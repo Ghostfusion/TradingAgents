@@ -6,7 +6,7 @@ from langchain_openai import AzureChatOpenAI
 from .base_client import BaseLLMClient, normalize_content
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "reasoning_effort", "temperature",
+    "timeout", "max_retries", "api_key", "temperature",
     "callbacks", "http_client", "http_async_client",
 )
 
@@ -39,6 +39,12 @@ class AzureOpenAIClient(BaseLLMClient):
             "model": self.model,
             "azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", self.model),
         }
+
+        # Honor an explicit base_url/TRADINGAGENTS_LLM_BACKEND_URL override; the
+        # AzureChatOpenAI SDK otherwise resolves the endpoint purely from
+        # AZURE_OPENAI_ENDPOINT, silently ignoring the caller's override.
+        if self.base_url:
+            llm_kwargs["azure_endpoint"] = self.base_url
 
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:

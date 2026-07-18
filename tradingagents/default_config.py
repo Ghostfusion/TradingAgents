@@ -19,6 +19,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
+    "TRADINGAGENTS_FINNHUB_API_KEY":      "finnhub_api_key",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -134,14 +135,27 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "news_data": "yfinance",             # Options: alpha_vantage, yfinance, finnhub
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
+        "analyst_ratings": "finnhub",        # Options: finnhub (needs key)
+        "earnings_calendar": "finnhub",      # Options: finnhub (needs key)
+        "options_data": "yfinance",          # Options: yfinance (free, no key)
+        "sec_filings": "sec_edgar",          # Options: sec_edgar (free, no key)
+        "short_interest": "yfinance",        # Options: yfinance (free, no key)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
     },
+    "finnhub_api_key": None,
+    # Vendor-result cache (operational): re-serve successful vendor fetches
+    # within a TTL instead of re-hitting free-tier APIs on every run.
+    "vendor_cache_enabled": True,
+    "vendor_cache_ttl_seconds": 21600,   # 6 hours
+    # Categories excluded from the cache because their content is genuinely
+    # live and must not be frozen (news moves continuously).
+    "vendor_cache_skip_categories": {"news_data"},
     # Benchmark for alpha calculation in the reflection layer.
     # ``benchmark_ticker`` (when set) overrides the suffix map for all
     # tickers; leave it None to use ``benchmark_map`` for auto-detection

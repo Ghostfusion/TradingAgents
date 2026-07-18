@@ -3,6 +3,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 @tool
@@ -20,4 +21,14 @@ def get_verified_market_snapshot(
     price levels, Bollinger bands, RSI, MACD, moving averages, support /
     resistance, or historical comparisons, and treat it as the source of truth.
     """
-    return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    try:
+        return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    except (NoMarketDataError, ValueError) as exc:
+        # Match the router's degradation contract: an unknown/delisted/stale
+        # symbol surfaces the same honest "no data" signal every other tool
+        # returns, not a raw exception the analyst might misread.
+        return (
+            f"NO_DATA_AVAILABLE: No verified market data for '{symbol}' "
+            f"({exc}). The symbol may be invalid, delisted, or the vendor "
+            f"returned stale data. Do not estimate or fabricate values."
+        )

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from .alpha_vantage_common import _filter_csv_by_date_range, _make_api_request
+from .errors import NoMarketDataError
 
 
 def get_stock(
@@ -37,4 +38,14 @@ def get_stock(
 
     response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
 
-    return _filter_csv_by_date_range(response, start_date, end_date)
+    filtered = _filter_csv_by_date_range(response, start_date, end_date)
+
+    # An empty/whitespace result means the symbol is unknown/delisted/not
+    # covered. Raise the typed error so the router tries the next vendor and,
+    # if all fail, emits an honest no-data sentinel — instead of returning an
+    # empty CSV that the vendor cache would store and replay as "success".
+    if not filtered or not filtered.strip():
+        raise NoMarketDataError(
+            symbol, detail=f"no rows between {start_date} and {end_date}"
+        )
+    return filtered

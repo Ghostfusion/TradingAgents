@@ -221,8 +221,40 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Conviction in this decision, 0.0 (no conviction) to 1.0 (certain). "
+            "Lower this when the risk analysts disagree or data is sparse; "
+            "raise it when the debate converged on strong, well-evidenced views."
+        ),
+    )
+    position_size: str | None = Field(
+        default=None,
+        description=(
+            "Explicit position sizing guidance, e.g. '5% of portfolio', "
+            "'2% initial, scale to 4% on confirmation', or '0% — no new "
+            "position' when the decision is Hold/Underweight/Sell. This is the "
+            "final, risk-adjusted size that caps the trader's proposal using the "
+            "risk debate's volatility/liquidity assessment."
+        ),
+    )
+    stop_loss: float | None = Field(
+        default=None,
+        description="Optional risk-management stop-loss price in the instrument's quote currency.",
+    )
+    consensus: Literal["high", "low"] | None = Field(
+        default=None,
+        description=(
+            "Whether the risk analysts converged. 'high' = broadly aligned on "
+            "the decision; 'low' = material disagreement (a dissent flag that "
+            "should reduce confidence and position size)."
+        ),
+    )
 
-    @field_validator("price_target", mode="before")
+    @field_validator("price_target", "stop_loss", "confidence", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
@@ -247,6 +279,14 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+    if decision.confidence is not None:
+        parts.extend(["", f"**Confidence**: {decision.confidence:.2f}"])
+    if decision.position_size:
+        parts.extend(["", f"**Position Size**: {decision.position_size}"])
+    if decision.stop_loss is not None:
+        parts.extend(["", f"**Stop Loss**: {decision.stop_loss}"])
+    if decision.consensus is not None:
+        parts.extend(["", f"**Consensus**: {decision.consensus.capitalize()}"])
     return "\n".join(parts)
 
 

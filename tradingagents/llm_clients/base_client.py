@@ -9,15 +9,24 @@ def normalize_content(response):
     Multiple providers (OpenAI Responses API, Google Gemini 3) return content
     as a list of typed blocks, e.g. [{'type': 'reasoning', ...}, {'type': 'text', 'text': '...'}].
     Downstream agents expect response.content to be a string. This extracts
-    and joins the text blocks, discarding reasoning/metadata blocks.
+    and joins the text blocks, discarding reasoning/metadata blocks. It also
+    captures ``refusal`` blocks (OpenAI Responses API) and ``content``-keyed
+    text blocks so a model refusal or an unusual relay shape never collapses
+    to a silent empty string.
     """
     content = response.content
     if isinstance(content, list):
-        texts = [
-            item.get("text", "") if isinstance(item, dict) and item.get("type") == "text"
-            else item if isinstance(item, str) else ""
-            for item in content
-        ]
+        texts = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    texts.append(item.get("text", "") or "")
+                elif item.get("type") == "refusal":
+                    texts.append(item.get("refusal", "") or "")
+                elif isinstance(item.get("content"), str):
+                    texts.append(item.get("content"))
+            elif isinstance(item, str):
+                texts.append(item)
         response.content = "\n".join(t for t in texts if t)
     return response
 

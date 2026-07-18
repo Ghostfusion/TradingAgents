@@ -21,7 +21,9 @@ import html
 import http.client
 import json
 import logging
+import os
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
@@ -47,6 +49,41 @@ _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 # discussion. wallstreetbets has the most volume but most noise; stocks /
 # investing trend more measured. Caller can override.
 DEFAULT_SUBREDDITS = ("wallstreetbets", "stocks", "investing")
+
+# Process-wide pacing for Reddit's public endpoints. Reddit's search feeds
+# share ONE per-IP rate-limit budget, so concurrent batch workers (a single
+# process running several analyses via ThreadPoolExecutor) must serialize and
+# space their requests rather than bursting and tripping 429s. The lock makes
+# the pacing atomic across threads; `_min_interval` is the floor between any
+# two Reddit requests process-wide.
+_rate_lock = threading.Lock()
+_min_interval = 2.0
+_last_slot = 0.0
+
+
+def _reddit_disabled() -> bool:
+    """True when Reddit fetching is turned off via env (kill-switch)."""
+    return os.environ.get("TRADINGAGENTS_DISABLE_REDDIT", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _pace_reddit_request() -> None:
+    """Sleep (if needed) so Reddit requests are spaced ``_min_interval`` apart.
+
+    Shared across threads via ``_rate_lock``; a thread waits outside the lock
+    so others can compute their slot meanwhile. Only meaningful between real
+    requests — callers that pass a delay of 0 (tests, or already-paced flows)
+    still go through here but a 2s floor is applied unless disabled.
+    """
+    global _last_slot
+    with _rate_lock:
+        now = time.monotonic()
+        next_slot = max(_last_slot, now) + _min_interval
+        _last_slot = next_slot
+        wait = next_slot - now
+    if wait > 0:
+        time.sleep(wait)
 
 
 def _search_qs(ticker: str, limit: int) -> str:
@@ -202,6 +239,9 @@ def fetch_reddit_posts(
     stay under Reddit's public per-IP rate limit; combined with the RSS-first
     path it makes 429s rare even when several analyses run back-to-back.
     """
+    if _reddit_disabled():
+        return "<reddit disabled via TRADINGAGENTS_DISABLE_REDDIT>"
+
     # Crypto reaches us as a Yahoo pair (BTC-USD); search Reddit for the base
     # ("BTC") so the query actually matches discussion instead of near-nothing.
     ticker = crypto_base(ticker) or ticker
@@ -210,6 +250,9 @@ def fetch_reddit_posts(
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
+        # Serialize + space requests across the whole process so concurrent
+        # workers share a single Reddit request budget instead of bursting.
+        _pace_reddit_request()
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
         total_posts += len(posts)
         if not posts:

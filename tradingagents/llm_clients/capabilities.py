@@ -117,10 +117,22 @@ _BY_PATTERN: list[tuple[re.Pattern[str], ModelCapabilities]] = [
 
 
 def get_capabilities(model_name: str) -> ModelCapabilities:
-    """Resolve capabilities by exact ID, then pattern, then default."""
+    """Resolve capabilities by exact ID, then pattern, then default.
+
+    Model IDs are matched against both the full string and its final
+    ``/``-separated segment, so prefixed IDs from relays like OpenRouter
+    (``deepseek/deepseek-v4-pro-0813``, ``minimax/MiniMax-M2.7``) inherit the
+    same quirks as the bare provider IDs they route to.
+    """
     if model_name in _BY_ID:
         return _BY_ID[model_name]
+
+    # Match the final path segment so "vendor/model-id" resolves like "model-id".
+    segment = model_name.rsplit("/", 1)[-1]
+    if segment in _BY_ID:
+        return _BY_ID[segment]
+
     for pattern, caps in _BY_PATTERN:
-        if pattern.match(model_name):
+        if pattern.match(model_name) or pattern.match(segment):
             return caps
     return _DEFAULT

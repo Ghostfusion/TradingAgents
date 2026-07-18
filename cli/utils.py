@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import questionary
-from dotenv import find_dotenv, set_key
+from dotenv import set_key
 from rich.console import Console
 
 from cli.models import AnalystType, AssetType
@@ -220,7 +220,11 @@ def _fetch_openrouter_models() -> list[tuple[str, str]]:
         # API currently returns this order, but sort explicitly so the prompt's
         # "latest available" label holds regardless of response ordering.
         models.sort(key=lambda m: m.get("created") or 0, reverse=True)
-        return [(m.get("name") or m["id"], m["id"]) for m in models]
+        return [
+            (m.get("name") or m.get("id") or "unknown", m["id"])
+            for m in models
+            if m.get("id")
+        ]
     except Exception as e:
         console.print(f"\n[yellow]Could not fetch OpenRouter models: {e}[/yellow]")
         return []
@@ -642,9 +646,12 @@ def ensure_api_key(provider: str) -> str | None:
         )
         return None
 
-    env_path = find_dotenv(usecwd=True) or str(Path.cwd() / ".env")
+    # Write to the CURRENT project's .env, not an ancestor .env found by
+    # find_dotenv(usecwd=True) (which walks up the tree and could persist the
+    # key to $HOME or another shared location).
+    env_path = Path.cwd() / ".env"
     Path(env_path).touch(exist_ok=True)
-    set_key(env_path, env_var, key)
+    set_key(str(env_path), env_var, key)
     os.environ[env_var] = key
     console.print(f"[green]Saved {env_var} to {env_path}[/green]")
     return key

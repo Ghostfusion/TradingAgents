@@ -17,8 +17,15 @@ from .errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
+from .finnhub import (
+    get_analyst_ratings_finnhub,
+    get_earnings_calendar_finnhub,
+    get_global_news_finnhub,
+    get_news_finnhub,
+)
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .sec_edgar import get_sec_filings
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -29,6 +36,9 @@ from .y_finance import (
     get_YFin_data_online,
 )
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
+from .yfinance_options import get_options_chain_yfinance
+from .yfinance_short_interest import get_short_interest_yfinance
+from .vendor_cache import vendor_cache
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +84,36 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_prediction_markets",
         ]
+    },
+    "analyst_ratings": {
+        "description": "Sell-side analyst ratings and price targets",
+        "tools": [
+            "get_analyst_ratings",
+        ]
+    },
+    "earnings_calendar": {
+        "description": "Upcoming earnings dates and EPS surprises",
+        "tools": [
+            "get_earnings_calendar",
+        ]
+    },
+    "options_data": {
+        "description": "Options implied volatility, open interest, and put/call ratio",
+        "tools": [
+            "get_options_chain",
+        ]
+    },
+    "sec_filings": {
+        "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G)",
+        "tools": [
+            "get_sec_filings",
+        ]
+    },
+    "short_interest": {
+        "description": "Short interest, days-to-cover, and ownership split",
+        "tools": [
+            "get_short_interest",
+        ]
     }
 }
 
@@ -82,6 +122,8 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "finnhub",
+    "sec_edgar",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -89,7 +131,15 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+OPTIONAL_CATEGORIES = {
+    "macro_data",
+    "prediction_markets",
+    "analyst_ratings",
+    "earnings_calendar",
+    "options_data",
+    "sec_filings",
+    "short_interest",
+}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -124,10 +174,12 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "finnhub": get_news_finnhub,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "finnhub": get_global_news_finnhub,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
@@ -140,6 +192,26 @@ VENDOR_METHODS = {
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
+    },
+    # analyst_ratings
+    "get_analyst_ratings": {
+        "finnhub": get_analyst_ratings_finnhub,
+    },
+    # earnings_calendar
+    "get_earnings_calendar": {
+        "finnhub": get_earnings_calendar_finnhub,
+    },
+    # options_data
+    "get_options_chain": {
+        "yfinance": get_options_chain_yfinance,
+    },
+    # sec_filings
+    "get_sec_filings": {
+        "sec_edgar": get_sec_filings,
+    },
+    # short_interest
+    "get_short_interest": {
+        "yfinance": get_short_interest_yfinance,
     },
 }
 
@@ -171,6 +243,17 @@ def route_to_vendor(method: str, *args, **kwargs):
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
+    # An explicit "none"/"off"/"disabled" vendor choice disables the whole
+    # category: the router returns a clear placeholder and never calls any
+    # vendor. This lets callers turn off an optional data source (e.g. analyst
+    # ratings for crypto) without deleting it from the config. An empty string
+    # is NOT "disabled" — it is treated as "default" below, so use "none".
+    if any(v.lower() in ("none", "off", "disabled") for v in primary_vendors):
+        return (
+            f"DATA_DISABLED: the '{category}' data source is disabled in the "
+            f"current configuration. Proceed without it; do not fabricate values."
+        )
+
     if method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
 
@@ -194,12 +277,24 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
+
+    # Serve a fresh TTL-cache hit without touching any vendor (quota savings).
+    cached = vendor_cache.get(method, category, args, kwargs)
+    if cached is not None:
+        logger.info("Vendor cache hit for %s (%s); skipping network fetch.", method, category)
+        return cached
+
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
-            return impl_func(*args, **kwargs)
+            result = impl_func(*args, **kwargs)
+            # Log which vendor actually served the call so free-tier quota burn
+            # is visible in the logs, then cache successful results.
+            logger.info("Vendor %r served %s (%s)", vendor, method, category)
+            vendor_cache.set(method, category, args, kwargs, result)
+            return result
         except VendorRateLimitError:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             continue

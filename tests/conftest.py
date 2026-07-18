@@ -39,21 +39,38 @@ def _dummy_api_keys(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_config():
-    """Reset the global dataflows config before and after each test.
+    """Reset the global + thread-local dataflows config before and after each test.
 
     ``set_config`` merges (it never clears keys absent from the override), so a
     test that sets e.g. ``tool_vendors`` would otherwise leak into later tests
-    and make routing behavior order-dependent. Replace the global outright so
-    every test starts from a clean DEFAULT_CONFIG.
+    and make routing behavior order-dependent. ``reset_config()`` clears both
+    the process fallback and the current thread's override, so every test
+    starts from a clean DEFAULT_CONFIG.
     """
-    import copy
-
     import tradingagents.dataflows.config as config_module
-    import tradingagents.default_config as default_config
 
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    config_module.reset_config()
+    # The vendor cache is a module-level singleton; clear its in-memory layer so
+    # a prior test's mocked vendor result can't be served to this test.
+    from tradingagents.dataflows.vendor_cache import vendor_cache
+
+    vendor_cache.clear()
     yield
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    config_module.reset_config()
+    vendor_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _disable_reddit_killswitch(monkeypatch):
+    """Force the Reddit fetch path during tests.
+
+    ``TRADINGAGENTS_DISABLE_REDDIT`` is read from the ambient environment (which
+    loads a developer's ``.env`` at package import). Unit tests for the fetcher
+    must exercise the real fetch path regardless of that local opt-out, so the
+    kill-switch is removed for every test.
+    """
+    monkeypatch.delenv("TRADINGAGENTS_DISABLE_REDDIT", raising=False)
+    yield
 
 
 @pytest.fixture()

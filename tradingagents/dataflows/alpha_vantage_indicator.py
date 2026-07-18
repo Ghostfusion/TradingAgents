@@ -1,4 +1,5 @@
 from .alpha_vantage_common import AlphaVantageNotConfiguredError, _make_api_request
+from .errors import NoMarketDataError, VendorRateLimitError
 
 
 def get_indicator(
@@ -131,23 +132,29 @@ def get_indicator(
                 "datatype": "csv"
             })
         elif indicator == "vwma":
-            # Alpha Vantage doesn't have direct VWMA, so we'll return an informative message
-            # In a real implementation, this would need to be calculated from OHLCV data
-            return f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
+            # Alpha Vantage has no direct VWMA endpoint. Raise NoMarketDataError
+            # so the router falls back to the next configured vendor (yfinance
+            # computes VWMA via stockstats) instead of returning a placeholder
+            # that would be cached as a successful tool result.
+            raise NoMarketDataError(
+                symbol, detail="VWMA is not directly available from Alpha Vantage"
+            )
         else:
-            return f"Error: Indicator {indicator} not implemented yet."
+            raise NoMarketDataError(symbol, detail=f"indicator {indicator} not implemented")
 
         # Parse CSV data and extract values for the date range
         lines = data.strip().split('\n')
         if len(lines) < 2:
-            return f"Error: No data returned for {indicator}"
+            raise NoMarketDataError(symbol, detail=f"no data returned for {indicator}")
 
         # Parse header and data
         header = [col.strip() for col in lines[0].split(',')]
         try:
             date_col_idx = header.index('time')
         except ValueError:
-            return f"Error: 'time' column not found in data for {indicator}. Available columns: {header}"
+            raise NoMarketDataError(
+                symbol, detail=f"'time' column not found for {indicator}. Columns: {header}"
+            )
 
         # Map internal indicator names to expected CSV column names from Alpha Vantage
         col_name_map = {
@@ -166,7 +173,9 @@ def get_indicator(
             try:
                 value_col_idx = header.index(target_col_name)
             except ValueError:
-                return f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                raise NoMarketDataError(
+                    symbol, detail=f"column '{target_col_name}' not found for {indicator}. Columns: {header}"
+                )
 
         result_data = []
         for line in lines[1:]:
@@ -205,10 +214,11 @@ def get_indicator(
 
         return result_str
 
-    except AlphaVantageNotConfiguredError:
-        # Vendor unavailable (no API key). Let it propagate so the router can
-        # fall back / emit the no-data sentinel instead of returning this as a
-        # successful-looking error string.
+    except (AlphaVantageNotConfiguredError, VendorRateLimitError, NoMarketDataError):
+        # Vendor unavailable / rate-limited / no data. Let the typed error
+        # propagate so the router can fall back to the next vendor or emit the
+        # honest no-data sentinel, instead of returning a successful-looking
+        # error string that would be cached as if it were real data.
         raise
     except Exception as e:
         print(f"Error getting Alpha Vantage indicator data for {indicator}: {e}")

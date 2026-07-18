@@ -18,7 +18,7 @@ def get_news(ticker, start_date, end_date) -> dict[str, str] | str:
     params = {
         "tickers": ticker,
         "time_from": format_datetime_for_api(start_date),
-        "time_to": format_datetime_for_api(end_date),
+        "time_to": format_datetime_for_api(end_date, end_of_day=True),
     }
 
     return _make_api_request("NEWS_SENTIMENT", params)
@@ -38,6 +38,14 @@ def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> dict
     """
     from datetime import datetime, timedelta
 
+    # The tool forwards None for these when the caller omitted them; fall back
+    # to the same defaults as the yfinance/finnhub implementations so a
+    # no-argument call doesn't crash on `timedelta(days=None)`.
+    if look_back_days is None:
+        look_back_days = 7
+    if limit is None:
+        limit = 50
+
     # Calculate start date
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = curr_dt - timedelta(days=look_back_days)
@@ -46,7 +54,7 @@ def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> dict
     params = {
         "topics": "financial_markets,economy_macro,economy_monetary",
         "time_from": format_datetime_for_api(start_date),
-        "time_to": format_datetime_for_api(curr_date),
+        "time_to": format_datetime_for_api(curr_date, end_of_day=True),
         "limit": str(limit),
     }
 

@@ -89,10 +89,15 @@ def clear_checkpoint(data_dir: str | Path, ticker: str, date: str, signature: st
     tid = thread_id(ticker, date, signature)
     conn = sqlite3.connect(str(db))
     try:
-        for table in ("writes", "checkpoints"):
+        # langgraph-checkpoint-sqlite stores state across three tables keyed by
+        # thread_id; delete all three so no serialized blob/write rows leak.
+        for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
             conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (tid,))
         conn.commit()
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        # "no such table" can happen on a partial/older DB; anything else is a
+        # real failure worth surfacing rather than silently swallowing.
+        if "no such table" not in str(exc).lower():
+            raise
     finally:
         conn.close()

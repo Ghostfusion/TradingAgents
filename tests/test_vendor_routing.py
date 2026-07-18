@@ -20,8 +20,9 @@ from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
 def _reset_config():
     # Hard reset: set_config() merges, so empty DEFAULT dicts (e.g. tool_vendors)
-    # don't clear keys leaked by other tests. Replace the global outright.
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    # don't clear keys leaked by other tests. reset_config() clears both the
+    # process fallback and the current thread's override.
+    config_module.reset_config()
 
 
 def _no_data(symbol, *a, **k):

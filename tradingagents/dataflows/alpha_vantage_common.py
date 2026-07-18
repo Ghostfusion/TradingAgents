@@ -34,8 +34,12 @@ def get_api_key() -> str:
         )
     return api_key
 
-def format_datetime_for_api(date_input) -> str:
-    """Convert various date formats to YYYYMMDDTHHMM format required by Alpha Vantage API."""
+def format_datetime_for_api(date_input, end_of_day: bool = False) -> str:
+    """Convert various date formats to YYYYMMDDTHHMM format required by Alpha Vantage API.
+
+    ``end_of_day=True`` emits ``YYYYMMDDT2359`` (used for ``time_to`` upper bounds)
+    so the entire target day is included rather than excluding it via midnight.
+    """
     if isinstance(date_input, str):
         # If already in correct format, return as-is
         if len(date_input) == 13 and 'T' in date_input:
@@ -43,7 +47,7 @@ def format_datetime_for_api(date_input) -> str:
         # Try to parse common date formats
         try:
             dt = datetime.strptime(date_input, "%Y-%m-%d")
-            return dt.strftime("%Y%m%dT0000")
+            return dt.strftime("%Y%m%dT2359") if end_of_day else dt.strftime("%Y%m%dT0000")
         except ValueError:
             try:
                 dt = datetime.strptime(date_input, "%Y-%m-%d %H:%M")
@@ -72,16 +76,6 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         "apikey": get_api_key(),
         "source": "trading_agents",
     })
-
-    # Handle entitlement parameter if present in params or global variable
-    current_entitlement = globals().get('_current_entitlement')
-    entitlement = api_params.get("entitlement") or current_entitlement
-
-    if entitlement:
-        api_params["entitlement"] = entitlement
-    elif "entitlement" in api_params:
-        # Remove entitlement if it's None or empty
-        api_params.pop("entitlement", None)
 
     response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
@@ -146,6 +140,9 @@ def _filter_csv_by_date_range(csv_data: str, start_date: str, end_date: str) -> 
         return filtered_df.to_csv(index=False)
 
     except Exception as e:
-        # If filtering fails, return original data with a warning
-        print(f"Warning: Failed to filter CSV data by date range: {e}")
-        return csv_data
+        # Never fall back to the unfiltered full series: that leaks future rows
+        # into a backtest (look-ahead bias). On a parse failure, return an empty
+        # body so the caller raises NoMarketDataError rather than serving
+        # post-end_date prices as if they were in-window.
+        print(f"Error: Failed to filter CSV data by date range ({e}); returning no data.")
+        return ""

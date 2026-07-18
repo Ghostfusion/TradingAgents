@@ -154,10 +154,10 @@ class FredFormattingTests(unittest.TestCase):
 @pytest.mark.unit
 class FredRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config_module.reset_config()
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config_module.reset_config()
 
     def test_macro_category_routes_to_fred(self):
         self.assertEqual(

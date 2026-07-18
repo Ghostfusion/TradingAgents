@@ -4,8 +4,7 @@ from typing import Any
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
-# Bedrock has no global default region; us-west-2 hosts the broadest model set.
-_DEFAULT_REGION = "us-west-2"
+# Bedrock has no global default region; a missing region is surfaced by boto3.
 _BEDROCK_CLASS = None
 
 
@@ -54,12 +53,13 @@ class BedrockClient(BaseLLMClient):
         self.warn_if_unknown_model()
         chat_cls = _bedrock_class()
 
-        region = (
-            os.environ.get("AWS_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or _DEFAULT_REGION
-        )
-        llm_kwargs = {"model": self.model, "region_name": region}
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        llm_kwargs = {"model": self.model}
+        # Only pin region when an env var supplies it; otherwise let boto3 resolve
+        # from ~/.aws/config / the SDK default instead of silently forcing
+        # us-west-2 (where the user's models may not be enabled).
+        if region:
+            llm_kwargs["region_name"] = region
         # A Bedrock API key authenticates without AWS access keys. Passing it as
         # api_key makes langchain-aws prefer bearer auth, so an ambient
         # AWS_PROFILE / SigV4 credentials can't override it (#1103).

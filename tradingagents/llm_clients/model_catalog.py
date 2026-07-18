@@ -197,13 +197,19 @@ def get_model_options(provider: str, mode: str) -> list[ModelOption]:
 
 
 def get_known_models() -> dict[str, list[str]]:
-    """Build known model names from the shared CLI catalog."""
+    """Build known model names from the shared CLI catalog.
+
+    The ``"custom"`` UI sentinel (the "Custom model ID" prompt option) is
+    excluded so a literal model id ``"custom"`` never passes validation or
+    pollutes the known-model warning list.
+    """
     return {
         provider: sorted(
             {
                 value
                 for options in mode_options.values()
                 for _, value in options
+                if value != "custom"
             }
         )
         for provider, mode_options in MODEL_OPTIONS.items()

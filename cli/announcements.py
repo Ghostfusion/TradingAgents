@@ -1,5 +1,3 @@
-import getpass
-
 import requests
 from rich.console import Console
 from rich.panel import Panel
@@ -21,7 +19,7 @@ def fetch_announcements(url: str = None, timeout: float = None) -> dict:
             "announcements": data.get("announcements", [fallback]),
             "require_attention": data.get("require_attention", False),
         }
-    except Exception:
+    except (requests.RequestException, ValueError):
         return {
             "announcements": [fallback],
             "require_attention": False,
@@ -47,6 +45,11 @@ def display_announcements(console: Console, data: dict) -> None:
     console.print(panel)
 
     if require_attention:
-        getpass.getpass("Press Enter to continue...")
+        # `input` (not `getpass`) so piped/redirected stdin doesn't raise
+        # GetPassWarning/EOFError on non-interactive runs.
+        try:
+            input("Press Enter to continue...")
+        except EOFError:
+            pass
     else:
         console.print()

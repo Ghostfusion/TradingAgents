@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 

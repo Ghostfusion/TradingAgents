@@ -94,6 +94,56 @@ class TradingMemoryLog:
             parts.extend(self._format_reflection_only(e) for e in cross)
         return "\n\n".join(parts)
 
+    def get_track_record_stats(self, ticker: str, n: int = 20) -> str:
+        """Summarize the realized track record for ``ticker`` as prompt text.
+
+        Computes, over the most recent ``n`` resolved same-ticker entries:
+        decision count, directional win rate (fraction with a positive raw
+        return), mean raw return, and mean alpha. Returns ``""`` when there is
+        no resolved history yet (a first-run ticker), so the caller can omit
+        the section rather than show misleading zeros.
+
+        ``raw`` / ``alpha`` are stored as percent strings (e.g. ``"+5.0%"``) by
+        :meth:`update_with_outcome`; entries missing those fields are skipped.
+        """
+        entries = [
+            e for e in self.load_entries()
+            if e.get("ticker") == ticker and not e.get("pending")
+        ][-n:]
+        if not entries:
+            return ""
+
+        def _pct(value):
+            if value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            try:
+                return float(str(value).replace("%", "")) / 100.0
+            except (TypeError, ValueError):
+                return None
+
+        raws = [v for v in (_pct(e.get("raw")) for e in entries) if v is not None]
+        alphas = [v for v in (_pct(e.get("alpha")) for e in entries) if v is not None]
+
+        if not raws and not alphas:
+            return ""
+
+        total = len(entries)
+        wins = sum(1 for v in raws if v > 0)
+        win_rate = wins / len(raws) if raws else None
+        avg_raw = sum(raws) / len(raws) if raws else None
+        avg_alpha = sum(alphas) / len(alphas) if alphas else None
+
+        lines = [f"- Historical track record for {ticker} ({total} resolved decision(s)):"]
+        if win_rate is not None:
+            lines.append(f"  - Directional win rate: {win_rate:.0%} ({wins}/{len(raws)})")
+        if avg_raw is not None:
+            lines.append(f"  - Mean realized return: {avg_raw:+.2%}")
+        if avg_alpha is not None:
+            lines.append(f"  - Mean alpha: {avg_alpha:+.2%}")
+        return "\n".join(lines)
+
     # --- Update path (Phase B) ---
 
     def update_with_outcome(

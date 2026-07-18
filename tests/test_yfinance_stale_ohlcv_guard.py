@@ -84,10 +84,10 @@ class StaleGuardPropagationTests(unittest.TestCase):
 @pytest.mark.unit
 class StaleGuardRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config_module.reset_config()
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config_module.reset_config()
 
     def test_router_sentinel_surfaces_stale_reason(self):
         set_config({"data_vendors": {"core_stock_apis": "yfinance"}})

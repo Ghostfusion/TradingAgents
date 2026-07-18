@@ -13,8 +13,10 @@ from langgraph.prebuilt import ToolNode
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_analyst_ratings,
     get_balance_sheet,
     get_cashflow,
+    get_earnings_calendar,
     get_fundamentals,
     get_global_news,
     get_income_statement,
@@ -22,7 +24,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_insider_transactions,
     get_macro_indicators,
     get_news,
+    get_options_chain,
     get_prediction_markets,
+    get_sec_filings,
+    get_short_interest,
     get_stock_data,
     get_verified_market_snapshot,
     resolve_instrument_identity,
@@ -198,6 +203,9 @@ class TradingAgentsGraph:
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").
                     get_verified_market_snapshot,
+                    # Forward-looking positioning (free yfinance sources)
+                    get_options_chain,
+                    get_short_interest,
                 ]
             ),
             "social": ToolNode(
@@ -214,6 +222,8 @@ class TradingAgentsGraph:
                     get_insider_transactions,
                     get_macro_indicators,
                     get_prediction_markets,
+                    get_earnings_calendar,
+                    get_sec_filings,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -223,6 +233,7 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                    get_analyst_ratings,
                 ]
             ),
         }
@@ -421,6 +432,12 @@ class TradingAgentsGraph:
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
+        # Append the aggregate track record (win rate / mean return / mean
+        # alpha) so the Portfolio Manager can weigh its own historical accuracy,
+        # not just individual past decisions.
+        track_record = self.memory_log.get_track_record_stats(company_name)
+        if track_record:
+            past_context = f"{past_context}\n\n{track_record}" if past_context else track_record
         instrument_context = self.resolve_instrument_context(company_name, asset_type)
         init_agent_state = self.propagator.create_initial_state(
             company_name,
