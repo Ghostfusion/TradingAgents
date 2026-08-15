@@ -283,47 +283,52 @@ What does not vary anymore: the analyzed company identity is resolved determinis
 
 Backtest results are not guaranteed to match any published figure. Returns depend on the model, the temperature, the date range, data quality, and the sampling above. Treat the framework as a research scaffold for studying multi-agent analysis, not as a strategy with a fixed, replicable return.
 
-## Batch runner
-
-A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
-
-```bash
-python batch.py --symbols NVDA MSFT AAPL
-python batch.py --symbols NVDA MSFT AAPL 0700.HK --date 2026-07-22 --workers 4
-python batch.py --symbols NVDA --depth deep --analysts market news
-```
-
-Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
-
-## Extended data sources
-
-Beyond the core price, fundamental, and news vendors, TradingAgents can pull additional free, decision-relevant signals (all optional — a vendor failure degrades gracefully instead of aborting a run):
-
-- **Options market** (yfinance) — implied volatility, put/call open-interest and volume skew, surfaced to the market analyst.
-- **SEC EDGAR filings** — 8-K (material events), 10-K/10-Q (reports), S-1/S-3 (capital raises), SC 13D/G (stake disclosures), surfaced to the news analyst.
-- **Short interest / float** (yfinance) — days-to-cover, short % of float, ownership split, surfaced to the market analyst.
-- **Analyst ratings & price targets** (Finnhub) — recommendation trends and consensus targets, surfaced to the fundamentals analyst.
-- **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
-
-Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
-
-## Decision quality
-
-The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
-
-- `confidence` (0–1) — conviction in the decision.
-- `position_size` — an explicit, risk-capped size that supersedes the trader's proposal.
-- `stop_loss` — a risk-derived stop level.
-- `consensus` (`high`/`low`) — a dissent flag when the aggressive/conservative/neutral analysts materially disagree.
-
-The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
-
-## Operational hardening
-
-- **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
-- **Vendor-result cache** — successful vendor fetches are cached on disk under a TTL (default 6 hours) to avoid re-burning free-tier API quotas; news is never cached, and failures are never cached.
-- **Vendor-served logging** — the routing layer logs which vendor answered each call, making free-tier quota burn visible.
-- **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
+> [!IMPORTANT]
+> **⚠️ The sections below are additions made in this fork and are not part of the original upstream TradingAgents project.**
+>
+> ---
+>
+> ## Batch runner
+>
+> A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
+>
+> ```bash
+> python batch.py --symbols NVDA MSFT AAPL
+> python batch.py --symbols NVDA MSFT AAPL 0700.HK --date 2026-07-22 --workers 4
+> python batch.py --symbols NVDA --depth deep --analysts market news
+> ```
+>
+> Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
+>
+> ## Extended data sources
+>
+> Beyond the core price, fundamental, and news vendors, TradingAgents can pull additional free, decision-relevant signals (all optional — a vendor failure degrades gracefully instead of aborting a run):
+>
+> - **Options market** (yfinance) — implied volatility, put/call open-interest and volume skew, surfaced to the market analyst.
+> - **SEC EDGAR filings** — 8-K (material events), 10-K/10-Q (reports), S-1/S-3 (capital raises), SC 13D/G (stake disclosures), surfaced to the news analyst.
+> - **Short interest / float** (yfinance) — days-to-cover, short % of float, ownership split, surfaced to the market analyst.
+> - **Analyst ratings & price targets** (Finnhub) — recommendation trends and consensus targets, surfaced to the fundamentals analyst.
+> - **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
+>
+> Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
+>
+> ## Decision quality
+>
+> The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
+>
+> - `confidence` (0–1) — conviction in the decision.
+> - `position_size` — an explicit, risk-capped size that supersedes the trader's proposal.
+> - `stop_loss` — a risk-derived stop level.
+> - `consensus` (`high`/`low`) — a dissent flag when the aggressive/conservative/neutral analysts materially disagree.
+>
+> The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
+>
+> ## Operational hardening
+>
+> - **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
+> - **Vendor-result cache** — successful vendor fetches are cached on disk under a TTL (default 6 hours) to avoid re-burning free-tier API quotas; news is never cached, and failures are never cached.
+> - **Vendor-served logging** — the routing layer logs which vendor answered each call, making free-tier quota burn visible.
+> - **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
 
 ## Contributing
 
