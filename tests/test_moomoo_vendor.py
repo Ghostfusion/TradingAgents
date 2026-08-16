@@ -6,6 +6,7 @@ machines without OpenD installed.
 """
 
 import unittest
+from datetime import datetime
 from unittest import mock
 
 import pandas as pd
@@ -555,6 +556,129 @@ class MoomooReturnsEndTests(unittest.TestCase):
         ):
             end = obj._resolve_returns_end("AAPL", "2026-08-10", 5)
         self.assertEqual(end.strftime("%Y-%m-%d"), "2026-08-22")  # 5 + 7 calendar days
+
+
+class MoomooQualityFixTests(unittest.TestCase):
+    """Review-fix regressions: warmup trim, IV scale, CSV order, date anchor."""
+
+    def setUp(self):
+        _reset()
+
+    def _klines(self, n_days=300):
+        dates = pd.date_range("2025-01-01", periods=n_days, freq="B")
+        return pd.DataFrame(
+            {
+                "time_key": dates.strftime("%Y-%m-%d"),
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 1000.0,
+            }
+        )
+
+    def test_indicator_warmup_trimmed(self):
+        """Only the last look_back_days are reported (no stockstats seeds)."""
+        ctx = mock.Mock()
+        ctx.request_history_kline.return_value = (RET_OK, self._klines(300), None)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            out = moomoo.get_indicators_moomoo("AAPL", "rsi", "2025-05-01", 30)
+        lines = [ln for ln in out.splitlines() if ln[:10].startswith("2025-")]
+        self.assertGreaterEqual(len(lines), 1)
+        # The report window must start at/near cutoff, not at the warmup start.
+        self.assertNotIn("2025-01-", "\n".join(lines))
+        # A longer warmup window was requested (max(2*lookback+100, 300)).
+        args = ctx.request_history_kline.call_args[1]
+        start = datetime.strptime(args["start"], "%Y-%m-%d")
+        end = datetime.strptime(args["end"], "%Y-%m-%d")
+        self.assertGreaterEqual((end - start).days, 300)
+
+    def test_options_iv_normalized_from_percent(self):
+        """IV in percent (31.9) must render as 31.9%, not 3190%."""
+        import pandas as pd
+
+        calls = pd.DataFrame(
+            {"strike": [100], "implied_vol": [31.9], "open_interest": [100], "volume": [10]}
+        )
+        puts = pd.DataFrame(
+            {"strike": [100], "implied_vol": [33.0], "open_interest": [200], "volume": [20]}
+        )
+        exp = pd.DataFrame({"time": ["2026-08-20"]})
+        ctx = mock.Mock()
+        ctx.get_option_expiration_date.return_value = (RET_OK, exp)
+        ctx.get_option_chain.return_value = (
+            RET_OK,
+            pd.concat([calls.assign(option_type="CALL"), puts.assign(option_type="PUT")]),
+            None,
+        )
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            out = moomoo.get_options_chain_moomoo("AAPL", "2026-08-16")
+        self.assertIn("31.9%", out)
+        self.assertIn("33.0%", out)
+
+    def test_capital_flow_anchored_by_date(self):
+        ctx = mock.Mock()
+        flow = pd.DataFrame(
+            {
+                "capital_flow_item_time": ["2026-07-01 00:00:00"],
+                "in_flow": [1e6],
+                "super_in_flow": [1],
+                "big_in_flow": [1],
+                "mid_in_flow": [1],
+                "sml_in_flow": [1],
+                "main_in_flow": [1],
+            }
+        )
+        dist = pd.DataFrame(
+            {
+                "capital_in_super": [1],
+                "capital_out_super": [1],
+                "capital_in_big": [1],
+                "capital_out_big": [1],
+                "capital_in_mid": [1],
+                "capital_out_mid": [1],
+                "capital_in_small": [1],
+                "capital_out_small": [1],
+            }
+        )
+        ctx.get_capital_flow.return_value = (RET_OK, flow)
+        ctx.get_capital_distribution.return_value = (RET_OK, dist)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            moomoo.get_capital_flow_moomoo("AAPL", "2026-08-16")
+        kwargs = ctx.get_capital_flow.call_args[1]
+        self.assertIn("start", kwargs)
+        self.assertEqual(kwargs["end"], "2026-08-16")
+
+    def test_stock_data_csv_ordered_columns(self):
+        """CSV columns are emitted in a fixed order (Date, Open, High, ...)."""
+        df = pd.DataFrame(
+            {
+                "time_key": ["2025-01-02"],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1000],
+            }
+        )
+        ctx = mock.Mock()
+        ctx.request_history_kline.return_value = (RET_OK, df, None)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            out = moomoo.get_stock_data_moomoo("AAPL", "2025-01-01", "2025-01-10")
+        header = [ln for ln in out.splitlines() if ln.startswith("Date,")]
+        self.assertEqual(header, ["Date,Open,High,Low,Close,Volume"])
 
 
 if __name__ == "__main__":

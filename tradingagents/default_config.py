@@ -35,6 +35,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL": "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT": "anthropic_effort",
+    # Opt-in analyst parallelism: >1 runs the analyst teams concurrently
+    # (each in its own thread with isolated messages). Multiplies LLM/data load.
+    "TRADINGAGENTS_ANALYST_CONCURRENCY": "analyst_concurrency",
 }
 
 
@@ -128,6 +131,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "max_debate_rounds": 1,
         "max_risk_discuss_rounds": 1,
         "max_recur_limit": 100,
+        # Analyst-team execution: 1 = sequential (default); >1 = concurrent
+        # threads (opt-in — multiplies LLM/provider load and free-tier quota burn).
+        "analyst_concurrency": 1,
         # News / data fetching parameters
         # Increase for longer lookback strategies or to broaden macro coverage;
         # decrease to reduce token usage in agent prompts.

@@ -24,6 +24,15 @@ class TradingMemoryLog:
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
         # Optional cap on resolved entries. None disables rotation.
         self._max_entries = cfg.get("memory_log_max_entries")
+        # Parse cache: (file_mtime, entries).  A run calls load_entries() via
+        # get_pending_entries / get_past_context / get_track_record_stats, so
+        # re-parsing the whole file each time is O(file) x 4 per run.  Keyed on
+        # mtime so any write path invalidates it naturally; write paths also
+        # clear it explicitly.
+        self._entries_cache: tuple[float, list[dict]] | None = None
+
+    def _invalidate_cache(self):
+        self._entries_cache = None
 
     # --- Write path (Phase A) ---
 
@@ -36,6 +45,7 @@ class TradingMemoryLog:
         """Append pending entry at end of propagate(). No LLM call."""
         if not self._log_path:
             return
+        self._invalidate_cache()
         # Idempotency guard: fast raw-text scan instead of full parse
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
@@ -51,9 +61,19 @@ class TradingMemoryLog:
     # --- Read path (Phase A) ---
 
     def load_entries(self) -> list[dict]:
-        """Parse all entries from log. Returns list of dicts."""
+        """Parse all entries from log. Returns list of dicts.
+
+        Cached by file mtime so repeated reads within a run (pending lookup,
+        past context, track record) don't re-parse the whole file.
+        """
         if not self._log_path or not self._log_path.exists():
             return []
+        try:
+            mtime = self._log_path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if self._entries_cache is not None and self._entries_cache[0] == mtime:
+            return self._entries_cache[1]
         text = self._log_path.read_text(encoding="utf-8")
         raw_entries = [e.strip() for e in text.split(self._SEPARATOR) if e.strip()]
         entries = []
@@ -61,6 +81,7 @@ class TradingMemoryLog:
             parsed = self._parse_entry(raw)
             if parsed:
                 entries.append(parsed)
+        self._entries_cache = (mtime, entries)
         return entries
 
     def get_pending_entries(self) -> list[dict]:
@@ -107,8 +128,7 @@ class TradingMemoryLog:
         :meth:`update_with_outcome`; entries missing those fields are skipped.
         """
         entries = [
-            e for e in self.load_entries()
-            if e.get("ticker") == ticker and not e.get("pending")
+            e for e in self.load_entries() if e.get("ticker") == ticker and not e.get("pending")
         ][-n:]
         if not entries:
             return ""
@@ -163,6 +183,7 @@ class TradingMemoryLog:
         """
         if not self._log_path or not self._log_path.exists():
             return
+        self._invalidate_cache()
 
         text = self._log_path.read_text(encoding="utf-8")
         blocks = text.split(self._SEPARATOR)
@@ -195,9 +216,7 @@ class TradingMemoryLog:
                     f" | {raw_pct} | {alpha_pct} | {holding_days}d]"
                 )
                 rest = "\n".join(lines[1:])
-                new_blocks.append(
-                    f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{reflection}"
-                )
+                new_blocks.append(f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{reflection}")
                 updated = True
             else:
                 new_blocks.append(block)
@@ -219,6 +238,7 @@ class TradingMemoryLog:
         """
         if not self._log_path or not self._log_path.exists() or not updates:
             return
+        self._invalidate_cache()
 
         text = self._log_path.read_text(encoding="utf-8")
         blocks = text.split(self._SEPARATOR)

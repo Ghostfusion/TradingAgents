@@ -38,6 +38,7 @@ Market coverage (Yahoo → Moomoo code mapping)
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import logging
 import os
@@ -82,6 +83,18 @@ _autostart_attempted = False  # module-level flag: try autostart at most once
 _last_probe_fail = 0.0  # monotonic() time of the last failed OpenD probe
 _PROBE_FAIL_TTL = 20.0  # skip re-probing for this long after a failure
 _PROBE_TIMEOUT = 0.5  # seconds for a single TCP probe
+
+# Live-context registry so atexit can close every thread's gateway connection.
+_live_ctxs: set = set()
+_ctx_lock = threading.Lock()
+
+
+def _atexit_close_all():
+    """Release all live OpenQuoteContext TCP connections at interpreter exit."""
+    _close_all_ctxs()
+
+
+atexit.register(_atexit_close_all)
 
 
 def _get_moomoo_config() -> dict:
@@ -266,6 +279,8 @@ def _ensure_ctx():
     except Exception as exc:
         raise MoomooNotConfiguredError(f"Failed to create OpenQuoteContext: {exc}") from exc
     _tls.moomoo_ctx = ctx
+    with _ctx_lock:
+        _live_ctxs.add(ctx)
     return ctx
 
 
@@ -276,6 +291,19 @@ def _close_ctx():
         with contextlib.suppress(Exception):
             ctx.close()
         _tls.moomoo_ctx = None
+        with _ctx_lock:
+            _live_ctxs.discard(ctx)
+
+
+def _close_all_ctxs():
+    """Close every live context (atexit). Batch workers hold one TCP connection
+    per thread for the whole process; this releases them at interpreter exit."""
+    with _ctx_lock:
+        live = list(_live_ctxs)
+        _live_ctxs.clear()
+    for ctx in live:
+        with contextlib.suppress(Exception):
+            ctx.close()
 
 
 # ---------------------------------------------------------------------------
@@ -438,9 +466,10 @@ def get_stock_data_moomoo(symbol: str, start_date: str, end_date: str) -> str:
             "volume": "Volume",
         }
     )
-    # Keep only the columns the rest of the pipeline expects
-    keep = {"Date", "Open", "High", "Low", "Close", "Volume"} & set(df.columns)
-    df = df[list(keep)]
+    # Keep only the columns the rest of the pipeline expects, in a FIXED order
+    # (set-based selection produced run-to-run column reordering).
+    ordered = [c for c in ("Date", "Open", "High", "Low", "Close", "Volume") if c in df.columns]
+    df = df[ordered]
     # Round numeric columns
     for col in ("Open", "High", "Low", "Close"):
         if col in df.columns:
@@ -465,13 +494,19 @@ def get_indicators_moomoo(
     Mirrors the yfinance vendor's local computation path (``_get_stock_stats_bulk``)
     so the output format is identical and the analyst prompt sees the same shape
     regardless of which vendor served the request.
+
+    Stockstats indicators need warm-up bars (SMA200 needs 200, MACD ~35, ...);
+    the yfinance path hides this by loading 5 years of data. Moomoo fetches a
+    ``max(look_back_days * 2 + 100, 300)``-day window and reports only the last
+    ``look_back_days`` so warm-up seeds never reach the report.
     """
     from stockstats import wrap
 
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    start_dt = end_dt - timedelta(days=look_back_days)
+    warmup_days = max(look_back_days * 2 + 100, 300)
+    start_dt = end_dt - timedelta(days=warmup_days)
     ret, data, _page_key = ctx.request_history_kline(
         code,
         start=start_dt.strftime("%Y-%m-%d"),
@@ -506,7 +541,8 @@ def get_indicators_moomoo(
             code,
             detail=f"stockstats indicator '{lower_ind}' computation failed: {exc}",
         ) from exc
-    # Build day-by-day result string
+    # Report only the last ``look_back_days`` calendar days (warm-up trimmed).
+    cutoff = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
     lines: list[str] = []
     for _, row in ss.iterrows():
         date_str = (
@@ -514,6 +550,8 @@ def get_indicators_moomoo(
             if hasattr(row["Date"], "strftime")
             else str(row["Date"])
         )
+        if date_str < cutoff:
+            continue
         val = row[lower_ind]
         if pd.isna(val) or val is None or val == "":
             val_str = "N/A"
@@ -522,10 +560,12 @@ def get_indicators_moomoo(
         lines.append(f"{date_str}: {val_str}")
     # Description from the yfinance vendor's best_ind_params
     description = _INDICATOR_DESCRIPTIONS.get(lower_ind, "")
+    sep = "\n\n"
     return (
-        f"## {lower_ind} values from {start_dt.strftime('%Y-%m-%d')} to {curr_date} (moomoo):\n\n"
-        + "\n".join(lines)
-        + "\n\n"
+        f"## {lower_ind} values from {cutoff} to {curr_date} (moomoo):"
+        + sep
+        + sep.join(lines)
+        + sep
         + description
     )
 
@@ -729,24 +769,28 @@ def get_options_chain_moomoo(symbol: str, curr_date: str = None) -> str:
     )
     call_vol = int(calls["volume"].sum()) if "volume" in calls.columns and not calls.empty else 0
     put_vol = int(puts["volume"].sum()) if "volume" in puts.columns and not puts.empty else 0
+
+    def _fmt_iv(v):
+        """Normalize moomoo implied vol: 0-1 fractions and 0-100+ percentages."""
+        if v is None:
+            return None
+        f = float(v)
+        if 0.0 <= f < 10.0:
+            return f  # fraction (e.g. 0.319 = 31.9%)
+        return f / 100.0  # percent (e.g. 31.9)
+
+    call_iv_n = _fmt_iv(call_iv)
+    put_iv_n = _fmt_iv(put_iv)
     lines = [
         f"## {symbol} Options Snapshot (moomoo, expiry {expiry})",
         "",
     ]
-    if call_iv is not None:
-        lines.append(
-            f"- Call implied vol (mean): {call_iv:.1%}"
-            if call_iv < 10
-            else f"- Call implied vol (mean): {call_iv:.2f}"
-        )
-    if put_iv is not None:
-        lines.append(
-            f"- Put implied vol (mean):  {put_iv:.1%}"
-            if put_iv < 10
-            else f"- Put implied vol (mean):  {put_iv:.2f}"
-        )
-    if call_iv is not None and put_iv is not None:
-        skew = put_iv - call_iv
+    if call_iv_n is not None:
+        lines.append(f"- Call implied vol (mean): {call_iv_n:.1%}")
+    if put_iv_n is not None:
+        lines.append(f"- Put implied vol (mean):  {put_iv_n:.1%}")
+    if call_iv_n is not None and put_iv_n is not None:
+        skew = put_iv_n - call_iv_n
         skew_note = (
             "puts richer than calls (downside protection demand)"
             if skew > 0.02
@@ -1136,10 +1180,18 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
     size (super/big/mid/small); ``get_capital_distribution`` shows the capital
     in/out split across size buckets for the latest session.  A weekly view is
     used because the intraday period is only meaningful for a live session.
+    ``curr_date`` anchors the weekly window (last 8 weeks up to that date).
     """
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
-    ret, flow_df = ctx.get_capital_flow(code, period_type="WEEK")
+    kwargs = {}
+    if curr_date:
+        end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+        kwargs = {
+            "start": (end_dt - timedelta(days=56)).strftime("%Y-%m-%d"),
+            "end": curr_date,
+        }
+    ret, flow_df = ctx.get_capital_flow(code, period_type="WEEK", **kwargs)
     _check_ret(ret, flow_df, ticker, code, "get_capital_flow")
     ret2, dist_df = ctx.get_capital_distribution(code)
     _check_ret(ret2, dist_df, ticker, code, "get_capital_distribution")

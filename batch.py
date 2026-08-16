@@ -131,6 +131,15 @@ def analyze(
     if crypto_base(symbol):
         config["data_vendors"]["analyst_ratings"] = "none"
         config["data_vendors"]["earnings_calendar"] = "none"
+        # Tier 1/2 enrichment tools are meaningless for crypto (no segments,
+        # no earnings catalysts, no corporate actions, no ARK holdings).
+        for tier_key in (
+            "smart_money",
+            "revenue_breakdown",
+            "corporate_actions",
+            "earnings_catalyst",
+        ):
+            config["data_vendors"][tier_key] = "none"
 
     # Fresh instance per worker: propagate() mutates self.ticker/curr_state,
     # so a single shared instance would race across threads.

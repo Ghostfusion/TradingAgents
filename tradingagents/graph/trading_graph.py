@@ -56,6 +56,23 @@ from .signal_processing import SignalProcessor
 
 logger = logging.getLogger(__name__)
 
+# Process-lifetime cache for the realized-return yfinance fetches: multiple
+# pending entries for the same ticker re-download the same window otherwise.
+# Keyed by (canonical_symbol, start, end). Small, bounded by pending entries.
+_returns_history_cache: dict[tuple[str, str, str], object] = {}
+
+
+def _fetch_cached_history(symbol: str, start: str, end: str):
+    """yfinance history with a process-lifetime memo (same window, same bars)."""
+    key = (symbol, start, end)
+    cached = _returns_history_cache.get(key)
+    if cached is not None:
+        return cached
+    frame = yf.Ticker(symbol).history(start=start, end=end)
+    if len(_returns_history_cache) < 256:  # bound the dict
+        _returns_history_cache[key] = frame
+    return frame
+
 
 def _coerce_max_retries(value):
     """Validate an ``llm_max_retries`` value to a non-negative int.
@@ -142,6 +159,7 @@ class TradingAgentsGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
+            analyst_concurrency=self.config.get("analyst_concurrency", 1),
         )
 
         self.propagator = Propagator(
@@ -292,7 +310,7 @@ class TradingAgentsGraph:
         try:
             from tradingagents.dataflows.moomoo import get_trading_days_between
 
-            probe = start + timedelta(days=holding_days + 21)
+            probe = start + timedelta(days=holding_days * 2 + 21)
             days = get_trading_days_between(ticker, trade_date, probe.strftime("%Y-%m-%d"))
             # days[0] is the trade_date (or the first trading day after it).
             # We need holding_days + 1 return observations → holding_days + 2 rows.
@@ -327,8 +345,8 @@ class TradingAgentsGraph:
             # Normalize so the realized-return lookup hits the same instrument
             # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
             # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            stock = _fetch_cached_history(normalize_symbol(ticker), trade_date, end_str)
+            bench = _fetch_cached_history(benchmark, trade_date, end_str)
 
             if len(stock) < 2 or len(bench) < 2:
                 return None, None, None
@@ -421,6 +439,7 @@ class TradingAgentsGraph:
                 f"debate={self.config['max_debate_rounds']}",
                 f"risk={self.config['max_risk_discuss_rounds']}",
                 f"asset={asset_type}",
+                f"conc={self.config.get('analyst_concurrency', 1)}",
             ]
         )
 
