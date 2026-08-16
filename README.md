@@ -312,6 +312,21 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
 >
+> ## Moomoo OpenAPI vendor
+>
+> Moomoo OpenAPI (formerly Futu OpenAPI) is available as an additional vendor behind the same `route_to_vendor` interface. It serves quotes/candlesticks, technical indicators, F10 financials, news, options chains, short interest, analyst consensus, the earnings calendar, and insider trades through the **local OpenD gateway** (TCP, default `127.0.0.1:11111`).
+>
+> - **No credentials in `.env`** — install OpenD, log in once with your (free) moomoo account and tick "remember password". The project only connects to the gateway.
+> - **Headless autostart** — set `TRADINGAGENTS_MOOMOO_AUTOSTART=true` (default in `.env`) and `TRADINGAGENTS_MOOMOO_ACCOUNT=<your moomoo ID>` (not a password); the vendor launches OpenD with `-login_by_remember=1` when it is not running. `TRADINGAGENTS_MOOMOO_OPEND_PATH` overrides executable discovery.
+> - **Graceful fallback** — when OpenD is down, logged out, or lacks quote permission for a market, the router emits `DATA_UNAVAILABLE`/`NO_DATA_AVAILABLE` and falls back to the next configured vendor (yfinance, finnhub, …). Free quote rights cover US equities (LV3 promo), HK LV1, and crypto; A-shares and LSE/India are not covered for global accounts.
+> - Covered by default in `data_vendors` chains (`moomoo,yfinance` for prices/indicators/fundamentals/options/short-interest, `moomoo,finnhub` for ratings/earnings, `fred,moomoo` for macro). Prediction markets use `polymarket,moomoo` — Polymarket first, with moomoo's event contracts (category → series → event → contract → snapshot, live YES probabilities) as the fallback. Event contracts are server-gated to moomoo SG/MY accounts; other regions fall back to Polymarket automatically.
+>
+> **Decision-quality tiers** (all moomoo-only, optional, degrade to a `DATA_UNAVAILABLE` sentinel when OpenD is down or gated):
+> - **Tier 1 — new evidence classes:** `get_capital_flow` (weekly net inflow by order size + session distribution → Market Analyst), `get_smart_money` (ARK institutional activity → Fundamentals), `get_economic_calendar` (dated CPI/FOMC/payroll catalysts → News), `get_fed_watch` (market-implied rate probabilities → News).
+> - **Tier 2 — enrichment:** `get_market_breadth` (sector heat map + rise/fall distribution → News), `get_revenue_breakdown` (segment mix/concentration → Fundamentals), `get_corporate_actions` (dividends/splits → Fundamentals), `get_earnings_catalyst` (historical earnings implied move + IV crush → News, feeds catalyst-risk sizing).
+> - **Tier 3 — accuracy infra:** the memory-log realized-return path uses moomoo's trading-day calendar for exact holding-day counting (falls back to the old calendar heuristic when OpenD is unreachable or the market is unsupported).
+>
+> The `batch.py` runner accepts a `--vendor moomoo|yfinance|default` flag to force a vendor-chain preset across all categories per run.
 > ## Decision quality
 >
 > The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:

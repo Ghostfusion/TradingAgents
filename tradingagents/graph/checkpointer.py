@@ -56,7 +56,9 @@ def has_checkpoint(data_dir: str | Path, ticker: str, date: str, signature: str 
     return checkpoint_step(data_dir, ticker, date, signature) is not None
 
 
-def checkpoint_step(data_dir: str | Path, ticker: str, date: str, signature: str = "") -> int | None:
+def checkpoint_step(
+    data_dir: str | Path, ticker: str, date: str, signature: str = ""
+) -> int | None:
     """Return the step number of the latest checkpoint, or None if none exists."""
     db = _db_path(data_dir, ticker)
     if not db.exists():
@@ -82,22 +84,47 @@ def clear_all_checkpoints(data_dir: str | Path) -> int:
 
 
 def clear_checkpoint(data_dir: str | Path, ticker: str, date: str, signature: str = "") -> None:
-    """Remove checkpoint for a specific ticker+date by deleting the thread's rows."""
+    """Remove checkpoint for a specific ticker+date by deleting the thread's rows.
+
+    Prefers ``SqliteSaver.delete_thread`` — the saver owns its schema, and the
+    table layout changed across langgraph-checkpoint-sqlite versions (older
+    builds used ``checkpoint_writes``/``checkpoint_blobs``/``checkpoints``,
+    newer builds use ``checkpoints`` + ``writes``). The saver's method deletes
+    both checkpoint rows and pending writes for the thread atomically.
+
+    Falls back to a runtime-discovered per-table delete for builds without
+    ``delete_thread``. Each table is handled independently so a missing table
+    on one build never aborts the remaining deletes (the old code wrapped the
+    whole loop in one try/except, so the first missing table silently skipped
+    the ``checkpoints`` delete and the commit entirely — stale checkpoints
+    were never actually cleared).
+    """
     db = _db_path(data_dir, ticker)
     if not db.exists():
         return
     tid = thread_id(ticker, date, signature)
-    conn = sqlite3.connect(str(db))
-    try:
-        # langgraph-checkpoint-sqlite stores state across three tables keyed by
-        # thread_id; delete all three so no serialized blob/write rows leak.
-        for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
-            conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (tid,))
-        conn.commit()
-    except sqlite3.OperationalError as exc:
-        # "no such table" can happen on a partial/older DB; anything else is a
-        # real failure worth surfacing rather than silently swallowing.
-        if "no such table" not in str(exc).lower():
-            raise
-    finally:
-        conn.close()
+    with get_checkpointer(data_dir, ticker) as saver:
+        delete_thread = getattr(saver, "delete_thread", None)
+        if delete_thread is not None:
+            delete_thread(tid)
+            return
+
+        # Legacy fallback for old langgraph-checkpoint-sqlite builds without
+        # delete_thread: discover the tables actually present in this DB and
+        # delete from each candidate independently.
+        conn = saver.conn
+        try:
+            tables = {
+                row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints", "writes"):
+                if table not in tables:
+                    continue
+                try:
+                    conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (tid,))
+                except sqlite3.OperationalError as exc:
+                    if "no such table" not in str(exc).lower():
+                        raise
+            conn.commit()
+        finally:
+            conn.close()

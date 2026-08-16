@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_capital_flow,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
@@ -23,6 +24,7 @@ def create_market_analyst(llm):
             get_verified_market_snapshot,
             get_options_chain,
             get_short_interest,
+            get_capital_flow,
         ]
 
         system_message = (
@@ -55,6 +57,8 @@ Volume-Based Indicators:
 Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices.
 
 You also have two forward-looking positioning tools: call get_options_chain(ticker, current_date) for implied volatility, open interest, and the put/call ratio (leading positioning/expectation signals), and get_short_interest(ticker) for short % of float, days-to-cover, and ownership split (squeeze and conviction signals). Weigh these as positioning gauges, not directional price calls.
+
+You also have a money-flow tool: call get_capital_flow(ticker) for weekly net capital inflow/outflow split by order size (super/big/mid/small) and the latest session's capital distribution. Sustained large/super-order outflows suggest institutional distribution; sustained inflows suggest accumulation. Weigh this as a positioning gauge alongside the options and short-interest signals.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

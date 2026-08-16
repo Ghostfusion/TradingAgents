@@ -21,8 +21,10 @@ Safety knobs live in the config (all overridable):
 
 The cache is process-safe via a lock; writes are atomic (temp file + replace).
 """
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -117,7 +119,7 @@ class VendorCache:
         if not path or not os.path.exists(path):
             return None
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 record = json.load(f)
             if time.time() - float(record.get("written", 0)) < ttl:
                 value = record.get("value")
@@ -155,14 +157,29 @@ class VendorCache:
             logger.debug("Vendor cache write failed for %s: %s", method, exc)
 
     def clear(self) -> None:
-        """Drop the in-memory cache (used for test isolation).
+        """Drop all cached results, both in-memory and on-disk.
 
-        Disk entries are left in place — they are still TTL-bound — but the
-        in-memory layer that could otherwise serve a prior test's mock result
-        is emptied.
+        The router consults the cache *before* running the configured vendor
+        chain, so cached results are keyed on ``(method, args, kwargs)`` and
+        blind to which vendor implementation is live at call time. Clearing
+        only the in-memory layer let a disk entry written by a prior test (or
+        a real run) with the same key be served to a later test that mocks the
+        vendors — silently skipping the mocked chain and causing
+        order-dependent test failures. Now the whole cache (including the
+        TTL-bound disk layer) is emptied, so ``clear()`` actually restores a
+        fresh cache as its name implies.
         """
         with self._lock:
             self._memory.clear()
+
+        d = self._dir()
+        if not d:
+            return
+        with contextlib.suppress(OSError):
+            for name in os.listdir(d):
+                if name.endswith(".json"):
+                    with contextlib.suppress(OSError):
+                        os.unlink(os.path.join(d, name))
 
 
 # Module-level singleton shared by the router.

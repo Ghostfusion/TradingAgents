@@ -24,8 +24,33 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .moomoo import (
+    get_analyst_ratings_moomoo,
+    get_balance_sheet_moomoo,
+    get_capital_flow_moomoo,
+    get_cashflow_moomoo,
+    get_corporate_actions_moomoo,
+    get_earnings_calendar_moomoo,
+    get_earnings_catalyst_moomoo,
+    get_economic_calendar_moomoo,
+    get_fed_watch_moomoo,
+    get_fundamentals_moomoo,
+    get_income_statement_moomoo,
+    get_indicators_moomoo,
+    get_insider_transactions_moomoo,
+    get_macro_indicators_moomoo,
+    get_market_breadth_moomoo,
+    get_news_moomoo,
+    get_options_chain_moomoo,
+    get_prediction_markets_moomoo,
+    get_revenue_breakdown_moomoo,
+    get_short_interest_moomoo,
+    get_smart_money_moomoo,
+    get_stock_data_moomoo,
+)
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .sec_edgar import get_sec_filings
+from .vendor_cache import vendor_cache
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -38,32 +63,19 @@ from .y_finance import (
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 from .yfinance_options import get_options_chain_yfinance
 from .yfinance_short_interest import get_short_interest_yfinance
-from .vendor_cache import vendor_cache
 
 logger = logging.getLogger(__name__)
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
-    "core_stock_apis": {
-        "description": "OHLCV stock price data",
-        "tools": [
-            "get_stock_data"
-        ]
-    },
+    "core_stock_apis": {"description": "OHLCV stock price data", "tools": ["get_stock_data"]},
     "technical_indicators": {
         "description": "Technical analysis indicators",
-        "tools": [
-            "get_indicators"
-        ]
+        "tools": ["get_indicators"],
     },
     "fundamental_data": {
         "description": "Company fundamentals",
-        "tools": [
-            "get_fundamentals",
-            "get_balance_sheet",
-            "get_cashflow",
-            "get_income_statement"
-        ]
+        "tools": ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"],
     },
     "news_data": {
         "description": "News and insider data",
@@ -71,50 +83,84 @@ TOOLS_CATEGORIES = {
             "get_news",
             "get_global_news",
             "get_insider_transactions",
-        ]
+        ],
     },
     "macro_data": {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
         "tools": [
             "get_macro_indicators",
-        ]
+        ],
     },
     "prediction_markets": {
         "description": "Market-implied probabilities for forward-looking events",
         "tools": [
             "get_prediction_markets",
-        ]
+        ],
     },
     "analyst_ratings": {
         "description": "Sell-side analyst ratings and price targets",
         "tools": [
             "get_analyst_ratings",
-        ]
+        ],
     },
     "earnings_calendar": {
         "description": "Upcoming earnings dates and EPS surprises",
         "tools": [
             "get_earnings_calendar",
-        ]
+        ],
     },
     "options_data": {
         "description": "Options implied volatility, open interest, and put/call ratio",
         "tools": [
             "get_options_chain",
-        ]
+        ],
     },
     "sec_filings": {
         "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G)",
         "tools": [
             "get_sec_filings",
-        ]
+        ],
     },
     "short_interest": {
         "description": "Short interest, days-to-cover, and ownership split",
         "tools": [
             "get_short_interest",
-        ]
-    }
+        ],
+    },
+    # moomoo-only enrichment categories (Tier 1/2). All optional — a vendor
+    # failure degrades to a sentinel instead of aborting the run.
+    "capital_flow": {
+        "description": "Capital inflow/outflow by order size and session distribution",
+        "tools": ["get_capital_flow"],
+    },
+    "smart_money": {
+        "description": "ARK fund institutional activity in a ticker",
+        "tools": ["get_smart_money"],
+    },
+    "economic_calendar": {
+        "description": "Upcoming economic events with consensus/actual (CPI, FOMC, payrolls)",
+        "tools": ["get_economic_calendar"],
+    },
+    "fed_watch": {
+        "description": "Market-implied Fed target-rate probabilities",
+        "tools": ["get_fed_watch"],
+    },
+    "market_breadth": {
+        "description": "US market breadth: sector heat map and rise/fall distribution",
+        "tools": ["get_market_breadth"],
+    },
+    "revenue_breakdown": {
+        "description": "Segment/regional revenue breakdown for the latest period",
+        "tools": ["get_revenue_breakdown"],
+    },
+    "corporate_actions": {
+        "description": "Dividend history, buybacks, and stock splits",
+        "tools": ["get_corporate_actions"],
+    },
+    "earnings_catalyst": {
+        "description": "Historical earnings-day implied move, IV crush, and price reaction",
+        "tools": ["get_earnings_catalyst"],
+    },
 }
 
 VENDOR_LIST = [
@@ -124,6 +170,7 @@ VENDOR_LIST = [
     "alpha_vantage",
     "finnhub",
     "sec_edgar",
+    "moomoo",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -139,6 +186,15 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
+    # moomoo-only enrichment (Tier 1/2): failures degrade to a sentinel.
+    "capital_flow",
+    "smart_money",
+    "economic_calendar",
+    "fed_watch",
+    "market_breadth",
+    "revenue_breakdown",
+    "corporate_actions",
+    "earnings_catalyst",
 }
 
 # Mapping of methods to their vendor-specific implementations
@@ -147,34 +203,41 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "moomoo": get_stock_data_moomoo,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "moomoo": get_indicators_moomoo,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "moomoo": get_fundamentals_moomoo,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "moomoo": get_balance_sheet_moomoo,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "moomoo": get_cashflow_moomoo,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "moomoo": get_income_statement_moomoo,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
         "finnhub": get_news_finnhub,
+        "moomoo": get_news_moomoo,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
@@ -184,26 +247,32 @@ VENDOR_METHODS = {
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+        "moomoo": get_insider_transactions_moomoo,
     },
     # macro_data
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
+        "moomoo": get_macro_indicators_moomoo,
     },
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
+        "moomoo": get_prediction_markets_moomoo,
     },
     # analyst_ratings
     "get_analyst_ratings": {
         "finnhub": get_analyst_ratings_finnhub,
+        "moomoo": get_analyst_ratings_moomoo,
     },
     # earnings_calendar
     "get_earnings_calendar": {
         "finnhub": get_earnings_calendar_finnhub,
+        "moomoo": get_earnings_calendar_moomoo,
     },
     # options_data
     "get_options_chain": {
         "yfinance": get_options_chain_yfinance,
+        "moomoo": get_options_chain_moomoo,
     },
     # sec_filings
     "get_sec_filings": {
@@ -212,8 +281,35 @@ VENDOR_METHODS = {
     # short_interest
     "get_short_interest": {
         "yfinance": get_short_interest_yfinance,
+        "moomoo": get_short_interest_moomoo,
+    },
+    # moomoo-only enrichment (Tier 1/2)
+    "get_capital_flow": {
+        "moomoo": get_capital_flow_moomoo,
+    },
+    "get_smart_money": {
+        "moomoo": get_smart_money_moomoo,
+    },
+    "get_economic_calendar": {
+        "moomoo": get_economic_calendar_moomoo,
+    },
+    "get_fed_watch": {
+        "moomoo": get_fed_watch_moomoo,
+    },
+    "get_market_breadth": {
+        "moomoo": get_market_breadth_moomoo,
+    },
+    "get_revenue_breakdown": {
+        "moomoo": get_revenue_breakdown_moomoo,
+    },
+    "get_corporate_actions": {
+        "moomoo": get_corporate_actions_moomoo,
+    },
+    "get_earnings_catalyst": {
+        "moomoo": get_earnings_catalyst_moomoo,
     },
 }
+
 
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
@@ -221,6 +317,7 @@ def get_category_for_method(method: str) -> str:
         if method in info["tools"]:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
+
 
 def get_vendor(category: str, method: str = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
@@ -237,11 +334,12 @@ def get_vendor(category: str, method: str = None) -> str:
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
-    primary_vendors = [v.strip() for v in vendor_config.split(',')]
+    primary_vendors = [v.strip() for v in vendor_config.split(",")]
 
     # An explicit "none"/"off"/"disabled" vendor choice disables the whole
     # category: the router returns a clear placeholder and never calls any
@@ -325,7 +423,8 @@ def route_to_vendor(method: str, *args, **kwargs):
             # verdict can't hide a broken primary (network/auth/etc.).
             logger.warning(
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
-                method, first_error,
+                method,
+                first_error,
             )
         sym = last_no_data.symbol
         canonical = last_no_data.canonical

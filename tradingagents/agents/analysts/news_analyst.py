@@ -2,10 +2,14 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_earnings_calendar,
+    get_earnings_catalyst,
+    get_economic_calendar,
+    get_fed_watch,
     get_global_news,
     get_instrument_context_from_state,
     get_language_instruction,
     get_macro_indicators,
+    get_market_breadth,
     get_news,
     get_prediction_markets,
     get_sec_filings,
@@ -26,11 +30,17 @@ def create_news_analyst(llm):
             get_prediction_markets,
             get_earnings_calendar,
             get_sec_filings,
+            get_economic_calendar,
+            get_fed_watch,
+            get_market_breadth,
+            get_earnings_catalyst,
         ]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve'), get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events), get_earnings_calendar(ticker, curr_date) for the upcoming earnings date and last reported EPS surprise (a major single-day catalyst), and get_sec_filings(ticker) for recent SEC filings (8-K material events, 10-K/Q reports, S-1/S-3 capital raises, SC 13D/G stake disclosures) as hard event-risk signals beyond headlines. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve'), get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events), get_earnings_calendar(ticker, curr_date) for the upcoming earnings date and last reported EPS surprise (a major single-day catalyst), and get_sec_filings(ticker) for recent SEC filings (8-K material events, 10-K/Q reports, S-1/S-3 capital raises, SC 13D/G stake disclosures) as hard event-risk signals beyond headlines. "
+            + "You also have scheduled-catalyst and regime tools: get_economic_calendar(curr_date) for upcoming macro events (CPI, FOMC, payrolls) with consensus/actual — date the next macro catalyst and flag positions exposed to it; get_fed_watch() for market-implied Fed target-rate probabilities (a numeric macro anchor); get_market_breadth() for US sector heat-map moves and the rise/fall distribution — separates a stock's move from a market-wide regime; and get_earnings_catalyst(ticker) for historical earnings-day implied move, IV crush, and price reaction — size the catalyst risk of an upcoming earnings print. "
+            + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + get_language_instruction()
         )
 

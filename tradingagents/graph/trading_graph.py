@@ -15,19 +15,27 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_analyst_ratings,
     get_balance_sheet,
+    get_capital_flow,
     get_cashflow,
+    get_corporate_actions,
     get_earnings_calendar,
+    get_earnings_catalyst,
+    get_economic_calendar,
+    get_fed_watch,
     get_fundamentals,
     get_global_news,
     get_income_statement,
     get_indicators,
     get_insider_transactions,
     get_macro_indicators,
+    get_market_breadth,
     get_news,
     get_options_chain,
     get_prediction_markets,
+    get_revenue_breakdown,
     get_sec_filings,
     get_short_interest,
+    get_smart_money,
     get_stock_data,
     get_verified_market_snapshot,
     resolve_instrument_identity,
@@ -206,6 +214,8 @@ class TradingAgentsGraph:
                     # Forward-looking positioning (free yfinance sources)
                     get_options_chain,
                     get_short_interest,
+                    # Money-flow positioning (moomoo; optional, degrades)
+                    get_capital_flow,
                 ]
             ),
             "social": ToolNode(
@@ -224,6 +234,11 @@ class TradingAgentsGraph:
                     get_prediction_markets,
                     get_earnings_calendar,
                     get_sec_filings,
+                    # Scheduled catalysts + regime (moomoo; optional, degrades)
+                    get_economic_calendar,
+                    get_fed_watch,
+                    get_market_breadth,
+                    get_earnings_catalyst,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -234,6 +249,10 @@ class TradingAgentsGraph:
                     get_cashflow,
                     get_income_statement,
                     get_analyst_ratings,
+                    # Smart-money + quality signals (moomoo; optional, degrades)
+                    get_smart_money,
+                    get_revenue_breakdown,
+                    get_corporate_actions,
                 ]
             ),
         }
@@ -259,8 +278,36 @@ class TradingAgentsGraph:
                 return benchmark
         return benchmark_map.get("", "SPY")
 
+    def _resolve_returns_end(self, ticker: str, trade_date: str, holding_days: int) -> datetime:
+        """Pick an end date whose window contains ~``holding_days`` trading days.
+
+        Uses moomoo's trading-day calendar (exact market holidays/weekends)
+        when OpenD is reachable; falls back to a calendar-day buffer heuristic.
+        ``trade_date`` is inclusive, so we ask for ``holding_days + 2`` trading
+        days and take the last one + 1 calendar day (yfinance ``end`` is
+        exclusive).  Any failure (OpenD down, unsupported market) degrades to
+        the old ``holding_days + 7``-calendar-day heuristic.
+        """
+        start = datetime.strptime(trade_date, "%Y-%m-%d")
+        try:
+            from tradingagents.dataflows.moomoo import get_trading_days_between
+
+            probe = start + timedelta(days=holding_days + 21)
+            days = get_trading_days_between(ticker, trade_date, probe.strftime("%Y-%m-%d"))
+            # days[0] is the trade_date (or the first trading day after it).
+            # We need holding_days + 1 return observations → holding_days + 2 rows.
+            if len(days) >= holding_days + 2:
+                target = days[holding_days + 1]
+                return datetime.strptime(target, "%Y-%m-%d") + timedelta(days=1)
+        except Exception:
+            pass  # fall through to the calendar heuristic
+        return start + timedelta(days=holding_days + 7)
+
     def _fetch_returns(
-        self, ticker: str, trade_date: str, holding_days: int = 5,
+        self,
+        ticker: str,
+        trade_date: str,
+        holding_days: int = 5,
         benchmark: str = "SPY",
     ) -> tuple[float | None, float | None, int | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
@@ -273,8 +320,8 @@ class TradingAgentsGraph:
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
         try:
-            start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+            datetime.strptime(trade_date, "%Y-%m-%d")
+            end = self._resolve_returns_end(ticker, trade_date, holding_days)
             end_str = end.strftime("%Y-%m-%d")
 
             # Normalize so the realized-return lookup hits the same instrument
@@ -288,19 +335,20 @@ class TradingAgentsGraph:
 
             actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
             raw = float(
-                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
+                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0]) / stock["Close"].iloc[0]
             )
             bench_ret = float(
-                (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0])
-                / bench["Close"].iloc[0]
+                (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0]) / bench["Close"].iloc[0]
             )
             alpha = raw - bench_ret
             return raw, alpha, actual_days
         except Exception as e:
             logger.warning(
                 "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
-                ticker, trade_date, benchmark, e,
+                ticker,
+                trade_date,
+                benchmark,
+                e,
             )
             return None, None, None
 
@@ -322,7 +370,9 @@ class TradingAgentsGraph:
         updates = []
         for entry in pending:
             raw, alpha, days = self._fetch_returns(
-                ticker, entry["date"], benchmark=benchmark,
+                ticker,
+                entry["date"],
+                benchmark=benchmark,
             )
             if raw is None:
                 continue  # price not available yet — try again next run
@@ -332,14 +382,16 @@ class TradingAgentsGraph:
                 alpha_return=alpha,
                 benchmark_name=benchmark,
             )
-            updates.append({
-                "ticker": ticker,
-                "trade_date": entry["date"],
-                "raw_return": raw,
-                "alpha_return": alpha,
-                "holding_days": days,
-                "reflection": reflection,
-            })
+            updates.append(
+                {
+                    "ticker": ticker,
+                    "trade_date": entry["date"],
+                    "raw_return": raw,
+                    "alpha_return": alpha,
+                    "holding_days": days,
+                    "reflection": reflection,
+                }
+            )
 
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
@@ -363,12 +415,14 @@ class TradingAgentsGraph:
         selection, debate/risk depth, or asset mode starts fresh instead of
         silently continuing the previous graph (#1089).
         """
-        return "|".join([
-            "analysts=" + ",".join(self.selected_analysts),
-            f"debate={self.config['max_debate_rounds']}",
-            f"risk={self.config['max_risk_discuss_rounds']}",
-            f"asset={asset_type}",
-        ])
+        return "|".join(
+            [
+                "analysts=" + ",".join(self.selected_analysts),
+                f"debate={self.config['max_debate_rounds']}",
+                f"risk={self.config['max_risk_discuss_rounds']}",
+                f"asset={asset_type}",
+            ]
+        )
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
         """Run the trading agents graph for a company on a specific date.
@@ -387,20 +441,18 @@ class TradingAgentsGraph:
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
-            self._checkpointer_ctx = get_checkpointer(
-                self.config["data_cache_dir"], company_name
-            )
+            self._checkpointer_ctx = get_checkpointer(self.config["data_cache_dir"], company_name)
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
             step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date),
+                self.config["data_cache_dir"],
+                company_name,
+                str(trade_date),
                 self._run_signature(asset_type),
             )
             if step is not None:
-                logger.info(
-                    "Resuming from step %d for %s on %s", step, company_name, trade_date
-                )
+                logger.info("Resuming from step %d for %s on %s", step, company_name, trade_date)
             else:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
@@ -492,7 +544,9 @@ class TradingAgentsGraph:
         # Clear checkpoint on successful completion to avoid stale state.
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date),
+                self.config["data_cache_dir"],
+                company_name,
+                str(trade_date),
                 self._run_signature(asset_type),
             )
 
@@ -511,12 +565,8 @@ class TradingAgentsGraph:
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
                 "history": final_state["investment_debate_state"]["history"],
-                "current_response": final_state["investment_debate_state"][
-                    "current_response"
-                ],
-                "judge_decision": final_state["investment_debate_state"][
-                    "judge_decision"
-                ],
+                "current_response": final_state["investment_debate_state"]["current_response"],
+                "judge_decision": final_state["investment_debate_state"]["judge_decision"],
             },
             "trader_investment_decision": final_state["trader_investment_plan"],
             "risk_debate_state": {
