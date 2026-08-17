@@ -66,7 +66,14 @@ _ROW_ALIASES = {
     "interest_expense": ["interest expense", "interest paid"],
     "tax_expense": ["tax provision", "income tax", "tax expense"],
     "cash": ["cash and cash equivalents", "cash & equivalents", "cash & cash"],
-    "total_debt": ["total debt", "total liabilities", "long-term debt"],
+    "total_debt": [
+        "total debt",
+        "total borrowings",
+        "long-term debt",
+        "long term borrowings",
+        "interest-bearing liabilities",
+        "total liabilities",  # last-resort fallback only
+    ],
     "market_cap": ["market cap", "market capitalization"],
     "total_assets": ["total assets"],
     "total_liabilities": ["total liabilities"],
@@ -90,15 +97,18 @@ def _norm(s: str) -> str:
 
 
 def _match_row(rows: dict, canonical: str):
-    """Return the (label, value) for the best matching row, or None."""
-    best = None
+    """Return the (label, value) for the best matching row, or None.
+
+    Aliases are tried in ``_ROW_ALIASES`` order (most specific first) and the
+    first alias that matches any row wins - so ``total_debt`` prefers a
+    dedicated debt row over the catch-all ``total_liabilities`` row.
+    """
     for alias in _ROW_ALIASES.get(canonical, []):
         key = _norm(alias)
         for label, value in rows.items():
             if key and key in _norm(label):
-                if best is None or len(alias) > len(best[0]):
-                    best = (label, value)
-    return best
+                return (label, value)
+    return None
 
 
 def _first_number(text: str) -> "float | None":
@@ -116,7 +126,7 @@ def _first_number(text: str) -> "float | None":
             multiplier = mult
             text = text[:-1].strip()
             break
-    match = re.search(r"[-+]?[0-9][0-9,]*(\.[0-9]+)?", text)
+    match = re.search(r"[-+]?[0-9][0-9,]*(\.[0-9]+)?([eE][-+]?[0-9]+)?", text)
     if not match:
         return None
     try:
@@ -202,12 +212,34 @@ def _parse_text_report(payload: str) -> dict:
     return rows
 
 
+def _detect_currency(payload: str) -> str:
+    """Best-effort statement-currency detection from vendor payloads.
+
+    moomoo markdown headers carry ``(FY 2025, currency: JPY)``; yfinance
+    fundamentals text carries a ``Financial Currency: JPY`` line (when present);
+    alpha_vantage JSON carries a ``reportedCurrency`` field. Returns ``""``
+    when unknown (yfinance CSV carries no marker).
+    """
+    text = payload or ""
+    for pattern in (
+        r"currency:\s*([A-Za-z]{3})",
+        r"Financial\s+Currency:\s*([A-Za-z]{3})",
+        r"\"reportedCurrency\"\s*:\s*\"([A-Za-z]{3})\"",
+    ):
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+    return ""
+
+
 def _canonicalize(payload: str) -> dict:
     """Turn a vendor payload string into a canonical line-item dict.
 
     Works for yfinance CSV (``get_balance_sheet`` etc.), moomoo markdown
     (``get_fundamentals``), alpha_vantage JSON (``get_fundamentals``) and
-    yfinance fundamentals text (``get_fundamentals``).
+    yfinance fundamentals text (``get_fundamentals``). A ``currency`` key is
+    added when the payload states a non-default reporting currency, so
+    USD-only metrics can refuse to mix currencies.
     """
     text = (payload or "").strip()
     if not text or text.startswith("NO_DATA") or text.startswith("DATA_"):
@@ -225,6 +257,9 @@ def _canonicalize(payload: str) -> dict:
         match = _match_row(rows, key)
         if match is not None:
             canonical[key] = match[1]
+    currency = _detect_currency(text)
+    if currency and currency != "USD":
+        canonical["currency"] = currency
     return canonical
 
 
@@ -248,6 +283,21 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
             canonical.update(_canonicalize(stmt))
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s %s: %s", ticker, method, exc)
+    # Guard: a cash figure larger than total assets means a wrong-row match.
+    ca_ = canonical.get("cash")
+    ta_ = canonical.get("total_assets")
+    if ca_ is not None and ta_ is not None and ca_ > ta_:
+        canonical["cash"] = None
+    # Currency heuristic for ADRs: yfinance reports statements in the local
+    # currency (e.g. JPY) with no marker in the CSV, while market cap arrives
+    # in USD. A total-assets / market-cap ratio above 1000x only occurs when
+    # currencies are mixed (e.g. 303T JPY assets vs 36B USD market cap) - flag
+    # it so the USD-only metrics refuse to mix.
+    if canonical.get("currency") is None:
+        mc = canonical.get("market_cap")
+        ta = canonical.get("total_assets")
+        if mc and ta and ta / mc > 1000:
+            canonical["currency"] = "non_usd"
     # Derive working capital when both sides are available (Altman Z needs it).
     if "working_capital" not in canonical:
         ca = canonical.get("current_assets")
@@ -257,19 +307,39 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
     return canonical
 
 
+def _usd_consistent(fin: dict) -> bool:
+    """True when EV-family screens can mix figures from this ticker.
+
+    moomoo reports ADR statements in the underlying currency (e.g. JPY) while
+    market cap arrives in USD - mixing them produces nonsense EV (e.g. JPY cash
+    68T minus a USD 36B market cap). Refuse the USD-only metrics unless the
+    statements are USD (or currency is unknown/yfinance-style) *and* the
+    asset/market-cap scale looks sane.
+    """
+    if fin.get("currency") not in (None, "", "USD"):
+        return False
+    mc = fin.get("market_cap")
+    ta = fin.get("total_assets")
+    if mc and ta and ta / mc > 1000:
+        # Only a currency mix produces assets >1000x the market cap.
+        return False
+    return True
+
+
 def screen_ticker(ticker: str, fin: dict) -> dict:
     """Compute every screen for one ticker's canonical items."""
-    ev = enterprise_value(fin)
-    am = acquirers_multiple(fin)
-    ey = earnings_yield(fin)
+    usd = _usd_consistent(fin)
+    ev = enterprise_value(fin) if usd else None
+    am = acquirers_multiple(fin) if usd else None
+    ey = earnings_yield(fin) if usd else None
     m_score = beneish_m_score(fin)
-    z_score = altman_z_score(fin)
+    z_score = altman_z_score(fin) if usd else None
     f_score = piotroski_f_score(fin)
     mc = fin.get("market_cap")
     ca = fin.get("current_assets")
     tl = fin.get("total_liabilities")
     net_net = (
-        mc is not None and ca is not None and tl is not None
+        usd and mc is not None and ca is not None and tl is not None
         and mc < (2.0 / 3.0) * (ca - tl)
     )
     return {
@@ -348,21 +418,29 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="current date (yyyy-mm-dd)")
     parser.add_argument("-l", "--limit", type=int, default=50,
                         help="max tickers to process")
-    parser.add_argument("-u", "--universe", choices=("tickers", "top-losers"),
+    parser.add_argument("-u", "--universe", choices=("tickers", "top-losers", "heat-proxy"),
                         default="tickers",
-                        help="symbol source: 'tickers' (positional/file, default) or "
-                             "'top-losers' (moomoo intraday decliners; refreshes daily)")
+                        help="symbol source: 'tickers' (positional/file, default), "
+                             "'top-losers' (moomoo intraday decliners; refreshes daily) "
+                             "or 'heat-proxy' (same as top-losers, US-only - the official "
+                             "trade-rank proxy for the proprietary in-app Heat List)")
     parser.add_argument("--market", default="US",
-                        help="market key for --universe top-losers (US/HK)")
+                        help="market key for --universe top-losers/heat-proxy (US/HK)")
     parser.add_argument("-n", "--movers-count", type=int, default=50,
-                        help="how many decliners to pull for top-losers (max 200)")
+                        help="how many decliners to pull (max 200)")
     parser.add_argument("--min-mcap", type=float, default=1e9,
-                        help="market-cap floor (USD) for top-losers; 0 disables")
+                        help="market-cap floor (USD); 0 disables")
     args = parser.parse_args(argv)
+
+    # The proprietary Heat List (search/news/trade telemetry) is app-only and
+    # not exposed by any moomoo API; 'heat-proxy' is the sanctioned stand-in
+    # (top-movers rank) so the daily losers-of-the-moment list keeps rotating.
+    if args.universe == "heat-proxy":
+        args.market = "US"
 
     mover_meta: dict = {}
     tickers = list(args.tickers)
-    if args.universe == "top-losers":
+    if args.universe in ("top-losers", "heat-proxy"):
         try:
             from tradingagents.dataflows.moomoo import (
                 MoomooNotConfiguredError,
@@ -386,6 +464,7 @@ def main(argv: "list[str] | None" = None) -> int:
                     mover_meta[symbol] = {
                         "name": m.get("name"),
                         "day_change": m.get("change_ratio"),
+                        "market_cap": m.get("market_cap"),
                     }
             logger.info("top-losers universe: %d symbols from moomoo", len(tickers))
         except MoomooNotConfiguredError as exc:
@@ -402,8 +481,13 @@ def main(argv: "list[str] | None" = None) -> int:
     for ticker in tickers[: args.limit]:
         try:
             fin = fetch_ticker(ticker, args.date)
-            row = screen_ticker(ticker, fin)
             meta = mover_meta.get(ticker.upper(), {})
+            # The moomoo rank carries market cap per symbol, but moomoo's
+            # fundamentals feed (statements) does not - inject it so the EV /
+            # earnings-yield / acquirer screens can run on the daily list.
+            if fin.get("market_cap") is None and meta.get("market_cap"):
+                fin["market_cap"] = meta["market_cap"]
+            row = screen_ticker(ticker, fin)
             row["name"] = meta.get("name")
             row["day_change"] = meta.get("day_change")
             results.append(row)

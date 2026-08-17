@@ -1677,12 +1677,18 @@ def get_top_movers_moomoo(
         )
     rows: list[dict] = []
     for _, row in df.iterrows():
+        change_ratio = _num_or_none(row.get("change_ratio"))
+        # The SDK's change_ratio scale varies by market session: some calls
+        # return a fraction (-0.2138 = -21.38%), others a percent (-21.38).
+        # Normalize to a fraction either way.
+        if change_ratio is not None and abs(change_ratio) > 1.5:
+            change_ratio /= 100.0
         rows.append(
             {
                 "symbol": _yahoo_style_symbol(row.get("security")),
                 "name": row.get("name") or "",
                 "cur_price": _num_or_none(row.get("cur_price")),
-                "change_ratio": _num_or_none(row.get("change_ratio")),
+                "change_ratio": change_ratio,
                 "change_amount": _num_or_none(row.get("change_amount")),
                 "pe_ttm": _num_or_none(row.get("pe_ttm")),
                 "market_cap": _num_or_none(row.get("market_cap")),

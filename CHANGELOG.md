@@ -10,6 +10,12 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **``--universe heat-proxy``** in the value screener: US-only alias for
+  ``top-losers`` that builds the daily universe from moomoo's official intraday
+  trade rank as the sanctioned stand-in for the proprietary in-app Heat List
+  (composite Trade/Search/News telemetry is not exposed by any moomoo API;
+  the web endpoint's signed token is undocumented). Pass the literal app Heat
+  List via ``-f list.txt`` to use it directly.
 - **Value watchlist screener** — `scripts/value_screener.py` builds a master
   value watchlist by screening tickers through the configured vendor chain
   (`fundamental_data`: `moomoo,yfinance` by default). It normalizes yfinance
@@ -33,6 +39,19 @@ daily; output merges name/change columns for picking. See
 
 ### Fixed
 
+- **Value screener refuses mixed currencies.** moomoo reports ADR statements
+  in the underlying currency (e.g. JPY) while market cap arrives in USD, which
+  produced nonsense EV (e.g. a -62T "EV" for Japan Post's ADR). The screener
+  now detects the statement currency (moomoo markdown headers, yfinance
+  ``Financial Currency``, alpha_vantage ``reportedCurrency``) plus an
+  assets/market-cap >1000x scale heuristic, and gates the USD-only metrics
+  (EV / EY / Acquirer's Multiple / Altman Z / net-net) to ``n/a`` when
+  currencies would be mixed. A cash > total-assets guard also drops wrong-row
+  matches.
+- **Moomoo top-movers ``change_ratio`` normalized to a fraction** - the SDK
+  returns a ratio in some market sessions and a percent in others for the same
+  symbol; the vendor now divides by 100 when \|\|>1.5 so ``DayChg`` formatting
+  is always correct.
 - **Moomoo fundamentals match the tool signatures.** The moomoo vendor's
   `get_fundamentals`/`get_balance_sheet`/`get_cashflow`/`get_income_statement`
   accepted only the symbol, so the interactive CLI's `curr_date` (and `freq`

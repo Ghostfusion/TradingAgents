@@ -59,8 +59,37 @@ def test_classic_path_has_no_mover_columns(capsys):
     assert "AAPL" in out
 
 
-def test_universe_caps_limit(capsys):
+def test_heat_proxy_forces_us_market(capsys):
+    """heat-proxy alias must force market=US regardless of --market."""
+    vs.main(["-u", "heat-proxy", "--market", "HK", "-n", "2", "-d", "2026-01-02", "-l", "2"])
+    out = capsys.readouterr().out
+    assert "Apple Inc." in out  # fake_movers asserts market == "US"
+
+
+def test_sale_caps_limit(capsys):
     vs.main(["--universe", "top-losers", "-n", "2", "-d", "2026-01-02", "-l", "1"])
     out = capsys.readouterr().out
     # Only one row should have been screened (limit=1).
     assert out.count("| 1 |") >= 1
+
+
+def test_currency_gate_blocks_mixed_ev():
+    """Non-USD statement currency must zero out USD-only metrics."""
+    fin = {"currency": "JPY", "market_cap": 3.68e10, "total_assets": 3.0e14,
+           "cash": 6.8e13, "total_debt": 6.2e12, "operating_income": 5.0e11}
+    row = vs.screen_ticker("JPPHY", fin)
+    assert row["ev"] is None
+    assert row["ev_ebit"] is None
+    assert row["earnings_yield"] is None
+    assert row["altman_z"] is None
+    assert row["net_net"] is False
+
+
+def test_scale_heuristic_flags_currency_mix():
+    """Assets >1000x market cap only happens when currencies are mixed."""
+    fin = {"market_cap": 3.68e10, "total_assets": 3.0e14,
+           "cash": 6.8e13, "total_debt": 6.2e12, "operating_income": 5.0e11}
+    assert vs._usd_consistent(fin) is False
+    row = vs.screen_ticker("JPPHY", fin)
+    assert row["ev"] is None
+

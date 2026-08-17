@@ -697,7 +697,7 @@ class MoomooTopMoversTests(unittest.TestCase):
                 "security": securities,
                 "name": ["Apple Inc.", "Tencent"],
                 "cur_price": [210.5, 780.0],
-                "change_ratio": [-0.0421, -0.0175],
+                "change_ratio": [-4.21, -1.75],
                 "change_amount": [-9.3, -1.4],
                 "turnover": [1.1e7, 2.2e8],
                 "volume": [5.0e7, 2.0e7],

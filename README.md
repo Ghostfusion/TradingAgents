@@ -334,13 +334,19 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > `scripts/value_screener.py` builds a master watchlist *before* spending analyst LLM budget: it screens each symbol through the same `route_to_vendor` chain (`fundamental_data` defaults to `moomoo,yfinance`), translating vendor output (CSV/markdown/JSON/text) into canonical line items and computing the classic screens — **EV/EBIT (Acquirer's Multiple), Earnings Yield, Piotroski F-Score, Beneish M-Score, Altman Z-Score and net-net** (see [`strategies/value_strategy.md`](strategies/value_strategy.md) and `strategies/Math.md` for the playbook). Missing rows render `n/a`, never a fabricated number.
 >
-> The daily-changing universe can come from moomoo's intraday **top-movers rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
+> The daily-changing universe can come from moomoo's intraday **top-movers"/"heat-proxy" rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
 >
 > ```
-> python scripts/value_screener.py -u top-losers -n 50 -d 2026-06-30 --min-mcap 1000000000
+> python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30 --min-mcap 1000000000
 > ```
 >
-> Output includes the day's change, name, and a screen-per-column table; pick from the ranked rows. Requires OpenD running + logged in (same as every moomoo feature), and fails loudly if unavailable.
+> `heat-proxy` is US-only and uses moomoo's official trade rank as the stand-in
+> for the proprietary in-app **Heat List** (the composite Trade/Search/News
+> telemetry isn't exposed by any moomoo API — the web endpoint is signed and
+> undocumented). To use the literal app Heat List, save its top symbols to a
+> file and pass `-f list.txt`. Output includes the day's change, name, and a
+> screen-per-column table; pick from the ranked rows. Requires OpenD running +
+> logged in (same as every moomoo feature), and fails loudly if unavailable.
 > ## Decision quality
 >
 > The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
