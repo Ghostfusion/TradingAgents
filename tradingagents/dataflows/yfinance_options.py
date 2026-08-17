@@ -66,14 +66,39 @@ def _option_greeks_row(row) -> dict:
 
 
 def _mean_iv(rows) -> float | None:
-    vals = [
-        float(r["implied_volatility"])
-        for r in rows
-        if r.get("implied_volatility") is not None
-    ]
+    vals = []
+    for r in rows:
+        v = r.get("implied_volatility")
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f != f:  # NaN is the only float not equal to itself
+            continue
+        vals.append(f)
     if not vals:
         return None
     return sum(vals) / len(vals)
+
+
+def _to_int(v) -> int:
+    """Safely coerce a chain value to int; None/NaN/non-numeric become 0.
+
+    yfinance option chains carry float ``NaN`` for open interest/volume on many
+    rows, and ``int(nan)`` raises ``ValueError`` — so any value that is not a
+    finite number contributes 0 to the totals instead of crashing the call.
+    """
+    if v is None:
+        return 0
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0
+    if f != f:  # NaN
+        return 0
+    return int(f)
 
 
 def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
@@ -111,10 +136,10 @@ def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
 
     call_iv = _mean_iv(calls)
     put_iv = _mean_iv(puts)
-    call_oi = sum(int(r["open_interest"] or 0) for r in calls if r.get("open_interest") is not None)
-    put_oi = sum(int(r["open_interest"] or 0) for r in puts if r.get("open_interest") is not None)
-    call_vol = sum(int(r["volume"] or 0) for r in calls if r.get("volume") is not None)
-    put_vol = sum(int(r["volume"] or 0) for r in puts if r.get("volume") is not None)
+    call_oi = sum(_to_int(r.get("open_interest")) for r in calls)
+    put_oi = sum(_to_int(r.get("open_interest")) for r in puts)
+    call_vol = sum(_to_int(r.get("volume")) for r in calls)
+    put_vol = sum(_to_int(r.get("volume")) for r in puts)
 
     lines = [
         f"## {ticker.upper()} Options Snapshot (yfinance, expiry {expiry})",

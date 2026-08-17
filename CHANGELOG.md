@@ -18,6 +18,12 @@ Breaking changes within the 0.x line are called out explicitly.
   other fundamentals vendors: `freq` selects the annual vs. quarterly report
   type on the moomoo SDK, and `curr_date` filters out statements published
   after the trading day (look-ahead guard, mirroring alpha_vantage).
+- **yfinance options chain no longer crashes on `NaN`.** Yahoo chains carry
+  `float('nan')` for open interest/volume on many rows; `int(nan)` raised
+  `ValueError` and the router logged `Vendor 'yfinance' failed for
+  get_options_chain`. The vendor now sums only finite values (missing counts
+  contribute 0) and skips non-finite implied-volatility values in the mean,
+  so the call degrades to zeroed totals instead of aborting.
 
 ## [0.3.1] — 2026-07-05
 
