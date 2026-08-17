@@ -337,12 +337,12 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > The daily-changing universe can come from moomoo's intraday **top-movers"/"heat-proxy" rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
 >
 > ```
-> python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30 --min-mcap 1000000000
+> python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30
 > ```
 >
 > `heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
 > official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
-> then gates to **price ≥ $20, 0 < P/E (TTM) ≤ 40** (`--price-min`, `--pe-max`)
+> then gates to **price ≥ $20, 0 < P/E (TTM) ≤ 40** (`--price-min 20`, `--pe-max 40`)
 > and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
 > cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
 > the value screens run. It uses moomoo's official trade rank as the stand-in
@@ -352,6 +352,12 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > file and pass `-f list.txt`. Output includes the day's change, name, and a
 > screen-per-column table; pick from the ranked rows. Requires OpenD running +
 > logged in (same as every moomoo feature), and fails loudly if unavailable.
+
+> Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
+> many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
+> render `n/a` instead of mixing currencies), and the day's % change is
+> normalized to a fraction regardless of the market session. `0` disables any gate.
+
 > ## Decision quality
 >
 > The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
