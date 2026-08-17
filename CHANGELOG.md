@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Fixed
+
+- **Moomoo fundamentals match the tool signatures.** The moomoo vendor's
+  `get_fundamentals`/`get_balance_sheet`/`get_cashflow`/`get_income_statement`
+  accepted only the symbol, so the interactive CLI's `curr_date` (and `freq`
+  for statements) arguments raised `TypeError` and every call fell back to
+  yfinance/alpha_vantage. The vendor now accepts the same arguments as the
+  other fundamentals vendors: `freq` selects the annual vs. quarterly report
+  type on the moomoo SDK, and `curr_date` filters out statements published
+  after the trading day (look-ahead guard, mirroring alpha_vantage).
+
 ## [0.3.1] — 2026-07-05
 
 Correctness and stability patch: data look-ahead, graph-router crash-safety,

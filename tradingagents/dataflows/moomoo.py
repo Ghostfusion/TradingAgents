@@ -599,12 +599,51 @@ _FINANCIAL_TYPE_ANNUAL = 7
 _FINANCIAL_TYPE_QUARTERLY_COMBO = 9
 
 
-def _format_financials(code: str, data: dict, label: str) -> str:
-    """Format the dict returned by get_financials_statements into a markdown table."""
+def _report_date(rpt) -> datetime.date | None:
+    """Best-effort parse of a report's publication date; None if unparseable.
+
+    The SDK exposes the date as either ``date_time_str`` (string, e.g. ``2025-12-31``)
+    or ``date_time`` (epoch seconds)."""
+    raw = rpt.get("date_time_str") or rpt.get("date_time") or ""
+    if not raw:
+        return None
+    if isinstance(raw, (int, float)) or (isinstance(raw, str) and raw.isdigit()):
+        try:
+            return datetime.fromtimestamp(int(raw)).date()
+        except (OSError, OverflowError, ValueError):
+            return None
+    try:
+        return datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _format_financials(code: str, data: dict, label: str, curr_date: str = None) -> str:
+    """Format the dict returned by get_financials_statements into a markdown table.
+
+    When ``curr_date`` is given, reports published after it are dropped so the
+    analyst never sees statements dated past the trading day (look-ahead guard,
+    mirroring the alpha_vantage vendor). Reports whose date cannot be parsed are
+    kept rather than risk hiding a usable statement.
+    """
     structure = data.get("structure_list") or []
     reports = data.get("report_list") or []
     if not reports:
         return f"No {label} data available for {code}"
+    if curr_date:
+        try:
+            cutoff = datetime.strptime(curr_date, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            cutoff = None
+        if cutoff is not None:
+            kept = []
+            for rpt in reports:
+                rpt_date = _report_date(rpt)
+                if rpt_date is None or rpt_date <= cutoff:
+                    kept.append(rpt)
+            reports = kept
+            if not reports:
+                return f"No {label} data available for {code} on or before {curr_date}"
     id_to_name = {e["field_id"]: e.get("display_name", f"field_{e['field_id']}") for e in structure}
     lines = [f"## {label} — {code}", ""]
     for rpt in reports[:4]:  # most recent 4 periods
@@ -654,37 +693,59 @@ def _fmt_fin_pct(v):
         return "--"
 
 
-def _get_financials(symbol: str, statement_type: int, label: str) -> str:
+def _get_financials(
+    symbol: str,
+    statement_type: int,
+    label: str,
+    freq: str = "annual",
+    curr_date: str = None,
+) -> str:
+    """Fetch and format a statement, honoring the tool-level freq/curr_date args.
+
+    ``freq`` selects the annual (7) vs quarterly (9) financial report type on the
+    moomoo SDK; the quarterly type is the combined-quarter breakdown. ``curr_date``
+    is passed through to ``_format_financials`` as a look-ahead guard.
+    """
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
+    financial_type = (
+        _FINANCIAL_TYPE_QUARTERLY_COMBO
+        if str(freq).strip().lower() == "quarterly"
+        else _FINANCIAL_TYPE_ANNUAL
+    )
     ret, data = ctx.get_financials_statements(
         code,
         statement_type=statement_type,
-        financial_type=_FINANCIAL_TYPE_ANNUAL,
+        financial_type=financial_type,
         num=8,
     )
     _check_ret(ret, data, symbol, code, f"get_financials ({label})")
-    return _format_financials(code, data, label)
+    return _format_financials(code, data, label, curr_date=curr_date)
 
 
-def get_fundamentals_moomoo(symbol: str) -> str:
-    """Return a combined fundamentals overview (income + balance + cash flow)."""
-    income = _get_financials(symbol, _STATEMENT_TYPE_INCOME, "Income Statement")
-    balance = _get_financials(symbol, _STATEMENT_TYPE_BALANCE, "Balance Sheet")
-    cashflow = _get_financials(symbol, _STATEMENT_TYPE_CASHFLOW, "Cash Flow")
+def get_fundamentals_moomoo(symbol: str, curr_date: str = None) -> str:
+    """Return a combined fundamentals overview (income + balance + cash flow).
+
+    ``curr_date`` is optional (the tool always passes it) and acts as a look-ahead
+    guard on each statement. The overview uses the annual report type, matching the
+    pre-existing behavior.
+    """
+    income = _get_financials(symbol, _STATEMENT_TYPE_INCOME, "Income Statement", "annual", curr_date)
+    balance = _get_financials(symbol, _STATEMENT_TYPE_BALANCE, "Balance Sheet", "annual", curr_date)
+    cashflow = _get_financials(symbol, _STATEMENT_TYPE_CASHFLOW, "Cash Flow", "annual", curr_date)
     return f"{income}\n\n{balance}\n\n{cashflow}"
 
 
-def get_balance_sheet_moomoo(symbol: str) -> str:
-    return _get_financials(symbol, _STATEMENT_TYPE_BALANCE, "Balance Sheet")
+def get_balance_sheet_moomoo(symbol: str, freq: str = "quarterly", curr_date: str = None) -> str:
+    return _get_financials(symbol, _STATEMENT_TYPE_BALANCE, "Balance Sheet", freq, curr_date)
 
 
-def get_cashflow_moomoo(symbol: str) -> str:
-    return _get_financials(symbol, _STATEMENT_TYPE_CASHFLOW, "Cash Flow")
+def get_cashflow_moomoo(symbol: str, freq: str = "quarterly", curr_date: str = None) -> str:
+    return _get_financials(symbol, _STATEMENT_TYPE_CASHFLOW, "Cash Flow", freq, curr_date)
 
 
-def get_income_statement_moomoo(symbol: str) -> str:
-    return _get_financials(symbol, _STATEMENT_TYPE_INCOME, "Income Statement")
+def get_income_statement_moomoo(symbol: str, freq: str = "quarterly", curr_date: str = None) -> str:
+    return _get_financials(symbol, _STATEMENT_TYPE_INCOME, "Income Statement", freq, curr_date)
 
 
 # ---------------------------------------------------------------------------
