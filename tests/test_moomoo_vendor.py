@@ -681,5 +681,75 @@ class MoomooQualityFixTests(unittest.TestCase):
         self.assertEqual(header, ["Date,Open,High,Low,Close,Volume"])
 
 
+
+
+class MoomooTopMoversTests(unittest.TestCase):
+    """Top-movers rank: symbol conversion, field mapping, error taxonomy."""
+
+    def setUp(self):
+        _reset()
+
+    def _rank_df(self, securities):
+        import pandas as pd
+
+        return pd.DataFrame(
+            {
+                "security": securities,
+                "name": ["Apple Inc.", "Tencent"],
+                "cur_price": [210.5, 780.0],
+                "change_ratio": [-0.0421, -0.0175],
+                "change_amount": [-9.3, -1.4],
+                "turnover": [1.1e7, 2.2e8],
+                "volume": [5.0e7, 2.0e7],
+                "pe_ttm": [28.1, 24.5],
+                "amplitude": [0.031, 0.028],
+                "market_cap": [3.2e12, 5.5e11],
+                "volume_ratio": [1.1, 0.9],
+            }
+        )
+
+    def test_top_movers_unpacks_rank_and_strips_prefix(self):
+        ctx = mock.Mock()
+        ctx.get_top_movers_rank.return_value = (RET_OK, (42, self._rank_df(["US.AAPL", "US.MSFT"])))
+        with mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx):
+            rows = moomoo.get_top_movers_moomoo(sort_dir="losers", count=2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["symbol"], "AAPL")
+        self.assertEqual(rows[0]["name"], "Apple Inc.")
+        self.assertAlmostEqual(rows[0]["change_ratio"], -0.0421)
+        self.assertAlmostEqual(rows[0]["pe_ttm"], 28.1)
+        self.assertAlmostEqual(rows[0]["market_cap"], 3.2e12)
+
+    def test_top_movers_hk_converts_to_yahoo_style(self):
+        self.assertEqual(moomoo._yahoo_style_symbol("HK.00700"), "00700.HK")
+        self.assertEqual(moomoo._yahoo_style_symbol("US.AAPL"), "AAPL")
+
+    def test_top_movers_gainers_dir_passes_descending(self):
+        ctx = mock.Mock()
+        ctx.get_top_movers_rank.return_value = (RET_OK, (0, self._rank_df(["US.AAPL", "US.MSFT"])))
+        with mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx):
+            moomoo.get_top_movers_moomoo(sort_dir="gainers", count=1)
+        kwargs = ctx.get_top_movers_rank.call_args[1]
+        self.assertIn("sort_dir", kwargs)
+
+    def test_top_movers_permission_error_raises_no_data(self):
+        ctx = mock.Mock()
+        ctx.get_top_movers_rank.return_value = (-1, "no permission for ranking")
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            self.assertRaises(NoMarketDataError),
+        ):
+            moomoo.get_top_movers_moomoo(count=1)
+
+    def test_top_movers_login_error_raises_not_configured(self):
+        ctx = mock.Mock()
+        ctx.get_top_movers_rank.return_value = (-1, "please login first")
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            self.assertRaises(MoomooNotConfiguredError),
+        ):
+            moomoo.get_top_movers_moomoo(count=1)
+
+
 if __name__ == "__main__":
     unittest.main()

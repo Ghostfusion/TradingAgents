@@ -8,6 +8,29 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **Value watchlist screener** — `scripts/value_screener.py` builds a master
+  value watchlist by screening tickers through the configured vendor chain
+  (`fundamental_data`: `moomoo,yfinance` by default). It normalizes yfinance
+  CSV, moomoo markdown/JSON, alpha_vantage JSON, and info text into canonical
+  line items, then computes EV/EBIT (Acquirer's Multiple), Earnings Yield, EV,
+  Piotroski F-Score, Beneish M-Score, Altman Z and net-net (missing rows ->
+  `n/a`, never fabricated). A `--universe top-losers` mode pulls moomoo's
+  intraday decliners rank (`get_top_movers_rank`) so the universe changes
+daily; output merges name/change columns for picking. See
+  `strategies/value_strategy.md`.
+- **Quantitative score library** — `tradingagents/dataflows/quantitative_scores.py`
+  implements Beneish M-Score, Altman Z-Score, Piotroski F-Score and
+  EV / Earnings-Yield / Acquirer's-Multiple helpers, vendor-agnostic over a
+  canonical line-item schema (offline unit-tested in
+  `tests/test_quantitative_scores.py`).
+- **Moomoo top movers vendor call** — `get_top_movers_moomoo()` wraps the SDK's
+  intraday gainers/losers rank with the usual error taxonomy (OpenD down /
+  permission / rate-limit degrade via `_check_ret`) and converts codes to
+  Yahoo-style symbols (`US.AAPL` -> `AAPL`, `HK.00700` -> `00700.HK`).
+  Covered by `MoomooTopMoversTests` and `tests/test_value_screener.py`.
+
 ### Fixed
 
 - **Moomoo fundamentals match the tool signatures.** The moomoo vendor's

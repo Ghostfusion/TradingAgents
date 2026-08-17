@@ -1588,3 +1588,105 @@ def get_trading_days_between(symbol: str, start_date: str, end_date: str) -> lis
         if t:
             days.append(str(t)[:10])
     return days
+
+
+# ---------------------------------------------------------------------------
+# Top movers rank (daily-changing universe source: 领涨/领跌榜单)
+# ---------------------------------------------------------------------------
+
+
+def _num_or_none(v):
+    """Float a value, mapping None / SDK NoneDataType / NaN to None."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None  # NaN check
+
+
+def _yahoo_style_symbol(security: str) -> str:
+    """Convert a moomoo security code (``US.AAPL``, ``HK.00700``) to the
+    Yahoo-style ticker the rest of the pipeline expects (``AAPL``, ``0700.HK``).
+
+    Unmapped prefixes (JP/AU/…) fall back to the bare code, which the router
+    would treat as US — callers piping non-US markets should double-check the
+    mapping themselves.
+    """
+    sec = str(security or "")
+    prefix, sep, rest = sec.partition(".")
+    if not sep or not rest:
+        return sec
+    if prefix == "HK":
+        with contextlib.suppress(ValueError):
+            return f"{int(rest):05d}.HK"
+    return rest  # US.AAPL -> AAPL; unknown prefixes used bare
+
+
+def get_top_movers_moomoo(
+    sort_dir: str = "losers",
+    count: int = 50,
+    market: str = "US",
+    min_market_cap: float = 0.0,
+) -> list[dict]:
+    """Return the intraday movers rank (领涨/领跌榜) as Yahoo-style symbols.
+
+    Wraps the SDK's ``get_top_movers_rank`` so a daily-changing watchlist
+    universe can be built *before* the value screener runs: whichever symbols
+    are down/up the most today are the ones screened today.
+
+    :param sort_dir: ``"losers"`` (biggest decliners first) or ``"gainers"``.
+    :param count: how many symbols to return (SDK allows 1-200).
+    :param market: market key, e.g. ``"US"`` or ``"HK"``.
+    :param min_market_cap: optional market-cap floor in USD (skips micro-caps).
+    :returns: list of ``{symbol, name, cur_price, change_ratio, change_amount,
+        pe_ttm, market_cap, volume}`` sorted with the biggest movers first.
+        ``change_ratio`` is a fraction (e.g. ``-0.0324`` = -3.24%).
+    :raises MoomooNotConfiguredError: OpenD down / not logged in.
+    :raises NoMarketDataError: no quote permission or empty ranking.
+    """
+    from moomoo import Market, RankSortDir, SimpleRankFilter, SimpleRankIndicatorType
+
+    market_key = str(market).strip().upper()
+    market_enum = {"US": Market.US, "HK": Market.HK}.get(market_key, Market.US)
+    ascending = str(sort_dir).strip().lower() == "losers"
+    filters = None
+    try:
+        mcap = float(min_market_cap or 0.0)
+    except (TypeError, ValueError):
+        mcap = 0.0
+    if mcap > 0:
+        filters = [
+            SimpleRankFilter(SimpleRankIndicatorType.MARKET_CAP, interval_min=mcap)
+        ]
+    ctx = _ensure_ctx()
+    ret, data = ctx.get_top_movers_rank(
+        market=market_enum,
+        sort_dir=RankSortDir.ASCENDING if ascending else RankSortDir.DESCENDING,
+        count=int(count),
+        filter_list=filters,
+    )
+    _check_ret(ret, data, market_key, market_key, "get_top_movers_rank")
+    _all_count, df = data
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            market_key,
+            market_key,
+            detail="top movers rank returned no rows",
+        )
+    rows: list[dict] = []
+    for _, row in df.iterrows():
+        rows.append(
+            {
+                "symbol": _yahoo_style_symbol(row.get("security")),
+                "name": row.get("name") or "",
+                "cur_price": _num_or_none(row.get("cur_price")),
+                "change_ratio": _num_or_none(row.get("change_ratio")),
+                "change_amount": _num_or_none(row.get("change_amount")),
+                "pe_ttm": _num_or_none(row.get("pe_ttm")),
+                "market_cap": _num_or_none(row.get("market_cap")),
+                "volume": _num_or_none(row.get("volume")),
+            }
+        )
+    return rows

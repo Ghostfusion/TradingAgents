@@ -329,6 +329,18 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > - **Tier 3 — accuracy infra:** the memory-log realized-return path uses moomoo's trading-day calendar for exact holding-day counting (falls back to the old calendar heuristic when OpenD is unreachable or the market is unsupported).
 >
 > The `batch.py` runner accepts a `--vendor moomoo|yfinance|default` flag to force a vendor-chain preset across all categories per run.
+>
+> ## Value watchlist screener
+>
+> `scripts/value_screener.py` builds a master watchlist *before* spending analyst LLM budget: it screens each symbol through the same `route_to_vendor` chain (`fundamental_data` defaults to `moomoo,yfinance`), translating vendor output (CSV/markdown/JSON/text) into canonical line items and computing the classic screens — **EV/EBIT (Acquirer's Multiple), Earnings Yield, Piotroski F-Score, Beneish M-Score, Altman Z-Score and net-net** (see [`strategies/value_strategy.md`](strategies/value_strategy.md) and `strategies/Math.md` for the playbook). Missing rows render `n/a`, never a fabricated number.
+>
+> The daily-changing universe can come from moomoo's intraday **top-movers rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
+>
+> ```
+> python scripts/value_screener.py -u top-losers -n 50 -d 2026-06-30 --min-mcap 1000000000
+> ```
+>
+> Output includes the day's change, name, and a screen-per-column table; pick from the ranked rows. Requires OpenD running + logged in (same as every moomoo feature), and fails loudly if unavailable.
 > ## Decision quality
 >
 > The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
