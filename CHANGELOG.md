@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **``$100B market-cap floor``** - `--min-mcap` now defaults to
+  $100B for the moomoo rank universes (total cap; float cap <= total so the
+  floor satisfies the “cap OR float cap >= $100B” rule); the day-of rank
+  cap takes precedence over parsed fundamentals, and `$T` (trillion) values
+  parse correctly.
 - **``--universe heat-proxy`` refinement** - US-only, stocks only (ETFs/ETNs/
   funds/indices excluded), pipeline is *hot master first (gainers+losers,
   hottest first), losers second*; universe gates now enforce price >= $20 and

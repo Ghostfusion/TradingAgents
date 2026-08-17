@@ -9,7 +9,7 @@ from unittest import mock
 
 import scripts.value_screener as vs
 
-FUND = "Market Cap: 3.2B\n"
+FUND = "Market Cap: 3.2T\n"
 BS = ("Date,2025-12-31\nCash And Cash Equivalents,300M\nTotal Debt,400M\n"
       "Total Assets,2.0B\nTotal Current Assets,700M\nTotal Current Liabilities,500M\n"
       "Total Liabilities,900M\nRetained Earnings,800M\nProperty Plant Equipment,400M")
@@ -68,6 +68,15 @@ def test_top_losers_adds_name_and_daychg_columns(capsys):
     assert "Apple Inc." in out
     assert "-4.21%" in out
     assert "US.AAPL" not in out  # prefix stripped by the vendor fn
+
+
+def test_min_mcap_floor_gates_universe(capsys):
+    """Default $100B floor: only mega-cap losers survive (float cap <= total)."""
+    vs.main(["--universe", "top-losers", "-n", "2", "-d", "2026-01-02"])
+    out = capsys.readouterr().out
+    assert "Apple Inc." in out and "Microsoft Corp." in out  # both > $100B
+    vs.main(["--universe", "top-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0"])
+    out = capsys.readouterr().out
 
 
 def test_classic_path_has_no_mover_columns(capsys):

@@ -121,7 +121,7 @@ def _first_number(text: str) -> "float | None":
     sign = -1.0 if text.startswith('-') else 1.0
     text = text.lstrip('-+')
     multiplier = 1.0
-    for suffix, mult in (("b", 1e9), ("m", 1e6), ("k", 1e3)):
+    for suffix, mult in (("t", 1e12), ("b", 1e9), ("m", 1e6), ("k", 1e3)):
         if text.lower().endswith(suffix):
             multiplier = mult
             text = text[:-1].strip()
@@ -437,8 +437,11 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="market key for --universe top-losers/heat-proxy (US/HK)")
     parser.add_argument("-n", "--movers-count", type=int, default=50,
                         help="how many decliners to pull (max 200)")
-    parser.add_argument("--min-mcap", type=float, default=1e9,
-                        help="market-cap floor (USD); 0 disables")
+    parser.add_argument("--min-mcap", type=float, default=100e9,
+                        help="market-cap / float-market-cap floor in USD (default $100B; "
+                             "0 disables). Float cap never exceeds total cap, so a "
+                             "total-cap floor >= $100B covers the 'market cap OR "
+                             "floating market cap >= $100B' rule exactly.")
     parser.add_argument("--price-min", type=float, default=20.0,
                         help="min last price in USD (default 20; 0 disables)")
     parser.add_argument("--pe-max", type=float, default=40.0,
@@ -481,16 +484,20 @@ def main(argv: "list[str] | None" = None) -> int:
                     market=args.market,
                     min_market_cap=args.min_mcap,
                 )
-            # Equity-only, price >= $20, P/E (TTM) in (0, 40].
+            # Equity-only, price >= $20, P/E (TTM) in (0, 40], market cap
+            # >= $100B (float cap <= total cap, so the total-cap floor covers it).
             gated = []
             for m in movers[: args.movers_count * 4]:
                 if _is_non_equity(m.get("name")):
                     continue
                 price = m.get("cur_price")
                 pe = m.get("pe_ttm")
+                cap = m.get("market_cap")
                 if args.price_min and (price is None or price < args.price_min):
                     continue
                 if args.pe_max and (pe is None or not (0.0 < pe <= args.pe_max)):
+                    continue
+                if args.min_mcap and (cap is None or cap < args.min_mcap):
                     continue
                 gated.append(m)
             movers = gated[: args.movers_count]
@@ -526,8 +533,16 @@ def main(argv: "list[str] | None" = None) -> int:
             # The moomoo rank carries market cap per symbol, but moomoo's
             # fundamentals feed (statements) does not - inject it so the EV /
             # earnings-yield / acquirer screens can run on the daily list.
-            if fin.get("market_cap") is None and meta.get("market_cap"):
-                fin["market_cap"] = meta["market_cap"]
+            meta_cap = meta.get("market_cap")
+            fin_cap = fin.get("market_cap")
+            # Prefer the day-of rank cap (real-time) over the parsed one when
+            # both exist; inject when fundamentals lacked a cap entirely.
+            if meta_cap is not None and (fin_cap is None or fin_cap < meta_cap):
+                fin["market_cap"] = meta_cap
+            cap = fin.get("market_cap")
+            if args.min_mcap and cap is not None and cap < args.min_mcap:
+                logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
+                continue
             row = screen_ticker(ticker, fin)
             row["name"] = meta.get("name")
             row["day_change"] = meta.get("day_change")

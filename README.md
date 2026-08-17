@@ -342,7 +342,9 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > `heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
 > official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
-> then gates to **price ≥ $20 and 0 < P/E (TTM) ≤ 40** (`--price-min`, `--pe-max`) before
+> then gates to **price ≥ $20, 0 < P/E (TTM) ≤ 40** (`--price-min`, `--pe-max`)
+> and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
+> cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
 > the value screens run. It uses moomoo's official trade rank as the stand-in
 > for the proprietary in-app **Heat List** (the composite Trade/Search/News
 > telemetry isn't exposed by any moomoo API — the web endpoint is signed and
