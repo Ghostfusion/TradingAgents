@@ -212,6 +212,15 @@ def _parse_text_report(payload: str) -> dict:
     return rows
 
 
+_NON_EQUITY_TOKENS = ("ETF", "ETN", "TRUST", "INDEX", "FUND")
+
+
+def _is_non_equity(name: str) -> bool:
+    """Best-effort flag for non-stock securities (ETFs, ETNs, funds, indices)."""
+    upper = (name or "").upper()
+    return any(tok in upper for tok in _NON_EQUITY_TOKENS)
+
+
 def _detect_currency(payload: str) -> str:
     """Best-effort statement-currency detection from vendor payloads.
 
@@ -430,6 +439,10 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="how many decliners to pull (max 200)")
     parser.add_argument("--min-mcap", type=float, default=1e9,
                         help="market-cap floor (USD); 0 disables")
+    parser.add_argument("--price-min", type=float, default=20.0,
+                        help="min last price in USD (default 20; 0 disables)")
+    parser.add_argument("--pe-max", type=float, default=40.0,
+                        help="max P/E (TTM) (default 40; 0 disables)")
     args = parser.parse_args(argv)
 
     # The proprietary Heat List (search/news/trade telemetry) is app-only and
@@ -444,17 +457,45 @@ def main(argv: "list[str] | None" = None) -> int:
         try:
             from tradingagents.dataflows.moomoo import (
                 MoomooNotConfiguredError,
+                get_hot_movers_moomoo,
                 get_top_movers_moomoo,
             )
 
-            movers = get_top_movers_moomoo(
-                sort_dir="losers",
-                count=args.movers_count,
-                market=args.market,
-                min_market_cap=args.min_mcap,
-            )
+            if args.universe == "heat-proxy":
+                # Heat-list stand-in: the official hot master (gainers+losers,
+                # hottest first), then keep the losers of the moment.
+                movers = get_hot_movers_moomoo(
+                    count=args.movers_count,
+                    market=args.market,
+                    min_market_cap=args.min_mcap,
+                )
+                losers = [
+                    m for m in movers
+                    if m.get("change_ratio") is not None and m["change_ratio"] < 0
+                ]
+                movers = losers
+            else:
+                movers = get_top_movers_moomoo(
+                    sort_dir="losers",
+                    count=args.movers_count,
+                    market=args.market,
+                    min_market_cap=args.min_mcap,
+                )
+            # Equity-only, price >= $20, P/E (TTM) in (0, 40].
+            gated = []
+            for m in movers[: args.movers_count * 4]:
+                if _is_non_equity(m.get("name")):
+                    continue
+                price = m.get("cur_price")
+                pe = m.get("pe_ttm")
+                if args.price_min and (price is None or price < args.price_min):
+                    continue
+                if args.pe_max and (pe is None or not (0.0 < pe <= args.pe_max)):
+                    continue
+                gated.append(m)
+            movers = gated[: args.movers_count]
             if not movers:
-                parser.error("moomoo top-losers rank returned no symbols")
+                parser.error("no symbols after price/P-E/equity gates")
             for m in movers:
                 symbol = (m.get("symbol") or "").upper()
                 if not symbol:

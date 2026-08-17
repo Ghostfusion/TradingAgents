@@ -741,6 +741,24 @@ class MoomooTopMoversTests(unittest.TestCase):
         ):
             moomoo.get_top_movers_moomoo(count=1)
 
+    def test_hot_movers_merges_and_dedupes(self):
+        """get_hot_movers_moomoo: gainers+losers, deduped, hottest first."""
+        ctx = mock.Mock()
+        gainer_df = self._rank_df(["US.AAPL", "US.AAPL"]).head(1)
+        los_df = self._rank_df(["US.MSFT", "US.MSFT"])
+        # reuse the same df so rows are valid; loser df has 2 rows
+        ctx.get_top_movers_rank.side_effect = [
+            (RET_OK, (1, gainer_df)),
+            (RET_OK, (1, los_df)),
+        ]
+        with mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx):
+            hot = moomoo.get_hot_movers_moomoo(count=5, market="US")
+        symbols = [r["symbol"] for r in hot]
+        self.assertIn("AAPL", symbols)   # gainer side
+        self.assertIn("MSFT", symbols)   # loser side
+        self.assertEqual(len(symbols), len(set(symbols)))  # deduped
+        self.assertEqual(ctx.get_top_movers_rank.call_count, 2)  # both directions
+
     def test_top_movers_login_error_raises_not_configured(self):
         ctx = mock.Mock()
         ctx.get_top_movers_rank.return_value = (-1, "please login first")

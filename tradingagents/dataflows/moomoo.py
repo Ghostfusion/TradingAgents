@@ -1624,6 +1624,36 @@ def _yahoo_style_symbol(security: str) -> str:
     return rest  # US.AAPL -> AAPL; unknown prefixes used bare
 
 
+def get_hot_movers_moomoo(
+    count: int = 50,
+    market: str = "US",
+    min_market_cap: float = 0.0,
+) -> list[dict]:
+    """The intraday 'hot' master list: gainers + losers, merged and deduped.
+
+    The in-app Heat List (search/trade/news telemetry) is not exposed by any
+    moomoo API, so this is its sanctioned stand-in: both sides of the official
+    intraday movers rank, sorted by absolute change (hottest first). Callers
+    pick the losers subset with change_ratio < 0.
+    """
+    seen: set = set()
+    merged: list[dict] = []
+    for direction in ("gainers", "losers"):
+        for row in get_top_movers_moomoo(
+            sort_dir=direction,
+            count=count,
+            market=market,
+            min_market_cap=min_market_cap,
+        ):
+            symbol = row["symbol"]
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            merged.append(row)
+    merged.sort(key=lambda r: abs(r.get("change_ratio") or 0.0), reverse=True)
+    return merged
+
+
 def get_top_movers_moomoo(
     sort_dir: str = "losers",
     count: int = 50,

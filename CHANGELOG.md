@@ -10,6 +10,10 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **``--universe heat-proxy`` refinement** - US-only, stocks only (ETFs/ETNs/
+  funds/indices excluded), pipeline is *hot master first (gainers+losers,
+  hottest first), losers second*; universe gates now enforce price >= $20 and
+  0 < P/E (TTM) <= 40 (`--price-min 20`, `--pe-max 40`, defaults).
 - **``--universe heat-proxy``** in the value screener: US-only alias for
   ``top-losers`` that builds the daily universe from moomoo's official intraday
   trade rank as the sanctioned stand-in for the proprietary in-app Heat List

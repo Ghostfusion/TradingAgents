@@ -340,7 +340,10 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30 --min-mcap 1000000000
 > ```
 >
-> `heat-proxy` is US-only and uses moomoo's official trade rank as the stand-in
+> `heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
+> official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
+> then gates to **price ≥ $20 and 0 < P/E (TTM) ≤ 40** (`--price-min`, `--pe-max`) before
+> the value screens run. It uses moomoo's official trade rank as the stand-in
 > for the proprietary in-app **Heat List** (the composite Trade/Search/News
 > telemetry isn't exposed by any moomoo API — the web endpoint is signed and
 > undocumented). To use the literal app Heat List, save its top symbols to a
