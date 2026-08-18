@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Value-style enhancements (V1-V5)** - normalized earnings (5y median
+  margin), historical valuation percentiles, Sloan accruals, trap verdict
+  (Trap column in the screener), hard portfolio caps, ATR exits + rebalance
+  hints, and computed debate-context snippets. See
+  `strategies/value_style_gap_plan.md`.
 - **Decision hardening (G1-G5)** - deterministic position/stop contract
   (Kelly x vol x flow x agreement, ATR stop), confidence calibration from
   ledger buckets, computed agreement/consensus, recency-decayed sentiment

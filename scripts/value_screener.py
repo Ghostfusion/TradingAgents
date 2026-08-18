@@ -351,6 +351,11 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         usd and mc is not None and ca is not None and tl is not None
         and mc < (2.0 / 3.0) * (ca - tl)
     )
+    trap = "n/a"
+    if any(v is not None for v in (f_score, m_score, z_score)):
+        from tradingagents.strategies.normalized import trap_verdict
+        trap = trap_verdict(f_score=f_score, m_score=m_score,
+                            z_score=z_score)["level"]
     return {
         "ticker": ticker,
         "ev_ebit": round(am, 2) if am is not None else None,
@@ -360,6 +365,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "beneish_m": round(m_score, 3) if m_score is not None else None,
         "altman_z": round(z_score, 3) if z_score is not None else None,
         "net_net": net_net,
+        "trap": trap,
     }
 
 
@@ -385,6 +391,9 @@ def _watchlist_markdown(results: list) -> str:
     if show_name:
         heads.append("Name")
     heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
+    show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
+    if show_trap:
+        heads.append("Trap")
     if show_chg:
         heads.append("DayChg")
     seps = ["---"] * len(heads)
@@ -413,6 +422,8 @@ def _watchlist_markdown(results: list) -> str:
             cell(r["altman_z"]),
             "yes" if r["net_net"] else "no",
         ]
+        if show_trap:
+            cells.append(cell(r.get("trap")))
         if show_chg:
             cells.append(cell(r.get("day_change"), "{:+.2%}"))
         out.append("| " + " | ".join(cells) + " |")

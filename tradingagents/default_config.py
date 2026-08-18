@@ -222,6 +222,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "calibration_min_n": 5,               # min samples per bucket (G2)
         "enable_agreement": False,            # G3: computed consensus / agreement
         "enable_threshold_gate": False,       # G5: require PBO-clean tuning
+        # Value-style enhancements (value_style_gap_plan.md).
+        "enable_computed_context": False,  # V5: computed numbers into debate snippets
+        "enable_exits": False,             # V4: ATR exits / rebalance hints
+        "breakeven_atr": 1.0,              # V4: stop-to-breakeven cushion (ATRs)
+        "target_atr": 4.0,                 # V4: profit target multiple
+        "sector_cap_limit": 0.35,          # V3: max single-sector weight
+        "max_name_weight": 0.25,           # V3: max single-name weight
+        "max_book_names": 10,              # V3: minimum names for diversification
+
 
         "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
