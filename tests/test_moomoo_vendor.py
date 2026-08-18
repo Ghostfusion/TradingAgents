@@ -481,6 +481,27 @@ class MoomooSdkHandlingTests(unittest.TestCase):
         self.assertIn("IV crush", out)
         self.assertIn("-7.4%", out)  # (308.64/333.14 - 1) = -7.36%
 
+    def test_capital_flow_embeds_flow_signal(self):
+        """L2: deterministic flow summary appended to the tool output."""
+        flow = pd.DataFrame({"capital_flow_item_time": ["2026-08-10"],
+                             "in_flow": [-1e8], "super_in_flow": [1e7]})
+        dist = pd.DataFrame({
+            "capital_in_super": [1.2e6], "capital_out_super": [1.1e7],
+            "capital_in_big": [2.3e7], "capital_out_big": [3.6e7],
+            "capital_in_mid": [4.0e7], "capital_out_mid": [5.7e7],
+            "capital_in_small": [7.2e7], "capital_out_small": [1.1e8],
+        })
+        ctx = mock.Mock()
+        ctx.get_capital_flow.return_value = (RET_OK, flow)
+        ctx.get_capital_distribution.return_value = (RET_OK, dist)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.UNH"),
+        ):
+            out = moomoo.get_capital_flow_moomoo("UNH", "2026-08-17")
+        self.assertIn("**Flow Signal**", out)
+        self.assertIn("FLOW_WARNING", out)
+
     def test_trading_days_between_parses_list(self):
         ctx = mock.Mock()
         ctx.request_trading_days.return_value = (

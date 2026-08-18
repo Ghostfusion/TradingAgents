@@ -1295,6 +1295,27 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
         "falling) suggest institutional distribution; sustained inflows suggest "
         "accumulation. Use as a positioning gauge, not a directional call."
     )
+    # L2: deterministic flow signal so ratio math is not left to the LLM.
+    try:
+        from tradingagents.strategies.orderflow import summarize
+
+        if isinstance(dist_df, pd.DataFrame) and not dist_df.empty:
+            row0 = dist_df.iloc[0]
+            buckets = {k: row0.get(k) for k in
+                       ("capital_in_super", "capital_out_super",
+                        "capital_in_big", "capital_out_big",
+                        "capital_in_mid", "capital_out_mid",
+                        "capital_in_small", "capital_out_small")}
+            weekly_nets = []
+            if isinstance(flow_df, pd.DataFrame) and not flow_df.empty:
+                weekly_nets = [float(r.get("in_flow") or 0.0)
+                               for _, r in flow_df.head(8).iterrows()]
+            signal = summarize(buckets, weekly_nets=weekly_nets)
+            lines.append("")
+            lines.append("**Flow Signal**")
+            lines.append(signal["text"])
+    except Exception:  # noqa: BLE001 - enrichment must never break the tool
+        pass
     return "\n".join(lines)
 
 

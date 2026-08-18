@@ -399,7 +399,13 @@ only after validating in the evaluation harness:
   catalyst-risk multipliers; `enable_events`.
 - **P5 reflection** `reflection.py` - JSON-lines post-trade ledger, decayed
   analyst hit-rates, critique hints, ticker recall; `enable_reflection`.
-- **P6 alt data/consensus** `sentiment.py` - sentiment velocity, mention spikes,
+- **P7 order flow (L1-L4)** - `tradingagents/strategies/orderflow.py` turns moomoo
+  capital-flow buckets (XL/L/M/S, in/out) into deterministic signals:
+  `distribution_score`, divergence (distribution-into-strength / silent-accumulation),
+  exhaustion, bucket alignment. Wired as: tool output enrichment (`**Flow Signal**`),
+  sizing fold into the strategy overlay (`enable_orderflow`; flow-scaled even while
+  `enable_orderflow` is off, the raw tool stays available), state/graph stamp, and
+  `scripts/orderflow_evaluate.py` for ledger-based evaluation (win-rate, mean alpha). - sentiment velocity, mention spikes,
   N-seed consensus (majority/blend); `enable_sentiment`, `consensus_seeds`.
 
 - **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
@@ -408,7 +414,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (694 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (708 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing

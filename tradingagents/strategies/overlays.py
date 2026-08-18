@@ -70,6 +70,32 @@ def build_strategy_overlays(config: "Mapping", closes: list) -> "dict | None":
     }
 
 
+def fold_flow_into_overlay(overlay: dict, flow: "dict | None",
+                            threshold: float = 0.7) -> dict:
+    """Fold order-flow signals into a strategy overlay (L3).
+
+    ``flow`` is the summary dict from ``orderflow.summarize``. The overlay's
+    ``position_scale`` is multiplied by ``max(0, 1 - distribution_score)`` and
+    the flow context + warning flag are attached, so downstream risk sees it.
+    """
+    if flow is None:
+        return overlay
+    dist = float(flow.get("distribution_score", 0.5))
+    scale = 1.0 - dist
+    base = float(overlay.get("position_scale", 1.0))
+    updated = dict(overlay)
+    updated["position_scale"] = round(base * max(0.0, min(scale, 1.0)), 3)
+    updated["flow"] = {
+        "distribution_score": dist,
+        "flag": flow.get("flag"),
+        "divergence": flow.get("divergence"),
+        "warning": dist >= threshold,
+    }
+    note = flow.get("text", "")
+    updated["context"] = overlay.get("context", "") + " | " + note
+    return updated
+
+
 def apply_overlay_to_state(state: dict, overlay: "dict | None") -> dict:
     """Attach overlay to graph state (copy, never mutate caller's object)."""
     if overlay is None:
@@ -95,6 +121,6 @@ def record_reflection_outcome(config, ledger_path, analyst: str, ticker: str,
 
 
 __all__ = [
-    "build_strategy_overlays", "apply_overlay_to_state",
-    "record_reflection_outcome",
+    "build_strategy_overlays", "fold_flow_into_overlay",
+    "apply_overlay_to_state", "record_reflection_outcome",
 ]

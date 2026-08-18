@@ -32,6 +32,7 @@ _ENV_OVERRIDES = {
     # Strategy overlays + reflection (Phase wiring) - settable via .env.
     "TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS": "enable_strategy_overlays",
     "TRADINGAGENTS_ENABLE_REFLECTION": "enable_reflection",
+    "TRADINGAGENTS_ENABLE_ORDERFLOW": "enable_orderflow",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -205,6 +206,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_reflection": True,    # Phase 5: post-trade analyst critique
         "enable_sentiment": False,    # Phase 6: sentiment velocity
         "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)
+        "enable_orderflow": False,   # L1-L4: capital-flow signals + flow-scaled sizing
+        "orderflow_distribution_threshold": 0.7,
         "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours

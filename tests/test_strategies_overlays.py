@@ -3,7 +3,8 @@
 import pytest
 
 from tradingagents.strategies.overlays import (
-    build_strategy_overlays, apply_overlay_to_state, record_reflection_outcome,
+    build_strategy_overlays, fold_flow_into_overlay, apply_overlay_to_state,
+    record_reflection_outcome,
 )
 
 
@@ -45,6 +46,25 @@ def test_record_reflection_guarded(tmp_path):
     record_reflection_outcome(cfg_off, str(tmp_path / "l.jsonl"), "market", "AAPL",
                               "2026-01-02", 0.02)
     assert not (tmp_path / "l.jsonl").exists()
+
+
+def test_fold_flow_scales_position_and_warns():
+    flow = {
+        "distribution_score": 0.79,
+        "flag": "distribution",
+        "divergence": "distribution_into_strength",
+        "text": "order flow: inst_net=-2e7 FLOW_WARNING",
+    }
+    overlay = {"regime": "bear", "position_scale": 1.0, "context": "regime=bear"}
+    out = fold_flow_into_overlay(overlay, flow, threshold=0.7)
+    assert out["position_scale"] == round(1.0 * (1.0 - 0.79), 3)
+    assert out["flow"]["warning"] is True
+    assert "FLOW_WARNING" in out["context"]
+
+
+def test_fold_flow_none_is_noop():
+    overlay = {"position_scale": 1.0, "context": "x"}
+    assert fold_flow_into_overlay(overlay, None) is overlay
 
 
 def test_record_reflection_writes(tmp_path):

@@ -621,8 +621,29 @@ class TradingAgentsGraph:
             from tradingagents.strategies.overlays import (
                 apply_overlay_to_state,
                 build_strategy_overlays,
+                fold_flow_into_overlay,
             )
             overlay = build_strategy_overlays(self.config, closes)
+            if self.config.get("enable_orderflow"):
+                try:
+                    from tradingagents.strategies.orderflow import fetch_flow, summarize
+
+                    flow_payload = fetch_flow(ticker)
+                    if flow_payload is not None:
+                        flow_summary = summarize(
+                            flow_payload.get("buckets", {}),
+                            weekly_nets=flow_payload.get("weekly_nets"),
+                            thresholds={
+                                "distribution_threshold": float(
+                                    self.config.get(
+                                        "orderflow_distribution_threshold", 0.7
+                                    )
+                                )
+                            },
+                        )
+                        overlay = fold_flow_into_overlay(overlay, flow_summary)
+                except Exception as flow_exc:
+                    logger.warning("orderflow fetch skipped: %s", flow_exc)
         except Exception as exc:
             logger.warning("strategy overlays skipped: %s", exc)
             return final_state
