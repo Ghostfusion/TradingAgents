@@ -399,7 +399,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (725 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (738 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -422,6 +422,13 @@ only after validating in the evaluation harness:
   catalyst-risk multipliers; `enable_events`.
 - **P5 reflection** `reflection.py` - JSON-lines post-trade ledger, decayed
   analyst hit-rates, critique hints, ticker recall; `enable_reflection`.
+- **Value-style hardening (V1-V5)** - `strategies/normalized.py` (5y
+  median-margin normalized EBIT, historical percentiles, Sloan accruals,
+  and a LOW/MED/HIGH trap verdict surfaced as the watchlist **Trap** column),
+  `strategies/portfolio.py` (hard per-name/sector caps, residual cash),
+  `strategies/exits.py` (stop-to-breakeven, ATR targets, rebalance cadence),
+  `strategies/debate_context.py` (computed context snippets for the LLM debate).
+  Plan: `Strategies/value_style_gap_plan.md`.
 - **P7 order flow (L1-L4)** - `tradingagents/strategies/orderflow.py` turns moomoo
   capital-flow buckets (XL/L/M/S, in/out) into deterministic signals:
   `distribution_score`, divergence (distribution-into-strength / silent-accumulation),
@@ -437,7 +444,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (708 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (738 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing
