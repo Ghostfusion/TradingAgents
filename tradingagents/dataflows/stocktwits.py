@@ -38,6 +38,40 @@ def _stocktwits_symbol(ticker: str) -> str:
     return f"{base}.X" if base else ticker.strip().upper()
 
 
+def _count_sentiment(messages: list, limit: int = 30):
+    """(bullish, bearish, unlabeled) counts from stocktwits basic sentiment."""
+    bullish = bearish = unlabeled = 0
+    for m in messages[:limit]:
+        entities = m.get("entities") or {}
+        sentiment_obj = entities.get("sentiment") or {}
+        sentiment = sentiment_obj.get("basic") if isinstance(sentiment_obj, dict) else None
+        if sentiment == "Bullish":
+            bullish += 1
+        elif sentiment == "Bearish":
+            bearish += 1
+        else:
+            unlabeled += 1
+    return bullish, bearish, unlabeled
+
+
+def stocktwits_counts(ticker: str, limit: int = 30, timeout: float = 10.0):
+    """Deterministic (bullish, bearish, unlabeled, total) counts; None on failure.
+
+    Parses the fixed summary line produced by ``fetch_stocktwits_messages``.
+    """
+    import re as _re
+
+    payload = fetch_stocktwits_messages(ticker, limit=limit, timeout=timeout)
+    if not payload or payload.startswith("<"):
+        return None
+    m = _re.search(r"Bullish:\s*(\d+)", payload)
+    b = _re.search(r"Bearish:\s*(\d+)", payload)
+    u = _re.search(r"Unlabeled:\s*(\d+)", payload)
+    if not (m and b and u):
+        return None
+    return int(m.group(1)), int(b.group(1)), int(u.group(1)),         int(m.group(1)) + int(b.group(1)) + int(u.group(1))
+
+
 def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.0) -> str:
     """Fetch recent StockTwits messages for ``ticker`` and return them as a
     formatted plaintext block ready for prompt injection.
@@ -62,7 +96,7 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         return f"<no StockTwits messages found for ${ticker.upper()}>"
 
     lines = []
-    bullish = bearish = unlabeled = 0
+    bullish, bearish, unlabeled = _count_sentiment(messages, limit)
     for m in messages[:limit]:
         created = m.get("created_at", "")
         user = (m.get("user") or {}).get("username", "?")
@@ -74,13 +108,10 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
             body = body[:280] + "…"
 
         if sentiment == "Bullish":
-            bullish += 1
             tag = "Bullish"
         elif sentiment == "Bearish":
-            bearish += 1
             tag = "Bearish"
         else:
-            unlabeled += 1
             tag = "no-label"
         lines.append(f"[{created} · @{user} · {tag}] {body}")
 

@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Deterministic sentiment velocity** - StockTwits counts -> signed
+  computed_score (-1..1) + surprise z-score vs a rolling per-ticker
+  baseline, injected into the SentimentReport as `computed_score` /
+  `computed_velocity` / `sample_size` (rendered **Computed Sentiment**
+  line); enabled via `.env` `TRADINGAGENTS_ENABLE_SENTIMENT=true`.
 - **Risk report R1b** - the computed risk gate (verdict/snapshot/reasons)
   is injected into every report: prepended to `4_risk/*` and the Risk
   section, mirrored into `5_portfolio/decision.md`; `--risk-compact`

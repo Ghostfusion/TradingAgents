@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 
 def sentiment_velocity(sentiment_series: list, window: int = 5) -> "float | None":
     """OLS-ish slope of sentiment over the recent window -> /day change."""
@@ -133,8 +135,79 @@ def surprise_velocity(current_score: "float | None", history: list,
     return (current_score - mean) / std
 
 
+def score_from_counts(bullish: int, bearish: int, unlabeled: int = 0) -> "float | None":
+    """Signed sentiment score in [-1, 1] from labeled counts; None when empty."""
+    labeled = (bullish or 0) + (bearish or 0)
+    if labeled <= 0:
+        return None
+    return round(((bullish or 0) - (bearish or 0)) / labeled, 4)
+
+
+def _baseline_file(cache_dir, ticker) -> str:
+    import os
+
+    root = Path(cache_dir or "~/.tradingagents").expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    safe = ticker.replace(".", "_").upper()
+    return str(root / f"sentiment_baseline_{safe}.jsonl")
+
+
+def compute_social_scores(ticker: str, cache_dir: "str | None" = None,
+                          limit: int = 30) -> "dict | None":
+    """Deterministic score + surprise velocity from StockTwits counts.
+
+    Persists a rolling score baseline per ticker so ``surprise_velocity`` can
+    z-score today's sentiment vs its own history. Returns None on any failure
+    (the caller degrades silently).
+    """
+    try:
+        from tradingagents.dataflows.stocktwits import stocktwits_counts
+
+        counts = stocktwits_counts(ticker, limit=limit)
+        if counts is None:
+            return None
+        bull, bear, unlabeled, total = counts
+        score = score_from_counts(bull, bear, unlabeled)
+        if score is None:
+            return None
+        path = _baseline_file(cache_dir, ticker)
+        history = []
+        if Path(path).exists():
+            for ln in Path(path).read_text(encoding="utf-8").splitlines():
+                if ln.strip():
+                    try:
+                        history.append(float(ln))
+                    except ValueError:
+                        pass
+        velocity = surprise_velocity(score, history[-30:])
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{score}\n")
+        return {
+            "computed_score": score,
+            "computed_velocity": velocity,
+            "sample_size": total,
+            "bullish": bull,
+            "bearish": bear,
+            "unlabeled": unlabeled,
+        }
+    except Exception:
+        return None
+
+
+def computed_sentiment_line(result: dict) -> str:
+    """Compact deterministic line to append to the sentiment report."""
+    if not result:
+        return ""
+    parts = [f"computed_score={result['computed_score']:+.2f}"]
+    if result.get("computed_velocity") is not None:
+        parts.append(f"velocity={result['computed_velocity']:+.2f}sigma")
+    parts.append(f"n={result.get('sample_size', 0)}")
+    return "**Computed Sentiment (deterministic):** " + "; ".join(parts)
+
+
 __all__ = [
     "sentiment_velocity", "mention_volume", "consensus_overlap",
     "consensus_verdict", "blended_score", "decayed_weight",
-    "weighted_sentiment", "surprise_velocity",
+    "weighted_sentiment", "surprise_velocity", "score_from_counts",
+    "compute_social_scores", "computed_sentiment_line",
 ]

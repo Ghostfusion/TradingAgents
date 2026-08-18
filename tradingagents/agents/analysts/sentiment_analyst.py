@@ -107,13 +107,41 @@ def create_sentiment_analyst(llm):
         # data is already in the prompt.
         formatted_messages = prompt.format_messages(messages=state["messages"])
 
+        # Deterministic sentiment (score + surprise velocity) injected into the
+        # report when enable_sentiment is on - numbers the LLM can't alter.
+        computed = None
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            if get_config().get("enable_sentiment"):
+                from tradingagents.strategies.sentiment import (
+                    computed_sentiment_line,
+                    compute_social_scores,
+                )
+
+                computed = compute_social_scores(
+                    ticker, cache_dir=get_config().get("data_cache_dir"), limit=30
+                )
+        except Exception:
+            computed = None
+
+        def _sentiment_hook(report):
+            if computed is None:
+                return
+            report.computed_score = computed["computed_score"]
+            report.computed_velocity = computed.get("computed_velocity")
+            report.sample_size = computed.get("sample_size")
+
         report_text = invoke_structured_or_freetext(
             structured_llm,
             llm,
             formatted_messages,
             render_sentiment_report,
             "Sentiment Analyst",
+            result_hook=_sentiment_hook if computed else None,
         )
+        if computed and "Computed Sentiment" not in report_text:
+            report_text = report_text.rstrip() + "\n\n" + computed_sentiment_line(computed)
 
         return {
             "messages": [AIMessage(content=report_text)],

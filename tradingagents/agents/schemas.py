@@ -349,6 +349,25 @@ class SentimentReport(BaseModel):
             "'high' when all three sources returned substantive data."
         ),
     )
+    computed_score: float | None = Field(
+        default=None,
+        description=(
+            "Deterministic signed sentiment in [-1, 1] from labeled message "
+            "counts (vendor labels), computed by the pipeline (not the LLM) "
+            "when enable_sentiment is on."
+        ),
+    )
+    computed_velocity: float | None = Field(
+        default=None,
+        description=(
+            "z-score of today's computed_score vs the ticker's rolling 30-day "
+            "baseline of deterministic scores."
+        ),
+    )
+    sample_size: int | None = Field(
+        default=None,
+        description="Number of labeled sentiment messages used for computed_score.",
+    )
     narrative: str = Field(
         description=(
             "Full sentiment report covering, in order: "
@@ -377,5 +396,20 @@ def render_sentiment_report(report: SentimentReport) -> str:
         f"(Score: {report.overall_score:.1f}/10)",
         f"**Confidence:** {report.confidence.capitalize()}",
         "",
+        _computed_line(report),
         report.narrative,
     ])
+
+
+def _computed_line(report) -> str:
+    """Deterministic computed-sentiment line; empty when unset."""
+    if report.computed_score is None:
+        return ""
+    extra = f"{report.computed_score:+.2f}"
+    if report.computed_velocity is not None and report.sample_size is not None:
+        extra += f" (velocity {report.computed_velocity:+.2f}sigma, n={report.sample_size})"
+    elif report.computed_velocity is not None:
+        extra += f" (velocity {report.computed_velocity:+.2f}sigma)"
+    elif report.sample_size is not None:
+        extra += f" (n={report.sample_size})"
+    return f"**Computed Sentiment:** {extra}"
