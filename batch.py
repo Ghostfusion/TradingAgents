@@ -27,16 +27,17 @@ MAX_PARALLEL_WORKERS = 4
 
 
 def effective_workers(requested: int) -> int:
-    """Cap the requested worker count (env override: TRADINGAGENTS_MAX_WORKERS)."""
+    """Cap the requested worker count (env override sets the ceiling)."""
     import os
 
+    cap = MAX_PARALLEL_WORKERS
     try:
         override = int(os.environ.get("TRADINGAGENTS_MAX_WORKERS", ""))
         if override > 0:
-            return min(max(1, override), 32)
+            cap = min(max(1, override), 32)
     except ValueError:
         pass
-    return min(max(1, int(requested)), MAX_PARALLEL_WORKERS)
+    return min(max(1, int(requested)), cap)
 from datetime import date, datetime
 from pathlib import Path
 

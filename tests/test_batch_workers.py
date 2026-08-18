@@ -12,8 +12,9 @@ def test_workers_capped_below_limit():
     assert batch.effective_workers(-5) == 1
 
 
-def test_env_override():
+def test_env_override_is_a_ceiling():
     with mock.patch.dict(os.environ, {"TRADINGAGENTS_MAX_WORKERS": "6"}):
         assert batch.effective_workers(50) == 6
+        assert batch.effective_workers(3) == 3  # requested < env ceiling
     with mock.patch.dict(os.environ, {"TRADINGAGENTS_MAX_WORKERS": "junk"}):
         assert batch.effective_workers(9) == 4
