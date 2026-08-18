@@ -350,7 +350,10 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > telemetry isn't exposed by any moomoo API — the web endpoint is signed and
 > undocumented). To use the literal app Heat List, save its top symbols to a
 > file and pass `-f list.txt`. Output includes the day's change, name, and a
-> screen-per-column table; pick from the ranked rows. Requires OpenD running +
+> screen-per-column table; pick from the ranked rows. Each run also saves
+> the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_180415.md`,
+> same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).
+> Requires OpenD running +
 > logged in (same as every moomoo feature), and fails loudly if unavailable.
 
 > Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
@@ -399,7 +402,11 @@ only after validating in the evaluation harness:
 - **P6 alt data/consensus** `sentiment.py` - sentiment velocity, mention spikes,
   N-seed consensus (majority/blend); `enable_sentiment`, `consensus_seeds`.
 
-Regression status: full suite passes (686 passed / 2 skipped / 56 subtests);
+- **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
+  attaches regime/sizing/momentum overlays to final state and records realized
+  outcomes to `strategy_ledger.jsonl` - both no-ops unless enabled.
+
+Regression status: full suite passes (694 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing
