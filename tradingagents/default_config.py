@@ -190,6 +190,18 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "moomoo_opend_path": None,  # explicit path to the OpenD executable
         # Vendor-result cache (operational): re-serve successful vendor fetches
         # within a TTL instead of re-hitting free-tier APIs on every run.
+        # Researched strategies (enhancement_plan.md - Phase 0..6). All off by
+        # default; each phase is a pure module under tradingagents/strategies/
+        # with offline unit tests (tests/test_strategies_*).
+        "evaluate_cost_bps": 10,      # Phase 0: per-trade cost in basis points
+        "enable_regime": False,       # Phase 1: regime gate (vol/trend/HMM)
+        "position_sizing": "kelly",   # Phase 2: kelly | vol_target | flat
+        "target_vol": 0.15,           # Phase 2: annualized vol target
+        "enable_factors": False,      # Phase 3: value+momentum composite
+        "enable_events": False,       # Phase 4: PEAD / catalyst sizing
+        "enable_reflection": False,   # Phase 5: post-trade analyst critique
+        "enable_sentiment": False,    # Phase 6: sentiment velocity
+        "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely
