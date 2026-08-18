@@ -373,7 +373,7 @@ def rank_watchlist(results: list) -> list:
     return sorted(results, key=key)
 
 
-def print_watchlist(results: list) -> None:
+def _watchlist_markdown(results: list) -> str:
     """Print the ranked watchlist as a table.
 
     ``Name`` / ``DayChg`` columns appear only when the run carried mover
@@ -416,7 +416,24 @@ def print_watchlist(results: list) -> None:
         if show_chg:
             cells.append(cell(r.get("day_change"), "{:+.2%}"))
         out.append("| " + " | ".join(cells) + " |")
-    print("\n".join(out))
+    return "\n".join(out)
+
+
+def print_watchlist(results) -> None:
+    """Print the ranked watchlist (legacy entry point for tests)."""
+    print(_watchlist_markdown(results))
+
+
+def save_watchlist(markdown, out_dir, ts=None):
+    """Write the watchlist markdown to <out_dir>/<finish_timestamp>.md."""
+    from datetime import datetime as _dt
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    stamp = ts or _dt.now().strftime("%Y%m%d_%H%M%S")
+    file = out_path / (stamp + ".md")
+    file.write_text(markdown + "\n", encoding="utf-8")
+    return file
 
 
 def main(argv: "list[str] | None" = None) -> int:
@@ -446,6 +463,8 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="min last price in USD (default 20; 0 disables)")
     parser.add_argument("--pe-max", type=float, default=40.0,
                         help="max P/E (TTM) (default 40; 0 disables)")
+    parser.add_argument("--out-dir", default="screener",
+                        help="folder for the saved watchlist markdown (finish timestamp)")
     args = parser.parse_args(argv)
 
     # The proprietary Heat List (search/news/trade telemetry) is app-only and
@@ -551,7 +570,12 @@ def main(argv: "list[str] | None" = None) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.warning("could not screen %s: %s", ticker, exc)
 
-    print_watchlist(rank_watchlist(results))
+    ranked = rank_watchlist(results)
+    markdown = _watchlist_markdown(ranked)
+    print_watchlist(ranked)
+    saved = save_watchlist(markdown, args.out_dir)
+    print(f"[screener] saved watchlist to {saved}")
+    return 0
     return 0
 
 

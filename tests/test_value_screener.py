@@ -79,6 +79,15 @@ def test_min_mcap_floor_gates_universe(capsys):
     out = capsys.readouterr().out
 
 
+def test_save_watchlist_writes_md(tmp_path):
+    """Watchlist results must be saved to <out>/<finish_timestamp>.md."""
+    out = tmp_path / "screener"
+    file = vs.save_watchlist("# Value Watchlist\n", str(out), ts="20260102_101112")
+    assert file.name == "20260102_101112.md"
+    assert file.read_text(encoding="utf-8").startswith("# Value Watchlist")
+    assert file.parent == out
+
+
 def test_classic_path_has_no_mover_columns(capsys):
     vs.main(["AAPL", "-d", "2026-01-02"])
     out = capsys.readouterr().out
