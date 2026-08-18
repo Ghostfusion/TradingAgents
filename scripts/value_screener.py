@@ -391,6 +391,10 @@ def _watchlist_markdown(results: list) -> str:
     if show_name:
         heads.append("Name")
     heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
+    show_norm = any(r.get("nebit_ev_ebit") is not None for r in results)
+    if show_norm:
+        heads.append("NEV/EBIT")
+        heads.append("PE5Y")
     show_scan = any(r.get("scan_a") or r.get("scan_b") for r in results)
     if show_scan:
         heads.append("ScanA")
@@ -426,6 +430,9 @@ def _watchlist_markdown(results: list) -> str:
             cell(r["altman_z"]),
             "yes" if r["net_net"] else "no",
         ]
+        if show_norm:
+            cells.append(cell(r.get("nebit_ev_ebit")))
+            cells.append(cell(r.get("pe_pct5"), "{:.0%}"))
         if show_scan:
             cells.append("yes" if r.get("scan_a") else "no")
             cells.append("yes" if r.get("scan_b") else "no")
@@ -756,6 +763,13 @@ def main(argv: "list[str] | None" = None) -> int:
         parser.error("no tickers provided (positional args, --file, or --universe top-losers)")
 
     results = []
+    fmp_use = False
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        fmp_use = bool(get_config().get("fmp_api_key"))
+    except Exception:
+        fmp_use = False
     for ticker in tickers[: args.limit]:
         try:
             fin = fetch_ticker(ticker, args.date)
@@ -774,6 +788,18 @@ def main(argv: "list[str] | None" = None) -> int:
                 logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
                 continue
             row = screen_ticker(ticker, fin)
+            if fmp_use:
+                _nf = None
+                try:
+                    from tradingagents.dataflows.fmp import normalized_score as _nsc
+
+                    _nf = _nsc(ticker)
+                except Exception:
+                    _nf = None
+                if _nf:
+                    row["nebit_ev_ebit"] = _nf.get("ev_nebit")
+                    row["pe_pct5"] = _nf.get("pe_pct5")
+                    row["fmp_ev"] = _nf.get("ev")
             sig = scan_meta.get(ticker.upper())
             row["scan_a"] = bool(sig and sig["a"])
             row["scan_b"] = bool(sig and sig["b"])

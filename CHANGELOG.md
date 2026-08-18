@@ -10,6 +10,12 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **FMP vendor (optional)** - `dataflows/fmp.py` + `fmp_common.py`: 5+ year
+  income/balance/cashflow history, enterprise-values, key metrics TTM,
+  earnings surprises, historical OHLCV; `normalized_score` fills the
+  V1/V2 gaps (5y median-margin EBIT, EV/NEBIT, 5y PE percentile). Screener
+  shows NEV/EBIT + PE5Y columns when `fmp_api_key` is set; register via
+  `TRADINGAGENTS_FMP_API_KEY` in `.env`.
 - **`--scan` strategies (scan.md)** - trend-pullback (20/50 EMA, RSI 40-55,
   quarter >= +10%, pullback to EMA20) and breakout (>=90% of 52w high,
   above SMA20/50, RVOL >1.5 or <0.75 + Bollinger squeeze) as screener

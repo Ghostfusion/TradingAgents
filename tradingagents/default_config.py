@@ -20,6 +20,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_TEMPERATURE": "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
+    "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     # Moomoo OpenAPI: connection + headless autostart of the local OpenD gateway.
     # Credentials are never stored here — OpenD holds the logged-in session.
     # ``moomoo_account`` is only the moomoo ID used with ``-login_by_remember=1``
@@ -197,6 +198,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # Example: "get_stock_data": "alpha_vantage",  # Override category default
         },
         "finnhub_api_key": None,
+        "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         # Moomoo OpenAPI (local OpenD gateway, quote-only).
         "moomoo_host": "127.0.0.1",
         "moomoo_port": 11111,
