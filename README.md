@@ -380,7 +380,30 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > - **NaN-safe options chains** — yfinance option chains frequently carry missing/`NaN` open-interest, volume, and implied-volatility values; the options vendor skips non-finite values when summing (missing counts contribute 0) instead of crashing the call.
 > - **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
 
-## Research enhancement strategies
+## Decision hardening (compute, don't narrate)
+
+Spec: [`Strategies/decision_hardening_spec.md`](Strategies/decision_hardening_spec.md).
+All config-gated, off by default:
+
+- **G1 position & stop contract** - `tradingagents/strategies/contract.py`:
+  size = min(Kelly, risk/stop) x vol x flow x agreement, 2x-ATR stop, with an
+  audit reason string; graph attaches `position_contract` when
+  `enable_position_contract` is on.
+- **G2 confidence calibration** (`strategies/calibration.py`) - bucket
+  realized win-rates from the ledger into `calibrated_confidence` and a
+  calibration table for the PM (`enable_calibration`).
+- **G3 measured consensus** (`strategies/consensus.py`) - `agreement_score`
+  from risk-DFV stances replaces the binary narrative flag; feeds G1.
+- **G4 sentiment decay/velocity** (`strategies/sentiment.py`) - recency
+  half-life weight, credibility factors, surprise z-score vs 30d baseline.
+- **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
+  PBO before tuning any new default (`enable_threshold_gate`).
+
+Regression status: full suite passes (725 passed / 2 skipped / 56 subtests).
+
+## Research
+
+
 
 Researched trading methods implemented as pure, offline-testable modules under
 `tradingagents/strategies/` (plan: [`Strategies/enhancement_plan.md`](Strategies/enhancement_plan.md)).

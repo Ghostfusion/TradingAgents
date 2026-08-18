@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Decision hardening (G1-G5)** - deterministic position/stop contract
+  (Kelly x vol x flow x agreement, ATR stop), confidence calibration from
+  ledger buckets, computed agreement/consensus, recency-decayed sentiment
+  + surprise velocity, and a walk-forward/PBO threshold gate. See
+  `strategies/decision_hardening_spec.md`.
 - **``$100B market-cap floor``** - `--min-mcap` now defaults to
   $100B for the moomoo rank universes (total cap; float cap <= total so the
   floor satisfies the “cap OR float cap >= $100B” rule); the day-of rank

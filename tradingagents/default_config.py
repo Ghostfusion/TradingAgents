@@ -33,6 +33,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS": "enable_strategy_overlays",
     "TRADINGAGENTS_ENABLE_REFLECTION": "enable_reflection",
     "TRADINGAGENTS_ENABLE_ORDERFLOW": "enable_orderflow",
+    "TRADINGAGENTS_ENABLE_POSITION_CONTRACT": "enable_position_contract",
+    "TRADINGAGENTS_ENABLE_CALIBRATION": "enable_calibration",
+    "TRADINGAGENTS_ENABLE_AGREEMENT": "enable_agreement",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -208,6 +211,18 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)
         "enable_orderflow": False,   # L1-L4: capital-flow signals + flow-scaled sizing
         "orderflow_distribution_threshold": 0.7,
+        # Decision hardening (decision_hardening_spec.md): compute, don’t narrate.
+        "enable_position_contract": False,  # G1: deterministic size/stop
+        "risk_per_trade": 0.01,              # risk budget per trade (G1)
+        "max_position_pct": 0.30,             # portfolio cap (G1)
+        "atr_mult": 2.0,                      # ATR stop multiple (G1)
+        "position_odds": 1.0,                 # win/loss payoff (G1)
+        "kelly_fraction": 0.25,               # quarter-Kelly (G1)
+        "enable_calibration": False,          # G2: bucket win-rates from ledger
+        "calibration_min_n": 5,               # min samples per bucket (G2)
+        "enable_agreement": False,            # G3: computed consensus / agreement
+        "enable_threshold_gate": False,       # G5: require PBO-clean tuning
+
         "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours

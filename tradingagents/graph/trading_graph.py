@@ -644,6 +644,34 @@ class TradingAgentsGraph:
                         overlay = fold_flow_into_overlay(overlay, flow_summary)
                 except Exception as flow_exc:
                     logger.warning("orderflow fetch skipped: %s", flow_exc)
+            if self.config.get("enable_position_contract"):
+                try:
+                    from tradingagents.strategies.contract import (
+                        build_position_contract,
+                    )
+
+                    flow_use = None
+                    flow = overlay.get("flow")
+                    if flow is not None:
+                        flow_use = {"distribution_score": flow.get("distribution_score")}
+                    agreement = self._agreement_from_state(final_state)
+                    calibrated_p = self._calibrated_p()
+                    contract = build_position_contract(
+                        cfg=self.config, closes=closes,
+                        flow_summary=flow_use, agreement=agreement,
+                        calibrated_p=calibrated_p,
+                    )
+                    if contract is not None:
+                        final_state["position_contract"] = (
+                            f"size {contract.size_pct:.1%}, stop "
+                            f"{contract.stop_loss}, reason: {contract.reason()}"
+                        )
+                        overlay["position_contract"] = (
+                            f"{contract.size_pct:.1%} @ stop {contract.stop_loss} "
+                            f"({contract.reason()})"
+                        )
+                except Exception as contract_exc:
+                    logger.warning("position contract skipped: %s", contract_exc)
         except Exception as exc:
             logger.warning("strategy overlays skipped: %s", exc)
             return final_state
@@ -685,6 +713,43 @@ class TradingAgentsGraph:
             )
         except Exception as exc:
             logger.warning("reflection record skipped: %s", exc)
+
+    def _agreement_from_state(self, final_state) -> "float | None":
+        if not self.config.get("enable_agreement"):
+            return None
+        try:
+            from tradingagents.agents.utils.rating import parse_rating
+            from tradingagents.strategies.consensus import agreement_score
+
+            state = final_state.get("risk_debate_state") or {}
+            stances = []
+            for key in ("aggressive_history", "conservative_history", "neutral_history"):
+                for chunk in (state.get(key) or [])[-3:]:
+                    if isinstance(chunk, str):
+                        stances.append(parse_rating(chunk))
+            return agreement_score(stances)
+        except Exception:
+            return None
+
+    def _calibrated_p(self) -> "float | None":
+        if not self.config.get("enable_calibration"):
+            return None
+        try:
+            base = Path(self.config.get("data_cache_dir", "~/.tradingagents")).expanduser()
+            cal_file = base / "calibration_ledger.jsonl"
+            if not cal_file.exists():
+                return None
+            from tradingagents.strategies.calibration import fit_buckets
+
+            rows = []
+            for ln in cal_file.read_text(encoding="utf-8").splitlines():
+                if ln.strip():
+                    import json
+                    rows.append(json.loads(ln))
+            _ = fit_buckets(rows)  # warm the table; used at decision-time later
+            return None  # identity until confidence is stamped into the ledger
+        except Exception:
+            return None
 
     def process_signal(self, full_signal):
         """Process a signal to extract the core decision."""
