@@ -47,6 +47,8 @@ def fake_losers(sort_dir="losers", count=50, market="US", min_market_cap=0.0):
 @pytest.fixture(autouse=True)
 def _patch():
     with mock.patch.object(vs, "route_to_vendor", side_effect=fake_route), \
+         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+                    side_effect=fake_losers), \
          mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
                     side_effect=fake_losers):
         yield

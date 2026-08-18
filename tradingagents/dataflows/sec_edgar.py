@@ -46,11 +46,27 @@ _FORM_LABELS = {
 _ticker_cik_cache: dict[str, str] | None = None
 
 
-def _json_get(url: str):
-    """GET a JSON document from SEC EDGAR with a descriptive User-Agent."""
-    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        return json.loads(resp.read())
+def _json_get(url: str, retries: int = 2):
+    """GET a JSON document from SEC EDGAR with a descriptive User-Agent.
+
+    SEC rate-limits IPs with HTTP 403 under parallel batch load; retry those
+    with a short backoff rather than failing the whole analysis.
+    """
+    import time
+
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(
+            url, headers={"User-Agent": _UA, "Accept": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403 and attempt < retries:
+                time.sleep(4 * (attempt + 1))
+                continue
+            raise
+    raise RuntimeError("unreachable")
 
 
 def _ticker_map() -> dict[str, str]:

@@ -252,6 +252,30 @@ def _autostart_opend() -> bool:
     return False
 
 
+def _max_open_ctxs() -> int:
+    """Connection cap (default 24, safely under OpenD's 128 limit)."""
+    try:
+        return int(get_config().get("moomoo_max_connections", 25) or 25)
+    except Exception:
+        return 25
+
+
+def _cap_open_ctxs():
+    """Close oldest live contexts until under the cap (LRU-ish, thread-safe).
+
+    Parallel batch workers each spawn their own thread-local OpenQuoteContext;
+    without a cap the gateway hits its 128-connection limit and new contexts
+    fail with 'The number of connections exceeds 128'.
+    """
+    limit = _max_open_ctxs()
+    with _ctx_lock:
+        while len(_live_ctxs) > limit:
+            victim = next(iter(_live_ctxs))
+            _live_ctxs.discard(victim)
+            with contextlib.suppress(Exception):
+                victim.close()
+
+
 def _ensure_ctx():
     """Return a thread-local ``OpenQuoteContext``, or raise ``MoomooNotConfiguredError``."""
     ctx = getattr(_tls, "moomoo_ctx", None)
@@ -281,6 +305,7 @@ def _ensure_ctx():
     _tls.moomoo_ctx = ctx
     with _ctx_lock:
         _live_ctxs.add(ctx)
+    _cap_open_ctxs()
     return ctx
 
 

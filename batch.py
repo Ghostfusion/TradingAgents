@@ -18,6 +18,25 @@ import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+#: Hard parallel-work cap. Moomoo's OpenD gateway allows at most 128 open
+#: connections; each concurrent batch worker opens its own thread-local
+#: OpenQuoteContext, so many workers pile up connections and the gateway
+#: rejects new contexts ("The number of connections exceeds 128").
+MAX_PARALLEL_WORKERS = 4
+
+
+def effective_workers(requested: int) -> int:
+    """Cap the requested worker count (env override: TRADINGAGENTS_MAX_WORKERS)."""
+    import os
+
+    try:
+        override = int(os.environ.get("TRADINGAGENTS_MAX_WORKERS", ""))
+        if override > 0:
+            return min(max(1, override), 32)
+    except ValueError:
+        pass
+    return min(max(1, int(requested)), MAX_PARALLEL_WORKERS)
 from datetime import date, datetime
 from pathlib import Path
 
@@ -213,9 +232,12 @@ def main() -> int:
     analysts = tuple(args.analysts)
     depth = DEPTH_LEVELS[args.depth]
     vendor = args.vendor
+    workers = effective_workers(args.workers)
     print(
         f"Running {len(symbols)} symbol(s) on {args.date} "
-        f"with {args.workers} worker(s) | depth={args.depth} | "
+        f"with {workers} worker(s) (requested {args.workers}; capped at "
+        f"{MAX_PARALLEL_WORKERS} to stay under moomoo connection limits) | "
+        f"depth={args.depth} | "
         f"vendor={vendor} | "
         f"analysts={','.join(analysts)}..."
     )
@@ -224,7 +246,7 @@ def main() -> int:
     summary_path = (
         Path.cwd() / "reports" / f"batch_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
     )
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(analyze, s, args.date, analysts, depth, vendor): s for s in symbols}
         for fut in as_completed(futures):
             symbol = futures[fut]
