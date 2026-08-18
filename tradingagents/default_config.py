@@ -29,6 +29,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MOOMOO_ACCOUNT": "moomoo_account",
     "TRADINGAGENTS_MOOMOO_AUTOSTART": "moomoo_autostart",
     "TRADINGAGENTS_MOOMOO_OPEND_PATH": "moomoo_opend_path",
+    # Strategy overlays + reflection (Phase wiring) - settable via .env.
+    "TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS": "enable_strategy_overlays",
+    "TRADINGAGENTS_ENABLE_REFLECTION": "enable_reflection",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.

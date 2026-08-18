@@ -405,7 +405,8 @@ only after validating in the evaluation harness:
 - **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
   attaches regime/sizing/momentum overlays to the final state and records
   realized outcomes to `strategy_ledger.jsonl` (**enabled by default**;
-  disable via `enable_strategy_overlays: false` / `enable_reflection: false`).
+  disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
+  both are also settable through `.env` (see below).
 
 Regression status: full suite passes (694 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
