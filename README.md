@@ -377,6 +377,31 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 > - **NaN-safe options chains** — yfinance option chains frequently carry missing/`NaN` open-interest, volume, and implied-volatility values; the options vendor skips non-finite values when summing (missing counts contribute 0) instead of crashing the call.
 > - **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
 
+## Research enhancement strategies
+
+Researched trading methods implemented as pure, offline-testable modules under
+`tradingagents/strategies/` (plan: [`Strategies/enhancement_plan.md`](Strategies/enhancement_plan.md)).
+All are **config-gated and off by default** (`default_config.py`); enable per phase
+only after validating in the evaluation harness:
+
+- **P0 eval** `evaluate.py` - cost-adjusted metrics, deflated Sharpe (multi-trial
+  penalty), walk-forward splits, backtest-overfit flag, drawdown/CAGR.
+- **P1 regime** `regime.py` - realized-vol percentile, 200-SMA trend, choppiness,
+  optional 2-3 state HMM label (hmmlearn); `enable_regime`.
+- **P2 sizing** `size.py` - quarter-Kelly, smoothed volatility targeting, ATR
+  stops, CVaR budget; `position_sizing` (`kelly|vol_target|flat`), `target_vol`.
+- **P3 factors** `factors.py` - 12-1m momentum, 52-week-high distance, vol-adjusted
+  momentum and a cross-sectional composite rank folding the value screens.
+- **P4 events** `events.py` - earnings surprise, post-earnings-drift side, and
+  catalyst-risk multipliers; `enable_events`.
+- **P5 reflection** `reflection.py` - JSON-lines post-trade ledger, decayed
+  analyst hit-rates, critique hints, ticker recall; `enable_reflection`.
+- **P6 alt data/consensus** `sentiment.py` - sentiment velocity, mention spikes,
+  N-seed consensus (majority/blend); `enable_sentiment`, `consensus_seeds`.
+
+Regression status: full suite passes (686 passed / 2 skipped / 56 subtests);
+smoke imports of graph/dataflow/agent/strategy modules green.
+
 ## Contributing
 
 Contributions are welcome: bug fixes, documentation, and feature ideas; past contributions are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
