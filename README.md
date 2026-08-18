@@ -403,8 +403,9 @@ only after validating in the evaluation harness:
   N-seed consensus (majority/blend); `enable_sentiment`, `consensus_seeds`.
 
 - **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
-  attaches regime/sizing/momentum overlays to final state and records realized
-  outcomes to `strategy_ledger.jsonl` - both no-ops unless enabled.
+  attaches regime/sizing/momentum overlays to the final state and records
+  realized outcomes to `strategy_ledger.jsonl` (**enabled by default**;
+  disable via `enable_strategy_overlays: false` / `enable_reflection: false`).
 
 Regression status: full suite passes (694 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
