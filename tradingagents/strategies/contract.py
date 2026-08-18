@@ -18,6 +18,9 @@ class PositionContract:
     stop_loss: "float | None"
     stop_pct: float
     reason_parts: "list[str]" = field(default_factory=list)
+    breakeven_stop: "float | None" = None
+    target: "float | None" = None
+    exit_note: "str | None" = None
 
     def reason(self) -> str:
         return "; ".join(self.reason_parts) if self.reason_parts else "no budget bound"
@@ -109,11 +112,26 @@ def build_position_contract(decision=None, cfg=None, closes=None, high=None,
         reasons.append(f"agreement={agree:.2f}")
 
     sized = min(size_base * vol_s * flow_s * agree, max_pct)
+    be_stop = None
+    target = None
+    if cfg.get("enable_exits") and a > 0:
+        from tradingagents.strategies.exits import (
+            stop_to_breakeven, target_level,
+        )
+
+        be_stop = stop_to_breakeven(last, a, cushion_atr=float(cfg.get("breakeven_atr", 1.0)))
+        target = target_level(last, a, atr_mult=float(cfg.get("target_atr", 4.0)))
+    note = None
+    if be_stop is not None:
+        note = f"exits: BE @ {be_stop:.2f}, target @ {target:.2f}"
     return PositionContract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
         stop_loss=round(last * (1.0 - stop_pct), 4),
         stop_pct=round(stop_pct, 4),
         reason_parts=reasons,
+        breakeven_stop=round(be_stop, 4) if be_stop is not None else None,
+        target=round(target, 4) if target is not None else None,
+        exit_note=note,
     )
 
 

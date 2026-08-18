@@ -447,6 +447,61 @@ def save_watchlist(markdown, out_dir, ts=None):
     return file
 
 
+def _fetch_closes(ticker: str, days: int = 320) -> list:
+    """Daily closes via the vendor chain (csv); empty on failure."""
+    try:
+        from datetime import datetime, timedelta
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        out = route_to_vendor("get_stock_data", ticker, start, end) or ""
+        closes = []
+        for line in out.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.lower().startswith("date,"):
+                continue
+            parts = line.split(",")
+            if len(parts) >= 5:
+                try:
+                    closes.append(float(parts[4]))
+                except ValueError:
+                    pass
+        return closes
+    except Exception:
+        return []
+
+
+def composite_scores(results: list, closes_map: dict) -> dict:
+    """EY + momentum + 52w-distance factors -> composite score per ticker."""
+    from tradingagents.strategies.factors import (
+        composite_score, high_distance, momentum,
+    )
+
+    factors = {}
+    for r in results:
+        f = {}
+        if r.get("earnings_yield") is not None:
+            f["ey"] = r["earnings_yield"]
+        closes = closes_map.get(r["ticker"]) or []
+        if len(closes) >= 70:
+            m = momentum(closes, lookback=60, skip=0)
+            d = high_distance(closes, window=min(252, len(closes)))
+            if m is not None:
+                f["mom"] = m
+            if d is not None:
+                f["dist"] = d
+        factors[r["ticker"]] = f
+    return composite_score(factors)
+
+
+def allocation_block(scores: dict) -> str:
+    """Capped value-proportional allocation text (V3)."""
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.strategies.portfolio import allocation_block as _ab
+
+    return _ab(scores, cfg=get_config())
+
+
 def main(argv: "list[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tickers", nargs="*", help="ticker symbols")
@@ -476,6 +531,10 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="max P/E (TTM) (default 40; 0 disables)")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved watchlist markdown (finish timestamp)")
+    parser.add_argument("--rank", choices=("value", "composite"), default=None,
+                        help="ranking mode; default reads config enable_composite_rank")
+    parser.add_argument("--alloc", action="store_true",
+                        help="append a capped allocation plan block")
     args = parser.parse_args(argv)
 
     # The proprietary Heat List (search/news/trade telemetry) is app-only and
@@ -582,8 +641,18 @@ def main(argv: "list[str] | None" = None) -> int:
             logger.warning("could not screen %s: %s", ticker, exc)
 
     ranked = rank_watchlist(results)
-    markdown = _watchlist_markdown(ranked)
+    alloc_extra = ""
+    if args.alloc and results:
+        alloc_extra = allocation_block(
+            {r["ticker"]: r.get("earnings_yield") or 0.001 for r in results})
+        markdown = _watchlist_markdown(ranked) + "\n\n" + alloc_extra
+    else:
+        markdown = _watchlist_markdown(ranked)
     print_watchlist(ranked)
+    if alloc_extra:
+        print(alloc_extra)
+    if alloc_extra:
+        print(alloc_extra)
     saved = save_watchlist(markdown, args.out_dir)
     print(f"[screener] saved watchlist to {saved}")
     return 0

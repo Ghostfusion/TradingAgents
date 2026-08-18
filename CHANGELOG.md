@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **V2-V5 value-style wiring** - composite (value+momentum) ranking in the
+  screener (`enable_composite_rank`, `--rank composite`), allocation plan
+  block (`--alloc`), contract exit levels (ATR breakeven/target via
+  `enable_exits`), and computed-debate-context injection
+  (`enable_computed_context`). .env defaults enabled.
 - **Value-style enhancements (V1-V5)** - normalized earnings (5y median
   margin), historical valuation percentiles, Sloan accruals, trap verdict
   (Trap column in the screener), hard portfolio caps, ATR exits + rebalance

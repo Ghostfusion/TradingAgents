@@ -36,6 +36,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_POSITION_CONTRACT": "enable_position_contract",
     "TRADINGAGENTS_ENABLE_CALIBRATION": "enable_calibration",
     "TRADINGAGENTS_ENABLE_AGREEMENT": "enable_agreement",
+    "TRADINGAGENTS_ENABLE_COMPOSITE_RANK": "enable_composite_rank",
+    "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
+    "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -224,6 +227,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_threshold_gate": False,       # G5: require PBO-clean tuning
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
+        "enable_composite_rank": False,   # V2: composite (value+momentum) ranking
         "enable_exits": False,             # V4: ATR exits / rebalance hints
         "breakeven_atr": 1.0,              # V4: stop-to-breakeven cushion (ATRs)
         "target_atr": 4.0,                 # V4: profit target multiple

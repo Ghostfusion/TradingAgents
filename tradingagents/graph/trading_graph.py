@@ -672,6 +672,25 @@ class TradingAgentsGraph:
                         )
                 except Exception as contract_exc:
                     logger.warning("position contract skipped: %s", contract_exc)
+            if self.config.get("enable_computed_context"):
+                try:
+                    from tradingagents.strategies.debate_context import (
+                        build_computed_context,
+                    )
+
+                    overlay = overlay or {}
+                    extra = [
+                        f"regime={overlay.get('regime', '?')}",
+                        f"flow={overlay.get('flow', {}).get('flag', 'n/a')}",
+                    ]
+                    if overlay.get("position_contract"):
+                        extra.append("contract=" + overlay["position_contract"])
+                    snippet = build_computed_context(self.config, extra=extra)
+                    if snippet:
+                        final_state["computed_context"] = snippet
+                        overlay["context"] = (overlay.get("context", "") + " | " + snippet)
+                except Exception as ctx_exc:
+                    logger.warning("computed context skipped: %s", ctx_exc)
         except Exception as exc:
             logger.warning("strategy overlays skipped: %s", exc)
             return final_state

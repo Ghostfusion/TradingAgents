@@ -399,7 +399,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (738 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (742 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -428,6 +428,9 @@ only after validating in the evaluation harness:
   `strategies/portfolio.py` (hard per-name/sector caps, residual cash),
   `strategies/exits.py` (stop-to-breakeven, ATR targets, rebalance cadence),
   `strategies/debate_context.py` (computed context snippets for the LLM debate).
+  V2 wires value+momentum composite ranking into the screener
+  (`--rank composite` / `enable_composite_rank`), alloc block via
+  `--alloc`, contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.
 - **P7 order flow (L1-L4)** - `tradingagents/strategies/orderflow.py` turns moomoo
   capital-flow buckets (XL/L/M/S, in/out) into deterministic signals:
