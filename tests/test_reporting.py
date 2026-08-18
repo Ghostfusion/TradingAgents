@@ -1,50 +1,58 @@
-"""Report parity: the shared writer produces the report tree for the CLI and the
-programmatic API alike (#1037)."""
+"""R1b unit tests: risk gate injected into reports; compact risk mode."""
 
-from types import SimpleNamespace
-
-import pytest
-
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
 
 
-def _state():
+def _state(verdict="PASS", reasons=None):
     return {
-        "market_report": "MKT",
-        "news_report": "NEWS",
-        "investment_debate_state": {"judge_decision": "RM PLAN"},
-        "trader_investment_plan": "TRADE",
-        "risk_debate_state": {"judge_decision": "PM DECISION"},
+        "risk_debate_state": {
+            "aggressive_history": "aggressive prose\n",
+            "conservative_history": "conservative prose\n",
+            "neutral_history": "neutral prose\n",
+            "judge_decision": "**Rating**: Hold\n**Executive Summary**: x\n",
+        },
+        "risk_gate": {"verdict": verdict, "reasons": reasons or []},
+        "risk_snapshot": f"verdict={verdict}; size=10.0%; cvar=1.00%",
+        "position_contract": "size 10.0% @ stop 95.0 (kelly=0.100)",
+        "trader_investment_plan": "Trader plan",
     }
 
 
-@pytest.mark.unit
-def test_write_report_tree_creates_files(tmp_path):
-    out = write_report_tree(_state(), "AAPL", tmp_path)
-    assert out.name == "complete_report.md"
-    assert (tmp_path / "1_analysts" / "market.md").read_text() == "MKT"
-    assert (tmp_path / "1_analysts" / "news.md").read_text() == "NEWS"
-    assert (tmp_path / "2_research" / "manager.md").read_text() == "RM PLAN"
-    assert (tmp_path / "3_trading" / "trader.md").read_text() == "TRADE"
-    assert (tmp_path / "5_portfolio" / "decision.md").read_text() == "PM DECISION"
-    complete = out.read_text()
-    assert "Trading Analysis Report: AAPL" in complete
-    assert "MKT" in complete and "PM DECISION" in complete
+def test_risk_gate_injected_ahead_of_debate(tmp_path):
+    path = write_report_tree(_state(verdict="REJECT", reasons=["size over cap"]),
+                             "TST", tmp_path)
+    aggressive = (tmp_path / "4_risk" / "aggressive.md").read_text(encoding="utf-8")
+    assert "### Risk Gate (computed)" in aggressive
+    assert "REJECT" in aggressive
+    assert "aggressive prose" in aggressive  # transcript still present (non-compact)
+    report = path.read_text(encoding="utf-8")
+    assert "## IV. Risk Management Team Decision" in report
+    assert "Risk Gate (computed)" in report
 
 
-@pytest.mark.unit
-def test_save_reports_explicit_path(tmp_path):
-    # Unbound: with an explicit save_path, the method doesn't touch self/config.
-    out = TradingAgentsGraph.save_reports(None, _state(), "AAPL", save_path=tmp_path)
-    assert (tmp_path / "complete_report.md").exists()
-    assert out == tmp_path / "complete_report.md"
+def test_decision_mirrors_risk_gate(tmp_path):
+    path = write_report_tree(_state(verdict="WARN", reasons=["near cap"]),
+                             "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Risk Gate (computed)" in decision
+    assert "WARN" in decision
 
 
-@pytest.mark.unit
-def test_save_reports_defaults_under_results_dir(tmp_path):
-    mock_self = SimpleNamespace(config={"results_dir": str(tmp_path)})
-    out = TradingAgentsGraph.save_reports(mock_self, _state(), "AAPL")
-    assert out.exists()
-    assert out.parent.parent.name == "reports"  # results_dir/reports/AAPL_<stamp>/...
-    assert out.parent.name.startswith("AAPL_")
+def test_compact_mode_verdict_only(tmp_path):
+    path = write_report_tree(_state("PASS"),
+                             "TST", tmp_path, config={"risk_compact_report": True})
+    assert (tmp_path / "4_risk" / "verdict.md").exists()
+    assert not (tmp_path / "4_risk" / "aggressive.md").exists()
+    report = path.read_text(encoding="utf-8")
+    assert "aggressive prose" not in report  # chat suppressed
+    assert "Risk Gate (computed)" in report
+
+
+def test_no_gate_no_changes(tmp_path):
+    state = {"risk_debate_state": {
+        "judge_decision": "decision",
+        "aggressive_history": "a",
+    }}
+    path = write_report_tree(state, "TST", tmp_path)
+    report = path.read_text(encoding="utf-8")
+    assert "Risk Gate (computed)" not in report

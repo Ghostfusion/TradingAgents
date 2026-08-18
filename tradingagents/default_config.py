@@ -43,6 +43,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
+    "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -248,6 +249,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "risk_audit_enabled": True,          # R4: risk_audit.jsonl
         # Moomoo connection guard (parallel batch): cap open gateway contexts
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit
+        "risk_compact_report": False,  # R1b: verdict-only 4_risk/ instead of chat transcripts
 
 
 

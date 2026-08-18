@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Risk report R1b** - the computed risk gate (verdict/snapshot/reasons)
+  is injected into every report: prepended to `4_risk/*` and the Risk
+  section, mirrored into `5_portfolio/decision.md`; `--risk-compact`
+  (`risk_compact_report`, config/.env) replaces 3-analyst transcripts
+  with a single `4_risk/verdict.md`.
 - **Risk governor R0-R4** - deterministic pre-trade gate
   (`strategies/risk_governor.py`): PASS/WARN/REJECT vs a limits registry;
   book & tail risk (`book_risk.py`): VaR/CVaR, stress shocks, drawdown
