@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **`--scan` strategies (scan.md)** - trend-pullback (20/50 EMA, RSI 40-55,
+  quarter >= +10%, pullback to EMA20) and breakout (>=90% of 52w high,
+  above SMA20/50, RVOL >1.5 or <0.75 + Bollinger squeeze) as screener
+  modes; `--scan value|trend-pullback|breakout|all` (default all: flags
+  ScanA/ScanB columns), combined with the existing value gates.
 - **Screener filters updated** - defaults now: market cap >= $10B,
   price >= $15, 30-day avg daily volume >= 1M shares, ATR(14) >= 2%
   of price (new `--min-avg-vol` / `--min-atr-pct` gates computed from

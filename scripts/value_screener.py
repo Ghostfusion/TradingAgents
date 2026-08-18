@@ -391,6 +391,10 @@ def _watchlist_markdown(results: list) -> str:
     if show_name:
         heads.append("Name")
     heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
+    show_scan = any(r.get("scan_a") or r.get("scan_b") for r in results)
+    if show_scan:
+        heads.append("ScanA")
+        heads.append("ScanB")
     show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
     if show_trap:
         heads.append("Trap")
@@ -422,6 +426,9 @@ def _watchlist_markdown(results: list) -> str:
             cell(r["altman_z"]),
             "yes" if r["net_net"] else "no",
         ]
+        if show_scan:
+            cells.append("yes" if r.get("scan_a") else "no")
+            cells.append("yes" if r.get("scan_b") else "no")
         if show_trap:
             cells.append(cell(r.get("trap")))
         if show_chg:
@@ -478,6 +485,93 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
 def _fetch_closes(ticker: str, days: int = 320) -> list:
     """Daily closes via the vendor chain (csv); empty on failure."""
     return _fetch_ohlcv(ticker, days=days)["closes"]
+
+
+def _sma(series, n: int) -> "float | None":
+    if len(series) < n or n <= 0:
+        return None
+    return sum(series[-n:]) / n
+
+
+def _ema(series, n: int) -> "float | None":
+    if len(series) < n or n <= 0:
+        return None
+    k = 2.0 / (n + 1)
+    ema = sum(series[:n]) / n
+    for v in series[n:]:
+        ema = v * k + ema * (1 - k)
+    return ema
+
+
+def _rsi(closes, n: int = 14) -> "float | None":
+    if len(closes) < n + 1:
+        return None
+    gains = losses = 0.0
+    for i in range(1, n + 1):
+        diff = closes[-i] - closes[-i - 1]
+        if diff >= 0:
+            gains += diff
+        else:
+            losses -= diff
+    if gains + losses == 0:
+        return 50.0
+    rs = gains / losses if losses > 0 else float("inf")
+    return round(100.0 - 100.0 / (1.0 + rs), 2)
+
+
+def _boll_squeeze(closes, n: int = 20) -> bool:
+    """True when Bollinger width (20,2) is at its lowest in the last n bars."""
+    if len(closes) < n * 2:
+        return False
+    widths = []
+    for i in range(len(closes) - n, len(closes) + 1):
+        window = closes[i - n:i]
+        if len(window) < n:
+            continue
+        mid = sum(window) / n
+        var = sum((v - mid) ** 2 for v in window) / n
+        sd = var ** 0.5
+        if mid > 0:
+            widths.append(4 * sd / mid)
+    return bool(widths) and widths[-1] == min(widths)
+
+
+def scan_signals(ohlcv: dict) -> "dict | None":
+    """Strategy A (trend pullback) / B (breakout) flags + metrics from OHLCV."""
+    closes = ohlcv.get("closes") or []
+    highs = ohlcv.get("highs") or []
+    lows = ohlcv.get("lows") or []
+    volumes = ohlcv.get("volumes") or []
+    if len(closes) < 200 or not highs or not lows or not volumes:
+        return None
+    close = closes[-1]
+    sma50 = _sma(closes, 50)
+    sma200 = _sma(closes, 200)
+    sma20 = _sma(closes, 20)
+    ema20 = _ema(closes, 20)
+    rsi = _rsi(closes, 14)
+    hi52 = max(closes[-252:]) if len(closes) >= 252 else max(closes)
+    hi52_dist = close / hi52 - 1.0 if hi52 else None
+    qret = closes[-1] / closes[-64] - 1.0 if len(closes) >= 64 and closes[-64] else None
+    avg20 = _sma(volumes, 20)
+    rvol = volumes[-1] / avg20 if avg20 else None
+    squeeze = _boll_squeeze(closes)
+
+    strategy_a = bool(
+        close > sma50 and sma50 > sma200 and lows[-1] <= ema20
+        and close >= ema20 and rsi is not None and 40.0 <= rsi <= 55.0
+        and qret is not None and qret >= 0.10
+    )
+    strategy_b = bool(
+        hi52_dist is not None and hi52_dist >= -0.10 and close > sma20
+        and close > sma50
+        and ((rvol is not None and rvol > 1.5) or (rvol is not None and rvol < 0.75 and squeeze))
+    )
+    return {
+        "a": strategy_a, "b": strategy_b,
+        "rsi": rsi, "qret": qret, "rvol": rvol,
+        "squeeze": squeeze, "hi52_dist": hi52_dist,
+    }
 
 
 def composite_scores(results: list, closes_map: dict) -> dict:
@@ -539,6 +633,11 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="min 30-day average daily volume in shares (default 1M; 0 disables)")
     parser.add_argument("--min-atr-pct", type=float, default=2.0,
                         help="min ATR(14) as %% of price (default 2; 0 disables)")
+    parser.add_argument("--scan", choices=("value", "trend-pullback", "breakout", "all"),
+                        default="all",
+                        help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
+                             "dip in uptrend), 'breakout' (volatility contraction/breakout), "
+                             "or 'all' (default: keep all, flag strategies)")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved watchlist markdown (finish timestamp)")
     parser.add_argument("--rank", choices=("value", "composite"), default=None,
@@ -554,6 +653,7 @@ def main(argv: "list[str] | None" = None) -> int:
         args.market = "US"
 
     mover_meta: dict = {}
+    scan_meta: dict = {}
     tickers = list(args.tickers)
     if args.universe in ("top-losers", "heat-proxy"):
         try:
@@ -584,8 +684,9 @@ def main(argv: "list[str] | None" = None) -> int:
                     min_market_cap=args.min_mcap,
                 )
             # Equity-only, price, P/E (TTM), market-cap, 30d volume, ATR gates.
-            need_ohlcv = bool(args.min_avg_vol or args.min_atr_pct)
+            need_ohlcv = bool(args.min_avg_vol or args.min_atr_pct or args.scan != "value")
             ohlcv_cache: dict = {}
+            scan_meta: dict = {}
             gated = []
             for m in movers[: args.movers_count * 4]:
                 if _is_non_equity(m.get("name")):
@@ -605,6 +706,14 @@ def main(argv: "list[str] | None" = None) -> int:
                     if ohlcv is None:
                         ohlcv = _fetch_ohlcv(symbol)
                         ohlcv_cache[symbol] = ohlcv
+                    if args.scan != "value":
+                        sig = scan_signals(ohlcv)
+                        if sig is not None:
+                            scan_meta[symbol] = sig
+                            if args.scan == "trend-pullback" and not sig["a"]:
+                                continue
+                            if args.scan == "breakout" and not sig["b"]:
+                                continue
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
                         avg_vol = sum(vols) / len(vols) if vols else 0.0
@@ -665,6 +774,12 @@ def main(argv: "list[str] | None" = None) -> int:
                 logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
                 continue
             row = screen_ticker(ticker, fin)
+            sig = scan_meta.get(ticker.upper())
+            row["scan_a"] = bool(sig and sig["a"])
+            row["scan_b"] = bool(sig and sig["b"])
+            row["scan_rsi"] = sig.get("rsi") if sig else None
+            row["scan_rvol"] = sig.get("rvol") if sig else None
+            row["scan_qret"] = sig.get("qret") if sig else None
             row["name"] = meta.get("name")
             row["day_change"] = meta.get("day_change")
             results.append(row)
