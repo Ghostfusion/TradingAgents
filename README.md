@@ -342,7 +342,10 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > `heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
 > official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
-> then gates to **price ≥ $20, 0 < P/E (TTM) ≤ 40** (`--price-min 20`, `--pe-max 40`)
+> then gates to **price ≥ $15, 0 < P/E (TTM) ≤ 40, market cap ≥ $10B**
+> (`--price-min 15`, `--pe-max 40`, `--min-mcap 10000000000`) plus
+> **30-day avg volume ≥ 1M shares** (`--min-avg-vol`) and
+> **ATR(14) ≥ 2% of price** (`--min-atr-pct`)
 > and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
 > cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
 > the value screens run. It uses moomoo's official trade rank as the stand-in
@@ -399,7 +402,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (769 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (770 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -451,7 +454,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (769 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (770 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing

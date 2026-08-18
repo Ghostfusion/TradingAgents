@@ -10,6 +10,10 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Screener filters updated** - defaults now: market cap >= $10B,
+  price >= $15, 30-day avg daily volume >= 1M shares, ATR(14) >= 2%
+  of price (new `--min-avg-vol` / `--min-atr-pct` gates computed from
+  vendor daily OHLCV; `--min-mcap`/`--price-min` retuned).
 - **Deterministic sentiment velocity** - StockTwits counts -> signed
   computed_score (-1..1) + surprise z-score vs a rolling per-ticker
   baseline, injected into the SentimentReport as `computed_score` /

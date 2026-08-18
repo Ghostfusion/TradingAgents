@@ -13,7 +13,7 @@ def _closes_csv(step):
     price = 100.0
     for i in range(140):
         price += step
-        rows.append(f"2026-01-{i%28+1:02d},{price:.2f},{price+1:.2f},{price-1:.2f},{price:.2f},1000")
+        rows.append(f"2026-01-{i%28+1:02d},{price:.2f},{price+3:.2f},{price-3:.2f},{price:.2f},5000000")
     return "\n".join(rows) + "\n"
 
 
@@ -28,7 +28,7 @@ INC = ("Date,2025-12-31\nTotal Revenue,1.0B\nOperating Income,150M\n"
 def fake_route(method, *a, **k):
     t = a[0]
     if method == "get_stock_data":
-        return _closes_csv(up=0.5) if t == "AAPL" else _closes_csv(up=0.0)
+        return _closes_csv(0.5) if t == "AAPL" else _closes_csv(0.0)
     if t != "AAPL":
         return "NO_DATA_AVAILABLE: no usable market data"
     return {"get_fundamentals": FUND, "get_balance_sheet": BS,
@@ -77,6 +77,18 @@ def test_allocation_block_sums_to_one_when_uncapped():
                             cfg={"max_name_weight": 0.5})
     assert "Allocation plan" in text
     assert "allocated: 100.0%" in text
+
+
+def test_volume_and_atr_gates_defaults_pass():
+    """Default gates (vol>=1M, ATR%>2) accept the fixture OHLCV."""
+    with mock.patch.object(vs, "route_to_vendor", side_effect=fake_route):
+        o = vs._fetch_ohlcv("MSFT")
+    assert len(o["closes"]) >= 100
+    avg_vol = sum(o["volumes"][-30:]) / 30
+    assert avg_vol >= 1_000_000
+    from tradingagents.strategies.size import atr
+    a = atr(o["highs"], o["lows"], o["closes"], window=14)
+    assert (a / o["closes"][-1] * 100.0) > 2.0
 
 
 def test_contract_exits_fields_when_enabled():

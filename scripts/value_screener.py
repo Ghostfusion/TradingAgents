@@ -447,28 +447,37 @@ def save_watchlist(markdown, out_dir, ts=None):
     return file
 
 
-def _fetch_closes(ticker: str, days: int = 320) -> list:
-    """Daily closes via the vendor chain (csv); empty on failure."""
+def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
+    """Daily OHLCV via the vendor chain (csv): closes/highs/lows/volumes."""
     try:
         from datetime import datetime, timedelta
 
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         out = route_to_vendor("get_stock_data", ticker, start, end) or ""
-        closes = []
+        closes, highs, lows, volumes = [], [], [], []
         for line in out.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or line.lower().startswith("date,"):
                 continue
             parts = line.split(",")
-            if len(parts) >= 5:
-                try:
-                    closes.append(float(parts[4]))
-                except ValueError:
-                    pass
-        return closes
+            if len(parts) < 6:
+                continue
+            try:
+                closes.append(float(parts[4]))
+                highs.append(float(parts[2]))
+                lows.append(float(parts[3]))
+                volumes.append(float(parts[5]))
+            except ValueError:
+                pass
+        return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes}
     except Exception:
-        return []
+        return {"closes": [], "highs": [], "lows": [], "volumes": []}
+
+
+def _fetch_closes(ticker: str, days: int = 320) -> list:
+    """Daily closes via the vendor chain (csv); empty on failure."""
+    return _fetch_ohlcv(ticker, days=days)["closes"]
 
 
 def composite_scores(results: list, closes_map: dict) -> dict:
@@ -520,15 +529,16 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="market key for --universe top-losers/heat-proxy (US/HK)")
     parser.add_argument("-n", "--movers-count", type=int, default=50,
                         help="how many decliners to pull (max 200)")
-    parser.add_argument("--min-mcap", type=float, default=100e9,
-                        help="market-cap / float-market-cap floor in USD (default $100B; "
-                             "0 disables). Float cap never exceeds total cap, so a "
-                             "total-cap floor >= $100B covers the 'market cap OR "
-                             "floating market cap >= $100B' rule exactly.")
-    parser.add_argument("--price-min", type=float, default=20.0,
-                        help="min last price in USD (default 20; 0 disables)")
+    parser.add_argument("--min-mcap", type=float, default=10e9,
+                        help="market-cap floor in USD (default $10B; 0 disables)")
+    parser.add_argument("--price-min", type=float, default=15.0,
+                        help="min last price in USD (default 15; 0 disables)")
     parser.add_argument("--pe-max", type=float, default=40.0,
                         help="max P/E (TTM) (default 40; 0 disables)")
+    parser.add_argument("--min-avg-vol", type=float, default=1_000_000,
+                        help="min 30-day average daily volume in shares (default 1M; 0 disables)")
+    parser.add_argument("--min-atr-pct", type=float, default=2.0,
+                        help="min ATR(14) as %% of price (default 2; 0 disables)")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved watchlist markdown (finish timestamp)")
     parser.add_argument("--rank", choices=("value", "composite"), default=None,
@@ -573,8 +583,9 @@ def main(argv: "list[str] | None" = None) -> int:
                     market=args.market,
                     min_market_cap=args.min_mcap,
                 )
-            # Equity-only, price >= $20, P/E (TTM) in (0, 40], market cap
-            # >= $100B (float cap <= total cap, so the total-cap floor covers it).
+            # Equity-only, price, P/E (TTM), market-cap, 30d volume, ATR gates.
+            need_ohlcv = bool(args.min_avg_vol or args.min_atr_pct)
+            ohlcv_cache: dict = {}
             gated = []
             for m in movers[: args.movers_count * 4]:
                 if _is_non_equity(m.get("name")):
@@ -588,6 +599,27 @@ def main(argv: "list[str] | None" = None) -> int:
                     continue
                 if args.min_mcap and (cap is None or cap < args.min_mcap):
                     continue
+                if need_ohlcv:
+                    symbol = (m.get("symbol") or "").upper()
+                    ohlcv = ohlcv_cache.get(symbol)
+                    if ohlcv is None:
+                        ohlcv = _fetch_ohlcv(symbol)
+                        ohlcv_cache[symbol] = ohlcv
+                    if args.min_avg_vol:
+                        vols = ohlcv["volumes"][-30:]
+                        avg_vol = sum(vols) / len(vols) if vols else 0.0
+                        if avg_vol < args.min_avg_vol:
+                            continue
+                    if args.min_atr_pct:
+                        closes = ohlcv["closes"]
+                        if len(closes) < 15 or not ohlcv["highs"] or not ohlcv["lows"]:
+                            continue
+                        from tradingagents.strategies.size import atr as _atr
+
+                        a = _atr(ohlcv["highs"], ohlcv["lows"], closes, window=14)
+                        last = closes[-1]
+                        if last <= 0 or (a / last * 100.0) < args.min_atr_pct:
+                            continue
                 gated.append(m)
             movers = gated[: args.movers_count]
             if not movers:

@@ -34,8 +34,19 @@ _HOT = _LOSERS + [
 ]
 
 
+def _closes_csv(ticker):
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    price = 200.0 if ticker == "AAPL" else 95.0
+    for i in range(140):
+        price += 0.1
+        rows.append(f"2026-01-{i%28+1:02d},{price:.2f},{price+3:.2f},{price-3:.2f},{price:.2f},5000000")
+    return "\n".join(rows) + "\n"
+
+
 def fake_route(method, *a, **k):
     t = a[0]
+    if method == "get_stock_data":
+        return _closes_csv(t)
     if t != "AAPL":
         return "NO_DATA_AVAILABLE: no usable market data"
     return {"get_fundamentals": FUND, "get_balance_sheet": BS,
