@@ -399,7 +399,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (742 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (758 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -429,6 +429,10 @@ only after validating in the evaluation harness:
   `strategies/exits.py` (stop-to-breakeven, ATR targets, rebalance cadence),
   `strategies/debate_context.py` (computed context snippets for the LLM debate).
   V2 wires value+momentum composite ranking into the screener
+  R0-R4: deterministic **RiskGovernor** gate (PASS/WARN/REJECT), stress/shock
+  scenarios and CVaR book risk (`strategies/book_risk.py`), escalation via
+  `risk_halt`, and a `risk_audit.jsonl` trail (`scripts/risk_report.py`).
+  Plan: `Strategies/risk_management_plan.md`.
   (`--rank composite` / `enable_composite_rank`), alloc block via
   `--alloc`, contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.

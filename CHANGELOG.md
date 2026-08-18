@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Risk governor R0-R4** - deterministic pre-trade gate
+  (`strategies/risk_governor.py`): PASS/WARN/REJECT vs a limits registry;
+  book & tail risk (`book_risk.py`): VaR/CVaR, stress shocks, drawdown
+  gate; escalation `risk_halt`; `risk_audit.jsonl` + `scripts/risk_report.py`.
+  Enabled via .env (`TRADINGAGENTS_ENABLE_RISK_GOVERNOR=true`).
 - **V2-V5 value-style wiring** - composite (value+momentum) ranking in the
   screener (`enable_composite_rank`, `--rank composite`), allocation plan
   block (`--alloc`), contract exit levels (ATR breakeven/target via

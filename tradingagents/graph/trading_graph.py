@@ -672,6 +672,60 @@ class TradingAgentsGraph:
                         )
                 except Exception as contract_exc:
                     logger.warning("position contract skipped: %s", contract_exc)
+            if self.config.get("enable_risk_governor"):
+                try:
+                    from tradingagents.strategies.risk_governor import (
+                        build_risk_snapshot,
+                        govern,
+                    )
+                    from tradingagents.strategies.book_risk import cvar as book_cvar
+
+                    size_pct = None
+                    stop_pct = None
+                    if final_state.get("position_contract"):
+                        size_pct = 0.0
+                    contract = overlay.get("position_contract")
+                    # best-effort size from the contract text we stored
+                    import re as _re
+
+                    for cand in (final_state.get("position_contract") or "").split(","):
+                        m = _re.search(r"size ([0-9.]+)%", cand)
+                        if m:
+                            size_pct = float(m.group(1)) / 100.0
+                    rets = None
+                    if closes:
+                        rets = __import__("tradingagents.strategies.contract",
+                                          fromlist=["_log_returns"])._log_returns(closes)
+                    cvar_pct = None
+                    if rets and len(rets) >= 5:
+                        cv = book_cvar(rets, alpha=0.05)
+                        cvar_pct = abs(cv) if cv is not None else None
+                    verdict = govern(
+                        size_pct, self.config,
+                        cvar_pct=cvar_pct,
+                        drawdown_pct=self.config.get("risk_max_drawdown_pct"),
+                    )
+                    final_state["risk_gate"] = verdict
+                    if verdict["verdict"] in ("WARN", "REJECT"):
+                        final_state["risk_snapshot"] = build_risk_snapshot(
+                            verdict, size_pct, stop_pct, cvar_pct)
+                    if verdict["verdict"] == "REJECT":
+                        final_state["risk_halt"] = True
+                    if self.config.get("risk_audit_enabled"):
+                        import json as _json
+
+                        base = Path(self.config.get("data_cache_dir",
+                                                    "~/.tradingagents")).expanduser()
+                        audit = base / "risk_audit.jsonl"
+                        audit.parent.mkdir(parents=True, exist_ok=True)
+                        with audit.open("a", encoding="utf-8") as fh:
+                            fh.write(_json.dumps({
+                                "ticker": ticker,
+                                "verdict": verdict["verdict"],
+                                "reasons": verdict.get("reasons", []),
+                            }) + "\n")
+                except Exception as risk_exc:
+                    logger.warning("risk governor skipped: %s", risk_exc)
             if self.config.get("enable_computed_context"):
                 try:
                     from tradingagents.strategies.debate_context import (

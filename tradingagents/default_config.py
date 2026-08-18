@@ -39,6 +39,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_COMPOSITE_RANK": "enable_composite_rank",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
+    "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
+    "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
+    "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -234,6 +237,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "sector_cap_limit": 0.35,          # V3: max single-sector weight
         "max_name_weight": 0.25,           # V3: max single-name weight
         "max_book_names": 10,              # V3: minimum names for diversification
+        # Risk governor (risk_management_plan.md): deterministic risk gate.
+        "enable_risk_governor": False,
+        "risk_max_position_pct": 0.45,     # R0: book cap
+        "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget
+        "risk_max_drawdown_pct": 0.10,       # R0/R2: realized drawdown stop
+        "risk_stress_shock_pct_1": -10.0,    # R2: scenario shock 1 (%)
+        "risk_stress_shock_pct_2": -30.0,    # R2: scenario shock 2 (%)
+        "risk_audit_enabled": True,          # R4: risk_audit.jsonl
+
 
 
         "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
