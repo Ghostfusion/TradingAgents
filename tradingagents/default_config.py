@@ -201,6 +201,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_events": False,       # Phase 4: PEAD / catalyst sizing
         "enable_reflection": False,   # Phase 5: post-trade analyst critique
         "enable_sentiment": False,    # Phase 6: sentiment velocity
+        "enable_strategy_overlays": False,  # graph overlay wiring (regime/sizing/context)
         "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours

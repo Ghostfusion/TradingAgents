@@ -400,6 +400,7 @@ class TradingAgentsGraph:
                 alpha_return=alpha,
                 benchmark_name=benchmark,
             )
+            self._maybe_record_reflection_outcome(ticker, entry['date'], alpha)
             updates.append(
                 {
                     "ticker": ticker,
@@ -549,6 +550,8 @@ class TradingAgentsGraph:
 
         # Store current state for reflection.
         self.curr_state = final_state
+        # Wiring: attach config-gated strategy overlays (regime/sizing/context).
+        final_state = self._apply_strategy_overlays(final_state, company_name)
 
         # Log state to disk.
         self._log_state(trade_date, final_state)
@@ -597,6 +600,7 @@ class TradingAgentsGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            "strategy_overlays": final_state.get("strategy_overlays"),
         }
 
         # Save to file. Reject ticker values that would escape the
@@ -608,6 +612,58 @@ class TradingAgentsGraph:
         log_path = directory / f"full_states_log_{trade_date}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
+
+    def _apply_strategy_overlays(self, final_state, ticker):
+        if not self.config.get("enable_strategy_overlays"):
+            return final_state
+        try:
+            closes = self._try_fetch_closes(ticker)
+            from tradingagents.strategies.overlays import (
+                apply_overlay_to_state,
+                build_strategy_overlays,
+            )
+            overlay = build_strategy_overlays(self.config, closes)
+        except Exception as exc:
+            logger.warning("strategy overlays skipped: %s", exc)
+            return final_state
+        return apply_overlay_to_state(final_state, overlay)
+
+    def _try_fetch_closes(self, ticker, days=320):
+        from tradingagents.dataflows.interface import route_to_vendor
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        out = route_to_vendor("get_stock_data", ticker, start, end) or ""
+        closes = []
+        for line in out.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.lower().startswith("date,"):
+                continue
+            parts = line.split(",")
+            if len(parts) >= 5:
+                try:
+                    closes.append(float(parts[4]))
+                except ValueError:
+                    pass
+        return closes
+
+    def _maybe_record_reflection_outcome(self, ticker, trade_date, alpha):
+        if not self.config.get("enable_reflection") or alpha is None:
+            return
+        try:
+            from tradingagents.strategies.overlays import record_reflection_outcome
+
+            base = Path(self.config.get("data_cache_dir", "~/.tradingagents")).expanduser()
+            record_reflection_outcome(
+                self.config,
+                str(base / "strategy_ledger.jsonl"),
+                "market",
+                ticker,
+                trade_date,
+                float(alpha),
+            )
+        except Exception as exc:
+            logger.warning("reflection record skipped: %s", exc)
 
     def process_signal(self, full_signal):
         """Process a signal to extract the core decision."""
