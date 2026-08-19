@@ -391,6 +391,9 @@ def _watchlist_markdown(results: list) -> str:
     if show_name:
         heads.append("Name")
     heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
+    show_mom = any(r.get("pills") is not None for r in results)
+    if show_mom:
+        heads += ["Pills", "Pull", "RR"]
     show_live = any(r.get("line_price") is not None for r in results)
     if show_live:
         heads += ["L1Px", "VWAP1m", "1mVol"]
@@ -433,6 +436,10 @@ def _watchlist_markdown(results: list) -> str:
             cell(r["altman_z"]),
             "yes" if r["net_net"] else "no",
         ]
+        if show_mom:
+            cells.append(cell(r.get("pills")))
+            cells.append("yes" if r.get("pullback") else "no")
+            cells.append(cell(r.get("mom_rr")))
         if show_live:
             cells.append(cell(r.get("line_price")))
             cells.append(cell(r.get("line_vwap")))
@@ -668,7 +675,8 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="min ATR(14) as %% of price (default 2; 0 disables)")
     parser.add_argument("--intraday", action="store_true",
                         help="append live Alpaca L1 price / 1m VWAP / volume columns")
-    parser.add_argument("--scan", choices=("value", "trend-pullback", "breakout", "all"),
+    parser.add_argument("--scan", choices=("value", "trend-pullback", "breakout",
+                                         "momentum", "all"),
                         default="all",
                         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
                              "dip in uptrend), 'breakout' (volatility contraction/breakout), "
@@ -742,13 +750,43 @@ def main(argv: "list[str] | None" = None) -> int:
                         ohlcv = _fetch_ohlcv(symbol)
                         ohlcv_cache[symbol] = ohlcv
                     if args.scan != "value":
-                        sig = scan_signals(ohlcv)
-                        if sig is not None:
-                            scan_meta[symbol] = sig
-                            if args.scan == "trend-pullback" and not sig["a"]:
+                        sig = scan_signals(ohlcv) or {}
+                        scan_meta[symbol] = sig
+                        if args.scan in ("trend-pullback", "breakout"):
+                            if args.scan == "trend-pullback" and not sig.get("a"):
                                 continue
-                            if args.scan == "breakout" and not sig["b"]:
+                            if args.scan == "breakout" and not sig.get("b"):
                                 continue
+                        if args.scan == "momentum":
+                            try:
+                                from tradingagents.strategies.momentum import (
+                                    first_pullback as _fp,
+                                    pillars as _pill,
+                                    rvol as _rvol,
+                                )
+
+                                closes = ohlcv["closes"]
+                                vols = ohlcv["volumes"]
+                                rv = _rvol(vols) if vols else None
+                                pill = _pill(
+                                    close=price,
+                                    day_volume=vols[-1] if vols else None,
+                                    prev_close=closes[-2] if len(closes) >= 2 else None,
+                                    day_open=None,
+                                    rv=rv,
+                                )
+                                pull = _fp(closes, ohlcv["highs"], ohlcv["lows"], vols)                                        if len(closes) >= 10 else {"candidate": False}
+                                scan_meta[symbol]["momentum"] = {
+                                    "pillars": {kk: bool(vv) for kk, vv in pill.items()
+                                                if vv is not None},
+                                    "pullback": bool(pull.get("candidate")),
+                                    "mom_rr": pull.get("rr"),
+                                }
+                                if not (pill.get("rvol") and pill.get("high_volume")
+                                        and pill.get("price_band")):
+                                    continue
+                            except Exception:
+                                pass
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
                         avg_vol = sum(vols) / len(vols) if vols else 0.0
@@ -829,8 +867,12 @@ def main(argv: "list[str] | None" = None) -> int:
                     row["pe_pct5"] = _nf.get("pe_pct5")
                     row["fmp_ev"] = _nf.get("ev")
             sig = scan_meta.get(ticker.upper())
-            row["scan_a"] = bool(sig and sig["a"])
-            row["scan_b"] = bool(sig and sig["b"])
+            row["scan_a"] = bool(sig and sig.get("a"))
+            row["scan_b"] = bool(sig and sig.get("b"))
+            _mom = (sig or {}).get("momentum") if sig else None
+            row["pills"] = (sum(1 for v in _mom["pillars"].values() if v) if _mom else None)
+            row["pullback"] = bool(_mom.get("pullback")) if _mom else False
+            row["mom_rr"] = _mom.get("mom_rr") if _mom else None
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None

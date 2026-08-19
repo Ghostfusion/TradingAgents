@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Momentum day-trading signals (analysis-only)** - `strategies/momentum.py`
+  (5-pillar pre-filter, RVOL/EMA9/VWAP, first-pullback pattern with R/R,
+  session risk flags); screener `--scan momentum` (+Pills/Pull/RR
+  columns); Market Analyst `get_momentum_scan` tool in the graph.
+  Source: `Strategies/momentum_day_trading.md`.
 - **Alpaca wired into the analyst graph (analysis-only)** -
   `get_market_snapshot_alpaca` tool on the Market Analyst ToolNode;
   `resolve_instrument_context` appends a one-line live 1m snapshot for

@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode
 # Import the abstract tool methods from agent_utils
 
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
+from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_analyst_ratings,
@@ -237,6 +238,7 @@ class TradingAgentsGraph:
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,
                     get_market_snapshot_alpaca,
+                    get_momentum_scan,
                 ]
             ),
             "social": ToolNode(
