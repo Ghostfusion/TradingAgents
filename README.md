@@ -375,6 +375,27 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
 >
+> ## Report format (consolidated hierarchy + Table of Contents)
+>
+> Every run writes a per-section tree (`1_analysts/`, `2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/` — raw per-agent markdown) plus a consolidated `complete_report.md`. The consolidated file auto-demotes each agent's own headings 3 levels so its outline sits strictly under its role label:
+>
+> ```
+> #  Trading Analysis Report: <ticker>    ← document
+> ## I. Analyst Team Reports              ← team
+> ### Market Analyst                      ← role
+>   #### <the analyst's own title>        ← agent content
+>     ##### <their sections>
+>     ###### <details>
+> ```
+>
+> The agent's raw files (`1_analysts/market.md`, `2_research/bull.md`, …) stay byte-identical — only the consolidated view is re-nested. `complete_report.md` also opens with an auto-generated **Table of Contents** (GitHub-anchor links to every team and role).
+>
+> To re-render the consolidated report for an existing folder (e.g. after a formatter change) without re-running the analysis — preserving the `Risk Gate (computed)` block when present:
+> ```bash
+> py -3.12 scripts/rebuild_complete_report.py reports/SFTBY_20260819_115450
+> py -3.12 scripts/rebuild_complete_report.py      # all folders
+> ```
+>
 > ## Operational hardening
 >
 > - **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
