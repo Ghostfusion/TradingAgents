@@ -494,7 +494,9 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
 
         if get_config().get("enable_alpaca"):
             bars = _alpaca_bars(ticker, timeframe="1Day", limit=330)
-            if bars:
+            # Free IEX tier returns only the latest daily bar (historical daily
+            # needs a paid tier); require enough depth for ATR/scan before use.
+            if bars and len(bars) >= 15:
                 return {
                     "closes": [float(b["c"]) for b in bars],
                     "highs": [float(b["h"]) for b in bars],

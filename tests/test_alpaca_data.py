@@ -36,8 +36,8 @@ def test_batch_bars_map_by_symbol():
 def test_snapshot_daily_bar_fields():
     from tradingagents.dataflows import alpaca
 
-    payload = {"snapshots": {"AAPL": {"dailyBar": {"t": "2026-08-18",
-                    "o": 100.0, "h": 103.0, "l": 99.0, "c": 101.5, "v": 9}}}}
+    payload = {"AAPL": {"dailyBar": {"t": "2026-08-18",
+                    "o": 100.0, "h": 103.0, "l": 99.0, "c": 101.5, "v": 9}}}
     with _patch(payload):
         out = alpaca.get_latest_snapshot(["AAPL"])
     assert out["AAPL"]["close"] == 101.5

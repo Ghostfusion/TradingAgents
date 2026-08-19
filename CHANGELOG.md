@@ -10,6 +10,10 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Alpaca smk w/ live keys** - verified against `data.alpaca.markets/v2`
+  (bars/batch/snapshots) and `paper-api.alpaca.markets/v2` (calendar/clock);
+  free IEX tier limits daily history to the latest bar - screener OHLCV
+  fallback now requires >=15 daily bars before use.
 - **Alpaca market data (analysis-only)** - `dataflows/alpaca.py` +
   `alpaca_common.py`: signed daily/1m bars (OHLC+vwap), batch bars,
   latest snapshots, trading calendar, market clock; screener falls back

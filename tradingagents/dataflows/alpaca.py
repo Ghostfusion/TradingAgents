@@ -34,7 +34,7 @@ def get_latest_snapshot(symbols: list) -> "dict | None":
                           {"symbols": ",".join(symbols)})
     if isinstance(data, dict):
         out = {}
-        for sym, info in data.get("snapshots", {}).items():
+        for sym, info in data.items():
             daily = (info or {}).get("dailyBar") or {}
             out[sym] = {"date": daily.get("t"), "open": daily.get("o"),
                         "high": daily.get("h"), "low": daily.get("l"),
@@ -50,14 +50,15 @@ def get_calendar(start: "str | None" = None,
         params["start"] = start
     if end:
         params["end"] = end
-    data = alpaca_get("calendar", params)
+    data = alpaca_get("calendar", params,
+               base="https://paper-api.alpaca.markets/v2")
     if isinstance(data, list) and data:
         return data[0]
     return data if isinstance(data, dict) else None
 
 
 def get_clock() -> "dict | None":
-    return alpaca_get("clock")
+    return alpaca_get("clock", base="https://paper-api.alpaca.markets/v2")
 
 
 __all__ = ["get_bars", "get_bars_batch", "get_latest_snapshot",

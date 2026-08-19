@@ -12,6 +12,8 @@ import time
 logger = logging.getLogger(__name__)
 
 DATA_BASE = "https://data.alpaca.markets/v2"
+#: calendar/clock live on the (paper) trading host, not the data host
+TRADING_BASE = "https://paper-api.alpaca.markets/v2"
 _TIMEOUT = 20
 _MAX_RETRIES = 2
 
@@ -29,14 +31,15 @@ def alpaca_credentials() -> "tuple[str | None, str | None]":
     return (str(key_id) if key_id else None, str(secret) if secret else None)
 
 
-def alpaca_get(path: str, params: "dict | None" = None) -> "dict | list | None":
-    """GET ``DATA_BASE/{path}`` signed; parsed JSON or None on any failure."""
+def alpaca_get(path: str, params: "dict | None" = None,
+              base: "str" = DATA_BASE) -> "dict | list | None":
+    """GET ``base/{path}`` signed; parsed JSON or None on any failure."""
     import requests
 
     key_id, secret = alpaca_credentials()
     if not key_id or not secret:
         return None
-    url = f"{DATA_BASE}/{path}"
+    url = f"{base}/{path}"
     headers = {"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret}
     query = dict(params or {})
     for attempt in range(_MAX_RETRIES + 1):
@@ -61,4 +64,4 @@ def alpaca_get(path: str, params: "dict | None" = None) -> "dict | list | None":
     return None
 
 
-__all__ = ["DATA_BASE", "alpaca_credentials", "alpaca_get"]
+__all__ = ["DATA_BASE", "TRADING_BASE", "alpaca_credentials", "alpaca_get"]
