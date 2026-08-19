@@ -60,6 +60,8 @@ You also have two forward-looking positioning tools: call get_options_chain(tick
 
 You also have a money-flow tool: call get_capital_flow(ticker) for weekly net capital inflow/outflow split by order size (super/big/mid/small) and the latest session's capital distribution. Sustained large/super-order outflows suggest institutional distribution; sustained inflows suggest accumulation. Weigh this as a positioning gauge alongside the options and short-interest signals.
 
+You also have an event-risk tool: call get_expected_move(ticker, current_date) for the option-market-implied 1-day move at the upcoming earnings print (e.g. ±9%). Weigh a large expected move when sizing volatility and when setting stop distances around the event — a ±10% event requires wider stops or smaller size than ±2%.
+
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()

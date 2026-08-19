@@ -20,13 +20,16 @@ from tradingagents.agents.utils.agent_utils import (
     get_corporate_actions,
     get_earnings_calendar,
     get_earnings_catalyst,
+    get_earnings_surprise_history,
     get_economic_calendar,
+    get_expected_move,
     get_fed_watch,
     get_fundamentals,
     get_global_news,
     get_income_statement,
     get_indicators,
     get_insider_transactions,
+    get_institution_holdings,
     get_macro_indicators,
     get_market_breadth,
     get_news,
@@ -238,6 +241,7 @@ class TradingAgentsGraph:
                     get_short_interest,
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,
+                    get_expected_move,
                     get_market_snapshot_alpaca,
                     get_momentum_scan,
                 ]
@@ -277,6 +281,8 @@ class TradingAgentsGraph:
                     get_smart_money,
                     get_revenue_breakdown,
                     get_corporate_actions,
+                    get_institution_holdings,
+                    get_earnings_surprise_history,
                 ]
             ),
         }

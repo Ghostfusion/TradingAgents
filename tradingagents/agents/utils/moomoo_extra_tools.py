@@ -164,3 +164,65 @@ def get_earnings_catalyst(
         str: A formatted report of earnings-day reaction history
     """
     return route_to_vendor("get_earnings_catalyst", ticker)
+
+
+@tool
+def get_institution_holdings(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """
+    Retrieve institutional ownership for a ticker: the share of float held by
+    institutions and its period-over-period change, plus the number of reporting
+    institutions (13F-style aggregate). A rising institutional % with stable price
+    flags accumulation; a falling % flags distribution. Uses the configured
+    institution_data vendor.
+
+    Args:
+        ticker (str): Ticker symbol
+
+    Returns:
+        str: Institutional ownership by reporting period
+    """
+    return route_to_vendor("get_institution_holdings", ticker)
+
+
+@tool
+def get_earnings_surprise_history(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str | None, "current date yyyy-mm-dd (optional)"] = None,
+) -> str:
+    """
+    Retrieve historical earnings surprises for a ticker: per past print the EPS
+    estimate vs actual (surprise %), the day-of price reaction, the option-implied
+    move, and IV crush. A succession of beats (acceleration) and large implied
+    moves flag elevated catalyst risk. Uses the configured earnings_surprise vendor.
+
+    Args:
+        ticker (str): Ticker symbol
+        curr_date (str): Optional current date
+
+    Returns:
+        str: Earnings surprise + reaction history table
+    """
+    return route_to_vendor("get_earnings_surprise_history", ticker, curr_date)
+
+
+@tool
+def get_expected_move(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str | None, "current date yyyy-mm-dd (optional)"] = None,
+) -> str:
+    """
+    Retrieve the option-market-implied expected move for the upcoming earnings
+    print (1σ, from the current-period earnings price history), plus a
+    price-based ±band on the last close. Use to size event risk. Uses the
+    configured expected_move vendor.
+
+    Args:
+        ticker (str): Ticker symbol
+        curr_date (str): Optional current date
+
+    Returns:
+        str: Expected move % and band
+    """
+    return route_to_vendor("get_expected_move", ticker, curr_date)

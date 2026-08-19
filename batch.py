@@ -38,6 +38,8 @@ def effective_workers(requested: int) -> int:
     except ValueError:
         pass
     return min(max(1, int(requested)), cap)
+
+
 from datetime import date, datetime
 from pathlib import Path
 
@@ -79,6 +81,9 @@ VENDOR_PRESETS = {
         "revenue_breakdown": "moomoo",
         "corporate_actions": "moomoo",
         "earnings_catalyst": "moomoo",
+        "institution_data": "moomoo",
+        "earnings_surprise": "moomoo",
+        "expected_move": "moomoo",
     },
     # Pure-yfinance stack (the pre-moomoo defaults).
     "yfinance": {
@@ -103,6 +108,9 @@ VENDOR_PRESETS = {
         "revenue_breakdown": "none",
         "corporate_actions": "none",
         "earnings_catalyst": "none",
+        "institution_data": "none",
+        "earnings_surprise": "none",
+        "expected_move": "none",
     },
 }
 

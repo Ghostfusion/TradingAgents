@@ -32,12 +32,15 @@ from .moomoo import (
     get_corporate_actions_moomoo,
     get_earnings_calendar_moomoo,
     get_earnings_catalyst_moomoo,
+    get_earnings_surprise_history_moomoo,
     get_economic_calendar_moomoo,
+    get_expected_move_moomoo,
     get_fed_watch_moomoo,
     get_fundamentals_moomoo,
     get_income_statement_moomoo,
     get_indicators_moomoo,
     get_insider_transactions_moomoo,
+    get_institution_holdings_moomoo,
     get_macro_indicators_moomoo,
     get_market_breadth_moomoo,
     get_news_moomoo,
@@ -161,6 +164,19 @@ TOOLS_CATEGORIES = {
         "description": "Historical earnings-day implied move, IV crush, and price reaction",
         "tools": ["get_earnings_catalyst"],
     },
+    # A-series enrichment (moomoo-only, optional).
+    "institution_data": {
+        "description": "Institutional ownership % and changes by reporting period (13F-style)",
+        "tools": ["get_institution_holdings"],
+    },
+    "earnings_surprise": {
+        "description": "Historical earnings surprises (EPS actual vs estimate) + day reaction + implied move",
+        "tools": ["get_earnings_surprise_history"],
+    },
+    "expected_move": {
+        "description": "Option-implied expected move for the upcoming earnings print",
+        "tools": ["get_expected_move"],
+    },
 }
 
 VENDOR_LIST = [
@@ -186,7 +202,7 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
-    # moomoo-only enrichment (Tier 1/2): failures degrade to a sentinel.
+    # moomoo-only enrichment (Tier 1/2 + A-series): failures degrade to a sentinel.
     "capital_flow",
     "smart_money",
     "economic_calendar",
@@ -195,6 +211,9 @@ OPTIONAL_CATEGORIES = {
     "revenue_breakdown",
     "corporate_actions",
     "earnings_catalyst",
+    "institution_data",
+    "earnings_surprise",
+    "expected_move",
 }
 
 # Mapping of methods to their vendor-specific implementations
@@ -307,6 +326,15 @@ VENDOR_METHODS = {
     },
     "get_earnings_catalyst": {
         "moomoo": get_earnings_catalyst_moomoo,
+    },
+    "get_institution_holdings": {
+        "moomoo": get_institution_holdings_moomoo,
+    },
+    "get_earnings_surprise_history": {
+        "moomoo": get_earnings_surprise_history_moomoo,
+    },
+    "get_expected_move": {
+        "moomoo": get_expected_move_moomoo,
     },
 }
 

@@ -783,7 +783,9 @@ def get_fundamentals_moomoo(symbol: str, curr_date: str = None) -> str:
     guard on each statement. The overview uses the annual report type, matching the
     pre-existing behavior.
     """
-    income = _get_financials(symbol, _STATEMENT_TYPE_INCOME, "Income Statement", "annual", curr_date)
+    income = _get_financials(
+        symbol, _STATEMENT_TYPE_INCOME, "Income Statement", "annual", curr_date
+    )
     balance = _get_financials(symbol, _STATEMENT_TYPE_BALANCE, "Balance Sheet", "annual", curr_date)
     cashflow = _get_financials(symbol, _STATEMENT_TYPE_CASHFLOW, "Cash Flow", "annual", curr_date)
     return f"{income}\n\n{balance}\n\n{cashflow}"
@@ -1354,15 +1356,24 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
 
         if isinstance(dist_df, pd.DataFrame) and not dist_df.empty:
             row0 = dist_df.iloc[0]
-            buckets = {k: row0.get(k) for k in
-                       ("capital_in_super", "capital_out_super",
-                        "capital_in_big", "capital_out_big",
-                        "capital_in_mid", "capital_out_mid",
-                        "capital_in_small", "capital_out_small")}
+            buckets = {
+                k: row0.get(k)
+                for k in (
+                    "capital_in_super",
+                    "capital_out_super",
+                    "capital_in_big",
+                    "capital_out_big",
+                    "capital_in_mid",
+                    "capital_out_mid",
+                    "capital_in_small",
+                    "capital_out_small",
+                )
+            }
             weekly_nets = []
             if isinstance(flow_df, pd.DataFrame) and not flow_df.empty:
-                weekly_nets = [float(r.get("in_flow") or 0.0)
-                               for _, r in flow_df.head(8).iterrows()]
+                weekly_nets = [
+                    float(r.get("in_flow") or 0.0) for _, r in flow_df.head(8).iterrows()
+                ]
             signal = summarize(buckets, weekly_nets=weekly_nets)
             lines.append("")
             lines.append("**Flow Signal**")
@@ -1761,9 +1772,7 @@ def get_top_movers_moomoo(
     except (TypeError, ValueError):
         mcap = 0.0
     if mcap > 0:
-        filters = [
-            SimpleRankFilter(SimpleRankIndicatorType.MARKET_CAP, interval_min=mcap)
-        ]
+        filters = [SimpleRankFilter(SimpleRankIndicatorType.MARKET_CAP, interval_min=mcap)]
     ctx = _ensure_ctx()
     ret, data = ctx.get_top_movers_rank(
         market=market_enum,
@@ -1800,3 +1809,252 @@ def get_top_movers_moomoo(
             }
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# A2: institutional ownership (13F-style aggregate, moomoo)
+# ---------------------------------------------------------------------------
+
+
+def get_institution_holdings_moomoo(ticker: str) -> str:
+    """Institutional ownership + change by reporting period (shareholders F10).
+
+    ``get_shareholders_institutional`` aggregates the 13F-style holder data:
+    institutional share of the float, the change vs the prior period, and the
+    number of reporting institutions.  A rising institutional % with price
+    stable flags accumulation; a falling % flags distribution.
+    """
+    code = _moomoo_code(ticker)
+    ctx = _ensure_ctx()
+    ret, data = ctx.get_shareholders_institutional(code)
+    _check_ret(ret, data, ticker, code, "get_shareholders_institutional")
+    df = data
+    if df is None or df.empty:
+        raise NoMarketDataError(ticker, code, detail="no institutional holding data")
+    lines = [f"## Institutional Ownership — {ticker} (moomoo)", ""]
+    lines.append("| Period | Institutions | Shares held | % of float | Chg (pp) |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for _, row in df.head(6).iterrows():
+        period = str(row.get("period_text", "?"))
+        inst = row.get("institution_quantity")
+        inst_s = int(inst) if isinstance(inst, (int, float)) else "n/a"
+        qty = row.get("holder_quantity")
+        qty_s = (
+            f"{qty / 1e9:.2f}B"
+            if isinstance(qty, (int, float)) and abs(qty) >= 1e9
+            else (f"{qty / 1e6:.1f}M" if isinstance(qty, (int, float)) else "n/a")
+        )
+        pct = row.get("holder_pct")
+        pct_s = f"{float(pct):.1f}%" if isinstance(pct, (int, float)) else "n/a"
+        chg = row.get("holder_pct_change")
+        chg_s = f"{float(chg):+.1f}pp" if isinstance(chg, (int, float)) else "n/a"
+        lines.append(f"| {period} | {inst_s} | {qty_s} | {pct_s} | {chg_s} |")
+    lines.append("")
+    lines.append(
+        "Interpretation: the % of float held by institutions and its period change "
+        "is the smart-money ownership signal; a persistent decline can precede "
+        "under-performance, a rise can support supply/demand. Weigh alongside "
+        "capital flow and price action."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# A3: historical earnings surprises (calendar actuals vs estimates)
+# ---------------------------------------------------------------------------
+
+
+def _earnings_cal_chunks(ctx, market: str, start: str, end: str) -> list:
+    """Chunked market earnings calendar (7-days-inclusive per call)."""
+    from pandas import concat
+
+    parts = []
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    cur = start_dt
+    while cur <= end_dt:
+        chunk_end = min(cur + timedelta(days=6), end_dt)
+        ret, df = ctx.get_earnings_calendar(
+            market=market,
+            begin_date=cur.strftime("%Y-%m-%d"),
+            end_date=chunk_end.strftime("%Y-%m-%d"),
+        )
+        if ret == 0 and df is not None and not df.empty:
+            parts.append(df)
+        cur = chunk_end + timedelta(days=1)
+    if not parts:
+        return []
+    combined = concat(parts, ignore_index=True)
+    rows = []
+    for r in combined.to_dict("records"):
+        rows.append(
+            {
+                "security": str(r.get("security", "") or ""),
+                "date": str(r.get("earnings_date") or "").strip(),
+                "eps_predict": _num(r.get("eps_predict")),
+                "eps_actual": _num(r.get("eps_actual")),
+                "revenue_predict": _num(r.get("revenue_predict")),
+                "revenue_actual": _num(r.get("revenue_actual")),
+                "ebit_predict": _num(r.get("ebit_predict")),
+                "ebit_actual": _num(r.get("ebit_actual")),
+            }
+        )
+    return rows
+
+
+def _num(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_earnings_surprise_history_moomoo(ticker: str, curr_date: str = None) -> str:
+    """Earnings surprises + reaction history for the last ~6 prints.
+
+    Combines moomoo's earnings price history (print dates, market-implied
+    move, IV crush, day move) with the earnings calendar's actual-vs-estimate
+    EPS/revenue/EBIT around those dates, plus the implied move for the upcoming
+    print. Deterministic table intended for catalyst-risk and surprise-momentum
+    analysis.
+    """
+    code = _moomoo_code(ticker)
+    ctx = _ensure_ctx()
+    market = code.split(".")[0] if "." in code else "US"
+    ret, hist = ctx.get_financials_earnings_price_history(code)
+    _check_ret(ret, hist, ticker, code, "get_financials_earnings_price_history")
+    if hist is None or hist.empty:
+        raise NoMarketDataError(ticker, code, detail="no earnings price history")
+
+    # Distinct prints (fiscal period -> print date), most recent first.
+    prints = []
+    seen = set()
+    for _, row in hist.iterrows():
+        period = str(row.get("period_text") or "")
+        pub = str(row.get("pub_trading_day_str") or "")[:10]
+        key = (period, pub)
+        if not pub or key in seen:
+            continue
+        seen.add(key)
+        prints.append(
+            {
+                "period": period,
+                "date": pub,
+                "implied": _num(row.get("predict_vola_ratio_newest")),
+                "iv_crush": _num(row.get("option_iv_crush")),
+                "close": _num(row.get("close_price")),
+                "last_close": _num(row.get("last_close_price")),
+            }
+        )
+    prints.sort(key=lambda p: p["date"], reverse=True)
+
+    # Fetch actuals/estimates for the last several prints via targeted windows.
+    cal = []
+    for p in prints[:6]:
+        day = datetime.strptime(p["date"], "%Y-%m-%d")
+        start = (day - timedelta(days=3)).strftime("%Y-%m-%d")
+        end = (day + timedelta(days=3)).strftime("%Y-%m-%d")
+        window = _earnings_cal_chunks(ctx, market, start, end)
+        cal.extend(window)
+    cal = [c for c in cal if code.upper() in str(c.get("security") or "").upper()]
+
+    lines = [f"## Earnings Surprise History — {ticker} (moomoo)", ""]
+    lines.append("| Period | Date | EPS est | EPS act | Surprise% | Day move | Implied |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    for _shown, p in enumerate(prints[:8]):
+        date_s = p["date"]
+        match = next((c for c in cal if c["date"] == date_s), None)
+        est, act = (match or {}).get("eps_predict"), (match or {}).get("eps_actual")
+        surprise = ""
+        if est is not None and act is not None and est != 0:
+            surprise = f"{(act - est) / abs(est) * 100:+.1f}"
+        close, last = p.get("close"), p.get("last_close")
+        move = ""
+        finite = (
+            close is not None
+            and last is not None
+            and close == close
+            and last == last
+            and last not in (0,)
+        )
+        if finite:
+            move = f"{(close / last - 1) * 100:+.1f}%"
+        implied = f"{p['implied']:.1f}%" if p.get("implied") is not None else "-"
+        lines.append(
+            f"| {p['period']} | {date_s} | {est if est is not None else '-'} | "
+            f"{act if act is not None else '-'} | {surprise or '-'} | {move or '-'} | {implied} |"
+        )
+    lines.append("")
+    lines.append(
+        "Interpretation: negative-surprise quarters with a large implied move "
+        "flag elevated catalyst risk; a succession of beats (acceleration) with "
+        "rising implied moves supports momentum. Use for event-risk sizing, not "
+        "direction alone."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# A1: option-market expected move (earnings implied move primary)
+# ---------------------------------------------------------------------------
+
+
+def get_expected_move_moomoo(ticker: str, curr_date: str = None) -> str:
+    """Expected single-event move for the upcoming earnings print.
+
+    The option market prices the upcoming print's 1-day move via
+    ``predict_vola_ratio_newest`` from moomoo's earnings price history (the
+    current-period row, falling back to the most recent print). Degrades to a
+    typed no-data error when no source serves (the analyst then skips this
+    optional signal).
+    """
+    code = _moomoo_code(ticker)
+    ctx = _ensure_ctx()
+    current_move = None
+    ret, hist = ctx.get_financials_earnings_price_history(code)
+    if ret == 0 and hist is not None and not hist.empty:
+        rows = hist.to_dict("records")
+        for row in rows:
+            if bool(row.get("is_current")):
+                v = _num(row.get("predict_vola_ratio_newest"))
+                if v is not None and v > 0:
+                    current_move = v / 100.0
+                break
+        if current_move is None and rows:
+            v = _num((rows[0] or {}).get("predict_vola_ratio_newest"))
+            if v is not None and v > 0:
+                current_move = v / 100.0
+    if current_move is None:
+        raise NoMarketDataError(
+            ticker,
+            code,
+            detail="no option-implied move available (moomoo earnings history or options chain)",
+        )
+    lines = [
+        f"## Expected Move — {ticker} (moomoo, option-implied)",
+        "",
+        f"- Expected 1σ move at next earnings: **{current_move:.1%}**",
+        "",
+        "Interpretation: the option market's priced move around the upcoming "
+        "earnings print. Use to size the event risk (a ±10% expected move "
+        "warrants smaller size than ±2%) and set wider stops *through* the "
+        "event when the thesis is event-based.",
+    ]
+    # Append a spot-based band when a recent close is available.
+    try:
+        end_dt = datetime.strptime(curr_date, "%Y-%m-%d") if curr_date else datetime.now()
+        start_dt = end_dt - timedelta(days=21)
+        ret2, kdf, _page = ctx.request_history_kline(
+            code, start=start_dt.strftime("%Y-%m-%d"), end=end_dt.strftime("%Y-%m-%d"),
+            ktype="K_DAY", autype="qfq", max_count=21,
+        )
+        if ret2 == 0 and kdf is not None and not kdf.empty:
+            spot = float(kdf.iloc[-1]["close"])
+            hi = spot * (1 + current_move)
+            lo = spot * (1 - current_move)
+            lines.append(f"- Last close {spot:.2f}; band [{lo:.2f}, {hi:.2f}] (±{current_move:.1%})")
+    except Exception:
+        pass
+    return "\n".join(lines)

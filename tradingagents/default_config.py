@@ -205,6 +205,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "revenue_breakdown": "moomoo",
             "corporate_actions": "moomoo",
             "earnings_catalyst": "moomoo",
+            "institution_data": "moomoo",
+            "earnings_surprise": "moomoo",
+            "expected_move": "moomoo",
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {

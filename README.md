@@ -288,6 +288,8 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > ---
 >
+> **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays) and [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports).
+>
 > ## Batch runner
 >
 > A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
@@ -422,6 +424,16 @@ All config-gated, off by default:
   half-life weight, credibility factors, surprise z-score vs 30d baseline.
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
+- **B2 cross-sectional pipeline** (`pipeline.py`) - screens the universe
+  (positional/file tickers or moomoo's top-losers/heat-proxy movers) through
+  the value-screener engine, ranks by the EY+momentum+52w composite, picks
+  top-N, and runs them through the batch runner (moomoo-first) — one command
+  to `reports/pipeline_<ts>.md` + per-symbol report folders with TOCs.
+- **A-series analyst tools (moomoo, optional)** - `get_institution_holdings`
+  (13F-style institutional % + period change), `get_earnings_surprise_history`
+  (EPS actual vs estimate per print + day reaction + implied move, with
+  NaN-safe rendering), and `get_expected_move` (option-implied 1σ move at the
+  next earnings + price band) — wired to the market and fundamentals analysts.
 - **B1 scheduled-catalyst overlay** (`tradingagents/strategies/catalyst.py`) -
   deterministic catalyst sizing (the Phase-4 PEAD wiring). `enable_events` is
   **on by default**; the graph folds earnings (next print date + last surprise side +
