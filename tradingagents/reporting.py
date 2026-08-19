@@ -11,6 +11,7 @@ mirrors the gate, and ``risk_compact_report`` replaces the verbose 3-analyst
 transcripts with a single verdict file (config-gated, off by default).
 """
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -20,9 +21,35 @@ def _config(config):
         return config
     try:
         from tradingagents.dataflows.config import get_config
+
         return get_config()
     except Exception:
         return {}
+
+
+def _shift_down(text: str, levels: int = 3) -> str:
+    """Push every ATX heading inside ``text`` down by ``levels`` (cap at 6 '#').
+
+    Embedded agent reports arrive with their own H1/H2/H3 outline; when they are
+    joined into the consolidated report those headings must sit *under* the outer
+    H2 team / H3 role markers. Default 3 levels gives strict nesting: an agent's
+    H1 title becomes H4 (below the H3 role label), its H2 sections become H5 and
+    its H3 subsections H6 — the role -> document -> section chain is unambiguous.
+    (A 2-level shift would put the agent's H1 title at the same H3 as the role
+    label, which is what made the older reports confusing.)
+    """
+    if levels <= 0:
+        return text
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if m:
+            hashes, rest = m.group(1), m.group(2)
+            new_n = min(6, len(hashes) + levels)
+            out.append("#" * new_n + " " + rest)
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def _risk_gate_block(final_state: dict) -> str:
@@ -47,8 +74,9 @@ def _risk_gate_block(final_state: dict) -> str:
     return "\n".join(parts) + "\n"
 
 
-def write_report_tree(final_state: dict, ticker: str, save_path,
-                      config: "dict | None" = None) -> Path:
+def write_report_tree(
+    final_state: dict, ticker: str, save_path, config: "dict | None" = None
+) -> Path:
     """Save a completed run's reports to ``save_path``; return the complete-report path."""
     save_path = Path(save_path)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -63,10 +91,12 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
     # 1. Analysts
     analysts_dir = save_path / "1_analysts"
     analyst_parts = []
-    for key, name in (("market_report", "Market Analyst"),
-                      ("sentiment_report", "Sentiment Analyst"),
-                      ("news_report", "News Analyst"),
-                      ("fundamentals_report", "Fundamentals Analyst")):
+    for key, name in (
+        ("market_report", "Market Analyst"),
+        ("sentiment_report", "Sentiment Analyst"),
+        ("news_report", "News Analyst"),
+        ("fundamentals_report", "Fundamentals Analyst"),
+    ):
         text = final_state.get(key)
         if text:
             analysts_dir.mkdir(exist_ok=True)
@@ -74,7 +104,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
             (analysts_dir / f"{safe}.md").write_text(prepend_block(text), encoding="utf-8")
             analyst_parts.append((name, text))
     if analyst_parts:
-        content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
+        content = "\n\n---\n\n".join(
+            f"### {name}\n\n{_shift_down(text)}" for name, text in analyst_parts
+        )
         sections.append(f"## I. Analyst Team Reports\n\n{content}")
 
     # 2. Research
@@ -82,8 +114,10 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
         research_dir = save_path / "2_research"
         debate = final_state["investment_debate_state"]
         research_parts = []
-        for key, fname, name in (("bull_history", "bull.md", "Bull Researcher"),
-                                 ("bear_history", "bear.md", "Bear Researcher")):
+        for key, fname, name in (
+            ("bull_history", "bull.md", "Bull Researcher"),
+            ("bear_history", "bear.md", "Bear Researcher"),
+        ):
             text = debate.get(key)
             if text:
                 research_dir.mkdir(exist_ok=True)
@@ -94,15 +128,21 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
             (research_dir / "manager.md").write_text(debate["judge_decision"], encoding="utf-8")
             research_parts.append(("Research Manager", debate["judge_decision"]))
         if research_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in research_parts)
+            content = "\n\n---\n\n".join(
+                f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts
+            )
             sections.append(f"## II. Research Team Decision\n\n{content}")
 
     # 3. Trading
     if final_state.get("trader_investment_plan"):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
-        (trading_dir / "trader.md").write_text(final_state["trader_investment_plan"], encoding="utf-8")
-        sections.append(f"## III. Trading Team Plan\n\n### Trader\n{final_state['trader_investment_plan']}")
+        (trading_dir / "trader.md").write_text(
+            final_state["trader_investment_plan"], encoding="utf-8"
+        )
+        sections.append(
+            f"## III. Trading Team Plan\n\n### Trader\n\n{_shift_down(final_state['trader_investment_plan'])}"
+        )
 
     # 4. Risk Management (debate transcripts + computed gate)
     if final_state.get("risk_debate_state"):
@@ -119,16 +159,20 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
             if risk.get("judge_decision"):
                 risk_parts.append(("Risk Analyst Verdict", risk["judge_decision"]))
         else:
-            for key, fname, name in (("aggressive_history", "aggressive.md", "Aggressive Analyst"),
-                                     ("conservative_history", "conservative.md", "Conservative Analyst"),
-                                     ("neutral_history", "neutral.md", "Neutral Analyst")):
+            for key, fname, name in (
+                ("aggressive_history", "aggressive.md", "Aggressive Analyst"),
+                ("conservative_history", "conservative.md", "Conservative Analyst"),
+                ("neutral_history", "neutral.md", "Neutral Analyst"),
+            ):
                 text = risk.get(key)
                 if text:
                     risk_dir.mkdir(exist_ok=True)
                     (risk_dir / fname).write_text(prepend_block(text), encoding="utf-8")
                     risk_parts.append((name, text))
         if risk_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in risk_parts)
+            content = "\n\n---\n\n".join(
+                f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts
+            )
             sections.append(f"## IV. Risk Management Team Decision\n\n{content}")
 
         # 5. Portfolio Manager (mirrors the risk gate)
@@ -137,7 +181,9 @@ def write_report_tree(final_state: dict, ticker: str, save_path,
             portfolio_dir.mkdir(exist_ok=True)
             wrapped = prepend_block(risk["judge_decision"])
             (portfolio_dir / "decision.md").write_text(wrapped, encoding="utf-8")
-            sections.append(f"## V. Portfolio Manager Decision\n\n{prepend_block(risk['judge_decision'])}")
+            sections.append(
+                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(risk['judge_decision']))}"
+            )
 
     # Write consolidated report
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
