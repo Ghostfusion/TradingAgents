@@ -52,6 +52,39 @@ def _shift_down(text: str, levels: int = 3) -> str:
     return "\n".join(out)
 
 
+def _slugify(heading: str) -> str:
+    """GitHub-style markdown anchor for a heading (lowercase, spaces->hyphens).
+
+    ``## I. Analyst Team Reports`` -> ``#i-analyst-team-reports``
+    ``### Market Analyst``        -> ``#market-analyst``
+    """
+    text = re.sub(r"[^\w\s-]", "", heading.lower()).strip()
+    return text.replace(" ", "-")
+
+
+def _build_toc(sections: list[str]) -> str:
+    """Auto-generate the Table of Contents block from the rendered sections.
+
+    Extracts each ``## <Team>`` header and the ``### <Role>`` markers under it
+    (embedded agent content is demoted to ``####``+ and never matches), and
+    renders nested markdown links.
+    """
+    lines = ["## Table of Contents", ""]
+    for section in sections:
+        team = None
+        roles = []
+        for ln in section.splitlines():
+            if ln.startswith("## "):
+                team = ln[3:].strip()
+            elif ln.startswith("### ") and team:
+                roles.append(ln[4:].strip())
+        if team:
+            lines.append(f"- [{team}](#{_slugify(team)})")
+            for role in roles:
+                lines.append(f"  - [{role}](#{_slugify(role)})")
+    return "\n".join(lines) + "\n"
+
+
 def _risk_gate_block(final_state: dict) -> str:
     """Markdown block of the computed risk gate; '' when no gate ran."""
     gate = final_state.get("risk_gate") or {}
@@ -185,7 +218,11 @@ def write_report_tree(
                 f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(risk['judge_decision']))}"
             )
 
-    # Write consolidated report
+    # Write consolidated report (auto Table of Contents above the teams)
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
+    body = "\n\n---\n\n".join(sections)
+    toc = _build_toc(sections)
+    (save_path / "complete_report.md").write_text(
+        header + toc + "\n\n---\n\n" + body, encoding="utf-8"
+    )
     return save_path / "complete_report.md"
