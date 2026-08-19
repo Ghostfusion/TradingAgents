@@ -45,6 +45,15 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
     "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
+    # B1 scheduled-catalyst overlay tuning (on by default via enable_events).
+    "TRADINGAGENTS_CATALYST_WINDOW_DAYS": "catalyst_window_days",
+    "TRADINGAGENTS_CATALYST_BASELINE_MOVE": "catalyst_baseline_move",
+    "TRADINGAGENTS_CATALYST_MACRO_WINDOW_DAYS": "catalyst_macro_window_days",
+    "TRADINGAGENTS_CATALYST_MACRO_SCALE": "catalyst_macro_scale",
+    "TRADINGAGENTS_CATALYST_FED_WINDOW_DAYS": "catalyst_fed_window_days",
+    "TRADINGAGENTS_CATALYST_FED_SCALE": "catalyst_fed_scale",
+    "TRADINGAGENTS_CATALYST_MISS_SCALE": "catalyst_miss_scale",
+    "TRADINGAGENTS_CATALYST_SCALE_FLOOR": "catalyst_scale_floor",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
@@ -222,7 +231,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "position_sizing": "kelly",  # Phase 2: kelly | vol_target | flat
         "target_vol": 0.15,  # Phase 2: annualized vol target
         "enable_factors": False,  # Phase 3: value+momentum composite
-        "enable_events": False,  # Phase 4: PEAD / catalyst sizing
+        "enable_events": True,  # Phase 4: PEAD / catalyst sizing (B1, on by default)
         # B1 scheduled-catalyst overlay tuning (used when enable_events is on).
         "catalyst_window_days": 5,  # earnings within N days -> scale down
         "catalyst_baseline_move": 0.02,  # baseline expected move for the penalty

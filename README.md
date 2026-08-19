@@ -423,8 +423,8 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 - **B1 scheduled-catalyst overlay** (`tradingagents/strategies/catalyst.py`) -
-  deterministic catalyst sizing (the Phase-4 PEAD wiring). When `enable_events`
-  is on, the graph folds earnings (next print date + last surprise side +
+  deterministic catalyst sizing (the Phase-4 PEAD wiring). `enable_events` is
+  **on by default**; the graph folds earnings (next print date + last surprise side +
   market-implied move / IV crush), HIGH-importance economic events (CPI, FOMC,
   payrolls, ...), and Fed-watch meetings into a `0..1` position scale and a
   verdict (`earnings-window` / `macro-catalyst` / `fed-catalyst` /

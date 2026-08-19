@@ -230,12 +230,17 @@ def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
         def get_earnings_calendar(self, **kwargs):
             from pandas import DataFrame
 
+            # Real moomoo rows, returned only for the chunk containing the date
+            # (the fetch chunks the window into 7-day calls).
+            begin, end = kwargs["begin_date"], kwargs["end_date"]
+            if not (begin <= "2026-08-24" <= end):
+                return 0, DataFrame()
             return 0, DataFrame(
                 {
-                    "code": ["US.AAPL"],
-                    "date": ["2026-08-24"],
-                    "eps_estimate": [1.0],
-                    "eps_actual": [None],
+                    "security": ["US.AAPL", "US.OTHER"],
+                    "earnings_date": ["2026-08-24", "2026-08-25"],
+                    "eps_predict": [1.0, 1.1],
+                    "eps_actual": ["N/A", "N/A"],
                 }
             )
 
@@ -247,7 +252,8 @@ def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
         def get_economic_calendar(self, **kwargs):
             from pandas import DataFrame
 
-            return 0, DataFrame({"title": ["CPI"], "timestamp": ["2026-08-20"], "star": ["HIGH"]})
+            # SDK returns (ret, df, next_page, has_more)
+            return 0, DataFrame({"title": ["CPI"], "timestamp": ["2026-08-20"], "star": ["HIGH"]}), None, False
 
         def get_fed_watch_target_rate(self):
             from pandas import DataFrame
@@ -258,7 +264,12 @@ def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
     monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
     data = fetch_catalyst_data("AAPL", "2026-08-19")
     assert data is not None
-    assert any(r["date"] == "2026-08-24" for r in data["earnings_calendar"])
+    # security filter keeps only AAPL rows; moomoo fields normalized
+    assert len(data["earnings_calendar"]) == 1
+    row = data["earnings_calendar"][0]
+    assert row["date"] == "2026-08-24"
+    assert row["eps_estimate"] == 1.0
+    assert row["eps_actual"] is None  # "N/A" actual converted
     assert data["move_history"] and data["move_history"][0]["predict_vola_ratio_newest"] == 3.9
 
 

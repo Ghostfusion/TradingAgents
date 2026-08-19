@@ -276,11 +276,12 @@ def apply_catalyst_scale(size_pct: float | None, snapshot: dict | None) -> float
 # ---------------------------------------------------------------------------
 
 
-def _calendar_window(ctx, market: str, start: str, end: str, chunk_days: int = 7) -> list:
-    """moomoo's earnings calendar caps windows at 7 days; chunk the request.
-
-    Returns a list of row dicts for entries whose ``code`` matches the market's
-    convention (code column optional).
+def _calendar_window(ctx, market: str, start: str, end: str, chunk_days: int = 6) -> list:
+    """moomoo's earnings calendar caps windows at 7 days *inclusive* (begin+6);
+    chunk the request so each call spans at most begin..begin+6. Returns
+    canonical row dicts for the market (``date``/``eps_estimate``/
+    ``eps_actual`` — mapped from moomoo's ``earnings_date``/``eps_predict``/
+    ``eps_actual`` with ``N/A`` actuals converted to None).
     """
     from pandas import concat
 
@@ -301,7 +302,34 @@ def _calendar_window(ctx, market: str, start: str, end: str, chunk_days: int = 7
     if not parts:
         return []
     combined = concat(parts, ignore_index=True)
-    return combined.to_dict("records")
+
+    # Normalize moomoo's names (security / earnings_date / eps_predict) to the
+    # canonical keys the pure layer reads; drop whole-market rows that are not
+    # the requested security; convert "N/A" actuals to None.
+    rows = []
+    for r in combined.to_dict("records"):
+        actual = r.get("eps_actual")
+        if actual is None or (
+            isinstance(actual, str) and actual.strip().upper() in ("N/A", "NA", "", "NONE")
+        ):
+            actual = None
+        rows.append(
+            {
+                "security": str(r.get("security", "") or ""),
+                "date": str(r.get("earnings_date") or r.get("date") or "").strip(),
+                "eps_estimate": r.get("eps_predict", r.get("eps_estimate")),
+                "eps_actual": actual,
+            }
+        )
+    return rows
+
+
+def _filter_by_security(rows: list, code: str) -> list:
+    """Keep calendar rows whose security marker contains the moomoo code."""
+    if not code:
+        return rows
+    needle = code.upper()
+    return [r for r in rows or [] if needle in str(r.get("security") or "").upper()]
 
 
 def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
@@ -314,10 +342,12 @@ def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
         market = code.split(".")[0] if "." in code else "US"
         td = parse_date(trade_date) or datetime.now()
         td_str = td.strftime("%Y-%m-%d")
-        past = (td - timedelta(days=40)).strftime("%Y-%m-%d")
-        fwd = (td + timedelta(days=60)).strftime("%Y-%m-%d")
+        past = (td - timedelta(days=35)).strftime("%Y-%m-%d")
+        fwd = (td + timedelta(days=95)).strftime("%Y-%m-%d")
 
-        earnings_rows = _calendar_window(ctx, market, past, fwd)
+        earnings_rows = _filter_by_security(
+            _calendar_window(ctx, market, past, fwd), code
+        )
 
         move_history = []
         ret, hist = ctx.get_financials_earnings_price_history(code)
@@ -325,7 +355,7 @@ def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
             move_history = hist.to_dict("records")
 
         macro_events = []
-        ret, eco = ctx.get_economic_calendar(
+        ret, eco, _next_page, _has_more = ctx.get_economic_calendar(
             begin_date=td_str,
             end_date=(td + timedelta(days=14)).strftime("%Y-%m-%d"),
         )
