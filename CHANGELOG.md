@@ -10,6 +10,10 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **`--intraday` watchlist columns** - with Alpaca keys set, `--intraday`
+  appends live **L1Px / VWAP1m / 1mVol** per symbol from the snapshots
+  endpoint (latest trade price, 1m-bar VWAP & volume); live-verified
+  against Alpaca (AAPL 292.04 / VWAP 309.66 - 2026-08-18).
 - **Alpaca smk w/ live keys** - verified against `data.alpaca.markets/v2`
   (bars/batch/snapshots) and `paper-api.alpaca.markets/v2` (calendar/clock);
   free IEX tier limits daily history to the latest bar - screener OHLCV

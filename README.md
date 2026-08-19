@@ -402,7 +402,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (785 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (787 passed / 2 skipped / 56 subtests).
 
 ## Research
 

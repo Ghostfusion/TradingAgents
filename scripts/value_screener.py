@@ -391,6 +391,9 @@ def _watchlist_markdown(results: list) -> str:
     if show_name:
         heads.append("Name")
     heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
+    show_live = any(r.get("line_price") is not None for r in results)
+    if show_live:
+        heads += ["L1Px", "VWAP1m", "1mVol"]
     show_norm = any(r.get("nebit_ev_ebit") is not None for r in results)
     if show_norm:
         heads.append("NEV/EBIT")
@@ -430,6 +433,10 @@ def _watchlist_markdown(results: list) -> str:
             cell(r["altman_z"]),
             "yes" if r["net_net"] else "no",
         ]
+        if show_live:
+            cells.append(cell(r.get("line_price")))
+            cells.append(cell(r.get("line_vwap")))
+            cells.append(cell(r.get("line_vol")))
         if show_norm:
             cells.append(cell(r.get("nebit_ev_ebit")))
             cells.append(cell(r.get("pe_pct5"), "{:.0%}"))
@@ -659,6 +666,8 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="min 30-day average daily volume in shares (default 1M; 0 disables)")
     parser.add_argument("--min-atr-pct", type=float, default=2.0,
                         help="min ATR(14) as %% of price (default 2; 0 disables)")
+    parser.add_argument("--intraday", action="store_true",
+                        help="append live Alpaca L1 price / 1m VWAP / volume columns")
     parser.add_argument("--scan", choices=("value", "trend-pullback", "breakout", "all"),
                         default="all",
                         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
@@ -832,6 +841,21 @@ def main(argv: "list[str] | None" = None) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.warning("could not screen %s: %s", ticker, exc)
 
+    if args.intraday and results:
+        try:
+            from tradingagents.dataflows.alpaca import get_intraday as _intraday
+            from tradingagents.dataflows.alpaca_common import alpaca_credentials
+
+            kid, sec = alpaca_credentials()
+            if kid and sec:
+                snap = _intraday([r["ticker"] for r in results])
+                for r in results:
+                    info = (snap or {}).get(r["ticker"]) or {}
+                    r["line_price"] = info.get("price")
+                    r["line_vwap"] = info.get("vwap")
+                    r["line_vol"] = info.get("volume")
+        except Exception:
+            pass
     ranked = rank_watchlist(results)
     alloc_extra = ""
     if args.alloc and results:

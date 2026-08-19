@@ -53,6 +53,20 @@ def test_calendar_first_row():
     assert cal and cal["open"] == "09:30"
 
 
+def test_intraday_parses_l1_trade_vwap():
+    from tradingagents.dataflows import alpaca
+
+    payload = {"AAPL": {"latestTrade": {"t": "2026-08-18T14:30:00Z", "px": 310.25},
+                        "latestQuote": {"ap": 310.30, "bp": 310.20},
+                        "latestBar": {"t": "2026-08-18T14:30:00Z", "o": 309.0, "h": 311.0,
+                                     "l": 308.8, "c": 310.1, "v": 123456, "vw": 310.07}}}
+    with _patch(payload):
+        out = alpaca.get_intraday(["AAPL"])
+    assert out["AAPL"]["price"] == 310.25
+    assert out["AAPL"]["vwap"] == 310.07
+    assert out["AAPL"]["volume"] == 123456
+
+
 def test_no_credentials_no_http_call():
     from tradingagents.dataflows import alpaca_common
 
@@ -62,6 +76,40 @@ def test_no_credentials_no_http_call():
         out = alpaca_common.alpaca_get("stocks/AAPL/bars", {})
     assert out is None
     req.assert_not_called()
+
+
+def test_screener_intraday_columns(capsys):
+    """--intraday appends L1Px / VWAP1m / 1mVol columns."""
+    import scripts.value_screener as vs
+
+    def _route(method, *a, **k):
+        if method == "get_stock_data":
+            rows = ["Date,Open,High,Low,Close,Volume"]
+            price = 100.0
+            for i in range(240):
+                price += 0.2
+                rows.append(f"2026-01-{i%28+1:02d},{price:.2f},{price+3:.2f},{price-3:.2f},{price:.2f},5000000")
+            return "\n".join(rows) + "\n"
+        return "NO_DATA_AVAILABLE"
+
+    def _losers(*a, **k):
+        return [{"symbol": "AAPL", "name": "Apple Inc.", "cur_price": 210.5,
+                 "change_ratio": -0.01, "pe_ttm": 28.1, "market_cap": 3.2e12}]
+
+    snap = {"AAPL": {"latestTrade": {"t": "2026-08-18T14:30:00Z", "px": 210.6},
+                      "latestQuote": {"ap": 210.65, "bp": 210.55},
+                      "latestBar": {"t": "2026-08-18T14:30:00Z", "vw": 210.55,
+                                    "v": 1_234_567},
+                      "dailyBar": {"c": 210.0, "vw": 210.1, "v": 5_000_000}}}
+    with mock.patch.object(vs, "route_to_vendor", side_effect=_route),          mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+                    side_effect=_losers),          mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
+                    side_effect=_losers),          mock.patch("tradingagents.dataflows.alpaca_common.alpaca_credentials",
+                    return_value=("kid", "sec")),          mock.patch("tradingagents.dataflows.alpaca.alpaca_get",
+                    return_value=snap):
+        vs.main(["--universe", "top-losers", "-n", "1", "-d", "2026-01-02",
+                 "--min-mcap", "1e9", "--intraday"])
+    out = capsys.readouterr().out
+    assert "L1Px" in out and "VWAP1m" in out and "1mVol" in out
 
 
 def test_screener_ohlcv_falls_back_to_alpaca():
