@@ -68,4 +68,6 @@ this doc turns the framework into detectable *screening & risk signals*.
   daily + Alpaca 1m intraday where available.
 
 Status: implemented - module (`strategies/momentum.py`), screener `--scan momentum`,
-  Market Analyst tool `get_momentum_scan`; session-risk/journal steps remain on request.
+  Market Analyst tool `get_momentum_scan`; session gates (M4) + journal (M5) +
+  intraday confirmation (phase 4) implemented as well - see README "M1-M5
+  momentum day-trading" for the wiring and CLI flags.

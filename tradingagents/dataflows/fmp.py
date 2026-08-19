@@ -64,6 +64,18 @@ def get_historical_prices(symbol: str) -> "list | None":
     return None
 
 
+def get_company_profile(symbol: str) -> "dict | None":
+    """Company profile: market cap, public float, shares outstanding.
+
+    Feeds the momentum low-float pillar (Strategies/momentum_day_trading.md).
+    None when the key is missing or the call fails (optional enrichment).
+    """
+    data = fmp_get("profile", {"symbol": symbol})
+    if isinstance(data, list) and data:
+        return data[0]
+    return None
+
+
 def normalized_score(symbol: str, years: int = 5) -> "dict | None":
     """5y median-margin normalized EBIT + EV/NEBIT + 5y PE percentile.
 

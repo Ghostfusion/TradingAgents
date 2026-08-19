@@ -483,7 +483,7 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         out = route_to_vendor("get_stock_data", ticker, start, end) or ""
-        closes, highs, lows, volumes = [], [], [], []
+        closes, opens, highs, lows, volumes = [], [], [], [], []
         for line in out.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or line.lower().startswith("date,"):
@@ -493,6 +493,7 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
                 continue
             try:
                 closes.append(float(parts[4]))
+                opens.append(float(parts[1]))
                 highs.append(float(parts[2]))
                 lows.append(float(parts[3]))
                 volumes.append(float(parts[5]))
@@ -516,10 +517,11 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
                     "highs": [float(b["h"]) for b in bars],
                     "lows": [float(b["l"]) for b in bars],
                     "volumes": [float(b["v"]) for b in bars],
+                    "opens": [float(b["o"]) for b in bars],
                 }
     except Exception:
         pass
-    return {"closes": [], "highs": [], "lows": [], "volumes": []}
+    return {"closes": [], "opens": [], "highs": [], "lows": [], "volumes": []}
 
 
 def _fetch_closes(ticker: str, days: int = 320) -> list:
@@ -685,6 +687,10 @@ def main(argv: "list[str] | None" = None) -> int:
                         help="folder for the saved watchlist markdown (finish timestamp)")
     parser.add_argument("--rank", choices=("value", "composite"), default=None,
                         help="ranking mode; default reads config enable_composite_rank")
+    parser.add_argument("--enable-float", action="store_true",
+                        help="fetch public float (FMP/yfinance) for the momentum low-float pillar")
+    parser.add_argument("--journal", default=None, metavar="PATH",
+                        help="append momentum candidate rows to a JSONL journal and print its stats")
     parser.add_argument("--alloc", action="store_true",
                         help="append a capped allocation plan block")
     args = parser.parse_args(argv)
@@ -696,6 +702,7 @@ def main(argv: "list[str] | None" = None) -> int:
         args.market = "US"
 
     mover_meta: dict = {}
+    float_cache: dict = {}
     scan_meta: dict = {}
     tickers = list(args.tickers)
     if args.universe in ("top-losers", "heat-proxy"):
@@ -763,28 +770,57 @@ def main(argv: "list[str] | None" = None) -> int:
                                     first_pullback as _fp,
                                     pillars as _pill,
                                     rvol as _rvol,
+                                    session_flags as _sess,
                                 )
 
                                 closes = ohlcv["closes"]
                                 vols = ohlcv["volumes"]
+                                opens = ohlcv.get("opens") or []
                                 rv = _rvol(vols) if vols else None
+                                fl = float_cache.get(symbol)
+                                if args.enable_float and fl is None:
+                                    try:
+                                        from tradingagents.dataflows.float_shares import (
+                                            fetch_float_shares,
+                                        )
+
+                                        fl = fetch_float_shares(symbol)
+                                        float_cache[symbol] = fl
+                                    except Exception:
+                                        fl = None
                                 pill = _pill(
                                     close=price,
                                     day_volume=vols[-1] if vols else None,
                                     prev_close=closes[-2] if len(closes) >= 2 else None,
-                                    day_open=None,
+                                    day_open=opens[-1] if opens else None,
                                     rv=rv,
+                                    float_shares=fl,
                                 )
-                                pull = _fp(closes, ohlcv["highs"], ohlcv["lows"], vols)                                        if len(closes) >= 10 else {"candidate": False}
+                                pull = _fp(closes, ohlcv["highs"], ohlcv["lows"],
+                                           vols, opens=opens or None)
+                                session = _sess(peak_pnl=None, current_pnl=None)
                                 scan_meta[symbol]["momentum"] = {
                                     "pillars": {kk: bool(vv) for kk, vv in pill.items()
                                                 if vv is not None},
                                     "pullback": bool(pull.get("candidate")),
                                     "mom_rr": pull.get("rr"),
                                 }
-                                if not (pill.get("rvol") and pill.get("high_volume")
-                                        and pill.get("price_band")):
+                                # 5-pillar pre-filter: skip when any *known*
+                                # pillar fails; unknown pillars (no data)
+                                # keep the symbol so scans stay honest.
+                                if any(v is False for v in pill.values()):
                                     continue
+                                if args.journal and pull.get("candidate"):
+                                    from tradingagents.strategies.journal import (
+                                        record_momentum_trade,
+                                    )
+
+                                    record_momentum_trade(
+                                        args.journal, symbol, date=args.date,
+                                        pillars=pill, pullback=pull,
+                                        session=session, price=price,
+                                        note="screener momentum candidate",
+                                    )
                             except Exception:
                                 pass
                     if args.min_avg_vol:
@@ -923,6 +959,13 @@ def main(argv: "list[str] | None" = None) -> int:
                 markdown = markdown.rstrip() + "\n\n" + note + "\n"
     except Exception:
         pass
+    if args.journal and args.scan == "momentum":
+        try:
+            from tradingagents.strategies.journal import format_summary, momentum_stats
+
+            print(format_summary(momentum_stats(args.journal)))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("momentum journal summary failed: %s", exc)
     saved = save_watchlist(markdown, args.out_dir)
     print(f"[screener] saved watchlist to {saved}")
     return 0

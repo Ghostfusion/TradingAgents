@@ -402,7 +402,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (799 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (808 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -448,13 +448,43 @@ only after validating in the evaluation harness:
   `scripts/orderflow_evaluate.py` for ledger-based evaluation (win-rate, mean alpha). - sentiment velocity, mention spikes,
   N-seed consensus (majority/blend); `enable_sentiment`, `consensus_seeds`.
 
+- **M1-M5 momentum day-trading** (Warrior Trading 5-step playbook, spec:
+  `Strategies/momentum_day_trading.md`) - `tradingagents/strategies/momentum.py`
+  + `tradingagents/strategies/journal.py`, analysis-only (no execution):
+  - **M1 stock selection** (`pillars`) - RVOL vs 50-day avg volume, total
+    volume, open-gap vs prior close, $2-$20 price band, float < 20M shares.
+    Each pillar is True (pass) / False (measured fail) / None (no data) -
+    missing data never fails a scan and the screener/tool gate on *known*
+    failures only. The float pillar is fed by `dataflows/float_shares.py`
+    (FMP company profile, guarded yfinance fallback).
+  - **M2 entry pattern** (`first_pullback`) - initial surge, pullback that
+    retraces <= 50%, holds the 9-EMA and VWAP, trigger = first new-high candle
+    above the pullback high, R/R >= 2 with a hard stop at the pullback low;
+    rulebook extras when opens are available: light-red/heavy-green volume
+    (`volume_ok`) and no prominent topping tails (`tail_ok`).
+  - **M3 execution** (`psych_level`) - next whole/half-dollar level for
+    psychological support/resistance.
+  - **M4 session gates** (`session_flags` + `past_optimal_window`) - 50%
+    peak give-back, max daily loss, ~10:00 ET window cutoff, missing-setups
+    flag, folded into a single `walk_away` verdict.
+  - **M5 journal & analytics** (`strategies/journal.py`) - JSON-lines paper
+    ledger (`record_momentum_trade`, `momentum_stats`, `format_summary`):
+    win/loss rate, avg R, per-pillar pass rates, FOMO / session-flag counts.
+  - **Intraday confirmation** (`intraday_pullback`) - same pattern on 1m/5m
+    bars with a session-VWAP hold (bar `vw` preferred, else typical price).
+  Wired: Market Analyst tool `get_momentum_scan` (daily pillars + pullback +
+  intraday block), screener `--scan momentum` with `--enable-float`
+  low-float enrichment and `--journal PATH` (records candidates, prints
+  ledger stats at the end). Live-only enrichment toggles:
+  `TRADINGAGENTS_MOMENTUM_OFFLINE=1` and `TRADINGAGENTS_MOMENTUM_NO_INTRADAY=1`.
+
 - **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
   attaches regime/sizing/momentum overlays to the final state and records
   realized outcomes to `strategy_ledger.jsonl` (**enabled by default**;
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (799 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (808 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing
