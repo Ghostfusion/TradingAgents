@@ -10,6 +10,13 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Alpaca wired into the analyst graph (analysis-only)** -
+  `get_market_snapshot_alpaca` tool on the Market Analyst ToolNode;
+  `resolve_instrument_context` appends a one-line live 1m snapshot for
+  every analyst (one call per run); enabled via `enable_alpaca`.
+  Rate-limit aware for the free tier: global pacing (~171 req/min under
+  the 200/min cap), batch symbol queries, Retry-After/X-RateLimit-Reset
+  backoff on 429.
 - **`--intraday` watchlist columns** - with Alpaca keys set, `--intraday`
   appends live **L1Px / VWAP1m / 1mVol** per symbol from the snapshots
   endpoint (latest trade price, 1m-bar VWAP & volume); live-verified

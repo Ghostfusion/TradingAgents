@@ -23,6 +23,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
     "TRADINGAGENTS_ALPACA_API_SECRET": "alpaca_api_secret",
+    "TRADINGAGENTS_ENABLE_ALPACA": "enable_alpaca",
     # Moomoo OpenAPI: connection + headless autostart of the local OpenD gateway.
     # Credentials are never stored here — OpenD holds the logged-in session.
     # ``moomoo_account`` is only the moomoo ID used with ``-login_by_remember=1``
@@ -203,6 +204,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         "alpaca_api_key_id": None,   # Alpaca market-data analyst (alpaca.py)
         "alpaca_api_secret": None,  # Alpaca market-data analyst (alpaca.py)
+        "enable_alpaca": False,   # Alpaca market-data (screener + analyst tool)
         # Moomoo OpenAPI (local OpenD gateway, quote-only).
         "moomoo_host": "127.0.0.1",
         "moomoo_port": 11111,

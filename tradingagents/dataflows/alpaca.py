@@ -72,6 +72,23 @@ def get_intraday(symbols: list) -> "dict | None":
     return out
 
 
+def intraday_context(ticker: str) -> str:
+    """One-line Alpaca intraday context for a ticker (used in instrument ctx)."""
+    try:
+        info = (get_intraday([ticker]) or {}).get(ticker) or {}
+        price = info.get("price")
+        if price is None:
+            return ""
+        parts = [f"alpaca intraday: price={price}"]
+        if info.get("vwap") is not None:
+            parts.append(f"vwap={info['vwap']}")
+        if info.get("volume") is not None:
+            parts.append(f"vol={info['volume']}")
+        return " | ".join(parts)
+    except Exception:
+        return ""
+
+
 def get_calendar(start: "str | None" = None,
                  end: "str | None" = None) -> "dict | None":
     params = {}

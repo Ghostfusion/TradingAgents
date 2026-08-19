@@ -67,6 +67,41 @@ def test_intraday_parses_l1_trade_vwap():
     assert out["AAPL"]["volume"] == 123456
 
 
+def test_intraday_context_line():
+    from tradingagents.dataflows import alpaca
+
+    payload = {"AAPL": {"latestTrade": {"t": "2026-08-18T14:30:00Z", "px": 310.25},
+                        "latestBar": {"t": "x", "vw": 310.0, "v": 120000}}}
+    with _patch(payload):
+        line = alpaca.intraday_context("AAPL")
+    assert line.startswith("alpaca intraday:")
+    assert "310.25" in line and "310.0" in line
+
+
+def test_market_snapshot_tool_formats():
+    from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
+
+    payload = {"AAPL": {"latestTrade": {"px": 310.25},
+                "latestBar": {"vw": 310.0, "v": 120000}},
+               "MSFT": {}}
+    with _patch(payload):
+        out = get_market_snapshot_alpaca.func("AAPL,MSFT")
+    assert "AAPL: price=310.25" in out
+    assert "MSFT: no intraday data" in out
+
+
+def test_rate_limit_pacing_sleeps():
+    from tradingagents.dataflows import alpaca_common as A
+
+    slept = []
+    real_sleep = __import__("time").sleep
+    def fake_sleep(sec): slept.append(sec)
+    with mock.patch.object(A.time, "sleep", side_effect=fake_sleep):
+        A._pace()
+        A._pace()  # second call must back off by the min-interval
+    assert len(slept) >= 1
+
+
 def test_no_credentials_no_http_call():
     from tradingagents.dataflows import alpaca_common
 

@@ -11,6 +11,8 @@ import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
 # Import the abstract tool methods from agent_utils
+
+from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_analyst_ratings,
@@ -234,6 +236,7 @@ class TradingAgentsGraph:
                     get_short_interest,
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,
+                    get_market_snapshot_alpaca,
                 ]
             ),
             "social": ToolNode(
@@ -425,7 +428,20 @@ class TradingAgentsGraph:
         graph regardless of entry point.
         """
         identity = resolve_instrument_identity(ticker)
-        return build_instrument_context(ticker, asset_type, identity)
+        context = build_instrument_context(ticker, asset_type, identity)
+        # Analysis-only Alpaca enrichment: one live 1m snapshot line shared by
+        # every analyst via the instrument context.
+        try:
+            from tradingagents.dataflows.config import get_config
+            from tradingagents.dataflows.alpaca import intraday_context as _intraday_ctx
+
+            if get_config().get("enable_alpaca"):
+                extra = _intraday_ctx(ticker)
+                if extra:
+                    context = f"{context}\n{extra}"
+        except Exception:
+            pass
+        return context
 
     def _run_signature(self, asset_type: str) -> str:
         """Graph-shape inputs that must invalidate a checkpoint if changed.
