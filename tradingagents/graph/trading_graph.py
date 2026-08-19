@@ -1,5 +1,6 @@
 # TradingAgents/graph/trading_graph.py
 
+import contextlib
 import json
 import logging
 import os
@@ -10,10 +11,6 @@ from typing import Any
 import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
-# Import the abstract tool methods from agent_utils
-
-from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
-from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_analyst_ratings,
@@ -43,7 +40,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_verified_market_snapshot,
     resolve_instrument_identity,
 )
+
+# Import the abstract tool methods from agent_utils
+from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -405,7 +406,7 @@ class TradingAgentsGraph:
                 alpha_return=alpha,
                 benchmark_name=benchmark,
             )
-            self._maybe_record_reflection_outcome(ticker, entry['date'], alpha)
+            self._maybe_record_reflection_outcome(ticker, entry["date"], alpha)
             updates.append(
                 {
                     "ticker": ticker,
@@ -434,8 +435,8 @@ class TradingAgentsGraph:
         # Analysis-only Alpaca enrichment: one live 1m snapshot line shared by
         # every analyst via the instrument context.
         try:
-            from tradingagents.dataflows.config import get_config
             from tradingagents.dataflows.alpaca import intraday_context as _intraday_ctx
+            from tradingagents.dataflows.config import get_config
 
             if get_config().get("enable_alpaca"):
                 extra = _intraday_ctx(ticker)
@@ -497,6 +498,14 @@ class TradingAgentsGraph:
         try:
             return self._run_graph(company_name, trade_date, asset_type=asset_type)
         finally:
+            # Release this thread's moomoo gateway connection while the process
+            # is healthy: the SDK's background threads tear down cleanly here,
+            # whereas closing at interpreter exit can block on the dead recv
+            # loop and hang the process (see dataflows/moomoo._close_all_ctxs).
+            with contextlib.suppress(Exception):
+                from tradingagents.dataflows.moomoo import close_context as _close_moomoo
+
+                _close_moomoo()
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
@@ -641,6 +650,7 @@ class TradingAgentsGraph:
                 build_strategy_overlays,
                 fold_flow_into_overlay,
             )
+
             overlay = build_strategy_overlays(self.config, closes)
             if self.config.get("enable_orderflow"):
                 try:
@@ -653,15 +663,34 @@ class TradingAgentsGraph:
                             weekly_nets=flow_payload.get("weekly_nets"),
                             thresholds={
                                 "distribution_threshold": float(
-                                    self.config.get(
-                                        "orderflow_distribution_threshold", 0.7
-                                    )
+                                    self.config.get("orderflow_distribution_threshold", 0.7)
                                 )
                             },
                         )
                         overlay = fold_flow_into_overlay(overlay, flow_summary)
                 except Exception as flow_exc:
                     logger.warning("orderflow fetch skipped: %s", flow_exc)
+            # B1: scheduled-catalyst overlay (Phase-4 PEAD wiring) — `enable_events`.
+            catalyst_snapshot = None
+            if self.config.get("enable_events"):
+                try:
+                    from tradingagents.strategies.catalyst import (
+                        build_catalyst_snapshot,
+                        fetch_catalyst_data,
+                        fold_catalyst_into_overlay,
+                    )
+
+                    trade_date_s = str(
+                        final_state.get("trade_date") or datetime.now().strftime("%Y-%m-%d")
+                    )
+                    cat_data = fetch_catalyst_data(ticker, trade_date_s)
+                    if cat_data is not None:
+                        catalyst_snapshot = build_catalyst_snapshot(
+                            cat_data, trade_date_s, self.config
+                        )
+                        overlay = fold_catalyst_into_overlay(overlay, catalyst_snapshot)
+                except Exception as cat_exc:
+                    logger.warning("catalyst overlay skipped: %s", cat_exc)
             if self.config.get("enable_position_contract"):
                 try:
                     from tradingagents.strategies.contract import (
@@ -675,9 +704,12 @@ class TradingAgentsGraph:
                     agreement = self._agreement_from_state(final_state)
                     calibrated_p = self._calibrated_p()
                     contract = build_position_contract(
-                        cfg=self.config, closes=closes,
-                        flow_summary=flow_use, agreement=agreement,
+                        cfg=self.config,
+                        closes=closes,
+                        flow_summary=flow_use,
+                        agreement=agreement,
                         calibrated_p=calibrated_p,
+                        catalyst_scale=(catalyst_snapshot or {}).get("scale"),
                     )
                     if contract is not None:
                         final_state["position_contract"] = (
@@ -692,11 +724,11 @@ class TradingAgentsGraph:
                     logger.warning("position contract skipped: %s", contract_exc)
             if self.config.get("enable_risk_governor"):
                 try:
+                    from tradingagents.strategies.book_risk import cvar as book_cvar
                     from tradingagents.strategies.risk_governor import (
                         build_risk_snapshot,
                         govern,
                     )
-                    from tradingagents.strategies.book_risk import cvar as book_cvar
 
                     size_pct = None
                     stop_pct = None
@@ -712,36 +744,45 @@ class TradingAgentsGraph:
                             size_pct = float(m.group(1)) / 100.0
                     rets = None
                     if closes:
-                        rets = __import__("tradingagents.strategies.contract",
-                                          fromlist=["_log_returns"])._log_returns(closes)
+                        rets = __import__(
+                            "tradingagents.strategies.contract", fromlist=["_log_returns"]
+                        )._log_returns(closes)
                     cvar_pct = None
                     if rets and len(rets) >= 5:
                         cv = book_cvar(rets, alpha=0.05)
                         cvar_pct = abs(cv) if cv is not None else None
                     verdict = govern(
-                        size_pct, self.config,
+                        size_pct,
+                        self.config,
                         cvar_pct=cvar_pct,
                         drawdown_pct=self.config.get("risk_max_drawdown_pct"),
                     )
                     final_state["risk_gate"] = verdict
                     if verdict["verdict"] in ("WARN", "REJECT"):
                         final_state["risk_snapshot"] = build_risk_snapshot(
-                            verdict, size_pct, stop_pct, cvar_pct)
+                            verdict, size_pct, stop_pct, cvar_pct
+                        )
                     if verdict["verdict"] == "REJECT":
                         final_state["risk_halt"] = True
                     if self.config.get("risk_audit_enabled"):
                         import json as _json
 
-                        base = Path(self.config.get("data_cache_dir",
-                                                    "~/.tradingagents")).expanduser()
+                        base = Path(
+                            self.config.get("data_cache_dir", "~/.tradingagents")
+                        ).expanduser()
                         audit = base / "risk_audit.jsonl"
                         audit.parent.mkdir(parents=True, exist_ok=True)
                         with audit.open("a", encoding="utf-8") as fh:
-                            fh.write(_json.dumps({
-                                "ticker": ticker,
-                                "verdict": verdict["verdict"],
-                                "reasons": verdict.get("reasons", []),
-                            }) + "\n")
+                            fh.write(
+                                _json.dumps(
+                                    {
+                                        "ticker": ticker,
+                                        "verdict": verdict["verdict"],
+                                        "reasons": verdict.get("reasons", []),
+                                    }
+                                )
+                                + "\n"
+                            )
                 except Exception as risk_exc:
                     logger.warning("risk governor skipped: %s", risk_exc)
             if self.config.get("enable_computed_context"):
@@ -760,7 +801,7 @@ class TradingAgentsGraph:
                     snippet = build_computed_context(self.config, extra=extra)
                     if snippet:
                         final_state["computed_context"] = snippet
-                        overlay["context"] = (overlay.get("context", "") + " | " + snippet)
+                        overlay["context"] = overlay.get("context", "") + " | " + snippet
                 except Exception as ctx_exc:
                     logger.warning("computed context skipped: %s", ctx_exc)
         except Exception as exc:
@@ -781,10 +822,8 @@ class TradingAgentsGraph:
                 continue
             parts = line.split(",")
             if len(parts) >= 5:
-                try:
+                with contextlib.suppress(ValueError):
                     closes.append(float(parts[4]))
-                except ValueError:
-                    pass
         return closes
 
     def _maybe_record_reflection_outcome(self, ticker, trade_date, alpha):
@@ -836,6 +875,7 @@ class TradingAgentsGraph:
             for ln in cal_file.read_text(encoding="utf-8").splitlines():
                 if ln.strip():
                     import json
+
                     rows.append(json.loads(ln))
             _ = fit_buckets(rows)  # warm the table; used at decision-time later
             return None  # identity until confidence is stamped into the ledger

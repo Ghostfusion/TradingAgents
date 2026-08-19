@@ -44,6 +44,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
+    "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
@@ -202,9 +203,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         },
         "finnhub_api_key": None,
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
-        "alpaca_api_key_id": None,   # Alpaca market-data analyst (alpaca.py)
+        "alpaca_api_key_id": None,  # Alpaca market-data analyst (alpaca.py)
         "alpaca_api_secret": None,  # Alpaca market-data analyst (alpaca.py)
-        "enable_alpaca": False,   # Alpaca market-data (screener + analyst tool)
+        "enable_alpaca": False,  # Alpaca market-data (screener + analyst tool)
         # Moomoo OpenAPI (local OpenD gateway, quote-only).
         "moomoo_host": "127.0.0.1",
         "moomoo_port": 11111,
@@ -216,53 +217,58 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Researched strategies (enhancement_plan.md - Phase 0..6). All off by
         # default; each phase is a pure module under tradingagents/strategies/
         # with offline unit tests (tests/test_strategies_*).
-        "evaluate_cost_bps": 10,      # Phase 0: per-trade cost in basis points
-        "enable_regime": False,       # Phase 1: regime gate (vol/trend/HMM)
-        "position_sizing": "kelly",   # Phase 2: kelly | vol_target | flat
-        "target_vol": 0.15,           # Phase 2: annualized vol target
-        "enable_factors": False,      # Phase 3: value+momentum composite
-        "enable_events": False,       # Phase 4: PEAD / catalyst sizing
-        "enable_reflection": True,    # Phase 5: post-trade analyst critique
-        "enable_sentiment": False,    # Phase 6: sentiment velocity
+        "evaluate_cost_bps": 10,  # Phase 0: per-trade cost in basis points
+        "enable_regime": False,  # Phase 1: regime gate (vol/trend/HMM)
+        "position_sizing": "kelly",  # Phase 2: kelly | vol_target | flat
+        "target_vol": 0.15,  # Phase 2: annualized vol target
+        "enable_factors": False,  # Phase 3: value+momentum composite
+        "enable_events": False,  # Phase 4: PEAD / catalyst sizing
+        # B1 scheduled-catalyst overlay tuning (used when enable_events is on).
+        "catalyst_window_days": 5,  # earnings within N days -> scale down
+        "catalyst_baseline_move": 0.02,  # baseline expected move for the penalty
+        "catalyst_macro_window_days": 3,  # HIGH macro events within N days
+        "catalyst_macro_scale": 0.6,  # multiplier per imminent HIGH macro event
+        "catalyst_fed_window_days": 10,  # FOMC within N days
+        "catalyst_fed_scale": 0.6,  # multiplier when FOMC is imminent
+        "catalyst_miss_scale": 0.5,  # last earnings miss during earnings window
+        "catalyst_scale_floor": 0.25,  # never scale below this via catalysts
+        "enable_reflection": True,  # Phase 5: post-trade analyst critique
+        "enable_sentiment": False,  # Phase 6: sentiment velocity
         "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)
-        "enable_orderflow": False,   # L1-L4: capital-flow signals + flow-scaled sizing
+        "enable_orderflow": False,  # L1-L4: capital-flow signals + flow-scaled sizing
         "orderflow_distribution_threshold": 0.7,
         # Decision hardening (decision_hardening_spec.md): compute, don’t narrate.
         "enable_position_contract": False,  # G1: deterministic size/stop
-        "risk_per_trade": 0.01,              # risk budget per trade (G1)
-        "max_position_pct": 0.30,             # portfolio cap (G1)
-        "atr_mult": 2.0,                      # ATR stop multiple (G1)
-        "position_odds": 1.0,                 # win/loss payoff (G1)
-        "kelly_fraction": 0.25,               # quarter-Kelly (G1)
-        "enable_calibration": False,          # G2: bucket win-rates from ledger
-        "calibration_min_n": 5,               # min samples per bucket (G2)
-        "enable_agreement": False,            # G3: computed consensus / agreement
-        "enable_threshold_gate": False,       # G5: require PBO-clean tuning
+        "risk_per_trade": 0.01,  # risk budget per trade (G1)
+        "max_position_pct": 0.30,  # portfolio cap (G1)
+        "atr_mult": 2.0,  # ATR stop multiple (G1)
+        "position_odds": 1.0,  # win/loss payoff (G1)
+        "kelly_fraction": 0.25,  # quarter-Kelly (G1)
+        "enable_calibration": False,  # G2: bucket win-rates from ledger
+        "calibration_min_n": 5,  # min samples per bucket (G2)
+        "enable_agreement": False,  # G3: computed consensus / agreement
+        "enable_threshold_gate": False,  # G5: require PBO-clean tuning
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
-        "enable_composite_rank": False,   # V2: composite (value+momentum) ranking
-        "enable_exits": False,             # V4: ATR exits / rebalance hints
-        "breakeven_atr": 1.0,              # V4: stop-to-breakeven cushion (ATRs)
-        "target_atr": 4.0,                 # V4: profit target multiple
-        "sector_cap_limit": 0.35,          # V3: max single-sector weight
-        "max_name_weight": 0.25,           # V3: max single-name weight
-        "max_book_names": 10,              # V3: minimum names for diversification
+        "enable_composite_rank": False,  # V2: composite (value+momentum) ranking
+        "enable_exits": False,  # V4: ATR exits / rebalance hints
+        "breakeven_atr": 1.0,  # V4: stop-to-breakeven cushion (ATRs)
+        "target_atr": 4.0,  # V4: profit target multiple
+        "sector_cap_limit": 0.35,  # V3: max single-sector weight
+        "max_name_weight": 0.25,  # V3: max single-name weight
+        "max_book_names": 10,  # V3: minimum names for diversification
         # Risk governor (risk_management_plan.md): deterministic risk gate.
         "enable_risk_governor": False,
-        "risk_max_position_pct": 0.45,     # R0: book cap
+        "risk_max_position_pct": 0.45,  # R0: book cap
         "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget
-        "risk_max_drawdown_pct": 0.10,       # R0/R2: realized drawdown stop
-        "risk_stress_shock_pct_1": -10.0,    # R2: scenario shock 1 (%)
-        "risk_stress_shock_pct_2": -30.0,    # R2: scenario shock 2 (%)
-        "risk_audit_enabled": True,          # R4: risk_audit.jsonl
+        "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop
+        "risk_stress_shock_pct_1": -10.0,  # R2: scenario shock 1 (%)
+        "risk_stress_shock_pct_2": -30.0,  # R2: scenario shock 2 (%)
+        "risk_audit_enabled": True,  # R4: risk_audit.jsonl
         # Moomoo connection guard (parallel batch): cap open gateway contexts
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit
         "risk_compact_report": False,  # R1b: verdict-only 4_risk/ instead of chat transcripts
-
-
-
-
-        "consensus_seeds": 1,         # Phase 6: LLM samples for consensus; >1 enables
+        "consensus_seeds": 1,  # Phase 6: LLM samples for consensus; >1 enables
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

@@ -58,6 +58,12 @@ def _isolate_config():
     yield
     config_module.reset_config()
     vendor_cache.clear()
+    # Close any real moomoo OpenQuoteContext a test created. The SDK's
+    # background threads only tear down while the process is healthy; contexts
+    # left open until interpreter exit hang the run for minutes.
+    from tradingagents.dataflows.moomoo import _close_all_ctxs
+
+    _close_all_ctxs()
 
 
 @pytest.fixture(autouse=True)

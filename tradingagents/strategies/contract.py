@@ -15,12 +15,12 @@ from dataclasses import dataclass, field
 @dataclass
 class PositionContract:
     size_pct: float
-    stop_loss: "float | None"
+    stop_loss: float | None
     stop_pct: float
-    reason_parts: "list[str]" = field(default_factory=list)
-    breakeven_stop: "float | None" = None
-    target: "float | None" = None
-    exit_note: "str | None" = None
+    reason_parts: list[str] = field(default_factory=list)
+    breakeven_stop: float | None = None
+    target: float | None = None
+    exit_note: str | None = None
 
     def reason(self) -> str:
         return "; ".join(self.reason_parts) if self.reason_parts else "no budget bound"
@@ -40,8 +40,12 @@ def _log_returns(closes) -> list:
 
 def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
     """ATR from H/L when present; else a close-to-close range proxy."""
-    ok = (high is not None and low is not None and len(high) == len(closes)
-          and len(low) == len(closes))
+    ok = (
+        high is not None
+        and low is not None
+        and len(high) == len(closes)
+        and len(low) == len(closes)
+    )
     if ok:
         from tradingagents.strategies.size import atr
 
@@ -56,11 +60,17 @@ def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
     return avg * closes[-1]
 
 
-def build_position_contract(decision=None, cfg=None, closes=None, high=None,
-                            low=None, flow_summary=None,
-                            agreement: "float | None" = None,
-                            calibrated_p: "float | None" = None
-                            ) -> "PositionContract | None":
+def build_position_contract(
+    decision=None,
+    cfg=None,
+    closes=None,
+    high=None,
+    low=None,
+    flow_summary=None,
+    agreement: float | None = None,
+    calibrated_p: float | None = None,
+    catalyst_scale: float | None = None,
+) -> PositionContract | None:
     """Compute the authoritative size + stop from config budgets.
 
     cfg keys: risk_per_trade (default 0.01), max_position_pct (0.30),
@@ -111,12 +121,19 @@ def build_position_contract(decision=None, cfg=None, closes=None, high=None,
     if agree < 1.0:
         reasons.append(f"agreement={agree:.2f}")
 
-    sized = min(size_base * vol_s * flow_s * agree, max_pct)
+    cat_s = 1.0
+    if catalyst_scale is not None:
+        cat_s = _clamp(float(catalyst_scale), 0.0, 1.0)
+        if cat_s < 1.0:
+            reasons.append(f"catalyst_scale={cat_s:.2f}")
+
+    sized = min(size_base * vol_s * flow_s * agree * cat_s, max_pct)
     be_stop = None
     target = None
     if cfg.get("enable_exits") and a > 0:
         from tradingagents.strategies.exits import (
-            stop_to_breakeven, target_level,
+            stop_to_breakeven,
+            target_level,
         )
 
         be_stop = stop_to_breakeven(last, a, cushion_atr=float(cfg.get("breakeven_atr", 1.0)))

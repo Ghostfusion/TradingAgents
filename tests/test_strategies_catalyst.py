@@ -1,0 +1,330 @@
+"""B1 scheduled-catalyst overlay unit tests (offline, deterministic)."""
+
+import pytest
+
+from tradingagents.strategies.catalyst import (
+    apply_catalyst_scale,
+    build_catalyst_snapshot,
+    calendar_days_between,
+    fed_imminence,
+    fetch_catalyst_data,
+    fold_catalyst_into_overlay,
+    implied_move_from_history,
+    last_earnings_surprise,
+    macro_imminence,
+    next_earnings,
+    parse_date,
+)
+
+
+def _earnings_rows():
+    return [
+        {"date": "2026-06-20", "eps_estimate": 1.00, "eps_actual": 1.10},  # beat
+        {"date": "2026-08-24", "eps_estimate": 1.05, "eps_actual": None},  # upcoming
+    ]
+
+
+def _move_history():
+    return [
+        {"period_text": "2026/Q3", "predict_vola_ratio_newest": 4.2},
+        {"period_text": "2026/Q2", "predict_vola_ratio_newest": 3.1},
+    ]
+
+
+def _macro_events():
+    return [
+        {"title": "CPI", "timestamp": "2026-08-18", "star": "HIGH"},
+        {"title": "Jobless Claims", "timestamp": "2026-08-20", "star": "MEDIUM"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
+
+
+def test_parse_date_formats():
+    assert parse_date("2026-08-19").strftime("%Y-%m-%d") == "2026-08-19"
+    assert parse_date("08/19/2026").strftime("%Y-%m-%d") == "2026-08-19"
+    assert parse_date(None) is None
+    assert parse_date("garbage") is None
+
+
+def test_calendar_days_between():
+    assert calendar_days_between("2026-08-01", "2026-08-10") == 9
+    assert calendar_days_between("2026-08-10", "2026-08-01") == -9
+    assert calendar_days_between("bad", "2026-08-10") == -1
+
+
+def test_last_earnings_surprise_picks_most_recent():
+    res = last_earnings_surprise(_earnings_rows())
+    assert res is not None
+    assert res["side"] == "beat"
+    assert res["date"] == "2026-06-20"
+    assert res["surprise"] == pytest.approx(0.10)
+
+
+def test_last_earnings_surprise_handles_missing():
+    assert last_earnings_surprise([]) is None
+    assert (
+        last_earnings_surprise([{"date": "2026-01-01", "eps_estimate": None, "eps_actual": None}])
+        is None
+    )
+
+
+def test_next_earnings_forward_window():
+    res = next_earnings(_earnings_rows(), "2026-08-10")
+    assert res is not None
+    assert res["days_until"] == 14
+    assert res["date"] == "2026-08-24"
+
+
+def test_next_earnings_filters_past():
+    assert next_earnings(_earnings_rows(), "2026-08-25") is None
+
+
+def test_implied_move_percent_to_fraction():
+    assert implied_move_from_history(_move_history()) == pytest.approx(0.042)
+    assert implied_move_from_history([]) is None
+
+
+def test_macro_imminence_counts_high_only():
+    res = macro_imminence(_macro_events(), "2026-08-15", window_days=3)
+    # CPI on 08-18 is 3 days out -> in window; claims is MEDIUM -> ignored.
+    assert res["count_high"] == 1
+    assert res["min_days"] == 3
+
+
+def test_fed_imminence_nearest_meeting():
+    rows = [
+        {"meeting_date": "2026-09-15", "target_range": "3.50-3.75%", "probability": 66.9},
+        {"meeting_date": "2026-09-15", "target_range": "3.75-4.00%", "probability": 33.1},
+        {"meeting_date": "2026-10-27", "target_range": "3.50-3.75%", "probability": 53.6},
+    ]
+    res = fed_imminence(rows, "2026-09-01", window_days=14)
+    assert res["days_until"] == 14
+    assert res["modal_prob"] == pytest.approx(66.9)
+
+
+# ---------------------------------------------------------------------------
+# Snapshot
+# ---------------------------------------------------------------------------
+
+
+def _full_data():
+    return {
+        "earnings_calendar": _earnings_rows(),  # next earnings 08-24 (within 5d default from 08-19)
+        "move_history": _move_history(),
+        "economic_calendar": _macro_events(),
+        "fed_watch": [
+            {"meeting_date": "2026-09-15", "target_range": "3.50-3.75%", "probability": 66.9},
+        ],
+    }
+
+
+def test_snapshot_earnings_window_scale_down():
+    snap = build_catalyst_snapshot(_full_data(), "2026-08-19", {"catalyst_window_days": 5})
+    assert snap["verdict"] == "earnings-window"
+    assert snap["scale"] < 1.0
+    assert any("earnings 2026-08-24" in r for r in snap["reasons"])
+
+
+def test_snapshot_no_catalyst_neutral():
+    snap = build_catalyst_snapshot(
+        {"earnings_calendar": [], "move_history": [], "economic_calendar": [], "fed_watch": []},
+        "2026-08-19",
+        {},
+    )
+    assert snap["verdict"] == "no-imminent-catalyst"
+    assert snap["scale"] == pytest.approx(1.0)
+    assert snap["reasons"] == []
+
+
+def test_snapshot_macro_verdict():
+    data = {
+        "earnings_calendar": [],
+        "move_history": [],
+        # CPI on 08-20 is within the 3-day macro window from 08-19
+        "economic_calendar": [
+            {"title": "CPI", "timestamp": "2026-08-20", "star": "HIGH"},
+        ],
+        "fed_watch": [],
+    }
+    snap = build_catalyst_snapshot(
+        data, "2026-08-19", {"catalyst_macro_window_days": 3, "catalyst_macro_scale": 0.6}
+    )
+    assert snap["verdict"] == "macro-catalyst"
+    assert snap["scale"] == pytest.approx(0.6)
+
+
+def test_snapshot_scale_floor_applied():
+    data = {
+        "earnings_calendar": [{"date": "2026-08-20", "eps_estimate": 1.0, "eps_actual": 0.4}],
+        "move_history": [{"predict_vola_ratio_newest": 40.0}],  # giant implied move
+        # last earnings is a big miss on 08-20 (past) -> miss_scale applied
+        "economic_calendar": [{"title": "CPI", "timestamp": "2026-08-20", "star": "HIGH"}],
+        "fed_watch": [{"meeting_date": "2026-08-22", "probability": 60.0}],
+    }
+    snap = build_catalyst_snapshot(data, "2026-08-19", {"catalyst_scale_floor": 0.3})
+    assert snap["scale"] <= 0.6001  # never above the smallest multiplier
+    assert snap["scale"] >= 0.3 - 1e-9  # floored
+    # a miss inside the earnings window contributes the miss multiplier
+    assert "miss" in " ".join(snap["reasons"])
+
+
+# ---------------------------------------------------------------------------
+# Overlay fold + contract scaling
+# ---------------------------------------------------------------------------
+
+
+def test_fold_multiplies_scale_and_stamps():
+    overlay = {"regime": "bull", "position_scale": 0.8, "context": "regime=bull"}
+    snap = {"verdict": "earnings-window", "scale": 0.5, "reasons": ["earnings in 3d"]}
+    out = fold_catalyst_into_overlay(overlay, snap)
+    assert out["position_scale"] == pytest.approx(0.4)
+    assert out["catalyst"]["verdict"] == "earnings-window"
+    assert "catalyst earnings-window" in out["context"]
+    # original untouched
+    assert overlay["position_scale"] == 0.8
+
+
+def test_fold_none_noop():
+    assert fold_catalyst_into_overlay(None, {"scale": 0.5}) is None
+    assert fold_catalyst_into_overlay({"position_scale": 1.0}, None)["position_scale"] == 1.0
+
+
+def test_apply_catalyst_scale_caps():
+    assert apply_catalyst_scale(0.20, {"scale": 0.5}) == pytest.approx(0.10)
+    assert apply_catalyst_scale(None, {"scale": 0.5}) is None
+    assert apply_catalyst_scale(0.20, None) == 0.20
+
+
+def test_contract_respects_catalyst_scale():
+    from tradingagents.strategies.contract import build_position_contract
+
+    closes = [100.0 + i for i in range(120)]
+    base = build_position_contract(cfg={}, closes=closes, calibrated_p=0.6)
+    scaled = build_position_contract(cfg={}, closes=closes, calibrated_p=0.6, catalyst_scale=0.5)
+    assert base is not None and scaled is not None
+    assert scaled.size_pct <= base.size_pct + 1e-9
+    assert any("catalyst_scale" in r for r in scaled.reason_parts)
+    assert not any("catalyst_scale" in r for r in base.reason_parts)
+
+
+# ---------------------------------------------------------------------------
+# Guarded live fetch
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_catalyst_data_unavailable_returns_none(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("OpenD down")
+
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._ensure_ctx", _boom)
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
+    assert fetch_catalyst_data("AAPL", "2026-08-19") is None
+
+
+def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
+    class FakeCtx:
+        def get_earnings_calendar(self, **kwargs):
+            from pandas import DataFrame
+
+            return 0, DataFrame(
+                {
+                    "code": ["US.AAPL"],
+                    "date": ["2026-08-24"],
+                    "eps_estimate": [1.0],
+                    "eps_actual": [None],
+                }
+            )
+
+        def get_financials_earnings_price_history(self, code):
+            from pandas import DataFrame
+
+            return 0, DataFrame({"predict_vola_ratio_newest": [3.9]})
+
+        def get_economic_calendar(self, **kwargs):
+            from pandas import DataFrame
+
+            return 0, DataFrame({"title": ["CPI"], "timestamp": ["2026-08-20"], "star": ["HIGH"]})
+
+        def get_fed_watch_target_rate(self):
+            from pandas import DataFrame
+
+            return 0, DataFrame({"meeting_date": ["2026-09-15"], "probability": [66.9]})
+
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._ensure_ctx", lambda: FakeCtx())
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
+    data = fetch_catalyst_data("AAPL", "2026-08-19")
+    assert data is not None
+    assert any(r["date"] == "2026-08-24" for r in data["earnings_calendar"])
+    assert data["move_history"] and data["move_history"][0]["predict_vola_ratio_newest"] == 3.9
+
+
+# ---------------------------------------------------------------------------
+# Graph wiring (enable_events gate)
+# ---------------------------------------------------------------------------
+
+
+def test_graph_overlay_wiring_enable_events(monkeypatch):
+    """_apply_strategy_overlays runs the catalyst fold when enable_events is on."""
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies import catalyst as cat_mod
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "enable_strategy_overlays": True,
+        "enable_events": True,
+        "enable_orderflow": False,
+        "enable_position_contract": False,
+        "enable_risk_governor": False,
+        "enable_computed_context": False,
+        "target_vol": 0.15,
+    }
+    closes = [100.0 + 0.2 * i for i in range(300)]
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+
+    snapshot = {"verdict": "earnings-window", "scale": 0.5, "reasons": ["earnings in 3d"]}
+    monkeypatch.setattr(cat_mod, "fetch_catalyst_data", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(cat_mod, "build_catalyst_snapshot", lambda *a, **k: snapshot)
+    monkeypatch.setattr(
+        cat_mod,
+        "fold_catalyst_into_overlay",
+        lambda overlay, snap: {
+            **overlay,
+            "catalyst": snap,
+            "position_scale": 0.5,
+            "context": "catalyst",
+        },
+    )
+
+    state = {"trade_date": "2026-08-19", "final_trade_decision": "Hold"}
+    out = graph._apply_strategy_overlays(state, "AAPL")
+    assert out["strategy_overlays"]["catalyst"]["verdict"] == "earnings-window"
+    assert out["strategy_overlays"]["position_scale"] == 0.5
+
+
+def test_graph_overlay_wiring_events_disabled(monkeypatch):
+    """enable_events off -> no catalyst key in the overlay."""
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies import catalyst as cat_mod
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "enable_strategy_overlays": True,
+        "enable_events": False,
+        "enable_orderflow": False,
+        "enable_position_contract": False,
+        "enable_risk_governor": False,
+        "enable_computed_context": False,
+        "target_vol": 0.15,
+    }
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: [100.0 + i for i in range(300)])
+    monkeypatch.setattr(
+        cat_mod,
+        "fetch_catalyst_data",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch")),
+    )
+    out = graph._apply_strategy_overlays({"trade_date": "2026-08-19"}, "AAPL")
+    assert "catalyst" not in (out.get("strategy_overlays") or {})

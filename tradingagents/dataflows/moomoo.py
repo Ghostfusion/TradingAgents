@@ -320,6 +320,34 @@ def _close_ctx():
             _live_ctxs.discard(ctx)
 
 
+def close_context():
+    """Public helper: close this thread's OpenQuoteContext (no-op when unused).
+
+    Call at the end of a run so the SDK's background threads tear down while
+    the process is healthy (closing at interpreter exit can block on the
+    now-dead receive loop).
+    """
+    _close_ctx()
+
+
+def _close_all_ctxs(timeout: float = 3.0):
+    """Close every live context; never blocks process exit.
+
+    ``ctx.close()`` performs a network round-trip that can block indefinitely
+    if the context's receive loop is already gone (interpreter shutdown). Each
+    close runs on a *daemon* thread joined with ``timeout``, so a stuck close
+    cannot hold the interpreter alive.
+    """
+    with _ctx_lock:
+        live = list(_live_ctxs)
+        _live_ctxs.clear()
+        _tls.moomoo_ctx = None
+    for ctx in live:
+        closer = threading.Thread(target=ctx.close, daemon=True)
+        closer.start()
+        closer.join(timeout)
+
+
 def _close_all_ctxs():
     """Close every live context (atexit). Batch workers hold one TCP connection
     per thread for the whole process; this releases them at interpreter exit."""

@@ -422,8 +422,21 @@ All config-gated, off by default:
   half-life weight, credibility factors, surprise z-score vs 30d baseline.
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
+- **B1 scheduled-catalyst overlay** (`tradingagents/strategies/catalyst.py`) -
+  deterministic catalyst sizing (the Phase-4 PEAD wiring). When `enable_events`
+  is on, the graph folds earnings (next print date + last surprise side +
+  market-implied move / IV crush), HIGH-importance economic events (CPI, FOMC,
+  payrolls, ...), and Fed-watch meetings into a `0..1` position scale and a
+  verdict (`earnings-window` / `macro-catalyst` / `fed-catalyst` /
+  `no-imminent-catalyst`). The scale multiplies the overlay's `position_scale`
+  and caps the G1 contract (`catalyst_scale`, included in its reason string);
+  the guarded fetch returns None (neutral) when OpenD is unavailable, and the
+  rule never scales **up** beyond the base — it is pre-event de-risking.
+  Tuning keys: `catalyst_window_days`, `catalyst_baseline_move`,
+  `catalyst_macro_window_days`/`_scale`, `catalyst_fed_window_days`/`_scale`,
+  `catalyst_miss_scale`, `catalyst_scale_floor`.
 
-Regression status: full suite passes (808 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (831 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -443,7 +456,9 @@ only after validating in the evaluation harness:
 - **P3 factors** `factors.py` - 12-1m momentum, 52-week-high distance, vol-adjusted
   momentum and a cross-sectional composite rank folding the value screens.
 - **P4 events** `events.py` - earnings surprise, post-earnings-drift side, and
-  catalyst-risk multipliers; `enable_events`.
+  catalyst-risk multipliers; **B1 wiring** in `catalyst.py` folds earnings /
+  macro / Fed-watch into a position scale + verdict applied by the graph when
+  `enable_events` is on (see Decision hardening).
 - **P5 reflection** `reflection.py` - JSON-lines post-trade ledger, decayed
   analyst hit-rates, critique hints, ticker recall; `enable_reflection`.
 - **Value-style hardening (V1-V5)** - `strategies/normalized.py` (5y
