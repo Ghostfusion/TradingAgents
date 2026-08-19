@@ -10,6 +10,12 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Alpaca market data (analysis-only)** - `dataflows/alpaca.py` +
+  `alpaca_common.py`: signed daily/1m bars (OHLC+vwap), batch bars,
+  latest snapshots, trading calendar, market clock; screener falls back
+  to Alpaca bars when the vendor CSV is empty (enable_alpaca) and adds a
+  market-hours note. No order/position/account endpoints are implemented.
+  Plan: `Strategies/alpaca_data_analysis.md`.
 - **FMP vendor (optional)** - `dataflows/fmp.py` + `fmp_common.py`: 5+ year
   income/balance/cashflow history, enterprise-values, key metrics TTM,
   earnings surprises, historical OHLCV; `normalized_score` fills the

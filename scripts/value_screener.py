@@ -484,9 +484,26 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
                 volumes.append(float(parts[5]))
             except ValueError:
                 pass
-        return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes}
+        if closes:
+            return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes}
     except Exception:
-        return {"closes": [], "highs": [], "lows": [], "volumes": []}
+        pass
+    try:
+        from tradingagents.dataflows.alpaca import get_bars as _alpaca_bars
+        from tradingagents.dataflows.config import get_config
+
+        if get_config().get("enable_alpaca"):
+            bars = _alpaca_bars(ticker, timeframe="1Day", limit=330)
+            if bars:
+                return {
+                    "closes": [float(b["c"]) for b in bars],
+                    "highs": [float(b["h"]) for b in bars],
+                    "lows": [float(b["l"]) for b in bars],
+                    "volumes": [float(b["v"]) for b in bars],
+                }
+    except Exception:
+        pass
+    return {"closes": [], "highs": [], "lows": [], "volumes": []}
 
 
 def _fetch_closes(ticker: str, days: int = 320) -> list:
@@ -826,9 +843,20 @@ def main(argv: "list[str] | None" = None) -> int:
         print(alloc_extra)
     if alloc_extra:
         print(alloc_extra)
+    try:
+        from tradingagents.dataflows.alpaca import get_clock as _alpaca_clock
+        from tradingagents.dataflows.config import get_config
+
+        if get_config().get("enable_alpaca"):
+            clock = _alpaca_clock()
+            if clock is not None and not clock.get("is_open"):
+                note = "[alpaca] market CLOSED (use /calendar for next open)"
+                print(note)
+                markdown = markdown.rstrip() + "\n\n" + note + "\n"
+    except Exception:
+        pass
     saved = save_watchlist(markdown, args.out_dir)
     print(f"[screener] saved watchlist to {saved}")
-    return 0
     return 0
 
 

@@ -402,7 +402,7 @@ All config-gated, off by default:
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +
   PBO before tuning any new default (`enable_threshold_gate`).
 
-Regression status: full suite passes (779 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (785 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -454,7 +454,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (779 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (785 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing
