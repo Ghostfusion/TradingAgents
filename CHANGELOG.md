@@ -12,7 +12,7 @@ Breaking changes within the 0.x line are called out explicitly.
 
 - **Massive Flat-File screener seam + live run** - the value-screener's
   `_fetch_ohlcv` now reads a configured Massive Flat-File day-aggregates CSV
-  first (`TRADINGAGENTS_MASSIVE_FLAT_PATH` / `massive_flat_path`) for bulk
+  first from a Massive day-aggregates folder (`TRADINGAGENTS_MASSIVE_FLAT_DIR`, default `data/massive_flat`) when `enable_massive_flat` is ON (default OFF) for bulk
   ATR / ATR-pct / scan bases, falling back to the per-ticker vendor chain
   otherwise (opt-in, >=15-row gate). Hermetic test in
   `tests/test_massive_flat_noi.py`. A live end-to-end `batch.py` run to AAPL

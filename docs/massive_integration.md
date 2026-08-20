@@ -279,18 +279,19 @@ and both are plan-gated.
 - Entitlement: requires the Massive **Imbalances Expansion** add-on (not the
   free Basic plan). Prints a clear message until entitlement exists.
 
-### Flat Files - bulk OHLCV loader + screener seam
+### Flat Files - bulk OHLCV loader + screener seam (folder, OFF by default)
 - `tradingagents/dataflows/massive_flat.py`: `load_day_aggregates(csv)` parses
   a downloaded day-aggregates CSV into per-ticker `{closes, opens, highs,
   lows, volumes, dates}`; `ohlcv_for_ticker` returns one ticker's series in
-  the same shape the value-screener's `_fetch_ohlcv` produces.
-- **Screener seam (wired)**: if `TRADINGAGENTS_MASSIVE_FLAT_PATH` (config
-  `massive_flat_path`) points at a local day-aggregates CSV, the value-
-  screener's ``_fetch_ohlcv`` reads that ticker's series **first** (requires
-  >=15 rows to be usable) before falling back to the per-ticker vendor chain -
-  so ATR/volatility/scan bases come from bulk history instead of N per-ticker
-  calls. Zero change to the default path (opt-in). See
-  `scripts/value_screener.py::_fetch_ohlcv`.
+  the same shape the value-screener's `_fetch_ohlcv` produces; a folder
+  helper `ohlcv_for_ticker_dir` scans every CSV in the `massive_flat_dir`.
+- **Screener seam (wired, OFF by default)**: the value-screener's
+  ``_fetch_ohlcv`` reads the bulk folder **only when
+  `TRADINGAGENTS_ENABLE_MASSIVE_FLAT=true`** (config `enable_massive_flat`, a
+  default OFF toggle) - it scans `massive_flat_dir` (config/env, default
+  `data/massive_flat`) for a day-aggregates CSV and uses that ticker's series
+  first (>=15 rows required) before the per-ticker vendor chain. This keeps
+  the default path unchanged; you deliberately opt in with the toggle.
 - Plan-gated: Flat Files need **Stocks Starter+** (free Basic is quote-only);
   the download URL is account-scoped (console/SDK), so the module takes a
   local CSV path rather than a REST call.

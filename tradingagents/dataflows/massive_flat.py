@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def load_day_aggregates(csv_path) -> dict:
 
 
 def ohlcv_for_ticker(csv_path, ticker: str) -> dict | None:
-    """Return one ticker's OHLCV series from a flat-file, or ``{}`` if absent."""
+    """Return one ticker's OHLCV series from a flat-file, or ``None`` if absent."""
     ticker = (ticker or "").strip().upper()
     if not ticker:
         return None
@@ -118,4 +119,27 @@ def ohlcv_for_ticker(csv_path, ticker: str) -> dict | None:
     return out
 
 
-__all__ = ["load_day_aggregates", "ohlcv_for_ticker"]
+def _find_candidates(dir_path) -> list:
+    """Top-level .csv files in the flat-file folder."""
+    if not dir_path or not os.path.isdir(dir_path):
+        return []
+    return sorted(
+        os.path.join(dir_path, f) for f in os.listdir(dir_path) if f.lower().endswith(".csv")
+    )
+
+
+def ohlcv_for_ticker_dir(dir_path, ticker: str) -> dict | None:
+    """Return ``ticker``'s OHLCV from the day-aggregates CSV in a folder (the
+    ``massive_flat_dir`` config). Uses the file with the longest close history
+    for the ticker, or None when no usable series is found.
+    """
+    best = None
+    for csvf in _find_candidates(dir_path):
+        out = ohlcv_for_ticker(csvf, ticker)
+        if out and (best is None or len(out["closes"]) > len(best["closes"])):
+            best = out
+    return best
+
+
+
+__all__ = ["load_day_aggregates", "ohlcv_for_ticker", "ohlcv_for_ticker_dir"]

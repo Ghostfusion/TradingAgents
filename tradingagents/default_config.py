@@ -22,7 +22,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     "TRADINGAGENTS_MASSIVE_API_KEY": "massive_api_key",
-    "TRADINGAGENTS_MASSIVE_FLAT_PATH": "massive_flat_path",
+    "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
+    "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
     "TRADINGAGENTS_ALPACA_API_SECRET": "alpaca_api_secret",
     "TRADINGAGENTS_ENABLE_ALPACA": "enable_alpaca",
@@ -223,7 +224,14 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # value-screener's OHLCV fetch checks it first (bulk history for ATR /
         # scan bases) before falling back to the per-ticker vendor chain. This
         # is the plan-aware Flat-File seam (see docs/massive_integration.md).
-        "massive_flat_path": None,
+        # Massive Flat-File (day-aggregates) bulk OHLCV import for the
+        # value-screener's ATR / ATR-pct / scan bases. OFF by default: you must
+        # (1) put a downloaded Massive day-aggregates CSV in `massive_flat_dir`
+        # and (2) set enable_massive_flat=true. When on, the screener reads a
+        # ticker's series from the folder's CSV (bulk) before the per-ticker
+        # vendor chain; only used when it resolves >=15 rows. Stocks Starter+.
+        "enable_massive_flat": False,
+        "massive_flat_dir": "data/massive_flat",
         "alpaca_api_key_id": None,  # Alpaca market-data analyst (alpaca.py)
         "alpaca_api_secret": None,  # Alpaca market-data analyst (alpaca.py)
         "enable_alpaca": False,  # Alpaca market-data (screener + analyst tool)

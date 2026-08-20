@@ -108,30 +108,43 @@ class MassiveNoiTests(unittest.TestCase):
 class MassiveScreenerFlatTests(unittest.TestCase):
     """The value-screener's OHLCV fetch prefers a configured Massive flat file."""
 
-    def test_fetch_ohlcv_uses_flat_file_when_configured(self):
+    def test_fetch_ohlcv_uses_flat_folder_when_enabled(self):
+        import os
+        from contextlib import suppress
         from unittest import mock as m
 
         import scripts.value_screener as vs
         from tradingagents.dataflows.config import set_config
 
+        folder = "test_ff_dir"
+        os.makedirs(folder, exist_ok=True)
         rows = []
         for i in range(20):
-            # flat CSV cols: ticker,volume,open,close,high,low,window_start,transactions
-            rows.append(f"AAPL,{1000+i},{99+i},{100+i},{101+i},{98+i},{1700000000000000000+i},100")
-        csv_text = "ticker,volume,open,close,high,low,window_start,transactions\n" + "\n".join(rows)
-        with open("test_ff.csv", "w", encoding="utf-8") as f:
-            f.write(csv_text)
+            rows.append(f"AAPL,{1000+i},{100+i},{101+i},{102+i},{99+i},{1700000000000000000+i},100")
+        with open(os.path.join(folder, "days.csv"), "w", encoding="utf-8") as f:
+            f.write("ticker,volume,open,close,high,low,window_start,transactions\n" + "\n".join(rows))
         try:
-            set_config({"massive_flat_path": "test_ff.csv"})
-            with m.patch.object(
-                vs, "route_to_vendor", side_effect=RuntimeError("must not hit vendor")
-            ):
-                o = vs._fetch_ohlcv("AAPL")
-            self.assertEqual(len(o["closes"]), 20)
-            self.assertAlmostEqual(o["closes"][0], 100.0)
-        finally:
-            import os
-            from contextlib import suppress
+            # default off: the flat import must NOT engage; vendor is reached.
+            set_config({"enable_massive_flat": False, "massive_flat_dir": folder})
+            vendor_called = {"hit": False}
 
+            def _hit(*a, **k):
+                vendor_called["hit"] = True
+                return ""
+
+            with m.patch.object(vs, "route_to_vendor", side_effect=_hit):
+                vs._fetch_ohlcv("AAPL")
+            self.assertTrue(vendor_called["hit"], "OFF: expected fall-through to vendor")
+
+            # enabled: flat folder short-circuits the vendor entirely.
+            vendor_called["hit"] = False
+            set_config({"enable_massive_flat": True, "massive_flat_dir": folder})
+            with m.patch.object(vs, "route_to_vendor", side_effect=_hit):
+                o = vs._fetch_ohlcv("AAPL")
+            self.assertFalse(vendor_called["hit"], "ON: vendor must not be called")
+            self.assertEqual(len(o["closes"]), 20)
+            self.assertAlmostEqual(o["closes"][0], 101.0)  # close col = {101+i}, i=0
+        finally:
             with suppress(OSError):
-                os.remove("test_ff.csv")
+                os.remove(os.path.join(folder, "days.csv"))
+                os.rmdir(folder)
