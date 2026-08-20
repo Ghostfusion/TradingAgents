@@ -6,7 +6,38 @@ running anything.
 
 ---
 
-## 0. THE MOST COMMON MISTAKE — Python interpreter
+## 0. WORKING AGREEMENT — read before EVERY task
+
+These are permanent repo-wide rules the maintainer expects on **every** task;
+a fresh agent must follow them without being reminded:
+
+1. **Compute as tools, feed the agents** - the project has `~15` "computed"
+   LangChain tools in `tradingagents/agents/utils/analysis_tools.py` (swing,
+   relative strength, catalyst scale, risk gate, position sizing, VCP, regime,
+   orderflow, analyst verdict, ...) that wrap the deterministic `strategies/*`
+   calculators so the LLM analysts reason over computed numbers instead of
+   re-deriving (or inventing) them from raw vendor output. When building or
+   extending any calculation/analysis function, ALWAYS consider exposing it as
+   a `@tool` bound to the relevant analyst (see the no-fabrication contract in
+   `docs/api_reference.md` §6.4) - a pure function that never reaches the
+   agent tool loops is incomplete work.
+2. **Keep every doc true** - whenever code/behavior changes, update the
+   relevant section(s) of the docs in `docs/` (api_reference.md,
+   howto_end_to_end.md, AGENT_ONBOARDING.md gotchas/changelog) AND `README.md`
+   (News entry + any feature bullet) AND `CHANGELOG.md`. Never leave a doc
+   stale against the code.
+3. **Always commit and push when done** - after changes pass the relevant
+   tests (full suite ~6 min only if extensive), `git add -A`, commit with a
+   descriptive Conventional-Commits-style message, and `git push origin main`.
+   Never leave uncommitted/pushed work at the end of a task. If the commit
+   hash is referenced in a doc (e.g. the onboarding changelog), commit it in a
+   follow-up docs commit and push.
+4. No personal info or secrets in commits (see §8 below); offline tests stay
+   hermetic (mock vendor calls); `py -3.12` everywhere (below).
+
+---
+
+## 1. THE MOST COMMON MISTAKE — Python interpreter
 
 There are **two Python environments** and they are NOT interchangeable:
 
@@ -245,6 +276,8 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-20 `HASH` - working-agreement policy §0: always expose calculations as
+  tools for the agents, keep docs + README true on every change, commit + push
 - 2026-08-20 `8947ea2` - moomoo period-order + prior-period fix (M column now
   computes; latest values were the OLDEST period)
 - 2026-08-19 `2ab7a8c` - Finnhub free-tier integration (basic financials -> growth
