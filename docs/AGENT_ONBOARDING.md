@@ -283,6 +283,7 @@ has changed before); never assume an endpoint works — the SDK's
 - 2026-08-20 `370a6ad` - Massive fundamentals/ratios + snapshots (plan-aware): `get_ratios` (precomputed EV/EBITDA/P/E/ROE), `get_market_snapshot`, `get_top_movers` bound to market/fundamentals analysts + `pipeline.py --universe top-movers-massive`; `massive` registered in `fundamental_data`. These 403 on free Basic so they degrade with an explicit upgrade message until the plan includes them.
 - 2026-08-20 `39e30a1` - Massive NOI + Flat Files (item 8): `massive_noi.py` (WebSocket NOI monitor + `scripts/massive_noi_monitor.py`) and `massive_flat.py` (bulk Flat-File OHLCV loader for screener/backtests). Plan-gated standalone utilities (Imbalances add-on / Starter+), not batch @tools.
 - 2026-08-20 `a606378` - Massive corporate actions/peers/IPOs (row 5): `get_company_peers` gains a `massive` option; `get_corporate_actions`/`get_dividends` (dividends+splits) and `get_ipos` bind Massive to fundamentals/news analysts. All entitled on current tier.
+- 2026-08-20 `WIP` - Massive Flat-File screener seam + live run: value-screener `_fetch_ohlcv` reads a configured massive flat-file CSV first (`TRADINGAGENTS_MASSIVE_FLAT_PATH`) for bulk ATR/scan bases; validated a live end-to-end `batch.py` run to AAPL (Underweight) exercising the new tools.
 
 - 2026-08-20 `1a87063` - README: fork-additions highlighted with a purple left
   border (HTML tables), matching the diff-vs-upstream intent; replaces the

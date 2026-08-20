@@ -735,6 +735,21 @@ def save_watchlist(markdown, out_dir, ts=None):
 
 def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
     """Daily OHLCV via the vendor chain (csv): closes/highs/lows/volumes."""
+    # Optional Massive Flat-File bulk history (plan-aware). When a local
+    # day-aggregates CSV is configured (TRADINGAGENTS_MASSIVE_FLAT_PATH / the
+    # ``massive_flat_path`` config key), read that ticker's series first so
+    # ATR/scan bases come from bulk history instead of N per-ticker calls.
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.dataflows.massive_flat import ohlcv_for_ticker
+
+        flat_path = get_config().get("massive_flat_path")
+        if flat_path:
+            flat = ohlcv_for_ticker(flat_path, ticker)
+            if flat and len(flat.get("closes") or []) >= 15:
+                return flat
+    except Exception:
+        pass
     try:
         from datetime import datetime, timedelta
 

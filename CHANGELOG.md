@@ -10,6 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive Flat-File screener seam + live run** - the value-screener's
+  `_fetch_ohlcv` now reads a configured Massive Flat-File day-aggregates CSV
+  first (`TRADINGAGENTS_MASSIVE_FLAT_PATH` / `massive_flat_path`) for bulk
+  ATR / ATR-pct / scan bases, falling back to the per-ticker vendor chain
+  otherwise (opt-in, >=15-row gate). Hermetic test in
+  `tests/test_massive_flat_noi.py`. A live end-to-end `batch.py` run to AAPL
+  (Underweight) validated the new Massive tools end-to-end (see
+  `docs/massive_integration.md` §3e).
+
 - **Massive corporate actions, peers & IPOs (row 5)** - `get_company_peers`
   gains a `massive` option (`get_related_companies_massive`, finnhub-format-
   compatible output); `get_dividends_massive` + `get_splits_massive` are

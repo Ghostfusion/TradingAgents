@@ -102,3 +102,36 @@ class MassiveNoiTests(unittest.TestCase):
             self.assertRaises(RuntimeError),
         ):
             massive_noi.stream_noi(["AAPL"], lambda e: None, api_key="k")
+
+
+@pytest.mark.unit
+class MassiveScreenerFlatTests(unittest.TestCase):
+    """The value-screener's OHLCV fetch prefers a configured Massive flat file."""
+
+    def test_fetch_ohlcv_uses_flat_file_when_configured(self):
+        from unittest import mock as m
+
+        import scripts.value_screener as vs
+        from tradingagents.dataflows.config import set_config
+
+        rows = []
+        for i in range(20):
+            # flat CSV cols: ticker,volume,open,close,high,low,window_start,transactions
+            rows.append(f"AAPL,{1000+i},{99+i},{100+i},{101+i},{98+i},{1700000000000000000+i},100")
+        csv_text = "ticker,volume,open,close,high,low,window_start,transactions\n" + "\n".join(rows)
+        with open("test_ff.csv", "w", encoding="utf-8") as f:
+            f.write(csv_text)
+        try:
+            set_config({"massive_flat_path": "test_ff.csv"})
+            with m.patch.object(
+                vs, "route_to_vendor", side_effect=RuntimeError("must not hit vendor")
+            ):
+                o = vs._fetch_ohlcv("AAPL")
+            self.assertEqual(len(o["closes"]), 20)
+            self.assertAlmostEqual(o["closes"][0], 100.0)
+        finally:
+            import os
+            from contextlib import suppress
+
+            with suppress(OSError):
+                os.remove("test_ff.csv")

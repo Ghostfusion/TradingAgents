@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     "TRADINGAGENTS_MASSIVE_API_KEY": "massive_api_key",
+    "TRADINGAGENTS_MASSIVE_FLAT_PATH": "massive_flat_path",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
     "TRADINGAGENTS_ALPACA_API_SECRET": "alpaca_api_secret",
     "TRADINGAGENTS_ENABLE_ALPACA": "enable_alpaca",
@@ -218,6 +219,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "finnhub_api_key": None,
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         "massive_api_key": None,  # Massive.com US data (massive.py)
+        # Optional path to a Massive Flat-File day-aggregates CSV. When set, the
+        # value-screener's OHLCV fetch checks it first (bulk history for ATR /
+        # scan bases) before falling back to the per-ticker vendor chain. This
+        # is the plan-aware Flat-File seam (see docs/massive_integration.md).
+        "massive_flat_path": None,
         "alpaca_api_key_id": None,  # Alpaca market-data analyst (alpaca.py)
         "alpaca_api_secret": None,  # Alpaca market-data analyst (alpaca.py)
         "enable_alpaca": False,  # Alpaca market-data (screener + analyst tool)
