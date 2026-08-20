@@ -174,6 +174,10 @@ tests/                     # conftest (autouse fixtures), test_* per area
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-19 `9a71cea` - swing scan + RS + PEAD entry + catalyst hard veto
+- 2026-08-19 `a69fba7` - repo hygiene: lint cleanup, defect fixes, docs
+- 2026-08-19 `d0a60ce` - docs: api_reference + howto full coverage
+- 2026-08-19 `7185307` - this onboarding file
 - 2026-08-19 `404c2c5` - README fork changelog entry
 - 2026-08-19 `796cd64` - B2 pipeline, A-series tools (institutions/surprises/
   expected-move), catalyst on-by-default, docs (api_reference, howto)

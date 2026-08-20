@@ -128,7 +128,10 @@ print(s['verdict'], s['scale'], s['reasons'][:2])
 
 Tuning keys: `catalyst_window_days`, `catalyst_baseline_move`,
 `catalyst_macro_window_days/_scale`, `catalyst_fed_window_days/_scale`,
-`catalyst_miss_scale`, `catalyst_scale_floor`.
+`catalyst_miss_scale`, `catalyst_scale_floor`. With
+`catalyst_hard_block_days > 0` (default 0 = off), an earnings print inside
+that window makes the risk governor REJECT new risk outright instead of just
+de-risking.
 
 ## 4. Reading the reports
 

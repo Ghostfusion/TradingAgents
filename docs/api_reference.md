@@ -121,6 +121,8 @@ B1 catalyst gate. Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `risk_stress_shock_pct`, `orderflow_distribution_threshold=0.7`,
 `evaluate_cost_bps=10`, `calibration_min_n=5`, `consensus_seeds=1`,
 `max_book_names=10`, `max_name_weight=0.25`, `risk_audit_enabled` default True.
+Catalyst: `catalyst_hard_block_days=0` - when > 0, an earnings print inside
+that many days makes the risk governor **REJECT** new risk (section 5).
 
 ## 2. LLM providers
 

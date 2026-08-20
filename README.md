@@ -442,16 +442,19 @@ All config-gated, off by default:
   **on by default**; the graph folds earnings (next print date + last surprise side +
   market-implied move / IV crush), HIGH-importance economic events (CPI, FOMC,
   payrolls, ...), and Fed-watch meetings into a `0..1` position scale and a
-  verdict (`earnings-window` / `macro-catalyst` / `fed-catalyst` /
-  `no-imminent-catalyst`). The scale multiplies the overlay's `position_scale`
-  and caps the G1 contract (`catalyst_scale`, included in its reason string);
-  the guarded fetch returns None (neutral) when OpenD is unavailable, and the
-  rule never scales **up** beyond the base — it is pre-event de-risking.
+  verdict (`earnings-window` / `earnings-hard-block` / `macro-catalyst` /
+  `fed-catalyst` / `no-imminent-catalyst`). The scale multiplies the overlay's
+  `position_scale` and caps the G1 contract (`catalyst_scale`, included in its
+  reason string); the guarded fetch returns None (neutral) when OpenD is
+  unavailable, and the rule never scales **up** beyond the base - it is
+  pre-event de-risking. With `catalyst_hard_block_days > 0`, an earnings print
+  inside that window makes the risk governor **REJECT** new risk outright
+  (the framework's "never initiate" rule).
   Tuning keys: `catalyst_window_days`, `catalyst_baseline_move`,
   `catalyst_macro_window_days`/`_scale`, `catalyst_fed_window_days`/`_scale`,
-  `catalyst_miss_scale`, `catalyst_scale_floor`.
+  `catalyst_miss_scale`, `catalyst_scale_floor`, `catalyst_hard_block_days` (0 = off).
 
-Regression status: full suite passes (831 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (888 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -529,13 +532,35 @@ only after validating in the evaluation harness:
   ledger stats at the end). Live-only enrichment toggles:
   `TRADINGAGENTS_MOMENTUM_OFFLINE=1` and `TRADINGAGENTS_MOMENTUM_NO_INTRADAY=1`.
 
+- **Techno-fundamental swing (S1-S3, spec: `Strategies/framework.md`)** -
+  `tradingagents/strategies/swing.py` + `tradingagents/strategies/relative_strength.py`,
+  analysis-only, wired as the screener `--scan swing` mode:
+  - **S1 trend architecture** - price above a *rising* SMA50/SMA200 with the
+    20-day EMA stacked above the SMA50 (`trend_architecture`).
+  - **S2 relative strength** - RS line vs `benchmark_ticker` (default SPY) in
+    an established 63-day uptrend (`relative_strength_report`): `leading` /
+    `uptrend` pass, `lagging` / `diverging` (price new-high without RS
+    backing) fail, unknown benchmark never blocks.
+  - **S3 pullback setup** (`pullback_setup`) - low trades into the 20-day EMA
+    while the close holds it on declining volume (accumulation).
+  - **S4 RSI discipline** (`rsi_band`) - RSI 45-70 operating band or 40-50
+    reset zone; below 40 invalidates.
+  - **S5 stops & targets** (`swing_low_stop`, `targets_rr`, `scaleout_plan`,
+    `trail_ema`) - 1-ATR stop below the swing low, 2R/3R targets, 50% T1
+    scale-out to break-even, 20-day-EMA trail.
+  - **S6 PEAD entry** (`events.py`) - post-earnings 2.5x-volume gap ->
+    opening-range consolidation -> break of consolidation high
+    (`post_earnings_play`).
+  Wired: `--scan swing` gates on the stack + RS + pullback and prints
+  `ScanC`/`RS`/`Stp`/`T2` columns (mode docs: `Strategies/scan.md`).
+
 - **Graph wiring** (`enable_strategy_overlays`, `enable_reflection`): the graph
   attaches regime/sizing/momentum overlays to the final state and records
   realized outcomes to `strategy_ledger.jsonl` (**enabled by default**;
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (808 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (888 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing
