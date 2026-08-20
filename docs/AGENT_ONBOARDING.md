@@ -175,7 +175,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-19 `HASH` - Finnhub free-tier integration (basic financials -> growth
+- 2026-08-19 `2ab7a8c` - Finnhub free-tier integration (basic financials -> growth
   gates, insider activity, peers, sector fallback, 3 analyst tools)
 - 2026-08-19 `4df08d9` - computed-analysis tools follow-up (regime/VCP/orderflow/verdict/surprise/portfolio)
 - 2026-08-19 `3b4084d` - computed-analysis tools for analyst LLMs (lean batch: swing/RS/earnings-event/catalyst/position/risk-gate)
