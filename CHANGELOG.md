@@ -10,14 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
-- **README fork-additions highlight (purple border)** - the fork-additions
-  body (Batch runner through Operational hardening) and the fork News changelog
-  are now wrapped in HTML tables with a **purple left border** (GitHub's
-  closest rendered equivalent to a diff-style added-line mark, since a
-  rendered README cannot show the purple bar of the diff view). Each `##`
-  section keeps a real heading; upstream sections (Framework, Installation,
-  Package, Persistence, Reproducibility, Research, Contributing, Citation)
-  stay unmarked. The `[!IMPORTANT]` callout stays as a GitHub alert.
+- **README fork-additions highlight (purple border, per-section)** - the fork
+  News changelog and EACH fork-additions section (Batch runner, Extended data
+  sources, Moomoo OpenAPI vendor, Value watchlist screener, Decision quality,
+  Report format, Operational hardening, Decision hardening) is wrapped in its
+  own HTML table with a **purple left border** (GitHub's closest rendered
+  equivalent to a diff-style added-line mark, since a rendered README cannot
+  show the purple bar of the diff view). Each `##` section keeps a real
+  heading; upstream sections stay unmarked. The `[!IMPORTANT]` callout stays
+  as a GitHub alert.
 - **Screener moomoo period-order + prior-period bug (M column always n/a)** -
   moomoo statement payloads list periods newest-first but `_parse_markdown_financials`
   used a last-write-wins dict, so the canonical "latest" was the OLDEST period

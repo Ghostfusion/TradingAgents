@@ -319,8 +319,6 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 <table>
 <tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
 
-<sub><b>Fork additions</b> - these sections are not part of the upstream [`TauricResearch/TradingAgents`](https://github.com/TauricResearch/TradingAgents) project.</sub>
-
 ## Batch runner
 
 A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
@@ -333,6 +331,12 @@ python batch.py --symbols NVDA --depth deep --analysts market news
 
 Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
 
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
+
 ## Extended data sources
 
 Beyond the core price, fundamental, and news vendors, TradingAgents can pull additional free, decision-relevant signals (all optional — a vendor failure degrades gracefully instead of aborting a run):
@@ -344,6 +348,12 @@ Beyond the core price, fundamental, and news vendors, TradingAgents can pull add
 - **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
 
 Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
+
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
 
 ## Moomoo OpenAPI vendor
 
@@ -362,6 +372,12 @@ Moomoo OpenAPI (formerly Futu OpenAPI) is available as an additional vendor behi
 - **Tier 3 — accuracy infra:** the memory-log realized-return path uses moomoo's trading-day calendar for exact holding-day counting (falls back to the old calendar heuristic when OpenD is unreachable or the market is unsupported).
 
 The `batch.py` runner accepts a `--vendor moomoo|yfinance|default` flag to force a vendor-chain preset across all categories per run.
+
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
 
 ## Value watchlist screener
 
@@ -397,6 +413,12 @@ many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
 render `n/a` instead of mixing currencies), and the day's % change is
 normalized to a fraction regardless of the market session. `0` disables any gate.
 
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
+
 ## Decision quality
 
 The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
@@ -407,6 +429,12 @@ The Portfolio Manager's structured output now captures the full risk-adjusted de
 - `consensus` (`high`/`low`) — a dissent flag when the aggressive/conservative/neutral analysts materially disagree.
 
 The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
+
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
 
 ## Report format (consolidated hierarchy + Table of Contents)
 
@@ -429,6 +457,12 @@ py -3.12 scripts/rebuild_complete_report.py reports/SFTBY_20260819_115450
 py -3.12 scripts/rebuild_complete_report.py      # all folders
 ```
 
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
+
 ## Operational hardening
 
 - **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
@@ -436,6 +470,12 @@ py -3.12 scripts/rebuild_complete_report.py      # all folders
 - **Vendor-served logging** — the routing layer logs which vendor answered each call, making free-tier quota burn visible.
 - **NaN-safe options chains** — yfinance option chains frequently carry missing/`NaN` open-interest, volume, and implied-volatility values; the options vendor skips non-finite values when summing (missing counts contribute 0) instead of crashing the call.
 - **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
+
+</td></tr>
+</table>
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
 
 ## Decision hardening (compute, don't narrate)
 
