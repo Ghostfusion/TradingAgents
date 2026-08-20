@@ -174,7 +174,9 @@ tests/                     # conftest (autouse fixtures), test_* per area
 
 ## Changelog of this fork (most recent first)
 
-- - 2026-08-19 `29e291b` - VCP scan (`--scan vcp`, volatility contraction)
+- 2026-08-19 `92ae6b8` - Phase-1 screens (growth YoY, ROE, max-cap, sector
+  top-3, revisions proxy, inst-accum; moomoo markdown parse fix)
+- 2026-08-19 `29e291b` - VCP scan (`--scan vcp`, volatility contraction)
 - 2026-08-19 `9a71cea` - swing scan + RS + PEAD entry + catalyst hard veto
 - 2026-08-19 `a69fba7` - repo hygiene: lint cleanup, defect fixes, docs
 - 2026-08-19 `d0a60ce` - docs: api_reference + howto full coverage
