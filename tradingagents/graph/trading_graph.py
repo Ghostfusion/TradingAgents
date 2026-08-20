@@ -46,6 +46,14 @@ from tradingagents.agents.utils.agent_utils import (
 
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
+from tradingagents.agents.utils.analysis_tools import (
+    get_catalyst_scale,
+    get_earnings_event_read,
+    get_position_sizing,
+    get_relative_strength,
+    get_risk_gate,
+    get_swing_set,
+)
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.dataflows.config import set_config
@@ -244,6 +252,11 @@ class TradingAgentsGraph:
                     get_expected_move,
                     get_market_snapshot_alpaca,
                     get_momentum_scan,
+                    # Computed-analysis tools (deterministic signals).
+                    get_swing_set,
+                    get_relative_strength,
+                    get_position_sizing,
+                    get_risk_gate,
                 ]
             ),
             "social": ToolNode(
@@ -267,6 +280,9 @@ class TradingAgentsGraph:
                     get_fed_watch,
                     get_market_breadth,
                     get_earnings_catalyst,
+                    # Computed-analysis tools (deterministic signals).
+                    get_catalyst_scale,
+                    get_earnings_event_read,
                 ]
             ),
             "fundamentals": ToolNode(

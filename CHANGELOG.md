@@ -10,6 +10,17 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Computed-analysis tools for the analyst LLMs** - `agents/utils/analysis_tools.py`
+  wraps the deterministic strategy calculators as LangChain tools so the
+  agents reason over computed numbers instead of re-deriving (or inventing)
+  them from raw vendor output: `get_swing_set` (trend stack + 1-ATR stop +
+  2R/3R targets + VCP), `get_relative_strength` (RS line vs benchmark),
+  `get_earnings_event_read` (surprise + PEAD setup), `get_catalyst_scale`
+  (0..1 B1 scale + verdict), `get_position_sizing` (Kelly + risk budget) and
+  `get_risk_gate` (PASS/WARN/REJECT). Bound to the market + news analyst tool
+  loops (prompt + graph ToolNodes); all return exact numbers or an explicit
+  'unavailable' (no-fabrication contract). Source:
+  `tradingagents/strategies/{swing,relative_strength,events,catalyst,size,risk_governor}.py`.
 - **Framework Phase-1 screens** - optional screener gates from
   `Strategies/framework.md`: `--min-eps-yoy` / `--min-rev-yoy` (moomoo
   statement YoY columns now parsed - also fixes a latent defect where moomoo

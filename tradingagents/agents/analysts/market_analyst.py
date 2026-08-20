@@ -6,8 +6,12 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_options_chain,
+    get_position_sizing,
+    get_relative_strength,
+    get_risk_gate,
     get_short_interest,
     get_stock_data,
+    get_swing_set,
     get_verified_market_snapshot,
 )
 
@@ -25,6 +29,10 @@ def create_market_analyst(llm):
             get_options_chain,
             get_short_interest,
             get_capital_flow,
+            get_swing_set,
+            get_relative_strength,
+            get_position_sizing,
+            get_risk_gate,
         ]
 
         system_message = (
@@ -61,6 +69,12 @@ You also have two forward-looking positioning tools: call get_options_chain(tick
 You also have a money-flow tool: call get_capital_flow(ticker) for weekly net capital inflow/outflow split by order size (super/big/mid/small) and the latest session's capital distribution. Sustained large/super-order outflows suggest institutional distribution; sustained inflows suggest accumulation. Weigh this as a positioning gauge alongside the options and short-interest signals.
 
 You also have an event-risk tool: call get_expected_move(ticker, current_date) for the option-market-implied 1-day move at the upcoming earnings print (e.g. ±9%). Weigh a large expected move when sizing volatility and when setting stop distances around the event — a ±10% event requires wider stops or smaller size than ±2%.
+
+You also have computed-analysis tools - use these numbers as ground truth, do not re-derive them from raw prices:
+- get_swing_set(ticker) - the deterministic multi-week setup: trend stack, RSI band, the 1-ATR structure stop below the swing low, 2R/3R targets, trail and VCP state. Use its stop/target/risk numbers whenever you propose entry, stop or reward:risk.
+- get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
+- get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one.
+- get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

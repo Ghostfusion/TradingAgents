@@ -90,7 +90,8 @@ tradingagents/
 │  ├─ trader/              # structured TraderProposal
 │  └─ utils/               # agent_states (LangGraph state schema), agent_utils (tool registry),
 │                          #   *tools.py wrappers (core/tech/fundamental/news/macro/prediction/
-│                          #   position/analyst/market_position/moomoo_extra), memory.py (decision log)
+│                          #   position/analyst/market_position/moomoo_extra), memory.py (decision log),
+│                          #   analysis_tools.py (computed-analysis: swing/RS/catalyst/sizing/risk)
 ├─ dataflows/              # VENDOR LAYER
 │  ├─ interface.py        # route_to_vendor(): TOOLS_CATEGORIES, VENDOR_METHODS, chains
 │  ├─ config.py           # thread-local config (set_config/get_config/reset_config)
@@ -190,7 +191,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 - 2026-08-19 `0ed81a3` - review fixes: indicator warmup, parallelism, caching
 - 2026-08-19 `1e2246b` - moomoo vendor integration + event contracts + --vendor
 
-Full suite: **924+ tested** (2 skipped: bedrock extra, live DeepSeek).
+Full suite: **943+ tested** (2 skipped: bedrock extra, live DeepSeek).
 
 ---
 

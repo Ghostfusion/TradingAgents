@@ -6,6 +6,14 @@ from typing import Any
 import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
+from tradingagents.agents.utils.analysis_tools import (
+    get_catalyst_scale,
+    get_earnings_event_read,
+    get_position_sizing,
+    get_relative_strength,
+    get_risk_gate,
+    get_swing_set,
+)
 from tradingagents.agents.utils.analyst_data_tools import (
     get_analyst_ratings,
     get_earnings_calendar,
@@ -78,6 +86,12 @@ __all__ = [
     "get_expected_move",
     "get_institution_holdings",
     "get_verified_market_snapshot",
+    "get_swing_set",
+    "get_relative_strength",
+    "get_earnings_event_read",
+    "get_catalyst_scale",
+    "get_position_sizing",
+    "get_risk_gate",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",

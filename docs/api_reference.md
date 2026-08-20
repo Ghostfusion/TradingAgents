@@ -238,6 +238,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `options_data` : `get_options_chain`
 - `sec_filings` : `get_sec_filings`
 - `short_interest` : `get_short_interest`
+- **computed-analysis tools** (bound to the analyst tool loops, see 6.5):
+  `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`,
+  `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -267,6 +270,24 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 gold `XAUUSD -> GC=F`, forex `EURUSD -> EURUSD=X`, crypto
 `BTCUSD -> BTC-USD`, indices `SPX500 -> ^GSPC`; moomoo code map
 (`_moomoo_code()`: US., HK. pad, JP., SH., SZ., AU., CA., SG., MY., CC.USD).
+
+### 6.5 Computed-analysis tools
+
+The analyst tool loops bind deterministic calculators from `tradingagents/strategies/*`
+so the LLM reasons over computed numbers rather than re-deriving them:
+
+| Tool | Wraps | Bound to | Returns |
+| --- | --- | --- | --- |
+| `get_swing_set(ticker)` | `swing.swing_report` | market | trend stack, RSI band, 1-ATR stop, 2R/3R targets, VCP, trail |
+| `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |
+| `get_earnings_event_read(ticker, date)` | `events.post_earnings_play` + `catalyst.last_earnings_surprise` | news | surprise %, drift side, print-day move, PEAD setup |
+| `get_catalyst_scale(ticker, date)` | `catalyst.build_catalyst_snapshot` | news | 0..1 scale + verdict + reasons |
+| `get_position_sizing(confidence, stop_dist_pct, ...)` | `size.kelly + risk-budget` | market | min(kelly_quarter, risk/stop, cap) |
+| `get_risk_gate(size_pct, ...)` | `risk_governor.govern` | market | PASS / WARN / REJECT |
+
+Every tool follows the no-fabrication contract: exact computed numbers or an
+ explicit "unavailable" message (both recorded in the agent's tool history for
+ auditability), never an invented value.
 
 ## 7. Persistence & recovery
 
