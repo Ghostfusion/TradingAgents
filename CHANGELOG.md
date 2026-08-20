@@ -10,6 +10,13 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Agent decision-tools audit (plan, no code)** - `docs/developer/11-agent-decision-tools.md`
+  audits the strategy + dataflow surface and lists decision-critical deterministic
+  functions not yet exposed as `@tool`s: exits (exit_check / stop-to-breakeven /
+  target), portfolio alloc (cap-respecting book), regime components (vol / trend /
+  choppiness), momentum detail, rating consensus, and event multipliers. Includes
+  a P0/P1/P2 integration order and adds no code yet.
+
 - **Strategies index (`Strategies/index.md`)** - navigation map linking each
   strategy plan doc under `Strategies/` (Math, value_strategy, framework, scan,
   momentum, risk/decision-hardening, enhancement_plan, alpaca_data_analysis) to

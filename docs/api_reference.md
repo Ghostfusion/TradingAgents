@@ -418,4 +418,6 @@ preserves `Risk Gate (computed)` blocks.
   strategies, agents/tools, entrypoints, persistence, dev guide, tests layout,
   Massive)
 - `docs/massive_integration.md` - the Massive.com add-on plan + entitlement map
+- `docs/developer/11-agent-decision-tools.md` - audit + plan: concrete functions
+  to expose as agent decision tools (no code yet)
 - `Strategies/*` - strategy plans and specs (index: `Strategies/index.md`)

@@ -22,6 +22,7 @@ drill into whatever area you are touching.
 | 8 | `08-development.md` | how to add a feature, test, keep docs true |
 | 9 | `09-massive-integration.md` | the Massive.com add-on and its seams |
 | 10 | `10-tests-layout.md` | the `tests/` directory map, fixtures, conventions |
+| 11 | `11-agent-decision-tools.md` | audit + plan: deterministic functions to expose as agent tools |
 
 Companion docs (repo root `docs/`):
 - [`docs/AGENT_ONBOARDING.md`](../AGENT_ONBOARDING.md) — environment runbook / gotchas (read first).
