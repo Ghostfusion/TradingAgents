@@ -260,6 +260,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - macro: `fred`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
 - analyst ratings + earnings calendar: `finnhub`, `moomoo`
+- finnhub free-tier extra (key-gated): `get_basic_financials` (metrics),
+  `get_company_peers`, `get_insider_activity` (insider sentiment);
+  `get_fundamentals` also accepts `finnhub` as a vendor
 - options chain: `yfinance`, `moomoo`
 - SEC filings: `sec_edgar`
 - all A-series/tier tools: `moomoo` only (optional)
@@ -292,6 +295,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_analyst_verdict(ticker, date)` | `screener screen_ticker` + `normalized.trap_verdict` | fundamentals | EY, EV/EBIT, F/M/Z, Net-Net, trap risk, ROE, YoY |
 | `get_earnings_surprise(ticker, date)` | `events.surprise_score` + `catalyst.last_earnings_surprise` | fundamentals | surprise % + side |
 | `get_portfolio_weights(scores, sector_map, ...)` | `portfolio.value_ratio_weights + adjust_for_caps` | fundamentals | cap-respecting value weights |
+| `get_basic_financials(ticker)` | `finnhub.get_basic_financials_finnhub` | fundamentals | EPS/revenue YoY, ROE/ROA, margins, payout (free tier) |
+| `get_insider_activity(ticker)` | `finnhub.get_insider_activity_finnhub` | fundamentals | 12m net insider change + mspr + trend |
+| `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

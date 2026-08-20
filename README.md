@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-19] **Finnhub free-tier integration** - live-probed your key and wired the endpoints that work: `get_basic_financials` (EPS/revenue YoY + ROE metrics feed the screener `--min-eps-yoy/--min-rev-yoy/--min-roe` gates and the Fundamentals analyst), `get_insider_activity` (computed 12m net insider change + mspr + trend), `get_company_peers`, and Finnhub as the second-tier `--sector-rank` sector source (FMP → Finnhub → yfinance). All key-gated/guarded, no-fabrication.
 - [2026-08-19] **Computed-analysis tools - follow-up batch (6 more)** - `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read` bound to the Market analyst; `get_analyst_verdict` (EY/EV/EBIT/F/M/Z/trap-risk/ROE/YoY), `get_earnings_surprise`, `get_portfolio_weights` bound to the Fundamentals analyst. Full set = 12 computed-signal tools for the analyst LLMs.
 - [2026-08-19] **Computed-analysis tools for the analyst LLMs** - `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`, `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate` wrap the deterministic strategy calculators (`strategies/{swing,relative_strength,events,catalyst,size,risk_governor}`) as LangChain tools bound to the market + news analyst tool loops - the agents now reason over computed stops/targets/RS/surprise/catalyst-scale/sizing/risk-gate numbers instead of re-deriving (or inventing) them. All follow the no-fabrication contract (exact numbers or explicit 'unavailable').
 - [2026-08-19] **Framework Phase-1 screens** - optional `--min-eps-yoy` / `--min-rev-yoy` (moomoo statement YoY columns; also fixed moomoo markdown `##`-header payloads never reaching the parser), `--min-roe`, `--max-mcap`, `--sector-rank` (SPDR top-3 by 1m/3m momentum), `--revision` (net analyst upgrades 60d), `--inst-accum` (two-quarter institutional %-of-float); new EpsYoY/RevYoY/ROE, Sec/Rank, RevUp, Inst columns; gates only apply to measured values, missing data renders n/a.
@@ -458,7 +459,7 @@ All config-gated, off by default:
   `catalyst_macro_window_days`/`_scale`, `catalyst_fed_window_days`/`_scale`,
   `catalyst_miss_scale`, `catalyst_scale_floor`, `catalyst_hard_block_days` (0 = off).
 
-Regression status: full suite passes (954 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (959 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -572,7 +573,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (954 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (959 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing

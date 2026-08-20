@@ -804,6 +804,83 @@ def get_portfolio_weights(
     return chr(10).join(lines)
 
 
+@tool
+def get_basic_financials(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Key fundamental metrics for a ticker (Finnhub free tier).
+
+    One call to the Finnhub basic-financials endpoint returns the metric set
+    the framework's Phase-1 screens need: EPS / revenue YoY growth, ROE/ROA,
+    margins, current ratio, payout ratio, 52-week high/low and average daily
+    volumes. Call this before any 'EPS growth of X%', 'revenue growing Y%',
+    'ROE of Z' style claim - it is the computed number, not a guess.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        A ``Metric: value`` block (the growth/quality numbers), or an
+        explicit 'unavailable' message when Finnhub has no metrics for the
+        symbol or the key is unset.
+    """
+    try:
+        from tradingagents.dataflows.finnhub import get_basic_financials_finnhub
+
+        return get_basic_financials_finnhub(ticker, None)
+    except Exception as exc:  # noqa: BLE001
+        return f"basic financials unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_insider_activity(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Insider net activity + trend for a ticker (Finnhub, computed).
+
+    Returns the summed net insider share change over the last 12 months, the
+    recent-vs-prior trend, and the latest month's mspr score (the proprietary
+    insider-sentiment metric). Use before any net insider-buy/sell claim; a
+    positive net change is a (weak, secondary) accumulation signal.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        window summary lines, or an explicit 'unavailable' message when
+        Finnhub has no insider data for the symbol.
+    """
+    try:
+        from tradingagents.dataflows.finnhub import get_insider_activity_finnhub
+
+        return get_insider_activity_finnhub(ticker)
+    except Exception as exc:  # noqa: BLE001
+        return f"insider activity unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_company_peers(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Comparable-company peer group from Finnhub.
+
+    Returns a comma-separated list of Finnhub's peer tickers for the symbol -
+    useful context for 'cheap vs peers' or 'sector comparison' reasoning.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        Peer-ticker list, or an explicit 'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.finnhub import get_company_peers_finnhub
+
+        return get_company_peers_finnhub(ticker)
+    except Exception as exc:  # noqa: BLE001
+        return f"company peers unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -817,4 +894,7 @@ __all__ = [
     "get_analyst_verdict",
     "get_earnings_surprise",
     "get_portfolio_weights",
+    "get_basic_financials",
+    "get_insider_activity",
+    "get_company_peers",
 ]

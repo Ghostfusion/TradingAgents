@@ -10,6 +10,22 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Finnhub free-tier integration (key: TRADINGAGENTS_FINNHUB_API_KEY)** -
+  live-probed the free tier and wired the endpoints that actually work:
+  - `get_basic_financials_finnhub` - company_basic_financials metrics
+    (epsGrowthQuarterlyYoy / revenueGrowthTTMYoy / roeTTM -> the screener's
+    --min-eps-yoy / --min-rev-yoy / --min-roe gates via new canonical aliases
+    + a text-router fix so header-prefixed blobs parse); also registered as a
+    `get_fundamentals` vendor option
+  - `get_insider_activity_finnhub` - stock_insider_sentiment (12m net change
+    + mspr + trend, computed)
+  - `get_company_peers_finnhub` - comparable peer group
+  - `get_profile_finnhub` - profile2 sector (finnhubIndustry -> sector) as
+    the second-tier `--sector-rank` fallback (FMP -> Finnhub -> yfinance)
+  - bound the three as analyst tools (get_basic_financials / get_insider_activity
+    / get_company_peers) to the Fundamentals analyst; all key-gated / guarded
+    / no-fabrication
+  - docs: api_reference 6.5 table + vendor list
 - **Computed-analysis tools - follow-up batch (6 more)** - `analysis_tools.py`
   grows `get_regime_read` (overlays.build_strategy_overlays: regime label +
   position scale + momentum/52w), `get_volatility_contraction` (swing.vcp_setup),

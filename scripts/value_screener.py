@@ -64,8 +64,22 @@ _ROW_ALIASES = {
     "operating_income": ["operating income", "ebit", "operating profit"],
     "net_income": ["net income", "net profit", "net income (common)"],
     "eps": ["diluted eps", "earnings per share", "basic eps"],
-    "eps_yoy": ["diluted eps yoy", "eps yoy", "earnings per share yoy"],
-    "revenue_yoy": ["total revenue yoy", "revenue yoy"],
+    "eps_yoy": [
+        "diluted eps yoy",
+        "eps yoy",
+        "earnings per share yoy",
+        "eps growth quarterly yoy",
+        "epsgrowthquarterlyyoy",
+        "epsgrowthttmyoy",
+    ],
+    "revenue_yoy": [
+        "total revenue yoy",
+        "revenue yoy",
+        "revenue growth ttm yoy",
+        "revenue growth quarterly yoy",
+        "revenuegrowthttmyoy",
+        "revenuegrowthquarterlyyoy",
+    ],
     "interest_expense": ["interest expense", "interest paid"],
     "tax_expense": ["tax provision", "income tax", "tax expense"],
     "cash": ["cash and cash equivalents", "cash & equivalents", "cash & cash"],
@@ -77,7 +91,7 @@ _ROW_ALIASES = {
         "interest-bearing liabilities",
         "total liabilities",  # last-resort fallback only
     ],
-    "market_cap": ["market cap", "market capitalization"],
+    "market_cap": ["market cap", "market capitalization", "marketcapitalization"],
     "total_assets": ["total assets"],
     "total_equity": [
         "total shareholder equity",
@@ -94,6 +108,7 @@ _ROW_ALIASES = {
     "ppem": ["property plant", "net ppe", "ppe", "fixed assets"],
     "marketable_securities": ["marketable securities", "short-term investments"],
     "sector": ["sector", "industrygroup"],
+    "roe": ["roe ttm", "roe rfy", "roettm", "roerfy"],
     "net_receivables": ["net receivables", "accounts receivable", "receivables"],
     "operating_cashflow": ["operating cash flow", "cash flow from operating"],
     "dividends_paid": ["cash dividends paid", "dividends paid"],
@@ -303,7 +318,7 @@ def _canonicalize(payload: str) -> dict:
         rows = _parse_json_statements(text)
     elif any(ln.lstrip().startswith("|") for ln in text.splitlines()):
         rows = _parse_markdown_financials(text)
-    elif ":" in text.splitlines()[0] if text.splitlines() else False:
+    elif any(":" in ln for ln in text.splitlines()):
         rows = _parse_text_report(text)
     else:
         rows = _parse_csv_statements(text)
@@ -338,6 +353,21 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
             canonical.update(_canonicalize(stmt))
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s %s: %s", ticker, method, exc)
+    # Finnhub basic financials (free tier, key-gated): a single call fills the
+    # growth / ROE screens when the key is present (fills in eps/revenue YoY
+    # and ROE where the statement chain lacks them). Only ever fills gaps -
+    # an existing canonical value is never overwritten. Calls the vendor
+    # directly (Finnhub-specific, not part of the fundamental_data chain).
+    try:
+        from tradingagents.dataflows.finnhub import get_basic_financials_finnhub
+
+        bf = get_basic_financials_finnhub(ticker, curr_date)
+        bf_canon = _canonicalize(bf)
+        for k in ("eps_yoy", "revenue_yoy", "roe", "market_cap"):
+            if k not in canonical and bf_canon.get(k) is not None:
+                canonical[k] = bf_canon.get(k)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("%s finnhub basic financials: %s", ticker, exc)
     # Guard: a cash figure larger than total assets means a wrong-row match.
     ca_ = canonical.get("cash")
     ta_ = canonical.get("total_assets")
@@ -463,8 +493,7 @@ def _watchlist_markdown(results: list) -> str:
         heads.append("ScanA")
         heads.append("ScanB")
     show_growth = any(
-        r.get("eps_yoy") is not None or r.get("revenue_yoy") is not None
-        or r.get("roe") is not None
+        r.get("eps_yoy") is not None or r.get("revenue_yoy") is not None or r.get("roe") is not None
         for r in results
     )
     if show_growth:
@@ -536,7 +565,9 @@ def _watchlist_markdown(results: list) -> str:
         if show_sector:
             cells.append(cell(r.get("sector")))
             rank = r.get("sec_rank")
-            cells.append(cell(rank) if rank is None else (f"T{rank}" if r.get("sec_top3") else str(rank)))
+            cells.append(
+                cell(rank) if rank is None else (f"T{rank}" if r.get("sec_top3") else str(rank))
+            )
         if show_rev:
             cells.append(cell(r.get("rev_net"), "%+d"))
         if show_inst:
@@ -1231,24 +1262,42 @@ def main(argv: list[str] | None = None) -> int:
             row = screen_ticker(ticker, fin)
             # Phase-1 growth / structure gates - applied only when the metric
             # is MEASURED (missing data keeps the row: "n/a", never fabricated).
-            if args.min_eps_yoy and row.get("eps_yoy") is not None \
-                    and (row["eps_yoy"] * 100.0) < args.min_eps_yoy:
-                logger.info("skip %s: EPS YoY %.1f%% < %.0f%%", ticker,
-                            row["eps_yoy"] * 100.0, args.min_eps_yoy)
+            if (
+                args.min_eps_yoy
+                and row.get("eps_yoy") is not None
+                and (row["eps_yoy"] * 100.0) < args.min_eps_yoy
+            ):
+                logger.info(
+                    "skip %s: EPS YoY %.1f%% < %.0f%%",
+                    ticker,
+                    row["eps_yoy"] * 100.0,
+                    args.min_eps_yoy,
+                )
                 continue
-            if args.min_rev_yoy and row.get("revenue_yoy") is not None \
-                    and (row["revenue_yoy"] * 100.0) < args.min_rev_yoy:
-                logger.info("skip %s: revenue YoY %.1f%% < %.0f%%", ticker,
-                            row["revenue_yoy"] * 100.0, args.min_rev_yoy)
+            if (
+                args.min_rev_yoy
+                and row.get("revenue_yoy") is not None
+                and (row["revenue_yoy"] * 100.0) < args.min_rev_yoy
+            ):
+                logger.info(
+                    "skip %s: revenue YoY %.1f%% < %.0f%%",
+                    ticker,
+                    row["revenue_yoy"] * 100.0,
+                    args.min_rev_yoy,
+                )
                 continue
-            if args.min_roe and row.get("roe") is not None \
-                    and (row["roe"] * 100.0) < args.min_roe:
-                logger.info("skip %s: ROE %.1f%% < %.0f%%", ticker,
-                            row["roe"] * 100.0, args.min_roe)
+            if args.min_roe and row.get("roe") is not None and (row["roe"] * 100.0) < args.min_roe:
+                logger.info(
+                    "skip %s: ROE %.1f%% < %.0f%%", ticker, row["roe"] * 100.0, args.min_roe
+                )
                 continue
             if args.max_mcap and cap is not None and cap > args.max_mcap:
-                logger.info("skip %s: market cap %.2fB > ceiling %.2fB",
-                            ticker, cap / 1e9, args.max_mcap / 1e9)
+                logger.info(
+                    "skip %s: market cap %.2fB > ceiling %.2fB",
+                    ticker,
+                    cap / 1e9,
+                    args.max_mcap / 1e9,
+                )
                 continue
             if args.sector_rank:
                 from tradingagents.strategies.sector_rank import sector_standing
@@ -1259,23 +1308,27 @@ def main(argv: list[str] | None = None) -> int:
                 row["sec_rank"] = standing.get("rank")
                 row["sec_top3"] = standing.get("top3_3m")
                 if standing.get("verdict") == "tracking":  # measured, not top-3
-                    logger.info("skip %s: sector %s rank %s not top-3",
-                                ticker, row["sector"], row["sec_rank"])
+                    logger.info(
+                        "skip %s: sector %s rank %s not top-3",
+                        ticker,
+                        row["sector"],
+                        row["sec_rank"],
+                    )
                     continue
             if args.revision:
                 rev = _fetch_revision_guarded(ticker)
                 row["rev_net"] = rev.get("net") if rev else None
                 if row["rev_net"] is not None and row["rev_net"] <= 0:
-                    logger.info("skip %s: net analyst revisions %+d <= 0",
-                                ticker, row["rev_net"])
+                    logger.info("skip %s: net analyst revisions %+d <= 0", ticker, row["rev_net"])
                     continue
             if args.inst_accum:
                 inst = _inst_accumulation(route_to_vendor("get_institution_holdings", ticker))
                 row["inst_latest_pp"] = inst.get("latest_pp") if inst else None
                 row["inst_two_q_pp"] = inst.get("two_q_pp") if inst else None
                 if inst is not None and inst.get("accumulate") is False:
-                    logger.info("skip %s: institutional distribution (2q pp %.2f)",
-                                ticker, inst["two_q_pp"])
+                    logger.info(
+                        "skip %s: institutional distribution (2q pp %.2f)", ticker, inst["two_q_pp"]
+                    )
                     continue
             if fmp_use:
                 _nf = None

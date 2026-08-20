@@ -14,6 +14,7 @@ Both follow the vendor taxonomy in ``errors.py``: a missing key raises
 "unavailable" instead of crashing, and empty results raise ``NoMarketDataError``
 so the router emits an honest "no data" signal rather than an empty string.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,9 +66,9 @@ def get_news_finnhub(ticker, start_date, end_date):
 
     news_str = ""
     for article in news:
-        headline = article.get('headline', 'No Title')
-        summary = article.get('summary', '')
-        url = article.get('url', '')
+        headline = article.get("headline", "No Title")
+        summary = article.get("summary", "")
+        url = article.get("url", "")
 
         news_str += f"### {headline}\n"
         if summary:
@@ -82,16 +83,16 @@ def get_news_finnhub(ticker, start_date, end_date):
 def get_global_news_finnhub(curr_date, look_back_days=None, limit=None):
     finnhub_client = _client()
 
-    news = finnhub_client.general_news('general', min_id=0)
+    news = finnhub_client.general_news("general", min_id=0)
 
     if not news:
         return "No global news found"
 
     news_str = ""
     for article in news:
-        headline = article.get('headline', 'No Title')
-        summary = article.get('summary', '')
-        url = article.get('url', '')
+        headline = article.get("headline", "No Title")
+        summary = article.get("summary", "")
+        url = article.get("url", "")
 
         news_str += f"### {headline}\n"
         if summary:
@@ -199,3 +200,108 @@ def get_earnings_calendar_finnhub(
             f" | Revenue estimate: {row.get('revenueEstimate', 'n/a')}"
         )
     return "\n".join(lines)
+
+
+def get_basic_financials_finnhub(symbol: str, curr_date: str | None = None) -> str:
+    """Finnhub basic financials metrics (free tier) -> canonical line items.
+
+    A single call to ``company_basic_financials`` provides the fundamental
+    metrics the framework's Phase-1 screens need (EPS / revenue / ROE growth
+    and levels, margins, payout, current ratio, 52w high). Returns a compact
+    ``Key: value`` block the screener's text parser can canonicalize into
+    eps_yoy / revenue_yoy / roe / market_cap; raises ``NoMarketDataError``
+    when Finnhub reports nothing.
+    """
+    finnhub_client = _client()
+    data = finnhub_client.company_basic_financials(symbol, "all") or {}
+    metric = data.get("metric") or {}
+    if not metric:
+        raise NoMarketDataError(symbol, detail="no basic financial metrics returned")
+    out = [
+        f"Basic Financials — {symbol.upper()} (Finnhub)",
+        "Sector: " + (data.get("sector") or ""),
+    ]
+    for k, v in metric.items():
+        # keep the numbers textual for the canonical parser (it reads 'a: 1.2')
+        # Finnhub reports market cap in millions - scale to raw USD so the
+        # screener's market-cap floor ($) compares correctly.
+        if k == "marketCapitalization" and isinstance(v, (int, float)):
+            v = float(v) * 1_000_000.0
+        if isinstance(v, (int, float)):
+            out.append(f"{k}: {v}")
+    return "\n".join(out)
+
+
+def get_company_peers_finnhub(ticker: str) -> str:
+    """Finnhub peers (free tier) -> comma-separated comparable tickers."""
+    finnhub_client = _client()
+    peers = finnhub_client.company_peers(ticker) or []
+    if not peers:
+        raise NoMarketDataError(ticker, "no peer data returned")
+    return "Peers: " + ", ".join(str(p) for p in peers[:24])
+
+
+def get_insider_activity_finnhub(ticker: str, months: int = 12) -> str:
+    """Finnhub insider sentiment (free tier) -> deterministic numeric read.
+
+    ``stock/insider-sentiment`` requires explicit from/to dates; we use the
+    last ``months``. Returns the summed net insider change, the recent-vs-prior
+    trend, and the latest month's mspr (the proprietary score) so the analyst
+    gets a handful of numbers, not a row dump.
+    """
+    finnhub_client = _client()
+
+    def _window():
+        from datetime import datetime, timedelta
+
+        end = datetime.now()
+        start = end - timedelta(days=int(months) * 30)
+        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+    _from, to = _window()
+    data = finnhub_client.stock_insider_sentiment(ticker, _from=_from, to=to) or {}
+    rows = data.get("data") or []
+    if not rows:
+        raise NoMarketDataError(ticker, detail="no insider sentiment in window")
+    net = sum(float(r.get("change") or 0.0) for r in rows)
+    n = len(rows)
+    last = rows[0]
+    half = max(1, n // 2)
+    recent = sum(float(r.get("change") or 0.0) for r in rows[:half])
+    prior = sum(float(r.get("change") or 0.0) for r in rows[half:]) if len(rows) > half else 0.0
+    trend = "accelerating" if recent > prior else ("decelerating" if prior > 0 else "flat")
+    lines = [
+        f"## Insider Sentiment — {ticker.upper()} (Finnhub)",
+        f"- Window: last {months} months, {n} periods",
+        f"- Net change (sum, shares): {net:,.0f}",
+        f"- Recent {half} vs prior {len(rows) - half}: {recent:,.0f} vs {prior:,.0f}",
+        f"- Trend: {trend}",
+        f"- Last month: {last.get('month')}/{last.get('year')} "
+        f"change={last.get('change'):,} mspr={last.get('mspr'):.1f}",
+        "",
+        "Interpretation: net insider buying (positive) usually precedes "
+        "outperformance; net selling is a caution flag, not a sell signal. "
+        "Weigh alongside institutional holdings and capital flow.",
+    ]
+    return "\n".join(lines)
+
+
+def get_profile_finnhub(ticker: str) -> dict | None:
+    """Finnhub company profile2 (free tier) key-gated sector/identity lookup.
+
+    Returns the raw profile dict (sector, industry, marketCap, float, ipo,
+    country...) or None when the key is missing / Finnhub errors. This is the
+    authoritative second-tier sector source behind FMP in the screener's
+    ``--sector-rank`` fallback chain; wrapped in try/except by callers so it
+    never raises into a scan.
+    """
+    try:
+        data = _client().company_profile2(symbol=ticker) or {}
+        if isinstance(data, dict) and data.get("ticker"):
+            # Finnhub returns the GICS sector under ``finnhubIndustry``.
+            if "finnhubIndustry" in data and "sector" not in data:
+                data["sector"] = data["finnhubIndustry"]
+            return data
+        return None
+    except Exception:  # noqa: BLE001 - optional enrichment never raises
+        return None

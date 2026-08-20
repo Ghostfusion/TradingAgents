@@ -178,6 +178,10 @@ def test_sector_rank_gate(capsys):
         mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
         mock.patch.object(vs, "_sector_ranking", return_value=fake_ranking),
         mock.patch.object(vs, "_fetch_sector_guarded", return_value="Technology"),
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+            return_value=None,
+        ),
     ):
         vs.main(["AAPL", "-d", "2026-01-02", "--sector-rank"])
     out = capsys.readouterr().out
@@ -188,6 +192,10 @@ def test_sector_rank_gate(capsys):
         mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
         mock.patch.object(vs, "_sector_ranking", return_value=fake_ranking),
         mock.patch.object(vs, "_fetch_sector_guarded", return_value="Energy"),
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+            return_value=None,
+        ),
     ):
         vs.main(["AAPL", "-d", "2026-01-02", "--sector-rank"])
     out = capsys.readouterr().out
@@ -233,5 +241,9 @@ def test_revision_unknown_data_kept():
     with (
         mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
         mock.patch.object(vs, "_fetch_revision_guarded", return_value=None),
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+            return_value=None,
+        ),
     ):
         vs.main(["AAPL", "-d", "2026-01-02", "--revision"])  # no SystemExit

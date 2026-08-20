@@ -19,8 +19,11 @@ from .errors import (
 )
 from .finnhub import (
     get_analyst_ratings_finnhub,
+    get_basic_financials_finnhub,
+    get_company_peers_finnhub,
     get_earnings_calendar_finnhub,
     get_global_news_finnhub,
+    get_insider_activity_finnhub,
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
@@ -78,7 +81,15 @@ TOOLS_CATEGORIES = {
     },
     "fundamental_data": {
         "description": "Company fundamentals",
-        "tools": ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"],
+        "tools": [
+            "get_fundamentals",
+            "get_balance_sheet",
+            "get_cashflow",
+            "get_income_statement",
+            "get_basic_financials",
+            "get_company_peers",
+            "get_insider_activity",
+        ],
     },
     "news_data": {
         "description": "News and insider data",
@@ -235,6 +246,16 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
         "moomoo": get_fundamentals_moomoo,
+        "finnhub": get_basic_financials_finnhub,
+    },
+    "get_basic_financials": {
+        "finnhub": get_basic_financials_finnhub,
+    },
+    "get_company_peers": {
+        "finnhub": get_company_peers_finnhub,
+    },
+    "get_insider_activity": {
+        "finnhub": get_insider_activity_finnhub,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,

@@ -48,9 +48,12 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.analysis_tools import (
     get_analyst_verdict,
+    get_basic_financials,
     get_catalyst_scale,
+    get_company_peers,
     get_earnings_event_read,
     get_earnings_surprise,
+    get_insider_activity,
     get_orderflow_read,
     get_portfolio_weights,
     get_position_sizing,
@@ -312,6 +315,9 @@ class TradingAgentsGraph:
                     get_analyst_verdict,
                     get_earnings_surprise,
                     get_portfolio_weights,
+                    get_basic_financials,
+                    get_insider_activity,
+                    get_company_peers,
                 ]
             ),
         }

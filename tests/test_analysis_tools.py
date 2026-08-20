@@ -342,3 +342,65 @@ def test_earnings_surprise_reports_side():
     with mock.patch("tradingagents.strategies.catalyst.fetch_catalyst_data", return_value=fake):
         out = T.get_earnings_surprise.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "last_surprise=+15.0%" in out and "side=beat" in out
+
+
+# ---------------------------------------------------------------------------
+# Finnhub-backed tools (get_basic_financials / get_insider_activity /
+# get_company_peers)
+# ---------------------------------------------------------------------------
+
+
+def test_basic_financials_direct_call():
+
+    with mock.patch(
+        "tradingagents.dataflows.finnhub._client",
+        return_value=_FakeFinnhubClient(),
+    ):
+        out = T.get_basic_financials.invoke({"ticker": "AAPL"})
+    assert "Basic Financials" in out and "epsGrowthQuarterlyYoy" in out
+
+
+def test_insider_activity_direct_call():
+
+    with mock.patch(
+        "tradingagents.dataflows.finnhub._client",
+        return_value=_FakeFinnhubClient(),
+    ):
+        out = T.get_insider_activity.invoke({"ticker": "AAPL"})
+    assert "Insider Sentiment" in out and "Trend:" in out
+
+
+def test_company_peers_direct_call():
+
+    with mock.patch(
+        "tradingagents.dataflows.finnhub._client",
+        return_value=_FakeFinnhubClient(),
+    ):
+        out = T.get_company_peers.invoke({"ticker": "AAPL"})
+    assert "Peers:" in out
+
+
+class _FakeFinnhubClient:
+    """Minimal finnhub.Client stand-in for the free-tier methods we wrapped."""
+
+    def company_basic_financials(self, symbol, metric_type):
+        return {
+            "symbol": symbol,
+            "metric": {
+                "epsGrowthQuarterlyYoy": 29.13,
+                "revenueGrowthTTMYoy": 14.24,
+                "roeTTM": 137.2,
+                "marketCapitalization": 4430136,
+            },
+        }
+
+    def stock_insider_sentiment(self, symbol, _from=None, to=None):
+        return {
+            "data": [
+                {"year": 2026, "month": 2, "change": -1000, "mspr": -10.2},
+                {"year": 2026, "month": 1, "change": -2000, "mspr": -8.1},
+            ]
+        }
+
+    def company_peers(self, symbol):
+        return ["DELL", "HPQ", "SMCI"]

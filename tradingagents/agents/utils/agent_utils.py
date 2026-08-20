@@ -8,9 +8,12 @@ from langchain_core.messages import HumanMessage, RemoveMessage
 
 from tradingagents.agents.utils.analysis_tools import (
     get_analyst_verdict,
+    get_basic_financials,
     get_catalyst_scale,
+    get_company_peers,
     get_earnings_event_read,
     get_earnings_surprise,
+    get_insider_activity,
     get_orderflow_read,
     get_portfolio_weights,
     get_position_sizing,
@@ -104,6 +107,9 @@ __all__ = [
     "get_analyst_verdict",
     "get_earnings_surprise",
     "get_portfolio_weights",
+    "get_basic_financials",
+    "get_insider_activity",
+    "get_company_peers",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",

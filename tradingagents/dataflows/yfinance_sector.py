@@ -55,7 +55,18 @@ def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
                 return sec
     except Exception:  # noqa: BLE001 - enrichment must never raise
         pass
-    # 2) yfinance guarded fallback.
+    # 2) Finnhub company_profile2 (key-gated) - a second authoritative source
+    #    when the FMP key is rate-limited/unset.
+    try:
+        from tradingagents.dataflows.finnhub import get_profile_finnhub
+
+        prof = get_profile_finnhub(ticker)
+        sec = str((prof or {}).get("sector") or "").strip()
+        if sec:
+            return sec
+    except Exception:  # noqa: BLE001
+        pass
+    # 3) yfinance guarded fallback.
     info = _ticker_info(ticker, timeout=timeout)
     sec = (info.get("sector") or "").strip()
     return sec or None
