@@ -278,7 +278,7 @@ has changed before); never assume an endpoint works — the SDK's
 
 - 2026-08-20 `1a87063` - README: fork-additions highlighted with a purple left
   border (HTML tables), matching the diff-vs-upstream intent; replaces the
-  grey blockquote (7a3bfac). Refined in `HASH` to per-section borders
+  grey blockquote (7a3bfac). Refined in `e68778a` to per-section borders
 - 2026-08-20 `bc24e79` - working-agreement policy §0: always expose calculations as
   tools for the agents, keep docs + README true on every change, commit + push
 - 2026-08-20 `8947ea2` - moomoo period-order + prior-period fix (M column now
