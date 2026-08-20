@@ -276,7 +276,7 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-20 `HASH` - working-agreement policy §0: always expose calculations as
+- 2026-08-20 `bc24e79` - working-agreement policy §0: always expose calculations as
   tools for the agents, keep docs + README true on every change, commit + push
 - 2026-08-20 `8947ea2` - moomoo period-order + prior-period fix (M column now
   computes; latest values were the OLDEST period)
