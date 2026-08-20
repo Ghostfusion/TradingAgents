@@ -47,12 +47,18 @@ from tradingagents.agents.utils.agent_utils import (
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.analysis_tools import (
+    get_analyst_verdict,
     get_catalyst_scale,
     get_earnings_event_read,
+    get_earnings_surprise,
+    get_orderflow_read,
+    get_portfolio_weights,
     get_position_sizing,
+    get_regime_read,
     get_relative_strength,
     get_risk_gate,
     get_swing_set,
+    get_volatility_contraction,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
@@ -257,6 +263,9 @@ class TradingAgentsGraph:
                     get_relative_strength,
                     get_position_sizing,
                     get_risk_gate,
+                    get_regime_read,
+                    get_volatility_contraction,
+                    get_orderflow_read,
                 ]
             ),
             "social": ToolNode(
@@ -299,6 +308,10 @@ class TradingAgentsGraph:
                     get_corporate_actions,
                     get_institution_holdings,
                     get_earnings_surprise_history,
+                    # Computed-analysis tools (deterministic signals).
+                    get_analyst_verdict,
+                    get_earnings_surprise,
+                    get_portfolio_weights,
                 ]
             ),
         }

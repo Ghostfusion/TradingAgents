@@ -10,6 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Computed-analysis tools - follow-up batch (6 more)** - `analysis_tools.py`
+  grows `get_regime_read` (overlays.build_strategy_overlays: regime label +
+  position scale + momentum/52w), `get_volatility_contraction` (swing.vcp_setup),
+  `get_orderflow_read` (orderflow.summarize on the guarded live fetch),
+  `get_analyst_verdict` (screener canonical pipeline -> EY/EV/EBIT/F/M/Z/
+  trap-risk/ROE/YoY), `get_earnings_surprise` (standardized surprise % +
+  side), and `get_portfolio_weights` (value-proportional + capped weights).
+  Bound to the market analyst (regime/VCP/orderflow) and the fundamentals
+  analyst (verdict/surprise/portfolio); same no-fabrication contract.
 - **Computed-analysis tools for the analyst LLMs** - `agents/utils/analysis_tools.py`
   wraps the deterministic strategy calculators as LangChain tools so the
   agents reason over computed numbers instead of re-deriving (or inventing)

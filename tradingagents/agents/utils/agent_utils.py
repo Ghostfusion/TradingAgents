@@ -7,12 +7,18 @@ import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 from tradingagents.agents.utils.analysis_tools import (
+    get_analyst_verdict,
     get_catalyst_scale,
     get_earnings_event_read,
+    get_earnings_surprise,
+    get_orderflow_read,
+    get_portfolio_weights,
     get_position_sizing,
+    get_regime_read,
     get_relative_strength,
     get_risk_gate,
     get_swing_set,
+    get_volatility_contraction,
 )
 from tradingagents.agents.utils.analyst_data_tools import (
     get_analyst_ratings,
@@ -92,6 +98,12 @@ __all__ = [
     "get_catalyst_scale",
     "get_position_sizing",
     "get_risk_gate",
+    "get_regime_read",
+    "get_volatility_contraction",
+    "get_orderflow_read",
+    "get_analyst_verdict",
+    "get_earnings_surprise",
+    "get_portfolio_weights",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",

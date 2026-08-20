@@ -512,6 +512,298 @@ def get_risk_gate(
     return chr(10).join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Regime / VCP / orderflow (market analyst)
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_regime_read(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Deterministic market-regime read for a ticker (risk-on / risk-off).
+
+    Computes the strategy-regime label (vol percentile + trend strength),
+    the volatility-target position scale, and the 60-day momentum + 52-week
+    high distance from the same pure calculators the overlay pipeline uses.
+    Call this before any claim that 'the regime is supportive / risk-on' or
+    when deciding how aggressively to size against the price backdrop.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        regime label + position scale + momentum/distance lines, or an
+        'insufficient history' message when fewer than 60 daily bars exist.
+    """
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 60:
+        return (
+            f"regime read unavailable for {ticker}: fewer than 60 daily bars "
+            f"({len(closes)}) - regime needs a real vol history."
+        )
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.overlays import build_strategy_overlays
+
+        ov = build_strategy_overlays(get_config(), closes)
+        if ov is None:
+            return (
+                f"regime read unavailable for {ticker}: strategy overlays "
+                "disabled in the current config."
+            )
+        return (
+            f"regime {ticker}: regime={ov.get('regime')} "
+            f"position_scale={ov.get('position_scale')} "
+            f"momentum_60d={_txt(ov.get('momentum60'))} "
+            f"52w_distance={_txt(ov.get('high_distance'))} "
+            f"context: {ov.get('context')}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"regime read unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_volatility_contraction(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Volatility Contraction Pattern (VCP) base state for a ticker.
+
+    Detects a classic 15% -> 8% -> 3% base: successively shallower pullbacks
+    off a base high on declining volume (strict pivot troughs, last-3 depth
+    contraction with a 10% noise tolerance, deepest pullback within 30% of
+    the base). Call this before any 'volatility contraction', 'VCP base' or
+    'tight base' / 'spring' claim - it is the computed state.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        candidate flag + the base depths + volume-fade + near-breakout lines.
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 90:
+        return f"VCP unavailable for {ticker}: fewer than 90 daily bars ({len(closes)})"
+    try:
+        from tradingagents.strategies.swing import vcp_setup
+
+        v = vcp_setup(closes, data["highs"], data["lows"], data["volumes"])
+        return (
+            f"vcp {ticker}: candidate={v.get('candidate')} "
+            f"pullback_depths={v.get('depths')} "
+            f"base_high={_txt(v.get('base_high'))} "
+            f"close_to_base={_txt(v.get('close_to_base'))} "
+            f"contraction_ok={v.get('contraction_ok')} "
+            f"volume_fade={v.get('volume_fade')} "
+            f"near_breakout={v.get('near_breakout')} "
+            f"context: {v.get('context')}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"VCP unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_orderflow_read(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Institutional vs retail capital-flow read for a ticker.
+
+    Fetches the live moomoo capital buckets and weekly net flows and folds
+    them into the deterministic order-flow summary: institutional/retail net,
+    distribution score, divergence, alignment, exhaustion. Call before any
+    'institutional accumulation / distribution / large orders' claim.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        The computed flow lines, or an explicit 'unavailable (neutral)' note
+        when the live gateway is down - never an estimated number.
+    """
+    try:
+        from tradingagents.strategies.orderflow import fetch_flow, summarize
+    except Exception as exc:  # noqa: BLE001
+        return f"order flow unavailable for {ticker}: {exc}"
+    payload = fetch_flow(ticker)
+    if payload is None:
+        return (
+            f"order flow unavailable for {ticker} (gateway down / no data) - "
+            "treat as neutral; do not fabricate a flow reading."
+        )
+    try:
+        summary = summarize(
+            payload.get("buckets", {}),
+            weekly_nets=payload.get("weekly_nets"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"order flow unavailable for {ticker}: {exc}"
+    return (
+        f"order flow {ticker}: inst_net={summary.get('institutional_net'):+,} "
+        f"retail_net={summary.get('retail_net'):+,} "
+        f"distribution={summary.get('distribution_score'):.2f} "
+        f"divergence={summary.get('divergence')} "
+        f"alignment={summary.get('alignment')} "
+        f"exhaustion={summary.get('exhaustion')} "
+        f"flag={summary.get('flag')}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fundamentals verdict / earnings surprise / portfolio weights (fundamentals)
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_analyst_verdict(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Deterministic value-quality verdict (trap risk + forensic screens).
+
+    Runs the same canonical financial pipeline as the value watchlist and
+    returns the computed screens: Earnings Yield, EV/EBIT (Acquirer's
+    Multiple), Piotroski F-Score, Beneish M-Score, Altman Z-Score, Net-Net,
+    the collapsed trap-risk verdict (LOW/MEDIUM/HIGH + evidence), ROE, and
+    EPS/Revenue YoY growth. Call this before any 'cheap / quality / value /
+    accounting risk / trap' claim - it is the computed number, not a guess.
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: the current trading date (YYYY-mm-dd).
+
+    Returns:
+        One line per computed screen (missing figures render n/a); an
+        'unavailable' message when the vendor chain yields no statements.
+    """
+    try:
+        from scripts.value_screener import fetch_ticker, screen_ticker
+    except Exception as exc:  # noqa: BLE001
+        return f"analyst verdict unavailable for {ticker}: {exc}"
+    fin = fetch_ticker(ticker, current_date)
+    if not fin:
+        return (
+            f"analyst verdict unavailable for {ticker}: no statements from "
+            "the vendor chain; do not fabricate value screens."
+        )
+    row = screen_ticker(ticker, fin)
+    lines = [f"analyst verdict {ticker}:"]
+    for key, label in (
+        ("earnings_yield", "EY"),
+        ("ev_ebit", "EV/EBIT"),
+        ("f_score", "Piotroski F"),
+        ("beneish_m", "Beneish M"),
+        ("altman_z", "Altman Z"),
+        ("roe", "ROE"),
+        ("eps_yoy", "EPS YoY"),
+        ("revenue_yoy", "Revenue YoY"),
+    ):
+        v = row.get(key)
+        if v is None:
+            lines.append(f"  {label}: n/a")
+        elif key in ("beneish_m", "altman_z", "f_score", "ev_ebit"):
+            lines.append(f"  {label}: {v:.2f}")
+        elif key in ("roe", "eps_yoy", "revenue_yoy", "earnings_yield"):
+            lines.append(f"  {label}: {v:.2%}")
+        else:
+            lines.append(f"  {label}: {v}")
+    lines.append(f"  net_net: {row.get('net_net')}")
+    trap = row.get("trap")
+    lines.append(f"  trap_risk: {trap}" if trap not in (None, "n/a") else "  trap_risk: n/a")
+    return chr(10).join(lines)
+
+
+@tool
+def get_earnings_surprise(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Standardized last-reported EPS surprise and its drift side.
+
+    Computes surprise = (actual - estimate) / |estimate| and the side
+    (beat / miss / flat) from the vendor earnings calendar. Use before any
+    'the company beat/missed expectations' claim - it is the computed %, and
+    it anchors the PEAD reasoning without re-deriving the arithmetic.
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: the current trading date (YYYY-mm-dd).
+
+    Returns:
+        surprise % + side + date; 'no reported surprise' when the calendar
+        carries no quantifiable print.
+    """
+    try:
+        from tradingagents.strategies.catalyst import (
+            fetch_catalyst_data,
+            last_earnings_surprise,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"earnings surprise unavailable for {ticker}: {exc}"
+    data = fetch_catalyst_data(ticker, current_date) or {}
+    last = last_earnings_surprise(data.get("earnings_calendar") or [])
+    if not last:
+        return (
+            f"earnings surprise unavailable for {ticker}: no reported print "
+            "with both actual and estimate in the window."
+        )
+    return (
+        f"earnings surprise {ticker}: last_surprise={_fmt_pct(last['surprise'])} "
+        f"side={last['side']} date={last.get('date')}"
+    )
+
+
+@tool
+def get_portfolio_weights(
+    scores: Annotated[
+        dict,
+        "map of ticker -> value/composite score (higher = better; only positive scores are weighted)",
+    ],
+    sector_map: Annotated[
+        dict | None, "map of ticker -> sector name (optional; used for the per-sector cap)"
+    ] = None,
+    max_name_pct: Annotated[float, "per-name weight cap as a fraction, default 0.25"] = 0.25,
+    sector_cap_pct: Annotated[float, "per-sector weight cap as a fraction, default 0.35"] = 0.35,
+) -> str:
+    """Value-proportional portfolio weights with the framework's hard caps.
+
+    Deterministic allocation for a small watchlist: weights proportional to
+    the composite score, then clipped to the per-name and per-sector caps; the
+    excess stays as cash (weights sum to <= 1). Call this when trading a
+    multi-name value book and report the computed weights instead of choosing
+    them by feel.
+
+    Args:
+        scores: {ticker: positive score}. Zero/negative scores are left out.
+        sector_map: {ticker: sector} to apply the sector cap (optional).
+        max_name_pct: per-name cap (fraction).
+        sector_cap_pct: per-sector cap (fraction).
+
+    Returns:
+        One line per name (weight %) + the total allocated (cash remainder).
+    """
+    try:
+        from tradingagents.strategies.portfolio import (
+            adjust_for_caps,
+            value_ratio_weights,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"portfolio weights unavailable: {exc}"
+    scores = {k: float(v) for k, v in (scores or {}).items() if v is not None and float(v) > 0}
+    if not scores:
+        return "portfolio weights unavailable: no positive scores provided."
+    raw = value_ratio_weights(scores)
+    out = adjust_for_caps(
+        raw, sector_map or {}, sector_cap_limit=sector_cap_pct, max_name=max_name_pct
+    )
+    lines = ["portfolio weights:"]
+    for name, w in sorted(out.items(), key=lambda kv: -float(kv[1])):
+        lines.append(f"  {name}: {float(w):.1%}")
+    alloc = sum(float(v) for v in out.values())
+    lines.append(f"  total allocated: {alloc:.1%} (cash remainder {1.0 - alloc:.1%})")
+    return chr(10).join(lines)
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -519,4 +811,10 @@ __all__ = [
     "get_catalyst_scale",
     "get_position_sizing",
     "get_risk_gate",
+    "get_regime_read",
+    "get_volatility_contraction",
+    "get_orderflow_read",
+    "get_analyst_verdict",
+    "get_earnings_surprise",
+    "get_portfolio_weights",
 ]

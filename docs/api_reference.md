@@ -240,7 +240,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `short_interest` : `get_short_interest`
 - **computed-analysis tools** (bound to the analyst tool loops, see 6.5):
   `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`,
-  `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`
+  `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`,
+  `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read`,
+  `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -284,6 +286,12 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_catalyst_scale(ticker, date)` | `catalyst.build_catalyst_snapshot` | news | 0..1 scale + verdict + reasons |
 | `get_position_sizing(confidence, stop_dist_pct, ...)` | `size.kelly + risk-budget` | market | min(kelly_quarter, risk/stop, cap) |
 | `get_risk_gate(size_pct, ...)` | `risk_governor.govern` | market | PASS / WARN / REJECT |
+| `get_regime_read(ticker)` | `overlays.build_strategy_overlays` | market | regime label + position scale + momentum/52w |
+| `get_volatility_contraction(ticker)` | `swing.vcp_setup` | market | VCP base depths + contraction + near-breakout |
+| `get_orderflow_read(ticker)` | `orderflow.summarize` (+ guarded fetch) | market | inst/retail net, distribution, divergence, alignment |
+| `get_analyst_verdict(ticker, date)` | `screener screen_ticker` + `normalized.trap_verdict` | fundamentals | EY, EV/EBIT, F/M/Z, Net-Net, trap risk, ROE, YoY |
+| `get_earnings_surprise(ticker, date)` | `events.surprise_score` + `catalyst.last_earnings_surprise` | fundamentals | surprise % + side |
+| `get_portfolio_weights(scores, sector_map, ...)` | `portfolio.value_ratio_weights + adjust_for_caps` | fundamentals | cap-respecting value weights |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

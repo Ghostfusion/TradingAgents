@@ -6,13 +6,16 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_options_chain,
+    get_orderflow_read,
     get_position_sizing,
+    get_regime_read,
     get_relative_strength,
     get_risk_gate,
     get_short_interest,
     get_stock_data,
     get_swing_set,
     get_verified_market_snapshot,
+    get_volatility_contraction,
 )
 
 
@@ -33,6 +36,9 @@ def create_market_analyst(llm):
             get_relative_strength,
             get_position_sizing,
             get_risk_gate,
+            get_regime_read,
+            get_volatility_contraction,
+            get_orderflow_read,
         ]
 
         system_message = (
@@ -75,6 +81,11 @@ You also have computed-analysis tools - use these numbers as ground truth, do no
 - get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
 - get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one.
 - get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT.
+
+You also have three environment-flow tools - ground regime and order-lifecycle claims in them:
+- get_regime_read(ticker) - the deterministic regime label (vol percentile + trend), volatility-target position scale, 60d momentum and 52w distance. Use it before any 'the regime is risk-on/off' or 'trade the trend' claim.
+- get_volatility_contraction(ticker) - the VCP base state (15%->8%->3% contraction, volume fade, near-breakout). Use it when assessing whether a tight base precedes a breakout.
+- get_orderflow_read(ticker) - the live institutional-vs-retail net, distribution score, divergence and alignment. Use it (instead of raw get_capital_flow) before any 'institutions are accumulating/distributing' claim - it is the computed summary.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
