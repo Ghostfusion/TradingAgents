@@ -276,7 +276,7 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-20 `HASH` - README: fork-additions now highlighted with a purple
+- 2026-08-20 `1a87063` - README: fork-additions now highlighted with a purple
   left border (HTML tables), matching the diff-vs-upstream intent; replaces
   the grey blockquote (7a3bfac) and the un-marked flat sections
 - 2026-08-20 `bc24e79` - working-agreement policy §0: always expose calculations as
