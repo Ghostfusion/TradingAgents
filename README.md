@@ -35,7 +35,7 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
-- [2026-08-20] **Strategies index** - added `Strategies/index.md`, a navigation map linking every strategy plan doc (`Math`, `value_strategy`, `framework`, `scan`, `momentum`, risk/decision-hardening, enhancement, alpaca) to its implementation modules, config gates, scan modes, and consumers.
+- [2026-08-20] **Strategies index** - added `Strategies/index.md`, a navigation map linking every strategy plan doc under `Strategies/` to its implementation modules, config gates, scan modes, and consumers. Wired into the README docs pointer.
 - [2026-08-20] **Developer docs set** - added `docs/developer/` with 11 focused guides (topology, graph topology + run, dataflow/vendors, strategies, agents/tools, entrypoints, persistence, dev guide, Massive integration, tests layout) covering the *whole* project for a joining developer.
 - [2026-08-20] **Massive Flat-File screener (folder, OFF by default)** - the value-screener's `_fetch_ohlcv` reads a Massive day-aggregates folder (`TRADINGAGENTS_MASSIVE_FLAT_DIR` / `massive_flat_dir`, default `data/massive_flat`) ONLY when `TRADINGAGENTS_ENABLE_MASSIVE_FLAT=true` (default OFF), giving bulk-history ATR/ATR-pct/scan bases before the per-ticker vendor chain. Opt-in, >=15-row gate; hermetic-tested. Also validated a live end-to-end `batch.py` run to AAPL (Underweight) exercising the new Massive tools.
 - [2026-08-20] **Massive NOI + Flat Files (item 8)** - `massive_noi.py` (WebSocket Net Order Imbalance streamer + `scripts/massive_noi_monitor.py` monitor app) and `massive_flat.py` (bulk Flat-File day-aggregates loader into per-ticker OHLCV for the screener/backtests). Both are **plan-gated standalone utilities** - not batch `@tool`s. NOI needs the Imbalances Expansion add-on; Flat Files need Starter+.
@@ -322,7 +322,7 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > ---
 >
-> **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays), [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports), and the full developer map in [`docs/developer/`](docs/developer/00-index.md).
+> **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays), [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports), the full developer map in [`docs/developer/`](docs/developer/00-index.md), and the strategy-plan index in [`Strategies/index.md`](Strategies/index.md).
 >
 
 
