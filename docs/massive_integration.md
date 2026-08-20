@@ -98,7 +98,7 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | 1 | `/v2/reference/news` (sentiment) | Sentiment + News analysts | ✅ implemented |
 | 2 | `economy/treasury-yields`, `inflation`, `inflation-expectations`, `labor-market` | Macro analyst + catalyst overlay (B1) decoupled from OpenD | ✅ implemented |
 | 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | ✅ implemented |
-| 4 | `filings/13-f-filings`, `form-4` | institutional/insider fundamentals + screener | planned |
+| 4 | `filings/form-4` | insider fundamentals + screener | ✅ implemented (13-F deferred: no security filter — see §3c) |
 | 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
 | 6 | `fundamentals/ratios|balance-sheets|income-statements|cash-flow|float` | `get_analyst_verdict` inputs (EY, EV/EBIT, ROE) | planned |
 | 7 | `snapshots/single-ticker|full-market|top-movers`, `aggregates/custom-bars`, `technical-indicators/*` | market analyst + `pipeline.py --universe` | planned |
@@ -198,9 +198,39 @@ print(get_short_volume_massive('AAPL', '2026-08-10', '2026-08-19', 3))
 "
 ```
 
+
+## 3c. Insider transactions (Form 4) - implemented; 13-F deferred
+
+### `get_form4_insider(ticker, start_date, end_date)` (implemented)
+
+SEC **Form 4** open-market insider activity via `/stocks/filings/vX/form-4`
+(the `tickers` filter is verified reliable - only the requested symbol's rows
+return). Computes net open-market insider buying:
+
+- **buys** = open-market purchases (`transaction_code` = `P`),
+- **sells** = open-market sales (`S`),
+- **net open-market $** = buys - sells, with grant/exercise (`A`/`M`) rows
+  excluded to strip compensation noise.
+
+Bound as `get_form4_insider` to the **fundamentals analyst** tool loop.
+Verified live: MSFT YTD net insider selling approx -$20.8M (7 sells vs 1 buy);
+AAPL net -$112M.
+
+### Why 13-F institutional holdings are deferred
+
+The `/stocks/filings/vX/13-F` endpoint only accepts **`filer_cik`** and
+**`filing_date`** filters - there is **no security/`ticker` filter**. Querying
+by `ticker` returns unrelated issuers (probed live), so a per-ticker
+"institutional holdings aggregate" would mix other companies' positions and
+mislead the analyst. It is therefore **not wired** until Massive adds a
+security-level (ticker/CUSIP) filter or the screener wants a
+filer-by-filer (CIK) workflow. The existing moomoo `get_institution_holdings`
+(13F-style per-ticker) remains the source for that signal.
+
 ---
 
 ## 4. Extension pattern (add the next vendor function)
+
 
 Follow the existing contract (`docs/api_reference.md` §6):
 

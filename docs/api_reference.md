@@ -231,7 +231,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `technical_indicators` : `get_indicators`
 - `fundamental_data` : `get_fundamentals`, `get_balance_sheet`, `get_cashflow`,
   `get_income_statement`, `get_basic_financials`, `get_company_peers`,
-  `get_insider_activity`
+  `get_insider_activity`, `get_form4_insider`
 - `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`, `get_massive_news`
 - `macro_data` : `get_macro_indicators`
 - `prediction_markets` : `get_prediction_markets`
@@ -285,7 +285,11 @@ de-risking even when the OpenD event calendar is unavailable (see
 `strategies/catalyst.py` + `docs/massive_integration.md` §3a).
 Short interest (`get_short_interest` chain, FINRA 2-week cadence) and a
 `get_short_volume` tool (daily short-sale ratio, market analyst) come from the
-`/stocks/v1/*` endpoints.
+`/stocks/v1/*` endpoints. Form-4 insider activity is a `get_form4_insider`
+tool bound to the fundamentals analyst. (13-F is *not* wired: Massive's
+`/stocks/filings/vX/13-F` has no security filter — only `filer_cik`/`filing_date`
+— so a per-ticker aggregate would be misleading; moomoo
+`get_institution_holdings` stays the source for that signal.)
 Plan-dependent recency/entitlements; FMV/Greeks are Business-only
 (unavailable, never invented). US-only — supplements, not replaces,
 moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.
@@ -327,6 +331,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_basic_financials(ticker)` | `finnhub.get_basic_financials_finnhub` | fundamentals | EPS/revenue YoY, ROE/ROA, margins, payout (free tier) |
 | `get_insider_activity(ticker)` | `finnhub.get_insider_activity_finnhub` | fundamentals | 12m net insider change + mspr + trend |
 | `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
+| `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

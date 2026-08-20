@@ -17,6 +17,7 @@ from tradingagents.dataflows.errors import (
 )
 from tradingagents.dataflows.massive import (
     fetch_macro_backdrop,
+    get_form4_insider_massive,
     get_macro_indicators_massive,
     get_news_massive,
     get_short_interest_massive,
@@ -273,3 +274,44 @@ class MassiveShortInterestTests(unittest.TestCase):
         with mock.patch.object(massive, "_get", return_value=rows):
             out = interface.route_to_vendor("get_short_interest", "GME")
         self.assertIn("Short Interest", out)
+
+
+@pytest.mark.unit
+class MassiveForm4Tests(unittest.TestCase):
+    def test_form4_net_open_market(self):
+        rows = [
+            {"transaction_code": "P", "transaction_value": 500000,
+             "transaction_date": "2026-01-05", "owner_name": "ALICE",
+             "is_director": True, "transaction_shares": 100,
+             "transaction_price_per_share": 100.0},
+            {"transaction_code": "S", "transaction_value": 200000,
+             "transaction_date": "2026-02-01", "owner_name": "BOB",
+             "is_officer": True, "transaction_shares": 50,
+             "transaction_price_per_share": 80.5},
+            # grant/award A row excluded from net
+            {"transaction_code": "A", "transaction_value": 999999,
+             "transaction_date": "2026-03-01", "owner_name": "CAROL"},
+        ]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_form4_insider_massive("AAPL", "2026-01-01", "2026-08-19")
+        self.assertIn("Open-market buys (P): 1 tx", out)
+        self.assertIn("Open-market sells (S): 1 tx", out)
+        self.assertIn("+300,000", out)  # 500k - 200k
+        # The A row must not appear as a sample transaction.
+        self.assertNotIn("999,999", out)
+
+    def test_form4_all_sells_negative_net(self):
+        rows = [
+            {"transaction_code": "S", "transaction_value": 100000,
+             "transaction_date": "2026-01-05", "owner_name": "BOB"},
+        ]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_form4_insider_massive("AAPL", "2026-01-01", "2026-08-19")
+        self.assertIn("-100,000", out)
+
+    def test_form4_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_form4_insider_massive("AAPL", "2026-01-01", "2026-08-19")

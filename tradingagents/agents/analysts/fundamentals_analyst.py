@@ -9,6 +9,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_company_peers,
     get_corporate_actions,
     get_earnings_surprise,
+    get_form4_insider,
     get_fundamentals,
     get_income_statement,
     get_insider_activity,
@@ -40,6 +41,7 @@ def create_fundamentals_analyst(llm):
             get_basic_financials,
             get_insider_activity,
             get_company_peers,
+            get_form4_insider,
         ]
 
         system_message = (

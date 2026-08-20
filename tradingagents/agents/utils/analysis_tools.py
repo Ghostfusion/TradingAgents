@@ -881,6 +881,36 @@ def get_company_peers(
         return f"company peers unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_form4_insider(
+    ticker: Annotated[str, "ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> str:
+    """Open-market insider transactions (Form 4) for a ticker over a window.
+
+    Computes net open-market insider buying (purchases P minus sales S) from
+    SEC Form 4 filings via Massive.com, excluding option grant/exercise (A/M)
+    rows to avoid compensation noise. A positive net dollar amount is a
+    (secondary) accumulation signal; net selling is a caution flag.
+
+    Args:
+        ticker: single ticker symbol.
+        start_date: window start (yyyy-mm-dd).
+        end_date: window end (yyyy-mm-dd).
+
+    Returns:
+        net open-market $ + buy/sell tx counts + sample transactions, or an
+        explicit 'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.massive import get_form4_insider_massive
+
+        return get_form4_insider_massive(ticker, start_date, end_date)
+    except Exception as exc:  # noqa: BLE001
+        return f"form-4 insider activity unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -897,4 +927,5 @@ __all__ = [
     "get_basic_financials",
     "get_insider_activity",
     "get_company_peers",
+    "get_form4_insider",
 ]

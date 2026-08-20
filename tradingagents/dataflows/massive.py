@@ -586,11 +586,119 @@ def _fmt_num(value) -> str:
     return f"{n:.1f}"
 
 
+# ---------------------------------------------------------------------------
+# SEC filings (REST `/stocks/filings/vX/*`) — institutional + insider ownership
+# ---------------------------------------------------------------------------
+
+
+def _plural_ticker_param(ticker: str) -> str:
+    """Normalize mass to single ticker for the ``ticker``/``tickers`` filters."""
+    return ticker.strip().upper()
+
+
+def get_form4_insider_massive(
+    ticker: str, start_date: str, end_date: str, rows: int = 500
+) -> str:
+    """Open-market insider transactions (Form 4) for a ticker over a window.
+
+    Pulls the latest Form 4 filings tagged for ``ticker`` within the window and
+    separates open-market **purchases** (transaction_code ``P``) from **sales**
+    (``S``), then reports the net dollar amount of open-market buying — a
+    direct insider-accumulation/distribution signal. Grant/award (``A``) and
+    exercise (``M``) rows are excluded from the net to avoid option-stuff
+    noise.
+
+    Raises ``NoMarketDataError`` when the provider returns no rows.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(
+        "/stocks/filings/vX/form-4",
+        {
+            "tickers": _plural_ticker_param(ticker),
+            "filing_date.gte": start_date,
+            "filing_date.lte": end_date,
+            "limit": rows,
+        },
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no Form 4 filings for {ticker}"
+        )
+
+    buy_val = 0.0
+    sell_val = 0.0
+    buys = 0
+    sells = 0
+    for row in results:
+        code = str(row.get("transaction_code") or "").upper()
+        if code not in ("P", "S"):
+            continue
+        val = row.get("transaction_value")
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            continue
+        if code == "P":
+            buy_val += val
+            buys += 1
+        else:
+            sell_val += val
+            sells += 1
+
+    net = buy_val - sell_val
+    lines = [
+        f"## {ticker.upper()} Insider Transactions (Form 4, Massive.com)",
+        "",
+        f"Window: {start_date} to {end_date}",
+        f"- Open-market buys (P): {buys} tx, ${_fmt_int(buy_val)}",
+        f"- Open-market sells (S): {sells} tx, ${_fmt_int(sell_val)}",
+        f"- Net open-market $: {_fmt_signed(net)}",
+        "",
+        "Sample recent transactions:",
+    ]
+    shown = 0
+    for row in results:
+        if shown >= 8:
+            break
+        code = str(row.get("transaction_code") or "").upper()
+        if code not in ("P", "S"):
+            continue
+        lines.append(
+            f"- {str(row.get('transaction_date') or row.get('filing_date') or '?')[:10]} "
+            f"| {row.get('owner_name') or '?'} ({'director' if row.get('is_director') else 'officer' if row.get('is_officer') else 'owner'}) "
+            f"| {'BUY' if code=='P' else 'SELL'} "
+            f"{_fmt_int(row.get('transaction_shares'))} sh @ {_fmt_num(row.get('transaction_price_per_share'))} "
+            f"= ${_fmt_int(row.get('transaction_value'))}"
+        )
+        shown += 1
+    lines.append("")
+    lines.append(
+        "Interpretation: sustained insider open-market buying is a (secondary) "
+        "accumulation signal; net selling a caution flag. Excludes option "
+        "grant/exercise (A/M) rows to avoid compensation noise."
+    )
+    return "\n".join(lines)
+
+
+def _fmt_signed(value) -> str:
+    """Format a signed dollar amount with thousands separators."""
+    if value is None:
+        return "n/a"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return f"{'+' if n > 0 else ''}{n:,.0f}"
+
+
 __all__ = [
     "get_news_massive",
     "get_macro_indicators_massive",
     "get_short_interest_massive",
     "get_short_volume_massive",
+    "get_form4_insider_massive",
     "fetch_macro_backdrop",
     "is_yield_curve_inverted",
     "latest_breakeven",

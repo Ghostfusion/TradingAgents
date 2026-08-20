@@ -55,6 +55,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_company_peers,
     get_earnings_event_read,
     get_earnings_surprise,
+    get_form4_insider,
     get_insider_activity,
     get_orderflow_read,
     get_portfolio_weights,
@@ -323,6 +324,7 @@ class TradingAgentsGraph:
                     get_basic_financials,
                     get_insider_activity,
                     get_company_peers,
+                    get_form4_insider,
                 ]
             ),
         }

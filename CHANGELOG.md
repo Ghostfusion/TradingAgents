@@ -10,6 +10,16 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive Form-4 insider activity** - `get_form4_insider(ticker, start, end)`
+  bound to the fundamentals analyst computes net open-market insider buying from
+  SEC Form 4 filings via Massive (`/stocks/filings/vX/form-4`): open-market
+  purchases (P) minus sales (S), excluding grant/exercise (A/M) rows. The 13-F
+  endpoint is intentionally **not** wired because it has no security (`ticker`)
+  filter (only `filer_cik`/`filing_date`) — a per-ticker aggregate would be
+  misleading; moomoo `get_institution_holdings` remains the per-ticker
+  institutional signal. Tests in `tests/test_massive_vendor.py`. Docs:
+  `docs/massive_integration.md` §3c.
+
 - **Massive short interest / short volume** - `get_short_interest_massive`
   registers `massive` in the existing `short_interest` category (FINRA
   two-week settlement: shares short, days-to-cover, avg daily volume, sorted
