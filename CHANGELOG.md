@@ -10,6 +10,12 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Strategies index (`Strategies/index.md`)** - navigation map linking each
+  strategy plan doc under `Strategies/` (Math, value_strategy, framework, scan,
+  momentum, risk/decision-hardening, enhancement_plan, alpaca_data_analysis) to
+  its implementation modules, config gates, scan modes, and consumers. Linked
+  from `docs/developer/04-strategies.md` and `docs/api_reference.md` §10.
+
 - **Developer docs set (`docs/developer/`)** - 11 focused guides covering the
   whole project for a joining developer: topology (01), graph topology + run
   (02/02-01), dataflow+vendors (03), strategies (04), agents+tools (05),

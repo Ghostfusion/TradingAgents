@@ -1,0 +1,180 @@
+# Strategies — Index & Code Map
+
+This is the navigation index for the `Strategies/` folder. It maps each
+**plan / spec markdown** to the **`tradingagents/strategies/*.py` modules** that
+implement it, the **config flags** that gate it, and the **consumer** (screener
+mode, analyst tool, or overlay). Read `docs/developer/04-strategies.md` (the
+module inventory) alongside this.
+
+---
+
+## The strategy plans at a glance
+
+| # | Plan file | What it specifies | Implemented by | Config gate |
+| --- | --- | --- | --- | --- |
+| 1 | `Math.md` | Value-screening playbook (Magic Formula, Quantitative Value, value traps) | `dataflows/quantitative_scores.py`, `scripts/value_screener.py` | `--scan value` |
+| 2 | `value_strategy.md` | Master-watchlist -> screened candidates -> analyst pipeline | `scripts/value_screener.py`, `strategies/factors.py` | `--rank composite`, `--alloc` |
+| 3 | `value_style_gap_plan.md` | V1-V5 value-style enhancements (normalized earnings, composite rank, alloc) | `strategies/normalized.py`, `strategies/factors.py`, `strategies/portfolio.py` | `--enable-float`, `--alloc` |
+| 4 | `framework.md` | Techno-fundamental swing trading (technical + fundamental + catalysts) | `strategies/swing.py`, `strategies/factors.py`, `strategies/catalyst.py` | `--scan swing` |
+| 5 | `scan.md` | Screener scan modes (trend-pullback, breakout, momentum, swing, vcp) | `scripts/value_screener.py` (+ `strategies/{momentum,swing,size}.py`) | `--scan <mode>` |
+| 6 | `momentum_day_trading.md` | Momentum day-trading (analysis-only signals: pillars, pullback, RVOL) | `strategies/momentum.py` | `--scan momentum` |
+| 7 | `risk_management_plan.md` | Deterministic risk governor (PASS/WARN/REJECT, CVaR limits) | `strategies/risk_governor.py`, `strategies/book_risk.py` | `enable_risk_governor` |
+| 8 | `decision_hardening_spec.md` | G1-G5 decision hardening (contract, calibration, consensus, PBO gate) | `strategies/{contract,calibration,consensus,evaluate}.py` | `enable_position_contract` / `enable_calibration` / `enable_agreement` / `enable_threshold_gate` |
+| 9 | `enhancement_plan.md` | 8-phase research plan (regime, PEAD/catalyst, sentiment, reflection) | `strategies/{regime,catalyst,events,sentiment,reflection,evaluate}.py` | per-phase enable flags |
+| 10 | `alpaca_data_analysis.md` | Alpaca market-data integration (analysis-only, no execution) | `dataflows/alpaca*.py`, `agents/utils/alpaca_tools.py` | `enable_alpaca` |
+
+---
+
+## 1. `Math.md` — value-screening source playbook
+
+**What it is:** curated reading for systematically generating a master watchlist
+of value stocks (Magic Formula / Quantitative Value / Acquirer's Multiple).
+
+**Implemented by**:
+- `tradingagents/dataflows/quantitative_scores.py` — the quantitative score
+  helpers (EY, EV/EBIT, Piotroski, Beneish, Normalized).
+- `scripts/value_screener.py` — the `--scan value` classic screens.
+
+**Related**: `Strategies/value_strategy.md`, `Strategies/value_style_gap_plan.md`.
+
+---
+
+## 2. `value_strategy.md` — master watchlist -> analyst pipeline
+
+**Status**: plan + reference implementation.
+
+**What it specifies**: turn the screening playbook into an executable strategy
+layered on the vendor pipeline (`route_to_vendor`) so a generated watchlist
+feeds straight into the analyst teams. **Status:** plan + reference implementation.
+
+**Implemented by**: `scripts/value_screener.py` (screens + `--rank`), plus
+`strategies/factors.py` (composite rank), `strategies/portfolio.py` (alloc).
+
+---
+
+## 3. `value_style_gap_plan.md` — value-style enhancement plan
+
+**Gap map** (V1..V5):
+- **V1** Normalized earnings + trap verdict -> `strategies/normalized.py`;
+- **V2** composite (value + momentum) ranking -> `strategies/factors.py`;
+- **V3** book/portfolio caps -> `strategies/portfolio.py`;
+- **V4** ATR exits / rebalance -> `strategies/exits.py`;
+- **V5** computed numbers into debate -> `strategies/debate_context.py`.
+
+---
+
+## 4. `framework.md` — techno-fundamental swing framework
+
+**Specifies** multi-day/multi-week swing execution: liquidity threshold, technical
+structure, momentum screen, fundamental quality filters, event catalysts.
+
+**Implemented by**: `strategies/swing.py` (2R/3R targets, 1-ATR stop, trail),
+`strategies/factors.py` (quality), `strategies/catalyst.py` (event de-risk).
+Consumed via `--scan swing` in the screener and `get_swing_set` analyst tool.
+
+**Related**: `Strategies/scan.md`, `Strategies/value_strategy.md`.
+
+---
+
+## 5. `scan.md` — screener scan modes
+
+**Specifies** `scripts/value_screener.py --scan <mode>`:
+`value`, `trend-pullback`, `breakout`, `momentum`, `swing`, `vcp`, `all`.
+
+**Gate rule**: every gate is computed, never narrated; a missing data point makes
+a gate "unknown" (ignored, not failed). Runs on top of liquidity / price / mcap /
+PE / ATR filters.
+
+**Implemented by**: `scripts/value_screener.py` mode functions + the strategies
+in `docs/developer/04-strategies.md` §4.1 (swing, momentum, relative_strength).
+
+---
+
+## 6. `momentum_day_trading.md` — momentum / day-trading signals
+
+**Analysis-only adaptation** of the momentum playbook: no order/execution
+endpoints. Turns the playbook into detectable screening & risk signals via
+`strategies/momentum.py` (pillars, first-pullback, RVOL, session flags) and
+`strategies/contract.py` + `strategies/book_risk.py` for sizing/risk.
+Consumed via `--scan momentum` and `get_momentum_scan`.
+
+---
+
+## 7. `risk_management_plan.md` — deterministic risk governor
+
+**Specifies**: replace chatty 3-LLM risk debate with a **deterministic
+pre-trade control** (limits, stress, escalation, audit); the LLM only argues at
+breaches with numbers.
+
+**Implemented by**: `strategies/risk_governor.py` (`govern` -> PASS/WARN/REJECT,
+`build_risk_snapshot`) + `strategies/book_risk.py` (CVaR). Wired in
+`graph/trading_graph.py::_apply_strategy_overlays` when `enable_risk_governor`.
+Audit rows -> `risk_audit.jsonl`.
+
+---
+
+## 8. `decision_hardening_spec.md` — "compute, don't narrate"
+
+**Status**: spec; the modules below are the implementation targets.
+
+- **G1** deterministic position & stop -> `strategies/contract.py`.
+- **G2** calibration (bucket win-rate -> P) -> `strategies/calibration.py`.
+- **G3** computed agreement / consensus -> `strategies/consensus.py` + `agents/utils/rating.py`.
+- **G5** walk-forward / PBO gate -> `strategies/evaluate.py` consumed by
+  `scripts/evaluate_config_gate.py`.
+
+Relevant config: `enable_position_contract`, `enable_calibration`,
+`enable_agreement`, `enable_threshold_gate`.
+
+---
+
+## 9. `enhancement_plan.md` — 8-phase research plan
+
+Phase-by-phase plan for 8 trading threads with arXiv/coverage references. All
+phases config-gated and off by default:
+- Phase 0..2 regime / sizing -> `strategies/regime.py`, `strategies/size.py`
+- Phase 4 PEAD / catalyst -> `strategies/events.py`, `strategies/catalyst.py`
+- Phase 5 reflection -> `strategies/reflection.py`
+- Phase 6 media sentiment -> `strategies/sentiment.py`
+- Phase G5 PBO gate -> `strategies/evaluate.py`
+
+---
+
+## 10. `alpaca_data_analysis.md` — Alpaca market-data integration (analysis-only)
+
+**Scope constraint**: no trading/execution/orders/positions/portfolio P&L.
+Only market-data/calendar/asset enrichment.
+
+**Implemented by**: `dataflows/alpaca*.py` (incl. `alpaca_common.py`,
+`alpaca.py`), `agents/utils/alpaca_tools.py` (the `get_market_snapshot_alpaca`
+tool, `get_bars`), gated by `enable_alpaca`. See the `alpaca_data_analysis.md`
+for the endpoint allowlist.
+
+---
+
+## Cross-map: where strategies meet the graph & reports
+
+| Strategy area | Consumer (graph tool / overlay / screener) |
+| --- | --- |
+| Value screens | `scripts/value_screener.py`, `get_analyst_verdict` (fundamentals analyst) |
+| Swing/RS/VCP | `get_swing_set`, `get_relative_strength`, `get_volatility_contraction` (market analyst) + `--scan` |
+| Catalyst/events | `get_catalyst_scale`, `get_earnings_event_read` (news analyst) + `_apply_strategy_overlays` |
+| Momentum | `get_momentum_scan`, `--scan momentum` |
+| Risk governor | `graph/trading_graph.py::_apply_strategy_overlays` (PASS/WARN/REJECT) |
+| Contract/sizing | `get_position_sizing`, `_apply_strategy_overlays` |
+
+---
+
+## Strategy config flags quick lookup
+
+- **Value screens**: `--scan`, `--rank`, `--enable-float`, `--alloc`
+- **Swing/framework**: `--scan swing`, `--min-atr-pct`, `--min-avg-vol`
+- **Momentum/day**: `--scan momentum`
+- **Risk governor**: `enable_risk_governor`, `risk_*`
+- **Position contract**: `enable_position_contract`, `position_sizing`,
+  `target_vol`, `risk_per_trade`, `atr_mult`, `kelly_fraction`
+- **Calibration**: `enable_calibration`, `calibration_min_n`
+- **Threshold/PBO**: `enable_threshold_gate`, `evaluate_cost_bps`
+
+See [`docs/developer/04-strategies.md`](../docs/developer/04-strategies.md) for
+the module reference, and `docs/AGENT_ONBOARDING.md` for the work prescriptions.

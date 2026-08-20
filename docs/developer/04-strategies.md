@@ -4,6 +4,10 @@
 that back the analyst tool loops and the post-graph overlays. No LLM is
 involved. This is the "compute, don't narrate" core.
 
+> **Plan specs** live in [`Strategies/`](../../Strategies/) — see
+> [`Strategies/index.md`](../../Strategies/index.md) to map each plan doc to
+> its implementation modules, config flags, and consumers.
+
 ## 4.1 Value & screening calculators
 
 - `swing.py` — `swing_report`, `vcp_setup`: trend stack, RSI band, 1-ATR stop,
