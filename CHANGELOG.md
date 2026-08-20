@@ -10,11 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
-- **Developer docs set (`docs/developer/`)** - 10 focused guides covering the
+- **Developer docs set (`docs/developer/`)** - 11 focused guides covering the
   whole project for a joining developer: topology (01), graph topology + run
   (02/02-01), dataflow+vendors (03), strategies (04), agents+tools (05),
   entrypoints (06), persistence (07), development guide (08), Massive
-  integration (09). Linked from `docs/api_reference.md` §10.
+  integration (09), tests layout (10). Linked from `docs/api_reference.md` §10.
 
 - **Massive Flat-File validator** - `scripts/validate_massive_flat.py`
   parses a day-aggregates CSV dropped in the flat folder and reports

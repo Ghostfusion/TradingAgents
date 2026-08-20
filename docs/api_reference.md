@@ -415,6 +415,7 @@ preserves `Risk Gate (computed)` blocks.
 - `docs/AGENT_ONBOARDING.md` - environment runbook (interpreter, quirks, layout)
 - `docs/howto_end_to_end.md` - screener -> pipeline -> reports walkthrough
 - `docs/developer/` - full developer map (topology, graph/workflow, dataflow,
-  strategies, agents/tools, entrypoints, persistence, dev guide, Massive)
+  strategies, agents/tools, entrypoints, persistence, dev guide, tests layout,
+  Massive)
 - `docs/massive_integration.md` - the Massive.com add-on plan + entitlement map
 - `Strategies/*` - strategy plans and specs

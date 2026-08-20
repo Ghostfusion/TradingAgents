@@ -29,6 +29,9 @@ py -3.12 -m ruff format  # reformat only files you touch
 
 Breakpoint debugging: add `breakpoint()` or `-s` on a test.
 
+> For the full `tests/` directory layout, fixture behavior, and how to write
+> hermetic tests, see [`10-tests-layout.md`](10-tests-layout.md).
+
 ## 8.4 Windows gotchas (critical)
 
 - **Heredocs mangle code** — never write file content with escapes/arrows/
