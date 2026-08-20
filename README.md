@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
+
+<sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
+
 - [2026-08-20] **Moomoo period-order + prior-period fix** - the value screener
   used to keep the OLDEST statement period (moomoo lists newest-first) and
   never supplied prior-period values, so the **Beneish M column was always
@@ -47,6 +52,8 @@
 - [2026-08-19] **Swing scan + relative strength + catalyst hard veto** - new `--scan swing` screener mode built on `strategies/swing.py` (20-EMA-over-rising-50/200-SMA trend stack, RSI 45-70 band, pullback-into-EMA on fading volume, 1-ATR swing-low stop, 2R/3R targets, T1 scale-out + 20-EMA trail) and `strategies/relative_strength.py` (RS line vs `benchmark_ticker`, 63-day uptrend + new-high position + negative-divergence); PEAD post-earnings entry helpers (`events.py`); optional `catalyst_hard_block_days` that makes the risk governor REJECT new risk inside the earnings window; `Strategies/scan.md` filled with all scan-mode docs. Source: `Strategies/framework.md`. Suite 888 passed / 2 skipped.
 - [2026-08-19] **Repo hygiene pass** - full lint cleanup to a green `ruff check` across `tradingagents/`, `scripts/`, `tests/`, `cli/` and the entry scripts, plus defect fixes found by the lint pass: removed a stale `__all__` entry in the Alpaca vendor (`latest_snapshot` -> `get_latest_snapshot`), fixed an unimported `Mapping` annotation, `raise ... from None` for expected data-format errors, explicit `zip(strict=)` everywhere, import-order fix in `batch.py`, deleted the committed scratch file `test.py`; **documentation completed**: `.env.example` now mirrors all 53 supported `TRADINGAGENTS_*` overrides (Alpaca/Finnhub/FMP keys, moomoo tuning, all strategy/catalyst/risk toggles, persistence paths), `docs/api_reference.md` deduped + env table completed, dev-machine paths scrubbed from `docs/AGENT_ONBOARDING.md`. Suite 843 passed / 2 skipped; "pip check" clean (rich / cryptography satisfied).
 - [2026-08-19] **Fork changelog (since last remote)** - B2 cross-sectional pipeline (`pipeline.py`: universe -> value-screen -> composite rank -> top-N -> concurrent moomoo batch, with `reports/pipeline_<ts>.md` summaries and per-symbol TOC reports); **A-series analyst tools** (moomoo, optional) `get_institution_holdings` (13F-style institutional % + period change), `get_earnings_surprise_history` (EPS surprise vs estimate per print with day reaction and NaN-safe rendering), `get_expected_move` (option-implied 1-sigma move at the next earnings + price band), wired to the market/fundamentals analysts; **catalyst overlay (B1) on by default** (`enable_events`) plus moomoo earnings-calendar fixes (7-day-inclusive cap, real column normalization, 4-tuple unpacking) verified live (AVGO 2026/Q3 implied move 9.4%, band [328.39, 396.57]); **docs**: `docs/api_reference.md` (config keys, graph flow, vendor contract, overlays) and `docs/howto_end_to_end.md` (screener -> pipeline -> reports). Suite 843 passed / 2 skipped, clean exit; no env/credentials committed.
+</td></tr>
+</table>
 - [2026-07] **TradingAgents v0.3.1** released with correctness and stability fixes: Alpha Vantage look-ahead filtering, graph-router crash-safety, graph-shape-aware checkpoint resume, working crypto sentiment sources, a configurable LLM retry budget, Bedrock API-key auth, and Claude Sonnet 5 / Fable 5 support. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 - [2026-06] **TradingAgents v0.3.0** released with a verified data-access contract, an expanded provider registry (NVIDIA, Kimi, Groq, Mistral, Bedrock, and any OpenAI-compatible endpoint), FRED and Polymarket data vendors, a current-generation model catalog, and a CI gate.
 - [2026-05] **TradingAgents v0.2.5** released with the grounded Sentiment Analyst, GPT-5.5 etc. model coverage, Qwen/GLM/MiniMax dual-region support, `TRADINGAGENTS_*` env-var configurability with API-key auto-detection, remote Ollama support, non-US alpha benchmarks, and ticker path-traversal hardening.
@@ -307,6 +314,13 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays) and [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports).
 >
+
+
+<table>
+<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
+
+<sub><b>Fork additions</b> - these sections are not part of the upstream [`TauricResearch/TradingAgents`](https://github.com/TauricResearch/TradingAgents) project.</sub>
+
 ## Batch runner
 
 A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
@@ -469,6 +483,10 @@ All config-gated, off by default:
   `catalyst_miss_scale`, `catalyst_scale_floor`, `catalyst_hard_block_days` (0 = off).
 
 Regression status: full suite passes (969 passed / 2 skipped / 56 subtests).
+
+
+</td></tr>
+</table>
 
 ## Research
 

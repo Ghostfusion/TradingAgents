@@ -276,8 +276,9 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-20 `7a3bfac` - README: un-nested the fork-additions body from one giant
-  blockquote (the grey `>` bar) - only the [!IMPORTANT] banner stays a callout
+- 2026-08-20 `HASH` - README: fork-additions now highlighted with a purple
+  left border (HTML tables), matching the diff-vs-upstream intent; replaces
+  the grey blockquote (7a3bfac) and the un-marked flat sections
 - 2026-08-20 `bc24e79` - working-agreement policy §0: always expose calculations as
   tools for the agents, keep docs + README true on every change, commit + push
 - 2026-08-20 `8947ea2` - moomoo period-order + prior-period fix (M column now
