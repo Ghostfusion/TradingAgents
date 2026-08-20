@@ -87,7 +87,10 @@ def get_short_volume(
     """
     from tradingagents.dataflows.massive import get_short_volume_massive
 
-    return get_short_volume_massive(ticker, start_date, end_date)
+    try:
+        return get_short_volume_massive(ticker, start_date, end_date)
+    except Exception as exc:  # noqa: BLE001
+        return f"short volume unavailable for {ticker}: {exc}"
 
 
 @tool
@@ -109,7 +112,10 @@ def get_market_snapshot(
     """
     from tradingagents.dataflows.massive import get_market_snapshot_massive
 
-    return get_market_snapshot_massive(ticker)
+    try:
+        return get_market_snapshot_massive(ticker)
+    except Exception as exc:  # noqa: BLE001
+        return f"market snapshot unavailable for {ticker}: {exc}"
 
 
 @tool
@@ -134,4 +140,7 @@ def get_top_movers(
         count = 10
     from tradingagents.dataflows.massive import get_top_movers_massive
 
-    return get_top_movers_massive(direction, count)
+    try:
+        return get_top_movers_massive(direction, count)
+    except Exception as exc:  # noqa: BLE001
+        return f"top movers unavailable: {exc}"

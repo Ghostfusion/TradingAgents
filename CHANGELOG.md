@@ -10,6 +10,14 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive no-data failover fix** - the direct Massive tool wrappers
+  (`get_short_volume`, `get_market_snapshot`, `get_top_movers`,
+  `get_massive_news`) now catch `NoMarketDataError` and return an explicit
+  "unavailable" string instead of letting the exception abort the analyst node
+  and fail the whole batch symbol. Fallback to moomoo/yfinance now happens
+  inside the report instead of crashing the run. Regression tests in
+  `tests/test_massive_vendor.py::MassiveFailoverTests` (8 cases).
+
 - **Data providers doc (`docs/developer/12-data-providers.md`)** - catalogs
   all **13 data providers** the project uses: the 8 routed vendors
   (`yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo,

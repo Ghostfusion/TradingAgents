@@ -480,3 +480,81 @@ class MassiveRow5Tests(unittest.TestCase):
     def test_row5_registered_as_vendors(self):
         self.assertIn("massive", interface.VENDOR_METHODS["get_company_peers"])
         self.assertIn("massive", interface.VENDOR_METHODS["get_corporate_actions"])
+
+
+
+@pytest.mark.unit
+class MassiveFailoverTests(unittest.TestCase):
+    """The direct Massive tool wrappers must degrade to 'unavailable' when the
+    vendor raises NoMarketDataError - not abort the whole analyst/batch symbol.
+    Regression for the batch failure seen when Massive lacks a symbol's data."""
+
+    def _patch(self, fn, module_path):
+        # Patch the module where the function lives (imports are local in tools).
+        import importlib
+        mod = importlib.import_module(module_path)
+        return mock.patch.object(mod, fn, side_effect=NoMarketDataError("x", "x", "none"))
+
+    def test_get_short_volume_degrades(self):
+        from tradingagents.agents.utils.market_position_tools import get_short_volume
+
+        with self._patch("get_short_volume_massive", "tradingagents.dataflows.massive"):
+            out = get_short_volume.invoke(
+                {"ticker": "hd", "start_date": "2026-08-13", "end_date": "2026-08-20"}
+            )
+        self.assertIn("short volume unavailable", out)
+
+    def test_get_market_snapshot_degrades(self):
+        from tradingagents.agents.utils.market_position_tools import get_market_snapshot
+
+        with self._patch("get_market_snapshot_massive", "tradingagents.dataflows.massive"):
+            out = get_market_snapshot.invoke({"ticker": "nue"})
+        self.assertIn("market snapshot unavailable", out)
+
+    def test_get_top_movers_degrades(self):
+        from tradingagents.agents.utils.market_position_tools import get_top_movers
+
+        with self._patch("get_top_movers_massive", "tradingagents.dataflows.massive"):
+            out = get_top_movers.invoke({"direction": "losers"})
+        self.assertIn("top movers unavailable", out)
+
+    def test_get_massive_news_degrades(self):
+        from tradingagents.agents.utils.news_data_tools import get_massive_news
+
+        with self._patch("get_news_massive", "tradingagents.dataflows.massive"):
+            out = get_massive_news.invoke(
+                {"ticker": "bby", "start_date": "2026-08-13", "end_date": "2026-08-20"}
+            )
+        self.assertIn("massive news unavailable", out)
+
+    def test_get_form4_degrades(self):
+        from tradingagents.agents.utils.analysis_tools import get_form4_insider
+
+        with self._patch("get_form4_insider_massive", "tradingagents.dataflows.massive"):
+            out = get_form4_insider.invoke(
+                {"ticker": "x", "start_date": "2026-01-01", "end_date": "2026-08-20"}
+            )
+        self.assertIn("form-4 insider activity unavailable", out)
+
+    def test_get_ratios_degrades(self):
+        from tradingagents.agents.utils.analysis_tools import get_ratios
+
+        with self._patch("get_ratios_massive", "tradingagents.dataflows.massive"):
+            out = get_ratios.invoke({"ticker": "x"})
+        self.assertIn("ratios unavailable", out)
+
+    def test_get_dividends_degrades(self):
+        from tradingagents.agents.utils.moomoo_extra_tools import get_dividends
+
+        with self._patch("get_dividends_massive", "tradingagents.dataflows.massive"):
+            out = get_dividends.invoke({"ticker": "x"})
+        self.assertIn("dividends unavailable", out)
+
+    def test_get_ipos_degrades(self):
+        from tradingagents.agents.utils.moomoo_extra_tools import get_ipos
+
+        with self._patch("get_ipos_massive", "tradingagents.dataflows.massive"):
+            out = get_ipos.invoke({"limit": 3})
+        self.assertIn("ipos unavailable", out)
+
+

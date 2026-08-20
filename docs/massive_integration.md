@@ -334,6 +334,17 @@ All degrade cleanly (NoMarketDataError on empty) and are hermetic-tested in
 graph tools - they are low-signal for batch decision-making vs. the entitled
 peers/dividend/IPO data above.
 
+### Failover contract (no-data must never abort a symbol)
+
+A direct Massive `@tool` wrapper must **return an explicit "unavailable" string**
+when the vendor raises `NoMarketDataError` (or any error) - never let it
+propagate. Otherwise the exception escapes the LangGraph tool call, aborts the
+whole analyst node, and the batch marks the symbol failed instead of falling
+back to moomoo/yfinance. Every direct Massive wrapper
+(`get_short_volume`, `get_market_snapshot`, `get_top_movers`, `get_massive_news`,
+`get_form4_insider`, `get_ratios`, `get_dividends`, `get_ipos`) follows this
+contract; guarded by `tests/test_massive_vendor.py::MassiveFailoverTests`.
+
 ---
 
 ## 4. Extension pattern (add the next vendor function)

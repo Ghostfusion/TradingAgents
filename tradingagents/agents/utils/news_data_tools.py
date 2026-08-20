@@ -83,4 +83,7 @@ def get_massive_news(
     """
     from tradingagents.dataflows.massive import get_news_massive
 
-    return get_news_massive(ticker, start_date, end_date)
+    try:
+        return get_news_massive(ticker, start_date, end_date)
+    except Exception as exc:  # noqa: BLE001
+        return f"massive news unavailable for {ticker}: {exc}"
