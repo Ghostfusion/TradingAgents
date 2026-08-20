@@ -37,7 +37,7 @@ coverage that moomoo/yfinance already provide.
 
 ---
 
-## 2. Implemented (first vendor module)
+## 2. Implemented (news sentiment + economy / macro-backdrop)
 
 **Module**: `tradingagents/dataflows/massive.py`
 
@@ -96,13 +96,76 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | # | Massive dataset / endpoint | Feeds | Status |
 | --- | --- | --- | --- |
 | 1 | `/v2/reference/news` (sentiment) | Sentiment + News analysts | ✅ implemented |
-| 2 | `economy/treasury-yields`, `inflation`, `inflation-expectations`, `labor-market` | Macro analyst + catalyst overlay (B1) decoupled from OpenD | planned |
+| 2 | `economy/treasury-yields`, `inflation`, `inflation-expectations`, `labor-market` | Macro analyst + catalyst overlay (B1) decoupled from OpenD | ✅ implemented |
 | 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | planned |
 | 4 | `filings/13-f-filings`, `form-4` | institutional/insider fundamentals + screener | planned |
 | 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
 | 6 | `fundamentals/ratios|balance-sheets|income-statements|cash-flow|float` | `get_analyst_verdict` inputs (EY, EV/EBIT, ROE) | planned |
 | 7 | `snapshots/single-ticker|full-market|top-movers`, `aggregates/custom-bars`, `technical-indicators/*` | market analyst + `pipeline.py --universe` | planned |
 | 8 | WebSocket NOI / Flat Files | real-time orderflow / backtest datasets | future |
+
+---
+
+## 3a. Economy endpoints (implemented) and the OpenD decoupling
+
+Massive's economy REST group (`/fed/v1/*`) exposes **time-series**: treasury
+**yields** (1m–30y, daily since 1962), **inflation** (CPI/core CPI/PCE/core PCE,
+monthly), **inflation expectations** (5y/10y/5y5y-forward breakevens + Cleveland
+Fed model, daily), and **labor market** (unemployment, LFPR, avg hourly
+earnings, job openings).
+
+### Macro analyst source — `get_macro_indicators_massive`
+
+A ``massive`` vendor is registered for `get_macro_indicators` and returns a
+markdown time-series report (title, units, window, latest, change, table) in
+the same `(indicator, curr_date, look_back_days)` contract as FRED, supporting
+the same friendly aliases (`cpi`, `core_pce`, `unemployment`, `10y_treasury`,
+`yield_curve`, `inflation_expectations`, ...). The news/macro analyst now has a
+second HTTP vendor chain (`fred,massive,moomoo`) so macro commentary is not
+depended on a FRED key or the OpenD gateway. Alias table:
+
+| Alias | Massive series |
+| --- | --- |
+| `10y_treasury` / `2y` / `30y` | treasury-yields yield_10/2/30_year |
+| `yield_curve` / `10y_2y_spread` | derived 10y-2y spread |
+| `cpi` / `core_cpi` / `pce` / `core_pce` | inflation cpi / cpi_core / pce / pce_core |
+| `inflation_expectations` / `10y_breakeven` / `5y_breakeven` | inflation-expectations market_10/5_year |
+| `unemployment` / `labor_force_participation` / `avg_hourly_earnings` / `job_openings` | labor-market |
+
+### Catalyst overlay decoupled from OpenD — `macro_backdrop`
+
+The B1 catalyst overlay (`strategies/catalyst.py`) previously pulled *all* its
+inputs — earnings, macro events, and Fed meetings — from moomoo's OpenD
+gateway. If OpenD was down, `fetch_catalyst_data` returned `None` and the whole
+overlay silently became neutral.
+
+Now: `fetch_catalyst_data` fetches a **`macro_backdrop`** from Massive
+treasury/breakeven data *independently of OpenD*, and the moomoo earnings/event
+path degrades per-section instead of nulling everything.
+
+- `fetch_macro_backdrop(trade_date)` → deterministic read of **current macro
+  stress**: yield-curve inversion (10y<2y, x0.70) and/or elevated 10y breakeven
+  (>3.0%, x0.75). Returns `{scale, verdict, reasons, curve_inverted, breakeven}`
+  or `None` when data is unavailable (guarded).
+- `build_catalyst_snapshot` applies the backdrop **only when the forward
+  event calendar is empty** (no moomoo HIGH macro events and no Fed meeting), so
+  a live moomoo read always wins and there is no double-counting. New verdict
+  `macro-backdrop`.
+- Semantics: Massive's economy endpoints are time-series, **not** a forward
+  event calendar. So the backdrop is a read of *current/accentuated* macro
+  stress, not a count of imminent CPI/FOMC events. When moomoo's real forward
+  calendar is available it is preferred.
+
+This means the catalyst overlay de-risks near macro stress even with OpenD
+down. Units are documented in `docs/massive_integration.md` §3a. Verify live:
+
+```bash
+py -3.12 -c "
+from tradingagents.dataflows.massive import get_macro_indicators_massive, fetch_macro_backdrop
+print(get_macro_indicators_massive('10y_treasury', '2026-08-18', 60))
+print(fetch_macro_backdrop('2026-08-18'))
+"
+```
 
 ---
 

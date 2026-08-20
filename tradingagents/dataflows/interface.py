@@ -27,7 +27,10 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
-from .massive import get_news_massive
+from .massive import (
+    get_macro_indicators_massive,
+    get_news_massive,
+)
 from .moomoo import (
     get_analyst_ratings_moomoo,
     get_balance_sheet_moomoo,
@@ -295,6 +298,7 @@ VENDOR_METHODS = {
     # macro_data
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
+        "massive": get_macro_indicators_massive,
         "moomoo": get_macro_indicators_moomoo,
     },
     # prediction_markets

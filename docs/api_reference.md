@@ -259,7 +259,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`
-- macro: `fred`, `moomoo` (optional)
+- macro: `fred`, `massive`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
 - analyst ratings + earnings calendar: `finnhub`, `moomoo`
 - finnhub free-tier extra (key-gated): `get_basic_financials` (metrics),
@@ -271,14 +271,19 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 `VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive`.
 
-**Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor;
-first integration is `get_massive_news` (`get_news` chain + the dedicated
-`get_massive_news` tool bound to the news/social nodes) returning per-article
-structured sentiment (positive/negative/neutral + reasoning) from
-`/v2/reference/news`. Plan-dependent recency/entitlements; FMV/Greeks are
-Business-only (unavailable, never invented). US-only — supplements, not
-replaces, moomoo/yfinance non-US coverage. See
-`docs/massive_integration.md`.
+**Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor:
+`get_massive_news` (`get_news` chain + dedicated tool on the news/social
+nodes) returning per-article structured sentiment (positive/negative/neutral
++ reasoning); and `get_macro_indicators_massive` (`macro_data` chain) serving
+treasury-yields / inflation / inflation-expectations / labor-market
+(aliases match the FRED surface: `10y_treasury`, `yield_curve`, `cpi`, ...).
+Massive also drives a deterministic `macro_backdrop` (yield-curve
+inversion / elevated breakevens) that keeps the B1 catalyst overlay
+de-risking even when the OpenD event calendar is unavailable (see
+`strategies/catalyst.py` + `docs/massive_integration.md` §3a).
+Plan-dependent recency/entitlements; FMV/Greeks are Business-only
+(unavailable, never invented). US-only — supplements, not replaces,
+moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.
 
 ### 6.3 Symbol mapping (Yahoo <-> moomoo / broker)
 

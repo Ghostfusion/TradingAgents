@@ -10,6 +10,19 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive macro economy + catalyst OpenD decoupling** - `get_macro_indicators_massive`
+  registers `massive` as a `macro_data` vendor (treasury-yields / inflation /
+  inflation-expectations / labor-market with FRED-compatible aliases) so macro
+  commentary no longer depends on a FRED key or the OpenD gateway. A
+  deterministic `fetch_macro_backdrop` (yield-curve inversion / elevated 10y
+  breakeven) feeds the B1 catalyst overlay so it keeps de-risking near macro
+  stress even when the moomoo event calendar is unavailable; `fetch_catalyst_data`
+  now degrades per-section instead of returning `None` on moomoo failure.
+  New snapshot verdict `macro-backdrop`; applied only when no forward event
+  calendar is present (no double-count with a live moomoo read). Tests in
+  `tests/test_massive_vendor.py` + `tests/test_strategies_catalyst.py`. Docs:
+  `docs/massive_integration.md` §2/§3a.
+
 - **Massive.com data vendor (news sentiment)** - new `dataflows/massive.py`
   with `get_news_massive` returning per-article structured sentiment
   (positive/negative/neutral + reasoning) from `/v2/reference/news`,

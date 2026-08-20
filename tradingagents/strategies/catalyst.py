@@ -177,6 +177,11 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
     their windows apply their configured multipliers; a recent earnings *miss*
     applies ``catalyst_miss_scale``. Scale is floored at
     ``catalyst_scale_floor`` and never exceeds 1.0.
+
+    Decoupled from OpenD: when the forward economic/Fed event calendar is
+    unavailable (moomoo down / gated), a Massive-derived ``macro_backdrop``
+    (from treasury + breakeven series) supplies a deterministic macro-stress
+    multiplier so the overlay still de-risks without a live gateway.
     """
     cfg = cfg or {}
     window_days = int(_num(cfg.get("catalyst_window_days"), 5) or 5)
@@ -248,6 +253,22 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
         reasons.append(
             f"FOMC {fed['days_until']}d out (modal {fed['modal_prob']:.0%}) -> x{fed_scale:.2f}"
         )
+
+    # OpenD-decoupled macro backdrop: only apply when no forward event calendar
+    # signal was available, so a live moomoo read always wins and the backdrop
+    # never double-counts against a real event calendar.
+    macro_backdrop = data.get("macro_backdrop") or {}
+    if (
+        macro_backdrop.get("verdict") == "macro-backdrop"
+        and macro["count_high"] == 0
+        and fed["days_until"] is None
+    ):
+        bscale = float(macro_backdrop.get("scale", 1.0) or 1.0)
+        scale *= bscale
+        if verdict == "no-imminent-catalyst":
+            verdict = "macro-backdrop"
+        for r in macro_backdrop.get("reasons") or []:
+            reasons.append(r)
 
     scale = max(floor_scale, min(1.0, scale))
     return {
@@ -352,26 +373,48 @@ def _filter_by_security(rows: list, code: str) -> list:
 
 
 def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
-    """Live catalyst inputs for one ticker; None on any failure (neutral)."""
+    """Live catalyst inputs for one ticker; None on total failure (neutral).
+
+    The earnings path still reads moomoo (real-time calendar + implied move),
+    but the macro/Fed sections are **decoupled from OpenD**: a Massive-derived
+    ``macro_backdrop`` (from treasury + breakeven time series) is fetched
+    independently so the overlay keeps a deterministic macro-stress signal even
+    when the moomoo gateway is down or its economic/fed calendar is empty.
+    """
+    td = parse_date(trade_date) or datetime.now()
+    td_str = td.strftime("%Y-%m-%d")
+
+    # Massive macro backdrop (OpenD-independent). Guarded like the rest.
+    backdrop = None
+    try:
+        from tradingagents.dataflows.massive import fetch_macro_backdrop
+
+        backdrop = fetch_macro_backdrop(td_str)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("catalyst macro backdrop unavailable: %s", exc)
+        backdrop = None
+
+    # Earnings + event calendar from moomoo. If moomoo fails, we still return
+    # the backdrop (macro/fed decoupled), not None.
+    earnings_rows: list = []
+    move_history: list = []
+    macro_events: list = []
+    fed_rows: list = []
     try:
         from tradingagents.dataflows.moomoo import _ensure_ctx, _moomoo_code
 
         code = _moomoo_code(ticker)
         ctx = _ensure_ctx()
         market = code.split(".")[0] if "." in code else "US"
-        td = parse_date(trade_date) or datetime.now()
-        td_str = td.strftime("%Y-%m-%d")
         past = (td - timedelta(days=35)).strftime("%Y-%m-%d")
         fwd = (td + timedelta(days=95)).strftime("%Y-%m-%d")
 
         earnings_rows = _filter_by_security(_calendar_window(ctx, market, past, fwd), code)
 
-        move_history = []
         ret, hist = ctx.get_financials_earnings_price_history(code)
         if ret == 0 and hist is not None and not hist.empty:
             move_history = hist.to_dict("records")
 
-        macro_events = []
         ret, eco, _next_page, _has_more = ctx.get_economic_calendar(
             begin_date=td_str,
             end_date=(td + timedelta(days=14)).strftime("%Y-%m-%d"),
@@ -379,20 +422,19 @@ def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
         if ret == 0 and eco is not None and not eco.empty:
             macro_events = eco.to_dict("records")
 
-        fed_rows = []
         ret, fed = ctx.get_fed_watch_target_rate()
         if ret == 0 and fed is not None and not fed.empty:
             fed_rows = fed.to_dict("records")
-
-        return {
-            "earnings_calendar": earnings_rows,
-            "move_history": move_history,
-            "economic_calendar": macro_events,
-            "fed_watch": fed_rows,
-        }
     except Exception as exc:  # noqa: BLE001 - guarded like orderflow.fetch
-        logger.info("catalyst data unavailable for %s: %s", ticker, exc)
-        return None
+        logger.info("moomoo catalyst source unavailable for %s: %s", ticker, exc)
+
+    return {
+        "earnings_calendar": earnings_rows,
+        "move_history": move_history,
+        "economic_calendar": macro_events,
+        "fed_watch": fed_rows,
+        "macro_backdrop": backdrop,
+    }
 
 
 __all__ = [

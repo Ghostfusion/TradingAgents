@@ -216,13 +216,85 @@ def test_contract_respects_catalyst_scale():
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_catalyst_data_unavailable_returns_none(monkeypatch):
+def test_fetch_catalyst_data_unavailable_returns_dict_with_backdrop(monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("OpenD down")
 
     monkeypatch.setattr("tradingagents.dataflows.moomoo._ensure_ctx", _boom)
     monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
-    assert fetch_catalyst_data("AAPL", "2026-08-19") is None
+    # Patch the OpenD-independent backdrop so the test stays hermetic.
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.fetch_macro_backdrop",
+        lambda *a, **k: {"scale": 0.7, "verdict": "macro-backdrop", "reasons": [],
+                         "curve_inverted": True, "breakeven": 2.1},
+    )
+    data = fetch_catalyst_data("AAPL", "2026-08-19")
+    # OpenD being down must NOT nullify the whole catalyst now.
+    assert data is not None
+    assert data["earnings_calendar"] == []
+    assert data["macro_backdrop"]["verdict"] == "macro-backdrop"
+
+
+def test_fetch_catalyst_data_patches_backdrop(monkeypatch):
+    """The backdrop fetch is called so macro/fed stay decoupled from OpenD."""
+    called = {}
+
+    def _fake_backdrop(trade_date):
+        called["td"] = trade_date
+        return {"scale": 1.0, "verdict": "no-macro-stress", "reasons": [],
+                "curve_inverted": False, "breakeven": 2.2}
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.fetch_macro_backdrop", _fake_backdrop
+    )
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
+    # Make the whole moomoo block raise to isolate the backdrop path.
+    def _boom(*a, **k):
+        raise RuntimeError("OpenD down")
+    monkeypatch.setattr("tradingagents.dataflows.moomoo._ensure_ctx", _boom)
+    data = fetch_catalyst_data("AAPL", "2026-08-19")
+    assert called.get("td") == "2026-08-19"
+    assert data["macro_backdrop"]["verdict"] == "no-macro-stress"
+
+def test_snapshot_applies_macro_backdrop_when_no_event_calendar():
+    """A stressed Massive backdrop de-risks when the moomoo event calendar
+    is empty (i.e. OpenD down / no forward events)."""
+    data = {
+        "earnings_calendar": [],
+        "move_history": [],
+        "economic_calendar": [],  # no HIGH macro events from moomoo
+        "fed_watch": [],
+        "macro_backdrop": {
+            "scale": 0.7, "verdict": "macro-backdrop",
+            "reasons": ["yield curve inverted (10y<2y) -> x0.70"],
+            "curve_inverted": True, "breakeven": 2.1,
+        },
+    }
+    snap = build_catalyst_snapshot(data, "2026-08-18", {})
+    assert snap["verdict"] == "macro-backdrop"
+    assert snap["scale"] == 0.7
+    assert any("inverted" in r for r in snap["reasons"])
+
+
+def test_snapshot_skips_backdrop_when_event_calendar_present():
+    """A live moomoo event calendar wins over the backdrop (no double-count)."""
+    data = {
+        "earnings_calendar": [],
+        "move_history": [],
+        "economic_calendar": [
+            {"title": "CPI", "timestamp": "2026-08-19", "star": "HIGH"},
+        ],
+        "fed_watch": [],
+        "macro_backdrop": {
+            "scale": 0.7, "verdict": "macro-backdrop",
+            "reasons": ["yield curve inverted (10y<2y) -> x0.70"],
+            "curve_inverted": True, "breakeven": 2.1,
+        },
+    }
+    snap = build_catalyst_snapshot(data, "2026-08-18", {})
+    # 0.6 macro_scale applied (event present); backdrop must not double-apply.
+    assert snap["scale"] == 0.6
+    assert snap["verdict"] == "macro-catalyst"
 
 
 def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
@@ -262,6 +334,11 @@ def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
 
     monkeypatch.setattr("tradingagents.dataflows.moomoo._ensure_ctx", lambda: FakeCtx())
     monkeypatch.setattr("tradingagents.dataflows.moomoo._moomoo_code", lambda s: "US.AAPL")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.fetch_macro_backdrop",
+        lambda *a, **k: {"scale": 1.0, "verdict": "no-macro-stress",
+                         "reasons": [], "curve_inverted": False, "breakeven": 2.2},
+    )
     data = fetch_catalyst_data("AAPL", "2026-08-19")
     assert data is not None
     # security filter keeps only AAPL rows; moomoo fields normalized
