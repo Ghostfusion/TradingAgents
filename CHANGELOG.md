@@ -10,6 +10,16 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive corporate actions, peers & IPOs (row 5)** - `get_company_peers`
+  gains a `massive` option (`get_related_companies_massive`, finnhub-format-
+  compatible output); `get_dividends_massive` + `get_splits_massive` are
+  combined by `get_corporate_actions_massive` registered in the
+  `corporate_actions` category; dedicated `get_dividends` (fundamentals
+  analyst) and `get_ipos` (news analyst, IPO reference) tools. All row-5
+  endpoints are **entitled on the current tier** (probed 200) so these are
+  working enrichments, not plan stubs. Tests in `tests/test_massive_vendor.py`.
+  Docs: `docs/massive_integration.md` §3f.
+
 - **Massive NOI + Flat Files (item 8)** - `massive_noi.py` is a WebSocket
   Net Order Imbalance streamer (`build_url`/`parse_frame`/`describe`/
   `stream_noi`) wired to `scripts/massive_noi_monitor.py`; `massive_flat.py`

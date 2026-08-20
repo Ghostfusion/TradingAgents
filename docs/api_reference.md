@@ -292,7 +292,11 @@ tool bound to the fundamentals analyst. (13-F is *not* wired: Massive's
 `get_institution_holdings` stays the source for that signal.) NOI
 (`massive_noi.py`, WebSocket monitor) and Flat Files (`massive_flat.py`, bulk
 OHLCV loader for the screener/backtests) are standalone monitored utilities,
-not graph `@tool`s — see `docs/massive_integration.md` §3e.
+not graph `@tool`s — see `docs/massive_integration.md` §3e. Row 5 (entitled on
+the current plan): `get_company_peers` gains a `massive` option
+(`related-companies`) to the fundamentals analyst; `get_corporate_actions` and
+a dedicated `get_dividends` bind Massive dividends/splits to the fundamentals
+analyst; `get_ipos` (IPO reference) binds to the news analyst.
 Plan-dependent recency/entitlements; FMV/Greeks are Business-only
 (unavailable, never invented). US-only — supplements, not replaces,
 moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.

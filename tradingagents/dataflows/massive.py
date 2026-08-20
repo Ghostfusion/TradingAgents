@@ -871,6 +871,126 @@ def get_top_movers_massive(direction: str = "gainers", count: int = 10) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Corporate actions + reference (REST) - entitled on the current plan (200).
+#   Wire as working enrichments: dividends/splits (corporate_actions channel),
+#   related companies (peers fallback), and IPO / ticker-event reference.
+# ---------------------------------------------------------------------------
+
+
+def get_dividends_massive(ticker: str, rows: int = 5) -> str:
+    """Recent cash dividends for a ticker (Massive, entitled).
+
+    Returns declaration/ex/record/pay dates, cash amount, frequency, and the
+    split-adjustment factor - feed for dividend-discipline and return-demand
+    reasoning. Raises NoMarketDataError when the ticker has no dividends.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get("/stocks/v1/dividends", {"ticker": ticker, "limit": rows})
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(ticker, detail="Massive returned no dividends")
+    lines = [f"## {ticker.upper()} Dividends (Massive.com)", ""]
+    for d in results:
+        lines.append(f"- pay {str(d.get('pay_date') or '?')[:10]} | "
+                     f"ex {str(d.get('ex_dividend_date') or '?')[:10]} | "
+                     f"{_fmt_num(d.get('cash_amount'))} {d.get('currency') or 'USD'} "
+                     f"| freq {d.get('frequency') or '?'}x/yr | "
+                     f"type {d.get('distribution_type') or 'recurring'}")
+    lines.append("")
+    lines.append("Interpretation: rising / consistent regular dividends signal "
+                 "return discipline; the adjustment factor helps normalize split "
+                 "history.")
+    return "\n".join(lines)
+
+
+def get_splits_massive(ticker: str, rows: int = 5) -> str:
+    """Recent stock splits for a ticker (Massive, entitled).
+
+    Returns execution date, split from/to, adjustment type and the historical
+    adjustment factor - context for share-structure / split-adjusted price work.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get("/stocks/v1/splits", {"ticker": ticker, "limit": rows})
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(ticker, detail="Massive returned no split events")
+    lines = [f"## {ticker.upper()} Stock Splits (Massive.com)", ""]
+    for s in results:
+        lines.append(f"- {str(s.get('execution_date') or '?')[:10]} | "
+                     f"{_fmt_num(s.get('split_from'))}->{_fmt_num(s.get('split_to'))} "
+                     f"| {s.get('adjustment_type') or '?'} | "
+                     f"adj {_fmt_num(s.get('historical_adjustment_factor'))}")
+    return "\n".join(lines)
+
+
+def get_related_companies_massive(ticker: str) -> str:
+    """Comparable companies for a ticker (Massive related-companies).
+
+    Matches the finnhub ``get_company_peers`` output format
+    (``Peers: A, B, C``) so it drops into the ``get_company_peers`` tool /
+    channel as a reroute/fallback for relative-valuation reasoning.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(f"/v1/related-companies/{ticker}")
+    rows = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError(ticker, detail="Massive returned no related companies")
+    peers = [r.get("ticker") for r in rows if r.get("ticker")]
+    if not peers:
+        raise NoMarketDataError(ticker, detail="Massive related-companies had no symbols")
+    return "Peers: " + ", ".join(str(p) for p in peers[:24])
+
+
+def get_ipos_massive(limit: int = 10, status: str = "pending") -> str:
+    """Upcoming / historical IPOs from Massive (entitled).
+
+    Returns issuer, ticker, announced/expected dates, offer price, size and
+    status - a catalyst/universe input (new listings are fresh-money events).
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get("/vX/reference/ipos", {"limit": limit, "ipo_status": status})
+    rows = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError("ipo", detail="Massive returned no IPO events")
+    lines = [f"## IPOs (Massive.com, status={status})", ""]
+    for d in rows:
+        lines.append(f"- {str(d.get('last_updated') or str(d.get('announced_date') or '?'))[:10]} "
+                     f"| {d.get('ticker') or '?'} | {d.get('issuer_name') or '?'} "
+                     f"| {_fmt_num(d.get('final_issue_price'))} | {d.get('ipo_status') or '?'}")
+    return "\n".join(lines)
+def get_corporate_actions_massive(ticker: str) -> str:
+    """Combined corporate actions (dividends + splits) for a ticker.
+
+    Matches the ``get_corporate_actions(ticker)`` vendor contract so it slots
+    into the existing ``corporate_actions`` category as a ``massive`` option
+    alongside moomoo. Returns dividends + splits sections, or an explicit
+    no-data message when the ticker has neither.
+    """
+    from .errors import NoMarketDataError
+
+    try:
+        div = get_dividends_massive(ticker, rows=5)
+    except NoMarketDataError:
+        div = ""
+    try:
+        sp = get_splits_massive(ticker, rows=5)
+    except NoMarketDataError:
+        sp = ""
+    if not div and not sp:
+        raise NoMarketDataError(ticker, detail="Massive returned no corporate actions")
+    return (div + "\n" + sp).strip()
+
+
+
+
+
+
+
 __all__ = [
     "get_news_massive",
     "get_macro_indicators_massive",
@@ -881,6 +1001,11 @@ __all__ = [
     "get_fundamentals_massive",
     "get_market_snapshot_massive",
     "get_top_movers_massive",
+    "get_dividends_massive",
+    "get_splits_massive",
+    "get_related_companies_massive",
+    "get_corporate_actions_massive",
+    "get_ipos_massive",
     "fetch_macro_backdrop",
     "is_yield_curve_inverted",
     "latest_breakeven",

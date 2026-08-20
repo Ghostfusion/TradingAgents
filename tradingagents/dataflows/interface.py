@@ -28,10 +28,12 @@ from .finnhub import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .massive import (
+    get_corporate_actions_massive,
     get_fundamentals_massive,
     get_macro_indicators_massive,
     get_news_massive,
     get_ratios_massive,
+    get_related_companies_massive,
     get_short_interest_massive,
 )
 from .moomoo import (
@@ -263,6 +265,7 @@ VENDOR_METHODS = {
     },
     "get_company_peers": {
         "finnhub": get_company_peers_finnhub,
+        "massive": get_related_companies_massive,
     },
     "get_insider_activity": {
         "finnhub": get_insider_activity_finnhub,
@@ -357,6 +360,7 @@ VENDOR_METHODS = {
     },
     "get_corporate_actions": {
         "moomoo": get_corporate_actions_moomoo,
+        "massive": get_corporate_actions_massive,
     },
     "get_earnings_catalyst": {
         "moomoo": get_earnings_catalyst_moomoo,

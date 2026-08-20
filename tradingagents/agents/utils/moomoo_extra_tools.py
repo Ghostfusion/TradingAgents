@@ -147,6 +147,62 @@ def get_corporate_actions(
 
 
 @tool
+def get_dividends(
+    ticker: Annotated[str, "ticker symbol"],
+    limit: Annotated[int | None, "max dividend rows to return; default 5"] = None,
+) -> str:
+    """
+    Recent cash dividends for a ticker (Massive.com). Returns declaration /
+    ex / record / pay dates, cash amount, currency, frequency and the
+    split-adjustment factor. Rising / consistent regular dividends signal
+    return discipline; the adjustment factor helps normalize split history.
+
+    Args:
+        ticker (str): Ticker symbol of the company
+        limit (int): max rows; default 5
+
+    Returns:
+        str: A formatted dividend report, or an explicit 'unavailable' message
+    """
+    if limit is None:
+        limit = 5
+    from tradingagents.dataflows.massive import get_dividends_massive
+
+    try:
+        return get_dividends_massive(ticker, limit)
+    except Exception as exc:  # noqa: BLE001
+        return f"dividends unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_ipos(
+    limit: Annotated[int | None, "max IPO rows to return, default 10"] = None,
+    status: Annotated[str, "IPO status filter: pending, priced, withdrawn"] = "pending",
+) -> str:
+    """
+    Recent IPOs (Massive.com): issuer, ticker, expected/announced date, offer
+    price, size and status. New listings are fresh-money / catalyst events the
+    news analyst can weigh as a universe or event-risk input.
+
+    Args:
+        limit (int): max rows; default 10
+        status (str): IPO status filter
+
+    Returns:
+        str: A formatted IPO list, or an explicit 'unavailable' message
+    """
+    if limit is None:
+        limit = 10
+    from tradingagents.dataflows.massive import get_ipos_massive
+
+    try:
+        return get_ipos_massive(limit, status)
+    except Exception as exc:  # noqa: BLE001
+        return f"ipos unavailable: {exc}"
+
+
+
+@tool
 def get_earnings_catalyst(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:

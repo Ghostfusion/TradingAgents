@@ -18,6 +18,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
     get_cashflow,
     get_corporate_actions,
+    get_dividends,
     get_earnings_calendar,
     get_earnings_catalyst,
     get_earnings_surprise_history,
@@ -30,6 +31,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_insider_transactions,
     get_institution_holdings,
+    get_ipos,
     get_macro_indicators,
     get_market_breadth,
     get_market_snapshot,
@@ -299,6 +301,7 @@ class TradingAgentsGraph:
                     get_prediction_markets,
                     get_earnings_calendar,
                     get_sec_filings,
+                    get_ipos,
                     # Scheduled catalysts + regime (moomoo; optional, degrades)
                     get_economic_calendar,
                     get_fed_watch,
@@ -321,6 +324,7 @@ class TradingAgentsGraph:
                     get_smart_money,
                     get_revenue_breakdown,
                     get_corporate_actions,
+                    get_dividends,
                     get_institution_holdings,
                     get_earnings_surprise_history,
                     # Computed-analysis tools (deterministic signals).

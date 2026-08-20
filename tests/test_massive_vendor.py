@@ -18,14 +18,19 @@ from tradingagents.dataflows.errors import (
 from tradingagents.dataflows.massive import (
     MassiveNotConfiguredError,
     fetch_macro_backdrop,
+    get_corporate_actions_massive,
+    get_dividends_massive,
     get_form4_insider_massive,
     get_fundamentals_massive,
+    get_ipos_massive,
     get_macro_indicators_massive,
     get_market_snapshot_massive,
     get_news_massive,
     get_ratios_massive,
+    get_related_companies_massive,
     get_short_interest_massive,
     get_short_volume_massive,
+    get_splits_massive,
     get_top_movers_massive,
     is_yield_curve_inverted,
     latest_breakeven,
@@ -412,3 +417,66 @@ class MassiveSnapshotTests(unittest.TestCase):
         with mock.patch.object(massive, "_get", return_value=[]):
             out = get_top_movers_massive("gainers", 5)
         self.assertIn("unavailable", out)
+
+
+@pytest.mark.unit
+class MassiveRow5Tests(unittest.TestCase):
+    def test_dividends_format(self):
+        rows = [{"pay_date": "2022-11-10", "ex_dividend_date": "2022-11-04",
+                 "cash_amount": 0.23, "currency": "USD", "frequency": 4,
+                 "distribution_type": "recurring"}]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_dividends_massive("AAPL")
+        self.assertIn("0.2", out)
+        self.assertIn("2022-11-10", out)
+        self.assertIn("freq 4x/yr", out)
+
+    def test_dividends_empty_raises(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_dividends_massive("AAPL")
+
+    def test_splits_format(self):
+        rows = [{"execution_date": "2020-08-31", "split_from": 1.0,
+                 "split_to": 4.0, "adjustment_type": "forward_split",
+                 "historical_adjustment_factor": 0.25}]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_splits_massive("AAPL")
+        self.assertIn("1.0->4.0", out)
+        self.assertIn("forward_split", out)
+
+    def test_related_companies_matches_peers_format(self):
+        rows = [{"ticker": "MSFT"}, {"ticker": "AMZN"}]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_related_companies_massive("AAPL")
+        self.assertTrue(out.startswith("Peers: "))
+        self.assertIn("MSFT", out)
+        self.assertIn(", ", out)
+
+    def test_ipos_format_and_status(self):
+        rows = [{"last_updated": "2026-08-20", "ticker": "SCATU",
+                 "issuer_name": "Acq Corp", "final_issue_price": 10.0,
+                 "ipo_status": "pending"}]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_ipos_massive(1, "pending")
+        self.assertIn("SCATU", out)
+        self.assertIn("pending", out)
+
+    def test_corporate_actions_combines(self):
+        def _fake(_path, params=None):
+            if "dividend" in _path:
+                return [{"cash_amount": 0.5, "pay_date": "2022-01-01"}]
+            if "split" in _path:
+                return [{"execution_date": "2020-01-01", "split_from": 1,
+                         "split_to": 2, "adjustment_type": "forward_split"}]
+            return []
+        with mock.patch.object(massive, "_get", side_effect=_fake):
+            out = get_corporate_actions_massive("AAPL")
+        self.assertIn("Dividends", out)
+        self.assertIn("Splits", out)
+
+    def test_row5_registered_as_vendors(self):
+        self.assertIn("massive", interface.VENDOR_METHODS["get_company_peers"])
+        self.assertIn("massive", interface.VENDOR_METHODS["get_corporate_actions"])

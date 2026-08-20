@@ -99,7 +99,7 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | 2 | `economy/treasury-yields`, `inflation`, `inflation-expectations`, `labor-market` | Macro analyst + catalyst overlay (B1) decoupled from OpenD | ✅ implemented |
 | 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | ✅ implemented |
 | 4 | `filings/form-4` | insider fundamentals + screener | ✅ implemented (13-F deferred: no security filter — see §3c) |
-| 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
+| 5 | `corporate-actions/dividends` + `splits`, `tickers/related-companies`, `ipos` | corporate-actions + peers (fundamentals) + IPO catalyst (news) | ✅ implemented (entitled on current plan) |
 | 6 | `fundamentals/ratios` + `get_fundamentals` | `get_ratios` (fundamentals analyst) + `fundamental_data` vendor | ✅ wired (plan-aware; 403 on free Basic) |
 | 7 | `snapshots/single-ticker`, `top-movers` | market analyst tools + `pipeline.py --universe top-movers-massive` | ✅ wired (plan-aware; 403 on free Basic) |
 | 8 | WebSocket NOI / Flat Files | NOI live monitor app + Flat-File bulk OHLCV loader | ✅ wired (plan-gated: Imbalances add-on / Starter+; not batch @tools) |
@@ -293,6 +293,35 @@ and both are plan-gated.
 
 Both are hermetic-tested (`tests/test_massive_flat_noi.py`). They activate as
 soon as the account gains the entitlement - no code change.
+
+## 3f. Corporate actions, peers & IPO reference (row 5, entitled)
+
+Row 5 is the **first live** set since news/economy/short/form-4: unlike rows 6
+and 7, these endpoints are **entitled on the current plan** (probed 200), so
+they wire as working enrichments at existing nodes.
+
+- **Peers** - `get_related_companies_massive(ticker)` (`/v1/related-companies/
+  {ticker}`) matches the finnhub `get_company_peers` output format, so it drops
+  into `get_company_peers` as a ``massive`` vendor option (default remains
+  finnhub-first; chain ``"massive,finnhub"`` to prefer Massive). Feeds
+  relative-valuation / peer reasoning in the fundamentals analyst.
+- **Dividends + splits** - `get_dividends_massive` (`/stocks/v1/dividends`) and
+  `get_splits_massive` (`/stocks/v1/splits`) are combined by
+  `get_corporate_actions_massive`, registered as a `massive` vendor in the
+  existing `corporate_actions` category (with moomoo). A dedicated
+  `get_dividends` tool is bound to the fundamentals analyst - cash amount,
+  declaration/ex/record/pay dates, frequency, adjustment factor - a dividend-
+  discipline / return-demand read.
+- **IPO reference** - `get_ipos_massive(limit, status)` (`/vX/reference/ipos`)
+  exposes pending/priced IPOs (issuer, ticker, offer price, size) as a
+  fresh-money / catalyst / universe input, bound via `get_ipos` to the news
+  analyst.
+
+All degrade cleanly (NoMarketDataError on empty) and are hermetic-tested in
+`tests/test_massive_vendor.py`. `ticker-events` / `market-operations`
+(reference timelines, holidays, exchanges) are intentionally **not** exposed as
+graph tools - they are low-signal for batch decision-making vs. the entitled
+peers/dividend/IPO data above.
 
 ---
 
