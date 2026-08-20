@@ -307,121 +307,121 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays) and [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports).
 >
-> ## Batch runner
->
-> A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
->
-> ```bash
-> python batch.py --symbols NVDA MSFT AAPL
-> python batch.py --symbols NVDA MSFT AAPL 0700.HK --date 2026-07-22 --workers 4
-> python batch.py --symbols NVDA --depth deep --analysts market news
-> ```
->
-> Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
->
-> ## Extended data sources
->
-> Beyond the core price, fundamental, and news vendors, TradingAgents can pull additional free, decision-relevant signals (all optional — a vendor failure degrades gracefully instead of aborting a run):
->
-> - **Options market** (yfinance) — implied volatility, put/call open-interest and volume skew, surfaced to the market analyst.
-> - **SEC EDGAR filings** — 8-K (material events), 10-K/10-Q (reports), S-1/S-3 (capital raises), SC 13D/G (stake disclosures), surfaced to the news analyst.
-> - **Short interest / float** (yfinance) — days-to-cover, short % of float, ownership split, surfaced to the market analyst.
-> - **Analyst ratings & price targets** (Finnhub) — recommendation trends and consensus targets, surfaced to the fundamentals analyst.
-> - **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
->
-> Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
->
-> ## Moomoo OpenAPI vendor
->
-> Moomoo OpenAPI (formerly Futu OpenAPI) is available as an additional vendor behind the same `route_to_vendor` interface. It serves quotes/candlesticks, technical indicators, F10 financials, news, options chains, short interest, analyst consensus, the earnings calendar, and insider trades through the **local OpenD gateway** (TCP, default `127.0.0.1:11111`).
->
-> - **No credentials in `.env`** — install OpenD, log in once with your (free) moomoo account and tick "remember password". The project only connects to the gateway.
-> - **Headless autostart** — set `TRADINGAGENTS_MOOMOO_AUTOSTART=true` (default in `.env`) and `TRADINGAGENTS_MOOMOO_ACCOUNT=<your moomoo ID>` (not a password); the vendor launches OpenD with `-login_by_remember=1` when it is not running. `TRADINGAGENTS_MOOMOO_OPEND_PATH` overrides executable discovery. Note: OpenD is a local desktop gateway — inside Docker, moomoo simply degrades to the fallback vendors unless OpenD is reachable from the container.
-> - **Analyst parallelism (opt-in)** — set `TRADINGAGENTS_ANALYST_CONCURRENCY=2` (or `analyst_concurrency` in config) to run the analyst teams concurrently, each in its own thread with isolated messages. Multiplies LLM/provider load and free-tier quota burn — start with 2, keep 1 (default) for rate-limited setups.
-> - **Graceful fallback** — when OpenD is down, logged out, or lacks quote permission for a market, the router emits `DATA_UNAVAILABLE`/`NO_DATA_AVAILABLE` and falls back to the next configured vendor (yfinance, finnhub, …). Free quote rights cover US equities (LV3 promo), HK LV1, and crypto; A-shares and LSE/India are not covered for global accounts.
-> - **Financial statements honor the tool contract** — `get_balance_sheet`, `get_cashflow`, and `get_income_statement` accept the same `freq` (`annual`/`quarterly`) and `curr_date` arguments as the yfinance and alpha_vantage vendors: `freq` selects the annual vs. quarterly report type on the moomoo SDK, and `curr_date` filters out statements published after the trading day (look-ahead guard). `get_fundamentals` accepts `curr_date` the same way.
-> - Covered by default in `data_vendors` chains (`moomoo,yfinance` for prices/indicators/fundamentals/options/short-interest, `moomoo,finnhub` for ratings/earnings, `fred,moomoo` for macro). Prediction markets use `polymarket,moomoo` — Polymarket first, with moomoo's event contracts (category → series → event → contract → snapshot, live YES probabilities) as the fallback. Event contracts are server-gated to moomoo SG/MY accounts; other regions fall back to Polymarket automatically.
->
-> **Decision-quality tiers** (all moomoo-only, optional, degrade to a `DATA_UNAVAILABLE` sentinel when OpenD is down or gated):
-> - **Tier 1 — new evidence classes:** `get_capital_flow` (weekly net inflow by order size + session distribution → Market Analyst), `get_smart_money` (ARK institutional activity → Fundamentals), `get_economic_calendar` (dated CPI/FOMC/payroll catalysts → News), `get_fed_watch` (market-implied rate probabilities → News).
-> - **Tier 2 — enrichment:** `get_market_breadth` (sector heat map + rise/fall distribution → News), `get_revenue_breakdown` (segment mix/concentration → Fundamentals), `get_corporate_actions` (dividends/splits → Fundamentals), `get_earnings_catalyst` (historical earnings implied move + IV crush → News, feeds catalyst-risk sizing).
-> - **Tier 3 — accuracy infra:** the memory-log realized-return path uses moomoo's trading-day calendar for exact holding-day counting (falls back to the old calendar heuristic when OpenD is unreachable or the market is unsupported).
->
-> The `batch.py` runner accepts a `--vendor moomoo|yfinance|default` flag to force a vendor-chain preset across all categories per run.
->
-> ## Value watchlist screener
->
-> `scripts/value_screener.py` builds a master watchlist *before* spending analyst LLM budget: it screens each symbol through the same `route_to_vendor` chain (`fundamental_data` defaults to `moomoo,yfinance`), translating vendor output (CSV/markdown/JSON/text) into canonical line items and computing the classic screens — **EV/EBIT (Acquirer's Multiple), Earnings Yield, Piotroski F-Score, Beneish M-Score, Altman Z-Score and net-net** (see [`strategies/value_strategy.md`](strategies/value_strategy.md) and `strategies/Math.md` for the playbook). Missing rows render `n/a`, never a fabricated number.
->
-> The daily-changing universe can come from moomoo's intraday **top-movers"/"heat-proxy" rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
->
-> ```
-> python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30
-> ```
->
-> `heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
-> official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
-> then gates to **price ≥ $15, 0 < P/E (TTM) ≤ 40, market cap ≥ $10B**
-> (`--price-min 15`, `--pe-max 40`, `--min-mcap 10000000000`) plus
-> **30-day avg volume ≥ 1M shares** (`--min-avg-vol`) and
-> **ATR(14) ≥ 2% of price** (`--min-atr-pct`)
-> and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
-> cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
-> the value screens run. It uses moomoo's official trade rank as the stand-in
-> for the proprietary in-app **Heat List** (the composite Trade/Search/News
-> telemetry isn't exposed by any moomoo API — the web endpoint is signed and
-> undocumented). To use the literal app Heat List, save its top symbols to a
-> file and pass `-f list.txt`. Output includes the day's change, name, and a
-> screen-per-column table; pick from the ranked rows. Each run also saves
-> the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_180415.md`,
-> same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).
-> Requires OpenD running +
-> logged in (same as every moomoo feature), and fails loudly if unavailable.
+## Batch runner
 
-> Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
-> many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
-> render `n/a` instead of mixing currencies), and the day's % change is
-> normalized to a fraction regardless of the market session. `0` disables any gate.
+A headless, concurrent runner ships alongside the interactive CLI. Run several symbols at once, auto-save reports in the same layout the CLI produces, and get a machine-readable summary — no interactive prompts.
 
-> ## Decision quality
->
-> The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
->
-> - `confidence` (0–1) — conviction in the decision.
-> - `position_size` — an explicit, risk-capped size that supersedes the trader's proposal.
-> - `stop_loss` — a risk-derived stop level.
-> - `consensus` (`high`/`low`) — a dissent flag when the aggressive/conservative/neutral analysts materially disagree.
->
-> The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
->
-> ## Report format (consolidated hierarchy + Table of Contents)
->
-> Every run writes a per-section tree (`1_analysts/`, `2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/` — raw per-agent markdown) plus a consolidated `complete_report.md`. The consolidated file auto-demotes each agent's own headings 3 levels so its outline sits strictly under its role label:
->
-> ```
-> #  Trading Analysis Report: <ticker>    ← document
-> ## I. Analyst Team Reports              ← team
-> ### Market Analyst                      ← role
->   #### <the analyst's own title>        ← agent content
->     ##### <their sections>
->     ###### <details>
-> ```
->
-> The agent's raw files (`1_analysts/market.md`, `2_research/bull.md`, …) stay byte-identical — only the consolidated view is re-nested. `complete_report.md` also opens with an auto-generated **Table of Contents** (GitHub-anchor links to every team and role).
->
-> To re-render the consolidated report for an existing folder (e.g. after a formatter change) without re-running the analysis — preserving the `Risk Gate (computed)` block when present:
-> ```bash
-> py -3.12 scripts/rebuild_complete_report.py reports/SFTBY_20260819_115450
-> py -3.12 scripts/rebuild_complete_report.py      # all folders
-> ```
->
-> ## Operational hardening
->
-> - **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
-> - **Vendor-result cache** — successful vendor fetches are cached on disk under a TTL (default 6 hours) to avoid re-burning free-tier API quotas; news is never cached, and failures are never cached.
-> - **Vendor-served logging** — the routing layer logs which vendor answered each call, making free-tier quota burn visible.
-> - **NaN-safe options chains** — yfinance option chains frequently carry missing/`NaN` open-interest, volume, and implied-volatility values; the options vendor skips non-finite values when summing (missing counts contribute 0) instead of crashing the call.
-> - **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
+```bash
+python batch.py --symbols NVDA MSFT AAPL
+python batch.py --symbols NVDA MSFT AAPL 0700.HK --date 2026-07-22 --workers 4
+python batch.py --symbols NVDA --depth deep --analysts market news
+```
+
+Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
+
+## Extended data sources
+
+Beyond the core price, fundamental, and news vendors, TradingAgents can pull additional free, decision-relevant signals (all optional — a vendor failure degrades gracefully instead of aborting a run):
+
+- **Options market** (yfinance) — implied volatility, put/call open-interest and volume skew, surfaced to the market analyst.
+- **SEC EDGAR filings** — 8-K (material events), 10-K/10-Q (reports), S-1/S-3 (capital raises), SC 13D/G (stake disclosures), surfaced to the news analyst.
+- **Short interest / float** (yfinance) — days-to-cover, short % of float, ownership split, surfaced to the market analyst.
+- **Analyst ratings & price targets** (Finnhub) — recommendation trends and consensus targets, surfaced to the fundamentals analyst.
+- **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
+
+Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
+
+## Moomoo OpenAPI vendor
+
+Moomoo OpenAPI (formerly Futu OpenAPI) is available as an additional vendor behind the same `route_to_vendor` interface. It serves quotes/candlesticks, technical indicators, F10 financials, news, options chains, short interest, analyst consensus, the earnings calendar, and insider trades through the **local OpenD gateway** (TCP, default `127.0.0.1:11111`).
+
+- **No credentials in `.env`** — install OpenD, log in once with your (free) moomoo account and tick "remember password". The project only connects to the gateway.
+- **Headless autostart** — set `TRADINGAGENTS_MOOMOO_AUTOSTART=true` (default in `.env`) and `TRADINGAGENTS_MOOMOO_ACCOUNT=<your moomoo ID>` (not a password); the vendor launches OpenD with `-login_by_remember=1` when it is not running. `TRADINGAGENTS_MOOMOO_OPEND_PATH` overrides executable discovery. Note: OpenD is a local desktop gateway — inside Docker, moomoo simply degrades to the fallback vendors unless OpenD is reachable from the container.
+- **Analyst parallelism (opt-in)** — set `TRADINGAGENTS_ANALYST_CONCURRENCY=2` (or `analyst_concurrency` in config) to run the analyst teams concurrently, each in its own thread with isolated messages. Multiplies LLM/provider load and free-tier quota burn — start with 2, keep 1 (default) for rate-limited setups.
+- **Graceful fallback** — when OpenD is down, logged out, or lacks quote permission for a market, the router emits `DATA_UNAVAILABLE`/`NO_DATA_AVAILABLE` and falls back to the next configured vendor (yfinance, finnhub, …). Free quote rights cover US equities (LV3 promo), HK LV1, and crypto; A-shares and LSE/India are not covered for global accounts.
+- **Financial statements honor the tool contract** — `get_balance_sheet`, `get_cashflow`, and `get_income_statement` accept the same `freq` (`annual`/`quarterly`) and `curr_date` arguments as the yfinance and alpha_vantage vendors: `freq` selects the annual vs. quarterly report type on the moomoo SDK, and `curr_date` filters out statements published after the trading day (look-ahead guard). `get_fundamentals` accepts `curr_date` the same way.
+- Covered by default in `data_vendors` chains (`moomoo,yfinance` for prices/indicators/fundamentals/options/short-interest, `moomoo,finnhub` for ratings/earnings, `fred,moomoo` for macro). Prediction markets use `polymarket,moomoo` — Polymarket first, with moomoo's event contracts (category → series → event → contract → snapshot, live YES probabilities) as the fallback. Event contracts are server-gated to moomoo SG/MY accounts; other regions fall back to Polymarket automatically.
+
+**Decision-quality tiers** (all moomoo-only, optional, degrade to a `DATA_UNAVAILABLE` sentinel when OpenD is down or gated):
+- **Tier 1 — new evidence classes:** `get_capital_flow` (weekly net inflow by order size + session distribution → Market Analyst), `get_smart_money` (ARK institutional activity → Fundamentals), `get_economic_calendar` (dated CPI/FOMC/payroll catalysts → News), `get_fed_watch` (market-implied rate probabilities → News).
+- **Tier 2 — enrichment:** `get_market_breadth` (sector heat map + rise/fall distribution → News), `get_revenue_breakdown` (segment mix/concentration → Fundamentals), `get_corporate_actions` (dividends/splits → Fundamentals), `get_earnings_catalyst` (historical earnings implied move + IV crush → News, feeds catalyst-risk sizing).
+- **Tier 3 — accuracy infra:** the memory-log realized-return path uses moomoo's trading-day calendar for exact holding-day counting (falls back to the old calendar heuristic when OpenD is unreachable or the market is unsupported).
+
+The `batch.py` runner accepts a `--vendor moomoo|yfinance|default` flag to force a vendor-chain preset across all categories per run.
+
+## Value watchlist screener
+
+`scripts/value_screener.py` builds a master watchlist *before* spending analyst LLM budget: it screens each symbol through the same `route_to_vendor` chain (`fundamental_data` defaults to `moomoo,yfinance`), translating vendor output (CSV/markdown/JSON/text) into canonical line items and computing the classic screens — **EV/EBIT (Acquirer's Multiple), Earnings Yield, Piotroski F-Score, Beneish M-Score, Altman Z-Score and net-net** (see [`strategies/value_strategy.md`](strategies/value_strategy.md) and `strategies/Math.md` for the playbook). Missing rows render `n/a`, never a fabricated number.
+
+The daily-changing universe can come from moomoo's intraday **top-movers"/"heat-proxy" rank** (领跌/领涨榜) — the biggest decliners at call time — so the watchlist rotates with the market:
+
+```
+python scripts/value_screener.py -u heat-proxy -n 50 -d 2026-06-30
+```
+
+`heat-proxy` is US-only (stocks only - ETFs/ETNs/funds/indices are excluded), takes the
+official hot master (gainers+losers, hottest first) and keeps the losers of the moment,
+then gates to **price ≥ $15, 0 < P/E (TTM) ≤ 40, market cap ≥ $10B**
+(`--price-min 15`, `--pe-max 40`, `--min-mcap 10000000000`) plus
+**30-day avg volume ≥ 1M shares** (`--min-avg-vol`) and
+**ATR(14) ≥ 2% of price** (`--min-atr-pct`)
+and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
+cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
+the value screens run. It uses moomoo's official trade rank as the stand-in
+for the proprietary in-app **Heat List** (the composite Trade/Search/News
+telemetry isn't exposed by any moomoo API — the web endpoint is signed and
+undocumented). To use the literal app Heat List, save its top symbols to a
+file and pass `-f list.txt`. Output includes the day's change, name, and a
+screen-per-column table; pick from the ranked rows. Each run also saves
+the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_180415.md`,
+same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).
+Requires OpenD running +
+logged in (same as every moomoo feature), and fails loudly if unavailable.
+
+Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
+many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
+render `n/a` instead of mixing currencies), and the day's % change is
+normalized to a fraction regardless of the market session. `0` disables any gate.
+
+## Decision quality
+
+The Portfolio Manager's structured output now captures the full risk-adjusted decision, not just a rating:
+
+- `confidence` (0–1) — conviction in the decision.
+- `position_size` — an explicit, risk-capped size that supersedes the trader's proposal.
+- `stop_loss` — a risk-derived stop level.
+- `consensus` (`high`/`low`) — a dissent flag when the aggressive/conservative/neutral analysts materially disagree.
+
+The decision log also feeds an aggregate track record back into the Portfolio Manager: on each same-ticker run it injects the historical directional win rate, mean realized return, and mean alpha, so future decisions weigh past accuracy.
+
+## Report format (consolidated hierarchy + Table of Contents)
+
+Every run writes a per-section tree (`1_analysts/`, `2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/` — raw per-agent markdown) plus a consolidated `complete_report.md`. The consolidated file auto-demotes each agent's own headings 3 levels so its outline sits strictly under its role label:
+
+```
+#  Trading Analysis Report: <ticker>    ← document
+## I. Analyst Team Reports              ← team
+### Market Analyst                      ← role
+  #### <the analyst's own title>        ← agent content
+    ##### <their sections>
+    ###### <details>
+```
+
+The agent's raw files (`1_analysts/market.md`, `2_research/bull.md`, …) stay byte-identical — only the consolidated view is re-nested. `complete_report.md` also opens with an auto-generated **Table of Contents** (GitHub-anchor links to every team and role).
+
+To re-render the consolidated report for an existing folder (e.g. after a formatter change) without re-running the analysis — preserving the `Risk Gate (computed)` block when present:
+```bash
+py -3.12 scripts/rebuild_complete_report.py reports/SFTBY_20260819_115450
+py -3.12 scripts/rebuild_complete_report.py      # all folders
+```
+
+## Operational hardening
+
+- **Thread-safe configuration** — `set_config`/`get_config` are thread-local, so concurrent batch workers never leak per-symbol overrides into each other.
+- **Vendor-result cache** — successful vendor fetches are cached on disk under a TTL (default 6 hours) to avoid re-burning free-tier API quotas; news is never cached, and failures are never cached.
+- **Vendor-served logging** — the routing layer logs which vendor answered each call, making free-tier quota burn visible.
+- **NaN-safe options chains** — yfinance option chains frequently carry missing/`NaN` open-interest, volume, and implied-volatility values; the options vendor skips non-finite values when summing (missing counts contribute 0) instead of crashing the call.
+- **Reddit rate limiting** — Reddit fetches are paced process-wide to avoid 429s, with a `TRADINGAGENTS_DISABLE_REDDIT=1` kill-switch for heavy batch days.
 
 ## Decision hardening (compute, don't narrate)
 

@@ -10,6 +10,11 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **README fork-additions rendering** - the fork-additions body (Batch runner
+  through Operational hardening) was wrapped in one giant Markdown blockquote
+  (`>` on every line), which rendered the grey left bar and demoted every
+  `##` section header; only the `[!IMPORTANT]` banner is a callout now, the
+  rest are normal top-level sections.
 - **Screener moomoo period-order + prior-period bug (M column always n/a)** -
   moomoo statement payloads list periods newest-first but `_parse_markdown_financials`
   used a last-write-wins dict, so the canonical "latest" was the OLDEST period
