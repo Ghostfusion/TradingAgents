@@ -36,7 +36,26 @@ def _ticker_info(ticker: str, timeout: float = 8.0) -> dict:
 
 
 def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
-    """GICS sector for the ticker; None when unavailable."""
+    """GICS sector for the ticker; None when unavailable.
+
+    1) FMP company profile (key-gated, instant when the key is set and not
+       rate-limited) - the authoritative source when available.
+    2) yfinance ``info`` on a daemon thread as a guarded fallback (slow /
+       blocked vendor or unset key can never hang the scanner; worst case:
+       None = unknown sector, which the sector gate treats as no-data).
+    """
+    # 1) FMP company profile (key-gated, fast).
+    try:
+        from tradingagents.dataflows.fmp import get_company_profile
+
+        prof = get_company_profile(ticker)
+        if prof:
+            sec = str(prof.get("sector") or "").strip()
+            if sec and sec.lower() != "none":
+                return sec
+    except Exception:  # noqa: BLE001 - enrichment must never raise
+        pass
+    # 2) yfinance guarded fallback.
     info = _ticker_info(ticker, timeout=timeout)
     sec = (info.get("sector") or "").strip()
     return sec or None

@@ -73,6 +73,26 @@ def test_sector_standing_fuzzy_match():
     assert s["sector"] == "Technology"
 
 
+def test_sector_standing_gics_names_canonicalize():
+    closes_map = {
+        "XLK": _up(100.0, 0.8),
+        "XLF": _up(100.0, 0.4),
+        "XLV": _up(100.0, 0.2),
+        "XLY": _up(100.0, 0.15),
+        "XLE": _up(100.0, 0.1),
+    }
+    ranking = rank_sectors(closes_map)
+    it = sector_standing("Information Technology", ranking)
+    assert it["verdict"] == "top3" and it["sector"] == "Technology"
+    fin = sector_standing("Financial Services", ranking)
+    assert fin["verdict"] == "top3" and fin["sector"] == "Financials"
+    hc = sector_standing("Health Care", ranking)
+    assert hc["sector"] == "Health Care" and hc["verdict"] == "top3"
+    cd = sector_standing("Consumer Discretionary", ranking)
+    assert cd["sector"] == "Consumer Disc." and cd["rank"] == 4
+    assert cd["verdict"] == "tracking"  # 4th - outside the top-3
+
+
 def test_sector_standing_unknown():
     assert sector_standing(None, None)["verdict"] == "unknown"
     assert sector_standing("Crypto", {"ranked": []})["verdict"] == "unknown"

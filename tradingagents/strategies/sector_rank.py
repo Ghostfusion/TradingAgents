@@ -66,6 +66,31 @@ def rank_sectors(closes_map: dict, window_1m: int = 21, window_3m: int = 63) -> 
     return {"ranked": ranked, "top3_3m": top3_3m, "top3_1m": top3_1m}
 
 
+def _canonical_sector(sector: str) -> str:
+    """Map a GICS/yfinance sector string to the SPDR short label (lowercase)."""
+    key = sector.strip().lower()
+    return _GICS_TO_SPDR.get(key, key)
+
+
+# GICS naming vs the SPDR short labels (FMP/av profile and yfinance report
+# GICS names; the SPDR group names differ in spelling, e.g. "Financial
+# Services" vs "Financials", "Information Technology" vs "Technology").
+_GICS_TO_SPDR = {
+    "information technology": "technology",
+    "communication services": "communications",
+    "consumer discretionary": "consumer disc.",
+    "financial services": "financials",
+    "financial": "financials",
+    "healthcare": "health care",
+    "consumer staples": "consumer staples",
+    "real estate": "real estate",
+    "utilities": "utilities",
+    "energy": "energy",
+    "materials": "materials",
+    "industrials": "industrials",
+}
+
+
 def sector_standing(sector: str | None, ranking: dict | None) -> dict:
     """Where a candidate's sector sits in the ranking.
 
@@ -81,13 +106,10 @@ def sector_standing(sector: str | None, ranking: dict | None) -> dict:
             "verdict": "unknown",
         }
     sector = sector.strip()
+    canon = _canonical_sector(sector)
     for r in ranking.get("ranked", []):
-        name = r.get("name", "")
-        if (
-            sector.lower() == name.lower()
-            or sector.lower() in name.lower()
-            or name.lower() in sector.lower()
-        ):
+        name = str(r.get("name", "")).lower()
+        if canon == name or (canon and (canon in name or name in canon)):
             top3 = r["etf"] in ranking.get("top3_3m", [])
             return {
                 "sector": r["name"],

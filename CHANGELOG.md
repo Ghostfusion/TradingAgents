@@ -17,7 +17,8 @@ Breaking changes within the 0.x line are called out explicitly.
   parser), `--min-roe` (net income / total equity via new `total_equity`
   canonical alias), `--max-mcap` ($2B-100B focus), `--sector-rank`
   (`strategies/sector_rank.py`: 11 SPDR ETF groups ranked by 1m/3m momentum,
-  ticker sector via guarded `dataflows/yfinance_sector.py`),
+  ticker sector via FMP profile (key-gated) with guarded
+  `dataflows/yfinance_sector.py` fallback),
   `--revision` (net analyst upgrades in 60d as the forward-revisions proxy)
   and `--inst-accum` (two-quarter institutional %-of-float change). New
   EpsYoY/RevYoY/ROE, Sec/Rank, RevUp and Inst table columns; gates apply only

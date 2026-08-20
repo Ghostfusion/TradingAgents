@@ -24,6 +24,37 @@ def test_fetch_sector_returns_value(monkeypatch):
     assert fetch_sector("AAPL") == "Technology"
 
 
+def test_fetch_sector_fmp_primary(monkeypatch):
+    # FMP answers -> its sector wins (no yfinance call needed).
+    with mock.patch(
+        "tradingagents.dataflows.fmp.get_company_profile",
+        return_value={"sector": "Information Technology"},
+    ):
+        def boom(t):
+            raise AssertionError("yfinance should not be called when FMP answers")
+
+        monkeypatch.setattr("yfinance.Ticker", boom)
+        assert fetch_sector("AAPL") == "Information Technology"
+
+
+def test_fetch_sector_fmp_missing_falls_back_to_yfinance():
+    with mock.patch(
+        "tradingagents.dataflows.fmp.get_company_profile",
+        return_value={"sector": "", "company": "Apple"},
+    ), mock.patch(
+        "yfinance.Ticker", return_value=type("T", (), {"info": {"sector": "Technology"}})
+    ):
+        assert fetch_sector("AAPL") == "Technology"
+
+
+def test_fetch_sector_neither_source():
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
+        mock.patch("yfinance.Ticker", return_value=type("T", (), {"info": {}})),
+    ):
+        assert fetch_sector("AAPL") is None
+
+
 def test_fetch_sector_none_on_failure(monkeypatch):
     def boom(t):
         raise RuntimeError("no network")

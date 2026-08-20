@@ -17,7 +17,7 @@ watchlist is tradeable-by-construction. The framework phase-1 gates below are
 | `--min-rev-yoy 15` | Revenue YoY >= 15% | moomoo statement YoY column |
 | `--min-roe 15` | Return on Equity >= 15% | net income / total equity |
 | `--max-mcap 100000000000` | market cap <= $100B ($2B-100B focus) | vendor cap |
-| `--sector-rank` | sector in the top-3 SPDR group (1m/3m) | SPDR ETFs + yfinance sector |
+| `--sector-rank` | sector in the top-3 SPDR group (1m/3m) | **FMP profile sector** (key-gated), yfinance guarded fallback; SPDR ETFs |
 | `--revision` | positive net analyst upgrades (60d) | yfinance upgrades/downgrades proxy |
 | `--inst-accum` | institutional %-of-float rising (2 quarters) | moomoo shareholders |
 
