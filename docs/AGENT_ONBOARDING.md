@@ -163,6 +163,54 @@ tests/                     # conftest (autouse fixtures), test_* per area
 - **Analyst concurrency / strategy overlays** are deterministic and tested
   offline; LLMs only argue from the reports.
 
+## Finnhub (free tier — behavior learned by live probing)
+
+`TRADINGAGENTS_FINNHUB_API_KEY` is set in `.env` (40-char key, free tier).
+Everything below was live-verified against the key, so don't re-discover it:
+
+**What the free tier actually allows (200):**
+- `company_basic_financials` (metrics: epsGrowthQuarterlyYoy,
+  revenueGrowthTTMYoy, roeTTM, margins, payout, current ratio, 52w high/low,
+  average volumes)
+- `company_profile2` (sector/industry/country/marketCap/float/ipo)
+- `quote`, `company_news`, `general_news`, `earnings_calendar` (symbol-scoped),
+  `company_peers`, `stock_insider_transactions`, `stock_insider_sentiment`,
+  `stock_symbols` (full US list)
+
+**❌ NOT on the free tier (403 — never wire these):** `news/sentiment`,
+`index/constituents` (S&P 500 list), `economic-calendar`, `press-releases`,
+`upgrade-downgrade`, `sector-performance` (needs an extra request header),
+`earnings-surprises`. The `--revision` flag therefore stays on the yfinance
+upgrade/downgrade **proxy** — don't "fix" it to finnhub, it will 403.
+
+**Rate limits:** free tier throttles hard with **429** (shared with FMP). A 429
+must degrade to "source unavailable" and fall through to the next vendor
+(yfinance/moomoo), never break a run. Treat the Finnhub key as a fourth data
+source in the growth/insider paths, NOT a replacement.
+
+**Scale gotcha:** Finnhub reports `marketCapitalization` in **millions**
+(e.g. `4430136` ≈ $4.43T for AAPL). `get_basic_financials_finnhub` multiplies
+by 1e6 to raw USD so the screener's `--min-mcap` floor compares correctly —
+don't "fix" that or the cap gate breaks by 1000x.
+
+**Wiring (all key-gated / guarded / no-fabrication):**
+- `get_basic_financials` (metrics) — feeds `fetch_ticker`'s growth/ROE gaps
+  so `--min-eps-yoy / --min-rev-yoy / --min-roe` work off Finnhub when the
+  statement chain lacks them; also a `get_fundamentals` vendor option
+- `get_insider_activity` (12m net insider change + mspr + trend) and
+  `get_company_peers` — bound to the Fundamentals analyst as tools
+- `get_profile_finnhub` → sector fallback for `--sector-rank`:
+  FMP → Finnhub → yfinance (sector is under `finnhubIndustry`, mapped to
+  `sector`)
+- The three analyst tools call the Finnhub module DIRECTLY (not
+  `route_to_vendor`) because `get_insider_activity` / `get_company_peers`
+  have no category chain; offline tests must mock
+  `tradingagents.dataflows.finnhub.get_basic_financials_finnhub` etc.
+
+**Re-probed endpoint availability** before adding anything new (the free tier
+has changed before); never assume an endpoint works — the SDK's
+`Client` exposes far more than the free key grants.
+
 ## Testing conventions
 
 - conftest autouse fixtures reset the thread-local config, clear the vendor
