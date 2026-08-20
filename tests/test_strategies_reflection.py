@@ -1,9 +1,8 @@
 """Phase 5 unit tests: reflection ledger (offline, tmp JSON)."""
 
-import pytest
-
 from tradingagents.strategies.reflection import (
-    ReflectionLedger, build_reflection_context,
+    ReflectionLedger,
+    build_reflection_context,
 )
 
 

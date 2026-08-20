@@ -16,7 +16,7 @@ from __future__ import annotations
 import threading
 
 
-def fetch_float_shares(ticker: str, timeout: float = 8.0) -> "float | None":
+def fetch_float_shares(ticker: str, timeout: float = 8.0) -> float | None:
     """Best-effort public float in shares; None when every source fails."""
     # 1) FMP company profile (key-gated, fast).
     try:

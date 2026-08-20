@@ -68,6 +68,9 @@ in `batch.py`).
 | `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` |
 | `TRADINGAGENTS_ANTHROPIC_EFFORT` | `anthropic_effort` |
 | `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` |
+| `TRADINGAGENTS_RESULTS_DIR` | `results_dir` |
+| `TRADINGAGENTS_CACHE_DIR` | `data_cache_dir` |
+| `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` |
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)
@@ -119,11 +122,6 @@ B1 catalyst gate. Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `max_book_names=10`, `max_name_weight=0.25`, `risk_audit_enabled` default True.
 
 ## 2. LLM providers
-
-`deep_think_llm` models the Research Manager + Portfolio Manager; `quick` the
-analysts/researchers/debaters/reflection. Client code:
-`llm_clients/factory.py` -> `llm_clients/{openai,anthropic,google,azure,
-bedrock}_client.py` + `model_catalog.py` (CLI model lists).
 
 `deep_think_llm` models the Research Manager + Portfolio Manager; `quick` the
 analysts/researchers/debaters/reflection. Client code:

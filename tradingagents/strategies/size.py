@@ -21,15 +21,17 @@ def kelly_fraction(p_win: float, odds: float = 1.0) -> float:
     return max(0.0, min(f, 1.0))
 
 
-def position_size_kelly(confidence: float, odds: float = 1.0,
-                        fraction: float = 0.25, max_size: float = 1.0) -> float:
+def position_size_kelly(
+    confidence: float, odds: float = 1.0, fraction: float = 0.25, max_size: float = 1.0
+) -> float:
     """Portfolio fraction for a signal with `confidence` win probability."""
     f = kelly_fraction(confidence, odds)
     return max(0.0, min(f * fraction, max_size))
 
 
-def volatility_target_scale(returns: list[float], target_vol: float = 0.15,
-                            decay: float = 0.94) -> float:
+def volatility_target_scale(
+    returns: list[float], target_vol: float = 0.15, decay: float = 0.94
+) -> float:
     """Scale (0..3) so the portfolio targets `target_vol` annualized vol.
 
     Uses EWR volatility; smoothing caps turnover. Returns None-safe 0 on no data.
@@ -48,23 +50,21 @@ def volatility_target_scale(returns: list[float], target_vol: float = 0.15,
     return max(0.0, min(raw, 3.0))
 
 
-def atr(high: list[float], low: list[float], close: list[float],
-        window: int = 14) -> float:
+def atr(high: list[float], low: list[float], close: list[float], window: int = 14) -> float:
     """Average True Range over the window."""
     if not (len(high) == len(low) == len(close)) or len(high) < 2:
         return 0.0
     trs = []
     for i in range(1, len(high)):
-        tr = max(high[i] - low[i],
-                 abs(high[i] - close[i - 1]),
-                 abs(low[i] - close[i - 1]))
+        tr = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
         trs.append(tr)
     sample = trs[-window:]
     return sum(sample) / len(sample) if sample else 0.0
 
 
-def stop_loss_atr(close: list[float], high: list[float], low: list[float],
-                  atr_mult: float = 2.0) -> float:
+def stop_loss_atr(
+    close: list[float], high: list[float], low: list[float], atr_mult: float = 2.0
+) -> float:
     """Stop level = close - atr_mult * ATR; None when insufficient data."""
     a = atr(high, low, close)
     if a <= 0 or not close:
@@ -72,8 +72,7 @@ def stop_loss_atr(close: list[float], high: list[float], low: list[float],
     return close[-1] - atr_mult * a
 
 
-def cvar_budget(returns: list[float], alpha: float = 0.05,
-                budget: float = 0.05) -> float:
+def cvar_budget(returns: list[float], alpha: float = 0.05, budget: float = 0.05) -> float:
     """Max fraction of budget the expected tail loss may consume.
 
     returns = portfolio strategy returns; alpha = tail quantile.
@@ -87,9 +86,14 @@ def cvar_budget(returns: list[float], alpha: float = 0.05,
     return sum(tail) / len(tail)
 
 
-def position_size_with_risk(confidence: float, odds: float, atr: float,
-                            close: float, risk_per_trade: float = 0.01,
-                            cap: float = 1.0) -> float:
+def position_size_with_risk(
+    confidence: float,
+    odds: float,
+    atr: float,
+    close: float,
+    risk_per_trade: float = 0.01,
+    cap: float = 1.0,
+) -> float:
     """Cap Kelly share by risk-per-trade / stop distance.
 
     size = min(kelly_frac_quarter, risk_per_trade / stop_distance_pct)
@@ -101,6 +105,11 @@ def position_size_with_risk(confidence: float, odds: float, atr: float,
 
 
 __all__ = [
-    "kelly_fraction", "position_size_kelly", "volatility_target_scale",
-    "atr", "stop_loss_atr", "cvar_budget", "position_size_with_risk",
+    "kelly_fraction",
+    "position_size_kelly",
+    "volatility_target_scale",
+    "atr",
+    "stop_loss_atr",
+    "cvar_budget",
+    "position_size_with_risk",
 ]

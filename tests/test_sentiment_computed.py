@@ -5,7 +5,9 @@ from unittest import mock
 import pytest
 
 from tradingagents.strategies.sentiment import (
-    score_from_counts, compute_social_scores, computed_sentiment_line,
+    compute_social_scores,
+    computed_sentiment_line,
+    score_from_counts,
 )
 
 
@@ -36,9 +38,7 @@ def test_compute_social_scores_baseline_and_velocity(tmp_path):
 
 
 def test_compute_social_scores_failure_none(tmp_path):
-    with mock.patch(
-        "tradingagents.dataflows.stocktwits.stocktwits_counts", return_value=None
-    ):
+    with mock.patch("tradingagents.dataflows.stocktwits.stocktwits_counts", return_value=None):
         assert compute_social_scores("ZZZ", cache_dir=str(tmp_path)) is None
 
 

@@ -1,3 +1,5 @@
+import contextlib
+
 import requests
 from rich.console import Console
 from rich.panel import Panel
@@ -47,9 +49,7 @@ def display_announcements(console: Console, data: dict) -> None:
     if require_attention:
         # `input` (not `getpass`) so piped/redirected stdin doesn't raise
         # GetPassWarning/EOFError on non-interactive runs.
-        try:
+        with contextlib.suppress(EOFError):
             input("Press Enter to continue...")
-        except EOFError:
-            pass
     else:
         console.print()

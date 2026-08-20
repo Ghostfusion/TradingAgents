@@ -4,33 +4,74 @@ Offline: moomoo ranks and vendor statements are mocked; nothing hits the
 network or OpenD.
 """
 
-import pytest
 from unittest import mock
+
+import pytest
 
 import scripts.value_screener as vs
 
 FUND = "Market Cap: 3.2T\n"
-BS = ("Date,2025-12-31\nCash And Cash Equivalents,300M\nTotal Debt,400M\n"
-      "Total Assets,2.0B\nTotal Current Assets,700M\nTotal Current Liabilities,500M\n"
-      "Total Liabilities,900M\nRetained Earnings,800M\nProperty Plant Equipment,400M")
-INC = ("Date,2025-12-31\nTotal Revenue,1.0B\nOperating Income,150M\n"
-       "Net Income,100M\nInterest Expense,10M\nTax Expense,20M")
+BS = (
+    "Date,2025-12-31\nCash And Cash Equivalents,300M\nTotal Debt,400M\n"
+    "Total Assets,2.0B\nTotal Current Assets,700M\nTotal Current Liabilities,500M\n"
+    "Total Liabilities,900M\nRetained Earnings,800M\nProperty Plant Equipment,400M"
+)
+INC = (
+    "Date,2025-12-31\nTotal Revenue,1.0B\nOperating Income,150M\n"
+    "Net Income,100M\nInterest Expense,10M\nTax Expense,20M"
+)
 
 _LOSERS = [
-    {"symbol": "AAPL", "name": "Apple Inc.", "cur_price": 210.5,
-     "change_ratio": -0.0421, "pe_ttm": 28.1, "market_cap": 3.2e12},
-    {"symbol": "MSFT", "name": "Microsoft Corp.", "cur_price": 95.2,
-     "change_ratio": -0.031, "pe_ttm": 35.0, "market_cap": 7.0e12},
+    {
+        "symbol": "AAPL",
+        "name": "Apple Inc.",
+        "cur_price": 210.5,
+        "change_ratio": -0.0421,
+        "pe_ttm": 28.1,
+        "market_cap": 3.2e12,
+    },
+    {
+        "symbol": "MSFT",
+        "name": "Microsoft Corp.",
+        "cur_price": 95.2,
+        "change_ratio": -0.031,
+        "pe_ttm": 35.0,
+        "market_cap": 7.0e12,
+    },
 ]
 _HOT = _LOSERS + [
-    {"symbol": "NVDA", "name": "NVIDIA Corp.", "cur_price": 120.0,
-     "change_ratio": 0.031, "pe_ttm": 55.0, "market_cap": 3.0e12},   # gainer, not a loser
-    {"symbol": "CHEAP", "name": "Cheap Co", "cur_price": 15.0,
-     "change_ratio": -0.05, "pe_ttm": 10.0, "market_cap": 2.0e9},    # price < 20 -> gated
-    {"symbol": "EYE", "name": "Pricey Inc", "cur_price": 50.0,
-     "change_ratio": -0.03, "pe_ttm": 55.0, "market_cap": 5.0e9},    # PE > 40 -> gated
-    {"symbol": "ETFX", "name": "Vanguard InfoTech ETF", "cur_price": 100.0,
-     "change_ratio": -0.02, "pe_ttm": 20.0, "market_cap": 4.0e10},   # not equity -> gated
+    {
+        "symbol": "NVDA",
+        "name": "NVIDIA Corp.",
+        "cur_price": 120.0,
+        "change_ratio": 0.031,
+        "pe_ttm": 55.0,
+        "market_cap": 3.0e12,
+    },  # gainer, not a loser
+    {
+        "symbol": "CHEAP",
+        "name": "Cheap Co",
+        "cur_price": 15.0,
+        "change_ratio": -0.05,
+        "pe_ttm": 10.0,
+        "market_cap": 2.0e9,
+    },  # price < 20 -> gated
+    {
+        "symbol": "EYE",
+        "name": "Pricey Inc",
+        "cur_price": 50.0,
+        "change_ratio": -0.03,
+        "pe_ttm": 55.0,
+        "market_cap": 5.0e9,
+    },  # PE > 40 -> gated
+    {
+        "symbol": "ETFX",
+        "name": "Vanguard InfoTech ETF",
+        "cur_price": 100.0,
+        "change_ratio": -0.02,
+        "pe_ttm": 20.0,
+        "market_cap": 4.0e10,
+    },  # not equity -> gated
 ]
 
 
@@ -39,7 +80,9 @@ def _closes_csv(ticker):
     price = 200.0 if ticker == "AAPL" else 95.0
     for i in range(140):
         price += 0.1
-        rows.append(f"2026-01-{i%28+1:02d},{price:.2f},{price+3:.2f},{price-3:.2f},{price:.2f},5000000")
+        rows.append(
+            f"2026-01-{i % 28 + 1:02d},{price:.2f},{price + 3:.2f},{price - 3:.2f},{price:.2f},5000000"
+        )
     return "\n".join(rows) + "\n"
 
 
@@ -49,8 +92,9 @@ def fake_route(method, *a, **k):
         return _closes_csv(t)
     if t != "AAPL":
         return "NO_DATA_AVAILABLE: no usable market data"
-    return {"get_fundamentals": FUND, "get_balance_sheet": BS,
-            "get_income_statement": INC}.get(method, "NO_DATA_AVAILABLE")
+    return {"get_fundamentals": FUND, "get_balance_sheet": BS, "get_income_statement": INC}.get(
+        method, "NO_DATA_AVAILABLE"
+    )
 
 
 def fake_losers(sort_dir="losers", count=50, market="US", min_market_cap=0.0):
@@ -65,11 +109,11 @@ def fake_hot(count=50, market="US", min_market_cap=0.0):
 
 @pytest.fixture(autouse=True)
 def _patch_vendors():
-    with mock.patch.object(vs, "route_to_vendor", side_effect=fake_route), \
-         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo",
-                    side_effect=fake_losers), \
-         mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
-                    side_effect=fake_hot):
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=fake_route),
+        mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
+        mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=fake_hot),
+    ):
         yield
 
 
@@ -118,16 +162,22 @@ def test_heat_proxy_master_then_losers_with_gates(capsys):
     vs.main(["-u", "heat-proxy", "--market", "HK", "-n", "50", "-d", "2026-01-02", "-l", "50"])
     out = capsys.readouterr().out
     assert "Apple Inc." in out and "Microsoft Corp." in out  # losers kept
-    assert "NVIDIA" not in out                                # gainer excluded
-    assert "Cheap Co" not in out                             # price < 20 gated
-    assert "Pricey Inc" not in out                           # PE > 40 gated
-    assert "ETF" not in out                                   # non-equity gated
+    assert "NVIDIA" not in out  # gainer excluded
+    assert "Cheap Co" not in out  # price < 20 gated
+    assert "Pricey Inc" not in out  # PE > 40 gated
+    assert "ETF" not in out  # non-equity gated
 
 
 def test_currency_gate_blocks_mixed_ev():
     """Non-USD statement currency must zero out USD-only metrics."""
-    fin = {"currency": "JPY", "market_cap": 3.68e10, "total_assets": 3.0e14,
-           "cash": 6.8e13, "total_debt": 6.2e12, "operating_income": 5.0e11}
+    fin = {
+        "currency": "JPY",
+        "market_cap": 3.68e10,
+        "total_assets": 3.0e14,
+        "cash": 6.8e13,
+        "total_debt": 6.2e12,
+        "operating_income": 5.0e11,
+    }
     row = vs.screen_ticker("JPPHY", fin)
     assert row["ev"] is None
     assert row["ev_ebit"] is None
@@ -137,8 +187,13 @@ def test_currency_gate_blocks_mixed_ev():
 
 
 def test_scale_heuristic_flags_currency_mix():
-    fin = {"market_cap": 3.68e10, "total_assets": 3.0e14,
-           "cash": 6.8e13, "total_debt": 6.2e12, "operating_income": 5.0e11}
+    fin = {
+        "market_cap": 3.68e10,
+        "total_assets": 3.0e14,
+        "cash": 6.8e13,
+        "total_debt": 6.2e12,
+        "operating_income": 5.0e11,
+    }
     assert vs._usd_consistent(fin) is False
     row = vs.screen_ticker("JPPHY", fin)
     assert row["ev"] is None

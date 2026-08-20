@@ -12,8 +12,8 @@ There are **two Python environments** and they are NOT interchangeable:
 
 | Command | Resolves to | pytest? | Use for |
 | --- | --- | --- | --- |
-| `python` (bare) | `C:\Users\vince\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe` | **NO** (no pytest) | nothing in this repo |
-| `py -3.12` | `C:\Users\vince\AppData\Local\Programs\Python\Python312\python.exe` | **YES** | EVERYTHING |
+| `python` (bare) | `%LOCALAPPDATA%\hermes\hermes-agent\venv\Scripts\python.exe` (agent venv) | **NO** (no pytest) | nothing in this repo |
+| `py -3.12` | `%LOCALAPPDATA%\Programs\Python\Python312\python.exe` | **YES** | EVERYTHING |
 
 - If you see `No module named pytest` or `No module named pandas`, you ran the
   wrong interpreter. **Always** use `py -3.12` for runtime, tests, and scripts.
@@ -54,26 +54,30 @@ py -3.12 -m ruff check tradingagents/ ...
    are closed at the end of `propagate()`, in the test teardown
    (`tests/conftest.py` -> `_close_all_ctxs()`), and via a daemon-guarded
    atexit in `dataflows/moomoo.py`.
-5. **OpenD is currently RUNNING** on this machine, logged into a free moomoo
-   account ("remember password"). Live moomoo calls work. The account is
-   moomoo-US (not SG/MY): US equities LV3 free, HK LV1, crypto free; **US
-   options permission-gated** (>$3000 assets); **event contracts gated** to
-   SG/MY (falls back to Polymarket); A-shares/LSE/India unsupported (falls
-   back to yfinance).
-6. **Full test suite takes ~3 minutes.** Don't rerun it unless you changed
-   something. Quick loop: `py -3.12 -m pytest tests/test_<area>.py`.
+5. **OpenD (moomoo gateway)** runs on the dev machine, logged into a free
+   moomoo account ("remember password"). Live moomoo calls work as long as
+   the gateway is up. The account is a US-market account (not SG/MY): US
+   equities LV3 free, HK LV1, crypto free; **US options permission-gated**
+   (>$3000 assets); **event contracts gated** to SG/MY (falls back to
+   Polymarket); A-shares/LSE/India unsupported (falls back to yfinance).
+6. **Full test suite takes ~3-5 minutes** (cache-dependent). Don't rerun it
+   unless you changed something. Quick loop: `py -3.12 -m pytest tests/test_<area>.py`.
 7. **ruff is the linter/formatter**: `py -3.12 -m ruff check` and
    `py -3.12 -m ruff format` (selectors E/W/F/I/B/UP/C4/SIM, line length 100).
-   Reformatting previously-unformatted files is normal. Pre-existing lint
-   errors exist in untouched files (cli/announcements.py, alpha_vantage_*,
-   sec_edgar.py, market_data_validation_tools.py, several tests) — leave them.
+   The whole repo (`tradingagents/`, `scripts/`, `tests/`, `cli/`, root
+   scripts) passes `ruff check` — don't regress it. `main.py` keeps
+   `# noqa: E402` imports on purpose (dotenv must load before config imports).
+   Reformat previously-unformatted files as needed, but keep formatting
+   scoped to the files you touch.
 8. **`.env` holds the user's real API keys** (OpenRouter, Finnhub, FRED,
    Alpaca, FMP...) and is **gitignored**. NEVER print, commit, or paste them.
-   Set `TRADINGAGENTS_*` overrides there, not in code.
+   Set `TRADINGAGENTS_*` overrides there, not in code. `.env.example`
+   mirrors every supported `TRADINGAGENTS_*` key — keep it in sync when
+   adding new config keys.
 
 ## Project structure (current `main`)
 
-Repo root: `D:/Users/vince/PycharmProjects/TradingNew/TradingAgents`
+Repo root: this checkout (clone of the remote below).
 Git: `origin` = `https://github.com/Ghostfusion/TradingAgents.git`, branch `main`.
 
 ```

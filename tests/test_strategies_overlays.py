@@ -1,9 +1,9 @@
 """Overlay wiring unit tests (offline, deterministic)."""
 
-import pytest
-
 from tradingagents.strategies.overlays import (
-    build_strategy_overlays, fold_flow_into_overlay, apply_overlay_to_state,
+    apply_overlay_to_state,
+    build_strategy_overlays,
+    fold_flow_into_overlay,
     record_reflection_outcome,
 )
 
@@ -21,8 +21,7 @@ def test_overlay_too_few_prices_none():
 
 
 def test_overlay_builds_context():
-    ov = build_strategy_overlays({"enable_strategy_overlays": True, "target_vol": 0.15},
-                                 _closes())
+    ov = build_strategy_overlays({"enable_strategy_overlays": True, "target_vol": 0.15}, _closes())
     assert ov is not None
     assert ov["regime"] in ("bull", "bear", "neutral", "high_vol")
     assert 0.0 < ov["position_scale"] <= 1.5
@@ -43,8 +42,9 @@ def test_apply_overlay_none_noop():
 
 def test_record_reflection_guarded(tmp_path):
     cfg_off = {"enable_reflection": False}
-    record_reflection_outcome(cfg_off, str(tmp_path / "l.jsonl"), "market", "AAPL",
-                              "2026-01-02", 0.02)
+    record_reflection_outcome(
+        cfg_off, str(tmp_path / "l.jsonl"), "market", "AAPL", "2026-01-02", 0.02
+    )
     assert not (tmp_path / "l.jsonl").exists()
 
 
@@ -73,5 +73,6 @@ def test_record_reflection_writes(tmp_path):
     record_reflection_outcome(cfg, path, "market", "AAPL", "2026-01-02", 0.02)
     record_reflection_outcome(cfg, path, "market", "MSFT", "2026-01-03", -0.01)
     from tradingagents.strategies.reflection import ReflectionLedger
+
     store = ReflectionLedger(path=path)
     assert store.total("market") == 2

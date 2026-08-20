@@ -19,16 +19,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20,
-                 trials: int = 20) -> dict:
+def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials: int = 20) -> dict:
     """Walk-forward over the series; flag when the best-trial strategy tanks OOS."""
     from tradingagents.strategies.evaluate import (
-        sharpe, deflated_sharpe, walk_forward_splits, pbo_flag,
+        deflated_sharpe,
+        pbo_flag,
+        sharpe,
+        walk_forward_splits,
     )
 
     if len(returns) < train_len + test_len + 1:
-        return {"ok": None, "reason": "too few samples for walk-forward",
-                "oos_best": None}
+        return {"ok": None, "reason": "too few samples for walk-forward", "oos_best": None}
 
     in_sample = []
     out_of_sample = []
@@ -56,8 +57,9 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20,
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--returns", required=True,
-                        help="comma-separated strategy returns (floats)")
+    parser.add_argument(
+        "--returns", required=True, help="comma-separated strategy returns (floats)"
+    )
     parser.add_argument("--train", type=int, default=60)
     parser.add_argument("--test", type=int, default=20)
     args = parser.parse_args(argv)

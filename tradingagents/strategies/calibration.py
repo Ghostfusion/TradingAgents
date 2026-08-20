@@ -12,7 +12,7 @@ from __future__ import annotations
 BUCKETS = ((0.00, 0.50), (0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 1.01))
 
 
-def _bucket_of(p: float) -> "tuple | None":
+def _bucket_of(p: float) -> tuple | None:
     for lo, hi in BUCKETS:
         if lo <= p < hi:
             return (lo, hi)
@@ -68,9 +68,9 @@ def calibration_table_text(table: dict) -> str:
     return "\n".join(lines) if len(lines) > 1 else "no calibration history yet"
 
 
-def record_calibration_entry(ledger_path, analyst: str, ticker: str,
-                             trade_date: str, confidence: float,
-                             won: bool) -> None:
+def record_calibration_entry(
+    ledger_path, analyst: str, ticker: str, trade_date: str, confidence: float, won: bool
+) -> None:
     """Append a confidence-tagged outcome; separate file to keep the ledger clean."""
     import json
     import time
@@ -79,14 +79,21 @@ def record_calibration_entry(ledger_path, analyst: str, ticker: str,
     path = Path(ledger_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
-        "analyst": analyst, "ticker": ticker, "trade_date": trade_date,
-        "confidence": float(confidence), "won": bool(won), "ts": time.time(),
+        "analyst": analyst,
+        "ticker": ticker,
+        "trade_date": trade_date,
+        "confidence": float(confidence),
+        "won": bool(won),
+        "ts": time.time(),
     }
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
 
 
 __all__ = [
-    "BUCKETS", "fit_buckets", "calibrated_confidence",
-    "calibration_table_text", "record_calibration_entry",
+    "BUCKETS",
+    "fit_buckets",
+    "calibrated_confidence",
+    "calibration_table_text",
+    "record_calibration_entry",
 ]

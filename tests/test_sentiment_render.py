@@ -1,7 +1,9 @@
 """Schema render includes deterministic computed-sentiment line."""
 
 from tradingagents.agents.schemas import (
-    SentimentBand, SentimentReport, render_sentiment_report,
+    SentimentBand,
+    SentimentReport,
+    render_sentiment_report,
 )
 
 

@@ -12,12 +12,12 @@ the SEC's ``company_tickers.json`` (cached in-process). Every network failure
 degrades via ``NoMarketDataError`` so the router surfaces "no data" rather than
 crashing.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import urllib.request
-from datetime import datetime
 
 from .errors import NoMarketDataError
 from .symbol_utils import normalize_symbol
@@ -55,9 +55,7 @@ def _json_get(url: str, retries: int = 2):
     import time
 
     for attempt in range(retries + 1):
-        req = urllib.request.Request(
-            url, headers={"User-Agent": _UA, "Accept": "application/json"}
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
                 return json.loads(resp.read())
@@ -75,8 +73,7 @@ def _ticker_map() -> dict[str, str]:
     if _ticker_cik_cache is None:
         data = _json_get(_TICKERS_URL)
         _ticker_cik_cache = {
-            str(row["ticker"]).upper(): str(row["cik_str"])
-            for row in data.values()
+            str(row["ticker"]).upper(): str(row["cik_str"]) for row in data.values()
         }
     return _ticker_cik_cache
 

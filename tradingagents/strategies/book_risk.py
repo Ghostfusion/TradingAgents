@@ -6,7 +6,7 @@ Pure helpers over return series and weights; deterministic and offline.
 from __future__ import annotations
 
 
-def simple_var(returns: list, alpha: float = 0.05) -> "float | None":
+def simple_var(returns: list, alpha: float = 0.05) -> float | None:
     """Historical VaR: alpha-quantile of returns (negative = loss)."""
     vals = sorted([float(r) for r in returns if r is not None])
     if not vals:
@@ -15,7 +15,7 @@ def simple_var(returns: list, alpha: float = 0.05) -> "float | None":
     return vals[k - 1]
 
 
-def cvar(returns: list, alpha: float = 0.05) -> "float | None":
+def cvar(returns: list, alpha: float = 0.05) -> float | None:
     """Historical CVaR: mean of the worst alpha tail (negative = loss)."""
     vals = sorted([float(r) for r in returns if r is not None])
     if not vals:
@@ -36,7 +36,7 @@ def portfolio_returns(weights: dict, returns_by_name: dict) -> list:
     for i in range(n):
         row = 0.0
         ok = True
-        for w, s in zip([weights[k] for k in keys], series):
+        for w, s in zip([weights[k] for k in keys], series, strict=True):
             if i >= len(s):
                 ok = False
                 break
@@ -55,12 +55,11 @@ def stress_loss(weights: dict, shock: float = -0.10) -> float:
     return -float(shock) * sum(max(0.0, float(w)) for w in weights.values())
 
 
-def drawdown_gate(drawdown_pct: "float | None", limit_pct: float = 0.10) -> bool:
+def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     """True = new risk blocked while realized drawdown exceeds the limit."""
     if drawdown_pct is None:
         return False
     return float(drawdown_pct) > float(limit_pct)
 
 
-__all__ = ["simple_var", "cvar", "portfolio_returns", "stress_loss",
-           "drawdown_gate"]
+__all__ = ["simple_var", "cvar", "portfolio_returns", "stress_loss", "drawdown_gate"]

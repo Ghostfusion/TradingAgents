@@ -3,8 +3,11 @@
 import pytest
 
 from tradingagents.strategies.factors import (
-    momentum, high_distance, vol_adjusted_momentum, percentile_rank,
     composite_score,
+    high_distance,
+    momentum,
+    percentile_rank,
+    vol_adjusted_momentum,
 )
 
 

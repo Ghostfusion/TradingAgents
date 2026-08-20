@@ -16,7 +16,7 @@ TIMEOUT = 20
 _MAX_RETRIES = 2
 
 
-def f_key() -> "str | None":
+def f_key() -> str | None:
     """API key from config or environment; None when unset."""
     try:
         from tradingagents.dataflows.config import get_config
@@ -31,7 +31,7 @@ def f_key() -> "str | None":
     return os.environ.get("FMP_API_KEY") or os.environ.get("TRADINGAGENTS_FMP_API_KEY")
 
 
-def fmp_get(path: str, params: "dict | None" = None) -> "dict | list | None":
+def fmp_get(path: str, params: dict | None = None) -> dict | list | None:
     """GET ``BASE/{path}`` with apikey; parsed JSON or None on any failure."""
     import requests
 

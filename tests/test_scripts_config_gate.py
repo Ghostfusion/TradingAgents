@@ -1,7 +1,5 @@
 """G5 unit tests: config-gate verdict (offline deterministic)."""
 
-import pytest
-
 from scripts.evaluate_config_gate import gate_verdict
 
 

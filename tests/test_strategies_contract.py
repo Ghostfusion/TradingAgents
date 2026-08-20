@@ -3,17 +3,24 @@
 import pytest
 
 from tradingagents.strategies.contract import (
-    PositionContract, build_position_contract,
+    build_position_contract,
 )
 from tradingagents.strategies.sentiment import (
-    decayed_weight, weighted_sentiment, surprise_velocity,
+    decayed_weight,
+    surprise_velocity,
+    weighted_sentiment,
 )
 
 
 def _cfg(**kw):
-    base = {"risk_per_trade": 0.01, "max_position_pct": 0.30,
-            "atr_mult": 2.0, "target_vol": 0.15,
-            "position_odds": 1.0, "kelly_fraction": 0.25}
+    base = {
+        "risk_per_trade": 0.01,
+        "max_position_pct": 0.30,
+        "atr_mult": 2.0,
+        "target_vol": 0.15,
+        "position_odds": 1.0,
+        "kelly_fraction": 0.25,
+    }
     base.update(kw)
     return base
 
@@ -39,15 +46,13 @@ def test_contract_respects_caps_and_stop():
 def test_contract_flow_scales_down():
     base = build_position_contract(cfg=_cfg(), closes=_closes())
     flow = {"distribution_score": 0.79}
-    heavy_dist = build_position_contract(cfg=_cfg(), closes=_closes(),
-                                         flow_summary=flow)
+    heavy_dist = build_position_contract(cfg=_cfg(), closes=_closes(), flow_summary=flow)
     assert heavy_dist.size_pct <= base.size_pct
     assert heavy_dist.size_pct == pytest.approx(base.size_pct * 0.21, abs=0.002)
 
 
 def test_contract_agreement_scales():
-    c = build_position_contract(cfg=_cfg(), closes=_closes(),
-                                agreement=0.0)
+    c = build_position_contract(cfg=_cfg(), closes=_closes(), agreement=0.0)
     assert c.size_pct == 0.0
 
 
@@ -58,7 +63,7 @@ def test_decay_weight_halflife():
 
 def test_weighted_sentiment_labels_and_age():
     msgs = [
-        {"label": "bullish", "age_days": 0},   # +1, weight 1
+        {"label": "bullish", "age_days": 0},  # +1, weight 1
         {"label": "bearish", "age_days": 28},  # -1, weight 0.0625
     ]
     w = weighted_sentiment(msgs)
@@ -75,7 +80,7 @@ def test_weighted_sentiment_credibility():
 
 
 def test_surprise_velocity_zscore():
-    history = ([0.10, 0.12, 0.08, 0.11, 0.09, 0.13, 0.07, 0.10, 0.12, 0.08] * 3)
+    history = [0.10, 0.12, 0.08, 0.11, 0.09, 0.13, 0.07, 0.10, 0.12, 0.08] * 3
     uvz = surprise_velocity(0.10, history)  # at baseline -> near zero z
     hot = surprise_velocity(0.90, history)  # big jump -> large positive z
     assert abs(uvz or 0.0) < 3.0

@@ -1,10 +1,16 @@
 """Phase 0 unit tests: cost-aware evaluation metrics (offline)."""
 
-import pytest
-
 from tradingagents.strategies.evaluate import (
-    net_returns, total_return, cagr, volatility, sharpe, deflated_sharpe,
-    max_drawdown, equity_curve, walk_forward_splits, pbo_flag,
+    cagr,
+    deflated_sharpe,
+    equity_curve,
+    max_drawdown,
+    net_returns,
+    pbo_flag,
+    sharpe,
+    total_return,
+    volatility,
+    walk_forward_splits,
 )
 
 
@@ -44,7 +50,7 @@ def test_max_drawdown():
 
 def test_equity_curve_compounds():
     eq = equity_curve([0.01] * 3, start=100)
-    assert abs(eq[-1] - 100 * 1.01 ** 3) < 1e-6
+    assert abs(eq[-1] - 100 * 1.01**3) < 1e-6
 
 
 def test_walk_forward_splits():

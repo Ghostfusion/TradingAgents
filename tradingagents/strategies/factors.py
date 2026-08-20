@@ -14,7 +14,7 @@ different magnitude scales; missing factors are skipped (never fabricated).
 from __future__ import annotations
 
 
-def momentum(closes: list[float], lookback: int = 252, skip: int = 21) -> "float | None":
+def momentum(closes: list[float], lookback: int = 252, skip: int = 21) -> float | None:
     """Cross-sectional momentum (12-1m by default): return over [lookback, skip]."""
     if len(closes) <= lookback + skip:
         return None
@@ -25,7 +25,7 @@ def momentum(closes: list[float], lookback: int = 252, skip: int = 21) -> "float
     return end / start - 1.0
 
 
-def high_distance(closes: list[float], window: int = 252) -> "float | None":
+def high_distance(closes: list[float], window: int = 252) -> float | None:
     """Distance from 52-week high: price / trailing high - 1 (<= 0 for losers)."""
     sample = closes[-window:]
     if not sample:
@@ -36,8 +36,9 @@ def high_distance(closes: list[float], window: int = 252) -> "float | None":
     return sample[-1] / hi - 1.0
 
 
-def vol_adjusted_momentum(closes: list[float], lookback: int = 126,
-                          vol_window: int = 21) -> "float | None":
+def vol_adjusted_momentum(
+    closes: list[float], lookback: int = 126, vol_window: int = 21
+) -> float | None:
     """Momentum divided by realized vol (risk-normalized alpha)."""
     from tradingagents.strategies.regime import realized_vol
 
@@ -69,7 +70,7 @@ def composite_score(factors_by_ticker: dict, weights: dict = None) -> dict:
         names.update(k for k, v in f.items() if v is not None)
     names = sorted(names)
     if weights is None:
-        weights = {n: 1.0 for n in names}
+        weights = dict.fromkeys(names, 1.0)
     scores: dict = {}
     for ticker, factors in factors_by_ticker.items():
         acc = 0.0
@@ -79,14 +80,20 @@ def composite_score(factors_by_ticker: dict, weights: dict = None) -> dict:
             if value is None:
                 continue
             rank = percentile_rank(value, [f.get(name) for f in factors_by_ticker.values()])
-            acc += (weights.get(name, 1.0) * rank if weights.get(name, 1.0) >= 0
-                    else weights.get(name, 1.0) * (1.0 - rank))
+            acc += (
+                weights.get(name, 1.0) * rank
+                if weights.get(name, 1.0) >= 0
+                else weights.get(name, 1.0) * (1.0 - rank)
+            )
             used += 1
         scores[ticker] = acc / used if used else 0.5
     return scores
 
 
 __all__ = [
-    "momentum", "high_distance", "vol_adjusted_momentum", "percentile_rank",
+    "momentum",
+    "high_distance",
+    "vol_adjusted_momentum",
+    "percentile_rank",
     "composite_score",
 ]

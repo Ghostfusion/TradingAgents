@@ -13,15 +13,15 @@ Pure and unit-testable; the graph calls it after the position contract.
 from __future__ import annotations
 
 LIMITS_KEYS = (
-    "max_position_pct",        # per-trade size cap
-    "max_book_position_pct",   # total book cap
+    "max_position_pct",  # per-trade size cap
+    "max_book_position_pct",  # total book cap
     "risk_daily_cvar_budget_pct",  # daily tail-loss budget (% of book)
-    "risk_max_drawdown_pct",   # realized drawdown stop for new risk
-    "sector_cap_limit",        # single-sector cap
+    "risk_max_drawdown_pct",  # realized drawdown stop for new risk
+    "sector_cap_limit",  # single-sector cap
 )
 
 
-def default_limits(cfg: "dict | None" = None) -> dict:
+def default_limits(cfg: dict | None = None) -> dict:
     cfg = cfg or {}
     return {
         "max_position_pct": float(cfg.get("max_position_pct", 0.30)),
@@ -32,13 +32,17 @@ def default_limits(cfg: "dict | None" = None) -> dict:
     }
 
 
-def govern(size_pct: "float | None", cfg: "dict | None" = None, *,
-           book_total_pct: "float | None" = None,
-           cvar_pct: "float | None" = None,
-           drawdown_pct: "float | None" = None,
-           sector_pct: "float | None" = None,
-           sector_cap: "float | None" = None,
-           halted: bool = False) -> dict:
+def govern(
+    size_pct: float | None,
+    cfg: dict | None = None,
+    *,
+    book_total_pct: float | None = None,
+    cvar_pct: float | None = None,
+    drawdown_pct: float | None = None,
+    sector_pct: float | None = None,
+    sector_cap: float | None = None,
+    halted: bool = False,
+) -> dict:
     """Evaluate decision size against limits; PASS/WARN/REJECT + reasons.
 
     size_pct: the computed position fraction (0..1). Use None for limits that
@@ -49,8 +53,7 @@ def govern(size_pct: "float | None", cfg: "dict | None" = None, *,
     touches = []
 
     if halted:
-        return {"verdict": "REJECT", "reasons": ["risk halt active"],
-                "numbers": "halt=on"}
+        return {"verdict": "REJECT", "reasons": ["risk halt active"], "numbers": "halt=on"}
 
     if size_pct is None:
         return {"verdict": "PASS", "reasons": [], "numbers": "size unknown"}
@@ -90,10 +93,13 @@ def govern(size_pct: "float | None", cfg: "dict | None" = None, *,
     return {"verdict": "PASS", "reasons": [], "touches": []}
 
 
-def build_risk_snapshot(verdict: dict, size_pct: "float | None",
-                        stop_pct: "float | None" = None,
-                        cvar_pct: "float | None" = None,
-                        drawdown_pct: "float | None" = None) -> str:
+def build_risk_snapshot(
+    verdict: dict,
+    size_pct: float | None,
+    stop_pct: float | None = None,
+    cvar_pct: float | None = None,
+    drawdown_pct: float | None = None,
+) -> str:
     """Compact numbers-only snapshot for the risk debate (kills prose)."""
     parts = [f"verdict={verdict.get('verdict', '?')}"]
     if size_pct is not None:

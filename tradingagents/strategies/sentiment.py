@@ -1,21 +1,22 @@
 """Phase 6 - alternative-data velocity & analyst consensus.
 
-  - sentiment_velocity(series): rate of change in sentiment (e.g. daily
-    polarity means) over a small window - catching accelerating interest.
-  - mention_spike(series, recent, history): ratio of recent mentions to
-    baseline; flags news/social heat.
-  - consensus_over_seeds(verdicts): majority threshold over N LLM samples
-    (FLAG-trader style diversified reasoning; used when analysts run with
-    multiple seeds).
-  - agree_rate(verdicts) helper: fraction of seeds in the majority bucket.
+- sentiment_velocity(series): rate of change in sentiment (e.g. daily
+  polarity means) over a small window - catching accelerating interest.
+- mention_spike(series, recent, history): ratio of recent mentions to
+  baseline; flags news/social heat.
+- consensus_over_seeds(verdicts): majority threshold over N LLM samples
+  (FLAG-trader style diversified reasoning; used when analysts run with
+  multiple seeds).
+- agree_rate(verdicts) helper: fraction of seeds in the majority bucket.
 """
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 
-def sentiment_velocity(sentiment_series: list, window: int = 5) -> "float | None":
+def sentiment_velocity(sentiment_series: list, window: int = 5) -> float | None:
     """OLS-ish slope of sentiment over the recent window -> /day change."""
     vals = [v for v in sentiment_series if v is not None]
     if len(vals) < 3:
@@ -30,19 +31,22 @@ def sentiment_velocity(sentiment_series: list, window: int = 5) -> "float | None
     den = sum((xi - xm) ** 2 for xi in x)
     if den == 0:
         return None
-    return sum((xi - xm) * (yi - ym) for xi, yi in zip(x, sample)) / den
+    return sum((xi - xm) * (yi - ym) for xi, yi in zip(x, sample, strict=True)) / den
 
 
-def mention_volume(history: list, recent: int = 1) -> "float | None":
+def mention_volume(history: list, recent: int = 1) -> float | None:
     """Recent mentions vs historic per-day baseline (ratio, >=1 hot)."""
     if not history:
         return None
-    base = max(1.0, float(sum(history[:-recent]) / len(history[:-recent])) if recent < len(history) else 1.0)
+    base = max(
+        1.0,
+        float(sum(history[:-recent]) / len(history[:-recent])) if recent < len(history) else 1.0,
+    )
     recent_sum = float(sum(history[-recent:]))
     return recent_sum / base
 
 
-def consensus_overlap(verdicts: list, threshold: float = 0.5) -> "float | None":
+def consensus_overlap(verdicts: list, threshold: float = 0.5) -> float | None:
     """Share of verdicts matching the majority bucket; None when empty."""
     if not verdicts:
         return None
@@ -72,7 +76,7 @@ def blended_score(verdict_map: dict, weights: dict = None) -> float:
     if not names:
         return 0.0
     if weights is None:
-        weights = {n: 1.0 for n in names}
+        weights = dict.fromkeys(names, 1.0)
     total = sum(weights.get(n, 1.0) * verdict_map[n] for n in names)
     weight_sum = sum(weights.get(n, 1.0) for n in names)
     return total / weight_sum if weight_sum else 0.0
@@ -96,7 +100,7 @@ def _score_from_label(label):
     return None
 
 
-def weighted_sentiment(messages: list) -> "float | None":
+def weighted_sentiment(messages: list) -> float | None:
     """Recency- and credibility-weighted mean sentiment in [-1, 1]."""
     total_w = 0.0
     acc = 0.0
@@ -118,8 +122,9 @@ def weighted_sentiment(messages: list) -> "float | None":
     return acc / total_w if total_w > 0 else None
 
 
-def surprise_velocity(current_score: "float | None", history: list,
-                      baseline_len: int = 30) -> "float | None":
+def surprise_velocity(
+    current_score: float | None, history: list, baseline_len: int = 30
+) -> float | None:
     """z-score of current weighted sentiment vs its recent baseline."""
     if current_score is None:
         return None
@@ -129,13 +134,13 @@ def surprise_velocity(current_score: "float | None", history: list,
         return None
     mean = sum(sample) / len(sample)
     var = sum((v - mean) ** 2 for v in sample) / len(sample)
-    std = var ** 0.5
+    std = var**0.5
     if std <= 1e-9:
         return 0.0
     return (current_score - mean) / std
 
 
-def score_from_counts(bullish: int, bearish: int, unlabeled: int = 0) -> "float | None":
+def score_from_counts(bullish: int, bearish: int, unlabeled: int = 0) -> float | None:
     """Signed sentiment score in [-1, 1] from labeled counts; None when empty."""
     labeled = (bullish or 0) + (bearish or 0)
     if labeled <= 0:
@@ -144,7 +149,6 @@ def score_from_counts(bullish: int, bearish: int, unlabeled: int = 0) -> "float 
 
 
 def _baseline_file(cache_dir, ticker) -> str:
-    import os
 
     root = Path(cache_dir or "~/.tradingagents").expanduser()
     root.mkdir(parents=True, exist_ok=True)
@@ -152,8 +156,9 @@ def _baseline_file(cache_dir, ticker) -> str:
     return str(root / f"sentiment_baseline_{safe}.jsonl")
 
 
-def compute_social_scores(ticker: str, cache_dir: "str | None" = None,
-                          limit: int = 30) -> "dict | None":
+def compute_social_scores(
+    ticker: str, cache_dir: str | None = None, limit: int = 30
+) -> dict | None:
     """Deterministic score + surprise velocity from StockTwits counts.
 
     Persists a rolling score baseline per ticker so ``surprise_velocity`` can
@@ -175,10 +180,8 @@ def compute_social_scores(ticker: str, cache_dir: "str | None" = None,
         if Path(path).exists():
             for ln in Path(path).read_text(encoding="utf-8").splitlines():
                 if ln.strip():
-                    try:
+                    with contextlib.suppress(ValueError):
                         history.append(float(ln))
-                    except ValueError:
-                        pass
         velocity = surprise_velocity(score, history[-30:])
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(f"{score}\n")
@@ -206,8 +209,15 @@ def computed_sentiment_line(result: dict) -> str:
 
 
 __all__ = [
-    "sentiment_velocity", "mention_volume", "consensus_overlap",
-    "consensus_verdict", "blended_score", "decayed_weight",
-    "weighted_sentiment", "surprise_velocity", "score_from_counts",
-    "compute_social_scores", "computed_sentiment_line",
+    "sentiment_velocity",
+    "mention_volume",
+    "consensus_overlap",
+    "consensus_verdict",
+    "blended_score",
+    "decayed_weight",
+    "weighted_sentiment",
+    "surprise_velocity",
+    "score_from_counts",
+    "compute_social_scores",
+    "computed_sentiment_line",
 ]

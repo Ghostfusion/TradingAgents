@@ -20,8 +20,9 @@ from statistics import pstdev
 FREQ_PER_DAY = 252.0
 
 
-def realized_vol(close_prices: list[float], window: int = 21,
-                 periods: float = FREQ_PER_DAY) -> float:
+def realized_vol(
+    close_prices: list[float], window: int = 21, periods: float = FREQ_PER_DAY
+) -> float:
     """Annualized realized volatility over the last `window` daily closes."""
     prices = close_prices[-window:]
     if len(prices) < 3:
@@ -91,9 +92,15 @@ def choppiness(close: list[float], window: int = 14) -> float:
     return float(pstdev(sample) or 0.5)
 
 
-def regime_label(vol_pct: float, trend: float, chop: float,
-                 vol_hi: float = 0.75, vol_lo: float = 0.25,
-                 trend_threshold: float = 0.02, chop_threshold: float = 0.30) -> str:
+def regime_label(
+    vol_pct: float,
+    trend: float,
+    chop: float,
+    vol_hi: float = 0.75,
+    vol_lo: float = 0.25,
+    trend_threshold: float = 0.02,
+    chop_threshold: float = 0.30,
+) -> str:
     """Rule-based regime: high-vol | bull | bear | choppy (fallback neutral).
 
     Priority: volatility state first (risk gate), then trend, then choppiness.
@@ -117,8 +124,9 @@ def hmm_regime(close: list[float], n_states: int = 2) -> str:
         rets = rets[:, None]
         if len(rets) < 20 or np.ptp(rets) == 0:
             return "unknown"
-        model = GaussianHMM(n_components=n_states, covariance_type="full",
-                            n_iter=50, random_state=7)
+        model = GaussianHMM(
+            n_components=n_states, covariance_type="full", n_iter=50, random_state=7
+        )
         model.fit(rets)
         state = model.predict(rets)[-1]
         means = model.means_.reshape(-1)
@@ -129,6 +137,11 @@ def hmm_regime(close: list[float], n_states: int = 2) -> str:
 
 
 __all__ = [
-    "realized_vol", "vol_percentile", "trend_strength", "choppiness",
-    "regime_label", "hmm_regime", "make_vol_series_of_closes",
+    "realized_vol",
+    "vol_percentile",
+    "trend_strength",
+    "choppiness",
+    "regime_label",
+    "hmm_regime",
+    "make_vol_series_of_closes",
 ]

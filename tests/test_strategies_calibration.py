@@ -3,10 +3,14 @@
 import pytest
 
 from tradingagents.strategies.calibration import (
-    fit_buckets, calibrated_confidence, calibration_table_text,
+    calibrated_confidence,
+    calibration_table_text,
+    fit_buckets,
 )
 from tradingagents.strategies.consensus import (
-    rating_to_number, agreement_score, consensus_from_score,
+    agreement_score,
+    consensus_from_score,
+    rating_to_number,
 )
 
 
@@ -29,8 +33,7 @@ def test_calibrated_identity_below_min():
 
 
 def test_calibrated_uses_bucket():
-    t = fit_buckets([{"confidence": 0.65, "won": True},
-                     {"confidence": 0.65, "won": False}] * 5)
+    t = fit_buckets([{"confidence": 0.65, "won": True}, {"confidence": 0.65, "won": False}] * 5)
     p = calibrated_confidence(0.65, t, min_n=5)
     assert p < 0.65  # realized 0.5 drags the declared 0.65 toward it
 

@@ -2,14 +2,22 @@
 
 import pytest
 
-from tradingagents.strategies.portfolio import (
-    value_ratio_weights, capped_weights, sector_cap, adjust_for_caps,
-    min_names_ok, summary,
-)
-from tradingagents.strategies.exits import (
-    stop_to_breakeven, target_level, net_of_cost, rebalance_due, exit_check,
-)
 from tradingagents.strategies.debate_context import build_computed_context
+from tradingagents.strategies.exits import (
+    exit_check,
+    net_of_cost,
+    rebalance_due,
+    stop_to_breakeven,
+    target_level,
+)
+from tradingagents.strategies.portfolio import (
+    adjust_for_caps,
+    capped_weights,
+    min_names_ok,
+    sector_cap,
+    summary,
+    value_ratio_weights,
+)
 
 
 def test_value_ratio_weights_proportional():
@@ -59,8 +67,11 @@ def test_exits():
 
 def test_build_computed_context():
     ctx = build_computed_context(
-        nebit=1.2e9, ev_nebit=12.5, pe_hist_pct=0.35,
-        trap={"level": "LOW", "evidence": []}, margin=0.18,
+        nebit=1.2e9,
+        ev_nebit=12.5,
+        pe_hist_pct=0.35,
+        trap={"level": "LOW", "evidence": []},
+        margin=0.18,
     )
     assert "Computed context" in ctx
     assert "trap_risk=LOW" in ctx

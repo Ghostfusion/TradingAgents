@@ -1,8 +1,16 @@
 """Real test file — flat, small, written via write tool."""
+
 import pytest
+
 from tradingagents.dataflows.quantitative_scores import (
-    beneish_m_score, altman_z_score, piotroski_f_score,
-    enterprise_value, earnings_yield, acquirers_multiple)
+    acquirers_multiple,
+    altman_z_score,
+    beneish_m_score,
+    earnings_yield,
+    enterprise_value,
+    piotroski_f_score,
+)
+
 
 @pytest.fixture
 def fin():
@@ -31,20 +39,24 @@ def fin():
         "operating_income": 90.0,
     }
 
+
 def test_beneish(fin):
     m = beneish_m_score(fin)
     assert m is not None
     assert -6.0 < m < -1.0
+
 
 def test_altman(fin):
     z = altman_z_score(fin)
     assert z is not None
     assert 0.5 < z < 5.0
 
+
 def test_piotroski(fin):
     f = piotroski_f_score(fin)
     assert f is not None
     assert 0 <= f <= 9
+
 
 def test_value(fin):
     ev = enterprise_value(fin)

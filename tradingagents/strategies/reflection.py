@@ -22,18 +22,20 @@ from pathlib import Path
 _HALF_LIFE_S = 60 * 60 * 24 * 30.0  # one month
 
 
-class ReflectionLedger(object):
+class ReflectionLedger:
     """JSON-lines backed analyst performance ledger."""
 
-    def __init__(self, path: "str | None" = None):
+    def __init__(self, path: str | None = None):
         self.path = Path(path) if path else None
         self.entries: list = []
         self.scores: dict = {}
         if self.path and self.path.exists():
             try:
-                self.entries = [json.loads(ln) for ln in
-                                self.path.read_text(encoding="utf-8").splitlines()
-                                if ln.strip()]
+                self.entries = [
+                    json.loads(ln)
+                    for ln in self.path.read_text(encoding="utf-8").splitlines()
+                    if ln.strip()
+                ]
             except Exception:
                 self.entries = []
         self._recompute_scores()
@@ -52,11 +54,13 @@ class ReflectionLedger(object):
                 total + weight,
             ]
 
-    def record_outcome(self, analyst: str, ticker: str, trade_date: str,
-                       delta_r: float) -> None:
+    def record_outcome(self, analyst: str, ticker: str, trade_date: str, delta_r: float) -> None:
         entry = {
-            "analyst": analyst, "ticker": ticker, "trade_date": trade_date,
-            "delta_r": round(float(delta_r), 6), "ts": time.time(),
+            "analyst": analyst,
+            "ticker": ticker,
+            "trade_date": trade_date,
+            "delta_r": round(float(delta_r), 6),
+            "ts": time.time(),
         }
         self.entries.append(entry)
         if self.path:
@@ -64,13 +68,14 @@ class ReflectionLedger(object):
                 fh.write(json.dumps(entry) + "\n")
         self._recompute_scores()
 
-    def score(self, analyst: str) -> "float | None":
+    def score(self, analyst: str) -> float | None:
         won, total = self.scores.get(analyst, [0.0, 0.0])
         return won / total if total > 0 else None
 
     def hits(self, analyst: str) -> int:
-        return sum(1 for e in self.entries
-                   if e.get("analyst") == analyst and e.get("delta_r", 0.0) > 0)
+        return sum(
+            1 for e in self.entries if e.get("analyst") == analyst and e.get("delta_r", 0.0) > 0
+        )
 
     def total(self, analyst: str) -> int:
         return sum(1 for e in self.entries if e.get("analyst") == analyst)
@@ -81,8 +86,10 @@ class ReflectionLedger(object):
         s = self.score(analyst)
         if s is not None and s >= baseline:
             return "verify winners: was the call thesis repeatable (avoid edge cases)?"
-        return ("critique: the strongest prior call failed to realize - "
-                "re-check timing and data source before trusting this signal.")
+        return (
+            "critique: the strongest prior call failed to realize - "
+            "re-check timing and data source before trusting this signal."
+        )
 
     def recent_tickers(self, limit: int = 10) -> list:
         out: list = []
@@ -105,8 +112,10 @@ def build_reflection_context(store: ReflectionLedger, analysts: list) -> str:
     for a in analysts:
         s = store.score(a)
         score_str = "n/a" if s is None else f"{s:.2f}"
-        lines.append(f"- {a}: score={score_str} ({store.hits(a)}/{store.total(a)}), "
-                     f"hint: {store.reflection_hint(a)}")
+        lines.append(
+            f"- {a}: score={score_str} ({store.hits(a)}/{store.total(a)}), "
+            f"hint: {store.reflection_hint(a)}"
+        )
     return "\n".join(lines) if lines else "(no reflection history)"
 
 

@@ -1,9 +1,11 @@
 """Phase 1 unit tests: regime features + rule labels (offline, no hmm)."""
 
-import pytest
-
 from tradingagents.strategies.regime import (
-    regime_label, trend_strength, choppiness, realized_vol, vol_percentile,
+    choppiness,
+    realized_vol,
+    regime_label,
+    trend_strength,
+    vol_percentile,
 )
 
 

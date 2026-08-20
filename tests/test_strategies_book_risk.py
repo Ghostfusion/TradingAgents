@@ -2,10 +2,14 @@
 
 import pytest
 
-from tradingagents.strategies.book_risk import (
-    simple_var, cvar, portfolio_returns, stress_loss, drawdown_gate,
-)
 from scripts.risk_report import audit_summary
+from tradingagents.strategies.book_risk import (
+    cvar,
+    drawdown_gate,
+    portfolio_returns,
+    simple_var,
+    stress_loss,
+)
 
 
 def test_var_and_cvar_negative_tails():

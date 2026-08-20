@@ -3,8 +3,11 @@
 import pytest
 
 from tradingagents.strategies.sentiment import (
-    sentiment_velocity, mention_volume, consensus_overlap, consensus_verdict,
     blended_score,
+    consensus_overlap,
+    consensus_verdict,
+    mention_volume,
+    sentiment_velocity,
 )
 
 

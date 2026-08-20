@@ -1,9 +1,9 @@
 """R0 unit tests: RiskGovernor gate."""
 
-import pytest
-
 from tradingagents.strategies.risk_governor import (
-    default_limits, govern, build_risk_snapshot,
+    build_risk_snapshot,
+    default_limits,
+    govern,
 )
 
 
@@ -19,8 +19,7 @@ def test_reject_over_size_cap():
 
 
 def test_reject_on_multiple_touches():
-    v = govern(0.28, {"max_position_pct": 0.30, "risk_max_drawdown_pct": 0.10},
-               drawdown_pct=0.22)
+    v = govern(0.28, {"max_position_pct": 0.30, "risk_max_drawdown_pct": 0.10}, drawdown_pct=0.22)
     assert v["verdict"] == "REJECT"
 
 
@@ -51,12 +50,16 @@ def test_book_cap():
 
 
 def test_snapshot_is_compact():
-    snap = build_risk_snapshot({"verdict": "WARN", "reasons": ["size near cap"]},
-                               size_pct=0.28, stop_pct=0.02, cvar_pct=0.04)
+    snap = build_risk_snapshot(
+        {"verdict": "WARN", "reasons": ["size near cap"]},
+        size_pct=0.28,
+        stop_pct=0.02,
+        cvar_pct=0.04,
+    )
     assert snap.startswith("risk snapshot:")
     assert "size=28.0%" in snap
 
 
 def test_default_limits():
-    l = default_limits({"max_position_pct": 0.5})
-    assert l["max_position_pct"] == 0.5
+    limits = default_limits({"max_position_pct": 0.5})
+    assert limits["max_position_pct"] == 0.5

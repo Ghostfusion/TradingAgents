@@ -14,7 +14,7 @@ calendar and catalyst data; this module converts them into sizing inputs.
 from __future__ import annotations
 
 
-def surprise_score(actual: "float | None", estimate: "float | None") -> "float | None":
+def surprise_score(actual: float | None, estimate: float | None) -> float | None:
     """Standardized earnings surprise; None when unquantifiable."""
     if actual is None or estimate is None:
         return None
@@ -23,7 +23,7 @@ def surprise_score(actual: "float | None", estimate: "float | None") -> "float |
     return (actual - estimate) / abs(estimate)
 
 
-def drift_side(surprise, momentum: "float | None" = None) -> str:
+def drift_side(surprise, momentum: float | None = None) -> str:
     """PEAD side: 'beat' | 'miss' | 'flat'."""
     if surprise is None or abs(surprise) < 1e-9:
         return "flat"
@@ -34,8 +34,7 @@ def drift_side(surprise, momentum: "float | None" = None) -> str:
     return "miss"
 
 
-def position_mult_by_side(side: str, catalyst: float = 1.0,
-                          cap: float = 1.5) -> float:
+def position_mult_by_side(side: str, catalyst: float = 1.0, cap: float = 1.5) -> float:
     """Position scale factor by event side (0 stays flat for 'flat')."""
     if side == "flat":
         return 0.0
@@ -44,15 +43,14 @@ def position_mult_by_side(side: str, catalyst: float = 1.0,
     return min(mult * event_scale, cap)
 
 
-def expected_drift_after(day0 : float, day_n: float) -> float:
+def expected_drift_after(day0: float, day_n: float) -> float:
     """Post-event drift return observed over the holding window."""
     if day0 <= 0:
         return 0.0
     return day_n / day0 - 1.0
 
 
-def catalyst_risk_penalty(expected_move: "float | None",
-                          baseline_move: float = 0.015) -> float:
+def catalyst_risk_penalty(expected_move: float | None, baseline_move: float = 0.015) -> float:
     """Risk multiplier (<=1) from announcement-implied move vs baseline."""
     if expected_move is None or expected_move <= 0:
         return 0.5  # unknown expiry: halve the event position
@@ -63,6 +61,9 @@ def catalyst_risk_penalty(expected_move: "float | None",
 
 
 __all__ = [
-    "surprise_score", "drift_side", "position_mult_by_side",
-    "expected_drift_after", "catalyst_risk_penalty",
+    "surprise_score",
+    "drift_side",
+    "position_mult_by_side",
+    "expected_drift_after",
+    "catalyst_risk_penalty",
 ]

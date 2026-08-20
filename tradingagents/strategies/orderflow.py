@@ -73,8 +73,7 @@ def divergence(direction: str, inst_net: float) -> str:
     return "neutral_flow"
 
 
-def exhaustion(weekly_nets: list, current: float,
-               lookback: int = 3, scale: float = 0.5) -> str:
+def exhaustion(weekly_nets: list, current: float, lookback: int = 3, scale: float = 0.5) -> str:
     """'exhaustion_candidate' when current outflow is ~<= scale * prior avg."""
     prior = [abs(_num(x)) for x in weekly_nets[-lookback:]] if weekly_nets else []
     if not prior:
@@ -98,9 +97,9 @@ def alignment(nets: dict) -> str:
     return "mixed"
 
 
-def summarize(buckets: dict, direction: str = "flat",
-              weekly_nets: "list | None" = None,
-              thresholds: dict = None) -> dict:
+def summarize(
+    buckets: dict, direction: str = "flat", weekly_nets: list | None = None, thresholds: dict = None
+) -> dict:
     """Structured summary + one-line text from the raw bucket dict."""
     th = thresholds or {}
     nets = tier_nets(buckets)
@@ -131,7 +130,7 @@ def summarize(buckets: dict, direction: str = "flat",
     }
 
 
-def fetch_flow(ticker: str) -> "dict | None":
+def fetch_flow(ticker: str) -> dict | None:
     """Live moomoo capital-flow buckets for a ticker; None when unavailable.
 
     Returns ``{"buckets": {...}, "weekly_nets": [...]}`` or None on failure.
@@ -145,11 +144,19 @@ def fetch_flow(ticker: str) -> "dict | None":
         if ret != 0 or dist is None or dist.empty:
             return None
         row = dist.iloc[0]
-        buckets = {k: row.get(k) for k in
-                   ("capital_in_super", "capital_out_super",
-                    "capital_in_big", "capital_out_big",
-                    "capital_in_mid", "capital_out_mid",
-                    "capital_in_small", "capital_out_small")}
+        buckets = {
+            k: row.get(k)
+            for k in (
+                "capital_in_super",
+                "capital_out_super",
+                "capital_in_big",
+                "capital_out_big",
+                "capital_in_mid",
+                "capital_out_mid",
+                "capital_in_small",
+                "capital_out_small",
+            )
+        }
         weekly = []
         ret2, flow = ctx.get_capital_flow(code, period_type="WEEK")
         if ret2 == 0 and flow is not None and not flow.empty:
@@ -161,7 +168,14 @@ def fetch_flow(ticker: str) -> "dict | None":
 
 
 __all__ = [
-    "tier_nets", "institutional_net", "retail_net", "tier_outflow_score",
-    "distribution_score", "divergence", "exhaustion", "alignment",
-    "summarize", "fetch_flow",
+    "tier_nets",
+    "institutional_net",
+    "retail_net",
+    "tier_outflow_score",
+    "distribution_score",
+    "divergence",
+    "exhaustion",
+    "alignment",
+    "summarize",
+    "fetch_flow",
 ]

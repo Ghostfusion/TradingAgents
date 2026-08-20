@@ -12,11 +12,12 @@ these under try/except so a failure is a silent no-op (config off by default).
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
 
 
-def build_strategy_overlays(config: "Mapping", closes: list) -> "dict | None":
+def build_strategy_overlays(config: Mapping, closes: list) -> dict | None:
     """Compute regime + scale + momentum context from closing prices.
 
     Returns None when overlays are disabled or data is insufficient, so the
@@ -26,15 +27,16 @@ def build_strategy_overlays(config: "Mapping", closes: list) -> "dict | None":
         return None
     if not closes or len(closes) < 60:
         return None
-    from .regime import regime_label, trend_strength, make_vol_series_of_closes
+    from .factors import high_distance, momentum
+    from .regime import regime_label, trend_strength
     from .size import volatility_target_scale
-    from .factors import momentum, high_distance
 
     closes_f = [float(c) for c in closes]
     logrets = []
     for i in range(1, len(closes_f)):
         if closes_f[i - 1] > 0 and closes_f[i] > 0:
             import math
+
             logrets.append(math.log(closes_f[i] / closes_f[i - 1]))
     vol_pct = 0.5
     if len(logrets) >= 10:
@@ -46,8 +48,11 @@ def build_strategy_overlays(config: "Mapping", closes: list) -> "dict | None":
         for r in logrets[-252:]:
             recent2 += r * r
         vol_all = (recent2 / len(logrets[-252:])) ** 0.5 if len(logrets) >= 252 else 0.0
-        vol_pct = 0.9 if (vol_now and vol_all and vol_now > 1.5 * vol_all) else \
-                  (0.1 if vol_all > 0 and vol_now < 0.5 * vol_all else 0.5)
+        vol_pct = (
+            0.9
+            if (vol_now and vol_all and vol_now > 1.5 * vol_all)
+            else (0.1 if vol_all > 0 and vol_now < 0.5 * vol_all else 0.5)
+        )
     trend = trend_strength(closes_f, sma_window=min(200, len(closes_f) // 2))
     label = regime_label(vol_pct, trend, 0.4)
     scale = volatility_target_scale(logrets, target_vol=config.get("target_vol", 0.15))
@@ -64,14 +69,11 @@ def build_strategy_overlays(config: "Mapping", closes: list) -> "dict | None":
         "position_scale": scale,
         "momentum60": round(mom, 4) if mom is not None else None,
         "high_distance": round(dist, 4) if dist is not None else None,
-        "context": (
-            f"regime={label}; position_scale={scale}x; " + "; ".join(notes)
-        ),
+        "context": (f"regime={label}; position_scale={scale}x; " + "; ".join(notes)),
     }
 
 
-def fold_flow_into_overlay(overlay: dict, flow: "dict | None",
-                            threshold: float = 0.7) -> dict:
+def fold_flow_into_overlay(overlay: dict, flow: dict | None, threshold: float = 0.7) -> dict:
     """Fold order-flow signals into a strategy overlay (L3).
 
     ``flow`` is the summary dict from ``orderflow.summarize``. The overlay's
@@ -96,7 +98,7 @@ def fold_flow_into_overlay(overlay: dict, flow: "dict | None",
     return updated
 
 
-def apply_overlay_to_state(state: dict, overlay: "dict | None") -> dict:
+def apply_overlay_to_state(state: dict, overlay: dict | None) -> dict:
     """Attach overlay to graph state (copy, never mutate caller's object)."""
     if overlay is None:
         return state
@@ -105,8 +107,9 @@ def apply_overlay_to_state(state: dict, overlay: "dict | None") -> dict:
     return updated
 
 
-def record_reflection_outcome(config, ledger_path, analyst: str, ticker: str,
-                              trade_date: str, alpha_return: "float | None") -> None:
+def record_reflection_outcome(
+    config, ledger_path, analyst: str, ticker: str, trade_date: str, alpha_return: float | None
+) -> None:
     """Write a realized outcome to the reflection ledger; guarded + silent."""
     if not config.get("enable_reflection"):
         return
@@ -114,6 +117,7 @@ def record_reflection_outcome(config, ledger_path, analyst: str, ticker: str,
         return
     try:
         from .reflection import ReflectionLedger
+
         store = ReflectionLedger(path=ledger_path)
         store.record_outcome(analyst, ticker, trade_date, float(alpha_return))
     except Exception as exc:  # noqa: BLE001
@@ -121,6 +125,8 @@ def record_reflection_outcome(config, ledger_path, analyst: str, ticker: str,
 
 
 __all__ = [
-    "build_strategy_overlays", "fold_flow_into_overlay",
-    "apply_overlay_to_state", "record_reflection_outcome",
+    "build_strategy_overlays",
+    "fold_flow_into_overlay",
+    "apply_overlay_to_state",
+    "record_reflection_outcome",
 ]

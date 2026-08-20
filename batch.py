@@ -18,6 +18,13 @@ import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime
+from pathlib import Path
+
+from tradingagents.dataflows.symbol_utils import crypto_base
+from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 #: Hard parallel-work cap. Moomoo's OpenD gateway allows at most 128 open
 #: connections; each concurrent batch worker opens its own thread-local
@@ -38,15 +45,6 @@ def effective_workers(requested: int) -> int:
     except ValueError:
         pass
     return min(max(1, int(requested)), cap)
-
-
-from datetime import date, datetime
-from pathlib import Path
-
-from tradingagents.dataflows.symbol_utils import crypto_base
-from tradingagents.dataflows.utils import safe_ticker_component
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 # All four analyst teams, in the CLI's execution order. This mirrors the
 # interactive checkbox's "select all" so batch runs match the CLI default.

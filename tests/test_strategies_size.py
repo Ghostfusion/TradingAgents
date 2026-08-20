@@ -1,10 +1,13 @@
 """Phase 2 unit tests: Kelly sizing, vol targeting, ATR stops, CVaR budget."""
 
-import pytest
-
 from tradingagents.strategies.size import (
-    kelly_fraction, position_size_kelly, volatility_target_scale, atr,
-    stop_loss_atr, cvar_budget, position_size_with_risk,
+    atr,
+    cvar_budget,
+    kelly_fraction,
+    position_size_kelly,
+    position_size_with_risk,
+    stop_loss_atr,
+    volatility_target_scale,
 )
 
 
@@ -46,6 +49,5 @@ def test_cvar_negative_tail():
 
 
 def test_risk_cap_respected():
-    size = position_size_with_risk(0.7, 1.0, atr=2.0, close=100.0,
-                                   risk_per_trade=0.01)
+    size = position_size_with_risk(0.7, 1.0, atr=2.0, close=100.0, risk_per_trade=0.01)
     assert 0.0 < size <= 0.10  # quarter-Kelly (0.1) is the binding cap

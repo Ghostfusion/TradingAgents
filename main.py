@@ -1,8 +1,8 @@
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: I001 - must load .env before config imports
 load_dotenv()
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.default_config import DEFAULT_CONFIG  # noqa: E402 - after load_dotenv
+from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: E402
 
 # DEFAULT_CONFIG already applies TRADINGAGENTS_* env-var overrides
 # (llm_provider, deep_think_llm, quick_think_llm, backend_url, etc.),

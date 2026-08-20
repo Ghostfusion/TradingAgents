@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ def main(argv=None) -> int:
     if path is None:
         try:
             from tradingagents.default_config import DEFAULT_CONFIG as cfg
+
             base = Path(cfg.get("data_cache_dir", "~/.tradingagents")).expanduser()
             path = str(base / "risk_audit.jsonl")
         except Exception:
@@ -40,10 +42,8 @@ def main(argv=None) -> int:
     if p.exists():
         for ln in p.read_text(encoding="utf-8").splitlines():
             if ln.strip():
-                try:
+                with contextlib.suppress(Exception):
                     entries.append(json.loads(ln))
-                except Exception:
-                    pass
     summary = audit_summary(entries)
     print(f"audit: {path}")
     print(f"entries: {summary['total']}")

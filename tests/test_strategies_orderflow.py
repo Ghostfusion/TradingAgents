@@ -3,8 +3,15 @@
 import pytest
 
 from tradingagents.strategies.orderflow import (
-    tier_nets, institutional_net, retail_net, tier_outflow_score,
-    distribution_score, divergence, exhaustion, alignment, summarize,
+    alignment,
+    distribution_score,
+    divergence,
+    exhaustion,
+    institutional_net,
+    retail_net,
+    summarize,
+    tier_nets,
+    tier_outflow_score,
 )
 
 # Exact values pulled from moomoo live distribution for UNH (2026-08-17).
@@ -61,8 +68,7 @@ def test_exhaustion():
 
 
 def test_summarize_flags_distribution():
-    sm = summarize(UNH_BUCKETS, direction="flat",
-                   weekly_nets=[-1e6, -8e5, -9e5])
+    sm = summarize(UNH_BUCKETS, direction="flat", weekly_nets=[-1e6, -8e5, -9e5])
     assert sm["flag"] == "distribution"
     assert "FLOW_WARNING" in sm["text"]
     assert sm["distribution_score"] >= 0.7

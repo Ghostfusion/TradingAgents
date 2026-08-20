@@ -51,7 +51,8 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         logger.warning(
             "%s: provider does not support with_structured_output (%s); "
             "falling back to free-text generation",
-            agent_name, exc,
+            agent_name,
+            exc,
         )
         return None
 
@@ -62,7 +63,7 @@ def invoke_structured_or_freetext(
     prompt: Any,
     render: Callable[[T], str],
     agent_name: str,
-    result_hook: "Callable[[Any], None] | None" = None,
+    result_hook: Callable[[Any], None] | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -85,7 +86,8 @@ def invoke_structured_or_freetext(
         except Exception as exc:
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
-                agent_name, exc,
+                agent_name,
+                exc,
             )
 
     response = plain_llm.invoke(prompt)

@@ -3,8 +3,11 @@
 import pytest
 
 from tradingagents.strategies.normalized import (
-    median_norm_ebit, percentile_hist, accruals_ratio, trap_verdict,
+    accruals_ratio,
     margin_of_safety,
+    median_norm_ebit,
+    percentile_hist,
+    trap_verdict,
 )
 
 
@@ -37,14 +40,12 @@ def test_accruals_ratio():
 
 
 def test_trap_verdict_low():
-    v = trap_verdict(f_score=8, m_score=-3.0, z_score=4.0,
-                     mom12=0.2, accrual=0.01)
+    v = trap_verdict(f_score=8, m_score=-3.0, z_score=4.0, mom12=0.2, accrual=0.01)
     assert v["level"] == "LOW"
 
 
 def test_trap_verdict_high_on_multiple_triggers():
-    v = trap_verdict(f_score=2, m_score=-0.5, z_score=1.2,
-                     mom12=-0.3, accrual=0.10)
+    v = trap_verdict(f_score=2, m_score=-0.5, z_score=1.2, mom12=-0.3, accrual=0.10)
     assert v["level"] == "HIGH"
     assert len(v["evidence"]) >= 2
 

@@ -26,7 +26,7 @@ _TIMEOUT = 20
 _MAX_RETRIES = 2
 
 
-def alpaca_credentials() -> "tuple[str | None, str | None]":
+def alpaca_credentials() -> tuple[str | None, str | None]:
     """(API key id, secret) from config/.env; (None, None) if unset."""
     try:
         from tradingagents.dataflows.config import get_config
@@ -65,8 +65,7 @@ def _sleep_from_headers(resp, fallback: float) -> None:
     time.sleep(min(max(wait, 0.0), 30.0))
 
 
-def alpaca_get(path: str, params: "dict | None" = None,
-              base: str = DATA_BASE) -> "dict | list | None":
+def alpaca_get(path: str, params: dict | None = None, base: str = DATA_BASE) -> dict | list | None:
     """GET ``base/{path}`` signed, paced; parsed JSON or None on any failure."""
     import requests
 

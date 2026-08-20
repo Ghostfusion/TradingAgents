@@ -2,14 +2,13 @@
 condition derives from VendorError, so the router catches base types and any
 vendor slots in without new handling.
 """
-import copy
+
 import unittest
 from unittest import mock
 
 import pytest
 
 import tradingagents.dataflows.config as config_module
-import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
@@ -46,6 +45,7 @@ class HierarchyTests(unittest.TestCase):
         from tradingagents.dataflows.symbol_utils import (
             NoMarketDataError as ReExported,
         )
+
         self.assertIs(ReExported, NoMarketDataError)
 
 
@@ -93,11 +93,14 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
 
-        with mock.patch.dict(
-            interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _unconfigured}},
-            clear=False,
-        ), self.assertRaises(AlphaVantageNotConfiguredError):
+        with (
+            mock.patch.dict(
+                interface.VENDOR_METHODS,
+                {"get_stock_data": {"alpha_vantage": _unconfigured}},
+                clear=False,
+            ),
+            self.assertRaises(AlphaVantageNotConfiguredError),
+        ):
             interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
 
 

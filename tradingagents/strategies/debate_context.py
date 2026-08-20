@@ -8,12 +8,16 @@ can adopt - so the LLM argues *from numbers*, not around them.
 from __future__ import annotations
 
 
-def build_computed_context(cfg: dict = None, *, nebit: "float | None" = None,
-                           ev_nebit: "float | None" = None,
-                           pe_hist_pct: "float | None" = None,
-                           trap: "dict | None" = None,
-                           margin: "float | None" = None,
-                           extra: "list | None" = None) -> str:
+def build_computed_context(
+    cfg: dict = None,
+    *,
+    nebit: float | None = None,
+    ev_nebit: float | None = None,
+    pe_hist_pct: float | None = None,
+    trap: dict | None = None,
+    margin: float | None = None,
+    extra: list | None = None,
+) -> str:
     """Render computed value inputs into a prompt snippet; empty when none."""
     cfg = cfg or {}
     parts = []
@@ -29,7 +33,7 @@ def build_computed_context(cfg: dict = None, *, nebit: "float | None" = None,
         parts.append(f"trap_risk={trap.get('level', 'n/a')}")
         if trap.get("evidence"):
             parts.append("evidence=" + "; ".join(trap["evidence"]))
-    for e in (extra or []):
+    for e in extra or []:
         if e:
             parts.append(str(e))
     if not parts:

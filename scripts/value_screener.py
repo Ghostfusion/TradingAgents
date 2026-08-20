@@ -40,12 +40,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tradingagents.dataflows.interface import route_to_vendor  # noqa: E402
 from tradingagents.dataflows.quantitative_scores import (  # noqa: E402
-    beneish_m_score,
-    altman_z_score,
-    piotroski_f_score,
-    enterprise_value,
-    earnings_yield,
     acquirers_multiple,
+    altman_z_score,
+    beneish_m_score,
+    earnings_yield,
+    enterprise_value,
+    piotroski_f_score,
 )
 
 logging.basicConfig(level=logging.WARNING)
@@ -111,15 +111,15 @@ def _match_row(rows: dict, canonical: str):
     return None
 
 
-def _first_number(text: str) -> "float | None":
+def _first_number(text: str) -> float | None:
     """Parse the first number from a formatted value like '$1.23B' or '1,234'."""
     if text is None:
         return None
     text = str(text).strip()
     if not text:
         return None
-    sign = -1.0 if text.startswith('-') else 1.0
-    text = text.lstrip('-+')
+    sign = -1.0 if text.startswith("-") else 1.0
+    text = text.lstrip("-+")
     multiplier = 1.0
     for suffix, mult in (("t", 1e12), ("b", 1e9), ("m", 1e6), ("k", 1e3)):
         if text.lower().endswith(suffix):
@@ -329,10 +329,8 @@ def _usd_consistent(fin: dict) -> bool:
         return False
     mc = fin.get("market_cap")
     ta = fin.get("total_assets")
-    if mc and ta and ta / mc > 1000:
-        # Only a currency mix produces assets >1000x the market cap.
-        return False
-    return True
+    # Only a currency mix produces assets >1000x the market cap.
+    return not (mc and ta and ta / mc > 1000)
 
 
 def screen_ticker(ticker: str, fin: dict) -> dict:
@@ -348,14 +346,17 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     ca = fin.get("current_assets")
     tl = fin.get("total_liabilities")
     net_net = (
-        usd and mc is not None and ca is not None and tl is not None
+        usd
+        and mc is not None
+        and ca is not None
+        and tl is not None
         and mc < (2.0 / 3.0) * (ca - tl)
     )
     trap = "n/a"
     if any(v is not None for v in (f_score, m_score, z_score)):
         from tradingagents.strategies.normalized import trap_verdict
-        trap = trap_verdict(f_score=f_score, m_score=m_score,
-                            z_score=z_score)["level"]
+
+        trap = trap_verdict(f_score=f_score, m_score=m_score, z_score=z_score)["level"]
     return {
         "ticker": ticker,
         "ev_ebit": round(am, 2) if am is not None else None,
@@ -371,6 +372,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
 
 def rank_watchlist(results: list) -> list:
     """Rank on earnings yield (desc), then EV/EBIT (asc); missing -> end."""
+
     def key(r):
         ey = r["earnings_yield"] if r["earnings_yield"] is not None else -1.0
         am = r["ev_ebit"] if r["ev_ebit"] is not None else float("inf")
@@ -411,14 +413,14 @@ def _watchlist_markdown(results: list) -> str:
     if show_chg:
         heads.append("DayChg")
     seps = ["---"] * len(heads)
-    header = ("# Value Watchlist "
-              f"({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n")
+    header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
     out = [
         header,
         "| " + " | ".join(heads) + " |",
         "| " + " | ".join(seps) + " |",
     ]
     for i, r in enumerate(results, 1):
+
         def cell(v, fmt=None):
             if v is None:
                 return "n/a"
@@ -529,13 +531,13 @@ def _fetch_closes(ticker: str, days: int = 320) -> list:
     return _fetch_ohlcv(ticker, days=days)["closes"]
 
 
-def _sma(series, n: int) -> "float | None":
+def _sma(series, n: int) -> float | None:
     if len(series) < n or n <= 0:
         return None
     return sum(series[-n:]) / n
 
 
-def _ema(series, n: int) -> "float | None":
+def _ema(series, n: int) -> float | None:
     if len(series) < n or n <= 0:
         return None
     k = 2.0 / (n + 1)
@@ -545,7 +547,7 @@ def _ema(series, n: int) -> "float | None":
     return ema
 
 
-def _rsi(closes, n: int = 14) -> "float | None":
+def _rsi(closes, n: int = 14) -> float | None:
     if len(closes) < n + 1:
         return None
     gains = losses = 0.0
@@ -567,18 +569,18 @@ def _boll_squeeze(closes, n: int = 20) -> bool:
         return False
     widths = []
     for i in range(len(closes) - n, len(closes) + 1):
-        window = closes[i - n:i]
+        window = closes[i - n : i]
         if len(window) < n:
             continue
         mid = sum(window) / n
         var = sum((v - mid) ** 2 for v in window) / n
-        sd = var ** 0.5
+        sd = var**0.5
         if mid > 0:
             widths.append(4 * sd / mid)
     return bool(widths) and widths[-1] == min(widths)
 
 
-def scan_signals(ohlcv: dict) -> "dict | None":
+def scan_signals(ohlcv: dict) -> dict | None:
     """Strategy A (trend pullback) / B (breakout) flags + metrics from OHLCV."""
     closes = ohlcv.get("closes") or []
     highs = ohlcv.get("highs") or []
@@ -600,26 +602,39 @@ def scan_signals(ohlcv: dict) -> "dict | None":
     squeeze = _boll_squeeze(closes)
 
     strategy_a = bool(
-        close > sma50 and sma50 > sma200 and lows[-1] <= ema20
-        and close >= ema20 and rsi is not None and 40.0 <= rsi <= 55.0
-        and qret is not None and qret >= 0.10
+        close > sma50
+        and sma50 > sma200
+        and lows[-1] <= ema20
+        and close >= ema20
+        and rsi is not None
+        and 40.0 <= rsi <= 55.0
+        and qret is not None
+        and qret >= 0.10
     )
     strategy_b = bool(
-        hi52_dist is not None and hi52_dist >= -0.10 and close > sma20
+        hi52_dist is not None
+        and hi52_dist >= -0.10
+        and close > sma20
         and close > sma50
         and ((rvol is not None and rvol > 1.5) or (rvol is not None and rvol < 0.75 and squeeze))
     )
     return {
-        "a": strategy_a, "b": strategy_b,
-        "rsi": rsi, "qret": qret, "rvol": rvol,
-        "squeeze": squeeze, "hi52_dist": hi52_dist,
+        "a": strategy_a,
+        "b": strategy_b,
+        "rsi": rsi,
+        "qret": qret,
+        "rvol": rvol,
+        "squeeze": squeeze,
+        "hi52_dist": hi52_dist,
     }
 
 
 def composite_scores(results: list, closes_map: dict) -> dict:
     """EY + momentum + 52w-distance factors -> composite score per ticker."""
     from tradingagents.strategies.factors import (
-        composite_score, high_distance, momentum,
+        composite_score,
+        high_distance,
+        momentum,
     )
 
     factors = {}
@@ -647,52 +662,98 @@ def allocation_block(scores: dict) -> str:
     return _ab(scores, cfg=get_config())
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tickers", nargs="*", help="ticker symbols")
     parser.add_argument("-f", "--file", help="file with one ticker per line")
-    parser.add_argument("-d", "--date", default=datetime.now().strftime("%Y-%m-%d"),
-                        help="current date (yyyy-mm-dd)")
-    parser.add_argument("-l", "--limit", type=int, default=50,
-                        help="max tickers to process")
-    parser.add_argument("-u", "--universe", choices=("tickers", "top-losers", "heat-proxy"),
-                        default="tickers",
-                        help="symbol source: 'tickers' (positional/file, default), "
-                             "'top-losers' (moomoo intraday decliners; refreshes daily) "
-                             "or 'heat-proxy' (same as top-losers, US-only - the official "
-                             "trade-rank proxy for the proprietary in-app Heat List)")
-    parser.add_argument("--market", default="US",
-                        help="market key for --universe top-losers/heat-proxy (US/HK)")
-    parser.add_argument("-n", "--movers-count", type=int, default=50,
-                        help="how many decliners to pull (max 200)")
-    parser.add_argument("--min-mcap", type=float, default=10e9,
-                        help="market-cap floor in USD (default $10B; 0 disables)")
-    parser.add_argument("--price-min", type=float, default=15.0,
-                        help="min last price in USD (default 15; 0 disables)")
-    parser.add_argument("--pe-max", type=float, default=40.0,
-                        help="max P/E (TTM) (default 40; 0 disables)")
-    parser.add_argument("--min-avg-vol", type=float, default=1_000_000,
-                        help="min 30-day average daily volume in shares (default 1M; 0 disables)")
-    parser.add_argument("--min-atr-pct", type=float, default=2.0,
-                        help="min ATR(14) as %% of price (default 2; 0 disables)")
-    parser.add_argument("--intraday", action="store_true",
-                        help="append live Alpaca L1 price / 1m VWAP / volume columns")
-    parser.add_argument("--scan", choices=("value", "trend-pullback", "breakout",
-                                         "momentum", "all"),
-                        default="all",
-                        help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
-                             "dip in uptrend), 'breakout' (volatility contraction/breakout), "
-                             "or 'all' (default: keep all, flag strategies)")
-    parser.add_argument("--out-dir", default="screener",
-                        help="folder for the saved watchlist markdown (finish timestamp)")
-    parser.add_argument("--rank", choices=("value", "composite"), default=None,
-                        help="ranking mode; default reads config enable_composite_rank")
-    parser.add_argument("--enable-float", action="store_true",
-                        help="fetch public float (FMP/yfinance) for the momentum low-float pillar")
-    parser.add_argument("--journal", default=None, metavar="PATH",
-                        help="append momentum candidate rows to a JSONL journal and print its stats")
-    parser.add_argument("--alloc", action="store_true",
-                        help="append a capped allocation plan block")
+    parser.add_argument(
+        "-d",
+        "--date",
+        default=datetime.now().strftime("%Y-%m-%d"),
+        help="current date (yyyy-mm-dd)",
+    )
+    parser.add_argument("-l", "--limit", type=int, default=50, help="max tickers to process")
+    parser.add_argument(
+        "-u",
+        "--universe",
+        choices=("tickers", "top-losers", "heat-proxy"),
+        default="tickers",
+        help="symbol source: 'tickers' (positional/file, default), "
+        "'top-losers' (moomoo intraday decliners; refreshes daily) "
+        "or 'heat-proxy' (same as top-losers, US-only - the official "
+        "trade-rank proxy for the proprietary in-app Heat List)",
+    )
+    parser.add_argument(
+        "--market", default="US", help="market key for --universe top-losers/heat-proxy (US/HK)"
+    )
+    parser.add_argument(
+        "-n", "--movers-count", type=int, default=50, help="how many decliners to pull (max 200)"
+    )
+    parser.add_argument(
+        "--min-mcap",
+        type=float,
+        default=10e9,
+        help="market-cap floor in USD (default $10B; 0 disables)",
+    )
+    parser.add_argument(
+        "--price-min",
+        type=float,
+        default=15.0,
+        help="min last price in USD (default 15; 0 disables)",
+    )
+    parser.add_argument(
+        "--pe-max", type=float, default=40.0, help="max P/E (TTM) (default 40; 0 disables)"
+    )
+    parser.add_argument(
+        "--min-avg-vol",
+        type=float,
+        default=1_000_000,
+        help="min 30-day average daily volume in shares (default 1M; 0 disables)",
+    )
+    parser.add_argument(
+        "--min-atr-pct",
+        type=float,
+        default=2.0,
+        help="min ATR(14) as %% of price (default 2; 0 disables)",
+    )
+    parser.add_argument(
+        "--intraday",
+        action="store_true",
+        help="append live Alpaca L1 price / 1m VWAP / volume columns",
+    )
+    parser.add_argument(
+        "--scan",
+        choices=("value", "trend-pullback", "breakout", "momentum", "all"),
+        default="all",
+        help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
+        "dip in uptrend), 'breakout' (volatility contraction/breakout), "
+        "or 'all' (default: keep all, flag strategies)",
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="screener",
+        help="folder for the saved watchlist markdown (finish timestamp)",
+    )
+    parser.add_argument(
+        "--rank",
+        choices=("value", "composite"),
+        default=None,
+        help="ranking mode; default reads config enable_composite_rank",
+    )
+    parser.add_argument(
+        "--enable-float",
+        action="store_true",
+        help="fetch public float (FMP/yfinance) for the momentum low-float pillar",
+    )
+    parser.add_argument(
+        "--journal",
+        default=None,
+        metavar="PATH",
+        help="append momentum candidate rows to a JSONL journal and print its stats",
+    )
+    parser.add_argument(
+        "--alloc", action="store_true", help="append a capped allocation plan block"
+    )
     args = parser.parse_args(argv)
 
     # The proprietary Heat List (search/news/trade telemetry) is app-only and
@@ -722,8 +783,7 @@ def main(argv: "list[str] | None" = None) -> int:
                     min_market_cap=args.min_mcap,
                 )
                 losers = [
-                    m for m in movers
-                    if m.get("change_ratio") is not None and m["change_ratio"] < 0
+                    m for m in movers if m.get("change_ratio") is not None and m["change_ratio"] < 0
                 ]
                 movers = losers
             else:
@@ -796,12 +856,14 @@ def main(argv: "list[str] | None" = None) -> int:
                                     rv=rv,
                                     float_shares=fl,
                                 )
-                                pull = _fp(closes, ohlcv["highs"], ohlcv["lows"],
-                                           vols, opens=opens or None)
+                                pull = _fp(
+                                    closes, ohlcv["highs"], ohlcv["lows"], vols, opens=opens or None
+                                )
                                 session = _sess(peak_pnl=None, current_pnl=None)
                                 scan_meta[symbol]["momentum"] = {
-                                    "pillars": {kk: bool(vv) for kk, vv in pill.items()
-                                                if vv is not None},
+                                    "pillars": {
+                                        kk: bool(vv) for kk, vv in pill.items() if vv is not None
+                                    },
                                     "pullback": bool(pull.get("candidate")),
                                     "mom_rr": pull.get("rr"),
                                 }
@@ -816,9 +878,13 @@ def main(argv: "list[str] | None" = None) -> int:
                                     )
 
                                     record_momentum_trade(
-                                        args.journal, symbol, date=args.date,
-                                        pillars=pill, pullback=pull,
-                                        session=session, price=price,
+                                        args.journal,
+                                        symbol,
+                                        date=args.date,
+                                        pillars=pill,
+                                        pullback=pull,
+                                        session=session,
+                                        price=price,
                                         note="screener momentum candidate",
                                     )
                             except Exception:
@@ -906,7 +972,7 @@ def main(argv: "list[str] | None" = None) -> int:
             row["scan_a"] = bool(sig and sig.get("a"))
             row["scan_b"] = bool(sig and sig.get("b"))
             _mom = (sig or {}).get("momentum") if sig else None
-            row["pills"] = (sum(1 for v in _mom["pillars"].values() if v) if _mom else None)
+            row["pills"] = sum(1 for v in _mom["pillars"].values() if v) if _mom else None
             row["pullback"] = bool(_mom.get("pullback")) if _mom else False
             row["mom_rr"] = _mom.get("mom_rr") if _mom else None
             row["scan_rsi"] = sig.get("rsi") if sig else None
@@ -938,7 +1004,8 @@ def main(argv: "list[str] | None" = None) -> int:
     alloc_extra = ""
     if args.alloc and results:
         alloc_extra = allocation_block(
-            {r["ticker"]: r.get("earnings_yield") or 0.001 for r in results})
+            {r["ticker"]: r.get("earnings_yield") or 0.001 for r in results}
+        )
         markdown = _watchlist_markdown(ranked) + "\n\n" + alloc_extra
     else:
         markdown = _watchlist_markdown(ranked)

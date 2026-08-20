@@ -3,8 +3,11 @@
 import pytest
 
 from tradingagents.strategies.events import (
-    surprise_score, drift_side, position_mult_by_side,
-    expected_drift_after, catalyst_risk_penalty,
+    catalyst_risk_penalty,
+    drift_side,
+    expected_drift_after,
+    position_mult_by_side,
+    surprise_score,
 )
 
 
