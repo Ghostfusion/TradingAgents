@@ -175,6 +175,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-19 `3b4084d` - computed-analysis tools for analyst LLMs (lean batch: swing/RS/earnings-event/catalyst/position/risk-gate)
 - 2026-08-19 `92ae6b8` - Phase-1 screens (growth YoY, ROE, max-cap, sector
   top-3, revisions proxy, inst-accum; moomoo markdown parse fix)
 - 2026-08-19 `29e291b` - VCP scan (`--scan vcp`, volatility contraction)
