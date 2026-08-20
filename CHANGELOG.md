@@ -8,6 +8,31 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Screener moomoo period-order + prior-period bug (M column always n/a)** -
+  moomoo statement payloads list periods newest-first but `_parse_markdown_financials`
+  used a last-write-wins dict, so the canonical "latest" was the OLDEST period
+  and prior-period values were never captured. Consequently the Beneish
+  M-Score - which needs current AND prior - was always `n/a`, and every metric
+  (EY, EV/EBIT, F, Z, EpsYoY, ROE) was computed on stale fiscal data. Fixes:
+  - `_markdown_period_tables` parses each `### <period>` table and sorts by
+    period year (newest first); `_markdown_canonical` scans ALL tables (a
+    `get_fundamentals` payload concatenates income+balance+cashflow) and emits
+    `{"current", "prior"}` dicts for two-period keys.
+  - `_match_row` skips moomoo `-`-prefixed sub-item / contra lines
+    (`-Accounts Receivable`, `-Accumulated Depreciation`).
+  - depreciation aliases drop the loose `d&a` (normalized to `d a`, it
+    substring-matched "Selling and Admin Expenses") and add `depreciation &
+    depletion`; `net_receivables` prefers the aggregate `receivables` row.
+  - `_latest()` unwraps the dict form at every flat read site (screen_ticker,
+    _usd_consistent, fetch_ticker, mover-meta injection).
+  - Result: M-Score computes (e.g. MT -2.29, WMT -2.72), F/Z/EY/ROE reflect
+    the newest period; NetNet staying `no` on large caps is expected (a
+    negative-current-liabilities - current-assets threshold).
+- **Regression tests** - tests/test_moomoo_period_fix.py (newest-period,
+  prior dicts, dash-skip, d&a alias, M-computes, concatenated-fundamentals).
+
 ### Added
 
 - **Finnhub free-tier integration (key: TRADINGAGENTS_FINNHUB_API_KEY)** -

@@ -312,6 +312,20 @@ Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for
  auditability), never an invented value.
 
+### 6.6 Canonical line items & prior periods
+
+The value screens read a canonical line-item dict (scripts/value_screener
+``_canonicalize``). For moomoo markdown the parser emits ``{"current": ..,
+"prior": ..}`` dicts for keys present in two consecutive periods (statements
+list newest-first; tables are sorted by period year). The Beneish M-Score and
+Piotroski time-components use ``current``/``prior`` via
+``quantitative_scores``' ``_num()``/``_prv()``; every other read unwraps with
+``scripts.value_screener._latest()``. moomoo ``-``-prefixed sub-item / contra
+lines (``-Accounts Receivable``, ``-Accumulated Depreciation``) are skipped so
+the aggregate value wins. Because the M-Score needs both periods, its M column
+now computes on moomoo data (previously always n/a), and the latest-value bug
+(which silently kept the OLDEST period) is fixed.
+
 ## 7. Persistence & recovery
 
 - Memory log (`agents/utils/memory.py`): append-only markdown; pending entries

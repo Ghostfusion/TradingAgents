@@ -59,8 +59,12 @@ logger = logging.getLogger("value_screener")
 _ROW_ALIASES = {
     "revenue": ["total revenue", "revenue", "operating income", "sales"],
     "cogs": ["cost of revenue", "cost of goods sold"],
-    "sga": ["selling general", "sg&a", "sga expense"],
-    "depreciation": ["depreciation", "depreciation & amortization", "d&a"],
+    "sga": ["selling general", "sg&a", "sga expense", "selling and admin"],
+    "depreciation": [
+        "depreciation",
+        "depreciation & amortization",
+        "depreciation & depletion",  # moomoo cashflow label
+    ],
     "operating_income": ["operating income", "ebit", "operating profit"],
     "net_income": ["net income", "net profit", "net income (common)"],
     "eps": ["diluted eps", "earnings per share", "basic eps"],
@@ -106,10 +110,21 @@ _ROW_ALIASES = {
     "current_liabilities": ["total current liabilities", "current liabilities"],
     "retained_earnings": ["retained earnings"],
     "ppem": ["property plant", "net ppe", "ppe", "fixed assets"],
-    "marketable_securities": ["marketable securities", "short-term investments"],
+    "marketable_securities": [
+        "marketable securities",
+        "short-term investments",
+        # moomoo reports the securities-equivalent line under Financial Assets
+        # / Available for Sale Securities (GAAP marketable-securities bucket).
+        "financial assets",
+        "available for sale securities",
+    ],
     "sector": ["sector", "industrygroup"],
     "roe": ["roe ttm", "roe rfy", "roettm", "roerfy"],
-    "net_receivables": ["net receivables", "accounts receivable", "receivables"],
+    "net_receivables": [
+        "receivables",  # moomoo aggregate line (net of the -Accounts/Taxes/Other sub-items)
+        "net receivables",
+        "accounts receivable",
+    ],
     "operating_cashflow": ["operating cash flow", "cash flow from operating"],
     "dividends_paid": ["cash dividends paid", "dividends paid"],
     "share_buybacks": ["repurchase of common", "share repurchase", "buyback"],
@@ -128,11 +143,17 @@ def _match_row(rows: dict, canonical: str):
 
     Aliases are tried in ``_ROW_ALIASES`` order (most specific first) and the
     first alias that matches any row wins - so ``total_debt`` prefers a
-    dedicated debt row over the catch-all ``total_liabilities`` row.
+    dedicated debt row over the catch-all ``total_liabilities`` row. Rows whose
+    label starts with ``-`` are moomoo sub-item / contra-account breakdowns
+    (e.g. ``-Accumulated Depreciation``, ``-Cash and Cash Equivalents``) and
+    are skipped so the canonical value always comes from the aggregate line
+    that precedes them.
     """
     for alias in _ROW_ALIASES.get(canonical, []):
         key = _norm(alias)
         for label, value in rows.items():
+            if label.startswith("-"):
+                continue
             if key and key in _norm(label):
                 return (label, value)
     return None
@@ -204,32 +225,71 @@ def _parse_csv_statements(payload: str) -> dict:
     return rows
 
 
-def _parse_markdown_financials(payload: str) -> dict:
-    """Parse a moomoo-style markdown table into {row_label: latest_value}.
+def _markdown_period_tables(payload: str) -> list[tuple[str, dict]]:
+    """Parse moomoo-style markdown into ``[(period_label, {row: value}), ...]``
+    sorted by the period year in the ``### `` header, NEWEST first.
 
+    Moomoo sends its statement tables newest-first (2025, 2024, ...) and a
+    ``get_fundamentals`` payload concatenates the income + balance + cashflow
+    statements (12 tables for 4 years); sorting by period year keeps
+    "current" unambiguous regardless of ordering. A payload without period
+    headers is treated as one implicit table. Each table also gains
+    ``"<label> YoY"`` rows from the YoY column so the canonical growth aliases
+    (revenue_yoy / eps_yoy) keep working.
+    """
+    tables: list[tuple[str, dict]] = []
+    current_label = ""
+    current: dict = {}
+    for line in (payload or "").splitlines():
+        line = line.strip()
+        if line.startswith("### "):
+            if current:
+                tables.append((current_label, current))
+            current_label = line[4:].strip()
+            current = {}
+            continue
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 2 or cells[0] in ("Item", "---", "Items"):
+            continue
+        label = cells[0]
+        value = _first_number(cells[1])
+        if not label or value is None:
+            continue
+        current[label] = value
+        if len(cells) >= 4 and cells[2] not in ("--", ""):
+            yoy = _percent_fraction(cells[2])
+            if yoy is not None:
+                current[f"{label} YoY"] = yoy
+    if current:
+        tables.append((current_label, current))
+
+    def _year(label: str):
+        return _period_year(label)
+
+    tables.sort(key=lambda t: _year(t[0]), reverse=True)
+    return tables
+
+
+def _parse_markdown_periods(payload: str) -> list[dict]:
+    """Period tables as bare row dicts, newest first (see
+    ``_markdown_period_tables``)."""
+    return [rows for _, rows in _markdown_period_tables(payload)]
+
+
+def _parse_markdown_financials(payload: str) -> dict:
+    """Parse a moomoo-style markdown payload into {row_label: latest_value}.
+
+    When the payload carries several ``### <period>`` tables (moomoo sends
+    newest-first), returns the NEWEST period's table - the previous
+    last-write-wins behaviour accidentally kept the OLDEST period's values.
     Handles the 4-column statement layout ("| Item | Value | YoY | QoQ |"):
     the YoY cell (fraction) is stored under ``"<label> YoY"`` so canonical
     growth fields (revenue_yoy / eps_yoy) read it directly.
     """
-    rows = {}
-    for line in payload.splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 2:
-            continue
-        if cells[0] in ("Item", "---", "Items"):
-            continue
-        label = cells[0]
-        value = _first_number(cells[1]) if len(cells) > 1 else None
-        if label and value is not None:
-            rows[label] = value
-            if len(cells) >= 4 and cells[2] not in ("--", ""):
-                yoy = _percent_fraction(cells[2])
-                if yoy is not None:
-                    rows[f"{label} YoY"] = yoy
-    return rows
+    tables = _parse_markdown_periods(payload)
+    return tables[0] if tables else {}
 
 
 def _parse_json_statements(payload: str) -> dict:
@@ -302,31 +362,99 @@ def _detect_currency(payload: str) -> str:
     return ""
 
 
+def _flat_canonical(rows: dict) -> dict:
+    """Canonical line items from a flat single-period ``{label: value}`` row
+    dict (yfinance CSV, alpha_vantage JSON, fundamentals text, Finnhub)."""
+    canonical = {}
+    for key in _ROW_ALIASES:
+        match = _match_row(rows, key)
+        if match is not None:
+            canonical[key] = match[1]
+    return canonical
+
+
+def _markdown_canonical(text: str) -> dict:
+    """Canonical line items from moomoo-style markdown with per-period tables.
+
+    Every table is searched for each canonical key (a ``get_fundamentals``
+    payload concatenates income + balance + cashflow, so the cashflow rows
+    live in later tables). "Current" is the value from the newest period that
+    has the key; "prior" is the same row label from the newest OTHER table.
+    Keys with both become ``{"current": .., "prior": ..}`` dicts - the Beneish
+    M-Score and the Piotroski time-components read the prior period, and the
+    canonical input contract in ``quantitative_scores`` already supports the
+    dict form. Keys with no prior stay flat (single float), so the screener's
+    other reads and the growth aliases are unaffected.
+    """
+    tables = _markdown_period_tables(text)
+    if not tables:
+        return {}
+    canonical = {}
+    for key in _ROW_ALIASES:
+        best = None  # (year, label, value, table_index)
+        for idx, (period, rows) in enumerate(tables):
+            m = _match_row(rows, key)
+            if m is None:
+                continue
+            year = _period_year(period)
+            if best is None or year > best[0]:
+                best = (year, m[0], m[1], idx)
+        if best is None:
+            continue
+        _year, label, cur, idx = best
+        prior = None
+        best_p = -1
+        for jdx, (period, rows) in enumerate(tables):
+            if jdx == idx:
+                continue
+            v = rows.get(label)
+            if v is None:
+                continue
+            y2 = _period_year(period)
+            if y2 > best_p:
+                prior, best_p = v, y2
+        canonical[key] = {"current": cur, "prior": prior} if prior is not None else cur
+    return canonical
+
+
+def _period_year(period_label: str) -> int:
+    """Fiscal year parsed from a moomoo ``### `` period label (e.g. "2025/FY")."""
+    m = re.search(r"(20\d{2})", period_label or "")
+    return int(m.group(1)) if m else -1
+
+
+def _latest(v):
+    """Current-period value of a canonical item (flat float or a
+    ``{"current": .., "prior": ..}`` dict)."""
+    if isinstance(v, dict):
+        return v.get("current", v.get("value"))
+    return v
+
+
 def _canonicalize(payload: str) -> dict:
     """Turn a vendor payload string into a canonical line-item dict.
 
     Works for yfinance CSV (``get_balance_sheet`` etc.), moomoo markdown
     (``get_fundamentals``), alpha_vantage JSON (``get_fundamentals``) and
-    yfinance fundamentals text (``get_fundamentals``). A ``currency`` key is
-    added when the payload states a non-default reporting currency, so
-    USD-only metrics can refuse to mix currencies.
+    yfinance fundamentals text (``get_fundamentals``). Moomoo markdown keeps
+    the prior period as ``{current, prior}`` dicts for the ratio screens. A
+    ``currency`` key is added when the payload states a non-default reporting
+    currency, so USD-only metrics can refuse to mix currencies.
     """
     text = (payload or "").strip()
     if not text or text.startswith("NO_DATA") or text.startswith("DATA_"):
         return {}
     if text.lstrip().startswith("{"):
         rows = _parse_json_statements(text)
+        canonical = _flat_canonical(rows)
     elif any(ln.lstrip().startswith("|") for ln in text.splitlines()):
-        rows = _parse_markdown_financials(text)
+        canonical = _markdown_canonical(text)
     elif any(":" in ln for ln in text.splitlines()):
         rows = _parse_text_report(text)
+        canonical = _flat_canonical(rows)
     else:
         rows = _parse_csv_statements(text)
-    canonical = {}
-    for key in _ROW_ALIASES:
-        match = _match_row(rows, key)
-        if match is not None:
-            canonical[key] = match[1]
+        canonical = _flat_canonical(rows)
     currency = _detect_currency(text)
     if currency and currency != "USD":
         canonical["currency"] = currency
@@ -369,8 +497,8 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.debug("%s finnhub basic financials: %s", ticker, exc)
     # Guard: a cash figure larger than total assets means a wrong-row match.
-    ca_ = canonical.get("cash")
-    ta_ = canonical.get("total_assets")
+    ca_ = _latest(canonical.get("cash"))
+    ta_ = _latest(canonical.get("total_assets"))
     if ca_ is not None and ta_ is not None and ca_ > ta_:
         canonical["cash"] = None
     # Currency heuristic for ADRs: yfinance reports statements in the local
@@ -379,14 +507,14 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
     # currencies are mixed (e.g. 303T JPY assets vs 36B USD market cap) - flag
     # it so the USD-only metrics refuse to mix.
     if canonical.get("currency") is None:
-        mc = canonical.get("market_cap")
-        ta = canonical.get("total_assets")
+        mc = _latest(canonical.get("market_cap"))
+        ta = _latest(canonical.get("total_assets"))
         if mc and ta and ta / mc > 1000:
             canonical["currency"] = "non_usd"
     # Derive working capital when both sides are available (Altman Z needs it).
     if "working_capital" not in canonical:
-        ca = canonical.get("current_assets")
-        cl = canonical.get("current_liabilities")
+        ca = _latest(canonical.get("current_assets"))
+        cl = _latest(canonical.get("current_liabilities"))
         if ca is not None and cl is not None:
             canonical["working_capital"] = ca - cl
     return canonical
@@ -403,8 +531,8 @@ def _usd_consistent(fin: dict) -> bool:
     """
     if fin.get("currency") not in (None, "", "USD"):
         return False
-    mc = fin.get("market_cap")
-    ta = fin.get("total_assets")
+    mc = _latest(fin.get("market_cap"))
+    ta = _latest(fin.get("total_assets"))
     # Only a currency mix produces assets >1000x the market cap.
     return not (mc and ta and ta / mc > 1000)
 
@@ -418,9 +546,9 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     m_score = beneish_m_score(fin)
     z_score = altman_z_score(fin) if usd else None
     f_score = piotroski_f_score(fin)
-    mc = fin.get("market_cap")
-    ca = fin.get("current_assets")
-    tl = fin.get("total_liabilities")
+    mc = _latest(fin.get("market_cap"))
+    ca = _latest(fin.get("current_assets"))
+    tl = _latest(fin.get("total_liabilities"))
     net_net = (
         usd
         and mc is not None
@@ -433,8 +561,8 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         from tradingagents.strategies.normalized import trap_verdict
 
         trap = trap_verdict(f_score=f_score, m_score=m_score, z_score=z_score)["level"]
-    ne = fin.get("net_income")
-    te = fin.get("total_equity")
+    ne = _latest(fin.get("net_income"))
+    te = _latest(fin.get("total_equity"))
     roe = None
     if ne is not None and te is not None and te > 0:
         roe = float(ne) / float(te)
@@ -449,8 +577,8 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "net_net": net_net,
         "trap": trap,
         "roe": round(roe, 4) if roe is not None else None,
-        "eps_yoy": fin.get("eps_yoy"),
-        "revenue_yoy": fin.get("revenue_yoy"),
+        "eps_yoy": _latest(fin.get("eps_yoy")),
+        "revenue_yoy": _latest(fin.get("revenue_yoy")),
         "sector": fin.get("sector"),
     }
 
@@ -1250,12 +1378,12 @@ def main(argv: list[str] | None = None) -> int:
             # fundamentals feed (statements) does not - inject it so the EV /
             # earnings-yield / acquirer screens can run on the daily list.
             meta_cap = meta.get("market_cap")
-            fin_cap = fin.get("market_cap")
+            fin_cap = _latest(fin.get("market_cap"))
             # Prefer the day-of rank cap (real-time) over the parsed one when
             # both exist; inject when fundamentals lacked a cap entirely.
             if meta_cap is not None and (fin_cap is None or fin_cap < meta_cap):
                 fin["market_cap"] = meta_cap
-            cap = fin.get("market_cap")
+            cap = _latest(fin.get("market_cap"))
             if args.min_mcap and cap is not None and cap < args.min_mcap:
                 logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
                 continue

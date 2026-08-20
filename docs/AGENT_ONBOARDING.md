@@ -155,6 +155,28 @@ tests/                     # conftest (autouse fixtures), test_* per area
 - **moomoo earnings calendar**: window cap is 7 days INCLUSIVE (begin..begin+6);
   the market-level call returns ALL securities - MUST filter by the ticker's
   code and normalize columns (`earnings_date`, `eps_predict`, `N/A` -> None).
+- **moomoo statement period order + prior periods**: statement payloads list
+  periods NEWEST-FIRST (2025, 2024, ...) and a `get_fundamentals` payload
+  concatenates income + balance + cashflow (12 tables for 4 years). The
+  screener's canonical parser (_parse_markdown_periods/_markdown_canonical in
+  scripts/value_screener.py) sorts tables by period year and emits
+  `{"current": .., "prior": ..}` dicts for keys present in two periods, so the
+  Beneish M-Score (needs prior) and the Piotroski time-components actually
+  compute instead of returning n/a. Gotchas to preserve:
+  - moomoo `-`-prefixed labels are sub-item/contra breakdowns (`-Accumulated
+    Depreciation`, `-Cash and Cash Equivalents`) and are SKIPPED - the
+    aggregate line always wins.
+  - the old `d&a` depreciation alias normalized to `"d a"` and substring-
+    matched "Selling and Admin Expenses" ("and admin") - depreciation aliases
+    must NOT include a bare `d&a`.
+  - `net_receivables` prefers the aggregate `receivables` row (the `-Accounts
+    Receivable` sub-line must be skipped).
+  - DO NOT "fix" the period-year regex (`r"(20\d{2})"`) with a doubled
+    backslash - a raw-string `\\d` matches a literal backslash and breaks the
+    newest-first sort (current/prior dicts silently become flat values).
+  - canonical `{current, prior}` dicts: the quantitative_scores._num() reads
+    `current`, _prv() reads `prior`; the screener's other reads use
+    `_latest()` to unwrap. Keep _latest() at every flat read site.
 - **Catalyst (B1)** is on by default (`enable_events=True`); tuning keys
   `catalyst_*`; it only de-risks (scale <= 1), guarded fetch returns None
   when OpenD is down.
@@ -243,7 +265,7 @@ has changed before); never assume an endpoint works — the SDK's
 - 2026-08-19 `0ed81a3` - review fixes: indicator warmup, parallelism, caching
 - 2026-08-19 `1e2246b` - moomoo vendor integration + event contracts + --vendor
 
-Full suite: **959+ tested** (2 skipped: bedrock extra, live DeepSeek).
+Full suite: **969+ tested** (2 skipped: bedrock extra, live DeepSeek).
 
 ---
 

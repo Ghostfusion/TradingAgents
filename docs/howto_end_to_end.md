@@ -191,6 +191,15 @@ py -3.12 scripts/smoke_structured_output.py # structured-output smoke
   run falls back silently.
 - `NO_DATA_AVAILABLE` for options on a US name -> account lacks options
   permission (threshold); chain falls back to yfinance.
+- **M column `n/a`** -> was a real bug: moomoo statements list periods
+  newest-first but the old parser kept the OLDEST period and never supplied
+  prior-period values, so the Beneish M-Score (which needs current + prior)
+  could never compute. Fixed (period-order aware + `{current, prior}`
+  canonical dicts); M now computes when the statements have two periods.
+- **NetNet column always `no`** -> normal. Net-Net needs
+  `market_cap < 2/3 x (current_assets - total_liabilities)`; for
+  institutional-grade names (cap >= $10B) `CA - TL` is typically negative so
+  it never qualifies. Only distressed micro-caps pass.
 - Catalyst scale stays 1 -> no imminent catalyst or no calendar coverage; by
   design neutral.
 - Process hangs at process exit -> an `OpenQuoteContext` leaked; close it
