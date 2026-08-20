@@ -16,12 +16,17 @@ from tradingagents.dataflows.errors import (
     VendorRateLimitError,
 )
 from tradingagents.dataflows.massive import (
+    MassiveNotConfiguredError,
     fetch_macro_backdrop,
     get_form4_insider_massive,
+    get_fundamentals_massive,
     get_macro_indicators_massive,
+    get_market_snapshot_massive,
     get_news_massive,
+    get_ratios_massive,
     get_short_interest_massive,
     get_short_volume_massive,
+    get_top_movers_massive,
     is_yield_curve_inverted,
     latest_breakeven,
     massive_api_key,
@@ -315,3 +320,95 @@ class MassiveForm4Tests(unittest.TestCase):
             self.assertRaises(NoMarketDataError),
         ):
             get_form4_insider_massive("AAPL", "2026-01-01", "2026-08-19")
+
+
+@pytest.mark.unit
+class MassiveRatiosTests(unittest.TestCase):
+    _RATIOS = {
+        "results": [
+            {
+                "date": "2026-08-19", "ticker": "AAPL",
+                "enterprise_value": 3555509835190, "ev_to_ebitda": 26.98,
+                "ev_to_sales": 9.22, "price_to_earnings": 34.84,
+                "price_to_book": 52.16, "price_to_sales": 9.02,
+                "return_on_equity": 1.5284, "return_on_assets": 0.3075,
+                "debt_to_equity": 1.52, "current": 0.68, "quick": 0.63,
+                "cash": 0.19, "dividend_yield": 0.0044,
+                "free_cash_flow": 104339000000, "market_cap": 3479770835190,
+            }
+        ]
+    }
+
+    def test_ratios_format(self):
+        with mock.patch.object(massive, "_get", return_value=self._RATIOS):
+            out = get_ratios_massive("AAPL", "2026-08-19")
+        self.assertIn("EV/EBITDA: 26.98", out)
+        self.assertIn("P/E: 34.84", out)
+        self.assertIn("ROE: 152.84%", out)  # 1.5284 formatted as percent
+        self.assertIn("Div yield: 0.44%", out)
+
+    def test_ratios_empty_is_unavailable(self):
+        with mock.patch.object(massive, "_get", return_value={"results": []}):
+            out = get_ratios_massive("AAPL")
+        self.assertIn("no data returned", out)
+
+    def test_ratios_403_degrades(self):
+        with mock.patch.object(
+            massive, "_get", side_effect=MassiveNotConfiguredError("403 plan")
+        ):
+            out = get_ratios_massive("AAPL")
+        self.assertIn("upgrade at massive.com/pricing", out)
+
+    def test_fundamentals_uses_ratios(self):
+        with mock.patch.object(massive, "_get", return_value=self._RATIOS):
+            out = get_fundamentals_massive("AAPL", "2026-08-19")
+        self.assertIn("Ratios", out)
+        self.assertIn("EV/EBITDA", out)
+
+    def test_fundamentals_registered_as_vendor(self):
+        self.assertIn("massive", interface.VENDOR_METHODS["get_fundamentals"])
+        self.assertIn("massive", interface.VENDOR_METHODS["get_basic_financials"])
+
+
+@pytest.mark.unit
+class MassiveSnapshotTests(unittest.TestCase):
+    def test_snapshot_format(self):
+        payload = {
+            "ticker": {
+                "day": {"c": 120.47, "o": 119.62, "h": 120.53, "l": 118.81,
+                         "v": 28727868, "vw": 119.725},
+                "prevDay": {"c": 119.49},
+                "todaysChange": 0.98, "todaysChangePerc": 0.82,
+                "lastQuote": {"p": 120.46, "P": 120.47},
+                "lastTrade": {"p": 120.47, "s": 236},
+            }
+        }
+        with mock.patch.object(massive, "_get", return_value=payload):
+            out = get_market_snapshot_massive("AAPL")
+        self.assertIn("Last: 120.5", out)
+        self.assertIn("Today's change", out)
+        self.assertIn("0.8%", out)  # todaysChangePerc
+
+    def test_snapshot_empty(self):
+        with mock.patch.object(massive, "_get", return_value={}):
+            out = get_market_snapshot_massive("AAPL")
+        self.assertIn("no data returned", out)
+
+    def test_top_movers_format(self):
+        rows = [
+            {"ticker": "GME", "todaysChangePerc": 12.5, "day": {"c": 20.1}},
+            {"ticker": "BBBY", "todaysChangePerc": 8.9, "day": {"c": 5.6}},
+        ]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_top_movers_massive("gainers", 5)
+        self.assertIn("GME", out)
+        self.assertIn("12.5", out)
+
+    def test_top_movers_bad_direction(self):
+        out = get_top_movers_massive("sideways", 5)
+        self.assertIn("invalid direction", out)
+
+    def test_top_movers_empty(self):
+        with mock.patch.object(massive, "_get", return_value=[]):
+            out = get_top_movers_massive("gainers", 5)
+        self.assertIn("unavailable", out)

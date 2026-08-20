@@ -911,6 +911,34 @@ def get_form4_insider(
         return f"form-4 insider activity unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_ratios(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str | None, "as-of date (yyyy-mm-dd)"] = None,
+) -> str:
+    """Precomputed valuation & profitability ratios for a ticker (Massive.com).
+
+    Returns EV/EBITDA, EV/Sales, P/E, P/B, P/S, ROE/ROA, D/E, liquidity and
+    FCF so the analyst reads precomputed numbers instead of deriving them.
+    Cross-check against the screener value screens (EY / EV-EBIT / F / Z)
+    before a final cheap/quality claim. Returns an explicit 'unavailable'
+    message when the Massive account plan lacks ratios access.
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: optional as-of date (yyyy-mm-dd).
+
+    Returns:
+        A ``key: value`` block, or an explicit 'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.massive import get_ratios_massive
+
+        return get_ratios_massive(ticker, current_date)
+    except Exception as exc:  # noqa: BLE001
+        return f"ratios unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -928,4 +956,5 @@ __all__ = [
     "get_insider_activity",
     "get_company_peers",
     "get_form4_insider",
+    "get_ratios",
 ]

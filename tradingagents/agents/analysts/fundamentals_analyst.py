@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_portfolio_weights,
+    get_ratios,
     get_revenue_breakdown,
     get_smart_money,
 )
@@ -42,6 +43,7 @@ def create_fundamentals_analyst(llm):
             get_insider_activity,
             get_company_peers,
             get_form4_insider,
+            get_ratios,
         ]
 
         system_message = (

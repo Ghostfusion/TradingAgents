@@ -100,8 +100,8 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | ✅ implemented |
 | 4 | `filings/form-4` | insider fundamentals + screener | ✅ implemented (13-F deferred: no security filter — see §3c) |
 | 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
-| 6 | `fundamentals/ratios|balance-sheets|income-statements|cash-flow|float` | `get_analyst_verdict` inputs (EY, EV/EBIT, ROE) | planned |
-| 7 | `snapshots/single-ticker|full-market|top-movers`, `aggregates/custom-bars`, `technical-indicators/*` | market analyst + `pipeline.py --universe` | planned |
+| 6 | `fundamentals/ratios` + `get_fundamentals` | `get_ratios` (fundamentals analyst) + `fundamental_data` vendor | ✅ wired (plan-aware; 403 on free Basic) |
+| 7 | `snapshots/single-ticker`, `top-movers` | market analyst tools + `pipeline.py --universe top-movers-massive` | ✅ wired (plan-aware; 403 on free Basic) |
 | 8 | WebSocket NOI / Flat Files | real-time orderflow / backtest datasets | future |
 
 ---
@@ -226,6 +226,41 @@ mislead the analyst. It is therefore **not wired** until Massive adds a
 security-level (ticker/CUSIP) filter or the screener wants a
 filer-by-filer (CIK) workflow. The existing moomoo `get_institution_holdings`
 (13F-style per-ticker) remains the source for that signal.
+
+## 3d. Fundamentals/ratios + snapshots/top-movers (plan-aware wiring)
+
+### Rationale
+These Massive datasets (`/stocks/financials/v1/*` and `/v2/snapshot/...`)
+return **403 NOT_AUTHORIZED** on the free Basic plan (probed live). They are
+wired in **plan-aware**: the guarded tools register and degrade cleanly through
+the router, and light up the moment the account's plan includes them. Nothing
+breaks today; the inputs become richer when entitlement increases.
+
+### Item 6 - fundamentals & ratios
+- **`get_ratios_massive(ticker, curr_date)`** - precomputed EV/EBITDA, EV/Sales,
+  P/E, P/B, P/S, ROE/ROA, D/E, liquidity, FCF, dividend yield from
+  `/stocks/financials/v1/ratios`. Registered as a `massive` vendor for
+  **`get_fundamentals`** and **`get_basic_financials`** (opt-in via the
+  `fundamental_data` chain).
+- **`get_ratios`** tool bound to the fundamentals analyst.
+- Feeds the value screens' `_canonicalize()` line-items when the statement
+  chain (moomoo/yfinance) lacks a field - richer `get_analyst_verdict` inputs.
+- Impact: low-risk. It only *backs* existing line-item sources inside the
+  already-running value pipeline; no new node, no workflow change.
+
+### Item 7 - snapshots & top-movers
+- **`get_market_snapshot(ticker)`** - consolidated latest day/prevDay/VWAP/
+  change + quote/trade from `/v2/snapshot/locale/us/markets/stocks/tickers/{t}`.
+  Bound to the market analyst (cross-check vs `get_verified_market_snapshot`).
+- **`get_top_movers('gainers'|'losers', n)`** - top movers by today-change;
+  bound to the market analyst AND exposed as a pipeline universe source:
+  `pipeline.py --universe top-movers-massive --movers-direction losers`.
+- Both are OpenD-independent (plain HTTP) and plan-aware.
+
+On the current free plan all three return an explicit
+"upgrade at massive.com/pricing" message and the graph continues with the
+existing vendors (moomoo/yfinance/Alpaca). Upgrade to a plan with `snapshots`
+(fundamentals for the ratios) to activate them - no code change required.
 
 ---
 

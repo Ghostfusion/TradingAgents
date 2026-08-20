@@ -10,6 +10,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive fundamentals/ratios + market snapshots (plan-aware)** - `get_ratios`
+  (precomputed EV/EBITDA, EV/Sales, P/E, P/B, ROE/ROA, D/E, FCF, dividend
+  yield) registered for `get_fundamentals`/`get_basic_financials` and bound to
+  the fundamentals analyst; `get_market_snapshot` (consolidated day/quote) and
+  `get_top_movers` bound to the market analyst; new
+  `pipeline.py --universe top-movers-massive --movers-direction` universe
+  source. These Massive endpoints return 403 NOT_AUTHORIZED on the free Basic
+  plan, so each tool degrades with an explicit
+  "upgrade at massive.com/pricing" message and activates automatically (no
+  code change) once the account's plan includes them. Tests in
+  `tests/test_massive_vendor.py`. Docs: `docs/massive_integration.md` §3d.
+
 - **Massive Form-4 insider activity** - `get_form4_insider(ticker, start, end)`
   bound to the fundamentals analyst computes net open-market insider buying from
   SEC Form 4 filings via Massive (`/stocks/filings/vX/form-4`): open-market

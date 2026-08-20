@@ -5,6 +5,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_market_snapshot,
     get_options_chain,
     get_orderflow_read,
     get_position_sizing,
@@ -15,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_short_volume,
     get_stock_data,
     get_swing_set,
+    get_top_movers,
     get_verified_market_snapshot,
     get_volatility_contraction,
 )
@@ -30,6 +32,8 @@ def create_market_analyst(llm):
             get_stock_data,
             get_indicators,
             get_verified_market_snapshot,
+            get_market_snapshot,
+            get_top_movers,
             get_options_chain,
             get_short_interest,
             get_short_volume,
@@ -71,6 +75,8 @@ Volume-Based Indicators:
 - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_stock_data first to retrieve the CSV that is needed to generate indicators. Then use get_indicators with the specific indicator names.
 
 Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices.
+
+You also have Massive.com verification tools (plan-gated): get_market_snapshot(ticker) returns a consolidated latest trade/bar/VWAP/change block you can cross-check against the verified snapshot when available; get_top_movers('gainers'|'losers') lists the day's biggest movers for market-context / relative-breadth framing. If either returns 'unavailable', proceed without it.
 
 You also have two forward-looking positioning tools: call get_options_chain(ticker, current_date) for implied volatility, open interest, and the put/call ratio (leading positioning/expectation signals), and get_short_interest(ticker) for short % of float, days-to-cover, and ownership split (squeeze and conviction signals). For intraday shorting conviction, call get_short_volume(ticker, start_date, end_date) for the daily short-sale volume ratio (% of total volume sold short) — elevated readings indicate heavy shorting pressure. Weigh these as positioning gauges, not directional price calls.
 

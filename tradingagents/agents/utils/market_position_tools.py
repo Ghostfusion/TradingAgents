@@ -88,3 +88,50 @@ def get_short_volume(
     from tradingagents.dataflows.massive import get_short_volume_massive
 
     return get_short_volume_massive(ticker, start_date, end_date)
+
+
+@tool
+def get_market_snapshot(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """
+    Latest consolidated market snapshot for a stock from Massive.com: latest
+    day/minute/prevDay bars, VWAP, today's change, plus quote/trade when the
+    plan includes them. A verification-grade read for exact price-level
+    claims. Returns an explicit 'unavailable' message when the account plan
+    lacks snapshot access.
+
+    Args:
+        ticker (str): Ticker symbol of the company
+
+    Returns:
+        str: snapshot OHLCV/VWAP/change, or an explicit 'unavailable' message
+    """
+    from tradingagents.dataflows.massive import get_market_snapshot_massive
+
+    return get_market_snapshot_massive(ticker)
+
+
+@tool
+def get_top_movers(
+    direction: Annotated[str, "'gainers' or 'losers'"] = "gainers",
+    count: Annotated[int | None, "max rows to return; omit for a default of 10"] = None,
+) -> str:
+    """
+    Top U.S. market gainers/losers by snapshot from Massive.com — a clean,
+    OpenD-independent universe source. Returns a ranked list of tickers with
+    their close and today's % change, or an explicit 'unavailable' message when
+    the account plan lacks snapshot access.
+
+    Args:
+        direction (str): 'gainers' or 'losers'
+        count (int): max rows to render; default 10
+
+    Returns:
+        str: a ranked list of top movers, or an explicit 'unavailable' message
+    """
+    if count is None:
+        count = 10
+    from tradingagents.dataflows.massive import get_top_movers_massive
+
+    return get_top_movers_massive(direction, count)

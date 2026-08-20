@@ -18,6 +18,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_orderflow_read,
     get_portfolio_weights,
     get_position_sizing,
+    get_ratios,
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
@@ -40,10 +41,12 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
 from tradingagents.agents.utils.market_position_tools import (
+    get_market_snapshot,
     get_options_chain,
     get_sec_filings,
     get_short_interest,
     get_short_volume,
+    get_top_movers,
 )
 from tradingagents.agents.utils.moomoo_extra_tools import (
     get_capital_flow,
@@ -88,6 +91,8 @@ __all__ = [
     "get_sec_filings",
     "get_short_interest",
     "get_short_volume",
+    "get_market_snapshot",
+    "get_top_movers",
     "get_capital_flow",
     "get_smart_money",
     "get_economic_calendar",
@@ -116,6 +121,7 @@ __all__ = [
     "get_insider_activity",
     "get_company_peers",
     "get_form4_insider",
+    "get_ratios",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",

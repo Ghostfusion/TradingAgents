@@ -32,6 +32,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_institution_holdings,
     get_macro_indicators,
     get_market_breadth,
+    get_market_snapshot,
     get_massive_news,
     get_news,
     get_options_chain,
@@ -42,6 +43,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_short_volume,
     get_smart_money,
     get_stock_data,
+    get_top_movers,
     get_verified_market_snapshot,
     resolve_instrument_identity,
 )
@@ -60,6 +62,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_orderflow_read,
     get_portfolio_weights,
     get_position_sizing,
+    get_ratios,
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
@@ -260,6 +263,9 @@ class TradingAgentsGraph:
                     get_options_chain,
                     get_short_interest,
                     get_short_volume,
+                    # Massive.com verification + movers (plan-gated, degrade)
+                    get_market_snapshot,
+                    get_top_movers,
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,
                     get_expected_move,
@@ -325,6 +331,7 @@ class TradingAgentsGraph:
                     get_insider_activity,
                     get_company_peers,
                     get_form4_insider,
+                    get_ratios,
                 ]
             ),
         }

@@ -28,8 +28,10 @@ from .finnhub import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .massive import (
+    get_fundamentals_massive,
     get_macro_indicators_massive,
     get_news_massive,
+    get_ratios_massive,
     get_short_interest_massive,
 )
 from .moomoo import (
@@ -253,9 +255,11 @@ VENDOR_METHODS = {
         "yfinance": get_yfinance_fundamentals,
         "moomoo": get_fundamentals_moomoo,
         "finnhub": get_basic_financials_finnhub,
+        "massive": get_fundamentals_massive,
     },
     "get_basic_financials": {
         "finnhub": get_basic_financials_finnhub,
+        "massive": get_ratios_massive,
     },
     "get_company_peers": {
         "finnhub": get_company_peers_finnhub,

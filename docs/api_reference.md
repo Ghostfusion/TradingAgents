@@ -225,7 +225,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `dataflows/errors.py`, the router converts to sentinel strings
 (`NO_DATA_AVAILABLE`, `DATA_UNAVAILABLE` optional, `DATA_DISABLED`).
 
-### 6.1 Tools by category (auto-generated)
+### ## 6.1 Tools by category (auto-generated)
 
 - `core_stock_apis` : `get_stock_data`
 - `technical_indicators` : `get_indicators`
@@ -294,6 +294,12 @@ Plan-dependent recency/entitlements; FMV/Greeks are Business-only
 (unavailable, never invented). US-only — supplements, not replaces,
 moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.
 
+➠ `get_market_snapshot` / `get_top_movers` also bound to the market analyst
+  (plan-gated, see §6.4), and `get_ratios` to the fundamentals analyst; a
+  `pipeline.py --universe top-movers-massive` option supplies a Massive mover
+  universe (plan-gated). These degrade to "upgrade at massive.com/pricing"
+  on the free plan and activate when the account's plan includes them.
+
 ### 6.3 Symbol mapping (Yahoo <-> moomoo / broker)
 
 `dataflows/symbol_utils.py::normalize_symbol()` maps broker symbols to Yahoo
@@ -332,6 +338,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_insider_activity(ticker)` | `finnhub.get_insider_activity_finnhub` | fundamentals | 12m net insider change + mspr + trend |
 | `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
 | `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
+| `get_ratios(ticker, date?)` | `massive.get_ratios_massive` | fundamentals | precomputed EV/EBITDA, P/E, P/B, ROE/ROA, FCF (plan-gated) |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

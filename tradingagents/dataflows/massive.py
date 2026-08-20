@@ -693,12 +693,194 @@ def _fmt_signed(value) -> str:
     return f"{'+' if n > 0 else ''}{n:,.0f}"
 
 
+# ---------------------------------------------------------------------------
+# Precomputed valuation & fundamentals (REST `/stocks/financials/v1/*`)
+#   Plan-aware: these endpoints are entitlements-gated (403 on free Basic). The
+#   403 path degrades through the router exactly like a missing key, so the
+#   tools light up automatically once the account's plan includes them.
+# ---------------------------------------------------------------------------
+
+
+def _not_entitled(path: str, exc) -> str:
+    """Honest message for entitlement-guarded endpoints (403 on current plan)."""
+    return (
+        f"{path} unavailable: {exc}. The Massive account plan does not include "
+        f"this dataset; upgrade at massive.com/pricing to enable it."
+    )
+
+
+def get_ratios_massive(ticker: str, curr_date: str | None = None) -> str:
+    """Precomputed valuation & profitability ratios for a ticker (plan-aware).
+
+    Uses `/stocks/financials/v1/ratios` (EV/EBITDA, P/E, P/B, ROE, ROA, D/E,
+    FCF, dividend yield, ...) so the analyst reads precomputed numbers instead
+    of derivations. Returns a ``key: value`` block, or an explicit
+    ``unavailable`` message when the endpoint is entitlement-gated (403 on free
+    Basic) or the ticker has no ratios.
+
+    Args:
+        ticker: symbol.
+        curr_date: optional as-of date (YYYY-MM-DD).
+    """
+    try:
+        payload = _get(
+            "/stocks/financials/v1/ratios",
+            {"ticker": ticker, "limit": 1},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _not_entitled("ratios", exc)
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        return f"ratios unavailable for {ticker}: no data returned."
+    row = results[0]
+    lines = [f"## {ticker.upper()} Ratios (Massive.com)", ""]
+    labels = [
+        ("date", "Date"), ("enterprise_value", "EV"), ("ev_to_ebitda", "EV/EBITDA"),
+        ("ev_to_sales", "EV/Sales"), ("price_to_earnings", "P/E"),
+        ("price_to_book", "P/B"), ("price_to_sales", "P/S"),
+        ("price_to_cash_flow", "P/CF"), ("price_to_free_cash_flow", "P/FCF"),
+        ("return_on_equity", "ROE"), ("return_on_assets", "ROA"),
+        ("debt_to_equity", "D/E"), ("current", "Current"), ("quick", "Quick"),
+        ("cash", "Cash ratio"), ("dividend_yield", "Div yield"),
+        ("free_cash_flow", "FCF"), ("market_cap", "Market cap"),
+    ]
+    for key, label in labels:
+        v = row.get(key)
+        if v is None:
+            continue
+        if key in ("return_on_assets", "return_on_equity", "dividend_yield"):
+            lines.append(f"- {label}: {float(v):.2%}")
+        elif key in (
+            "ev_to_ebitda", "ev_to_sales", "debt_to_equity", "current", "quick", "cash"
+        ) or key in (
+            "price_to_earnings", "price_to_book", "price_to_sales", "price_to_cash_flow",
+            "price_to_free_cash_flow",
+        ):
+            lines.append(f"- {label}: {float(v):.2f}")
+        else:
+            lines.append(f"- {label}: {_fmt_int(v)}")
+    lines.append("")
+    lines.append(
+        "Interpretation: precomputed valuation/profitability from Massive. "
+        "Cross-check against screener value screens (EY/EV-EBIT/F/Z) before a "
+        "final cheap/quality call."
+    )
+    return "\n".join(lines)
+
+
+def get_fundamentals_massive(ticker: str, curr_date: str | None = None) -> str:
+    """Comprehensive fundamentals overview for a ticker (plan-aware).
+
+    Matches the ``get_fundamentals`` vendor contract (``(ticker, curr_date)``
+    -> str) so it plugs into the ``fundamental_data`` category. Renders the
+    latest ratios block plus the statement-derived metrics Massive provides.
+    Degrades to an explicit 'unavailable' message when entitlement-gated (403)
+    or the ticker has no data.
+
+    Args:
+        ticker: symbol.
+        curr_date: optional as-of date (YYYY-MM-DD); today when None.
+    """
+    return get_ratios_massive(ticker, curr_date)
+
+
+# ---------------------------------------------------------------------------
+# Snapshots & market movers (REST `/v2/snapshot/locale/us/*`)
+#   Plan-aware: entitlements-gated on free Basic (403). Once the plan includes
+#   snapshots, these power single-ticker verification and the pipeline universe.
+#   All degrade through the router (DataUnavailable) on the current plan.
+# ---------------------------------------------------------------------------
+
+
+def get_market_snapshot_massive(ticker: str) -> str:
+    """Latest consolidated market snapshot for one stock (plan-aware).
+
+    Uses `/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}` — the latest
+    day/minute/prevDay bars, VWAP, today's change, plus quote/trade when the
+    plan includes them. A verification-grade read for the market analyst.
+    Returns a ``key: value`` block, or an explicit 'unavailable' message when
+    entitlement-gated (403) or the snapshot is empty.
+
+    Args:
+        ticker: symbol.
+    """
+    try:
+        payload = _get(
+            f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
+            {},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _not_entitled("snapshot", exc)
+    t = (payload or {}).get("ticker") if isinstance(payload, dict) else None
+    if not t:
+        return f"market snapshot unavailable for {ticker}: no data returned."
+    day = t.get("day") or {}
+    prev = t.get("prevDay") or {}
+    lines = [f"## {ticker.upper()} Market Snapshot (Massive.com)", ""]
+    lines.append(f"- Last: {_fmt_num(day.get('c'))} | O {_fmt_num(day.get('o'))} "
+                 f"H {_fmt_num(day.get('h'))} L {_fmt_num(day.get('l'))} | "
+                 f"VWAP {_fmt_num(day.get('vw'))}")
+    lines.append(f"- Volume: {_fmt_int(day.get('v'))}")
+    lines.append(f"- Prev close: {_fmt_num(prev.get('c'))} | "
+                 f"Today's change: {_fmt_num(t.get('todaysChange'))} "
+                 f"({_fmt_num(t.get('todaysChangePerc'))}%)")
+    quote = t.get("lastQuote") or {}
+    if quote:
+        lines.append(f"- Quote bid {_fmt_num(quote.get('p'))} ask {_fmt_num(quote.get('P'))}")
+    trade = t.get("lastTrade") or {}
+    if trade:
+        lines.append(f"- Last trade {_fmt_num(trade.get('p'))} @ {_fmt_int(trade.get('s'))}")
+    return "\n".join(lines)
+
+
+def get_top_movers_massive(direction: str = "gainers", count: int = 10) -> str:
+    """Top U.S. market gainers/losers by snapshot (plan-aware).
+
+    Uses `/v2/snapshot/locale/us/markets/stocks/{direction}` (gainers/losers)
+    to list the top movers with their today-change and close — a clean,
+    OpenD-independent universe source for the cross-sectional pipeline
+    (`pipeline.py --universe`). Returns a ranked list, or an explicit
+    'unavailable' message when entitlement-gated (403).
+
+    Args:
+        direction: 'gainers' or 'losers'.
+        count: max rows to render.
+    """
+    direction = direction.lower().strip()
+    if direction not in ("gainers", "losers"):
+        return f"invalid direction '{direction}'; use 'gainers' or 'losers'."
+    try:
+        payload = _get(
+            f"/v2/snapshot/locale/us/markets/stocks/{direction}",
+            {"limit": count},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _not_entitled("top movers", exc)
+    rows = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(rows, list) or not rows:
+        return f"top {direction} unavailable: no data returned."
+    lines = [f"## Top U.S. Market {direction.title()} (Massive.com)", ""]
+    for row in rows[:count]:
+        sym = row.get("ticker") or "?"
+        day = row.get("day") or {}
+        change = day.get("c")
+        pct = row.get("todaysChangePerc")
+        lines.append(
+            f"- {sym}: {_fmt_num(change)} ({_fmt_num(pct)}%)"
+        )
+    return "\n".join(lines)
+
+
 __all__ = [
     "get_news_massive",
     "get_macro_indicators_massive",
     "get_short_interest_massive",
     "get_short_volume_massive",
     "get_form4_insider_massive",
+    "get_ratios_massive",
+    "get_fundamentals_massive",
+    "get_market_snapshot_massive",
+    "get_top_movers_massive",
     "fetch_macro_backdrop",
     "is_yield_curve_inverted",
     "latest_breakeven",

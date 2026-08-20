@@ -53,7 +53,28 @@ def _load_screener():
 
 def _build_universe(vs, args) -> list:
     tickers = []
-    if args.universe in ("top-losers", "heat-proxy"):
+    if args.universe == "top-movers-massive":
+        try:
+            from tradingagents.dataflows.massive import get_top_movers_massive
+
+            direction = args.movers_direction
+            rendered = get_top_movers_massive(direction, args.movers_count)
+            # Rendered lines look like "- AAPL: 120.5 (1.2%)". Keep the ones
+            # that parse as bare tickers; the plan-gated 'unavailable' line is
+            # ignored and the pipeline falls back to positional tickers.
+            for ln in rendered.splitlines():
+                ln = ln.strip()
+                if not ln.startswith("-"):
+                    continue
+                body = ln[1:].strip()
+                sym = body.split(":")[0].strip().upper()
+                if not sym or not sym.replace(".", "").isalnum():
+                    continue
+                if "unavailable" not in body.lower() and sym not in tickers:
+                    tickers.append(sym)
+        except Exception as exc:  # noqa: BLE001 - Massive plan-gated
+            logger.warning("massive mover universe unavailable (%s)", exc)
+    elif args.universe in ("top-losers", "heat-proxy"):
         try:
             from tradingagents.dataflows.moomoo import (
                 get_hot_movers_moomoo,
@@ -219,10 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("tickers", nargs="*", help="ticker symbols (fallback universe)")
     parser.add_argument("-f", "--file", help="universe file (one ticker per line)")
     parser.add_argument(
-        "-u", "--universe", choices=("tickers", "top-losers", "heat-proxy"), default="tickers"
+        "-u", "--universe", choices=("tickers", "top-losers", "heat-proxy", "top-movers-massive"), default="tickers"
     )
     parser.add_argument("--market", default="US")
     parser.add_argument("-n", "--movers-count", type=int, default=50)
+    parser.add_argument(
+        "--movers-direction",
+        choices=("gainers", "losers"),
+        default="losers",
+        help="Direction for --universe top-movers-massive (default losers)",
+    )
     parser.add_argument("--top", type=int, default=5, help="picks to analyze")
     parser.add_argument("--limit", type=int, default=0, help="max candidates to screen (0 = all)")
     parser.add_argument("-d", "--date", default=date.today().isoformat())
