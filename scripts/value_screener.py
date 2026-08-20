@@ -410,6 +410,9 @@ def _watchlist_markdown(results: list) -> str:
     show_swing = any(r.get("scan_c") for r in results)
     if show_swing:
         heads += ["ScanC", "RS", "Stp", "T2"]
+    show_vcp = any(r.get("vcp_flag") for r in results)
+    if show_vcp:
+        heads += ["VCP", "Brk"]
     show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
     if show_trap:
         heads.append("Trap")
@@ -460,6 +463,9 @@ def _watchlist_markdown(results: list) -> str:
             cells.append(cell(r.get("swing_rs") or "n/a"))
             cells.append(cell(r.get("swing_stop_pct"), "{:.1%}"))
             cells.append(cell(r.get("swing_t2_pct"), "{:.1%}"))
+        if show_vcp:
+            cells.append("yes" if r.get("vcp_flag") else "no")
+            cells.append(cell(r.get("vcp_brk"), "{:.1%}"))
         if show_trap:
             cells.append(cell(r.get("trap")))
         if show_chg:
@@ -570,17 +576,31 @@ def _swing_scan(symbol: str, ohlcv: dict, benchmark: list) -> dict | None:
         if len(closes) < 200:
             return None
         atr_v = _atr(highs, lows, closes, window=14)
-        rep = swing_report(
-            closes, highs, lows, vols, atr_value=atr_v, benchmark_closes=benchmark
-        )
+        rep = swing_report(closes, highs, lows, vols, atr_value=atr_v, benchmark_closes=benchmark)
         if not rep:
             return None
         out = dict(rep)
-        t2 = ((rep.get("targets") or {}).get("t2"))
+        t2 = (rep.get("targets") or {}).get("t2")
         last = closes[-1] if closes else None
         out["t2_pct"] = (float(t2) / last - 1.0) if (t2 and last) else None
         return out
     except Exception:  # noqa: BLE001 - a failed swing read must not abort a run
+        return None
+
+
+def _vcp_scan(ohlcv: dict) -> dict | None:
+    """Volatility Contraction Pattern read for one symbol."""
+    try:
+        from tradingagents.strategies.swing import vcp_setup
+
+        closes = ohlcv.get("closes") or []
+        highs = ohlcv.get("highs") or []
+        lows = ohlcv.get("lows") or []
+        vols = ohlcv.get("volumes") or []
+        if len(closes) < 90:
+            return None
+        return vcp_setup(closes, highs, lows, vols)
+    except Exception:  # noqa: BLE001 - a failed vcp read must not abort a run
         return None
 
 
@@ -776,14 +796,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--scan",
-        choices=("value", "trend-pullback", "breakout", "momentum", "swing", "all"),
+        choices=("value", "trend-pullback", "breakout", "momentum", "swing", "vcp", "all"),
         default="all",
         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
         "dip in uptrend), 'breakout' (volatility contraction/breakout), "
         "'momentum' (day-trade pre-filter + first pullback), 'swing' "
         "(techno-fundamental swing: stacked trend + RS vs benchmark + "
-        "pullback + stops/targets), or 'all' (default: keep all, flag "
-        "strategies)",
+        "pullback + stops/targets), 'vcp' (volatility contraction pattern: "
+        "successively shallower pullbacks on fading volume), or 'all' "
+        "(default: keep all, flag strategies)",
     )
     parser.add_argument(
         "--out-dir",
@@ -952,6 +973,12 @@ def main(argv: list[str] | None = None) -> int:
                             scan_meta[symbol]["swing"] = sw
                         if not (sw and sw.get("candidate")):
                             continue
+                    if args.scan == "vcp":
+                        vc = _vcp_scan(ohlcv)
+                        if vc is not None:
+                            scan_meta[symbol]["vcp"] = vc
+                        if not (vc and vc.get("candidate")):
+                            continue
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
                         avg_vol = sum(vols) / len(vols) if vols else 0.0
@@ -1044,6 +1071,9 @@ def main(argv: list[str] | None = None) -> int:
             row["swing_rs"] = _sw_rs.get("verdict")
             row["swing_stop_pct"] = ((_sw or {}).get("stop") or {}).get("risk_pct")
             row["swing_t2_pct"] = (_sw or {}).get("t2_pct")
+            _vc = (sig or {}).get("vcp") if sig else None
+            row["vcp_flag"] = bool(_vc and _vc.get("candidate"))
+            row["vcp_brk"] = (_vc or {}).get("close_to_base")
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None

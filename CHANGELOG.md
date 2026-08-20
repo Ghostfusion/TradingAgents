@@ -10,6 +10,12 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Volatility Contraction Pattern scan (`--scan vcp`)** -
+  `strategies/swing.py::vcp_setup` (strict pivot troughs, last-3 pullback depths vs
+  the base high must contract 15%->8%->3%-style, deepest pullback within 30%
+  of the base, fading volume across troughs; absent volume never fails);
+  wired as a screener mode with VCP/Brk columns; `swing_report` carries the
+  VCP block as an additional signal. Docs in `Strategies/scan.md`.
 - **Techno-fundamental swing scan (`--scan swing`)** - `strategies/swing.py`
   (trend architecture: 20-EMA stacked over rising 50/200-SMA, RSI 45-70 band
   with 40-50 reset, pullback-into-EMA20 on fading volume, 1-ATR swing-low

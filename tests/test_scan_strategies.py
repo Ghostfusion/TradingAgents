@@ -377,3 +377,100 @@ def test_scan_swing_filters_non_matches(capsys):
                 "swing",
             ]
         )
+
+
+def _vcp_csv(flat: bool = False):
+    """A VCP base: rally then three shallower pullbacks (15% -> 8% -> 3%)
+    on fading volume; with ``flat`` a flat line (no pullbacks) instead."""
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    if flat:
+        for i in range(120):
+            rows.append(f"2026-01-{i % 28 + 1:02d},100.1,102.0,98.0,100.0,5000000")
+        return "\n".join(rows) + "\n"
+    closes = [100.0 + 1.25 * i for i in range(80)]
+    closes += [200.0, 190.0, 180.0, 172.0, 170.0, 178.0, 186.0, 195.0]
+    closes += [195.0, 192.0, 188.0, 184.0, 188.0, 192.0, 196.0]
+    closes += [196.0, 195.5, 194.2, 194.0, 195.0, 196.0, 197.0, 197.5, 198.0]
+    vols = [10_000_000] * 80 + [8_000_000] * 8 + [6_000_000] * 7 + [4_000_000] * 9
+    for i, (c, v) in enumerate(zip(closes, vols, strict=False)):
+        rows.append(f"2026-01-{i % 28 + 1:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}")
+    return "\n".join(rows) + "\n"
+
+
+def _vcp_route(method, *a, **k):
+    if method == "get_stock_data":
+        sym = a[0] if a else "?"
+        return _vcp_csv(flat=sym == "FLAT")
+    return "NO_DATA_AVAILABLE"
+
+
+def test_scan_vcp_passes_and_shows_columns(capsys):
+    """--scan vcp keeps VCP bases and shows VCP/Brk columns."""
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=_vcp_route),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+    ):
+        vs.main(
+            [
+                "--universe",
+                "top-losers",
+                "-n",
+                "2",
+                "-d",
+                "2026-01-02",
+                "--min-mcap",
+                "1e9",
+                "--min-atr-pct",
+                "0",
+                "--scan",
+                "vcp",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert "VCP" in out and "Brk" in out
+
+
+def test_scan_vcp_filters_non_matches(capsys):
+    """--scan vcp must drop names without a contracting base."""
+    import pytest as _pytest
+
+    def flat_route(method, *a, **k):
+        if method == "get_stock_data":
+            return _vcp_csv(flat=True)
+        return "NO_DATA_AVAILABLE"
+
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=flat_route),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        _pytest.raises(SystemExit),
+    ):
+        vs.main(
+            [
+                "--universe",
+                "top-losers",
+                "-n",
+                "2",
+                "-d",
+                "2026-01-02",
+                "--min-mcap",
+                "1e9",
+                "--min-atr-pct",
+                "0",
+                "--scan",
+                "vcp",
+            ]
+        )

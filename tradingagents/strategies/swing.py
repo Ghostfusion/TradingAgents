@@ -238,6 +238,108 @@ def trail_ema(closes: list, n: int = 20) -> dict:
     return {"ema": round(ema, 4), "below": below, "exit": below}
 
 
+def _pivot_lows(lows: list, k: int = 3) -> list[int]:
+    """Indices of strict local minima (pivot troughs): lower than the ``k``
+    bars on either side."""
+    out = []
+    for i in range(k, len(lows) - k):
+        if lows[i] < min(lows[i - k : i]) and lows[i] < min(lows[i + 1 : i + k + 1]):
+            out.append(i)
+    return out
+
+
+def vcp_setup(
+    closes: list,
+    highs: list,
+    lows: list,
+    volumes: list,
+    window: int = 90,
+    pivot: int = 3,
+    min_contractions: int = 3,
+    max_base_depth: float = 0.30,
+    contraction_tol: float = 1.10,
+    spring_pct: float = 0.05,
+) -> dict:
+    """Volatility Contraction Pattern (framework Phase 3: 15% -> 8% -> 3%).
+
+    A VCP base is a series of successively *shallower* pullbacks off a base
+    high on *declining* volume - volatility contracting before a breakout.
+
+    * pivot troughs over the trailing ``window`` (strict, ``pivot``-bar
+      lookback either side)
+    * each pullback depth = (base high - trough low) / base high
+    * contraction_ok: the last ``min_contractions`` depths are non-increasing
+      (later pullbacks shallower, within ``contraction_tol`` for noise)
+    * base_ok: the deepest pullback stays inside ``max_base_depth`` (30%)
+    * volume_fade: mean volume between successive troughs does not expand
+    * near_breakout: the close is within ``spring_pct`` of the base high
+      (the "spring", informational - not a gate)
+
+    Unknown volume data never fails the gate: a missing volume series drives
+    ``volume_fade`` to None (ignored) rather than False.
+    """
+    empty = {
+        "candidate": False,
+        "depths": [],
+        "base_high": None,
+        "close_to_base": None,
+        "contraction_ok": None,
+        "volume_fade": None,
+        "near_breakout": None,
+        "context": "vcp: no data",
+    }
+    if not closes or len(closes) < window or len(highs) < window or len(lows) < window:
+        return empty
+    seg_h = highs[-window:]
+    seg_l = lows[-window:]
+    seg_v = volumes[-window:]
+    base_high = max(seg_h[:-pivot]) if len(seg_h) > pivot else max(seg_h)
+    if not base_high or base_high <= 0:
+        return empty
+    piv = [i for i in _pivot_lows(seg_l, pivot) if seg_l[i] < base_high]
+    depths = [(i, (base_high - seg_l[i]) / base_high) for i in piv]
+    depths = [(i, d) for i, d in depths if d >= 0.01]  # skip noise touches
+    if len(depths) < min_contractions:
+        return {
+            "candidate": False,
+            "depths": [round(d, 4) for _, d in depths],
+            "base_high": round(base_high, 4),
+            "close_to_base": round((base_high - closes[-1]) / base_high, 4),
+            "contraction_ok": None,
+            "volume_fade": None,
+            "near_breakout": None,
+            "context": "vcp: too few pullbacks",
+        }
+    last = depths[-min_contractions:]
+    ds = [d for _, d in last]
+    contract_ok = all(ds[i] <= ds[i - 1] * contraction_tol for i in range(1, len(ds)))
+    base_ok = ds[0] <= max_base_depth
+    idxs = [i for i, _ in last]
+    vols = []
+    for a, b in zip(idxs, idxs[1:] + [len(seg_v)], strict=False):
+        seg = seg_v[a:b]
+        vols.append(sum(seg) / len(seg) if seg else None)
+    vol_fade = None
+    if len(vols) >= 2 and all(v is not None for v in vols):
+        vol_fade = all(vols[i] <= vols[i - 1] * 1.05 for i in range(1, len(vols)))
+    near = (base_high - closes[-1]) / base_high
+    success = bool(
+        contract_ok and base_ok and len(ds) >= min_contractions and (vol_fade is not False)
+    )
+    ctx_depths = "/".join(f"{d:.1%}" for d in ds)
+    return {
+        "candidate": success,
+        "depths": [round(d, 4) for d in ds],
+        "base_high": round(base_high, 4),
+        "close_to_base": round(near, 4),
+        "contraction_ok": contract_ok,
+        "volume_fade": vol_fade,
+        "near_breakout": near <= spring_pct,
+        "context": f"vcp depths={ctx_depths} contract={contract_ok} "
+        f"volfade={vol_fade} break={near:.1%}",
+    }
+
+
 def swing_report(
     closes: list,
     highs: list,
@@ -307,6 +409,7 @@ def swing_report(
         if stop_block and stop_block.get("stop")
         else None,
         "trail": trail_ema(closes),
+        "vcp": vcp_setup(closes, highs, lows, volumes),
         "candidate": candidate,
         "context": "; ".join(p for p in ctx_parts if p),
     }
@@ -321,5 +424,6 @@ __all__ = [
     "targets_rr",
     "scaleout_plan",
     "trail_ema",
+    "vcp_setup",
     "swing_report",
 ]

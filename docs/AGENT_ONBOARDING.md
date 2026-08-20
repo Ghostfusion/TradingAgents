@@ -187,7 +187,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 - 2026-08-19 `0ed81a3` - review fixes: indicator warmup, parallelism, caching
 - 2026-08-19 `1e2246b` - moomoo vendor integration + event contracts + --vendor
 
-Full suite: **888+ tested** (2 skipped: bedrock extra, live DeepSeek).
+Full suite: **898+ tested** (2 skipped: bedrock extra, live DeepSeek).
 
 ---
 

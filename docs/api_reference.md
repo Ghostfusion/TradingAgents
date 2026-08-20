@@ -308,7 +308,7 @@ preserves `Risk Gate (computed)` blocks.
 - value_screener.py: `tickers` `-f/--file` `-d/--date` `-l/--limit`
   `-u/--universe` `--market` `-n/--movers-count` `--min-mcap` `--price-min`
   `--pe-max` `--min-avg-vol` `--min-atr-pct` `--intraday` `--scan`
-  (value|trend-pullback|breakout|momentum|swing|all)
+  (value|trend-pullback|breakout|momentum|swing|vcp|all)
   `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
 
 ## 10. Docs index

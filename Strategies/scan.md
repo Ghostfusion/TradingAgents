@@ -62,11 +62,27 @@ Table columns for swing mode: `ScanC` (yes/no), `RS` (lead/up/lag/div/n/a),
 (50% off at 2R, break-even on the rest, trail the 20-day EMA) is covered by
 `tradingagents/strategies/swing.py` and `exits.py`.
 
+## `vcp` (volatility contraction pattern)
+
+The classic Weinberger/Minervini base: a series of successively *shallower*
+pullbacks off a base high on *declining* volume - volatility contracting
+before a breakout (framework Phase 3: 15% -> 8% -> 3%).
+`tradingagents/strategies/swing.py::vcp_setup`:
+
+- pivot troughs over the trailing 90 bars (strict 3-bar lookback)
+- last 3 pullback depths (vs the base high) must be **non-increasing** (later
+  pullbacks shallower, 10% tolerance for noise)
+- the deepest pullback stays inside **30%** of the base high
+- mean volume between successive troughs must not expand (absent volume is
+  ignored, never a failure)
+- `Brk` column = distance from the close to the base high (the "spring")
+
 ## `all` (default)
 
 Everything survives; `ScanA`/`ScanB` columns flag trend-pullback and breakout
-setups and `ScanC`/`RS`/`Stp`/`T2` appear when any swing setup is present
-(a `--scan swing`/`momentum` run filters, `all` only flags).
+setups, `ScanC`/`RS`/`Stp`/`T2` appear when any swing setup is present and
+`VCP`/`Brk` when a volatility-contraction base is detected. A dedicated
+`--scan <mode>` filters to that one setup; `all` only flags.
 
 ## Benchmark note
 
