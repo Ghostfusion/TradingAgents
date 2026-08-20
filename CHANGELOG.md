@@ -10,6 +10,13 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive Flat-File validator** - `scripts/validate_massive_flat.py`
+  parses a day-aggregates CSV dropped in the flat folder and reports
+  per-ticker close counts, date ranges and usability (>=15 rows) via the
+  screener's exact `ohlcv_for_ticker_dir` lookup, so you confirm a genuine
+  Massive file (needs Stocks Starter+) before enabling the bulk import.
+  Hermetic test in `tests/test_massive_flat_noi.py`.
+
 - **Massive Flat-File screener seam + live run** - the value-screener's
   `_fetch_ohlcv` now reads a configured Massive Flat-File day-aggregates CSV
   first from a Massive day-aggregates folder (`TRADINGAGENTS_MASSIVE_FLAT_DIR`, default `data/massive_flat`) when `enable_massive_flat` is ON (default OFF) for bulk

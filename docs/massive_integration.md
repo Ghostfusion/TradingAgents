@@ -296,6 +296,12 @@ and both are plan-gated.
   the download URL is account-scoped (console/SDK), so the module takes a
   local CSV path rather than a REST call.
 
+A small **validator** (``scripts/validate_massive_flat.py``) parses whatever
+CSV you drop in the folder and reports per-ticker close counts, date ranges,
+and whether each is usable (>=15 rows) — both in-isolation and via the
+screener's exact ``ohlcv_for_ticker_dir`` lookup — so you confirm a genuine
+file before relying on it.
+
 Both are hermetic-tested (`tests/test_massive_flat_noi.py`). They activate as
 soon as the account gains the entitlement - no code change.
 

@@ -148,3 +148,23 @@ class MassiveScreenerFlatTests(unittest.TestCase):
             with suppress(OSError):
                 os.remove(os.path.join(folder, "days.csv"))
                 os.rmdir(folder)
+
+
+
+@pytest.mark.unit
+class MassiveFlatValidatorTests(unittest.TestCase):
+    """The helper reports a usable-vs-too-few verdict for the screener."""
+
+    def test_validator_flags_ticker_present_usable(self):
+        from unittest import mock as m
+
+        import scripts.validate_massive_flat as validator
+        from tradingagents.dataflows import massive_flat
+
+        fake = {"closes": [100.0] * 20, "opens": [], "highs": [], "lows": [],
+                "volumes": [], "dates": ["2026-01-01"]}
+        with m.patch.object(massive_flat, "ohlcv_for_ticker_dir", return_value=fake):
+            # A present, usable symbol should be flagged ready (rc 0).
+            rc = validator.main(["data/massive_flat", "-t", "AAPL"])
+            self.assertEqual(rc, 0)
+
