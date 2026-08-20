@@ -102,4 +102,8 @@ forex `EURUSD -> EURUSD=X`, crypto `BTCUSD -> BTC-USD`, indices `SPX500 ->
 [`09-massive-integration.md`](09-massive-integration.md). It registers
 `massive` in several categories and adds derived tools.
 
+For the full **catalog of every provider/source** (routed vendors, direct
+sources, Massive sub-modules, API keys, per-category chains), see
+[`12-data-providers.md`](12-data-providers.md).
+
 Continue to [`04-strategies.md`](04-strategies.md).

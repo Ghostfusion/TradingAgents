@@ -23,6 +23,7 @@ drill into whatever area you are touching.
 | 9 | `09-massive-integration.md` | the Massive.com add-on and its seams |
 | 10 | `10-tests-layout.md` | the `tests/` directory map, fixtures, conventions |
 | 11 | `11-agent-decision-tools.md` | audit + plan: deterministic functions to expose as agent tools |
+| 12 | `12-data-providers.md` | the 13 data providers/sources and how each is wired |
 
 Companion docs (repo root `docs/`):
 - [`docs/AGENT_ONBOARDING.md`](../AGENT_ONBOARDING.md) — environment runbook / gotchas (read first).

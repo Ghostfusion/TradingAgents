@@ -10,6 +10,13 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Data providers doc (`docs/developer/12-data-providers.md`)** - catalogs
+  all **13 data providers** the project uses: the 8 routed vendors
+  (`yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo,
+  massive`) plus 5 direct sources (Alpaca, FMP, Reddit, StockTwits,
+  float_shares), with per-category `data_vendors` chains, Massive sub-modules,
+  and API-key gates.
+
 - **Agent decision-tools (implemented)** - `docs/developer/11-agent-decision-tools.md`
   audits the strategy + dataflow surface and lands six decision-grounding
   `@tool`s the analyst LLMs now cite: `get_exit_check` (stop/target/action),
