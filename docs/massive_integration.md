@@ -97,7 +97,7 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | --- | --- | --- | --- |
 | 1 | `/v2/reference/news` (sentiment) | Sentiment + News analysts | ✅ implemented |
 | 2 | `economy/treasury-yields`, `inflation`, `inflation-expectations`, `labor-market` | Macro analyst + catalyst overlay (B1) decoupled from OpenD | ✅ implemented |
-| 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | planned |
+| 3 | `fundamentals/short-interest`, `short-volume` | Fundamentals + existing `short_interest` category | ✅ implemented |
 | 4 | `filings/13-f-filings`, `form-4` | institutional/insider fundamentals + screener | planned |
 | 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
 | 6 | `fundamentals/ratios|balance-sheets|income-statements|cash-flow|float` | `get_analyst_verdict` inputs (EY, EV/EBIT, ROE) | planned |
@@ -164,6 +164,37 @@ py -3.12 -c "
 from tradingagents.dataflows.massive import get_macro_indicators_massive, fetch_macro_backdrop
 print(get_macro_indicators_massive('10y_treasury', '2026-08-18', 60))
 print(fetch_macro_backdrop('2026-08-18'))
+"
+```
+
+---
+
+## 3b. Short interest / short volume (implemented)
+
+Massive's `/stocks/v1/short-interest` (FINRA two-week settlement cadence) and
+`/stocks/v1/short-volume` (daily FINRA/ATS short-sale ratio):
+
+- **`get_short_interest_massive(ticker)`** — registered as a `massive` vendor
+  in the existing `short_interest` category, so the existing
+  `get_short_interest(ticker)` tool routes to it when configured
+  (`data_vendors.short_interest = "massive,..."`). Returns the most recent
+  settlements (newest-first) with `short_interest` shares, `days_to_cover` and
+  average daily volume — a squeeze/conviction read (GME push-button example:
+  days-to-cover ~17).
+- **`get_short_volume(ticker, start_date, end_date)`** — a dedicated tool bound
+  to the market analyst, returning daily short-sale volume **ratio** (% of total
+  volume sold short) to gauge intraday shorting pressure.
+
+Both follow the error taxonomy (`NoMarketDataError` on empty) so they degrade
+cleanly through the router.
+
+Verify live:
+
+```bash
+py -3.12 -c "
+from tradingagents.dataflows.massive import get_short_interest_massive, get_short_volume_massive
+print(get_short_interest_massive('GME', 3))
+print(get_short_volume_massive('AAPL', '2026-08-10', '2026-08-19', 3))
 "
 ```
 

@@ -19,6 +19,8 @@ from tradingagents.dataflows.massive import (
     fetch_macro_backdrop,
     get_macro_indicators_massive,
     get_news_massive,
+    get_short_interest_massive,
+    get_short_volume_massive,
     is_yield_curve_inverted,
     latest_breakeven,
     massive_api_key,
@@ -218,3 +220,56 @@ class MassiveBackdropTests(unittest.TestCase):
         with mock.patch.object(massive, "_get", side_effect=RuntimeError("boom")):
             out = fetch_macro_backdrop("2026-08-18")
         self.assertIsNone(out)
+
+
+@pytest.mark.unit
+class MassiveShortInterestTests(unittest.TestCase):
+    def test_short_interest_formats_latest_first(self):
+        rows = [
+            {"settlement_date": "2026-07-31", "short_interest": 53736062,
+             "avg_daily_volume": 3150012, "days_to_cover": 17.06},
+            {"settlement_date": "2026-07-15", "short_interest": 55426276,
+             "avg_daily_volume": 3433961, "days_to_cover": 16.14},
+        ]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_short_interest_massive("GME")
+        self.assertIn("53,736,062", out)
+        self.assertIn("17.1", out)
+        self.assertIn("Days to cover: 17.1", out)
+
+    def test_short_interest_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value={"results": []}),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_short_interest_massive("GME")
+
+    def test_short_volume_renders_ratio(self):
+        rows = [
+            {"date": "2026-08-10", "short_volume_ratio": 42.4,
+             "short_volume": 6318868, "total_volume": 14914704},
+        ]
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = get_short_volume_massive("AAPL", "2026-08-10", "2026-08-19")
+        self.assertIn("42.4%", out)
+        self.assertIn("2026-08-10", out)
+
+    def test_short_volume_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_short_volume_massive("AAPL", "2026-08-10", "2026-08-19")
+
+    def test_short_interest_registered_as_vendor(self):
+        self.assertIn("massive", interface.VENDOR_METHODS["get_short_interest"])
+
+    def test_route_short_interest_to_massive_when_configured(self):
+        rows = [{"settlement_date": "2026-07-31", "short_interest": 1,
+                 "avg_daily_volume": 2, "days_to_cover": 3.0}]
+        config_module.set_config(
+            {"data_vendors": {"short_interest": "massive"}}
+        )
+        with mock.patch.object(massive, "_get", return_value=rows):
+            out = interface.route_to_vendor("get_short_interest", "GME")
+        self.assertIn("Short Interest", out)

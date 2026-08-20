@@ -64,3 +64,27 @@ def get_short_interest(
         str: A formatted report of short interest and ownership
     """
     return route_to_vendor("get_short_interest", ticker)
+
+
+@tool
+def get_short_volume(
+    ticker: Annotated[str, "ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> str:
+    """
+    Retrieve daily short-sale volume ratio (% of total volume sold short) for a
+    ticker from FINRA/ATS data via Massive.com. Elevated readings indicate
+    heavy intraday shorting — a conviction / squeeze signal.
+
+    Args:
+        ticker (str): Ticker symbol of the company
+        start_date (str): Start date in yyyy-mm-dd format
+        end_date (str): End date in yyyy-mm-dd format
+
+    Returns:
+        str: A formatted report of daily short-volume ratios
+    """
+    from tradingagents.dataflows.massive import get_short_volume_massive
+
+    return get_short_volume_massive(ticker, start_date, end_date)

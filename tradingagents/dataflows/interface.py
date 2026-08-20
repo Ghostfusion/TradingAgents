@@ -30,6 +30,7 @@ from .fred import get_macro_data as get_fred_macro_data
 from .massive import (
     get_macro_indicators_massive,
     get_news_massive,
+    get_short_interest_massive,
 )
 from .moomoo import (
     get_analyst_ratings_moomoo,
@@ -329,6 +330,7 @@ VENDOR_METHODS = {
     "get_short_interest": {
         "yfinance": get_short_interest_yfinance,
         "moomoo": get_short_interest_moomoo,
+        "massive": get_short_interest_massive,
     },
     # moomoo-only enrichment (Tier 1/2)
     "get_capital_flow": {

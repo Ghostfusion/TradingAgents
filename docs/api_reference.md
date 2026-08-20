@@ -239,7 +239,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `earnings_calendar` : `get_earnings_calendar`
 - `options_data` : `get_options_chain`
 - `sec_filings` : `get_sec_filings`
-- `short_interest` : `get_short_interest`
+- `short_interest` : `get_short_interest`, `get_short_volume`
 - **computed-analysis tools** (bound to the analyst tool loops, see 6.4):
   `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`,
   `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`,
@@ -267,6 +267,8 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_fundamentals` also accepts `finnhub` as a vendor
 - options chain: `yfinance`, `moomoo`
 - SEC filings: `sec_edgar`
+- short interest: `yfinance`, `moomoo`, `massive`
+- short volume (daily short-sale ratio, Massive-only): `massive`
 - all A-series/tier tools: `moomoo` only (optional)
 
 `VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive`.
@@ -281,6 +283,9 @@ Massive also drives a deterministic `macro_backdrop` (yield-curve
 inversion / elevated breakevens) that keeps the B1 catalyst overlay
 de-risking even when the OpenD event calendar is unavailable (see
 `strategies/catalyst.py` + `docs/massive_integration.md` §3a).
+Short interest (`get_short_interest` chain, FINRA 2-week cadence) and a
+`get_short_volume` tool (daily short-sale ratio, market analyst) come from the
+`/stocks/v1/*` endpoints.
 Plan-dependent recency/entitlements; FMV/Greeks are Business-only
 (unavailable, never invented). US-only — supplements, not replaces,
 moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.

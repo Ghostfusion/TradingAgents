@@ -39,6 +39,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_revenue_breakdown,
     get_sec_filings,
     get_short_interest,
+    get_short_volume,
     get_smart_money,
     get_stock_data,
     get_verified_market_snapshot,
@@ -257,6 +258,7 @@ class TradingAgentsGraph:
                     # Forward-looking positioning (free yfinance sources)
                     get_options_chain,
                     get_short_interest,
+                    get_short_volume,
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,
                     get_expected_move,

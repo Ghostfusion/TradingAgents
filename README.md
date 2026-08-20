@@ -35,6 +35,7 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-20] **Massive short-interest/short-volume** - `get_short_interest_massive` adds a `massive` `short_interest` vendor (FINRA 2-week settlement: shares short, days-to-cover, avg daily volume); a dedicated `get_short_volume(ticker, start, end)` tool surfaces the daily short-sale volume ratio to the market analyst. Both degrade cleanly via the error taxonomy.
 - [2026-08-20] **Massive economy + catalyst OpenD decoupling** - `get_macro_indicators_massive` adds a `massive` `macro_data` vendor (treasury-yields / inflation / inflation-expectations / labor-market, FRED-compatible aliases like `10y_treasury`/`yield_curve`/`cpi`); a deterministic `macro_backdrop` (yield-curve inversion x0.70, elevated 10y breakeven x0.75) keeps the B1 catalyst overlay de-risking near macro stress even when the moomoo OpenD event calendar is down — `fetch_catalyst_data` now degrades per-section instead of nulling the overlay on moomoo failure.
 - [2026-08-20] **Massive.com vendor (news sentiment)** - new `dataflows/massive.py` + `get_massive_news`: per-article **structured sentiment** (positive/negative/neutral + reasoning) from `/v2/reference/news`, ticker-filtered; bound to the news/social tool nodes + news analyst; `get_news` chain gains a `massive` vendor (opt-in). Key: `MASSIVE_API_KEY`. US-only additive vendor — see `docs/massive_integration.md`.
 - [2026-08-20] **Moomoo period-order + prior-period fix** - the value screener
@@ -350,6 +351,7 @@ Beyond the core price, fundamental, and news vendors, TradingAgents can pull add
 - **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
 - **News with structured sentiment** (Massive.com) — per-article sentiment (positive/negative/neutral) + reasoning, surfaced to the news/social analysts via `get_massive_news`. Set `MASSIVE_API_KEY` (or `TRADINGAGENTS_MASSIVE_API_KEY`). US-centric additive vendor; see `docs/massive_integration.md`.
 - **Macro economy + catalyst OpenD decoupling** (Massive.com) — `get_macro_indicators` gains a `massive` vendor (treasury yields / inflation / inflation-expectations / labor-market, FRED-compatible aliases); a deterministic `macro_backdrop` (yield-curve inversion / elevated breakevens) keeps the B1 catalyst overlay de-risking near macro stress even when the moomoo OpenD event calendar is unavailable.
+- **Short interest / short volume** (Massive.com) — `get_short_interest` gains a `massive` vendor (FINRA 2-week settlement, days-to-cover / shares short); a dedicated `get_short_volume` tool surfaces the daily short-sale volume ratio to the market analyst.
 
 Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
 

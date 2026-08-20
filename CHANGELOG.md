@@ -10,6 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive short interest / short volume** - `get_short_interest_massive`
+  registers `massive` in the existing `short_interest` category (FINRA
+  two-week settlement: shares short, days-to-cover, avg daily volume, sorted
+  newest-first), so the existing `get_short_interest` tool routes to it when
+  configured. A dedicated `get_short_volume(ticker, start, end)` tool (daily
+  short-sale volume ratio) is bound to the market analyst. Both degrade via
+  the error taxonomy (`NoMarketDataError` on empty). Tests in
+  `tests/test_massive_vendor.py`. Docs: `docs/massive_integration.md` §3b.
+
 - **Massive macro economy + catalyst OpenD decoupling** - `get_macro_indicators_massive`
   registers `massive` as a `macro_data` vendor (treasury-yields / inflation /
   inflation-expectations / labor-market with FRED-compatible aliases) so macro

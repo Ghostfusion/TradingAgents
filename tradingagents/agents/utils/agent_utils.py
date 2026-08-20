@@ -42,6 +42,7 @@ from tradingagents.agents.utils.market_position_tools import (
     get_options_chain,
     get_sec_filings,
     get_short_interest,
+    get_short_volume,
 )
 from tradingagents.agents.utils.moomoo_extra_tools import (
     get_capital_flow,
@@ -85,6 +86,7 @@ __all__ = [
     "get_options_chain",
     "get_sec_filings",
     "get_short_interest",
+    "get_short_volume",
     "get_capital_flow",
     "get_smart_money",
     "get_economic_calendar",

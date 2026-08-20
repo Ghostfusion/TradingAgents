@@ -464,9 +464,133 @@ def fetch_macro_backdrop(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Short interest / short volume (REST `/stocks/v1/*`) — squeeze & conviction
+# ---------------------------------------------------------------------------
+
+
+def _fmt_int(value) -> str:
+    """Format a number with thousands separators, or 'n/a'."""
+    if value is None:
+        return "n/a"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if n.is_integer():
+        return f"{int(n):,}"
+    return f"{n:,.1f}"
+
+
+def get_short_interest_massive(ticker: str, rows: int = 4) -> str:
+    """FINRA short interest (two-week settlement cadence) for a ticker.
+
+    Matches the ``get_short_interest(ticker)`` vendor contract (single symbol
+    arg) so it plugs into the existing ``short_interest`` category and the
+    ``get_short_interest`` tool. Returns the most recent settlements
+    (newest-first) with short_interest, days_to_cover and average daily volume
+    so the market analyst reads a squeeze/conviction signal.
+
+    Raises ``NoMarketDataError`` when the provider returns no rows.
+    """
+    from .errors import NoMarketDataError  # local to avoid top-level cycle
+
+    payload = _get(
+        "/stocks/v1/short-interest",
+        {"ticker": ticker, "sort": "settlement_date.desc", "limit": rows},
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no short-interest for {ticker}"
+        )
+
+    lines = [f"## {ticker.upper()} Short Interest (Massive.com, FINRA)", ""]
+    for row in results:
+        date_s = str(row.get("settlement_date") or "?")[:10]
+        short_i = row.get("short_interest")
+        dtc = row.get("days_to_cover")
+        adv = row.get("avg_daily_volume")
+        lines.append(f"- Settlement {date_s}:")
+        lines.append(f"  - Shares short: {_fmt_int(short_i)}")
+        lines.append(f"  - Days to cover: {_fmt_num(dtc)}")
+        lines.append(f"  - Avg daily volume: {_fmt_int(adv)}")
+
+    latest = results[0]
+    dtc = latest.get("days_to_cover")
+    lines.append("")
+    note = (
+        "Interpretation: days_to_cover >5 means unwinding would take time "
+        "(high squeeze/conviction); short-interest rising across settlements "
+        "indicates building bearish positioning."
+    )
+    if dtc is not None:
+        try:
+            lines.append(f"Latest days-to-cover = {float(dtc):.1f}.")
+            lines.append(note)
+        except (TypeError, ValueError):
+            pass
+    return "\n".join(lines)
+
+
+def get_short_volume_massive(
+    ticker: str, start_date: str, end_date: str, rows: int = 10
+) -> str:
+    """Daily short-sale volume ratio (%) for a ticker from FINRA / ATS data.
+
+    ``short_volume_ratio`` = short volume / total volume (%). Elevated readings
+    indicate heavy intraday shorting — a conviction / squeeze signal the
+    market analyst can weigh. Returns the most recent days within the window,
+    newest-first.
+
+    Raises ``NoMarketDataError`` when the provider returns no rows.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(
+        "/stocks/v1/short-volume",
+        {
+            "ticker": ticker,
+            "date.gte": start_date,
+            "date.lte": end_date,
+            "limit": rows,
+        },
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no short-volume for {ticker}"
+        )
+
+    lines = [f"## {ticker.upper()} Short Volume (Massive.com, % of total)", ""]
+    for row in results:
+        date_s = str(row.get("date") or "?")[:10]
+        ratio = row.get("short_volume_ratio")
+        short_v = row.get("short_volume")
+        total_v = row.get("total_volume")
+        lines.append(
+            f"- {date_s}: short volume {_fmt_int(short_v)} of {_fmt_int(total_v)} "
+            f"({_fmt_num(ratio)}%)"
+        )
+    return "\n".join(lines)
+
+
+def _fmt_num(value) -> str:
+    """Format a number to 1-2 decimals; n/a when unparseable."""
+    if value is None:
+        return "n/a"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    return f"{n:.1f}"
+
+
 __all__ = [
     "get_news_massive",
     "get_macro_indicators_massive",
+    "get_short_interest_massive",
+    "get_short_volume_massive",
     "fetch_macro_backdrop",
     "is_yield_curve_inverted",
     "latest_breakeven",
