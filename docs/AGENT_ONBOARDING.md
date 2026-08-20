@@ -108,7 +108,7 @@ tradingagents/
 │  ├─ regime.py size.py factors.py events.py catalyst.py orderflow.py
 │  ├─ contract.py (G1) calibration.py consensus.py sentiment.py exits.py
 │  ├─ risk_governor.py (R0-R4) book_risk.py debate_context.py portfolio.py
-│  └─ swing.py relative_strength.py  # techno-fundamental swing (--scan swing)
+│  └─ swing.py relative_strength.py sector_rank.py  # techno-fundamental swing (--scan swing/vcp)
 ├── llm_clients/           # factory + provider registry (OpenAI/anthropic/google/azure/bedrock/
 │                          #   openrouter/deepseek/qwen/glm/minimax/ollama/openai_compatible)
 ├── default_config.py      # DEFAULT_CONFIG + TRADINGAGENTS_* env overrides
