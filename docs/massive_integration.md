@@ -102,7 +102,7 @@ Prioritized by leverage vs effort. Implemented rows are marked ✅.
 | 5 | `corporate-actions/dividends|splits|ipos|ticker-events`, `tickers/related-tickers`, `market-operations/*` | catalyst de-risk + peers + instrument context | planned |
 | 6 | `fundamentals/ratios` + `get_fundamentals` | `get_ratios` (fundamentals analyst) + `fundamental_data` vendor | ✅ wired (plan-aware; 403 on free Basic) |
 | 7 | `snapshots/single-ticker`, `top-movers` | market analyst tools + `pipeline.py --universe top-movers-massive` | ✅ wired (plan-aware; 403 on free Basic) |
-| 8 | WebSocket NOI / Flat Files | real-time orderflow / backtest datasets | future |
+| 8 | WebSocket NOI / Flat Files | NOI live monitor app + Flat-File bulk OHLCV loader | ✅ wired (plan-gated: Imbalances add-on / Starter+; not batch @tools) |
 
 ---
 
@@ -261,6 +261,38 @@ On the current free plan all three return an explicit
 "upgrade at massive.com/pricing" message and the graph continues with the
 existing vendors (moomoo/yfinance/Alpaca). Upgrade to a plan with `snapshots`
 (fundamentals for the ratios) to activate them - no code change required.
+
+## 3e. WebSocket NOI + Flat Files (plan-gated standalone utilities)
+
+Item 8 is architecturally different from 1-7: NOI is a real-time WebSocket
+stream and Flat Files are bulk S3 datasets. Neither fits the batch
+LangGraph `@tool` contract (per-ticker REST inside a node loop), so they are
+shipped as **standalone monitored utilities** - live apps, not graph nodes -
+and both are plan-gated.
+
+### Net Order Imbalance (NOI) - WebSocket
+- `tradingagents/dataflows/massive_noi.py`: `build_url`, `parse_frame`,
+  `describe`, and `stream_noi(tickers, on_event, ...)` - a `websocket-client`
+  streamer (lazy import) for NYSE auction buy/sell imbalance events (`NOI`).
+- `scripts/massive_noi_monitor.py`: a console monitor
+  (`--ticker AAPL,MSFT` or `--all`; `--once N` smoke test).
+- Entitlement: requires the Massive **Imbalances Expansion** add-on (not the
+  free Basic plan). Prints a clear message until entitlement exists.
+
+### Flat Files - bulk OHLCV loader
+- `tradingagents/dataflows/massive_flat.py`: `load_day_aggregates(csv)` parses
+  a downloaded day-aggregates CSV into per-ticker `{closes, opens, highs,
+  lows, volumes, dates}`; `ohlcv_for_ticker` returns one ticker's series in
+  the same shape the value-screener's `_fetch_ohlcv` produces.
+- This lets a screener/backtest seed its ATR/volatility/scan bases from a bulk
+  download instead of N per-ticker calls - a **backtest/cross-sectional
+  enrichment**, not a per-ticker graph tool.
+- Plan-gated: Flat Files need **Stocks Starter+** (free Basic is quote-only);
+  the download URL is account-scoped (console/SDK), so the module takes a
+  local CSV path rather than a REST call.
+
+Both are hermetic-tested (`tests/test_massive_flat_noi.py`). They activate as
+soon as the account gains the entitlement - no code change.
 
 ---
 

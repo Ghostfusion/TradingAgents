@@ -10,6 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Massive NOI + Flat Files (item 8)** - `massive_noi.py` is a WebSocket
+  Net Order Imbalance streamer (`build_url`/`parse_frame`/`describe`/
+  `stream_noi`) wired to `scripts/massive_noi_monitor.py`; `massive_flat.py`
+  loads bulk Flat-File day-aggregates into per-ticker OHLCV for the
+  value-screener/backtests. Both are **standalone plan-gated utilities**, not
+  batch-graph `@tool`s: NOI is a live stream (Imbalances Expansion add-on),
+  Flat Files are bulk S3 (Stocks Starter+). Offline tests in
+  `tests/test_massive_flat_noi.py`. Docs: `docs/massive_integration.md` §3e.
+
 - **Massive fundamentals/ratios + market snapshots (plan-aware)** - `get_ratios`
   (precomputed EV/EBITDA, EV/Sales, P/E, P/B, ROE/ROA, D/E, FCF, dividend
   yield) registered for `get_fundamentals`/`get_basic_financials` and bound to

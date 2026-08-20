@@ -289,7 +289,10 @@ Short interest (`get_short_interest` chain, FINRA 2-week cadence) and a
 tool bound to the fundamentals analyst. (13-F is *not* wired: Massive's
 `/stocks/filings/vX/13-F` has no security filter — only `filer_cik`/`filing_date`
 — so a per-ticker aggregate would be misleading; moomoo
-`get_institution_holdings` stays the source for that signal.)
+`get_institution_holdings` stays the source for that signal.) NOI
+(`massive_noi.py`, WebSocket monitor) and Flat Files (`massive_flat.py`, bulk
+OHLCV loader for the screener/backtests) are standalone monitored utilities,
+not graph `@tool`s — see `docs/massive_integration.md` §3e.
 Plan-dependent recency/entitlements; FMV/Greeks are Business-only
 (unavailable, never invented). US-only — supplements, not replaces,
 moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.
