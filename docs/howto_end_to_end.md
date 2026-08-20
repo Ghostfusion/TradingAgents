@@ -51,8 +51,11 @@ from tradingagents.default_config import DEFAULT_CONFIG
 cfg = DEFAULT_CONFIG.copy()
 ta = TradingAgentsGraph(debug=True, config=cfg)
 final_state, decision = ta.propagate("NVDA", "2026-08-19")
-ta.save_reports(final_state, "NVDA")   # writes reports/ (CLI layout)
+ta.save_reports(final_state, "NVDA")  # writes <results_dir>/reports/NVDA_<ts>/ (see Persistence)
 ```
+
+> The PyPI-style default is `~/.tradingagents/logs/reports/<TICKER>_<ts>/`; pass
+> an explicit `save_path` (or use `batch.py`) to write under `./reports/`.
 
 ### 1c. Batch runner (headless, concurrent)
 
@@ -192,6 +195,10 @@ py -3.12 scripts/smoke_structured_output.py # structured-output smoke
   design neutral.
 - Process hangs at process exit -> an `OpenQuoteContext` leaked; close it
   (see AGENT_ONBOARDING). Tests close contexts per-fixture.
+- `429` from FMP/Finnhub (free-tier rate limits) -> the vendor degrades to
+  "unavailable" and the chain falls through to yfinance/moomoo; a run never
+  fails on a 429. The keys are a fourth source, not a replacement - if growth
+  screens come back `n/a`, the free-tier quota is likely exhausted.
 - Corrupted escapes when a fresh agent uses heredocs on Windows -> write files
   with the write tool, not heredocs (see AGENT_ONBOARDING).
 

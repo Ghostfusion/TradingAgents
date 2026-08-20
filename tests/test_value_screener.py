@@ -197,3 +197,14 @@ def test_scale_heuristic_flags_currency_mix():
     assert vs._usd_consistent(fin) is False
     row = vs.screen_ticker("JPPHY", fin)
     assert row["ev"] is None
+
+
+def test_help_renders(capsys):
+    """--help must not crash (a bare % in a help string used to raise)."""
+    import pytest as _pytest
+
+    with _pytest.raises(SystemExit) as exc:
+        vs.main(["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "--inst-accum" in out and "--scan" in out

@@ -118,7 +118,7 @@ B1 catalyst gate. Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
 `target_atr=4.0`, `sector_cap_limit=0.35`, `risk_max_drawdown_pct=0.10`,
 `risk_daily_cvar_budget_pct=0.03`, `risk_max_position_pct=0.45`,
-`risk_stress_shock_pct`, `orderflow_distribution_threshold=0.7`,
+`risk_stress_shock_pct_1` / `risk_stress_shock_pct_2` (R2 scenario shocks, def -10%/-30%)
 `evaluate_cost_bps=10`, `calibration_min_n=5`, `consensus_seeds=1`,
 `max_book_names=10`, `max_name_weight=0.25`, `risk_audit_enabled` default True.
 Catalyst: `catalyst_hard_block_days=0` - when > 0, an earnings print inside
@@ -229,7 +229,8 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `core_stock_apis` : `get_stock_data`
 - `technical_indicators` : `get_indicators`
 - `fundamental_data` : `get_fundamentals`, `get_balance_sheet`, `get_cashflow`,
-  `get_income_statement`
+  `get_income_statement`, `get_basic_financials`, `get_company_peers`,
+  `get_insider_activity`
 - `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`
 - `macro_data` : `get_macro_indicators`
 - `prediction_markets` : `get_prediction_markets`
@@ -238,7 +239,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `options_data` : `get_options_chain`
 - `sec_filings` : `get_sec_filings`
 - `short_interest` : `get_short_interest`
-- **computed-analysis tools** (bound to the analyst tool loops, see 6.5):
+- **computed-analysis tools** (bound to the analyst tool loops, see 6.4):
   `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`,
   `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`,
   `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read`,
@@ -276,7 +277,15 @@ gold `XAUUSD -> GC=F`, forex `EURUSD -> EURUSD=X`, crypto
 `BTCUSD -> BTC-USD`, indices `SPX500 -> ^GSPC`; moomoo code map
 (`_moomoo_code()`: US., HK. pad, JP., SH., SZ., AU., CA., SG., MY., CC.USD).
 
-### 6.5 Computed-analysis tools
+### 6.4 Computed-analysis tools
+
+**Market-analyst house tools** (bound only to the market node, not part of the
+vendor category system - see `6.1`): `get_verified_market_snapshot`
+(deterministic OHLCV/indicator verification snapshot, the market analyst's
+source of truth), `get_momentum_scan` (5-pillar day-trade pre-filter +
+first-pullback + intraday confirmation), `get_market_snapshot_alpaca` (live
+1-minute Alpaca L1 price/VWAP/volume when configured). News/earnings house
+tools bound to the news node: `get_catalyst_scale`, `get_earnings_event_read`.
 
 The analyst tool loops bind deterministic calculators from `tradingagents/strategies/*`
 so the LLM reasons over computed numbers rather than re-deriving them:

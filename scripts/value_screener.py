@@ -1001,7 +1001,7 @@ def main(argv: list[str] | None = None) -> int:
         "--inst-accum",
         action="store_true",
         help="require institutional accumulation (last two 13F periods "
-        "%-of-float change > 0, moomoo); adds Inst column",
+        "%%-of-float change > 0, moomoo); adds Inst column",
     )
     parser.add_argument(
         "--intraday",
