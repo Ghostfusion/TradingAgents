@@ -245,6 +245,8 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-20 `8947ea2` - moomoo period-order + prior-period fix (M column now
+  computes; latest values were the OLDEST period)
 - 2026-08-19 `2ab7a8c` - Finnhub free-tier integration (basic financials -> growth
   gates, insider activity, peers, sector fallback, 3 analyst tools)
 - 2026-08-19 `4df08d9` - computed-analysis tools follow-up (regime/VCP/orderflow/verdict/surprise/portfolio)
