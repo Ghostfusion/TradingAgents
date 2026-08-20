@@ -58,3 +58,29 @@ def get_insider_transactions(
         str: A report of insider transaction data
     """
     return route_to_vendor("get_insider_transactions", ticker)
+
+
+@tool
+def get_massive_news(
+    ticker: Annotated[str, "Ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> str:
+    """
+    Retrieve Massive.com news for a ticker with structured per-article sentiment
+    (positive / negative / neutral) plus the provider's sentiment reasoning.
+
+    Massive's news endpoint tags every article with the sentiment it assigns
+    to each ticker, so this tool lets the news / sentiment analysts read a
+    computed polarity instead of guessing from raw headlines.
+
+    Args:
+        ticker (str): Ticker symbol
+        start_date (str): Start date in yyyy-mm-dd format
+        end_date (str): End date in yyyy-mm-dd format
+    Returns:
+        str: A formatted string containing news data with sentiment labels
+    """
+    from tradingagents.dataflows.massive import get_news_massive
+
+    return get_news_massive(ticker, start_date, end_date)

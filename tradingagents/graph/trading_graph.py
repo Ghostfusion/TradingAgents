@@ -32,6 +32,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_institution_holdings,
     get_macro_indicators,
     get_market_breadth,
+    get_massive_news,
     get_news,
     get_options_chain,
     get_prediction_markets,
@@ -275,12 +276,14 @@ class TradingAgentsGraph:
                 [
                     # News tools for social media analysis
                     get_news,
+                    get_massive_news,
                 ]
             ),
             "news": ToolNode(
                 [
                     # News and insider information
                     get_news,
+                    get_massive_news,
                     get_global_news,
                     get_insider_transactions,
                     get_macro_indicators,

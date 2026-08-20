@@ -32,6 +32,7 @@ in `batch.py`).
 | `TRADINGAGENTS_TEMPERATURE` | `temperature` |
 | `TRADINGAGENTS_LLM_MAX_RETRIES` | `llm_max_retries` |
 | `TRADINGAGENTS_FINNHUB_API_KEY` | `finnhub_api_key` |
+| `TRADINGAGENTS_MASSIVE_API_KEY` | `massive_api_key` |
 | `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
@@ -231,7 +232,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - `fundamental_data` : `get_fundamentals`, `get_balance_sheet`, `get_cashflow`,
   `get_income_statement`, `get_basic_financials`, `get_company_peers`,
   `get_insider_activity`
-- `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`
+- `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`, `get_massive_news`
 - `macro_data` : `get_macro_indicators`
 - `prediction_markets` : `get_prediction_markets`
 - `analyst_ratings` : `get_analyst_ratings`
@@ -257,7 +258,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 ### 6.2 Vendor implementations per tool (exact)
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`
-- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`
+- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`
 - macro: `fred`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
 - analyst ratings + earnings calendar: `finnhub`, `moomoo`
@@ -268,7 +269,16 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - SEC filings: `sec_edgar`
 - all A-series/tier tools: `moomoo` only (optional)
 
-`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo`.
+`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive`.
+
+**Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor;
+first integration is `get_massive_news` (`get_news` chain + the dedicated
+`get_massive_news` tool bound to the news/social nodes) returning per-article
+structured sentiment (positive/negative/neutral + reasoning) from
+`/v2/reference/news`. Plan-dependent recency/entitlements; FMV/Greeks are
+Business-only (unavailable, never invented). US-only — supplements, not
+replaces, moomoo/yfinance non-US coverage. See
+`docs/massive_integration.md`.
 
 ### 6.3 Symbol mapping (Yahoo <-> moomoo / broker)
 

@@ -8,6 +8,21 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **Massive.com data vendor (news sentiment)** - new `dataflows/massive.py`
+  with `get_news_massive` returning per-article structured sentiment
+  (positive/negative/neutral + reasoning) from `/v2/reference/news`,
+  ticker-filtered so a peer ticker's sentiment never leaks in. Registered as
+  a `massive` vendor in the `get_news` chain and `VENDOR_LIST`; a dedicated
+  `get_massive_news` LangChain tool is bound to the news/social tool nodes
+  and the news analyst prompt. New config key `massive_api_key`
+  (`MASSIVE_API_KEY` / `TRADINGAGENTS_MASSIVE_API_KEY`), hermetic offline
+  tests in `tests/test_massive_vendor.py`, and `docs/massive_integration.md`.
+  US-centric additive vendor (supplements, not replaces, moomoo/yfinance);
+  plan-dependent recency/entitlements, FMV/Greeks Business-only (unavailable,
+  never invented).
+
 ### Fixed
 
 - **README fork-additions highlight (purple border, per-section)** - the fork

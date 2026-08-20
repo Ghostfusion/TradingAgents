@@ -21,6 +21,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
+    "TRADINGAGENTS_MASSIVE_API_KEY": "massive_api_key",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
     "TRADINGAGENTS_ALPACA_API_SECRET": "alpaca_api_secret",
     "TRADINGAGENTS_ENABLE_ALPACA": "enable_alpaca",
@@ -216,6 +217,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         },
         "finnhub_api_key": None,
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
+        "massive_api_key": None,  # Massive.com US data (massive.py)
         "alpaca_api_key_id": None,  # Alpaca market-data analyst (alpaca.py)
         "alpaca_api_secret": None,  # Alpaca market-data analyst (alpaca.py)
         "enable_alpaca": False,  # Alpaca market-data (screener + analyst tool)

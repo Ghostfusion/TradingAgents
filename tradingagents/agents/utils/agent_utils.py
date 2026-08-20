@@ -59,6 +59,7 @@ from tradingagents.agents.utils.moomoo_extra_tools import (
 from tradingagents.agents.utils.news_data_tools import (
     get_global_news,
     get_insider_transactions,
+    get_massive_news,
     get_news,
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
@@ -74,6 +75,7 @@ __all__ = [
     "get_cashflow",
     "get_income_statement",
     "get_news",
+    "get_massive_news",
     "get_global_news",
     "get_insider_transactions",
     "get_macro_indicators",

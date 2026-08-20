@@ -276,6 +276,8 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-20 `WIP` - Massive.com vendor (first integration): `dataflows/massive.py` + `get_news_massive` with per-article structured news sentiment; registered in `VENDOR_LIST`/`get_news` chain; dedicated `get_massive_news` tool bound to news/social nodes + news analyst prompt; `MASSIVE_API_KEY` config/env; `tests/test_massive_vendor.py`; `docs/massive_integration.md`. US-only additive vendor (see docs).
+
 - 2026-08-20 `1a87063` - README: fork-additions highlighted with a purple left
   border (HTML tables), matching the diff-vs-upstream intent; replaces the
   grey blockquote (7a3bfac). Refined in `e68778a` to per-section borders

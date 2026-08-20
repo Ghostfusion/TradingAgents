@@ -27,6 +27,7 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .massive import get_news_massive
 from .moomoo import (
     get_analyst_ratings_moomoo,
     get_balance_sheet_moomoo,
@@ -198,6 +199,7 @@ VENDOR_LIST = [
     "finnhub",
     "sec_edgar",
     "moomoo",
+    "massive",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -278,6 +280,7 @@ VENDOR_METHODS = {
         "yfinance": get_news_yfinance,
         "finnhub": get_news_finnhub,
         "moomoo": get_news_moomoo,
+        "massive": get_news_massive,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,

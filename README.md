@@ -35,6 +35,7 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-20] **Massive.com vendor (news sentiment)** - new `dataflows/massive.py` + `get_massive_news`: per-article **structured sentiment** (positive/negative/neutral + reasoning) from `/v2/reference/news`, ticker-filtered; bound to the news/social tool nodes + news analyst; `get_news` chain gains a `massive` vendor (opt-in). Key: `MASSIVE_API_KEY`. US-only additive vendor — see `docs/massive_integration.md`.
 - [2026-08-20] **Moomoo period-order + prior-period fix** - the value screener
   used to keep the OLDEST statement period (moomoo lists newest-first) and
   never supplied prior-period values, so the **Beneish M column was always
@@ -346,6 +347,7 @@ Beyond the core price, fundamental, and news vendors, TradingAgents can pull add
 - **Short interest / float** (yfinance) — days-to-cover, short % of float, ownership split, surfaced to the market analyst.
 - **Analyst ratings & price targets** (Finnhub) — recommendation trends and consensus targets, surfaced to the fundamentals analyst.
 - **Earnings calendar** (Finnhub) — upcoming earnings dates and EPS surprises, surfaced to the news analyst.
+- **News with structured sentiment** (Massive.com) — per-article sentiment (positive/negative/neutral) + reasoning, surfaced to the news/social analysts via `get_massive_news`. Set `MASSIVE_API_KEY` (or `TRADINGAGENTS_MASSIVE_API_KEY`). US-centric additive vendor; see `docs/massive_integration.md`.
 
 Each source is a vendor behind the same `route_to_vendor` interface and is toggled per-category in `default_config.py` (`options_data`, `sec_filings`, `short_interest`, `analyst_ratings`, `earnings_calendar`). Set `finnhub_api_key` (or `TRADINGAGENTS_FINNHUB_API_KEY`) for the two Finnhub sources.
 
