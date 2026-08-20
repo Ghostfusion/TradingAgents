@@ -939,6 +939,192 @@ def get_ratios(
         return f"ratios unavailable for {ticker}: {exc}"
 
 
+
+# ---------------------------------------------------------------------------
+# Decision-grounding tools (agent-decision plan P0/P1/P2)
+#   Expose deterministic strategy functions so the trader / PM / analysts
+#   cite computed stops, allocation, regime components, consensus, momentum
+#   detail, and event multipliers instead of re-deriving or guessing them.
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_exit_check(
+    entry: Annotated[float, "entry price of the position"],
+    close: Annotated[float, "current price"],
+    atr: Annotated[float, "current ATR (use get_swing_set / get_volatility_contraction)"],
+    target_mult: Annotated[float, "ATR multiple for the profit target, default 4.0"] = 4.0,
+    breakeven_cushion: Annotated[float, "ATRs above entry for stop-to-breakeven, default 1.0"] = 1.0,
+) -> str:
+    "Deterministic exit state for a held long position: stop-to-breakeven, ATR target, holding action."
+    try:
+        from tradingagents.strategies.exits import exit_check
+    except Exception as exc:  # noqa: BLE001
+        return f"exit check unavailable: {exc}"
+    if atr is None or atr <= 0:
+        return "exit check unavailable: atr must be > 0."
+    r = exit_check(float(entry), float(close), float(atr),
+                   target_mult=float(target_mult), breakeven_cushion=float(breakeven_cushion))
+    return (
+        f"exit: breakeven_stop={r['breakeven_stop']:.2f} target={r['target']:.2f} "
+        f"stop_hit={r['stop_hit']} target_hit={r['target_hit']} "
+        f"action={r['holding_action']}"
+    )
+
+
+@tool
+def get_allocation(
+    scores: Annotated[dict, "name -> composite/value score"],
+    sector_map: Annotated[dict | None, "name to sector; optional, enables per-sector caps"] = None,
+    max_name: Annotated[float, "max single-name weight, default 0.25"] = 0.25,
+    sector_cap_limit: Annotated[float, "max per-sector weight, default 0.35"] = 0.35,
+) -> str:
+    "Cap-respecting, value-proportional allocation across a book (hard per-name and per-sector caps)."
+    try:
+        from tradingagents.strategies.portfolio import (
+            adjust_for_caps,
+            capped_weights,
+            summary,
+            value_ratio_weights,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"allocation unavailable: {exc}"
+    w = value_ratio_weights(scores, min_weight=0.0)
+    if sector_map:
+        w = adjust_for_caps(w, sector_map, sector_cap_limit=float(sector_cap_limit),
+                            max_name=float(max_name))
+    else:
+        w = capped_weights(w, cap=float(max_name))
+    info = summary(w, min_n=1)
+    lines = ["## Allocation plan", ""]
+    for name, wt in sorted(w.items(), key=lambda kv: -kv[1])[:15]:
+        lines.append(f"- {name}: {wt:.1%}")
+    lines.append("")
+    lines.append(f"allocated: {info['allocated']:.1%} active_names: {info['active']}")
+    return "\n".join(lines)
+
+
+@tool
+def get_regime_components(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    "Drill into why the regime label says what it does: vol_pct, trend, choppiness, label."
+    try:
+        from tradingagents.strategies.regime import (
+            choppiness,
+            regime_label,
+            trend_strength,
+            vol_percentile,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"regime components unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    if not closes or len(closes) < 30:
+        return f"regime components unavailable for {ticker}: not enough price history."
+    try:
+        # vol_percentile expects a list of close *windows* (it computes vol of
+        # each). Build 21-day rolling windows over the close series.
+        window = 21
+        windows = [
+            closes[i - window : i]
+            for i in range(window, len(closes) + 1, window)
+        ]
+        vol_pct = vol_percentile(windows or [closes], current_window=window)
+        trend = trend_strength(closes, sma_window=min(200, max(2, len(closes) // 2)))
+        chop = choppiness(closes, window=14)
+        label = regime_label(vol_pct, trend, chop)
+    except Exception as exc:  # noqa: BLE001
+        return f"regime components unavailable for {ticker}: {exc}"
+    return f"regime {ticker}: vol_pct={vol_pct:.2f} trend={trend:.4f} chop={chop:.2f} label={label}"
+
+
+@tool
+def get_consensus(
+    ratings: Annotated[list, "list of rating strings/scores, e.g. ['Buy','Hold','Sell']"],
+) -> str:
+    "Numeric agreement / consensus across ratings; call before setting consensus in a decision."
+    try:
+        from tradingagents.strategies.consensus import (
+            agreement_score,
+            consensus_from_score,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"consensus unavailable: {exc}"
+    # agreement_score maps ratings internally (Buy/Hold/Sell/... -> stance).
+    score = agreement_score(ratings or [])
+    level = consensus_from_score(score)
+    s = "n/a" if score is None else f"{score:.2f}"
+    n = len(ratings or [])
+    return f"consensus: agreement={s} level={level} (n={n})"
+
+
+@tool
+def get_momentum_detail(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    "Exact momentum microstructure (pillars, RVOL, VWAP, first-pullback, session) for a ticker."
+    try:
+        from tradingagents.strategies.momentum import (
+            ema9,
+            first_pullback,
+            pillars,
+            rvol,
+            vwap,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"momentum detail unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    vols = data.get("volumes") or []
+    opens = data.get("opens") or []
+    if not closes:
+        return f"momentum detail unavailable for {ticker}: no history."
+    try:
+        rv = rvol(vols, window=50) if vols else None
+        vw = vwap(closes, vols) if vols else None
+        ema = ema9(closes[-10:]) if len(closes) >= 10 else None
+        p = pillars(close=closes[-1], day_volume=vols[-1] if vols else None,
+                    prev_close=closes[-2] if len(closes) >= 2 else None,
+                    day_open=opens[-1] if opens else None)
+        fp = first_pullback(closes, highs, lows, vols) if len(closes) >= 5 else None
+    except Exception as exc:  # noqa: BLE001
+        return f"momentum detail unavailable for {ticker}: {exc}"
+    parts = [f"momentum detail {ticker}:"]
+    if rv is not None:
+        parts.append(f"  rvol={rv:.2f}")
+    if vw is not None:
+        parts.append(f"  vwap={vw:.2f}")
+    if ema is not None:
+        parts.append(f"  ema9={ema:.2f}")
+    if p:
+        for k in ("a", "m", "e", "l"):
+            if p.get(k) is not None:
+                parts.append(f"  pillar_{k}={p[k]}")
+    if fp:
+        parts.append(f"  first_pullback={fp}")
+    return "\n".join(parts)
+
+
+@tool
+def get_beat_miss_sizing(
+    side: Annotated[str, "'beat' or 'miss' (the earnings surprise side)"],
+    catalyst: Annotated[float, "catalyst scale 0..1, default 1.0"] = 1.0,
+) -> str:
+    "Position multiplier implied by an earnings beat/miss side (with catalyst scale)."
+    try:
+        from tradingagents.strategies.events import position_mult_by_side
+    except Exception as exc:  # noqa: BLE001
+        return f"beat/miss sizing unavailable: {exc}"
+    mult = position_mult_by_side(side, catalyst=float(catalyst))
+    return f"beat/miss sizing: side={side} position_mult={mult:.2f}"
+
+
+
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -957,4 +1143,10 @@ __all__ = [
     "get_company_peers",
     "get_form4_insider",
     "get_ratios",
+    "get_exit_check",
+    "get_allocation",
+    "get_regime_components",
+    "get_consensus",
+    "get_momentum_detail",
+    "get_beat_miss_sizing",
 ]

@@ -10,12 +10,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
-- **Agent decision-tools audit (plan, no code)** - `docs/developer/11-agent-decision-tools.md`
-  audits the strategy + dataflow surface and lists decision-critical deterministic
-  functions not yet exposed as `@tool`s: exits (exit_check / stop-to-breakeven /
-  target), portfolio alloc (cap-respecting book), regime components (vol / trend /
-  choppiness), momentum detail, rating consensus, and event multipliers. Includes
-  a P0/P1/P2 integration order and adds no code yet.
+- **Agent decision-tools (implemented)** - `docs/developer/11-agent-decision-tools.md`
+  audits the strategy + dataflow surface and lands six decision-grounding
+  `@tool`s the analyst LLMs now cite: `get_exit_check` (stop/target/action),
+  `get_allocation` (cap-respecting book), `get_regime_components`
+  (vol/trend/chop regime breakdown), `get_consensus` (rating agreement;
+  also computed-injected into the PM prompt), `get_momentum_detail`
+  (pillars/rvol/vwap/first-pullback), and `get_beat_miss_sizing` (event
+  multiplier). Each wraps an existing deterministic `strategies/*` function,
+  is bound to the market / fundamentals / news tool nodes (and the PM's
+  computed-consensus logic), with hermetic tests in
+  `tests/test_analysis_tools.py`. No topology change; the PM keeps its
+  NO_EXTERNAL_TOOLS single-structured-call design.
 
 - **Strategies index (`Strategies/index.md`)** - navigation map linking each
   strategy plan doc under `Strategies/` (Math, value_strategy, framework, scan,

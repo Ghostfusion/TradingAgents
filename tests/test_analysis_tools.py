@@ -404,3 +404,86 @@ class _FakeFinnhubClient:
 
     def company_peers(self, symbol):
         return ["DELL", "HPQ", "SMCI"]
+
+
+# --------------------------------------------------------------------------
+# Decision-grounding tools (P0/P1/P2) - hermetic
+# --------------------------------------------------------------------------
+
+
+def test_exit_check_returns_stop_target_action():
+    out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 3.0})
+    assert "breakeven_stop=103.00" in out
+    assert "target=107.00" in out  # close + 4*atr
+    assert "action=stop" in out
+
+
+def test_exit_check_requires_positive_atr():
+    out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 0.0})
+    assert "atr must be > 0" in out
+
+
+def test_allocation_caps_weight():
+    out = T.get_allocation.invoke(
+        {"scores": {"A": 50, "B": 30, "C": 20, "D": 10}}
+    )
+    assert "Allocation plan" in out
+    # every weight <= 25% max_name cap
+    import re
+
+    pcts = [float(x) for x in re.findall(rb"- [A-Z]+: ([0-9.]+)%", out.encode() if isinstance(out, str) else out)]
+    assert all(x <= 25.0 for x in pcts)
+
+
+def test_consensus_high_when_aligned():
+    out = T.get_consensus.invoke({"ratings": ["Buy", "Buy", "Buy"]})
+    assert "level=high" in out
+
+
+def test_consensus_low_when_split():
+    out = T.get_consensus.invoke({"ratings": ["Buy", "Hold", "Sell"]})
+    assert "level=low" in out
+
+
+def test_beat_miss_sizing_side_mult():
+    out = T.get_beat_miss_sizing.invoke({"side": "beat", "catalyst": 1.0})
+    assert "position_mult=" in out
+
+
+def test_regime_components_uses_ohlcv(monkeypatch):
+    fake = {"closes": _uptrend(260), "highs": _uptrend(260), "lows": _uptrend(260),
+            "volumes": [100] * 260, "opens": _uptrend(260)}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_regime_components.invoke({"ticker": "AAPL"})
+    assert "label=" in out
+    assert "vol_pct=" in out
+
+
+def test_regime_components_short_history_degrades(monkeypatch):
+    fake = {"closes": [100.0, 101.0], "opens": [], "highs": [], "lows": [], "volumes": []}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_regime_components.invoke({"ticker": "AAPL"})
+    assert "not enough price history" in out
+
+
+def test_momentum_detail_uses_ohlcv(monkeypatch):
+    n = 70
+    closes = [100.0 + i for i in range(n)]
+    highs = [100.0 + i + 0.5 for i in range(n)]
+    lows = [100.0 + i - 0.5 for i in range(n)]
+    vols = [1000] * n
+    opens = closes[:]
+    fake = {"closes": closes, "opens": opens, "highs": highs, "lows": lows, "volumes": vols}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
+    assert "momentum detail AAPL" in out
+    assert "rvol=" in out
+
+
+def test_momentum_detail_empty_history_degrades(monkeypatch):
+    fake = {"closes": [], "opens": [], "highs": [], "lows": [], "volumes": []}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out
+
+

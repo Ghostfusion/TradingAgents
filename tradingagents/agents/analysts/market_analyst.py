@@ -2,13 +2,16 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
+    get_exit_check,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
     get_market_snapshot,
+    get_momentum_detail,
     get_options_chain,
     get_orderflow_read,
     get_position_sizing,
+    get_regime_components,
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
@@ -43,6 +46,9 @@ def create_market_analyst(llm):
             get_position_sizing,
             get_risk_gate,
             get_regime_read,
+            get_regime_components,
+            get_exit_check,
+            get_momentum_detail,
             get_volatility_contraction,
             get_orderflow_read,
         ]
@@ -94,6 +100,11 @@ You also have three environment-flow tools - ground regime and order-lifecycle c
 - get_regime_read(ticker) - the deterministic regime label (vol percentile + trend), volatility-target position scale, 60d momentum and 52w distance. Use it before any 'the regime is risk-on/off' or 'trade the trend' claim.
 - get_volatility_contraction(ticker) - the VCP base state (15%->8%->3% contraction, volume fade, near-breakout). Use it when assessing whether a tight base precedes a breakout.
 - get_orderflow_read(ticker) - the live institutional-vs-retail net, distribution score, divergence and alignment. Use it (instead of raw get_capital_flow) before any 'institutions are accumulating/distributing' claim - it is the computed summary.
+
+You also have decision-grounding tools:
+- get_regime_components(ticker) - drill into why the regime label says what it does: vol_pct, trend strength, choppiness, label. Use before any regime claim, alongside get_regime_read.
+- get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
+- get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

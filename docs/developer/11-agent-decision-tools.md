@@ -1,6 +1,11 @@
 # Plan: Give the virtual agent better decision tools
 
-**Status: plan only — no code changed.**
+**Status: implemented (P0-P2 all six tools landed + hermetic-tested).**
+The six decision tools below are now exposed as @tools and bound to the
+analyst tool nodes (and, for consensus, computed-injected into the PM
+prompt). Each wraps an existing deterministic strategies function, so the
+LLM agents cite computed stops, allocation, regime components, consensus,
+momentum detail, and event multipliers instead of guessing them.
 
 Auditing the current fork, the analyst LLMs already reason over many computed
 numbers, but **several decision-critical deterministic functions exist and are
@@ -115,20 +120,24 @@ These are lower priority; the four above are the highest signal.
 
 ---
 
-## 4. Recommended integration order (no code yet)
+## 4. How each was implemented
 
-| Priority | Tool | Bind to | Why it improves the decision |
+| Priority | Tool | Bound to | Why it improves the decision |
 | --- | --- | --- | --- |
-| P0 | `get_exit_check` | market analyst (+ trader prompt) | deterministic stop/target instead of LLM-picked stop_loss |
-| P0 | `get_allocation` | portfolio manager (PM input) | cap/diversified book sizing for the final size |
+| P0 | `get_exit_check` | market analyst tool node | deterministic stop/target instead of LLM-picked stop_loss |
+| P0 | `get_allocation` | fundamentals analyst tool node | cap/diversified book sizing from a scores dict |
 | P1 | `get_regime_components` | market analyst | grounded vol/choppiness/trend for the regime read |
-| P1 | `get_consensus` | portfolio manager | numeric rating agreement for the PM call |
+| P1 | `get_consensus` | tool + computed-injected PM prompt | numeric rating agreement for the PM call |
 | P2 | `get_momentum_detail` | market analyst | exact pillar/pullback microstructure for intraday |
 | P2 | `get_beat_miss_sizing` | news analyst | compute the post-earnings drift / gap-up multiplier |
 
-Each is a ~2-5 line `@tool` wrapping an existing strategy function, re-exported
-in `agent_utils`, bound in `graph/trading_graph.py::_create_tool_nodes`
-(or the analyst `tools` list), and tested offline with a mock (the `tests/test_strategies_*.py` pattern).
+Each is a `@tool` wrapping an existing strategy function, re-exported
+in `agent_utils`, bound in both the analyst `tools` list and
+`graph/trading_graph.py::_create_tool_nodes`, with hermetic tests in
+`tests/test_analysis_tools.py`. The PM has no tool loop (NO_EXTERNAL_TOOLS), so
+`get_consensus` is exposed as a tool AND its value is pre-fetched/parsed from
+the risk debate and injected straight into the PM prompt (compute-as-tools
+without a topology change).
 
 ---
 

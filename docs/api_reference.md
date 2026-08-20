@@ -346,6 +346,12 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
 | `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
 | `get_ratios(ticker, date?)` | `massive.get_ratios_massive` | fundamentals | precomputed EV/EBITDA, P/E, P/B, ROE/ROA, FCF (plan-gated) |
+| `get_exit_check(entry, close, atr)` | `strategies.exits.exit_check` | market | stop-to-breakeven, ATR target, holding action |
+| `get_allocation(scores, sector_map?)` | `strategies.portfolio.adjust_for_caps` | fundamentals | cap-respecting book allocation |
+| `get_regime_components(ticker)` | `strategies.regime` | market | vol_pct / trend / chop / regime label breakdown |
+| `get_consensus(ratings)` | `strategies.consensus` | PM tool + injected | numeric agreement -> high/low consensus |
+| `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |
+| `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

@@ -53,18 +53,23 @@ from tradingagents.agents.utils.agent_utils import (
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.analysis_tools import (
+    get_allocation,
     get_analyst_verdict,
     get_basic_financials,
+    get_beat_miss_sizing,
     get_catalyst_scale,
     get_company_peers,
     get_earnings_event_read,
     get_earnings_surprise,
+    get_exit_check,
     get_form4_insider,
     get_insider_activity,
+    get_momentum_detail,
     get_orderflow_read,
     get_portfolio_weights,
     get_position_sizing,
     get_ratios,
+    get_regime_components,
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
@@ -279,6 +284,9 @@ class TradingAgentsGraph:
                     get_position_sizing,
                     get_risk_gate,
                     get_regime_read,
+                    get_regime_components,
+                    get_exit_check,
+                    get_momentum_detail,
                     get_volatility_contraction,
                     get_orderflow_read,
                 ]
@@ -310,6 +318,7 @@ class TradingAgentsGraph:
                     # Computed-analysis tools (deterministic signals).
                     get_catalyst_scale,
                     get_earnings_event_read,
+                    get_beat_miss_sizing,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -336,6 +345,7 @@ class TradingAgentsGraph:
                     get_company_peers,
                     get_form4_insider,
                     get_ratios,
+                    get_allocation,
                 ]
             ),
         }

@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_allocation,
     get_analyst_ratings,
     get_analyst_verdict,
     get_balance_sheet,
@@ -46,6 +47,7 @@ def create_fundamentals_analyst(llm):
             get_company_peers,
             get_form4_insider,
             get_ratios,
+            get_allocation,
         ]
 
         system_message = (
@@ -55,7 +57,7 @@ def create_fundamentals_analyst(llm):
             + " You also have quality and smart-money signals: `get_revenue_breakdown(ticker)` for the latest period's segment revenue mix and concentration (a shrinking core segment or heavy single-segment concentration are quality flags); `get_corporate_actions(ticker)` for dividend history and stock splits (consistent dividends signal return discipline); `get_smart_money(ticker)` for ARK fund institutional activity (arbitrary buys/sells); `get_institution_holdings(ticker)` for the institutional share of the float and its period-over-period change (13F-style accumulation/distribution); and `get_earnings_surprise_history(ticker)` for EPS surprise vs estimate per print, the day-of price reaction, and the option-implied move (a succession of beats supports the growth case, negative surprises flag quality risk). Weigh these as supporting signals, not one signal."
             + " You also have three computed-analysis tools - ground your 'quality', 'value', 'accounting risk' and 'beat/miss' claims in them: `get_analyst_verdict(ticker, current_date)` returns the deterministic value screens (EY, EV/EBIT, Piotroski F, Beneish M, Altman Z, Net-Net), the collapsed trap-risk verdict with evidence, ROE and EPS/Revenue YoY - quote these numbers rather than re-deriving them; `get_earnings_surprise(ticker, current_date)` returns the standardized last-reported EPS surprise % and its side (beat/miss). "
             + " You also have three Finnhub-powered tools (free tier, key-gated): `get_basic_financials(ticker)` returns the metric block (EPS/revenue YoY growth, ROE/ROA, margins, payout, current ratio) - use it before any growth/quality metric claim; `get_insider_activity(ticker)` returns the net 12-month insider change + latest mspr (use before any net insider-buy/sell claim); `get_company_peers(ticker)` returns the comparable peer group for 'cheap vs peers / relative valuation' reasoning. "
-            + " For a multi-name value book, `get_portfolio_weights(scores, sector_map, ...)` computes the cap-respecting value-proportional weights - report the computed weights when proposing an allocation."
+            + " For a multi-name value book, `get_portfolio_weights(...)` computes cap-respecting value weights and `get_allocation(scores, sector_map, ...)` returns the final cap-respected allocation block with per-name weights and the min-names check - report the computed weights when proposing an allocation."
             + get_language_instruction(),
         )
 

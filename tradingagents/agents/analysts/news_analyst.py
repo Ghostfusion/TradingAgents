@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_beat_miss_sizing,
     get_catalyst_scale,
     get_earnings_calendar,
     get_earnings_catalyst,
@@ -42,6 +43,7 @@ def create_news_analyst(llm):
             get_earnings_catalyst,
             get_catalyst_scale,
             get_earnings_event_read,
+            get_beat_miss_sizing,
         ]
 
         system_message = (
@@ -50,6 +52,7 @@ def create_news_analyst(llm):
             + "You also have two computed-analysis tools - ground your event claims in them, do not recompute from raw numbers: "
             + "get_catalyst_scale(ticker, curr_date) - one 0..1 risk scale + verdict folded from the next earnings print (with implied move), high-importance macro events and the next FOMC. Use scale/reasons when judging event-window risk; scale=1 means no imminent catalyst. "
             + "get_earnings_event_read(ticker, curr_date) - the last reported EPS surprise % + side (beat/miss) and the post-earnings drift setup (print-day move, volume vs 2.5x average, consolidation break). Use it before any beat/miss, drift or gap-up claim; it is the computed number. "
+            + "get_beat_miss_sizing(side, catalyst) - the deterministic position multiplier implied by a beat/miss side (with the catalyst scale). Use its multiplier when the market will size an event-window position, not a guess. "
             + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + get_language_instruction()
