@@ -10,6 +10,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Framework Phase-1 screens** - optional screener gates from
+  `Strategies/framework.md`: `--min-eps-yoy` / `--min-rev-yoy` (moomoo
+  statement YoY columns now parsed - also fixes a latent defect where moomoo
+  markdown payloads with `##` headers were never routed to the markdown
+  parser), `--min-roe` (net income / total equity via new `total_equity`
+  canonical alias), `--max-mcap` ($2B-100B focus), `--sector-rank`
+  (`strategies/sector_rank.py`: 11 SPDR ETF groups ranked by 1m/3m momentum,
+  ticker sector via guarded `dataflows/yfinance_sector.py`),
+  `--revision` (net analyst upgrades in 60d as the forward-revisions proxy)
+  and `--inst-accum` (two-quarter institutional %-of-float change). New
+  EpsYoY/RevYoY/ROE, Sec/Rank, RevUp and Inst table columns; gates apply only
+  to measured values (missing data renders n/a).
 - **Volatility Contraction Pattern scan (`--scan vcp`)** -
   `strategies/swing.py::vcp_setup` (strict pivot troughs, last-3 pullback depths vs
   the base high must contract 15%->8%->3%-style, deepest pullback within 30%

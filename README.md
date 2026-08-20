@@ -30,7 +30,8 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-08-19] **VCP scan (`--scan vcp`)** - `strategies/swing.py::vcp_setup` (the classic 15%->8%->3% volatility-contraction base: strict pivot troughs, last-3 pullback depths vs the base high must contract, deepest pullback within 30%, fading volume across troughs - absent volume never fails); new screener mode with `VCP`/`Brk` columns; `swing_report` carries the VCP block as an extra signal; mode docs in `Strategies/scan.md`. Suite 898 passed / 2 skipped.
+- [2026-08-19] **Framework Phase-1 screens** - optional `--min-eps-yoy` / `--min-rev-yoy` (moomoo statement YoY columns; also fixed moomoo markdown `##`-header payloads never reaching the parser), `--min-roe`, `--max-mcap`, `--sector-rank` (SPDR top-3 by 1m/3m momentum), `--revision` (net analyst upgrades 60d), `--inst-accum` (two-quarter institutional %-of-float); new EpsYoY/RevYoY/ROE, Sec/Rank, RevUp, Inst columns; gates only apply to measured values, missing data renders n/a.
+- [2026-08-19] **VCP scan (`--scan vcp`)** - `strategies/swing.py::vcp_setup` (the classic 15%->8%->3% volatility-contraction base: strict pivot troughs, last-3 pullback depths vs the base high must contract, deepest pullback within 30%, fading volume across troughs - absent volume never fails); new screener mode with `VCP`/`Brk` columns; `swing_report` carries the VCP block as an extra signal; mode docs in `Strategies/scan.md`. Suite 924 passed / 2 skipped.
 - [2026-08-19] **Swing scan + relative strength + catalyst hard veto** - new `--scan swing` screener mode built on `strategies/swing.py` (20-EMA-over-rising-50/200-SMA trend stack, RSI 45-70 band, pullback-into-EMA on fading volume, 1-ATR swing-low stop, 2R/3R targets, T1 scale-out + 20-EMA trail) and `strategies/relative_strength.py` (RS line vs `benchmark_ticker`, 63-day uptrend + new-high position + negative-divergence); PEAD post-earnings entry helpers (`events.py`); optional `catalyst_hard_block_days` that makes the risk governor REJECT new risk inside the earnings window; `Strategies/scan.md` filled with all scan-mode docs. Source: `Strategies/framework.md`. Suite 888 passed / 2 skipped.
 - [2026-08-19] **Repo hygiene pass** - full lint cleanup to a green `ruff check` across `tradingagents/`, `scripts/`, `tests/`, `cli/` and the entry scripts, plus defect fixes found by the lint pass: removed a stale `__all__` entry in the Alpaca vendor (`latest_snapshot` -> `get_latest_snapshot`), fixed an unimported `Mapping` annotation, `raise ... from None` for expected data-format errors, explicit `zip(strict=)` everywhere, import-order fix in `batch.py`, deleted the committed scratch file `test.py`; **documentation completed**: `.env.example` now mirrors all 53 supported `TRADINGAGENTS_*` overrides (Alpaca/Finnhub/FMP keys, moomoo tuning, all strategy/catalyst/risk toggles, persistence paths), `docs/api_reference.md` deduped + env table completed, dev-machine paths scrubbed from `docs/AGENT_ONBOARDING.md`. Suite 843 passed / 2 skipped; "pip check" clean (rich / cryptography satisfied).
 - [2026-08-19] **Fork changelog (since last remote)** - B2 cross-sectional pipeline (`pipeline.py`: universe -> value-screen -> composite rank -> top-N -> concurrent moomoo batch, with `reports/pipeline_<ts>.md` summaries and per-symbol TOC reports); **A-series analyst tools** (moomoo, optional) `get_institution_holdings` (13F-style institutional % + period change), `get_earnings_surprise_history` (EPS surprise vs estimate per print with day reaction and NaN-safe rendering), `get_expected_move` (option-implied 1-sigma move at the next earnings + price band), wired to the market/fundamentals analysts; **catalyst overlay (B1) on by default** (`enable_events`) plus moomoo earnings-calendar fixes (7-day-inclusive cap, real column normalization, 4-tuple unpacking) verified live (AVGO 2026/Q3 implied move 9.4%, band [328.39, 396.57]); **docs**: `docs/api_reference.md` (config keys, graph flow, vendor contract, overlays) and `docs/howto_end_to_end.md` (screener -> pipeline -> reports). Suite 843 passed / 2 skipped, clean exit; no env/credentials committed.
@@ -455,7 +456,7 @@ All config-gated, off by default:
   `catalyst_macro_window_days`/`_scale`, `catalyst_fed_window_days`/`_scale`,
   `catalyst_miss_scale`, `catalyst_scale_floor`, `catalyst_hard_block_days` (0 = off).
 
-Regression status: full suite passes (898 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (924 passed / 2 skipped / 56 subtests).
 
 ## Research
 
@@ -569,7 +570,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (898 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (924 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing

@@ -174,7 +174,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-19 `29e291b` - VCP scan (`--scan vcp`, volatility contraction)
+- - 2026-08-19 `29e291b` - VCP scan (`--scan vcp`, volatility contraction)
 - 2026-08-19 `9a71cea` - swing scan + RS + PEAD entry + catalyst hard veto
 - 2026-08-19 `a69fba7` - repo hygiene: lint cleanup, defect fixes, docs
 - 2026-08-19 `d0a60ce` - docs: api_reference + howto full coverage
@@ -188,7 +188,7 @@ tests/                     # conftest (autouse fixtures), test_* per area
 - 2026-08-19 `0ed81a3` - review fixes: indicator warmup, parallelism, caching
 - 2026-08-19 `1e2246b` - moomoo vendor integration + event contracts + --vendor
 
-Full suite: **898+ tested** (2 skipped: bedrock extra, live DeepSeek).
+Full suite: **924+ tested** (2 skipped: bedrock extra, live DeepSeek).
 
 ---
 

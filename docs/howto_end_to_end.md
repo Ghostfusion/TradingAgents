@@ -89,6 +89,8 @@ py -3.12 scripts/value_screener.py --file universe.txt --limit 10 --rank composi
 Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski
 (F-Score), Shareholder Yield, Net-Net, and Beneish/Altman guards; trend
 pullback / breakout / momentum / swing / vcp scans (see `Strategies/scan.md`);
+optional framework phase-1 gates (`--min-eps-yoy`, `--min-rev-yoy`, `--min-roe`,
+`--max-mcap`, `--sector-rank`, `--revision`, `--inst-accum`);
 portfolio alloc block; journaling.
 
 ## 2. What happens in one analysis

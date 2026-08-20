@@ -63,6 +63,9 @@ _ROW_ALIASES = {
     "depreciation": ["depreciation", "depreciation & amortization", "d&a"],
     "operating_income": ["operating income", "ebit", "operating profit"],
     "net_income": ["net income", "net profit", "net income (common)"],
+    "eps": ["diluted eps", "earnings per share", "basic eps"],
+    "eps_yoy": ["diluted eps yoy", "eps yoy", "earnings per share yoy"],
+    "revenue_yoy": ["total revenue yoy", "revenue yoy"],
     "interest_expense": ["interest expense", "interest paid"],
     "tax_expense": ["tax provision", "income tax", "tax expense"],
     "cash": ["cash and cash equivalents", "cash & equivalents", "cash & cash"],
@@ -76,12 +79,21 @@ _ROW_ALIASES = {
     ],
     "market_cap": ["market cap", "market capitalization"],
     "total_assets": ["total assets"],
+    "total_equity": [
+        "total shareholder equity",
+        "total stockholders equity",
+        "total stockholder equity",
+        "total equity",
+        "shareholders equity",
+        "common stock equity",
+    ],
     "total_liabilities": ["total liabilities"],
     "current_assets": ["total current assets", "current assets"],
     "current_liabilities": ["total current liabilities", "current liabilities"],
     "retained_earnings": ["retained earnings"],
     "ppem": ["property plant", "net ppe", "ppe", "fixed assets"],
     "marketable_securities": ["marketable securities", "short-term investments"],
+    "sector": ["sector", "industrygroup"],
     "net_receivables": ["net receivables", "accounts receivable", "receivables"],
     "operating_cashflow": ["operating cash flow", "cash flow from operating"],
     "dividends_paid": ["cash dividends paid", "dividends paid"],
@@ -135,6 +147,22 @@ def _first_number(text: str) -> float | None:
         return None
 
 
+def _percent_fraction(text: str) -> float | None:
+    """Parse a '12.34%' / '-5.2%' YoY cell into a fraction (0.1234 / -0.052).
+
+    None for '--', 'n/a' or any unparseable cell (never 0 - a missing growth
+    figure must not be confused with zero growth)."""
+    if text is None:
+        return None
+    raw = str(text).strip().rstrip("%")
+    if not raw or raw.lower() in ("--", "n/a", "na", "-"):
+        return None
+    try:
+        return float(raw) / 100.0
+    except ValueError:
+        return None
+
+
 def _parse_csv_statements(payload: str) -> dict:
     """Parse a yfinance-style CSV statement into {row_label: latest_value}."""
     rows = {}
@@ -162,7 +190,12 @@ def _parse_csv_statements(payload: str) -> dict:
 
 
 def _parse_markdown_financials(payload: str) -> dict:
-    """Parse a moomoo-style markdown table into {row_label: latest_value}."""
+    """Parse a moomoo-style markdown table into {row_label: latest_value}.
+
+    Handles the 4-column statement layout ("| Item | Value | YoY | QoQ |"):
+    the YoY cell (fraction) is stored under ``"<label> YoY"`` so canonical
+    growth fields (revenue_yoy / eps_yoy) read it directly.
+    """
     rows = {}
     for line in payload.splitlines():
         line = line.strip()
@@ -177,6 +210,10 @@ def _parse_markdown_financials(payload: str) -> dict:
         value = _first_number(cells[1]) if len(cells) > 1 else None
         if label and value is not None:
             rows[label] = value
+            if len(cells) >= 4 and cells[2] not in ("--", ""):
+                yoy = _percent_fraction(cells[2])
+                if yoy is not None:
+                    rows[f"{label} YoY"] = yoy
     return rows
 
 
@@ -189,6 +226,12 @@ def _parse_json_statements(payload: str) -> dict:
         return rows
     if not isinstance(data, dict):
         return rows
+    # Company-overview keys are single-level; statements are per-report.
+    for key, value in data.items():
+        if key in ("fiscalDateEnding", "reportedCurrency"):
+            continue
+        if key.lower() == "sector" and isinstance(value, str) and value.strip():
+            rows["Sector"] = value.strip()
     for report in data.get("annualReports", []) or data.get("quarterlyReports", []):
         for key, value in report.items():
             if key in ("fiscalDateEnding", "reportedCurrency"):
@@ -209,6 +252,9 @@ def _parse_text_report(payload: str) -> dict:
         parsed = _first_number(rest)
         if label.strip() and parsed is not None:
             rows[label.strip()] = parsed
+        elif label.strip().lower() == "sector" and rest.strip():
+            # non-numeric attributes (sector/industry) are kept as strings
+            rows["Sector"] = rest.strip()
     return rows
 
 
@@ -253,10 +299,10 @@ def _canonicalize(payload: str) -> dict:
     text = (payload or "").strip()
     if not text or text.startswith("NO_DATA") or text.startswith("DATA_"):
         return {}
-    if text.startswith("|"):
-        rows = _parse_markdown_financials(text)
-    elif text.lstrip().startswith("{"):
+    if text.lstrip().startswith("{"):
         rows = _parse_json_statements(text)
+    elif any(ln.lstrip().startswith("|") for ln in text.splitlines()):
+        rows = _parse_markdown_financials(text)
     elif ":" in text.splitlines()[0] if text.splitlines() else False:
         rows = _parse_text_report(text)
     else:
@@ -357,6 +403,11 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         from tradingagents.strategies.normalized import trap_verdict
 
         trap = trap_verdict(f_score=f_score, m_score=m_score, z_score=z_score)["level"]
+    ne = fin.get("net_income")
+    te = fin.get("total_equity")
+    roe = None
+    if ne is not None and te is not None and te > 0:
+        roe = float(ne) / float(te)
     return {
         "ticker": ticker,
         "ev_ebit": round(am, 2) if am is not None else None,
@@ -367,6 +418,10 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "altman_z": round(z_score, 3) if z_score is not None else None,
         "net_net": net_net,
         "trap": trap,
+        "roe": round(roe, 4) if roe is not None else None,
+        "eps_yoy": fin.get("eps_yoy"),
+        "revenue_yoy": fin.get("revenue_yoy"),
+        "sector": fin.get("sector"),
     }
 
 
@@ -407,6 +462,22 @@ def _watchlist_markdown(results: list) -> str:
     if show_scan:
         heads.append("ScanA")
         heads.append("ScanB")
+    show_growth = any(
+        r.get("eps_yoy") is not None or r.get("revenue_yoy") is not None
+        or r.get("roe") is not None
+        for r in results
+    )
+    if show_growth:
+        heads += ["EpsYoY", "RevYoY", "ROE"]
+    show_sector = any(r.get("sec_rank") is not None for r in results)
+    if show_sector:
+        heads += ["Sec", "Rank"]
+    show_rev = any(r.get("rev_net") is not None for r in results)
+    if show_rev:
+        heads.append("RevUp")
+    show_inst = any(r.get("inst_latest_pp") is not None for r in results)
+    if show_inst:
+        heads.append("Inst")
     show_swing = any(r.get("scan_c") for r in results)
     if show_swing:
         heads += ["ScanC", "RS", "Stp", "T2"]
@@ -458,6 +529,18 @@ def _watchlist_markdown(results: list) -> str:
         if show_scan:
             cells.append("yes" if r.get("scan_a") else "no")
             cells.append("yes" if r.get("scan_b") else "no")
+        if show_growth:
+            cells.append(cell(r.get("eps_yoy"), "{:.1%}"))
+            cells.append(cell(r.get("revenue_yoy"), "{:.1%}"))
+            cells.append(cell(r.get("roe"), "{:.1%}"))
+        if show_sector:
+            cells.append(cell(r.get("sector")))
+            rank = r.get("sec_rank")
+            cells.append(cell(rank) if rank is None else (f"T{rank}" if r.get("sec_top3") else str(rank)))
+        if show_rev:
+            cells.append(cell(r.get("rev_net"), "%+d"))
+        if show_inst:
+            cells.append(cell(r.get("inst_latest_pp"), "%+.1f"))
         if show_swing:
             cells.append("yes" if r.get("scan_c") else "no")
             cells.append(cell(r.get("swing_rs") or "n/a"))
@@ -602,6 +685,64 @@ def _vcp_scan(ohlcv: dict) -> dict | None:
         return vcp_setup(closes, highs, lows, vols)
     except Exception:  # noqa: BLE001 - a failed vcp read must not abort a run
         return None
+
+
+_SECTOR_RANK_CACHE: dict = {}
+
+
+def _sector_ranking() -> dict:
+    """SPDR sector ranking (11 ETFs via the vendor chain, cached per run)."""
+    if not _SECTOR_RANK_CACHE:
+        from tradingagents.strategies.sector_rank import SPDR_SECTORS, rank_sectors
+
+        closes_map = {}
+        for etf in SPDR_SECTORS:
+            closes = _fetch_closes(etf)
+            if closes:
+                closes_map[etf] = closes
+        _SECTOR_RANK_CACHE["value"] = rank_sectors(closes_map)
+    return _SECTOR_RANK_CACHE["value"]
+
+
+def _fetch_sector_guarded(ticker: str) -> str | None:
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_sector
+
+        return fetch_sector(ticker)
+    except Exception:  # noqa: BLE001 - enrichment must never abort a run
+        return None
+
+
+def _fetch_revision_guarded(ticker: str) -> dict | None:
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_revision_actions
+
+        return fetch_revision_actions(ticker)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _inst_accumulation(payload) -> dict | None:
+    """Sum of the two most recent %-of-float period changes from the moomoo
+    institutional-holdings table ("| period | inst | shares | pct | chg pp |");
+    None when the payload carries no change cells."""
+    if not payload or str(payload).startswith(("NO_DATA", "DATA_")):
+        return None
+    chgs = []
+    for line in str(payload).splitlines():
+        line = line.strip()
+        if not line.startswith("|") or "pp" not in line:
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) >= 5 and cells[4].endswith("pp"):
+            v = _first_number(cells[4])
+            if v is not None:
+                chgs.append(v)
+    if not chgs:
+        return None
+    latest = chgs[0]
+    two_q = latest + (chgs[1] if len(chgs) > 1 else 0.0)
+    return {"latest_pp": latest, "two_q_pp": two_q, "accumulate": two_q > 0}
 
 
 def _sma(series, n: int) -> float | None:
@@ -788,6 +929,48 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=2.0,
         help="min ATR(14) as %% of price (default 2; 0 disables)",
+    )
+    parser.add_argument(
+        "--max-mcap",
+        type=float,
+        default=0.0,
+        help="market-cap ceiling in USD (framework 2B-100B focus; 0 disables)",
+    )
+    parser.add_argument(
+        "--min-eps-yoy",
+        type=float,
+        default=0.0,
+        help="min EPS YoY change as %% (framework >= 20; 0 disables)",
+    )
+    parser.add_argument(
+        "--min-rev-yoy",
+        type=float,
+        default=0.0,
+        help="min revenue YoY change as %% (framework >= 15; 0 disables)",
+    )
+    parser.add_argument(
+        "--min-roe",
+        type=float,
+        default=0.0,
+        help="min return on equity as %% (framework >= 15; 0 disables)",
+    )
+    parser.add_argument(
+        "--sector-rank",
+        action="store_true",
+        help="confirm the sector is a top-3 SPDR group (1m/3m momentum); "
+        "adds Sec/Rank columns and keeps only top-3 sectors",
+    )
+    parser.add_argument(
+        "--revision",
+        action="store_true",
+        help="require positive net analyst upgrades in the last 60d "
+        "(yfinance proxy for forward earnings revisions); adds RevUp column",
+    )
+    parser.add_argument(
+        "--inst-accum",
+        action="store_true",
+        help="require institutional accumulation (last two 13F periods "
+        "%-of-float change > 0, moomoo); adds Inst column",
     )
     parser.add_argument(
         "--intraday",
@@ -1046,6 +1229,54 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
                 continue
             row = screen_ticker(ticker, fin)
+            # Phase-1 growth / structure gates - applied only when the metric
+            # is MEASURED (missing data keeps the row: "n/a", never fabricated).
+            if args.min_eps_yoy and row.get("eps_yoy") is not None \
+                    and (row["eps_yoy"] * 100.0) < args.min_eps_yoy:
+                logger.info("skip %s: EPS YoY %.1f%% < %.0f%%", ticker,
+                            row["eps_yoy"] * 100.0, args.min_eps_yoy)
+                continue
+            if args.min_rev_yoy and row.get("revenue_yoy") is not None \
+                    and (row["revenue_yoy"] * 100.0) < args.min_rev_yoy:
+                logger.info("skip %s: revenue YoY %.1f%% < %.0f%%", ticker,
+                            row["revenue_yoy"] * 100.0, args.min_rev_yoy)
+                continue
+            if args.min_roe and row.get("roe") is not None \
+                    and (row["roe"] * 100.0) < args.min_roe:
+                logger.info("skip %s: ROE %.1f%% < %.0f%%", ticker,
+                            row["roe"] * 100.0, args.min_roe)
+                continue
+            if args.max_mcap and cap is not None and cap > args.max_mcap:
+                logger.info("skip %s: market cap %.2fB > ceiling %.2fB",
+                            ticker, cap / 1e9, args.max_mcap / 1e9)
+                continue
+            if args.sector_rank:
+                from tradingagents.strategies.sector_rank import sector_standing
+
+                sector = row.get("sector") or _fetch_sector_guarded(ticker)
+                standing = sector_standing(sector, _sector_ranking())
+                row["sector"] = standing.get("sector") or sector
+                row["sec_rank"] = standing.get("rank")
+                row["sec_top3"] = standing.get("top3_3m")
+                if standing.get("verdict") == "tracking":  # measured, not top-3
+                    logger.info("skip %s: sector %s rank %s not top-3",
+                                ticker, row["sector"], row["sec_rank"])
+                    continue
+            if args.revision:
+                rev = _fetch_revision_guarded(ticker)
+                row["rev_net"] = rev.get("net") if rev else None
+                if row["rev_net"] is not None and row["rev_net"] <= 0:
+                    logger.info("skip %s: net analyst revisions %+d <= 0",
+                                ticker, row["rev_net"])
+                    continue
+            if args.inst_accum:
+                inst = _inst_accumulation(route_to_vendor("get_institution_holdings", ticker))
+                row["inst_latest_pp"] = inst.get("latest_pp") if inst else None
+                row["inst_two_q_pp"] = inst.get("two_q_pp") if inst else None
+                if inst is not None and inst.get("accumulate") is False:
+                    logger.info("skip %s: institutional distribution (2q pp %.2f)",
+                                ticker, inst["two_q_pp"])
+                    continue
             if fmp_use:
                 _nf = None
                 try:

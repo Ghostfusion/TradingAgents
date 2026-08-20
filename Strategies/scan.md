@@ -8,13 +8,29 @@ failed). Source docs: `Strategies/value_strategy.md`, `Strategies/framework.md`,
 `Strategies/momentum_day_trading.md`.
 
 Mode gates run on top of the liquidity/price/market-cap/PE/ATR filters, so each
-watchlist is tradeable-by-construction.
+watchlist is tradeable-by-construction. The framework phase-1 gates below are
+**optional flags** (all off by default, `0` disables):
+
+| Flag | Rule (framework) | Data source |
+| --- | --- | --- |
+| `--min-eps-yoy 20` | EPS YoY >= 20% | moomoo statement YoY column |
+| `--min-rev-yoy 15` | Revenue YoY >= 15% | moomoo statement YoY column |
+| `--min-roe 15` | Return on Equity >= 15% | net income / total equity |
+| `--max-mcap 100000000000` | market cap <= $100B ($2B-100B focus) | vendor cap |
+| `--sector-rank` | sector in the top-3 SPDR group (1m/3m) | SPDR ETFs + yfinance sector |
+| `--revision` | positive net analyst upgrades (60d) | yfinance upgrades/downgrades proxy |
+| `--inst-accum` | institutional %-of-float rising (2 quarters) | moomoo shareholders |
+
+A gate is applied **only when the metric is measured** - a symbol with missing
+data keeps the row and renders `n/a` (never a fabricated pass or fail).
 
 ## `value` (classic)
 
 Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F-Score,
-Shareholder Yield, Net-Net and the Beneish/Altman guards — see
-`Strategies/Math.md`. No OHLCV gates.
+Shareholder Yield, Net-Net and the Beneish/Altman guards - see
+`Strategies/Math.md`. No OHLCV gates. The framework Phase-1 growth/structure
+gates (EPS/revenue YoY, ROE, max cap, sector top-3, revisions, institutional
+accumulation) are the optional flags above and work in every mode.
 
 ## `trend-pullback` (Strategy A)
 
