@@ -407,6 +407,9 @@ def _watchlist_markdown(results: list) -> str:
     if show_scan:
         heads.append("ScanA")
         heads.append("ScanB")
+    show_swing = any(r.get("scan_c") for r in results)
+    if show_swing:
+        heads += ["ScanC", "RS", "Stp", "T2"]
     show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
     if show_trap:
         heads.append("Trap")
@@ -452,6 +455,11 @@ def _watchlist_markdown(results: list) -> str:
         if show_scan:
             cells.append("yes" if r.get("scan_a") else "no")
             cells.append("yes" if r.get("scan_b") else "no")
+        if show_swing:
+            cells.append("yes" if r.get("scan_c") else "no")
+            cells.append(cell(r.get("swing_rs") or "n/a"))
+            cells.append(cell(r.get("swing_stop_pct"), "{:.1%}"))
+            cells.append(cell(r.get("swing_t2_pct"), "{:.1%}"))
         if show_trap:
             cells.append(cell(r.get("trap")))
         if show_chg:
@@ -529,6 +537,51 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
 def _fetch_closes(ticker: str, days: int = 320) -> list:
     """Daily closes via the vendor chain (csv); empty on failure."""
     return _fetch_ohlcv(ticker, days=days)["closes"]
+
+
+_BENCHMARK_CACHE: dict = {}
+
+
+def _benchmark_closes() -> list:
+    """Benchmark (SPY or TRADINGAGENTS_BENCHMARK_TICKER) closes for the RS
+    line; cached per run so one fetch serves every symbol. Empty on failure
+    (the swing scan then treats RS as unknown and never blocks on it)."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        bench = get_config().get("benchmark_ticker") or "SPY"
+    except Exception:
+        bench = "SPY"
+    if bench not in _BENCHMARK_CACHE:
+        _BENCHMARK_CACHE[bench] = _fetch_closes(bench)
+    return _BENCHMARK_CACHE[bench]
+
+
+def _swing_scan(symbol: str, ohlcv: dict, benchmark: list) -> dict | None:
+    """Composite swing read for one symbol + display metrics for the table."""
+    try:
+        from tradingagents.strategies.size import atr as _atr
+        from tradingagents.strategies.swing import swing_report
+
+        closes = ohlcv.get("closes") or []
+        highs = ohlcv.get("highs") or []
+        lows = ohlcv.get("lows") or []
+        vols = ohlcv.get("volumes") or []
+        if len(closes) < 200:
+            return None
+        atr_v = _atr(highs, lows, closes, window=14)
+        rep = swing_report(
+            closes, highs, lows, vols, atr_value=atr_v, benchmark_closes=benchmark
+        )
+        if not rep:
+            return None
+        out = dict(rep)
+        t2 = ((rep.get("targets") or {}).get("t2"))
+        last = closes[-1] if closes else None
+        out["t2_pct"] = (float(t2) / last - 1.0) if (t2 and last) else None
+        return out
+    except Exception:  # noqa: BLE001 - a failed swing read must not abort a run
+        return None
 
 
 def _sma(series, n: int) -> float | None:
@@ -723,11 +776,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--scan",
-        choices=("value", "trend-pullback", "breakout", "momentum", "all"),
+        choices=("value", "trend-pullback", "breakout", "momentum", "swing", "all"),
         default="all",
         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
         "dip in uptrend), 'breakout' (volatility contraction/breakout), "
-        "or 'all' (default: keep all, flag strategies)",
+        "'momentum' (day-trade pre-filter + first pullback), 'swing' "
+        "(techno-fundamental swing: stacked trend + RS vs benchmark + "
+        "pullback + stops/targets), or 'all' (default: keep all, flag "
+        "strategies)",
     )
     parser.add_argument(
         "--out-dir",
@@ -889,6 +945,13 @@ def main(argv: list[str] | None = None) -> int:
                                     )
                             except Exception:
                                 pass
+                    if args.scan == "swing":
+                        bench = _benchmark_closes()
+                        sw = _swing_scan(symbol, ohlcv, bench)
+                        if sw is not None:
+                            scan_meta[symbol]["swing"] = sw
+                        if not (sw and sw.get("candidate")):
+                            continue
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
                         avg_vol = sum(vols) / len(vols) if vols else 0.0
@@ -975,6 +1038,12 @@ def main(argv: list[str] | None = None) -> int:
             row["pills"] = sum(1 for v in _mom["pillars"].values() if v) if _mom else None
             row["pullback"] = bool(_mom.get("pullback")) if _mom else False
             row["mom_rr"] = _mom.get("mom_rr") if _mom else None
+            _sw = (sig or {}).get("swing") if sig else None
+            row["scan_c"] = bool(_sw and _sw.get("candidate"))
+            _sw_rs = ((_sw or {}).get("relative_strength") or {}) if _sw else {}
+            row["swing_rs"] = _sw_rs.get("verdict")
+            row["swing_stop_pct"] = ((_sw or {}).get("stop") or {}).get("risk_pct")
+            row["swing_t2_pct"] = (_sw or {}).get("t2_pct")
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None

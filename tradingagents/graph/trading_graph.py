@@ -763,6 +763,19 @@ class TradingAgentsGraph:
                         cvar_pct=cvar_pct,
                         drawdown_pct=self.config.get("risk_max_drawdown_pct"),
                     )
+                    # Catalyst hard block (framework Phase 4): "never initiate"
+                    # inside the earnings window - a scheduled print within
+                    # catalyst_hard_block_days forces REJECT regardless of size.
+                    hard_block = (catalyst_snapshot or {}).get("hard_block")
+                    if hard_block:
+                        verdict = {
+                            "verdict": "REJECT",
+                            "reasons": [
+                                f"catalyst hard block: earnings {hard_block['earnings_date']} "
+                                f"in {hard_block['days_until']}d (window {hard_block['window_days']}d)"
+                            ],
+                            "numbers": "catalyst-hard-block",
+                        }
                     final_state["risk_gate"] = verdict
                     if verdict["verdict"] in ("WARN", "REJECT"):
                         final_state["risk_snapshot"] = build_risk_snapshot(

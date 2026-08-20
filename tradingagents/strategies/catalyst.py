@@ -187,6 +187,7 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
     fed_scale = float(_num(cfg.get("catalyst_fed_scale"), 0.6) or 0.6)
     miss_scale = float(_num(cfg.get("catalyst_miss_scale"), 0.5) or 0.5)
     floor_scale = float(_num(cfg.get("catalyst_scale_floor"), 0.25) or 0.25)
+    block_days = int(_num(cfg.get("catalyst_hard_block_days"), 0) or 0)
 
     data = data or {}
     earnings = next_earnings(data.get("earnings_calendar") or [], trade_date)
@@ -200,6 +201,7 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
     scale = 1.0
     verdict = "no-imminent-catalyst"
     reasons: list[str] = []
+    hard_block = None
 
     if earnings is not None and 0 <= earnings["days_until"] <= window_days:
         penalty = catalyst_risk_penalty(implied, baseline)
@@ -214,6 +216,22 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
             reasons.append(
                 f"last earnings miss (surprise {last['surprise']:+.1%}) -> x{miss_scale:.2f}"
             )
+
+    if block_days > 0 and earnings is not None and 0 <= earnings["days_until"] <= block_days:
+        # Framework hard rule (Phase 4): never *initiate* a swing within 5-7
+        # trading days of a scheduled print - binary overnight gap risk. The
+        # governor turns this into a REJECT; the scale fold still applies as
+        # the de-risk fallback for consumers without the governor.
+        hard_block = {
+            "days_until": earnings["days_until"],
+            "window_days": block_days,
+            "earnings_date": earnings.get("date"),
+        }
+        reasons.append(
+            f"earnings {earnings['date']} in {earnings['days_until']}d within "
+            f"hard-block window ({block_days}d) -> REJECT new risk"
+        )
+        verdict = "earnings-hard-block"
 
     if macro["count_high"] > 0:
         scale *= macro_scale
@@ -241,6 +259,7 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
         "scale": round(scale, 4),
         "verdict": verdict,
         "reasons": reasons,
+        "hard_block": hard_block,
     }
 
 
@@ -345,9 +364,7 @@ def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
         past = (td - timedelta(days=35)).strftime("%Y-%m-%d")
         fwd = (td + timedelta(days=95)).strftime("%Y-%m-%d")
 
-        earnings_rows = _filter_by_security(
-            _calendar_window(ctx, market, past, fwd), code
-        )
+        earnings_rows = _filter_by_security(_calendar_window(ctx, market, past, fwd), code)
 
         move_history = []
         ret, hist = ctx.get_financials_earnings_price_history(code)

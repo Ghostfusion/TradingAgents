@@ -339,3 +339,122 @@ def test_graph_overlay_wiring_events_disabled(monkeypatch):
     )
     out = graph._apply_strategy_overlays({"trade_date": "2026-08-19"}, "AAPL")
     assert "catalyst" not in (out.get("strategy_overlays") or {})
+
+
+def test_snapshot_hard_block_off_by_default():
+    snap = build_catalyst_snapshot(
+        _full_data(), "2026-08-19", {"catalyst_window_days": 5}
+    )
+    assert snap["hard_block"] is None
+    assert snap["verdict"] != "earnings-hard-block"
+
+
+def test_snapshot_hard_block_when_within_window():
+    snap = build_catalyst_snapshot(
+        _full_data(),  # next earnings 08-24 -> 5 days out
+        "2026-08-19",
+        {"catalyst_window_days": 5, "catalyst_hard_block_days": 7},
+    )
+    assert snap["hard_block"] is not None
+    assert snap["hard_block"]["days_until"] == 5
+    assert snap["hard_block"]["window_days"] == 7
+    assert snap["verdict"] == "earnings-hard-block"
+    assert snap["scale"] < 1.0  # de-risk still applies alongside the veto
+    assert any("hard-block" in r for r in snap["reasons"])
+
+
+def test_snapshot_hard_block_no_earnings():
+    snap = build_catalyst_snapshot(
+        {"earnings_calendar": [], "move_history": [], "economic_calendar": [], "fed_watch": []},
+        "2026-08-19",
+        {"catalyst_hard_block_days": 7},
+    )
+    assert snap["hard_block"] is None
+    assert snap["verdict"] == "no-imminent-catalyst"
+
+
+def test_snapshot_hard_block_outside_window_no_veto():
+    snap = build_catalyst_snapshot(
+        _full_data(),  # earnings 08-24, 5 days out
+        "2026-08-19",
+        {"catalyst_window_days": 5, "catalyst_hard_block_days": 3},  # block < distance
+    )
+    assert snap["hard_block"] is None
+    assert snap["verdict"] == "earnings-window"  # still de-risked, not vetoed
+
+
+def test_graph_overlay_wiring_hard_block_rejects(monkeypatch):
+    """A catalyst hard block must force a REJECT risk gate even when the
+    size limits would pass."""
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies import catalyst as cat_mod
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "enable_strategy_overlays": True,
+        "enable_events": True,
+        "enable_orderflow": False,
+        "enable_position_contract": False,
+        "enable_risk_governor": True,
+        "enable_computed_context": False,
+        "risk_audit_enabled": False,
+        "data_cache_dir": "~/.tradingagents",
+        "target_vol": 0.15,
+    }
+    closes = [100.0 + 0.2 * i for i in range(300)]
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+
+    snapshot = {
+        "verdict": "earnings-hard-block",
+        "scale": 0.4,
+        "reasons": ["earnings hard block"],
+        "hard_block": {"days_until": 3, "window_days": 7, "earnings_date": "2026-08-24"},
+    }
+    monkeypatch.setattr(cat_mod, "fetch_catalyst_data", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(cat_mod, "build_catalyst_snapshot", lambda *a, **k: snapshot)
+    monkeypatch.setattr(
+        cat_mod,
+        "fold_catalyst_into_overlay",
+        lambda overlay, snap: {**overlay, "catalyst": snap, "position_scale": 0.4},
+    )
+
+    state = {"trade_date": "2026-08-19", "final_trade_decision": "Buy"}
+    out = graph._apply_strategy_overlays(state, "AAPL")
+    assert out["risk_gate"]["verdict"] == "REJECT"
+    assert out["risk_halt"] is True
+    assert any("hard block" in r for r in out["risk_gate"]["reasons"])
+
+
+def test_graph_overlay_wiring_no_hard_block_passes(monkeypatch):
+    """Without a hard block, a small size inside the limits stays PASS."""
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies import catalyst as cat_mod
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "enable_strategy_overlays": True,
+        "enable_events": True,
+        "enable_orderflow": False,
+        "enable_position_contract": True,
+        "enable_risk_governor": True,
+        "enable_computed_context": False,
+        "risk_audit_enabled": False,
+        "target_vol": 0.15,
+    }
+    closes = [100.0 + 0.2 * i for i in range(300)]
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+
+    snapshot = {"verdict": "no-imminent-catalyst", "scale": 1.0, "hard_block": None}
+    monkeypatch.setattr(cat_mod, "fetch_catalyst_data", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(cat_mod, "build_catalyst_snapshot", lambda *a, **k: snapshot)
+    from tradingagents.strategies import catalyst as cat_mod2
+
+    monkeypatch.setattr(
+        cat_mod2,
+        "fold_catalyst_into_overlay",
+        lambda overlay, snap: {**overlay, "catalyst": snap, "position_scale": 1.0},
+    )
+
+    state = {"trade_date": "2026-08-19", "final_trade_decision": "Hold"}
+    out = tg.TradingAgentsGraph._apply_strategy_overlays(graph, state, "AAPL")
+    assert out["risk_gate"]["verdict"] in ("PASS", "WARN")

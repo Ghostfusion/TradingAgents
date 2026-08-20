@@ -10,6 +10,27 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Techno-fundamental swing scan (`--scan swing`)** - `strategies/swing.py`
+  (trend architecture: 20-EMA stacked over rising 50/200-SMA, RSI 45-70 band
+  with 40-50 reset, pullback-into-EMA20 on fading volume, 1-ATR swing-low
+  stop, 2R/3R two-tier targets, 50% T1 scale-out + 20-EMA trail) and
+  `strategies/relative_strength.py` (RS line vs `benchmark_ticker`, 63-day
+  established-uptrend slope, new-high/near-high position, negative-divergence
+  detection); wired as a new screener mode with ScanC/RS/Stp/T2 columns.
+  Source: `Strategies/framework.md`; mode docs in `Strategies/scan.md`.
+- **PEAD post-earnings entry helpers** - `events.py` gains
+  `gap_up_qualifies` (2.5x-volume gap gate), `consolidation_and_break`
+  (opening-range tightening + break trigger) and `post_earnings_play`.
+- **Catalyst hard block (G5)** - `catalyst_hard_block_days` config (default
+  0 = off; `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` env override): a
+  scheduled earnings print inside the window makes the risk governor REJECT
+  new risk outright (framework Phase-4 "never initiate" rule) while the
+  scale-fold de-risk still applies.
+- **Strategy docs** - `Strategies/scan.md` filled (was an empty placeholder)
+  with all scan modes including swing.
+
+### Added
+
 - **Momentum day-trading signals (analysis-only)** - `strategies/momentum.py`
   (5-pillar pre-filter, RVOL/EMA9/VWAP, first-pullback pattern with R/R,
   session risk flags); screener `--scan momentum` (+Pills/Pull/RR

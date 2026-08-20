@@ -54,6 +54,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CATALYST_FED_SCALE": "catalyst_fed_scale",
     "TRADINGAGENTS_CATALYST_MISS_SCALE": "catalyst_miss_scale",
     "TRADINGAGENTS_CATALYST_SCALE_FLOOR": "catalyst_scale_floor",
+    "TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS": "catalyst_hard_block_days",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
@@ -244,6 +245,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "catalyst_fed_scale": 0.6,  # multiplier when FOMC is imminent
         "catalyst_miss_scale": 0.5,  # last earnings miss during earnings window
         "catalyst_scale_floor": 0.25,  # never scale below this via catalysts
+        "catalyst_hard_block_days": 0,  # >0: REJECT new risk within N calendar
+        #   days of a scheduled earnings print (framework Phase-4 hard rule)
         "enable_reflection": True,  # Phase 5: post-trade analyst critique
         "enable_sentiment": False,  # Phase 6: sentiment velocity
         "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)

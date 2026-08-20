@@ -260,3 +260,120 @@ def _fake_losers_offline(sort_dir="losers", count=50, market="US", min_market_ca
             "market_cap": 7.0e12,
         },
     ]
+
+
+def _swing_csv(flatten: bool = False):
+    """Swing-candidate daily series (noisy uptrend + 6-bar fading-volume
+    pullback into the 20-day EMA). With ``flatten`` the price is a flat line
+    (no trend) so the swing gate must drop it."""
+    import math
+
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    if flatten:
+        for i in range(240):
+            rows.append(f"2026-01-{i % 28 + 1:02d},100.1,102.0,98.0,100.0,5000000")
+        return "\n".join(rows) + "\n"
+    n = 252
+    base = [100.0 + 0.5 * i + 8.0 * math.sin(i / 6) for i in range(n)]
+    k = 2.0 / 21.0
+    ema = sum(base[:20]) / 20.0
+    for v in base[20:]:
+        ema = v * k + ema * (1 - k)
+    closes = base + [ema + 5.0, ema + 4.0, ema + 3.0, ema + 2.0, ema + 1.0, ema + 1.6]
+    vols = [5_000_000] * len(closes)
+    vols = vols[:-6] + [1_000_000] * 6  # volume fades into the pullback
+    for i, (c, v) in enumerate(zip(closes, vols, strict=False)):
+        rows.append(f"2026-01-{i % 28 + 1:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}")
+    return "\n".join(rows) + "\n"
+
+
+def _spy_csv():
+    """Flat benchmark so the stock's RS line reads as an established uptrend."""
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    for i in range(260):
+        rows.append(f"2026-01-{i % 28 + 1:02d},200.1,202.0,199.0,200.0,50000000")
+    return "\n".join(rows) + "\n"
+
+
+def _swing_route(method, *a, **k):
+    if method == "get_stock_data":
+        sym = a[0] if a else "?"
+        if sym == "SPY":
+            return _spy_csv()
+        # Every symbol gets the candidate setup at first, or a flat line to
+        # exercise the gate depending on the flatten flag below.
+        return _swing_csv(flatten=sym == "FLAT")
+    return "NO_DATA_AVAILABLE: no usable market data"
+
+
+def test_scan_swing_passes_and_shows_columns(capsys):
+    """--scan swing keeps RS-backed swing setups and shows ScanC/RS/Stp/T2."""
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=_swing_route),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+    ):
+        vs.main(
+            [
+                "--universe",
+                "top-losers",
+                "-n",
+                "2",
+                "-d",
+                "2026-01-02",
+                "--min-mcap",
+                "1e9",
+                "--min-atr-pct",
+                "0",
+                "--scan",
+                "swing",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert "ScanC" in out and "RS" in out and "Stp" in out and "T2" in out
+
+
+def test_scan_swing_filters_non_matches(capsys):
+    """--scan swing must drop names without a stacked/RS-backed setup."""
+    import pytest as _pytest
+
+    def flat_route(method, *a, **k):
+        if method == "get_stock_data":
+            sym = a[0] if a else "?"
+            return _spy_csv() if sym == "SPY" else _swing_csv(flatten=True)
+        return "NO_DATA_AVAILABLE"
+
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=flat_route),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        mock.patch(
+            "tradingagents.dataflows.moomoo.get_hot_movers_moomoo",
+            side_effect=_fake_losers_offline,
+        ),
+        _pytest.raises(SystemExit),
+    ):
+        vs.main(
+            [
+                "--universe",
+                "top-losers",
+                "-n",
+                "2",
+                "-d",
+                "2026-01-02",
+                "--min-mcap",
+                "1e9",
+                "--min-atr-pct",
+                "0",
+                "--scan",
+                "swing",
+            ]
+        )

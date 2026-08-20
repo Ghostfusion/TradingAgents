@@ -61,6 +61,7 @@ in `batch.py`).
 | `TRADINGAGENTS_CATALYST_FED_SCALE` | `catalyst_fed_scale` |
 | `TRADINGAGENTS_CATALYST_MISS_SCALE` | `catalyst_miss_scale` |
 | `TRADINGAGENTS_CATALYST_SCALE_FLOOR` | `catalyst_scale_floor` |
+| `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` |
 | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` |
 | `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` |
 | `TRADINGAGENTS_RISK_COMPACT_REPORT` | `risk_compact_report` |
@@ -197,7 +198,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | --- | --- | --- | --- |
 | Regime / size | `enable_strategy_overlays` (T) | `strategies/regime.py`, `size.py` | vol-percentile/trend label + vol-target scale |
 | Order flow | `enable_orderflow` (T) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
-| Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict |
+| Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict; `catalyst_hard_block_days` > 0 turns an imminent print into a risk-governor REJECT |
 | Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst |
 | Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt` |
 | Calibration | `enable_calibration` (T) | `strategies/calibration.py` | calibrated P from ledger |
@@ -305,6 +306,7 @@ preserves `Risk Gate (computed)` blocks.
 - value_screener.py: `tickers` `-f/--file` `-d/--date` `-l/--limit`
   `-u/--universe` `--market` `-n/--movers-count` `--min-mcap` `--price-min`
   `--pe-max` `--min-avg-vol` `--min-atr-pct` `--intraday` `--scan`
+  (value|trend-pullback|breakout|momentum|swing|all)
   `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
 
 ## 10. Docs index

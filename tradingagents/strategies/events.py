@@ -60,10 +60,88 @@ def catalyst_risk_penalty(expected_move: float | None, baseline_move: float = 0.
     return max(0.0, min(1.0, 1.0 / (1.0 + ratio * 3.0)))
 
 
+def gap_up_qualifies(
+    day0_return: float | None,
+    volume_ratio: float | None,
+    vol_min: float = 2.5,
+    gap_min: float | None = None,
+) -> bool:
+    """PEAD entry gate (Phase 4): a post-earnings gap up on exceptional
+    volume (>=2.5x the average by default).
+
+    ``volume_ratio`` is print-day volume / trailing average; ``gap_min`` is an
+    optional minimum gap size (fraction) that must also hold. Unknown inputs
+    never qualify (a gap we cannot verify is not a confirmed tailwind).
+    """
+    if day0_return is None or day0_return <= 0:
+        return False
+    if gap_min is not None and day0_return < gap_min:
+        return False
+    return bool(volume_ratio is not None and volume_ratio >= vol_min)
+
+
+def consolidation_and_break(highs: list, closes: list, hold_days: int = 4) -> dict:
+    """Post-earnings opening-range consolidation + breakout trigger.
+
+    Measures the ``hold_days`` bars *after* the gap day (the caller passes the
+    trailing bars only - the series must not include the print day itself),
+    then flags a close above that range's high: the framework enters on a
+    break above the consolidation high rather than chasing the gap.
+    """
+    if not highs or not closes or len(highs) < 2 or len(closes) < 2:
+        return {"range_high": None, "range_low": None, "breakout": None}
+    n = min(hold_days, len(highs) - 1) or 1
+    seg_h = [float(v) for v in highs[-n:]]
+    seg_l = [float(v) for v in closes[-n:]]  # low proxy: closes of the range
+    rng_high = max(seg_h)
+    rng_low = min(seg_l)
+    tight_aggregate = False
+    if n >= 3:
+        first = max(highs[-n : -n // 2]) - min(closes[-n : -n // 2])
+        last = max(highs[-n // 2 :]) - min(closes[-n // 2 :])
+        tight_aggregate = bool(first and last < first)
+    return {
+        "range_high": round(rng_high, 4),
+        "range_low": round(rng_low, 4),
+        "tightening": tight_aggregate,
+        "breakout": bool(closes[-1] > rng_high),
+        "days": n,
+    }
+
+
+def post_earnings_play(
+    day0_return: float | None,
+    volume_ratio: float | None,
+    post_highs: list,
+    post_closes: list,
+    hold_days: int = 4,
+    vol_min: float = 2.5,
+    gap_min: float | None = None,
+) -> dict:
+    """Full PEAD entry read: gap gate -> consolidation -> break trigger.
+
+    Verdicts: ``setup`` (gap qualified and price broke the consolidation
+    high), ``consolidating`` (gap qualified, waiting for the break),
+    ``no-gap`` (gap did not qualify) or ``no-data``.
+    """
+    if day0_return is None or volume_ratio is None or not post_highs:
+        return {"verdict": "no-data"}
+    gap_ok = gap_up_qualifies(day0_return, volume_ratio, vol_min=vol_min, gap_min=gap_min)
+    cons = consolidation_and_break(post_highs, post_closes, hold_days=hold_days)
+    if not gap_ok:
+        return {"verdict": "no-gap", "gap": False, **cons}
+    if cons.get("breakout"):
+        return {"verdict": "setup", "gap": True, **cons}
+    return {"verdict": "consolidating", "gap": True, **cons}
+
+
 __all__ = [
     "surprise_score",
     "drift_side",
     "position_mult_by_side",
     "expected_drift_after",
     "catalyst_risk_penalty",
+    "gap_up_qualifies",
+    "consolidation_and_break",
+    "post_earnings_play",
 ]
