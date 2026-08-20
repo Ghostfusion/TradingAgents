@@ -70,6 +70,33 @@ They are optional / key-gated or pre-fetch sources.
 | **StockTwits** | `dataflows/stocktwits.py` | `fetch_stocktwits_messages` -> pre-fetched into the sentiment analyst | optional |
 | **float_shares** | `dataflows/float_shares.py` | `fetch_float_shares` -> screener `--enable-float` momentum pillar | `--enable-float` |
 
+### Why these are direct, not routed
+
+These five are **not** in `VENDOR_LIST` / `VENDOR_METHODS`, so `route_to_vendor`
+does not know about them (verified against `dataflows/interface.py`). They are
+**imported and called directly** instead. The reason is architectural: they do
+not fit the "per-category chain with fallback" model that `route_to_vendor`
+provides.
+
+- **Alpaca** — optional, opt-in analysis source (`enable_alpaca`). It returns a
+  **live snapshot** (distinct shape) rather than a category-method result, and
+  there is no chain/fallback — you either enable Alpaca or you don't. So it is
+  wrapped as its own `get_market_snapshot_alpaca` tool and called directly.
+- **FMP** — optional enrich (`fmp_api_key`); a *supplement* to the fundamental
+  chain, not a first-class fallback vendor. The screener calls it directly to
+  fill multi-year fundamentals/EV/surprises when the core chain is thin.
+- **Reddit / StockTwits** — **pre-fetched as raw text directly into the
+  sentiment analyst's prompt** (turn 0), not fetched on-demand by a tool call.
+  They are prompt-injected content, not per-category methods.
+- **float_shares** — a single-purpose lookup (public float shares) used only
+  by the screener `--enable-float` momentum pillar. No category, no fallback
+  needed.
+
+The 8 routed vendors are the well-behaved *core* feeds (prices, fundamentals,
+news) where resilience (fallback / TTL cache / typed errors) matters; the 5
+direct sources are one-off / optional / special-purpose inputs that do not need
+that resilience.
+
 ---
 
 ## Tier 3 — Massive sub-modules (part of provider 8)
