@@ -10,6 +10,19 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Risk Gate renders both CVaRs (analyzed-name + book)** - when a risk basket
+  is configured, the report's `Risk Gate (computed)` (and compact verdict mode)
+  now shows `Analyzed-name CVaR` (the analyzed ticker's own daily tail) next to
+  `Portfolio (book) CVaR — this fed the gate` (the weighted-basket CVaR that is
+  actually compared to the budget). The same comparison is computed-injected
+  into the Portfolio Manager prompt as `**Computed daily-tail CVaR**`, so the PM
+  grounds tail-risk/sizing language in these numbers (no `risk_context` on the
+  state → the PM line is omitted, keeping old prompts unchanged). The graph
+  writes `final_state["risk_context"] = {single_cvar, book_cvar}` when the
+  governor runs. Tests: `test_reporting` (2: both-CVaR block + no-basket
+  single-only), `test_structured_agent_prompts` (2: PM prompt injects both,
+  omits when absent).
+
 - **True portfolio CVaR for the risk governor (R2)** - the governor's daily-era
   tail budget now uses the *weighted basket's* historical CVaR when configured:
   new config keys `risk_basket_tickers` (list) + `risk_basket_weights` (dict,

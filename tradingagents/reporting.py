@@ -96,6 +96,14 @@ def _risk_gate_block(final_state: dict) -> str:
     snap = final_state.get("risk_snapshot")
     if snap:
         parts.append(f"Snapshot: {snap}")
+    # Expose both the analyzed name's own daily-tail CVaR and (when a risk
+    # basket is configured) the book-level CVaR that actually fed the gate - so
+    # a reader can tell "this idea's tail" from "my book's tail".
+    ctx = final_state.get("risk_context") or {}
+    if ctx.get("single_cvar") is not None:
+        parts.append(f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}")
+    if ctx.get("book_cvar") is not None:
+        parts.append(f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%} — this fed the gate")
     reasons = gate.get("reasons") or []
     if reasons:
         parts.append("Reasons: " + "; ".join(reasons))

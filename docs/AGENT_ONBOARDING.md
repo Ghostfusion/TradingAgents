@@ -281,6 +281,13 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-21 `(working tree)` - Risk Gate renders both CVaRs: with a risk
+  basket configured, `5_portfolio/decision.md`'s `Risk Gate (computed)` block
+  shows `Analyzed-name CVaR` (the analyzed ticker's own daily tail) next to
+  `Portfolio (book) CVaR — this fed the gate` (the weighted-basket CVaR the
+  governor budgets against); the same numbers are computed-injected into the
+  PM prompt (`**Computed daily-tail CVaR**`) via `final_state["risk_context"]`.
+
 - 2026-08-21 `(working tree)` - Session-discipline + earnings-quality tools:
   `get_session_discipline` (market, momentum.session_flags walk-away + psych
   levels) and `get_earnings_quality` (fundamentals, Sloan accruals_ratio +

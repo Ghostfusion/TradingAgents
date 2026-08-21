@@ -838,6 +838,9 @@ class TradingAgentsGraph:
                     if rets and len(rets) >= 5:
                         cv = book_cvar(rets, alpha=0.05)
                         cvar_pct = abs(cv) if cv is not None else None
+                    # The analyzed name's own daily-tail CVaR, kept for display
+                    # alongside the (possibly basket-derived) gate input.
+                    single_name_cvar = cvar_pct
                     # True portfolio CVaR (R2): when a risk basket is configured,
                     # mix the basket names' daily return series (weighted) and
                     # take the basket's historical CVaR as the daily tail budget
@@ -846,6 +849,13 @@ class TradingAgentsGraph:
                     basket_budget = self._basket_cvar(ticker)
                     if basket_budget is not None:
                         cvar_pct = basket_budget
+                    # Surface both numbers on the state so the report / agents
+                    # can compare the analyzed name's own tail vs the book tail.
+                    risk_ctx = final_state.setdefault("risk_context", {})
+                    if basket_budget is not None:
+                        risk_ctx["book_cvar"] = basket_budget
+                    if single_name_cvar is not None:
+                        risk_ctx["single_cvar"] = single_name_cvar
                     verdict = govern(
                         size_pct,
                         self.config,

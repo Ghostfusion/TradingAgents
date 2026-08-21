@@ -3,7 +3,7 @@
 from tradingagents.reporting import _slugify, write_report_tree
 
 
-def _state(verdict="PASS", reasons=None):
+def _state(verdict="PASS", reasons=None, risk_ctx=None):
     return {
         "risk_debate_state": {
             "aggressive_history": "aggressive prose\n",
@@ -15,6 +15,7 @@ def _state(verdict="PASS", reasons=None):
         "risk_snapshot": f"verdict={verdict}; size=10.0%; cvar=1.00%",
         "position_contract": "size 10.0% @ stop 95.0 (kelly=0.100)",
         "trader_investment_plan": "Trader plan",
+        "risk_context": risk_ctx or {},
     }
 
 
@@ -55,6 +56,29 @@ def test_no_gate_no_changes(tmp_path):
     path = write_report_tree(state, "TST", tmp_path)
     report = path.read_text(encoding="utf-8")
     assert "Risk Gate (computed)" not in report
+
+
+def test_risk_gate_renders_both_cvars(tmp_path):
+    state = _state(
+        verdict="REJECT",
+        reasons=["cvar 3.25% > budget 3.00%"],
+        risk_ctx={"single_cvar": 0.0123, "book_cvar": 0.0325},
+    )
+    path = write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Analyzed-name CVaR: 1.23%" in decision
+    assert "Portfolio (book) CVaR: 3.25% — this fed the gate" in decision
+    report = path.read_text(encoding="utf-8")
+    assert "Analyzed-name CVaR: 1.23%" in report
+
+
+def test_risk_gate_without_basket_only_single_cvar(tmp_path):
+    # No book CVaR (basket unconfigured) -> only the analyzed-name line shows.
+    state = _state(verdict="WARN", reasons=[], risk_ctx={"single_cvar": 0.018})
+    path = write_report_tree(state, "TST", tmp_path)
+    report = path.read_text(encoding="utf-8")
+    assert "Analyzed-name CVaR: 1.80%" in report
+    assert "Portfolio (book) CVaR" not in report
 
 
 def _full_state():

@@ -401,6 +401,9 @@ now computes on moomoo data (previously always n/a), and the latest-value bug
 `reporting.py::write_report_tree(state, ticker, path)` writes the per-section
 tree plus `complete_report.md` with H1 report -> H2 team -> H3 role -> H4+
 agent content (agent headings demoted 3 levels) and an auto Table of Contents.
+When the risk governor ran, the `Risk Gate (computed)` block also renders the
+`Analyzed-name CVaR` and (with a configured risk basket) the
+`Portfolio (book) CVaR — this fed the gate` lines from `risk_context`.
 `scripts/rebuild_complete_report.py` re-renders folders without a re-run and
 preserves `Risk Gate (computed)` blocks.
 

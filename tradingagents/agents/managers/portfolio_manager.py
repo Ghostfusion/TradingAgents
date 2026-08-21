@@ -66,6 +66,27 @@ def create_portfolio_manager(llm):
             else ""
         )
 
+        # Computed CVaR context: the analyzed name's own daily tail vs the
+        # book's tail that actually fed the risk gate (when a risk basket is
+        # configured). Grounds the PM's tail-risk / sizing language.
+        cvar_line = ""
+        try:
+            ctx = state.get("risk_context") or {}
+            bits = []
+            if ctx.get("single_cvar") is not None:
+                bits.append(f"analyzed-name daily CVaR {ctx['single_cvar']:.2%}")
+            if ctx.get("book_cvar") is not None:
+                bits.append(f"portfolio (book) daily CVaR {ctx['book_cvar']:.2%} — fed the gate")
+            if bits:
+                cvar_line = (
+                    "**Computed daily-tail CVaR** (deterministic): "
+                    + "; ".join(bits)
+                    + ". Ground any tail-risk/sizing language in these numbers; "
+                    "do not invent a CVaR.\n\n"
+                )
+        except Exception:  # noqa: BLE001 - degrade to no line
+            cvar_line = ""
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -86,7 +107,7 @@ def create_portfolio_manager(llm):
 **Risk Analysts Debate History:**
 {history}
 
-{consensus_line}---
+{cvar_line}{consensus_line}---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
 
