@@ -6,6 +6,7 @@ from scripts.risk_report import audit_summary
 from tradingagents.strategies.book_risk import (
     cvar,
     drawdown_gate,
+    portfolio_cvar,
     portfolio_returns,
     simple_var,
     stress_loss,
@@ -31,6 +32,34 @@ def test_portfolio_returns_weighted():
     out = portfolio_returns(weights, series)
     assert out[0] == pytest.approx(0.6 * 0.01 + 0.4 * 0.02)
     assert out[1] == pytest.approx(0.6 * -0.01 + 0.4 * 0.01)
+
+
+def test_portfolio_cvar_mixes_weighted_series():
+    # a: flat-ish, b: a hard loss day => the basket tail is pulled negative by b.
+    series = {
+        "a": [0.001] * 60,
+        "b": [0.001] * 59 + [-0.10],
+    }
+    # b at 10% weight makes the worst 5% tail negative...
+    cv_with_b = portfolio_cvar(series, weights={"a": 0.9, "b": 0.1}, alpha=0.05)
+    assert cv_with_b is not None and cv_with_b < 0
+    # ...while a pure-a basket keeps the tail positive.
+    cv_single_a = portfolio_cvar(series, weights={"a": 1.0, "b": 0.0}, alpha=0.05)
+    assert cv_single_a is not None and cv_single_a > 0
+
+
+def test_portfolio_cvar_requires_two_names():
+    assert portfolio_cvar({}) is None
+    assert portfolio_cvar({"a": [0.01] * 30}) is None
+
+
+def test_portfolio_cvar_normalizes_missing_weights():
+    series = {"a": [0.01] * 40, "b": [-0.02] * 40}
+    # no weights -> equal weight, so the result matches 0.5/0.5 mixing
+    cv_no_weights = portfolio_cvar(series)
+    cv_half = portfolio_cvar(series, weights={"a": 0.5, "b": 0.5})
+    assert cv_no_weights is not None and cv_half is not None
+    assert abs(cv_no_weights - cv_half) < 1e-12
 
 
 def test_stress_loss():

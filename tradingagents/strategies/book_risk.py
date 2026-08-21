@@ -25,6 +25,39 @@ def cvar(returns: list, alpha: float = 0.05) -> float | None:
     return sum(tail) / len(tail)
 
 
+def portfolio_cvar(
+    returns_by_name: dict,
+    weights: dict | None = None,
+    alpha: float = 0.05,
+) -> float | None:
+    """Portfolio CVaR from one return series per name (aligned by index).
+
+    Mixes the per-name daily return series with ``weights`` (default equal
+    weight) via :func:`portfolio_returns`, then takes the historical CVaR of
+    the weighted book series. ``weights`` are normalized to sum to 1 over the
+    names actually provided (any name in ``returns_by_name`` missing from
+    ``weights`` gets an equal share of the remainder). Returns None when the
+    series cannot be aligned (fewer than two names, or a name whose series is
+    missing/short so no common index exists).
+    """
+    names = list(returns_by_name or {})
+    if len(names) < 2:
+        return None
+    w = weights or {}
+    norm = {}
+    total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
+    if total > 0:
+        for n in names:
+            norm[n] = float(w.get(n, 0.0) or 0.0) / total
+    else:
+        share = 1.0 / len(names)
+        norm = dict.fromkeys(names, share)
+    mixed = portfolio_returns(norm, returns_by_name)
+    if not mixed:
+        return None
+    return cvar(mixed, alpha)
+
+
 def portfolio_returns(weights: dict, returns_by_name: dict) -> list:
     """Weighted aggregate portfolio return series (names aligned by index)."""
     keys = list(weights)
@@ -62,4 +95,4 @@ def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     return float(drawdown_pct) > float(limit_pct)
 
 
-__all__ = ["simple_var", "cvar", "portfolio_returns", "stress_loss", "drawdown_gate"]
+__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "drawdown_gate"]

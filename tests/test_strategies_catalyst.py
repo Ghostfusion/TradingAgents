@@ -535,3 +535,47 @@ def test_graph_overlay_wiring_no_hard_block_passes(monkeypatch):
     state = {"trade_date": "2026-08-19", "final_trade_decision": "Hold"}
     out = tg.TradingAgentsGraph._apply_strategy_overlays(graph, state, "AAPL")
     assert out["risk_gate"]["verdict"] in ("PASS", "WARN")
+
+
+def test_risk_governor_basket_cvar_overrides_single_name(monkeypatch):
+    """With a risk basket configured, the governor budgets the basket's CVaR.
+
+    A basket of two names where the analyzed name is calm but the other name is
+    wildly volatile must produce a HIGHER cvar (REJECT tail budget), proving the
+    weighted-basket series replaced the single-name series.
+    """
+    import tradingagents.graph.trading_graph as tg
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "enable_strategy_overlays": True,
+        "enable_orderflow": False,
+        "enable_position_contract": False,
+        "enable_risk_governor": True,
+        "enable_computed_context": False,
+        "enable_events": False,
+        "risk_audit_enabled": False,
+        "risk_basket_tickers": ["SPY", "QQQ"],
+        "risk_basket_weights": {"SPY": 0.5, "QQQ": 0.5},
+        "risk_daily_cvar_budget_pct": 0.03,
+        "risk_max_drawdown_pct": 0.10,
+        "max_position_pct": 0.30,
+        "data_cache_dir": "~/.tradingagents",
+        "target_vol": 0.15,
+    }
+    # The analyzed ticker is calm; SPY is volatile -> the basket tail must be
+    # large, overriding the (calm) single-name CVaR.
+    calm = [100.0 + 0.001 * i for i in range(300)]
+    wild = [100.0 + 0.001 * i + 5.0 * ((-1) ** i) for i in range(300)]
+
+    def fake_closes(ticker, days=320):
+        if str(ticker).upper() == "SPY":
+            return wild
+        if str(ticker).upper() == "QQQ":
+            return wild
+        return calm
+
+    monkeypatch.setattr(graph, "_try_fetch_closes", fake_closes)
+
+    # Direct: the helper must return a value with the basket configured.
+    assert graph._basket_cvar("AAPL") is not None

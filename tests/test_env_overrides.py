@@ -127,3 +127,33 @@ def test_unknown_env_var_is_ignored(monkeypatch):
         TRADINGAGENTS_NONEXISTENT_KEY="oops",
     )
     assert "nonexistent_key" not in dc.DEFAULT_CONFIG
+
+
+def test_list_coercion(monkeypatch):
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_RISK_BASKET_TICKERS="SPY,QQQ,AAPL")
+    assert dc.DEFAULT_CONFIG["risk_basket_tickers"] == ["SPY", "QQQ", "AAPL"]
+    assert isinstance(dc.DEFAULT_CONFIG["risk_basket_tickers"], list)
+
+
+def test_dict_coercion_kv_pairs(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch, TRADINGAGENTS_RISK_BASKET_WEIGHTS="SPY=0.4,QQQ=0.6"
+    )
+    w = dc.DEFAULT_CONFIG["risk_basket_weights"]
+    assert w == {"SPY": 0.4, "QQQ": 0.6}
+    assert isinstance(w, dict)
+
+
+def test_dict_coercion_json(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch, TRADINGAGENTS_RISK_BASKET_WEIGHTS='{"SPY": 0.5, "QQQ": 0.5}'
+    )
+    assert dc.DEFAULT_CONFIG["risk_basket_weights"] == {"SPY": 0.5, "QQQ": 0.5}
+
+
+def test_invalid_dict_raises(monkeypatch):
+    monkeypatch.setenv("TRADINGAGENTS_RISK_BASKET_WEIGHTS", "not-a-dict")
+    with pytest.raises(ValueError, match="TRADINGAGENTS_RISK_BASKET_WEIGHTS"):
+        importlib.reload(default_config_module)
+    monkeypatch.delenv("TRADINGAGENTS_RISK_BASKET_WEIGHTS", raising=False)
+    importlib.reload(default_config_module)

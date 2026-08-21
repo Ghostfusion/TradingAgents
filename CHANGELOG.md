@@ -10,6 +10,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **True portfolio CVaR for the risk governor (R2)** - the governor's daily-era
+  tail budget now uses the *weighted basket's* historical CVaR when configured:
+  new config keys `risk_basket_tickers` (list) + `risk_basket_weights` (dict,
+  optional) + `TRADINGAGENTS_RISK_BASKET_TICKERS` / `TRADINGAGENTS_RISK_BASKET_WEIGHTS`
+  env overrides. `book_risk.portfolio_cvar()` mixes each name's daily log-return
+  series (aligned by index, weights normalized) and takes the historical CVaR of
+  the weighted book, replacing the single analyzed name's series. Falls back to
+  the single-name behavior when the basket is unconfigured or unresolvable (`>2`
+  names with `>=5` aligned returns). Env coercion now handles list/dict values
+  (comma-split / `k=v` pairs / JSON). Tests: `test_strategies_book_risk` (3),
+  `test_env_overrides` (4), `test_strategies_catalyst` (1).
+
 - **Session-discipline & earnings-quality analyst tools** - two more
 deterministic strategies exposed as `@tool`s so the analysts cite computed
 numbers instead of guessing: `get_session_discipline` (market node; wraps

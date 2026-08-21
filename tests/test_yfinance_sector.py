@@ -21,7 +21,11 @@ def test_fetch_sector_returns_value(monkeypatch):
     monkeypatch.setattr(
         "yfinance.Ticker", lambda t: type("T", (), {"info": {"sector": "Technology"}})
     )
-    assert fetch_sector("AAPL") == "Technology"
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
+        mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub", side_effect=_no_finnhub),
+    ):
+        assert fetch_sector("AAPL") == "Technology"
 
 
 def test_fetch_sector_fmp_primary(monkeypatch):
@@ -68,13 +72,17 @@ def test_fetch_sector_none_on_failure(monkeypatch):
     def boom(t):
         raise RuntimeError("no network")
 
-    with mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub", side_effect=_no_finnhub):
-        monkeypatch.setattr("yfinance.Ticker", boom)
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
+        mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub", side_effect=_no_finnhub),
+        mock.patch("yfinance.Ticker", boom),
+    ):
         assert fetch_sector("AAPL") is None
 
 
 def test_fetch_sector_empty_info():
     with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
         mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub", side_effect=_no_finnhub),
         mock.patch("yfinance.Ticker", return_value=type("T", (), {"info": {}})),
     ):

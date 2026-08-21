@@ -65,6 +65,8 @@ in `batch.py`).
 | `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` |
 | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` |
 | `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` |
+| `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` |
+| `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` |
 | `TRADINGAGENTS_RISK_COMPACT_REPORT` | `risk_compact_report` |
 | `TRADINGAGENTS_GOOGLE_THINKING_LEVEL` | `google_thinking_level` |
 | `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` |
@@ -205,7 +207,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Order flow | `enable_orderflow` (T) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
 | Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict; `catalyst_hard_block_days` > 0 turns an imminent print into a risk-governor REJECT |
 | Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst |
-| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt` |
+| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series |
 | Calibration | `enable_calibration` (T) | `strategies/calibration.py` | calibrated P from ledger |
 | Agreement | `enable_agreement` (T) | `strategies/consensus.py` | debate agreement -> size |
 | Computed context | `enable_computed_context` (T) | `strategies/debate_context.py` | numbers into debate |

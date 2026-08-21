@@ -60,6 +60,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS": "catalyst_hard_block_days",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
+    "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
+    "TRADINGAGENTS_RISK_BASKET_WEIGHTS": "risk_basket_weights",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
     "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
@@ -98,6 +100,29 @@ def _coerce(value: str, reference):
         return int(value)
     if isinstance(reference, float):
         return float(value)
+    if isinstance(reference, list):
+        # Comma-separated list, e.g. "SPY,QQQ,AAPL" -> ["SPY", "QQQ", "AAPL"].
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(reference, dict):
+        # Accept either JSON ("{\"SPY\": 0.4}") or comma-separated key=value
+        # pairs ("SPY=0.4,QQQ=0.6").
+        import json
+
+        saw_pairs = "=" in value or ("=" not in value and "{" not in value)
+        if not saw_pairs:
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"expected a JSON object, got {value!r}") from exc
+        out = {}
+        for part in value.split(","):
+            part = part.strip()
+            if "=" in part:
+                k, _, v = part.partition("=")
+                out[k.strip()] = float(v.strip())
+            elif part:
+                raise ValueError(f"expected key=value pairs or JSON, got {value!r}")
+        return out
     return value
 
 
@@ -295,6 +320,16 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop
         "risk_stress_shock_pct_1": -10.0,  # R2: scenario shock 1 (%)
         "risk_stress_shock_pct_2": -30.0,  # R2: scenario shock 2 (%)
+        # R2: true portfolio CVaR. When ``risk_basket_tickers`` is non-empty and
+        # at least two of its names resolve aligned return series via the vendor
+        # chain, the risk governor computes the daily tail budget from the
+        # *weighted basket*'s historical CVaR (book_risk.portfolio_cvar) instead
+        # of the single analyzed name's series. ``risk_basket_weights`` is an
+        # optional per-name weight map ({ticker: weight}); missing/absent names
+        # are equal-weighted when no weights are given. Falls back to the
+        # single-name series when the basket cannot be resolved.
+        "risk_basket_tickers": [],  # e.g. ["SPY", "QQQ", "AAPL"]
+        "risk_basket_weights": {},  # e.g. {"SPY": 0.4, "QQQ": 0.6}
         "risk_audit_enabled": True,  # R4: risk_audit.jsonl
         # Moomoo connection guard (parallel batch): cap open gateway contexts
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit

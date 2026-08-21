@@ -838,6 +838,14 @@ class TradingAgentsGraph:
                     if rets and len(rets) >= 5:
                         cv = book_cvar(rets, alpha=0.05)
                         cvar_pct = abs(cv) if cv is not None else None
+                    # True portfolio CVaR (R2): when a risk basket is configured,
+                    # mix the basket names' daily return series (weighted) and
+                    # take the basket's historical CVaR as the daily tail budget
+                    # instead of the analyzed name's own series. Falls back to
+                    # the single-name series when the basket can't be resolved.
+                    basket_budget = self._basket_cvar(ticker)
+                    if basket_budget is not None:
+                        cvar_pct = basket_budget
                     verdict = govern(
                         size_pct,
                         self.config,
@@ -925,6 +933,47 @@ class TradingAgentsGraph:
                 with contextlib.suppress(ValueError):
                     closes.append(float(parts[4]))
         return closes
+
+    def _log_returns_from_closes(self, closes) -> list:
+        """Daily log-return series from closes (skips non-positive steps)."""
+        return __import__(
+            "tradingagents.strategies.contract", fromlist=["_log_returns"]
+        )._log_returns(closes)
+
+    def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> float | None:
+        """True portfolio CVaR for the configured risk basket, or None.
+
+        Reads ``risk_basket_tickers`` (list) + optional ``risk_basket_weights``
+        (dict) from config. When at least two basket names resolve aligned daily
+        return series via the vendor chain (``_try_fetch_closes``), returns the
+        abs() of the weighted basket's historical CVaR (``book_risk.portfolio_cvar``)
+        so the risk governor budgets against the basket tail, not the single
+        name. Returns None when the basket is unconfigured, cannot be resolved,
+        or fewer than two names have usable series - the governor falls back
+        to the analyzed name's own series.
+        """
+        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
+        if len(tickers) < 2:
+            return None
+        weights = self.config.get("risk_basket_weights") or {}
+        returns_by_name: dict[str, list] = {}
+        for name in tickers:
+            try:
+                closes = self._try_fetch_closes(str(name))
+                rets = self._log_returns_from_closes(closes)
+                if len(rets) >= 5:
+                    returns_by_name[str(name)] = rets
+            except Exception:  # noqa: BLE001 - a missing name just drops out
+                continue
+        if len(returns_by_name) < 2:
+            return None
+        try:
+            from tradingagents.strategies.book_risk import portfolio_cvar
+
+            cv = portfolio_cvar(returns_by_name, weights=weights, alpha=alpha)
+            return abs(cv) if cv is not None else None
+        except Exception:  # noqa: BLE001 - fall back to single-name
+            return None
 
     def _maybe_record_reflection_outcome(self, ticker, trade_date, alpha):
         if not self.config.get("enable_reflection") or alpha is None:
