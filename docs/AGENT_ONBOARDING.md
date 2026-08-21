@@ -276,7 +276,7 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-21 `(pending)` - Second decision-tool batch for the analyst LLMs:
+- 2026-08-21 `c7405b3` - Second decision-tool batch for the analyst LLMs:
   `get_sector_rank` (11-SPDR 1m/3m momentum + sector standing, market),
   `get_strategy_quality` (net CAGR/vol/Sharpe/max-drawdown, market),
   `get_margin_of_safety` ((intrinsic-price)/intrinsic band, fundamentals),
