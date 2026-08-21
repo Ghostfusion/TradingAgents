@@ -6,6 +6,11 @@ import pytest
 
 import scripts.value_screener as vs
 
+# Tests drive vs.main() end-to-end (benchmark closes, growth/ROE/revision
+# gates) on live vendor data; 15-60s each under a slow network. Keep the
+# no-hang guard but allow a generous per-test budget.
+pytestmark = pytest.mark.timeout(600)
+
 INCOME_MD = """## Income Statement — US.AAPL
 
 ### 2025 (FY 2025, currency: USD)

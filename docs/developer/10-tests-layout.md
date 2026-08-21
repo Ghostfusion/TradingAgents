@@ -61,6 +61,27 @@ py -3.12 -m pytest tests/ -q --no-header -p no:cacheprovider
 
 Use `py -3.12` (bare `python` has no pytest).
 
+## Test timers (required)
+
+Every test inherits a per-test deadline so a hung vendor / network call can never
+block the whole session indefinitely (``pytest-timeout``):
+
+- **Global default: 180 s per test, thread method** — set in
+  ``[tool.pytest.ini_options]`` (``timeout`` / ``timeout_method``). The thread
+  method is the only one reliable on Windows (signal timers are POSIX-only).
+- **Module-level override: ``pytestmark = pytest.mark.timeout(600)``** for
+  modules whose tests legitimately run live vendor calls end-to-end
+  (``test_value_screener``, ``test_scan_strategies``, ``test_growth_screens``,
+  ``test_structured_agents``) — those measured 12-62s per test on a normal
+  network, so 180s would be too tight on a slow one.
+- **Session cap: 30 min** (``session_timeout = "1800"``) — checked between
+  tests, never interrupts a test in progress; a long chain of slow network tests
+  can't keep a CI/dev session open forever.
+
+New tests should stay well under 180s; only add a module-level marker when the
+module genuinely runs minutes of live vendor calls. pytest-timeout itself is a
+dev dependency (``pip install -e .[dev]`` / it is already in the py3.12 env).
+
 ## Hermetic-testing habit that matters
 
 - **Mock the network**, never call real vendors in unit tests. `mock.patch`

@@ -10,6 +10,12 @@ import pytest
 
 import scripts.value_screener as vs
 
+# Several tests drive vs.main() end-to-end, which fetches real OHLCV/statements
+# (benchmark SPDR closes, scan bases) through the vendor chain; those calls can
+# take 15-60s per test under a slow network and must not hit the global 180s
+# default. Keep the no-hang guarantee but allow a generous per-test budget.
+pytestmark = pytest.mark.timeout(600)
+
 FUND = "Market Cap: 3.2T\n"
 BS = (
     "Date,2025-12-31\nCash And Cash Equivalents,300M\nTotal Debt,400M\n"

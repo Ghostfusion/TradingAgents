@@ -10,6 +10,15 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Per-test timers (pytest-timeout)** - every test now carries a deadline so
+  a hung vendor/network call can never block the whole session indefinitely:
+  global 180s per-test default (thread method) + 30-minute session cap in
+  `[tool.pytest.ini_options]`, and a 600s module-level `pytestmark` override
+  for the modules that legitimately run live vendor calls end-to-end
+  (`test_value_screener`, `test_scan_strategies`, `test_growth_screens`,
+  `test_structured_agents`; 12-62s/test measured). `pytest-timeout>=2.4` added
+  to the `[dev]` extra. Docs: `docs/developer/10-tests-layout.md`.
+
 - **Credit-stress read (FRED ICE BofA OAS)** - `strategies/credit_spread.py`
   (`credit_stress_level`) plus a `get_credit_spread_read(date)` tool bound to
   the market analyst: pulls the three ICE BofA US high-yield option-adjusted

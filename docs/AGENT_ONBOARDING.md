@@ -273,6 +273,11 @@ has changed before); never assume an endpoint works — the SDK's
 - Strategy tests are pure/offline (no network).
 - Slow tests exist: value_screener (network), structured_agents (LLM mocks) -
   ~30-70s each. Only full-suite when needed.
+- **Every test has a timer** (`pytest-timeout`): 180s per-test default (thread
+  method), 30-minute session cap, and a 600s module-level override for the
+  live-vendor modules (`value_screener`/`scan_strategies`/`growth_screens`/
+  `structured_agents`). Adds a real deadline so a hung vendor call can't block
+  the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
 

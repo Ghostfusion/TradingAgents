@@ -28,6 +28,11 @@ from tradingagents.agents.schemas import (
 )
 from tradingagents.agents.trader.trader import create_trader
 
+# The sentiment-analyst tests pre-fetch live news/StockTwits/Reddit into the
+# prompt (unmocked), which can take many seconds under a slow network. Keep the
+# default no-hang guarantee but give this module a generous per-test budget.
+pytestmark = pytest.mark.timeout(600)
+
 # ---------------------------------------------------------------------------
 # Render functions
 # ---------------------------------------------------------------------------

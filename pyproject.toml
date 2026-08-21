@@ -40,6 +40,7 @@ dev = [
     "ruff>=0.15",
     "pytest>=8.0",
     "pytest-subtests>=0.13",
+    "pytest-timeout>=2.4",
 ]
 # Amazon Bedrock support (AWS SigV4 auth + boto3). Optional so the core install
 # stays lean: pip install "tradingagents[bedrock]".
@@ -63,7 +64,19 @@ markers = [
     "unit: fast isolated unit tests",
     "integration: tests requiring external services",
     "smoke: quick sanity-check tests",
+    "timeout: per-test timeout override (seconds) for slow-but-legit tests",
 ]
+# Every test gets a deadline so a hung vendor/network call can never block the
+# whole session indefinitely. The thread method is the only one reliable on
+# Windows (signal-based timers only work on POSIX). A slow-but-legit network
+# test should not approach this; modules that legitimately run minutes of live
+# vendor calls override it with a module-level @pytest.mark.timeout(...).
+timeout = "180"
+timeout_method = "thread"
+# Belt-and-braces: cap the whole session at 30 minutes (checked between tests,
+# never interrupts a test in progress), so even a long chain of slow network
+# tests cannot keep a CI/dev session open forever.
+session_timeout = "1800"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]

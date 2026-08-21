@@ -6,6 +6,11 @@ import pytest
 
 import scripts.value_screener as vs
 
+# Tests drive vs.main() end-to-end (benchmark SPDR closes, OHLCV scan bases,
+# sector/revision lookups) that fetch live vendor data and can take 15-60s per
+# test under a slow network. Keep the no-hang guard but allow a generous budget.
+pytestmark = pytest.mark.timeout(600)
+
 
 def _ohlcv(closes, vols, hi_off=0.5, lo_off=0.5):
     return {
