@@ -22,6 +22,7 @@ module inventory) alongside this.
 | 8 | `decision_hardening_spec.md` | G1-G5 decision hardening (contract, calibration, consensus, PBO gate) | `strategies/{contract,calibration,consensus,evaluate}.py` | `enable_position_contract` / `enable_calibration` / `enable_agreement` / `enable_threshold_gate` |
 | 9 | `enhancement_plan.md` | 8-phase research plan (regime, PEAD/catalyst, sentiment, reflection) | `strategies/{regime,catalyst,events,sentiment,reflection,evaluate}.py` | per-phase enable flags |
 | 10 | `alpaca_data_analysis.md` | Alpaca market-data integration (analysis-only, no execution) | `dataflows/alpaca*.py`, `agents/utils/alpaca_tools.py` | `enable_alpaca` |
+| 11 | `Discounted_Cash_Flow.md` | DCF valuation methodology (pragmatic FCF-DCF built from it) | `strategies/dcf.py`, `get_dcf_valuation` tool (fundamentals) | provider-sourced; growth/ERP overrides |
 
 ---
 

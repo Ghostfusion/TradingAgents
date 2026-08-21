@@ -352,6 +352,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_consensus(ratings)` | `strategies.consensus` | PM tool + injected | numeric agreement -> high/low consensus |
 | `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
+| `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

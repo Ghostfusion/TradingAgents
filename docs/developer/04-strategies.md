@@ -21,6 +21,8 @@ involved. This is the "compute, don't narrate" core.
 - `portfolio.py` — `value_ratio_weights`, cap adjustments (watchlist alloc).
 - `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile.
 - `factors.py` — composite rank (EY + momentum + 52w).
+- `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
+  EV->equity bridge) powering `get_dcf_valuation`.
 - `journal.py` — `--journal` alloc/journal.
 
 ## 4.2 Overlays

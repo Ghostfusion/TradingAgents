@@ -10,13 +10,22 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **DCF valuation tool** - `strategies/dcf.py` (pragmatic FCF-DCF: WACC via
+  CAPM, Gordon terminal value, EV-to-equity bridge) + `get_dcf_valuation`
+  tool bound to the fundamentals analyst. Provider-sourced inputs: free cash
+  flow (from the cashflow statement chain), 10y Treasury (risk-free), beta,
+  shares/cash/debt. growth/ERP are analyst overrides; degrades to
+  "unavailable" when there is no usable FCF. Based on
+  `Strategies/Discounted_Cash_Flow.md`. Tests in
+  `tests/test_strategies_dcf.py` (8) + `tests/test_analysis_tools.py` (2).
+
 - **Massive no-data failover fix** - the direct Massive tool wrappers
   (`get_short_volume`, `get_market_snapshot`, `get_top_movers`,
   `get_massive_news`) now catch `NoMarketDataError` and return an explicit
   "unavailable" string instead of letting the exception abort the analyst node
   and fail the whole batch symbol. Fallback to moomoo/yfinance now happens
   inside the report instead of crashing the run. Regression tests in
-  `tests/test_massive_vendor.py::MassiveFailoverTests` (8 cases).
+  `tests/test_massive_vendor.py::MassiveFailoverTests` (8).
 
 - **Data providers doc (`docs/developer/12-data-providers.md`)** - catalogs
   all **13 data providers** the project uses: the 8 routed vendors

@@ -487,3 +487,45 @@ def test_momentum_detail_empty_history_degrades(monkeypatch):
     assert "unavailable" in out
 
 
+
+# --------------------------------------------------------------------------
+# DCF valuation tool - hermetic (mock route_to_vendor)
+# --------------------------------------------------------------------------
+_CF_CSV = """# Cash Flow data for AAPL (annual)
+
+,2025-09-30,2024-09-30,2023-09-30,2022-09-30
+Operating Cash Flow,110000000000,95000000000,85000000000,78000000000
+Capital Expenditure,-15000000000,-12000000000,-11000000000,-10000000000
+Free Cash Flow,95000000000,83000000000,69000000000,68000000000
+"""
+
+
+def _dcf_side(method, *a, **k):
+    return {
+        "get_cashflow": _CF_CSV,
+        "get_fundamentals": "Beta: 1.1\nMarket Cap: 3000000000000",
+        "get_balance_sheet": "Cash Cash Equivalents: 60000000000\nTotal Debt: 110000000000",
+        "get_macro_indicators": "## FRED 10Y\nLatest: 4.2",
+        "get_stock_data": "",
+    }.get(method, "")
+
+
+def test_get_dcf_valuation_returns_fair_value(monkeypatch):
+    monkeypatch.setattr(T, "route_to_vendor", _dcf_side)
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [200.0, 205.0, 210.0]})
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+    assert "dcf AAPL" in out
+    assert "fair_value=" in out
+    assert "wacc=" in out
+
+
+def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
+    def side(method, *a, **k):
+        if method == "get_cashflow":
+            return "NO_DATA_AVAILABLE: ..."
+        return "Beta: 1.1\nMarket Cap: 3000000000000"
+    monkeypatch.setattr(T, "route_to_vendor", side)
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+    assert "no usable free cash flow" in out
+
+

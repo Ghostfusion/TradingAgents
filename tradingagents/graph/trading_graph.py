@@ -59,6 +59,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_beat_miss_sizing,
     get_catalyst_scale,
     get_company_peers,
+    get_dcf_valuation,
     get_earnings_event_read,
     get_earnings_surprise,
     get_exit_check,
@@ -346,6 +347,7 @@ class TradingAgentsGraph:
                     get_form4_insider,
                     get_ratios,
                     get_allocation,
+                    get_dcf_valuation,
                 ]
             ),
         }

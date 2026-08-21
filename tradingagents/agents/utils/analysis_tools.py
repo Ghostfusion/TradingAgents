@@ -23,6 +23,8 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.interface import route_to_vendor
+
 # ---------------------------------------------------------------------------
 # Shared data helpers (vendor chain CSV, benchmark closes)
 # ---------------------------------------------------------------------------
@@ -1125,6 +1127,190 @@ def get_beat_miss_sizing(
 
 
 
+
+# ---------------------------------------------------------------------------
+# DCF valuation (pragmatic FCF-DCF) - an intrinsic-value lens for the
+# fundamentals analyst. Uses provider-sourced free cash flow + market inputs.
+# ---------------------------------------------------------------------------
+def _dcf_latest(d):
+    """Latest-of a canonical value (handles {current,prior} dicts)."""
+    if isinstance(d, dict):
+        return d.get("current", d.get("value"))
+    return d
+
+
+def _dcf_canonical(payload):
+    from scripts.value_screener import _canonicalize
+    return _canonicalize(payload)
+
+
+def _dcf_yf_rows(payload):
+    """Parse a yfinance-style CSV statement into {label: {date: value}} using
+    the header date columns (most recent first).
+
+    yfinance statements are ``# comment`` + data.to_csv(): a header line whose
+    first cell is blank followed by the date columns, then row lines. Skip
+    comment (#) and blank lines so we locate the real header.
+    """
+    import csv as _csv
+    import io as _io
+
+    from scripts.value_screener import _first_number
+
+    rows = {}
+    try:
+        reader = _csv.reader(_io.StringIO(payload or ""))
+        lines = [
+            r for r in reader if r and not (r[0] or "").startswith("#")
+        ]
+    except Exception:
+        return rows
+    if not lines:
+        return rows
+    # Header = first line whose first cell is blank (the date-column header).
+    header = None
+    data_start = 0
+    for idx, row in enumerate(lines):
+        if not (row[0] or "").strip():
+            header = row[1:]
+            data_start = idx + 1
+            break
+    if header is None:
+        return rows
+    for row in lines[data_start:]:
+        if not row or not (row[0] or "").strip():
+            continue
+        label = row[0].strip()
+        vals = {}
+        for i, cell in enumerate(row[1:]):
+            parsed = _first_number(cell)
+            if parsed is not None and i < len(header):
+                vals[str(header[i])[:10]] = parsed
+        if vals:
+            rows[label] = vals
+        else:
+            rows[label] = {}
+    return rows
+    return rows
+
+
+def _dcf_fcf_series(cashflow_payload):
+    """Time-ordered positive FCF series from the cashflow CSV (Free Cash Flow
+    row, else operating cash flow minus capex)."""
+    rows = _dcf_yf_rows(cashflow_payload)
+    fcf_row = None
+    for label, vals in rows.items():
+        if "free cash flow" in label.lower():
+            fcf_row = vals
+            break
+    if fcf_row is None:
+        op = cap = None
+        for label, vals in rows.items():
+            low = label.lower()
+            if "operating cash flow" in low or "cash flow from operating" in low:
+                op = vals
+            if "capital expenditure" in low or "purchase of property" in low:
+                cap = vals
+        if op and cap:
+            fcf_row = {d: op.get(d, 0.0) - cap.get(d, 0.0) for d in op}
+    if not fcf_row:
+        return []
+    series = [fcf_row[d] for d in sorted(fcf_row) if fcf_row[d] is not None]
+    return [float(v) for v in series if float(v) > 0]
+
+
+def _dcf_market_cap(fund):
+    return _dcf_latest(fund.get("market_cap"))
+
+
+def _dcf_beta(fund):
+    return _dcf_latest(fund.get("beta")) or 1.0
+
+
+def _dcf_cash_debt(bal):
+    return _dcf_latest(bal.get("cash")) or 0.0, _dcf_latest(bal.get("total_debt")) or 0.0
+
+
+def _dcf_shares(fund, bal, market_cap, ticker):
+    """Shares from balance/fundamentals, else derived (market_cap / last close)."""
+    for src in (bal, fund):
+        for key in ("diluted_shares", "shares_outstanding", "shares", "shares_os"):
+            v = _dcf_latest(src.get(key)) if isinstance(src, dict) else None
+            if v:
+                return float(v)
+    last = _dcf_last_close(ticker)
+    if last and market_cap:
+        return float(market_cap) / float(last)
+    return None
+
+
+def _dcf_rf(current_date):
+    out = route_to_vendor("get_macro_indicators", "10y_treasury", current_date, None)
+    import re
+
+    try:
+        m = re.search(r"Latest[^0-9]*([0-9.]+)", out or "")
+        return float(m.group(1)) / 100.0 if m else None
+    except Exception:
+        return None
+
+
+def _dcf_last_close(ticker):
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    return closes[-1] if closes else None
+
+
+@tool
+def get_dcf_valuation(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+    growth: Annotated[float, "forward FCF growth as a fraction (e.g. 0.025)"] = 0.025,
+    erp: Annotated[float, "equity risk premium as a fraction, default 0.05"] = 0.05,
+    years: Annotated[int, "explicit forecast years, default 5"] = 5,
+) -> str:
+    "Pragmatic discounted-cash-flow valuation from provider-sourced free cash flow."
+    try:
+        from tradingagents.strategies.dcf import compute_dcf
+    except Exception as exc:  # noqa: BLE001
+        return f"dcf unavailable for {ticker}: {exc}"
+    try:
+        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+        fcf = _dcf_fcf_series(cf_payload)
+        if not fcf:
+            return f"dcf unavailable for {ticker}: no usable free cash flow series."
+        rf = _dcf_rf(current_date)
+        fund = _dcf_canonical(route_to_vendor("get_fundamentals", ticker, current_date) or "")
+        bal = _dcf_canonical(route_to_vendor("get_balance_sheet", ticker, "annual", current_date) or "")
+        market_cap = _dcf_market_cap(fund)
+        beta = _dcf_beta(fund)
+        cash, debt = _dcf_cash_debt(bal)
+        shares = _dcf_shares(fund, bal, market_cap, ticker)
+        if not shares:
+            return f"dcf unavailable for {ticker}: no shares outstanding."
+        if rf is None:
+            rf = 0.04
+    except Exception as exc:  # noqa: BLE001
+        return f"dcf unavailable for {ticker}: {exc}"
+    res = compute_dcf(
+        fcf, rf=rf, beta=beta, erp=erp, growth=growth, years=years,
+        shares=shares, cash=cash, debt=debt,
+    )
+    if not res:
+        return f"dcf unavailable for {ticker}: inputs not usable (no positive FCF or g>=wacc)."
+    return (
+        f"dcf {ticker}: fair_value={res['price']:.2f} "
+        f"ev={res['ev']:.2f} pv_explicit={res['pv_explicit']:.2f} "
+        f"pv_terminal={res['pv_tv']:.2f} terminal_share={res['terminal_share']:.0%} "
+        f"wacc={res['wacc']:.2%} g={res['growth']:.2%} "
+        f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
+        f"(provider-derived; growth/ERP are analyst overrides)"
+    )
+
+
+
+
+
 __all__ = [
     "get_swing_set",
     "get_relative_strength",
@@ -1149,4 +1335,5 @@ __all__ = [
     "get_consensus",
     "get_momentum_detail",
     "get_beat_miss_sizing",
+    "get_dcf_valuation",
 ]
