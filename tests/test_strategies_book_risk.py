@@ -81,3 +81,30 @@ def test_audit_summary():
     assert sm["total"] == 2
     assert sm["counts"]["REJECT"] == 1
     assert "size over cap" in sm["limit_hits"]
+
+
+def test_portfolio_cvar_sub_unity_weights_dilute_by_cash():
+    """Weights summing < 1.0 mean the remainder is zero-return cash.
+
+    The mixed series must be scaled by the invested fraction (0.68 in this
+    case), so the CVaR is diluted - NOT renormalized back to the full book.
+    """
+    a = [0.0005] * 60
+    b = [0.0005] * 59 + [-0.05]
+    w_full = {"a": 0.5, "b": 0.5}
+    w_cash = {"a": 0.34, "b": 0.34}  # 0.68 invested, 0.32 cash
+
+    cv_full = portfolio_cvar({"a": a, "b": b}, weights=w_full)
+    cv_cash = portfolio_cvar({"a": a, "b": b}, weights=w_cash)
+    assert cv_cash is not None and cv_full is not None
+    assert cv_full < 0 and cv_cash < 0
+    # Cash dilution scales the tail by the invested share.
+    assert cv_cash / cv_full == pytest.approx(0.68, rel=1e-9)
+
+
+def test_portfolio_cvar_over_allocated_weights_clamp_to_unity():
+    """Weights summing > 1.0 must be clamped to a valid portfolio (no crash)."""
+    a = [0.001] * 40
+    b = [-0.02] * 20 + [0.001] * 20
+    cv = portfolio_cvar({"a": a, "b": b}, weights={"a": 2.0, "b": 2.0})
+    assert cv is not None and cv < 0

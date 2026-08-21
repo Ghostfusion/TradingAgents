@@ -32,26 +32,40 @@ def portfolio_cvar(
 ) -> float | None:
     """Portfolio CVaR from one return series per name (aligned by index).
 
-    Mixes the per-name daily return series with ``weights`` (default equal
-    weight) via :func:`portfolio_returns`, then takes the historical CVaR of
-    the weighted book series. ``weights`` are normalized to sum to 1 over the
-    names actually provided (any name in ``returns_by_name`` missing from
-    ``weights`` gets an equal share of the remainder). Returns None when the
-    series cannot be aligned (fewer than two names, or a name whose series is
-    missing/short so no common index exists).
+    Mixes the per-name daily return series with ``weights`` via
+    :func:`portfolio_returns`, then takes the historical CVaR of the weighted
+    book series. Semantics:
+
+    - weights summing to **1.0** -> the normalized relative book (historical
+      behavior).
+    - weights summing to **< 1.0** -> the remainder is implicitly a **zero
+      -return cash sleeve** (e.g. money market / cash in the account): the
+      mixed series uses the raw (un-normalized) weights, so the daily returns
+      are scaled by the invested fraction and the CVaR is diluted by cash
+      holding. This is how "include cash as overall portfolio" is honored.
+    - weights summing to **> 1.0** (config error) -> normalized down to 1.0
+      to remain a valid portfolio.
+    - no weights / all-zero -> equal weight across the provided names.
+
+    Returns None when the series cannot be aligned (fewer than two names, or a
+    name whose series is missing/short so no common index exists).
     """
     names = list(returns_by_name or {})
     if len(names) < 2:
         return None
     w = weights or {}
-    norm = {}
     total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
-    if total > 0:
-        for n in names:
-            norm[n] = float(w.get(n, 0.0) or 0.0) / total
-    else:
+    if total <= 0:
+        # No weights given (or all zero): equal share per name.
         share = 1.0 / len(names)
         norm = dict.fromkeys(names, share)
+    elif total > 1.0:
+        # Over-allocated config: clamp to a valid portfolio (normalize down).
+        norm = {n: float(w.get(n, 0.0) or 0.0) / total for n in names}
+    else:
+        # total in (0, 1]: use the raw weights so the remainder (1 - total)
+        # stays as an implicit zero-return cash sleeve (dilutes the tail).
+        norm = {n: float(w.get(n, 0.0) or 0.0) for n in names}
     mixed = portfolio_returns(norm, returns_by_name)
     if not mixed:
         return None

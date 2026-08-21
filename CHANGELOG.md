@@ -10,6 +10,16 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Risk basket cash-remainder semantics** - `book_risk.portfolio_cvar` now
+  treats a weight sum `< 1.0` as "weights + implicit zero-return cash": the raw
+  weights are used (not renormalized), so the mixed daily series is scaled by
+  the invested fraction and the portfolio CVaR is diluted by the cash sleeve.
+  Weights summing `> 1.0` are still clamped to a valid portfolio. This is what
+  makes "include cash as overall portfolio" (e.g. `risk_basket_weights` summing
+  to ~0.68 with the rest in SPAXX/cash) actually lower the gate's tail budget.
+  Tests: `test_strategies_book_risk` (2: sub-unity dilution + over-allocated
+  clamp).
+
 - **Risk Gate renders both CVaRs (analyzed-name + book)** - when a risk basket
   is configured, the report's `Risk Gate (computed)` (and compact verdict mode)
   now shows `Analyzed-name CVaR` (the analyzed ticker's own daily tail) next to

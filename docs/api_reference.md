@@ -207,7 +207,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Order flow | `enable_orderflow` (T) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
 | Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict; `catalyst_hard_block_days` > 0 turns an imminent print into a risk-governor REJECT |
 | Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst |
-| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series |
+| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio" |
 | Calibration | `enable_calibration` (T) | `strategies/calibration.py` | calibrated P from ledger |
 | Agreement | `enable_agreement` (T) | `strategies/consensus.py` | debate agreement -> size |
 | Computed context | `enable_computed_context` (T) | `strategies/debate_context.py` | numbers into debate |
