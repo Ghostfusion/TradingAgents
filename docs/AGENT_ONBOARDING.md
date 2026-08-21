@@ -276,7 +276,7 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
-- 2026-08-21 `(pending)` - Credit-stress read (FRED ICE BofA OAS):
+- 2026-08-21 `a70e3b6` - Credit-stress read (FRED ICE BofA OAS):
   `get_credit_spread_read(date)` (market node) + `strategies/credit_spread.py`
   `credit_stress_level`, flattening the HY/CCC/BB option-adjusted spreads
   (FRED aliases `hy_oas`/`ccc_oas`/`bb_oas`) into a credit-cycle band +
