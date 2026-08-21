@@ -281,6 +281,14 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-21 `(working tree)` - Session-discipline + earnings-quality tools:
+  `get_session_discipline` (market, momentum.session_flags walk-away + psych
+  levels) and `get_earnings_quality` (fundamentals, Sloan accruals_ratio +
+  trap verdict) bound + hermetic-tested (6 cases); docs backfilled the
+  missing `TRADINGAGENTS_ENABLE_MASSIVE_FLAT`/`_MASSIVE_FLAT_DIR` env keys in
+  api_reference §1.1 and synced `.env.example` for `TRADINGAGENTS_MASSIVE_API_KEY`
+  and the REDDIT/MOMENTUM runtime toggles.
+
 - 2026-08-21 `a70e3b6` - Credit-stress read (FRED ICE BofA OAS):
   `get_credit_spread_read(date)` (market node) + `strategies/credit_spread.py`
   `credit_stress_level`, flattening the HY/CCC/BB option-adjusted spreads

@@ -668,3 +668,84 @@ def test_credit_spread_read_degrades_with_no_key(monkeypatch):
     monkeypatch.setattr(T, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
     out = T.get_credit_spread_read.invoke({"current_date": "2026-08-19"})
     assert "FRED" in out or "unavailable" in out
+
+
+# --------------------------------------------------------------------------
+# get_session_discipline (market analyst) - session_flags + psych levels
+# --------------------------------------------------------------------------
+
+
+def test_session_discipline_reports_walk_away(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0, 101.0, 102.0]})
+    out = T.get_session_discipline.invoke(
+        {"ticker": "AAPL", "peak_pnl": 0.04, "current_pnl": 0.01}
+    )
+    assert "session discipline AAPL" in out
+    assert "walk_away=" in out
+    assert "giveback_50=" in out  # 50% giveback (0.04 -> 0.01) should be True
+    assert "max_daily_loss_hit=" in out
+
+
+def test_session_discipline_past_optimal_window_flag(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [102.0]})
+    out = T.get_session_discipline.invoke({"ticker": "AAPL"})
+    assert "past_optimal_window=" in out
+    assert "no_quality_setups=" in out
+
+
+def test_session_discipline_no_price_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": []})
+    out = T.get_session_discipline.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+# --------------------------------------------------------------------------
+# get_earnings_quality (fundamentals analyst) - accruals + trap verdict
+# --------------------------------------------------------------------------
+
+
+def _eq_canonical():
+    """Canonical line-items dict a mocked fetch_ticker would return."""
+    return {
+        "net_income": 100e6,
+        "operating_cashflow": 45e6,
+        "total_assets": 1.0e9,
+        "revenue": 900e6,
+        "current_assets": 300e6,
+        "current_liabilities": 150e6,
+        "retained_earnings": 200e6,
+        "sector": "Technology",
+    }
+
+
+def test_earnings_quality_reports_accruals(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.value_screener.fetch_ticker", lambda ticker, date: _eq_canonical()
+    )
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "earnings quality AAPL" in out
+    assert "accrual_ratio=" in out  # (100 - 45) / 1000 = 0.055 (moderate)
+    assert "trap_risk=" in out
+
+
+def test_earnings_quality_high_accruals_flagged(monkeypatch):
+    import scripts.value_screener as vs
+
+    def fake_fetch(ticker, date):
+        fin = _eq_canonical()
+        fin["net_income"] = 200e6  # accrual = 155e6 / 1e9 = 0.155 (risk)
+        return fin
+
+    monkeypatch.setattr(vs, "fetch_ticker", fake_fetch)
+    monkeypatch.setattr(vs, "screen_ticker", lambda ticker, fin: {})
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "0.155" in out
+    assert "low-earnings-quality-risk" in out
+
+
+def test_earnings_quality_no_data_degrades(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.value_screener.fetch_ticker", lambda ticker, date: {}
+    )
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "unavailable" in out.lower()

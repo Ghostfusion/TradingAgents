@@ -955,7 +955,6 @@ def get_ratios(
         return f"ratios unavailable for {ticker}: {exc}"
 
 
-
 # ---------------------------------------------------------------------------
 # Decision-grounding tools (agent-decision plan P0/P1/P2)
 #   Expose deterministic strategy functions so the trader / PM / analysts
@@ -970,7 +969,9 @@ def get_exit_check(
     close: Annotated[float, "current price"],
     atr: Annotated[float, "current ATR (use get_swing_set / get_volatility_contraction)"],
     target_mult: Annotated[float, "ATR multiple for the profit target, default 4.0"] = 4.0,
-    breakeven_cushion: Annotated[float, "ATRs above entry for stop-to-breakeven, default 1.0"] = 1.0,
+    breakeven_cushion: Annotated[
+        float, "ATRs above entry for stop-to-breakeven, default 1.0"
+    ] = 1.0,
 ) -> str:
     "Deterministic exit state for a held long position: stop-to-breakeven, ATR target, holding action."
     try:
@@ -979,8 +980,13 @@ def get_exit_check(
         return f"exit check unavailable: {exc}"
     if atr is None or atr <= 0:
         return "exit check unavailable: atr must be > 0."
-    r = exit_check(float(entry), float(close), float(atr),
-                   target_mult=float(target_mult), breakeven_cushion=float(breakeven_cushion))
+    r = exit_check(
+        float(entry),
+        float(close),
+        float(atr),
+        target_mult=float(target_mult),
+        breakeven_cushion=float(breakeven_cushion),
+    )
     return (
         f"exit: breakeven_stop={r['breakeven_stop']:.2f} target={r['target']:.2f} "
         f"stop_hit={r['stop_hit']} target_hit={r['target_hit']} "
@@ -1007,8 +1013,9 @@ def get_allocation(
         return f"allocation unavailable: {exc}"
     w = value_ratio_weights(scores, min_weight=0.0)
     if sector_map:
-        w = adjust_for_caps(w, sector_map, sector_cap_limit=float(sector_cap_limit),
-                            max_name=float(max_name))
+        w = adjust_for_caps(
+            w, sector_map, sector_cap_limit=float(sector_cap_limit), max_name=float(max_name)
+        )
     else:
         w = capped_weights(w, cap=float(max_name))
     info = summary(w, min_n=1)
@@ -1042,10 +1049,7 @@ def get_regime_components(
         # vol_percentile expects a list of close *windows* (it computes vol of
         # each). Build 21-day rolling windows over the close series.
         window = 21
-        windows = [
-            closes[i - window : i]
-            for i in range(window, len(closes) + 1, window)
-        ]
+        windows = [closes[i - window : i] for i in range(window, len(closes) + 1, window)]
         vol_pct = vol_percentile(windows or [closes], current_window=window)
         trend = trend_strength(closes, sma_window=min(200, max(2, len(closes) // 2)))
         chop = choppiness(closes, window=14)
@@ -1102,9 +1106,12 @@ def get_momentum_detail(
         rv = rvol(vols, window=50) if vols else None
         vw = vwap(closes, vols) if vols else None
         ema = ema9(closes[-10:]) if len(closes) >= 10 else None
-        p = pillars(close=closes[-1], day_volume=vols[-1] if vols else None,
-                    prev_close=closes[-2] if len(closes) >= 2 else None,
-                    day_open=opens[-1] if opens else None)
+        p = pillars(
+            close=closes[-1],
+            day_volume=vols[-1] if vols else None,
+            prev_close=closes[-2] if len(closes) >= 2 else None,
+            day_open=opens[-1] if opens else None,
+        )
         fp = first_pullback(closes, highs, lows, vols) if len(closes) >= 5 else None
     except Exception as exc:  # noqa: BLE001
         return f"momentum detail unavailable for {ticker}: {exc}"
@@ -1138,10 +1145,6 @@ def get_beat_miss_sizing(
     return f"beat/miss sizing: side={side} position_mult={mult:.2f}"
 
 
-
-
-
-
 # ---------------------------------------------------------------------------
 # DCF valuation (pragmatic FCF-DCF) - an intrinsic-value lens for the
 # fundamentals analyst. Uses provider-sourced free cash flow + market inputs.
@@ -1155,6 +1158,7 @@ def _dcf_latest(d):
 
 def _dcf_canonical(payload):
     from scripts.value_screener import _canonicalize
+
     return _canonicalize(payload)
 
 
@@ -1174,9 +1178,7 @@ def _dcf_yf_rows(payload):
     rows = {}
     try:
         reader = _csv.reader(_io.StringIO(payload or ""))
-        lines = [
-            r for r in reader if r and not (r[0] or "").startswith("#")
-        ]
+        lines = [r for r in reader if r and not (r[0] or "").startswith("#")]
     except Exception:
         return rows
     if not lines:
@@ -1295,7 +1297,9 @@ def get_dcf_valuation(
             return f"dcf unavailable for {ticker}: no usable free cash flow series."
         rf = _dcf_rf(current_date)
         fund = _dcf_canonical(route_to_vendor("get_fundamentals", ticker, current_date) or "")
-        bal = _dcf_canonical(route_to_vendor("get_balance_sheet", ticker, "annual", current_date) or "")
+        bal = _dcf_canonical(
+            route_to_vendor("get_balance_sheet", ticker, "annual", current_date) or ""
+        )
         market_cap = _dcf_market_cap(fund)
         beta = _dcf_beta(fund)
         cash, debt = _dcf_cash_debt(bal)
@@ -1307,8 +1311,15 @@ def get_dcf_valuation(
     except Exception as exc:  # noqa: BLE001
         return f"dcf unavailable for {ticker}: {exc}"
     res = compute_dcf(
-        fcf, rf=rf, beta=beta, erp=erp, growth=growth, years=years,
-        shares=shares, cash=cash, debt=debt,
+        fcf,
+        rf=rf,
+        beta=beta,
+        erp=erp,
+        growth=growth,
+        years=years,
+        shares=shares,
+        cash=cash,
+        debt=debt,
     )
     if not res:
         return f"dcf unavailable for {ticker}: inputs not usable (no positive FCF or g>=wacc)."
@@ -1386,10 +1397,13 @@ def get_sector_rank(
 # Item-2: strategy quality (market analyst) - net CAGR / Sharpe / drawdown
 # ---------------------------------------------------------------------------
 
+
 @tool
 def get_strategy_quality(
     ticker: Annotated[str, "ticker symbol"],
-    returns: Annotated[list[float] | None, "optional daily/simple returns; defaults to price-derived"] = None,
+    returns: Annotated[
+        list[float] | None, "optional daily/simple returns; defaults to price-derived"
+    ] = None,
     cost_bps: Annotated[float, "per-trade cost in basis points, default 10"] = 10.0,
 ) -> str:
     """Risk-adjusted quality of a strategy over its return series: net CAGR,
@@ -1438,10 +1452,13 @@ def get_strategy_quality(
 # Item-3a: safety margin (fundamentals) ----------------
 # ---------------------------------------------------------------------------
 
+
 @tool
 def get_margin_of_safety(
     ticker: Annotated[str, "ticker symbol"],
-    intrinsic: Annotated[float | None, "intrinsic value estimate, e.g. from a DCF / normalized EV/EBIT"] = None,
+    intrinsic: Annotated[
+        float | None, "intrinsic value estimate, e.g. from a DCF / normalized EV/EBIT"
+    ] = None,
 ) -> str:
     """(intrinsic - price) / intrinsic safety margin for a name.
 
@@ -1464,11 +1481,7 @@ def get_margin_of_safety(
     mos = margin_of_safety(price, float(intrinsic))
     if mos is None:
         return f"margin of safety unavailable for {ticker}: unquantifiable."
-    band = (
-        "wide"
-        if mos > 0.3
-        else ("modest" if mos > 0 else "negative")
-    )
+    band = "wide" if mos > 0.3 else ("modest" if mos > 0 else "negative")
     return f"margin of safety {ticker}: {mos:.1%} ({band}); price={price:.2f} intrinsic={intrinsic:.2f}"
 
 
@@ -1476,10 +1489,13 @@ def get_margin_of_safety(
 # Item 3b: composite factor rank (fundamentals) ---
 # ---------------------------------------------------------------------------
 
+
 @tool
 def get_composite_rank(
     ticker: Annotated[str, "ticker symbol"],
-    factors: Annotated[dict | None, "optional extra factor -> value map (e.g. {'ev_ebit': -1})"] = None,
+    factors: Annotated[
+        dict | None, "optional extra factor -> value map (e.g. {'ev_ebit': -1})"
+    ] = None,
 ) -> str:
     """Cross-sectional value+momentum composite (percentile-ranked)
     from the ticker + its industry peers, folding in optional factor weights.
@@ -1535,6 +1551,7 @@ def get_composite_rank(
 # Item 4: tail / book risk (market analyst) ----------------
 # ---------------------------------------------------------------------------
 
+
 @tool
 def get_tail_risk(
     ticker: Annotated[str, "ticker symbol"],
@@ -1565,7 +1582,9 @@ def get_tail_risk(
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'} "
         f"stress_-10pct={stress:.2%} alpha={alpha:.0%}"
-    )# ---------------------------------------------------------------------------
+    )  # ---------------------------------------------------------------------------
+
+
 # Item-5: credit-stress read (market analyst) - HY/CCC/BB OAS from FRED
 # ---------------------------------------------------------------------------
 
@@ -1612,6 +1631,159 @@ def get_credit_spread_read(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Session discipline (market analyst) - waves `momentum.session_flags` +
+# `psych_level` + `past_optimal_window` into one intraday walk-away read.
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_session_discipline(
+    ticker: Annotated[str, "ticker symbol"],
+    peak_pnl: Annotated[
+        float | None, "session peak P&L as a fraction of capital, if trading live"
+    ] = None,
+    current_pnl: Annotated[
+        float | None, "current session P&L as a fraction of capital, if trading live"
+    ] = None,
+) -> str:
+    """Intraday session-discipline read (walk-away rules + psychological levels).
+
+    Deterministic "walk away for the day" flags from the momentum playbook:
+    50% giveback from session peak, max-daily-loss breach, past the 10:00 ET
+    optimal window, and no quality setups. Also reports the nearest
+    whole/half-dollar psychological levels around the current price. Call this
+    before any 'sell into strength / take the day off / giveback' claim when
+    trading intraday momentum.
+
+    Args:
+        ticker: single ticker symbol.
+        peak_pnl: session peak P&L as a fraction (e.g. 0.02 for +2%); omit when
+            not tracking live P&L (the giveback/max-loss rules stay unknown).
+        current_pnl: current session P&L as a fraction; omit when not tracking
+            live P&L.
+
+    Returns:
+        The walk-away flag + each rule's state + the psych levels, or an
+        explicit 'unavailable' message when price data is missing.
+    """
+    try:
+        from tradingagents.strategies.momentum import (
+            past_optimal_window,
+            psych_level,
+            session_flags,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"session discipline unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if not closes:
+        return f"session discipline unavailable for {ticker}: no price history."
+    price = closes[-1]
+    past_window = past_optimal_window()
+    flags = session_flags(
+        peak_pnl=peak_pnl,
+        current_pnl=current_pnl,
+        past_optimal_window=past_window,
+    )
+    pl = psych_level(price)
+    lines = [
+        f"session discipline {ticker}:",
+        f"  walk_away={flags['walk_away']}",
+        f"  giveback_50={flags['giveback_50']} max_daily_loss_hit={flags['max_daily_loss_hit']}",
+        f"  past_optimal_window={flags['past_optimal_window']}"
+        f" no_quality_setups={flags['no_quality_setups']}",
+    ]
+    if pl.get("above") is not None:
+        lines.append(
+            f"  psych_levels: next={pl['above']} below={pl['below']} "
+            f"dist_to_next={pl['dist_pct'] and round(pl['dist_pct'], 2)}%"
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Earnings quality (fundamentals analyst) - Sloan accruals + the forensic
+# trap verdict that *includes* the accrual evidence (screen_ticker's trap call
+# drops it today).
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_earnings_quality(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Deterministic earnings-quality read: Sloan accruals + forensic trap.
+
+    Computes the accruals ratio (net income - operating cash flow) / total
+    assets - a high value signals earnings quality risk - then folds it into
+    the forensic trap verdict (Beneish M / Altman Z / F-Score) with the
+    accrual as an extra evidence trigger. Call this before any
+    'strong earnings quality / accrual-driven earnings / manipulation risk'
+    claim; it is the computed number, not a guess.
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: the current trading date (YYYY-mm-dd).
+
+    Returns:
+        accruals + quality/trap verdict lines, or an explicit 'unavailable'
+        message when the vendor chain yields no statements.
+    """
+    try:
+        from scripts.value_screener import fetch_ticker
+    except Exception as exc:  # noqa: BLE001
+        return f"earnings quality unavailable for {ticker}: {exc}"
+    fin = fetch_ticker(ticker, current_date)
+    if not fin:
+        return (
+            f"earnings quality unavailable for {ticker}: no statements from "
+            "the vendor chain; do not fabricate quality screens."
+        )
+    try:
+        from scripts.value_screener import _latest
+        from tradingagents.strategies.normalized import accruals_ratio, trap_verdict
+    except Exception as exc:  # noqa: BLE001
+        return f"earnings quality unavailable for {ticker}: {exc}"
+    ni = _latest(fin.get("net_income"))
+    cfo = _latest(fin.get("operating_cashflow"))
+    ta = _latest(fin.get("total_assets"))
+    accrual = accruals_ratio(ni, cfo, ta) if (ni is not None or cfo is not None) else None
+    lines = [f"earnings quality {ticker}:"]
+    if accrual is None:
+        lines.append("  accruals_ratio: n/a (needs net_income + operating_cashflow + total_assets)")
+        lines.append("  guidance: do not claim earnings quality without the accrual input.")
+    else:
+        band = (
+            "low-earnings-quality-risk"
+            if accrual > 0.06
+            else ("moderate" if accrual > 0.02 else "clean")
+        )
+        lines.append(f"  accrual_ratio={accrual:.3f} ({band}): high accruals = quality risk")
+    m = z = f = None
+    try:
+        # Reuse the screener's screens so the trap verdict includes the accrual,
+        # which screen_ticker's own trap call currently omits.
+        from scripts.value_screener import screen_ticker
+
+        row = screen_ticker(ticker, fin)
+        m, z, f = row.get("beneish_m"), row.get("altman_z"), row.get("f_score")
+    except Exception:  # noqa: BLE001
+        pass
+    trap = None
+    if any(v is not None for v in (m, z, f, accrual)):
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            trap = trap_verdict(f_score=f, m_score=m, z_score=z, accrual=accrual)
+    if trap:
+        lines.append(f"  trap_risk={trap.get('level')}")
+        for ev in trap.get("evidence") or []:
+            lines.append(f"    - {ev}")
+    else:
+        lines.append("  trap_risk: insufficient forensic inputs")
+    return chr(10).join(lines)
+
 
 __all__ = [
     "get_sector_rank",
@@ -1644,4 +1816,6 @@ __all__ = [
     "get_momentum_detail",
     "get_beat_miss_sizing",
     "get_dcf_valuation",
+    "get_session_discipline",
+    "get_earnings_quality",
 ]

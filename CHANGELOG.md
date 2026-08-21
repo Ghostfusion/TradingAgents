@@ -10,6 +10,26 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Session-discipline & earnings-quality analyst tools** - two more
+deterministic strategies exposed as `@tool`s so the analysts cite computed
+numbers instead of guessing: `get_session_discipline` (market node; wraps
+`momentum.session_flags` + `psych_level` + `past_optimal_window` into an
+intraday walk-away read: giveback, max-daily-loss, past the 10:00 ET optimal
+window) and `get_earnings_quality` (fundamentals node; wraps
+`normalized.accruals_ratio` + `trap_verdict`, surfacing the Sloan accruals
+ratio - which `scripts/value_screener.screen_ticker`'s own trap call drops - as
+an evidence trigger). Both bound in `_create_tool_nodes` + their analyst's
+tool list/prompt, re-exported from `agent_utils`, and hermetic-tested in
+  `tests/test_analysis_tools.py` (6 cases). Docs: `api_reference.md` §6.1/6.4
+(tool list + table rows), README, CHANGELOG.
+
+- **Docs backfill (missing env keys)** - documented the two `TRADINGAGENTS_*`
+  env overrides (`ENABLE_MASSIVE_FLAT`, `MASSIVE_FLAT_DIR`) that were in code
+  but absent from `api_reference.md` §1.1's env→config table; synced
+  `.env.example` for `TRADINGAGENTS_MASSIVE_API_KEY` and the runtime toggles
+  `TRADINGAGENTS_DISABLE_REDDIT` / `TRADINGAGENTS_MOMENTUM_OFFLINE` /
+  `TRADINGAGENTS_MOMENTUM_NO_INTRADAY`.
+
 - **Per-test timers (pytest-timeout)** - every test now carries a deadline so
   a hung vendor/network call can never block the whole session indefinitely:
   global 180s per-test default (thread method) + 30-minute session cap in

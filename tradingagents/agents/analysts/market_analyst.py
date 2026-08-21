@@ -17,6 +17,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_relative_strength,
     get_risk_gate,
     get_sector_rank,
+    get_session_discipline,
     get_short_interest,
     get_short_volume,
     get_stock_data,
@@ -56,6 +57,7 @@ def create_market_analyst(llm):
             get_volatility_contraction,
             get_orderflow_read,
             get_sector_rank,
+            get_session_discipline,
             get_strategy_quality,
             get_tail_risk,
             get_credit_spread_read,
@@ -116,6 +118,7 @@ You also have decision-grounding tools:
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
+- get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.
 - get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""

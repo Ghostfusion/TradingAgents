@@ -73,6 +73,8 @@ in `batch.py`).
 | `TRADINGAGENTS_RESULTS_DIR` | `results_dir` |
 | `TRADINGAGENTS_CACHE_DIR` | `data_cache_dir` |
 | `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` |
+| `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` | `enable_massive_flat` |
+| `TRADINGAGENTS_MASSIVE_FLAT_DIR` | `massive_flat_dir` |
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)
@@ -246,7 +248,8 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read`,
   `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`,
   `get_sector_rank`, `get_strategy_quality`, `get_margin_of_safety`,
-  `get_composite_rank`, `get_tail_risk`, `get_credit_spread_read`
+  `get_composite_rank`, `get_tail_risk`, `get_credit_spread_read`,
+  `get_session_discipline`, `get_earnings_quality`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -361,6 +364,8 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
 | `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` | market | historical VaR / CVaR tail budget + -10% uniform stress loss |
 | `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
+| `get_session_discipline(ticker, peak_pnl?, current_pnl?)` | `strategies.momentum.session_flags` + `psych_level` + `past_optimal_window` | market | intraday walk-away rules (giveback, max-daily-loss, past 10:00 ET optimal) + nearest psych levels |
+| `get_earnings_quality(ticker, date)` | `strategies.normalized.accruals_ratio` + `trap_verdict` | fundamentals | Sloan accruals ratio + the forensic trap verdict incl. the accrual evidence trigger |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for
