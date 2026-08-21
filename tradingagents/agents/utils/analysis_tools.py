@@ -96,6 +96,20 @@ def _txt_round(v, nd: int = 4) -> str:
     return f"{v:.{nd}f}" if v is not None else "n/a"
 
 
+def _daily_returns(closes) -> list:
+    """Period-over-period simple returns from a close series (None gaps skipped)."""
+    rets: list = []
+    prev = None
+    for c in closes:
+        if c is None:
+            prev = None
+            continue
+        if prev:
+            rets.append(c / prev - 1.0)
+        prev = c
+    return rets
+
+
 # ---------------------------------------------------------------------------
 # Swing / relative strength (market analyst)
 # ---------------------------------------------------------------------------
@@ -1308,10 +1322,259 @@ def get_dcf_valuation(
     )
 
 
+# ---------------------------------------------------------------------------
+# Item-1: sector leadership / sector standing (market analyst)
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_sector_rank(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Sector-momentum ranking (11 SPDR groups, 1m + 3m) and where the ticker's
+    own sector sits (top3 / tracking / unknown). Use before any sector-rotation
+    or 'sector leadership' claim.
+
+    Args:
+        ticker: single ticker symbol (e.g. "AAPL").
+
+    Returns:
+        The 3m top-3 SPDR group tickers + the ticker's sector standing, or
+        an explicit 'unavailable' message when no SPDR series resolves.
+    """
+    try:
+        from tradingagents.strategies.sector_rank import (
+            rank_sectors,
+            sector_standing,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"sector rank unavailable for {ticker}: {exc}"
+    from tradingagents.strategies.sector_rank import SPDR_SECTORS
+
+    closes_map = {}
+    for etf in SPDR_SECTORS:
+        closes = _ohlcv(etf).get("closes") or []
+        if len(closes) >= 65:  # ~3 months of bars
+            closes_map[etf] = closes
+    if not closes_map:
+        return f"sector rank unavailable for {ticker}: no SPDR history from the vendor chain."
+    ranking = rank_sectors(closes_map)
+    top3 = ranking.get("top3_3m") or []
+    top1 = ranking.get("top3_1m") or []
+    top3_names = [SPDR_SECTORS.get(e, e) for e in top3]
+
+    # Resolve the ticker's sector -> standing.
+    sector = None
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_sector
+
+        sector = fetch_sector(ticker)
+    except Exception:  # noqa: BLE001
+        sector = None
+    standing = sector_standing(sector, ranking)
+    lines = [
+        f"sector rank {ticker}:",
+        f"  top3_3m={top3_names}",
+        f"  top1_1m={[SPDR_SECTORS.get(e, e) for e in top1[:1]]}",
+        f"  sector={sector or 'n/a'} standing={standing.get('verdict')} "
+        f"rank={standing.get('rank') if standing.get('rank') is not None else 'n/a'}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item-2: strategy quality (market analyst) - net CAGR / Sharpe / drawdown
+# ---------------------------------------------------------------------------
+
+@tool
+def get_strategy_quality(
+    ticker: Annotated[str, "ticker symbol"],
+    returns: Annotated[list[float] | None, "optional daily/simple returns; defaults to price-derived"] = None,
+    cost_bps: Annotated[float, "per-trade cost in basis points, default 10"] = 10.0,
+) -> str:
+    """Risk-adjusted quality of a strategy over its return series: net CAGR,
+    annualized volatility and Sharpe ratio. Use when judging whether a
+    strategy is backtest-worth / risk-adjusted rather than just gross return.
+
+    Args:
+        ticker: ticker symbol (used to derive default returns when not given).
+        returns: optional explicit daily/% returns list.
+        cost_bps: per-trade cost subtracted from each period return.
+
+    Returns:
+        A single line with the computed metrics, or an explicit 'unavailable'.
+    """
+    try:
+        from tradingagents.strategies.evaluate import (
+            cagr,
+            equity_curve,
+            max_drawdown,
+            net_returns,
+            sharpe,
+            volatility,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"strategy quality unavailable: {exc}"
+    if returns is None or not returns:
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 30:
+            return f"strategy quality unavailable for {ticker}: not enough price history."
+        returns = _daily_returns(closes)
+    if len(returns) < 4:
+        return f"strategy quality unavailable for {ticker}: need >=4 returns."
+    net = net_returns(returns, cost_bps=cost_bps)
+    cg = cagr(net)
+    vol = volatility(net)
+    shr = sharpe(net)
+    curve = equity_curve(net)
+    mdd = max_drawdown(curve)
+    return (
+        f"strategy quality {ticker}: net_cagr={cg:.2%} vol={vol:.2%} "
+        f"sharpe={shr:.2f} max_dd={mdd:.2%} n={len(net)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Item-3a: safety margin (fundamentals) ----------------
+# ---------------------------------------------------------------------------
+
+@tool
+def get_margin_of_safety(
+    ticker: Annotated[str, "ticker symbol"],
+    intrinsic: Annotated[float | None, "intrinsic value estimate, e.g. from a DCF / normalized EV/EBIT"] = None,
+) -> str:
+    """(intrinsic - price) / intrinsic safety margin for a name.
+
+    Use when arguing about 'undervalued / margin-of-safety' on intrinsics. Pass
+    ``intrinsic`` from a valuation the analyst already produced (e.g. from
+    get_dcf_valuation / get_analyst_verdict / your own fair value) - it is
+    required, since the safety margin is only meaningful against an explicit
+    intrinsic estimate.
+    """
+    try:
+        from tradingagents.strategies.normalized import margin_of_safety
+    except Exception as exc:  # noqa: BLE001
+        return f"margin of safety unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    price = closes[-1] if closes else None
+    if price is None:
+        return f"margin of safety unavailable for {ticker}: no price."
+    if intrinsic is None or intrinsic <= 0:
+        return f"margin of safety unavailable for {ticker}: pass a positive intrinsic estimate (e.g. from get_dcf_valuation) to compute the safety margin."
+    mos = margin_of_safety(price, float(intrinsic))
+    if mos is None:
+        return f"margin of safety unavailable for {ticker}: unquantifiable."
+    band = (
+        "wide"
+        if mos > 0.3
+        else ("modest" if mos > 0 else "negative")
+    )
+    return f"margin of safety {ticker}: {mos:.1%} ({band}); price={price:.2f} intrinsic={intrinsic:.2f}"
+
+
+# ---------------------------------------------------------------------------
+# Item 3b: composite factor rank (fundamentals) ---
+# ---------------------------------------------------------------------------
+
+@tool
+def get_composite_rank(
+    ticker: Annotated[str, "ticker symbol"],
+    factors: Annotated[dict | None, "optional extra factor -> value map (e.g. {'ev_ebit': -1})"] = None,
+) -> str:
+    """Cross-sectional value+momentum composite (percentile-ranked)
+    from the ticker + its industry peers, folding in optional factor weights.
+
+    Returns the percentile composite (0-1) and the per-factor percentile ranks.
+    """
+    try:
+        from tradingagents.strategies.factors import composite_score, high_distance, momentum
+    except Exception as exc:  # noqa: BLE001
+        return f"composite rank unavailable for {ticker}: {exc}"
+    # Peer universe: the ticker plus its company peers, when available.
+    peers = [ticker]
+    try:
+        from tradingagents.dataflows.finnhub import get_company_peers_finnhub
+
+        peer_list = get_company_peers_finnhub(ticker) or []
+        peers = [ticker] + list(peer_list)[:8]
+    except Exception:  # noqa: BLE001
+        peers = [ticker]
+    factors_by_ticker = {}
+    for t in peers:
+        closes = _ohlcv(t).get("closes") or []
+        f = {}
+        if len(closes) >= 64:
+            mom = momentum(closes)
+            if mom is not None:
+                f["momentum"] = mom
+            hd = high_distance(closes)
+            if hd is not None:
+                f["high_distance"] = hd
+        if factors and t == ticker:
+            f.update(factors)
+        if f:
+            factors_by_ticker[t] = f
+    if len(factors_by_ticker) < 2 or ticker not in factors_by_ticker:
+        return f"composite rank unavailable for {ticker}: <2 comparable tickers with factor data."
+    weights = None
+    if factors:
+        # weight the explicit factors & default the momentum peers.
+        weights = {"momentum": 1.0, "high_distance": 1.0}
+        for k in factors:
+            weights[k] = -1.0 if factors[k] < 0 else 1.0
+    scores = composite_score(factors_by_ticker, weights)
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:6]
+    peers_str = "; ".join(f"{t}={v:.0%}" for t, v in ranked)
+    return (
+        f"composite rank {ticker}: score={scores[ticker]:.2%} "
+        f"(vs {len(scores) - 1} peers); {peers_str}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Item 4: tail / book risk (market analyst) ----------------
+# ---------------------------------------------------------------------------
+
+@tool
+def get_tail_risk(
+    ticker: Annotated[str, "ticker symbol"],
+    alpha: Annotated[float, "tail size, default 0.05"] = 0.05,
+    weight: Annotated[float, "allocation weight for stress-loss exposure, default 1.0"] = 1.0,
+) -> str:
+    """Book & tail-risk read: historical VaR and CVaR over the trailing
+    return series, plus a uniform -10% stress loss on the given weight."""
+    try:
+        from tradingagents.strategies.book_risk import cvar, stress_loss
+    except Exception as exc:  # noqa: BLE001
+        return f"tail risk unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 30:
+        return f"tail risk unavailable for {ticker}: not enough price history."
+    returns = _daily_returns(closes)
+    if not returns:
+        return f"tail risk unavailable for {ticker}: no returns."
+    c = cvar(returns, alpha=alpha)
+    stress = stress_loss({ticker: weight}, shock=-0.10)
+    var = None
+    try:
+        from tradingagents.strategies.book_risk import simple_var
+
+        var = simple_var(returns, alpha=alpha)
+    except Exception:
+        var = None
+    return (
+        f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'} "
+        f"stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+    )
 
 
 
 __all__ = [
+    "get_sector_rank",
+    "get_strategy_quality",
+    "get_margin_of_safety",
+    "get_composite_rank",
+    "get_tail_risk",
     "get_swing_set",
     "get_relative_strength",
     "get_earnings_event_read",

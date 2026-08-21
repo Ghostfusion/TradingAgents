@@ -276,6 +276,15 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-21 `(pending)` - Second decision-tool batch for the analyst LLMs:
+  `get_sector_rank` (11-SPDR 1m/3m momentum + sector standing, market),
+  `get_strategy_quality` (net CAGR/vol/Sharpe/max-drawdown, market),
+  `get_margin_of_safety` ((intrinsic-price)/intrinsic band, fundamentals),
+  `get_composite_rank` (value+momentum composite percentile vs peers,
+  fundamentals), `get_tail_risk` (VaR/CVaR tail budget + stress loss, market).
+  Each wraps an existing deterministic `strategies/*` function, bound in
+  `_create_tool_nodes` + the market/fundamentals analyst tools lists+prompts,
+  hermetic-tested (12 cases), docs+README+CHANGELOG kept true.
 - 2026-08-20 `a22092c` - Developer docs: added `docs/developer/` full developer set (topology, graph workflow, dataflow/vendors, strategies, agents/tools, entrypoints, persistence, dev guide, Massive integration) covering the whole project for a joining developer.
 - 2026-08-20 `1557954` - Developer docs: added `docs/developer/10-tests-layout.md` (tests/ directory map, fixtures, hermetic conventions) + index/dev-guide cross-links.
 - 2026-08-20 `35e7e3f` - `Strategies/index.md`: navigation map linking each strategy plan doc under Strategies/ to its implementation modules, config gates, scan modes, and consumers.

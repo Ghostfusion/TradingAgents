@@ -59,12 +59,14 @@ from tradingagents.agents.utils.analysis_tools import (
     get_beat_miss_sizing,
     get_catalyst_scale,
     get_company_peers,
+    get_composite_rank,
     get_dcf_valuation,
     get_earnings_event_read,
     get_earnings_surprise,
     get_exit_check,
     get_form4_insider,
     get_insider_activity,
+    get_margin_of_safety,
     get_momentum_detail,
     get_orderflow_read,
     get_portfolio_weights,
@@ -74,7 +76,10 @@ from tradingagents.agents.utils.analysis_tools import (
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
+    get_sector_rank,
+    get_strategy_quality,
     get_swing_set,
+    get_tail_risk,
     get_volatility_contraction,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
@@ -290,6 +295,9 @@ class TradingAgentsGraph:
                     get_momentum_detail,
                     get_volatility_contraction,
                     get_orderflow_read,
+                    get_sector_rank,
+                    get_strategy_quality,
+                    get_tail_risk,
                 ]
             ),
             "social": ToolNode(
@@ -348,6 +356,8 @@ class TradingAgentsGraph:
                     get_ratios,
                     get_allocation,
                     get_dcf_valuation,
+                    get_margin_of_safety,
+                    get_composite_rank,
                 ]
             ),
         }

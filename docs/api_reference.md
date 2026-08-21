@@ -244,7 +244,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_swing_set`, `get_relative_strength`, `get_earnings_event_read`,
   `get_catalyst_scale`, `get_position_sizing`, `get_risk_gate`,
   `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read`,
-  `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`
+  `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`,
+  `get_sector_rank`, `get_strategy_quality`, `get_margin_of_safety`,
+  `get_composite_rank`, `get_tail_risk`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -353,6 +355,11 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 | `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown |
+| `get_sector_rank(ticker)` | `strategies.sector_rank.rank_sectors` + `sector_standing` | market | 11-SPDR 1m/3m momentum ranking + the ticker's sector standing |
+| `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` | market | net CAGR / annualized vol / Sharpe / max drawdown over a return series |
+| `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
+| `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
+| `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` | market | historical VaR / CVaR tail budget + -10% uniform stress loss |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

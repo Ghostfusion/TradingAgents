@@ -15,10 +15,13 @@ from tradingagents.agents.utils.agent_utils import (
     get_regime_read,
     get_relative_strength,
     get_risk_gate,
+    get_sector_rank,
     get_short_interest,
     get_short_volume,
     get_stock_data,
+    get_strategy_quality,
     get_swing_set,
+    get_tail_risk,
     get_top_movers,
     get_verified_market_snapshot,
     get_volatility_contraction,
@@ -51,6 +54,9 @@ def create_market_analyst(llm):
             get_momentum_detail,
             get_volatility_contraction,
             get_orderflow_read,
+            get_sector_rank,
+            get_strategy_quality,
+            get_tail_risk,
         ]
 
         system_message = (
@@ -105,6 +111,9 @@ You also have decision-grounding tools:
 - get_regime_components(ticker) - drill into why the regime label says what it does: vol_pct, trend strength, choppiness, label. Use before any regime claim, alongside get_regime_read.
 - get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
 - get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
+- get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
+- get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
+- get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

@@ -10,6 +10,21 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Second decision-tool batch (sector/quality/safety/composite/tail)** -
+  five more deterministic `strategies/*` functions exposed as analyst
+  `@tool`s — `get_sector_rank` (11-SPDR 1m/3m momentum ranking + the
+  ticker's sector standing; market node), `get_strategy_quality` (net CAGR,
+  annualized vol, Sharpe, max drawdown over the price-derived or provided
+  return series; market), `get_margin_of_safety` ((intrinsic - price)/
+  intrinsic band, wide/modest/negative; fundamentals), `get_composite_rank`
+  (cross-sectional value+momentum composite percentile vs industry peers;
+  fundamentals), `get_tail_risk` (historical VaR/CVaR tail budget + -10%
+  uniform stress loss; market). Each wraps an existing deterministic
+  function, is bound to the market / fundamentals tool nodes and analyst
+  prompts, and is hermetic-tested in `tests/test_analysis_tools.py` (12 new
+  cases). No config or topology change; all degrade to an explicit
+  'unavailable' per the no-fabrication contract.
+
 - **DCF valuation tool** - `strategies/dcf.py` (pragmatic FCF-DCF: WACC via
   CAPM, Gordon terminal value, EV-to-equity bridge) + `get_dcf_valuation`
   tool bound to the fundamentals analyst. Provider-sourced inputs: free cash

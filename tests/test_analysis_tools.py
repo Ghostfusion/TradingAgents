@@ -529,3 +529,113 @@ def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
     assert "no usable free cash flow" in out
 
 
+
+
+# --------------------------------------------------------------------------
+# New decision-grounding tools (sector / quality / safety / composite / tail)
+# --------------------------------------------------------------------------
+
+
+def test_strategy_quality_explicit_returns():
+    out = T.get_strategy_quality.invoke(
+        {"ticker": "AAPL", "returns": [0.01] * 50, "cost_bps": 0}
+    )
+    assert "strategy quality AAPL" in out
+    assert "net_cagr=" in out and "sharpe=" in out and "max_dd=" in out
+
+
+def test_strategy_quality_derives_returns_from_ohlcv(monkeypatch):
+    fake = {"closes": _uptrend(260), "opens": [], "highs": [], "lows": [], "volumes": []}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_strategy_quality.invoke({"ticker": "AAPL", "cost_bps": 5.0})
+    assert "strategy quality AAPL" in out
+    assert "n=" in out
+
+
+def test_strategy_quality_too_few_returns_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0, 101.0]})
+    out = T.get_strategy_quality.invoke({"ticker": "AAPL"})
+    assert "not enough price history" in out
+
+
+def test_margin_of_safety_requires_intrinsic(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [90.0]})
+    out = T.get_margin_of_safety.invoke({"ticker": "AAPL"})
+    assert "pass a positive intrinsic estimate" in out
+
+
+def test_margin_of_safety_computes_band(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [90.0]})
+    out = T.get_margin_of_safety.invoke({"ticker": "AAPL", "intrinsic": 200.0})
+    assert "margin of safety AAPL" in out
+    assert "wide" in out  # (200-90)/200 = 55%
+
+
+def test_margin_of_safety_negative_when_rich(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [150.0]})
+    out = T.get_margin_of_safety.invoke({"ticker": "AAPL", "intrinsic": 100.0})
+    assert "negative" in out
+
+
+def test_composite_rank_requires_peers(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": _uptrend(260)})
+    # finnhub peers unavailable -> only the ticker itself -> degrades
+    with mock.patch(
+        "tradingagents.dataflows.finnhub.get_company_peers_finnhub",
+        return_value=[],
+    ):
+        out = T.get_composite_rank.invoke({"ticker": "AAPL"})
+    assert "<2 comparable tickers" in out
+
+
+def test_composite_rank_with_peers(monkeypatch):
+    def _prices(t):
+        if t == "MSFT":
+            return {"closes": _uptrend(260)}
+        return {"closes": [100.0 + 0.1 * i for i in range(260)]}
+    monkeypatch.setattr(T, "_ohlcv", _prices)
+    with mock.patch(
+        "tradingagents.dataflows.finnhub.get_company_peers_finnhub",
+        return_value=["MSFT", "ORCL"],
+    ):
+        out = T.get_composite_rank.invoke({"ticker": "AAPL"})
+    assert "composite rank AAPL" in out
+    assert "score=" in out
+
+
+def test_tail_risk_computes_cvar(monkeypatch):
+    n = 120
+    closes = [100.0 + 0.5 * i + 20.0 * math.sin(i / 3) for i in range(n)]
+    fake = {"closes": closes, "opens": [], "highs": [], "lows": [], "volumes": []}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_tail_risk.invoke({"ticker": "AAPL", "alpha": 0.05})
+    assert "tail risk AAPL" in out
+    assert "cvar=" in out and "stress_-10pct=" in out
+
+
+def test_tail_risk_too_short_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0, 101.0, 99.0]})
+    out = T.get_tail_risk.invoke({"ticker": "AAPL"})
+    assert "not enough price history" in out
+
+
+def test_sector_rank_resolves_standing(monkeypatch):
+    # SPDR ETFs all return an uptrend via _ohlcv; ticker sector known.
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": _uptrend(260)})
+
+    def fake_fetch_sector(ticker):
+        return "Technology" if ticker == "AAPL" else None
+
+    with mock.patch(
+        "tradingagents.dataflows.yfinance_sector.fetch_sector",
+        side_effect=fake_fetch_sector,
+    ):
+        out = T.get_sector_rank.invoke({"ticker": "AAPL"})
+    assert "sector rank AAPL" in out
+    assert "top3_3m=" in out and "standing=" in out
+
+
+def test_sector_rank_no_spdr_history_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": []})
+    out = T.get_sector_rank.invoke({"ticker": "AAPL"})
+    assert "no SPDR history" in out

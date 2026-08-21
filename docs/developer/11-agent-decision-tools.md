@@ -1,6 +1,6 @@
 # Plan: Give the virtual agent better decision tools
 
-**Status: implemented (P0-P2 all six tools landed + hermetic-tested).**
+**Status: implemented (P0-P2 all six tools landed + hermetic-tested, plus a follow-up batch of five sector/quality/safety/composite/tail tools).**
 The six decision tools below are now exposed as @tools and bound to the
 analyst tool nodes (and, for consensus, computed-injected into the PM
 prompt). Each wraps an existing deterministic strategies function, so the
@@ -138,6 +138,21 @@ in `agent_utils`, bound in both the analyst `tools` list and
 `get_consensus` is exposed as a tool AND its value is pre-fetched/parsed from
 the risk debate and injected straight into the PM prompt (compute-as-tools
 without a topology change).
+
+## Follow-up batch (sector / quality / safety / composite / tail)
+
+A later pass surfaced five more deterministic functions that were implemented
+but not exposed to the analysts. Each is a `@tool` wrapping an existing
+`strategies/*` pure function, bound in both the analyst tools list and
+`_create_tool_nodes`, hermetic-tested in `tests/test_analysis_tools.py`:
+
+| Tool | Wraps | Bound to | Why it improves the decision |
+| --- | --- | --- | --- |
+| `get_sector_rank(ticker)` | `sector_rank.rank_sectors` + `sector_standing` | market | grounds any sector-rotation / sector-leadership claim in the 11-SPDR 1m/3m momentum ranking + the ticker's standing |
+| `get_strategy_quality(ticker, returns?)` | `evaluate` (cagr/sharp/vol/max_dd) | market | a deterministic risk-adjusted quality read (net CAGR, Sharpe, max drawdown) instead of a guessed quality narrative |
+| `get_margin_of_safety(ticker, intrinsic)` | `normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic band cited before any undervaluation claim |
+| `get_composite_rank(ticker, factors?)` | `factors.composite_score` | fundamentals | cross-sectional value+momentum percentile vs industry peers (leader/laggard in the group) |
+| `get_tail_risk(ticker, alpha?)` | `book_risk.cvar`/`simple_var`/`stress_loss` | market | explicit VaR/CVaR tail budget + -10% stress loss before a sizing/tail-risk claim |
 
 ---
 
