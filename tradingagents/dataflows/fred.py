@@ -65,6 +65,16 @@ MACRO_SERIES = {
     "money_supply": "M2SL",
     "vix": "VIXCLS",
     "dollar_index": "DTWEXBGS",
+    # Credit markets (ICE BofA option-adjusted spreads, daily)
+    "hy_oas": "BAMLH0A0HYM2",
+    "hy_spread": "BAMLH0A0HYM2",
+    "high_yield_oas": "BAMLH0A0HYM2",
+    "high_yield_spread": "BAMLH0A0HYM2",
+    "ccc_oas": "BAMLH0A3HYC",
+    "ccc_spread": "BAMLH0A3HYC",
+    "ccc_and_lower_oas": "BAMLH0A3HYC",
+    "bb_oas": "BAMLH0A1HYBB",
+    "bb_spread": "BAMLH0A1HYBB",
     # Sentiment & housing
     "consumer_sentiment": "UMCSENT",
     "housing_starts": "HOUST",

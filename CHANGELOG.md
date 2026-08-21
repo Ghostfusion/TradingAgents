@@ -10,6 +10,19 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Credit-stress read (FRED ICE BofA OAS)** - `strategies/credit_spread.py`
+  (`credit_stress_level`) plus a `get_credit_spread_read(date)` tool bound to
+  the market analyst: pulls the three ICE BofA US high-yield option-adjusted
+  spreads from FRED (`hy_oas`=BAMLH0A0HYM2, `ccc_oas`=BAMLH0A3HYC,
+  `bb_oas`=BAMLH0A1HYBB, new aliases in `dataflows/fred.py::MACRO_SERIES`)
+  and flattens them into a deterministic credit-cycle band (low/moderate/
+  high/severe) + a 0..1 de-risk scale. Thresholds follow the credit-cycle
+  table: HY <3% low / 3.5-4.5% moderate / >5.5% severe; CCC <8% low /
+  10-12% moderate / >15% severe. The CCC spread is the leading risk-off
+  sentinel. Degrades to an explicit 'unavailable' when FRED_API_KEY is unset
+  (no-fabrication). Tests: `tests/test_strategies_credit_spread.py` (7),
+  `tests/test_fred.py` (1), `tests/test_analysis_tools.py` (3).
+
 - **Second decision-tool batch (sector/quality/safety/composite/tail)** -
   five more deterministic `strategies/*` functions exposed as analyst
   `@tool`s — `get_sector_rank` (11-SPDR 1m/3m momentum ranking + the

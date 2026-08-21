@@ -1565,13 +1565,58 @@ def get_tail_risk(
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'} "
         f"stress_-10pct={stress:.2%} alpha={alpha:.0%}"
-    )
+    )# ---------------------------------------------------------------------------
+# Item-5: credit-stress read (market analyst) - HY/CCC/BB OAS from FRED
+# ---------------------------------------------------------------------------
+
+
+def _fred_latest_pct(payload: str) -> float | None:
+    """Parse the latest value (%) from a FRED macro markdown payload."""
+    import re as _re
+
+    m = _re.search(r"Latest:\*{2}\s*([0-9.]+)", payload or "")
+    return float(m.group(1)) if m else None
+
+
+@tool
+def get_credit_spread_read(
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Credit-stress read from the three ICE BofA US high-yield OAS spreads
+    (FRED, daily): whole HY (BAMLH0A0HYM2), CCC & lower (BAMLH0A3HYC) and BB
+    (BAMLH0A1HYBB). Returns each spread in % and a deterministic credit-cycle
+    band (low/moderate/high/severe) + a 0..1 de-risk scale. Call before any
+    'credit stress / risk-off / debt market' claim; the CCC spread is the
+    leading risk-off sentinel."""
+    try:
+        from tradingagents.strategies.credit_spread import credit_stress_level
+    except Exception as exc:  # noqa: BLE001
+        return f"credit spread read unavailable: {exc}"
+    hy = _fred_latest_pct(route_to_vendor("get_macro_indicators", "hy_oas", current_date, None))
+    ccc = _fred_latest_pct(route_to_vendor("get_macro_indicators", "ccc_oas", current_date, None))
+    bb = _fred_latest_pct(route_to_vendor("get_macro_indicators", "bb_oas", current_date, None))
+    if hy is None and ccc is None and bb is None:
+        return (
+            f"credit spread read unavailable for {current_date}: no FRED OAS data "
+            "(FRED_API_KEY unset or series missing in the window)."
+        )
+    res = credit_stress_level(hy, ccc, bb)
+    if res["level"] == "unknown":
+        return f"credit spread read unavailable for {current_date}."
+    lines = [
+        f"credit spread read {current_date}:",
+        f"  level={res['level']} scale={res['scale']:.2f}",
+    ]
+    for r in res["reasons"]:
+        lines.append(f"  {r}")
+    return "\n".join(lines)
 
 
 
 __all__ = [
     "get_sector_rank",
     "get_strategy_quality",
+    "get_credit_spread_read",
     "get_margin_of_safety",
     "get_composite_rank",
     "get_tail_risk",

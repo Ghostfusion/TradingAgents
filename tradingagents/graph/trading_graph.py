@@ -60,6 +60,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_catalyst_scale,
     get_company_peers,
     get_composite_rank,
+    get_credit_spread_read,
     get_dcf_valuation,
     get_earnings_event_read,
     get_earnings_surprise,
@@ -298,6 +299,7 @@ class TradingAgentsGraph:
                     get_sector_rank,
                     get_strategy_quality,
                     get_tail_risk,
+                    get_credit_spread_read,
                 ]
             ),
             "social": ToolNode(

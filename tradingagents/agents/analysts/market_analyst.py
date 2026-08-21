@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
+    get_credit_spread_read,
     get_exit_check,
     get_indicators,
     get_instrument_context_from_state,
@@ -57,6 +58,7 @@ def create_market_analyst(llm):
             get_sector_rank,
             get_strategy_quality,
             get_tail_risk,
+            get_credit_spread_read,
         ]
 
         system_message = (
@@ -114,6 +116,7 @@ You also have decision-grounding tools:
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
+- get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

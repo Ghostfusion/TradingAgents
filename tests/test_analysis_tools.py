@@ -639,3 +639,32 @@ def test_sector_rank_no_spdr_history_degrades(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": []})
     out = T.get_sector_rank.invoke({"ticker": "AAPL"})
     assert "no SPDR history" in out
+
+
+def test_credit_spread_read_uses_oas_series(monkeypatch):
+    # No FRED data -> explicit unavailable (no-fabrication).
+    monkeypatch.setattr(T, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    out = T.get_credit_spread_read.invoke({"current_date": "2026-08-19"})
+    assert "unavailable" in out
+
+
+def test_credit_spread_read_band_from_latest(monkeypatch):
+    def side(method, *a, **k):
+        vals = {
+            "hy_oas": "FRED: **Latest:** 3.90 (2026-08-19)",
+            "ccc_oas": "FRED: **Latest:** 10.30 (2026-08-19)",
+            "bb_oas": "FRED: **Latest:** 1.63 (2026-08-19)",
+        }
+        return vals.get(a[0], "NO_DATA_AVAILABLE")
+
+    monkeypatch.setattr(T, "route_to_vendor", side)
+    out = T.get_credit_spread_read.invoke({"current_date": "2026-08-19"})
+    assert "level=moderate" in out
+    assert "scale=0.85" in out
+    assert "ccc_oas=10.30%" in out
+
+
+def test_credit_spread_read_degrades_with_no_key(monkeypatch):
+    monkeypatch.setattr(T, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    out = T.get_credit_spread_read.invoke({"current_date": "2026-08-19"})
+    assert "FRED" in out or "unavailable" in out

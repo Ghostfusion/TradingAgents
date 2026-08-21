@@ -276,6 +276,12 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-21 `(pending)` - Credit-stress read (FRED ICE BofA OAS):
+  `get_credit_spread_read(date)` (market node) + `strategies/credit_spread.py`
+  `credit_stress_level`, flattening the HY/CCC/BB option-adjusted spreads
+  (FRED aliases `hy_oas`/`ccc_oas`/`bb_oas`) into a credit-cycle band +
+  de-risk scale. Thresholds: HY <3% low/3.5-4.5% mod/>5.5% severe; CCC <8%
+  low/10-12% mod/>15% severe. Degrades to 'unavailable' without FRED_API_KEY.
 - 2026-08-21 `c7405b3` - Second decision-tool batch for the analyst LLMs:
   `get_sector_rank` (11-SPDR 1m/3m momentum + sector standing, market),
   `get_strategy_quality` (net CAGR/vol/Sharpe/max-drawdown, market),

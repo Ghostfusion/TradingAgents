@@ -246,7 +246,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_regime_read`, `get_volatility_contraction`, `get_orderflow_read`,
   `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`,
   `get_sector_rank`, `get_strategy_quality`, `get_margin_of_safety`,
-  `get_composite_rank`, `get_tail_risk`
+  `get_composite_rank`, `get_tail_risk`, `get_credit_spread_read`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -280,7 +280,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 nodes) returning per-article structured sentiment (positive/negative/neutral
 + reasoning); and `get_macro_indicators_massive` (`macro_data` chain) serving
 treasury-yields / inflation / inflation-expectations / labor-market
-(aliases match the FRED surface: `10y_treasury`, `yield_curve`, `cpi`, ...).
+(aliases match the FRED surface: `10y_treasury`, `yield_curve`, `cpi`, ...). The FRED `macro_data` vendor also exposes ICE BofA credit-OAS aliases for the credit-stress read: `hy_oas`/`hy_spread`/`high_yield_oas` → `BAMLH0A0HYM2`, `ccc_oas`/`ccc_and_lower_oas` → `BAMLH0A3HYC`, `bb_oas` → `BAMLH0A1HYBB`.
 Massive also drives a deterministic `macro_backdrop` (yield-curve
 inversion / elevated breakevens) that keeps the B1 catalyst overlay
 de-risking even when the OpenD event calendar is unavailable (see
@@ -360,6 +360,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
 | `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` | market | historical VaR / CVaR tail budget + -10% uniform stress loss |
+| `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for

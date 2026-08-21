@@ -57,6 +57,13 @@ class FredResolutionTests(unittest.TestCase):
         self.assertEqual(fred._resolve_series_id("Fed Funds Rate"), "FEDFUNDS")
         self.assertEqual(fred._resolve_series_id("10y-treasury"), "DGS10")
 
+    def test_credit_oas_aliases_resolve(self):
+        # ICE BofA high-yield OAS aliases (credit-stress read).
+        self.assertEqual(fred._resolve_series_id("hy_oas"), "BAMLH0A0HYM2")
+        self.assertEqual(fred._resolve_series_id("high_yield_spread"), "BAMLH0A0HYM2")
+        self.assertEqual(fred._resolve_series_id("ccc_oas"), "BAMLH0A3HYC")
+        self.assertEqual(fred._resolve_series_id("bb_spread"), "BAMLH0A1HYBB")
+
     def test_unknown_alias_is_treated_as_raw_series_id(self):
         # Power users can pass any FRED series ID; we uppercase by convention.
         self.assertEqual(fred._resolve_series_id("dgs30"), "DGS30")
