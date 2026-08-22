@@ -44,7 +44,9 @@ engages. Keyed on ticker+date+graph-shape; cleared on success.
 ```
 
 The TOC auto-links every team/role heading. `5_portfolio/decision.md` carries
-the `Risk Gate (computed)` verdict when the governor is on.
+the `Risk Gate (computed)` verdict when the governor is on (plus, with the
+tranche fold enabled, `Tranche peak-deployed` / `Tranche capital-at-risk` lines
+from `tranche_context`).
 `rebuild_complete_report.py` re-renders a folder without re-running and
 preserves `Risk Gate (computed)` blocks.
 

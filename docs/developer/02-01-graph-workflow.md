@@ -66,8 +66,11 @@ The **Portfolio Manager** (deep-think) emits a structured `PortfolioDecision`
 `_apply_strategy_overlays` adjusts the decision deterministically:
 regime/vol-target → orderflow → catalyst → position contract → risk governor →
 computed context. It writes `strategy_overlays`, `position_contract`, `risk_gate`,
-`risk_halt`, `computed_context` keys. A REJECT sets `risk_halt=True`, which a
-downstream decision / portfolio step treats as "no position".
+`risk_halt`, `computed_context` keys. With `enable_tranche_risk` on, the contract
+uses the weighted tranche entry and the governor sizes against the worst-case
+peak-deployed-at-scale-in + capital-at-risk (`tranche_context` on the state). A
+REJECT sets `risk_halt=True`, which a downstream decision / portfolio step
+ treats as "no position".
 
 ## Step 7 — persistence + memory
 

@@ -107,7 +107,9 @@ portfolio alloc block; journaling.
 5. Portfolio Manager returns the structured decision
    (rating, confidence, `position_size`, `stop_loss`, `consensus`).
 6. Deterministic overlays then adjust size: regime -> orderflow -> catalyst ->
-   position contract -> risk governor (`PASS/WARN/REJECT`, `risk_halt`).
+   position contract -> risk governor (`PASS/WARN/REJECT`, `risk_halt`); with
+   `enable_tranche_risk` on, the contract uses the weighted tranche entry and
+   the governor enforces the worst-case peak-deployed + capital-at-risk.
 7. The decision is appended to the memory log; the next same-ticker run
    resolves the realized return vs the regional benchmark and reflects.
 

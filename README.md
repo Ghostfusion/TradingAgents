@@ -561,7 +561,7 @@ All config-gated, off by default:
   `catalyst_macro_window_days`/`_scale`, `catalyst_fed_window_days`/`_scale`,
   `catalyst_miss_scale`, `catalyst_scale_floor`, `catalyst_hard_block_days` (0 = off).
 
-Regression status: full suite passes (969 passed / 2 skipped / 56 subtests).
+Regression status: full suite passes (1153 passed / 2 skipped / 56 subtests).
 
 
 </td></tr>
@@ -679,7 +679,7 @@ only after validating in the evaluation harness:
   disable via `enable_strategy_overlays: false` / `enable_reflection: false`;
   both are also settable through `.env` (see below).
 
-Regression status: full suite passes (969 passed / 2 skipped / 56 subtests);
+Regression status: full suite passes (1153 passed / 2 skipped / 56 subtests);
 smoke imports of graph/dataflow/agent/strategy modules green.
 
 ## Contributing

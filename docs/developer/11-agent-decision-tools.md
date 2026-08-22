@@ -1,6 +1,6 @@
 # Plan: Give the virtual agent better decision tools
 
-**Status: implemented (P0-P2 all six tools landed + hermetic-tested, plus a follow-up batch of five sector/quality/safety/composite/tail tools).**
+**Status: implemented (P0-P2 all six tools landed + hermetic-tested, plus a follow-up batch of five sector/quality/safety/composite/tail tools, plus the six Value Dip + Swing hybrid tools below).**
 The six decision tools below are now exposed as @tools and bound to the
 analyst tool nodes (and, for consensus, computed-injected into the PM
 prompt). Each wraps an existing deterministic strategies function, so the
@@ -153,6 +153,26 @@ but not exposed to the analysts. Each is a `@tool` wrapping an existing
 | `get_margin_of_safety(ticker, intrinsic)` | `normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic band cited before any undervaluation claim |
 | `get_composite_rank(ticker, factors?)` | `factors.composite_score` | fundamentals | cross-sectional value+momentum percentile vs industry peers (leader/laggard in the group) |
 | `get_tail_risk(ticker, alpha?)` | `book_risk.cvar`/`simple_var`/`stress_loss` | market | explicit VaR/CVaR tail budget + -10% stress loss before a sizing/tail-risk claim |
+
+## Value Dip + Swing hybrid batch (from `Strategies/Value_Dip_swing*.md`)
+
+A later batch added the six value-dip computed tools wrapping
+`strategies/value_dip.py` (see `docs/api_reference.md` §6.4):
+
+| Tool | Wraps | Bound to | Why it improves the decision |
+| --- | --- | --- | --- |
+| `get_bollinger_pct_b(ticker)` | `value_dip.bollinger_pct_b` | market | computed %b (<= 0.10 = mean-reversion entry zone) for oversold claims |
+| `get_tranche_plan(ticker, weights?, risk_pct?, account?)` | `value_dip.tranche_plan` | market | 3-tranche scale-in levels, weighted entry, composite stop, 1.8R/3.0R targets + blended R:R + breakeven win rate |
+| `get_trade_expectancy(p_win, avg_win, avg_loss, rr?)` | `value_dip.expectancy` + `breakeven_win_rate` | market | per-trade E = p*W - (1-p)*L and breakeven rate |
+| `get_fcf_yield(ticker, date)` | `value_dip.fcf_yield` | fundamentals | FCF / market cap (>= 6% value-floor row) |
+| `get_valuation_z_score(ticker, date, multiple?)` | `value_dip.valuation_z_read` | fundamentals | historical valuation Z (cheap <= -1.5) vs own trailing P/E, EV/EBITDA, P/FCF |
+| `get_value_dip_setup(ticker, date)` | `value_dip.value_dip_setup` | fundamentals | the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one candidate verdict |
+
+Related: the tranche plan is also folded as a **control** computation into the
+risk governor (`enable_tranche_risk`): `value_dip.tranche_risk_read` feeds the
+gate the config-frozen worst-case peak-deployed-at-scale-in fraction and the
+capital-at-risk budget; `contract.build_position_contract` takes the weighted
+`entry_price` hook (see `docs/api_reference.md` §5).
 
 ---
 

@@ -23,7 +23,7 @@ module inventory) alongside this.
 | 9 | `enhancement_plan.md` | 8-phase research plan (regime, PEAD/catalyst, sentiment, reflection) | `strategies/{regime,catalyst,events,sentiment,reflection,evaluate}.py` | per-phase enable flags |
 | 10 | `alpaca_data_analysis.md` | Alpaca market-data integration (analysis-only, no execution) | `dataflows/alpaca*.py`, `agents/utils/alpaca_tools.py` | `enable_alpaca` |
 | 11 | `Discounted_Cash_Flow.md` | DCF valuation methodology (pragmatic FCF-DCF built from it) | `strategies/dcf.py`, `get_dcf_valuation` tool (fundamentals) | provider-sourced; growth/ERP overrides |
-| 12 | `Value_Dip_swing.md` + `Value_Dip_swing_Continue.md` | Value Dip + Swing hybrid (margin of safety, valuation Z, FCF yield, RSI/%b oversold entry, tranche scale-in, blended expectancy) | `strategies/value_dip.py` + six value-dip analyst tools | `--scan value-dip`, `enable_value_dip` |
+| 12 | `Value_Dip_swing.md` + `Value_Dip_swing_Continue.md` | Value Dip + Swing hybrid (margin of safety, valuation Z, FCF yield, RSI/%b oversold entry, tranche scale-in, blended expectancy) | `strategies/value_dip.py` + six value-dip analyst tools + the `tranche_risk_read` fold | `--scan value-dip`, `enable_value_dip` + `enable_tranche_risk` |
 
 ---
 
@@ -159,6 +159,7 @@ for the endpoint allowlist.
 | Strategy area | Consumer (graph tool / overlay / screener) |
 | --- | --- |
 | Value screens | `scripts/value_screener.py`, `get_analyst_verdict` (fundamentals analyst) |
+| Value Dip + Swing | `get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy` (market); `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup` (fundamentals) + `--scan value-dip`; tranche risk fold in `graph/trading_graph._apply_strategy_overlays` |
 | Swing/RS/VCP | `get_swing_set`, `get_relative_strength`, `get_volatility_contraction` (market analyst) + `--scan` |
 | Catalyst/events | `get_catalyst_scale`, `get_earnings_event_read` (news analyst) + `_apply_strategy_overlays` |
 | Momentum | `get_momentum_scan`, `--scan momentum` |
@@ -170,6 +171,7 @@ for the endpoint allowlist.
 ## Strategy config flags quick lookup
 
 - **Value screens**: `--scan`, `--rank`, `--enable-float`, `--alloc`
+- **Value Dip + Swing tranche risk**: `enable_tranche_risk`, `tranche_*` (weights/stop_mult/risk_pct/account)
 - **Swing/framework**: `--scan swing`, `--min-atr-pct`, `--min-avg-vol`
 - **Momentum/day**: `--scan momentum`
 - **Risk governor**: `enable_risk_governor`, `risk_*`

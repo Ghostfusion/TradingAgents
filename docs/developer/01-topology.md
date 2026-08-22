@@ -46,6 +46,7 @@ reports/                # run output (batch / pipeline)
     ├─ agent_states.py            # AgentState / InvestDebateState / RiskDebateState
     ├─ agent_utils.py             # re-export of all @tools + helpers
     ├─ analysis_tools.py          # computed-analysis tools (wrap strategies)
+    ├─ value_dip_tools.py         # Value Dip + Swing hybrid @tools (wrap strategies/value_dip.py)
     ├─ analyst_data_tools.py, core_stock_tools.py, fundamental_data_tools.py,
     │   macro_data_tools.py, market_data_validation_tools.py,
     │   market_position_tools.py, momentum_tools.py, moomoo_extra_tools.py,

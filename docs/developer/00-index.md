@@ -39,7 +39,8 @@ configurable vendor layer, then feeds a **Bull/Bear debate**, a **Research
 Manager**, a **Trader**, a **3-way risk debate**, and a **Portfolio Manager**
 that emits a structured decision. After the graph finishes, a **deterministic
 strategy-overlay pipeline** (regime → orderflow → catalyst → position contract
-→ risk governor → computed context) adjusts the size / vetoes risk. The
+→ risk governor → computed context; opt-in tranche-scaling risk fold) adjusts
+the size / vetoes risk. The
 decision is logged to memory; the next same-ticker run resolves the realized
 return.
 

@@ -123,10 +123,18 @@ The **order of folds matters** (each multiplies / feeds the downstream):
    verdict) -> `fold_catalyst_into_overlay` multiplies `position_scale`.
 4. **position contract** (optional, `enable_position_contract`) –
    `strategies/contract.py::build_position_contract`: size + stop, using
-   `closes`, flow, agreement, calibrated_p, catalyst_scale.
+   `closes`, flow, agreement, calibrated_p, catalyst_scale. With the tranche
+   fold on (`enable_tranche_risk`) it receives the weighted tranche
+   `entry_price` so the G1 dollar stop/risk matches the scale-in execution.
 5. **risk governor** (optional, `enable_risk_governor`) –
    `strategies/book_risk.cvar` + `risk_governor.govern`: PASS/WARN/REJECT.
-   Hard-block (imminent earnings) → REJECT.
+   Hard-block (imminent earnings) → REJECT. With `enable_tranche_risk` on,
+   `strategies/value_dip.py::tranche_risk_read` feeds `govern()` the
+   config-frozen worst-case **peak-deployed-at-scale-in** fraction (the
+   per-trade cap the gate bounds) and the **capital-at-risk** budget (sum of
+   per-tranche losses at the hard stop vs `tranche_risk_pct`); the state
+   gains `tranche_context` (avg_entry, peak_deployed_pct, capital_at_risk_pct,
+   peak_ok, book_ok).
 6. **computed context** (optional, `enable_computed_context`) –
    `strategies/debate_context.py::build_computed_context`: snippet fed into the
    debates.

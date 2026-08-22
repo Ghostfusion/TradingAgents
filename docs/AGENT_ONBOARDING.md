@@ -122,7 +122,8 @@ tradingagents/
 │  └─ utils/               # agent_states (LangGraph state schema), agent_utils (tool registry),
 │                          #   *tools.py wrappers (core/tech/fundamental/news/macro/prediction/
 │                          #   position/analyst/market_position/moomoo_extra), memory.py (decision log),
-│                          #   analysis_tools.py (computed-analysis: swing/RS/catalyst/sizing/risk)
+│                          #   analysis_tools.py (computed-analysis: swing/RS/catalyst/sizing/risk),
+│                          #   value_dip_tools.py (Value Dip hybrid: %b/tranche/expectancy/FCFy/Z/matrix)
 ├─ dataflows/              # VENDOR LAYER
 │  ├─ interface.py        # route_to_vendor(): TOOLS_CATEGORIES, VENDOR_METHODS, chains
 │  ├─ config.py           # thread-local config (set_config/get_config/reset_config)
@@ -140,7 +141,8 @@ tradingagents/
 │  ├─ regime.py size.py factors.py events.py catalyst.py orderflow.py
 │  ├─ contract.py (G1) calibration.py consensus.py sentiment.py exits.py
 │  ├─ risk_governor.py (R0-R4) book_risk.py debate_context.py portfolio.py
-│  └─ swing.py relative_strength.py sector_rank.py  # techno-fundamental swing (--scan swing/vcp)
+│  ├─ swing.py relative_strength.py sector_rank.py  # techno-fundamental swing (--scan swing/vcp)
+│  └─ value_dip.py              # Value Dip hybrid + tranche risk fold (--scan value-dip)
 ├── llm_clients/           # factory + provider registry (OpenAI/anthropic/google/azure/bedrock/
 │                          #   openrouter/deepseek/qwen/glm/minimax/ollama/openai_compatible)
 ├── default_config.py      # DEFAULT_CONFIG + TRADINGAGENTS_* env overrides
@@ -374,7 +376,7 @@ has changed before); never assume an endpoint works — the SDK's
 - 2026-08-19 `0ed81a3` - review fixes: indicator warmup, parallelism, caching
 - 2026-08-19 `1e2246b` - moomoo vendor integration + event contracts + --vendor
 
-Full suite: **969+ tested** (2 skipped: bedrock extra, live DeepSeek).
+Full suite: **1153 passed** (2 skipped: bedrock extra, live DeepSeek).
 
 ---
 

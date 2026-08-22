@@ -22,9 +22,14 @@ runs Research + Portfolio managers.
 
 ## 5.2 Tool binding
 
-`@tool`-wrapped functions live in `agents/utils/*_tools.py`. `agent_utils.py`
-re-exports them all (:keyword `__all__`). The graph's `_create_tool_nodes`
-binds a per-analyst `ToolNode(...)` list.
+`@tool`-wrapped functions live in `agents/utils/*_tools.py` (data-tool files
+per source; `analysis_tools.py` wraps the deterministic `strategies/*`
+calculators; `value_dip_tools.py` wraps the Value Dip + Swing hybrid:
+`get_bollinger_pct_b` / `get_tranche_plan` / `get_trade_expectancy` on the
+market node and `get_fcf_yield` / `get_valuation_z_score` / `get_value_dip_setup`
+on the fundamentals node). `agent_utils.py` re-exports them all (:keyword
+`__all__`). The graph's `_create_tool_nodes` binds a per-analyst `ToolNode(...)`
+list.
 
 Each analyst prompt lists its tools by signature so the LLM calls them with the
 right args (a `get_news(ticker, start_date, end_date)` style). The route goes:

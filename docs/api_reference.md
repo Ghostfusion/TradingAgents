@@ -220,8 +220,8 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Regime / size | `enable_strategy_overlays` (T) | `strategies/regime.py`, `size.py` | vol-percentile/trend label + vol-target scale |
 | Order flow | `enable_orderflow` (T) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
 | Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict; `catalyst_hard_block_days` > 0 turns an imminent print into a risk-governor REJECT |
-| Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst |
-| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio" |
+| Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst; when a tranche plan is in play (`enable_tranche_risk`) the dollar stop/BE/target are measured from the weighted tranche `entry_price` hook |
+| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio". With `enable_tranche_risk` on it also sizes/throttles against the worst-case 3-tranche scale-in (`strategies/value_dip.py::tranche_risk_read`): the peak-deployed-at-scale-in fraction vs the per-trade cap and the capital-at-risk budget (sum of per-tranche losses at the hard stop vs `tranche_risk_pct`) |
 | Calibration | `enable_calibration` (T) | `strategies/calibration.py` | calibrated P from ledger |
 | Agreement | `enable_agreement` (T) | `strategies/consensus.py` | debate agreement -> size |
 | Computed context | `enable_computed_context` (T) | `strategies/debate_context.py` | numbers into debate |
@@ -425,7 +425,9 @@ tree plus `complete_report.md` with H1 report -> H2 team -> H3 role -> H4+
 agent content (agent headings demoted 3 levels) and an auto Table of Contents.
 When the risk governor ran, the `Risk Gate (computed)` block also renders the
 `Analyzed-name CVaR` and (with a configured risk basket) the
-`Portfolio (book) CVaR — this fed the gate` lines from `risk_context`.
+`Portfolio (book) CVaR — this fed the gate` lines from `risk_context`; with the
+tranche fold on, it additionally shows `Tranche peak-deployed` (cap-ok) and
+`Tranche capital-at-risk` from `tranche_context`.
 `scripts/rebuild_complete_report.py` re-renders folders without a re-run and
 preserves `Risk Gate (computed)` blocks.
 
