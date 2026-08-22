@@ -39,6 +39,15 @@ __all__ = [
     "expectancy",
     "tranche_plan",
     "tranche_risk_read",
+    "balance_sheet_health",
+    "profitability_quality",
+    "macd_divergence",
+    "volume_dry_up",
+    "trigger_candle",
+    "higher_low_structure",
+    "vdu_entry_setup",
+    "support_structure",
+    "decline_driver_check",
     "value_dip_setup",
 ]
 
@@ -335,6 +344,453 @@ def tranche_risk_read(
     }
 
 
+# ---------------------------------------------------------------------------
+# Step-1 fundamental gates (Value_Dip_swing.md §1)
+# ---------------------------------------------------------------------------
+
+
+def balance_sheet_health(
+    debt_to_equity: float | None = None,
+    current_ratio: float | None = None,
+) -> dict:
+    """Balance-sheet health: D/E < 1.0 OR current ratio > 1.5 (§1).
+
+    Unknown inputs render that side None (ignored, never a failure); pass is
+    None when neither side is measured. ``reasons`` lists which side passed.
+    """
+    d_ok = debt_to_equity is not None and debt_to_equity < 1.0
+    cr_ok = current_ratio is not None and current_ratio > 1.5
+    reasons = []
+    if debt_to_equity is not None:
+        reasons.append(f"d_e={debt_to_equity:.2f}" + ("<1.0" if d_ok else ">=1.0"))
+    if current_ratio is not None:
+        reasons.append(f"cr={current_ratio:.2f}" + (">1.5" if cr_ok else "<=1.5"))
+    if debt_to_equity is None and current_ratio is None:
+        return {
+            "pass": None,
+            "d_e": None,
+            "current_ratio": None,
+            "reasons": ["no balance-sheet data"],
+        }
+    return {
+        "pass": bool(d_ok or cr_ok),
+        "d_e": round(debt_to_equity, 4) if debt_to_equity is not None else None,
+        "current_ratio": round(current_ratio, 4) if current_ratio is not None else None,
+        "reasons": reasons,
+    }
+
+
+def profitability_quality(
+    fcf: float | None = None,
+    fcf_yield: float | None = None,
+    roe: float | None = None,
+) -> dict:
+    """Step-1 profitability/quality row: positive FCF AND ROE > 15%.
+
+    A missing side is ignored; pass is None when neither is measured. FCF may
+    be given directly or as a positive ``fcf_yield`` (same sign when the cap
+    is positive).
+    """
+    fcf_pos = None
+    if fcf is not None:
+        fcf_pos = fcf > 0
+    elif fcf_yield is not None:
+        fcf_pos = fcf_yield > 0
+    roe_ok = (roe is not None and roe > 0.15) if roe is not None else None
+    reasons = []
+    if fcf_pos is not None:
+        reasons.append("fcf_positive" if fcf_pos else "fcf_non-positive")
+    if roe is not None:
+        reasons.append(f"roe={roe:.1%}" + (">15%" if roe_ok else "<=15%"))
+    if fcf_pos is None and roe is None:
+        return {
+            "pass": None,
+            "fcf_positive": None,
+            "roe": None,
+            "reasons": ["no profitability data"],
+        }
+    measured = [v for v in (fcf_pos, roe_ok) if v is not None]
+    return {
+        "pass": bool(all(measured)),
+        "fcf_positive": fcf_pos,
+        "roe": round(roe, 4) if roe is not None else None,
+        "reasons": reasons,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step-2 technical structure (Value_Dip_swing.md §2)
+# ---------------------------------------------------------------------------
+
+
+def _sma(series: list, n: int) -> float | None:
+    if len(series) < n or n <= 0:
+        return None
+    return sum(series[-n:]) / n
+
+
+def _ema_series(values: list, n: int) -> list:
+    """Full EMA series aligned to ``values`` (None for the first n-1 bars)."""
+    if not values or n <= 0:
+        return [None] * len(values)
+    k = 2.0 / (n + 1)
+    out = [None] * (n - 1)
+    ema = sum(values[:n]) / n
+    out.append(ema)
+    for v in values[n:]:
+        ema = float(v) * k + ema * (1 - k)
+        out.append(ema)
+    return out
+
+
+def _rsi_series(closes: list, n: int = 14) -> list:
+    """Wilder RSI series aligned to ``closes`` (None for the first n bars)."""
+    if len(closes) <= n:
+        return [None] * len(closes)
+    out = [None] * (n)
+    gains = losses = 0.0
+    for i in range(1, n + 1):
+        diff = closes[i] - closes[i - 1]
+        if diff >= 0:
+            gains += diff
+        else:
+            losses -= diff
+
+    def _val(g, loss):
+        if g + loss == 0:
+            return 50.0
+        rs = g / loss if loss > 0 else float("inf")
+        return 100.0 - 100.0 / (1.0 + rs)
+
+    out.append(_val(gains, losses))
+    for i in range(n + 1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gain = diff if diff >= 0 else 0.0
+        loss = -diff if diff < 0 else 0.0
+        gains = (gains * (n - 1) + gain) / n
+        losses = (losses * (n - 1) + loss) / n
+        out.append(_val(gains, losses))
+    return out
+
+
+def _macd_hist(closes, fast=12, slow=26, signal=9):
+    """MACD line / signal / histogram series aligned to ``closes``.
+
+    Returns (line, signal, hist) each the same length as ``closes`` with None
+    in the warm-up region, or None when there is insufficient history.
+    """
+    if not closes or len(closes) < slow + signal + 2:
+        return None
+    ema_f = _ema_series(closes, fast)
+    ema_s = _ema_series(closes, slow)
+    line = [
+        (fl - sl) if (fl is not None and sl is not None) else None
+        for fl, sl in zip(ema_f, ema_s, strict=False)
+    ]
+    start = next((i for i, v in enumerate(line) if v is not None), None)
+    if start is None:
+        return None
+    valid = line[start:]
+    sig_valid = _ema_series(valid, signal)
+    sig = [None] * start + sig_valid
+    hist = [
+        (lv - s) if (lv is not None and s is not None) else None
+        for lv, s in zip(line, sig, strict=False)
+    ]
+    return line, sig, hist
+
+
+def _pivot_troughs(series: list, k: int = 3, window: int | None = None) -> list[int]:
+    """Indices of strict local minima (troughs) in ``series``."""
+    if not series:
+        return []
+    seg = series[-window:] if window else series
+    base = len(series) - len(seg)
+    out = []
+    for i in range(k, len(seg) - k):
+        if seg[i] < min(seg[i - k : i]) and seg[i] <= min(seg[i + 1 : i + k + 1]):
+            out.append(base + i)
+    return out
+
+
+def macd_divergence(
+    closes: list,
+    lows: list | None = None,
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+    window: int = 120,
+    k: int = 3,
+) -> dict:
+    """Bullish momentum divergence (Daily RSI / MACD histogram, §2).
+
+    Compares the two most recent price troughs: a LOWER price low with a
+    HIGHER MACD-histogram (or RSI) low is a bullish divergence. Verdicts:
+
+    * ``bullish-divergence`` - lower price low + higher indicator low (entry)
+    * ``higher-low`` - higher price low + higher indicator low (momentum shift)
+    * ``lower-low-confirmation`` - lower low + lower indicator (no reversal)
+    * ``none`` / ``unknown``
+
+    ``bullish`` is True for the first two (a usable Step-2 momentum read).
+    """
+    if not closes or len(closes) < max(slow + signal, 40) + 4:
+        return {"verdict": "unknown", "bullish": None, "reasons": ["insufficient history"]}
+    lows_series = lows if (lows and len(lows) == len(closes)) else closes
+    m = _macd_hist(closes, fast, slow, signal)
+    rsi_s = _rsi_series(closes, 14)
+    if m is None:
+        return {"verdict": "unknown", "bullish": None, "reasons": ["insufficient history"]}
+    _, _, hist = m
+    piv = _pivot_troughs(lows_series, k, window)
+    if len(piv) < 2:
+        return {"verdict": "none", "bullish": False, "reasons": ["fewer than two troughs"]}
+    i1, i2 = piv[-2], piv[-1]
+    pl1, pl2 = float(lows_series[i1]), float(lows_series[i2])
+    hv1, hv2 = hist[i1], hist[i2]
+    rv1, rv2 = rsi_s[i1], rsi_s[i2]
+    if hv1 is None or hv2 is None:
+        return {"verdict": "none", "bullish": False, "reasons": ["no MACD at troughs"]}
+    if pl2 < pl1:  # lower price low
+        verdict = "bullish-divergence" if hv2 > hv1 else "lower-low-confirmation"
+    elif pl2 > pl1:  # higher price low
+        verdict = "higher-low" if hv2 > hv1 else "higher-low-weak-indicator"
+    else:
+        verdict = "none"
+    rsi_note = None
+    if rv1 is not None and rv2 is not None and pl2 < pl1 and rv2 > rv1:
+        rsi_note = "rsi-divergence-also"
+    return {
+        "verdict": verdict,
+        "bullish": verdict in ("bullish-divergence", "higher-low"),
+        "price_lows": (round(pl1, 4), round(pl2, 4)),
+        "macd_hist_lows": (round(hv1, 6), round(hv2, 6)),
+        "rsi_lows": (
+            round(rv1, 2) if rv1 is not None else None,
+            round(rv2, 2) if rv2 is not None else None,
+        ),
+        "rsi_note": rsi_note,
+        "reasons": [],
+    }
+
+
+def volume_dry_up(
+    volumes: list,
+    window: int = 20,
+    lookback: int = 5,
+    ratio: float = 0.7,
+) -> dict:
+    """Volume dry-up (VDU): selling volume drops below 70% of the 20-day
+    average near support (§2). ``lookback`` bars before the trigger day are
+    compared against the prior ``window`` bars, so the trigger candle's own
+    volume does not count against the dry-up.
+    """
+    if not volumes or len(volumes) < window + lookback + 1:
+        return {"dry_up": None, "vdu_ratio": None}
+    recent = volumes[-lookback - 1 : -1]
+    prior = volumes[-window - lookback - 1 : -window - 1]
+    pm = sum(prior) / len(prior) if prior else 0.0
+    if pm <= 0:
+        return {"dry_up": None, "vdu_ratio": None}
+    rm = sum(recent) / len(recent) if recent else 0.0
+    r = rm / pm
+    return {"dry_up": bool(r <= ratio), "vdu_ratio": round(r, 4)}
+
+
+def trigger_candle(
+    closes: list,
+    highs: list,
+    lows: list,
+    volumes: list,
+    window: int = 20,
+    rvol_min: float = 1.3,
+) -> dict:
+    """Trigger candle (§2): daily close above the prior day's high (or a
+    bullish engulfing candle) on above-average volume (RVOL >= 1.3x).
+    """
+    if not closes or len(closes) < window + 2 or len(highs) < 2 or not volumes:
+        return {"trigger": None, "rvol": None}
+    avg = sum(volumes[-window - 1 : -1]) / window if window else 0.0
+    rvol = volumes[-1] / avg if avg > 0 else None
+    prev_high = float(highs[-2])
+    close = float(closes[-1])
+    close_above_prev_high = close > prev_high
+    # Bullish engulfing approximation (no opens): close > prior high and
+    # the prior bar closed down vs the bar before it.
+    engulfing = close > prev_high and len(closes) >= 3 and float(closes[-2]) <= float(closes[-3])
+    trig = bool(rvol is not None and rvol >= rvol_min and (close_above_prev_high or engulfing))
+    return {
+        "trigger": trig,
+        "rvol": round(rvol, 3) if rvol is not None else None,
+        "close_above_prior_high": close_above_prev_high,
+        "engulfing": engulfing,
+        "rvol_min": rvol_min,
+    }
+
+
+def higher_low_structure(lows: list, k: int = 3, window: int = 60) -> dict:
+    """Higher-low confirmation (§2): the most recent swing low is above the
+    prior swing low - selling momentum is fading."""
+    piv = _pivot_troughs(lows, k, window)
+    if len(piv) < 2:
+        return {"higher_low": None, "recent_low": None, "prior_low": None}
+    lo1, lo2 = float(lows[piv[-2]]), float(lows[piv[-1]])
+    return {
+        "higher_low": bool(lo2 > lo1),
+        "recent_low": round(lo2, 4),
+        "prior_low": round(lo1, 4),
+    }
+
+
+def vdu_entry_setup(
+    closes: list,
+    highs: list,
+    lows: list,
+    volumes: list,
+    window: int = 20,
+    rvol_min: float = 1.3,
+    k: int = 3,
+    support_window: int = 60,
+    div_window: int = 120,
+) -> dict:
+    """The full Step-2 entry ladder: VDU near support -> momentum divergence /\
+    higher-low -> trigger candle with volume expansion (§2 diagram).
+
+    ``candidate`` = trigger-candle AND momentum confirmation AND (dry-up is not
+    False when measured). Each sub-signal is reported; a missing sub-signal is
+    ignored (never fails) per the repo convention.
+    """
+    if not closes or len(closes) < 30 or not volumes:
+        return {"candidate": False, "reasons": ["insufficient data"]}
+    dry = volume_dry_up(volumes, window=window)
+    trig = trigger_candle(closes, highs, lows, volumes, window=window, rvol_min=rvol_min)
+    hl = higher_low_structure(lows, k=k, window=support_window)
+    mom = macd_divergence(closes, lows, window=div_window, k=k)
+    reasons = []
+    if dry.get("dry_up") is False:
+        reasons.append("volume dry-up absent")
+    if not trig.get("trigger"):
+        reasons.append("no trigger candle (RVOL/close above prior high)")
+    confirmation = bool(mom.get("bullish") or hl.get("higher_low"))
+    if not confirmation:
+        reasons.append("no momentum confirmation (divergence / higher-low)")
+    dry_ok = dry.get("dry_up") is not False  # None (no data) is ignored
+    candidate = bool(trig.get("trigger") and confirmation and dry_ok)
+    return {
+        "candidate": candidate,
+        "volume_dry_up": dry,
+        "trigger_candle": trig,
+        "higher_low": hl,
+        "momentum": mom,
+        "reasons": reasons,
+    }
+
+
+def support_structure(
+    closes: list,
+    highs: list,
+    lows: list,
+    atr_value: float | None = None,
+    sma_window: int = 200,
+    base_window: int = 150,
+) -> dict:
+    """Major support read (§2 Step 2): multi-month consolidation base low,
+    200-day SMA proximity, or neither.
+
+    Verdicts: ``multi-month-base-support`` (price within 1.5 ATR of the
+    trailing ``base_window``-bar low), ``200-day-sma-support`` (price within
+    1 ATR of the 200-day SMA), ``holding-above-base`` (price above the base
+    on shallow depth), else ``no-near-support``. ``unknown`` when the history
+    is too short (200+ closes required).
+    """
+    if not closes or len(closes) < max(sma_window, base_window) + 5:
+        return {"verdict": "unknown", "reasons": ["insufficient history"]}
+    price = float(closes[-1])
+    sma200 = _sma(closes, sma_window)
+    base_low = min(float(v) for v in lows[-base_window:])
+    base_high = max(float(v) for v in highs[-base_window:])
+    base_depth = (price - base_low) / price if price > 0 else None
+    a = atr_value if atr_value and atr_value > 0 else None
+    dist_base = (price - base_low) / price if price > 0 else None
+    dist_sma = (price - sma200) / sma200 if sma200 else None
+    reasons = []
+    if a is not None and dist_base is not None and (price - base_low) <= 1.5 * a:
+        verdict = "multi-month-base-support"
+        reasons.append(f"within 1.5 ATR of {base_window}-bar base low")
+    elif dist_sma is not None and (
+        (a is not None and abs(price - sma200) <= a) or abs(dist_sma) <= 0.03
+    ):
+        verdict = "200-day-sma-support"
+        reasons.append("price within 1 ATR / 3% of the 200-day SMA")
+    elif dist_base is not None and base_depth is not None and base_depth < 0.15:
+        verdict = "holding-above-base"
+        reasons.append(f"close {dist_base:.1%} above the multi-month base low")
+    else:
+        verdict = "no-near-support"
+        reasons.append("no major weekly / base / 200-SMA support nearby")
+    return {
+        "verdict": verdict,
+        "price": round(price, 4),
+        "sma200": round(sma200, 4) if sma200 else None,
+        "base_low": round(base_low, 4),
+        "base_high": round(base_high, 4),
+        "distance_to_base_pct": round(dist_base, 4) if dist_base is not None else None,
+        "distance_to_sma200_pct": round(dist_sma, 4) if dist_sma is not None else None,
+        "reasons": reasons,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step-1 catalyst / negative-force screen (Value_Dip_swing.md §1)
+# ---------------------------------------------------------------------------
+
+
+def decline_driver_check(
+    *,
+    trap_level: str | None = None,
+    accrual: float | None = None,
+    mom12: float | None = None,
+    fcf: float | None = None,
+    roe: float | None = None,
+    eps_yoy: float | None = None,
+) -> dict:
+    """Negative-force screen (§1 catalyst check): is the dip a temporary macro/
+    headline pullback or structural deterioration?
+
+    Direct "loss of moat / regulatory ban" data is not available from the
+    vendors, so this proxies those with the measurable red flags the pipeline
+    already computes: trap_risk HIGH (Beneish manipulation / Altman distress),
+    Sloan accruals > 6%, deeply negative 12-1m momentum, non-positive FCF,
+    non-positive ROE, or a severe EPS YoY decline.
+
+    Verdicts: ``clean`` (healthy dip), ``caution`` (one flag), ``structural``
+    (two or more flags / trap HIGH) - a ``structural`` verdict means the
+    decline looks company-specific and the value-dip setup should be rejected.
+    """
+    reasons = []
+    if trap_level == "HIGH":
+        reasons.append("trap_risk=HIGH (fraud/distress accounting evidence)")
+    if accrual is not None and accrual > 0.06:
+        reasons.append(f"accruals={accrual:.3f} > 0.06 (earnings quality risk)")
+    if mom12 is not None and mom12 < -0.20:
+        reasons.append(f"12-1m momentum {mom12:.1%} (structural downtrend)")
+    if fcf is not None and fcf <= 0:
+        reasons.append("negative free cash flow (business deterioration)")
+    if roe is not None and roe <= 0:
+        reasons.append(f"non-positive ROE ({roe:.1%})")
+    if eps_yoy is not None and eps_yoy < -0.30:
+        reasons.append(f"EPS YoY {eps_yoy:.1%} (severe earnings decline)")
+    if trap_level == "MEDIUM" and not reasons:
+        reasons.append("trap_risk=MEDIUM")
+    if not reasons:
+        verdict = "clean"
+    elif trap_level == "HIGH" or len(reasons) >= 2:
+        verdict = "structural"
+    else:
+        verdict = "caution"
+    return {"verdict": verdict, "reasons": reasons, "clean": verdict == "clean"}
+
+
 def value_dip_setup(
     closes: list,
     highs: list,
@@ -345,6 +801,11 @@ def value_dip_setup(
     val_z: float | None = None,
     atr_value: float | None = None,
     min_closes: int = 20,
+    debt_to_equity: float | None = None,
+    current_ratio: float | None = None,
+    roe: float | None = None,
+    fcf: float | None = None,
+    min_closes_support: int = 200,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -356,11 +817,20 @@ def value_dip_setup(
       distance is <= 2% of price (<= 2% account risk proxy)
     * **exit_target** - R:R to the 2.5R target >= 2.5 (always true by
       construction of the R:R target)
+    * **balance_sheet** - debt/equity < 1.0 OR current ratio > 1.5
+    * **profitability** - positive FCF and ROE > 15% (the Step-1 quality row)
+    * **momentum_divergence** - bullish RSI/MACD divergence or higher-low
+      (display row; feeds the VDU ladder, never blocks alone)
+    * **vdu** - the Step-2 trigger ladder (volume dry-up near support ->\
+      trigger candle on RVOL >= 1.3 + higher-low/divergence confirmation)
+    * **support** - major weekly / multi-month base support or 200-day SMA
+      proximity (display row; 200+ closes required)
 
-    ``candidate`` = value_floor + technical_entry + trade_risk all pass
-    (exit_target is definitionally true, kept for the audit trail). Each row
-    carries its computed numbers; a missing input renders the row unknown
-    (ignored, not failed) - the same convention as the swing/VCP scans.
+    ``candidate`` = the gating rows all pass when measured (unknown rows are
+    ignored, never fail): value_floor + technical_entry + trade_risk +
+    balance_sheet + profitability. The VDU/divergence/support rows are
+    computed and displayed; their dedicated tools (`get_vdu_entry_setup`, etc.)
+    expose the full Step-2 ladder as its own candidate.
     """
     if not closes or len(closes) < min_closes or not highs or not lows:
         return {"candidate": False, "reasons": ["no data"], "rows": {}}
@@ -383,6 +853,20 @@ def value_dip_setup(
     trade_risk = bool(stop_pct is not None and stop_pct <= MAX_ACCOUNT_RISK)
     exit_target = True  # 2.5R target is definitionally >= 2.5 R:R
 
+    # Step-1 fundamental rows (unknown inputs never fail a gate).
+    bs = balance_sheet_health(debt_to_equity, current_ratio)
+    prof = profitability_quality(fcf=fcf, fcf_yield=fcf_yield, roe=roe)
+    # Step-2 technical structure rows (computed from the OHLCV already given).
+    vdu = vdu_entry_setup(closes, highs, lows, volumes) if volumes else None
+    mom = None
+    if len(closes) >= 45:
+        mom = macd_divergence(closes, lows, window=min(120, len(closes)) // 2)
+    support = (
+        support_structure(closes, highs, lows, atr_value=a)
+        if len(closes) >= min_closes_support
+        else None
+    )
+
     reasons = []
     if not value_floor:
         reasons.append("value floor missed (MoS/FCFY below thresholds)")
@@ -390,6 +874,10 @@ def value_dip_setup(
         reasons.append("technical entry missed (RSI/%b above thresholds)")
     if not trade_risk:
         reasons.append("trade risk too high (stop > 2% of price)")
+    if bs.get("pass") is False:
+        reasons.append("balance sheet health missed (D/E >= 1.0 and current ratio <= 1.5)")
+    if prof.get("pass") is False:
+        reasons.append("profitability missed (FCF not positive or ROE <= 15%)")
 
     rows = {
         "value_floor": {
@@ -418,6 +906,11 @@ def value_dip_setup(
             "rr_target": RR_TARGET,
             "blended_rr": None,  # filled by tranche_plan when an entry exists
         },
+        "balance_sheet": bs,
+        "profitability": prof,
+        "momentum_divergence": mom,
+        "vdu": vdu,
+        "support": support,
     }
     val_z_row = None
     if val_z is not None:
@@ -429,8 +922,19 @@ def value_dip_setup(
         if val_z > Z_CHEAP:
             reasons.append(f"valuation Z={val_z:.2f} not below {Z_CHEAP:.1f}")
     rows["valuation"] = val_z_row
+    # Candidate: the gating rows must all pass when measured; unknown rows
+    # (no data) are ignored, matching the repo's scan convention.
+    measured_gates = [
+        value_floor,
+        technical_entry,
+        trade_risk,
+    ]
+    if bs.get("pass") is not None:
+        measured_gates.append(bs["pass"])
+    if prof.get("pass") is not None:
+        measured_gates.append(prof["pass"])
     return {
-        "candidate": bool(value_floor and technical_entry and trade_risk),
+        "candidate": bool(all(measured_gates)),
         "reasons": reasons,
         "rows": rows,
         "price": round(price, 4),

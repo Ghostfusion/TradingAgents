@@ -93,7 +93,7 @@ before a breakout (framework Phase 3: 15% -> 8% -> 3%).
   ignored, never a failure)
 - `Brk` column = distance from the close to the base high (the "spring")
 
-## `value-dip` (Value Dip + Swing hybrid)
+## The `value-dip` (Value Dip + Swing hybrid)
 
 Buys fundamentally sound assets at a margin of safety into an oversold
 technical dip with a tranche scale-in execution plan and strict portfolio
@@ -104,11 +104,19 @@ is the hybrid allocation matrix:
 - **value floor** - margin of safety >= 20% OR free cash flow yield >= 6%
   (FCF / market cap from the canonical financials; the screener's intrinsic is
   unavailable so the floor falls back to FCF yield)
+- **balance sheet** - debt/equity < 1.0 OR current ratio > 1.5 (Step-1 gate)
+- **profitability** - positive FCF and ROE > 15% (Step-1 gate)
 - **technical entry** - RSI(14) <= 35 AND Bollinger %b <= 0.10 (price near /
   piercing the lower 2-sigma band)
 - **trade risk** - the 2-ATR stop distance <= 2% of price
 - **exit target** - R:R to the 2.5R target (definitionally true, kept for
   the audit trail)
+
+The candidate gate requires the measured rows (value floor, balance sheet,
+profitability, technical entry, trade risk) to all pass; the VDU ladder /
+momentum divergence / support rows are computed and surfaced as separate
+tools (`get_vdu_entry_setup`, `get_macd_divergence`, `get_support_structure`,
+`get_balance_sheet_health`, `get_decline_driver_check`).
 
 Table columns: `VDip` (yes/no candidate), `FCFy` (FCF yield), `RSI` (RSI-14),
 `%b` (Bollinger %b) and `Stp%` (stop distance % of price). The deterministic

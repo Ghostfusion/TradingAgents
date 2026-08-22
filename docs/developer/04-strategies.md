@@ -24,10 +24,13 @@ involved. This is the "compute, don't narrate" core.
   Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
   expectancy, 3-tranche scale-in plan (P1/P2/P3, weighted avg entry, composite
   stop, capital-at-risk, blended R:R), the hybrid allocation matrix
-  (`value_dip_setup`) AND the deterministic tranche-scaling risk fold
-  (`tranche_risk_read`) that feeds the governor's worst-case peak-deployed /
-  capital-at-risk measures with config-frozen params (gate:
-  `enable_tranche_risk`). Exposed as the six value-dip analyst tools,
+  (`value_dip_setup`), the deterministic tranche-scaling risk fold
+  (`tranche_risk_read`), and the six Step-1/Step-2 gap calculators:
+  `balance_sheet_health` (D/E + current ratio), `profitability_quality`
+  (FCF + ROE), `macd_divergence` / `volume_dry_up` / `trigger_candle` /
+  `higher_low_structure` / `vdu_entry_setup` (the Step-2 ladder),
+  `support_structure` (multi-month base / 200-SMA), and `decline_driver_check`
+  (negative-force screen). Exposed as eleven value-dip analyst tools,
   `--scan value-dip`, and the folded risk gate.
 - `factors.py` — composite rank (EY + momentum + 52w).
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,

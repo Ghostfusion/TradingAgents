@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_macd_divergence,
     get_market_snapshot,
     get_momentum_detail,
     get_options_chain,
@@ -23,11 +24,13 @@ from tradingagents.agents.utils.agent_utils import (
     get_short_volume,
     get_stock_data,
     get_strategy_quality,
+    get_support_structure,
     get_swing_set,
     get_tail_risk,
     get_top_movers,
     get_trade_expectancy,
     get_tranche_plan,
+    get_vdu_entry_setup,
     get_verified_market_snapshot,
     get_volatility_contraction,
 )
@@ -67,6 +70,9 @@ def create_market_analyst(llm):
             get_bollinger_pct_b,
             get_tranche_plan,
             get_trade_expectancy,
+            get_macd_divergence,
+            get_vdu_entry_setup,
+            get_support_structure,
         ]
 
         system_message = (
@@ -131,6 +137,9 @@ You also have value-dip computed tools (the Value Dip + Swing hybrid):
 - get_bollinger_pct_b(ticker) - the deterministic Bollinger %b: price position inside the 20-day 2-sigma band. %b <= 0 = at/piercing the lower band; <= 0.10 is the mean-reversion entry zone. Use it before any 'oversold / at the lower Bollinger / mean-reversion entry' claim.
 - get_tranche_plan(ticker, weights=..., risk_pct=..., account=...) - the 3-tranche scale-in plan (P1/P2/P3 at 1.0/2.0 ATR, weighted avg entry, composite stop P3-1.5ATR, capital-at-risk check, 1.8R/3.0R targets + blended R:R and breakeven win rate). Use its computed levels whenever you propose a scale-in entry for a value dip.
 - get_trade_expectancy(p_win, avg_win, avg_loss, rr=...) - the per-trade expectancy E = p*W - (1-p)*L and breakeven win rate 1/(1+R:R). Use it before any 'this setup has positive expectancy / the win rate needed to break even' claim.
+- get_macd_divergence(ticker) - the Daily RSI(14) / MACD-histogram momentum divergence read (bullish-divergence / higher-low / lower-low-confirmation). Use it before any 'bullish divergence / momentum turning / reversal support' claim.
+- get_vdu_entry_setup(ticker) - the Step-2 entry ladder: volume dry-up near support -> divergence/higher-low -> trigger candle (close above prior high, RVOL >= 1.3x). Use its candidate before proposing an active swing entry out of an oversold dip.
+- get_support_structure(ticker) - the major-support read (multi-month base low, 200-day SMA proximity, holding above base). Use it before any 'at major support / near the 200-day / multi-month base' claim.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

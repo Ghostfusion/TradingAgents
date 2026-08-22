@@ -10,6 +10,29 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Value Dip Step-1/Step-2 gap strategies** - five more deterministic
+  calculators in `tradingagents/strategies/value_dip.py` close the original
+  doc's gaps (`Strategies/Value_Dip_swing.md`):
+  - **balance_sheet_health** - D/E < 1.0 OR current ratio > 1.5 (§1 gate),
+  - **profitability_quality** - positive FCF AND ROE > 15% (§1 gate),
+  - **Step-2 technical ladder** - `macd_divergence` (Daily RSI-14 / MACD-
+    histogram bullish divergence or higher-low), `volume_dry_up` (VDU near
+    support), `trigger_candle` (RVOL >= 1.3x + close above prior high /
+    engulfing), `higher_low_structure`, composed by `vdu_entry_setup`,
+  - **support_structure** - multi-month consolidation base low / 200-day SMA
+    proximity (200+ closes),
+  - **decline_driver_check** - the negative-force screen (clean / caution /
+    structural) proxying moat/regulatory red flags with measurable signals
+    (trap-HIGH, Sloan accruals > 6%, negative 12-1m momentum, non-positive
+    FCF/ROE, severe EPS decline) - a `structural` verdict rejects the dip.
+  Exposed as five new analyst `@tool`s: `get_macd_divergence` /
+  `get_vdu_entry_setup` / `get_support_structure` (market), `get_balance_sheet_
+  health` / `get_decline_driver_check` (fundamentals). `value_dip_setup` and
+  the `--scan value-dip` screener now gate on balance-sheet + profitability
+  when measured (unknown rows ignored, repo convention). Hermetic tests:
+  `test_strategies_value_dip` (new gap cases) + `test_analysis_tools` (5
+  tool cases).
+
 - **Tranche risk fold for the risk governor** - the Value Dip + Swing tranche
   plan is now a *control* computation, not just a planning one:
   `strategies/value_dip.py::tranche_risk_read` derives the worst-case measures

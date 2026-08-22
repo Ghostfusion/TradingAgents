@@ -922,3 +922,147 @@ def test_value_dip_setup_no_data_degrades(monkeypatch):
     monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {})
     out = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
+
+
+# --------------------------------------------------------------------------
+# Value Dip gap tools: balance sheet, MACD divergence, VDU ladder, support,
+# decline driver
+# --------------------------------------------------------------------------
+
+
+def test_balance_sheet_health_computes(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.value_screener.fetch_ticker",
+        lambda t, d: {
+            "total_debt": 400e6,
+            "total_equity": 1e9,
+            "current_assets": 800e6,
+            "current_liabilities": 300e6,
+        },
+    )
+    out = V.get_balance_sheet_health.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "balance sheet health AAPL" in out
+    assert "pass=True" in out  # d_e 0.4 < 1, cr 2.67 > 1.5
+    assert "d_e=0.40" in out
+
+
+def test_balance_sheet_health_degrades(monkeypatch):
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {})
+    out = V.get_balance_sheet_health.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "unavailable" in out.lower()
+
+
+def test_macd_divergence_reports_verdict(monkeypatch):
+    closes, highs, lows, vols = _vdip_dip_trigger()
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": closes,
+            "lows": lows,
+            "highs": highs,
+            "volumes": vols,
+            "opens": closes,
+        },
+    )
+    out = V.get_macd_divergence.invoke({"ticker": "AAPL"})
+    assert "macd divergence AAPL" in out
+    assert "verdict=" in out and "bullish=" in out
+
+
+def test_macd_divergence_short_history_degrades(monkeypatch):
+    monkeypatch.setattr(
+        V, "_ohlcv", lambda ticker: {"closes": [100.0, 101.0], "lows": [99.0, 100.0]}
+    )
+    out = V.get_macd_divergence.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+def test_vdu_entry_setup_reports_candidate(monkeypatch):
+    closes, highs, lows, vols = _vdip_dip_trigger()
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": closes,
+            "lows": lows,
+            "highs": highs,
+            "volumes": vols,
+            "opens": closes,
+        },
+    )
+    out = V.get_vdu_entry_setup.invoke({"ticker": "AAPL"})
+    assert "vdu entry setup AAPL" in out
+    assert "candidate=" in out
+
+
+def test_support_structure_requires_history(monkeypatch):
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": [1.0] * 50,
+            "lows": [1.0] * 50,
+            "highs": [1.0] * 50,
+            "volumes": [1] * 50,
+        },
+    )
+    out = V.get_support_structure.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower() or "need 200+ closes" in out
+
+
+def test_decline_driver_reports_verdict(monkeypatch):
+    fin = {
+        "market_cap": 1e11,
+        "total_equity": 1e9,
+        "net_income": 150e6,
+        "total_debt": 300e6,
+        "current_assets": 800e6,
+        "current_liabilities": 300e6,
+    }
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": _vdip_closes(),
+            "lows": _vdip_closes(),
+            "highs": [c + 1 for c in _vdip_closes()],
+            "volumes": [1e6] * len(_vdip_closes()),
+            "opens": _vdip_closes(),
+        },
+    )
+    monkeypatch.setattr(V, "_trap_level_from_fin", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_accrual_from_fin", lambda *a, **k: None)
+    out = V.get_decline_driver_check.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "decline driver AAPL" in out
+    assert "verdict=" in out
+
+
+def _vdip_closes():
+    closes = []
+    px = 100.0
+    for i in range(160):
+        px += -0.3 + 0.8 * math.sin(i / 7)
+        closes.append(px)
+    return closes
+
+
+def _vdip_dip_trigger():
+    closes, highs, lows = [], [], []
+    px = 200.0
+    for n, drift in [(100, -0.15), (13, -1.2), (5, 0.4), (7, -0.2), (14, 0.6), (4, -0.4), (7, 0.3)]:
+        for _ in range(n):
+            px += drift
+            closes.append(px)
+            highs.append(px + 1.0)
+            lows.append(px - 1.0)
+    closes.append(px + 4.0)
+    highs.append(px + 5.0)
+    lows.append(px - 0.5)
+    vols = [2_000_000] * len(closes)
+    for i in range(len(closes) - 8, len(closes) - 1):
+        vols[i] = 300_000
+    vols[-1] = 4_500_000
+    return closes, highs, lows, vols

@@ -283,6 +283,16 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-22 `(working tree)` - Value Dip Step-1/Step-2 gap strategies:
+  balance_sheet_health (D/E + current ratio), profitability_quality (FCF +
+  ROE), the Step-2 technical ladder (macd_divergence / volume_dry_up /
+  trigger_candle / higher_low_structure / vdu_entry_setup), support_structure
+  (multi-month base / 200-SMA), decline_driver_check (negative-force screen);
+  five new analyst @tools (market: get_macd_divergence / get_vdu_entry_setup /
+  get_support_structure; fundamentals: get_balance_sheet_health /
+  get_decline_driver_check); value_dip_setup + --scan value-dip gate on the
+  new rows when measured.
+
 - 2026-08-22 `(working tree)` - Tranche risk fold for the Value Dip + Swing
   hybrid: `tranche_risk_read` (config-frozen weights/stop/risk/account, never
   the LLM) feeds the risk governor the worst-case peak-deployed-at-scale-in

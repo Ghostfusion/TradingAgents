@@ -908,10 +908,29 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
             )
             fcf_series = _fcf_series(cf_payload) if cf_payload else None
             fy = _fcfy(fcf_series[0] if fcf_series else None, mc)  # newest period first
+            fcf_raw = fcf_series[0] if fcf_series else None
             mos = None  # intrinsic unavailable here; value floor falls back to FCF yield
+            # Step-1 balance-sheet / profitability inputs from the canonical
+            # line items (a missing side renders the row unknown, never fails).
+            d_e = None
+            te = _latest(fin.get("total_equity"))
+            td = _latest(fin.get("total_debt"))
+            if td is not None and te:
+                d_e = float(td) / float(te)
+            cr = None
+            ca_ = _latest(fin.get("current_assets"))
+            cl_ = _latest(fin.get("current_liabilities"))
+            if ca_ is not None and cl_:
+                cr = float(ca_) / float(cl_)
+            roe = None
+            ne = _latest(fin.get("net_income"))
+            if ne is not None and te:
+                roe = float(ne) / float(te)
         except Exception:  # noqa: BLE001 - value inputs degrade
             fy = None
             mos = None
+            fcf_raw = None
+            d_e = cr = roe = None
         atr_v = _atr(highs, lows, closes, window=14)
         setup = _setup(
             closes,
@@ -922,6 +941,10 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
             fcf_yield=fy,
             val_z=None,
             atr_value=atr_v,
+            debt_to_equity=d_e,
+            current_ratio=cr,
+            roe=roe,
+            fcf=fcf_raw,
         )
         if not setup.get("rows"):
             return None

@@ -88,12 +88,17 @@ from tradingagents.agents.utils.analysis_tools import (
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.agents.utils.value_dip_tools import (
+    get_balance_sheet_health,
     get_bollinger_pct_b,
+    get_decline_driver_check,
     get_fcf_yield,
+    get_macd_divergence,
+    get_support_structure,
     get_trade_expectancy,
     get_tranche_plan,
     get_valuation_z_score,
     get_value_dip_setup,
+    get_vdu_entry_setup,
 )
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
@@ -315,6 +320,9 @@ class TradingAgentsGraph:
                     get_bollinger_pct_b,
                     get_tranche_plan,
                     get_trade_expectancy,
+                    get_macd_divergence,
+                    get_vdu_entry_setup,
+                    get_support_structure,
                 ]
             ),
             "social": ToolNode(
@@ -380,6 +388,8 @@ class TradingAgentsGraph:
                     get_fcf_yield,
                     get_valuation_z_score,
                     get_value_dip_setup,
+                    get_balance_sheet_health,
+                    get_decline_driver_check,
                 ]
             ),
         }

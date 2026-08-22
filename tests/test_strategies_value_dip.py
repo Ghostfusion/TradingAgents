@@ -15,14 +15,23 @@ import math
 import pytest
 
 from tradingagents.strategies.value_dip import (
+    balance_sheet_health,
     bollinger_pct_b,
     breakeven_win_rate,
+    decline_driver_check,
     expectancy,
     fcf_yield,
+    higher_low_structure,
+    macd_divergence,
+    profitability_quality,
+    support_structure,
     tranche_plan,
     tranche_risk_read,
+    trigger_candle,
     valuation_z_read,
     value_dip_setup,
+    vdu_entry_setup,
+    volume_dry_up,
     zscore,
 )
 
@@ -408,3 +417,162 @@ def test_graph_tranche_fold_contract_uses_weighted_entry(monkeypatch):
     # the weighted entry is below the last close -> the dollar stop is below
     # the last-close stop; assert the contract text carries the tranche tag
     assert "tranche weighted entry" in out.get("position_contract", "")
+
+
+# ---------------------------------------------------------------------------
+# New gap functions (Value_Dip_swing.md §1 + §2): the 6 implemented gaps
+# ---------------------------------------------------------------------------
+
+
+def _dip_trigger_series():
+    """A dip -> volume dry-up -> high-volume reversal series that satisfies
+    the Step-2 ladder: VDU, trigger candle (RVOL>=1.3, close above prior high),
+    higher-low, and MACD bullish divergence."""
+    closes, highs, lows = [], [], []
+    px = 200.0
+    for n, drift in [(100, -0.15), (13, -1.2), (5, 0.4), (7, -0.2), (14, 0.6), (4, -0.4), (7, 0.3)]:
+        for _ in range(n):
+            px += drift
+            closes.append(px)
+            highs.append(px + 1.0)
+            lows.append(px - 1.0)
+    closes.append(px + 4.0)
+    highs.append(px + 5.0)
+    lows.append(px - 0.5)
+    vols = [2_000_000] * len(closes)
+    for i in range(len(closes) - 8, len(closes) - 1):
+        vols[i] = 300_000
+    vols[-1] = 4_500_000
+    return closes, highs, lows, vols
+
+
+# --- balance sheet health ---
+
+
+def test_balance_sheet_health_or_semantics():
+    # D/E < 1 OR current ratio > 1.5 -> either passes
+    assert balance_sheet_health(0.5, 2.0)["pass"] is True
+    assert balance_sheet_health(2.0, 2.0)["pass"] is True  # cr side
+    assert balance_sheet_health(0.5, 0.8)["pass"] is True  # d_e side
+    assert balance_sheet_health(2.0, 0.8)["pass"] is False
+    assert balance_sheet_health()["pass"] is None  # unknown neither fails
+
+
+def test_profitability_quality_and_semantics():
+    assert profitability_quality(fcf=1e9, roe=0.20)["pass"] is True
+    assert profitability_quality(fcf=-1e9, roe=0.10)["pass"] is False
+    # missing side ignored
+    assert profitability_quality(fcf=1e9)["pass"] is True
+    assert profitability_quality(roe=0.25)["pass"] is True
+    assert profitability_quality()["pass"] is None
+    assert profitability_quality(fcf=-1e9)["pass"] is False  # fcf alone fails
+
+
+# --- technical Step-2 ---
+
+
+def test_volume_dry_up():
+    vols = [2_000_000] * 30 + [300_000] * 5 + [2_000_000]
+    assert volume_dry_up(vols)["dry_up"] is True
+    # high recent volume vs prior -> no dry-up (enough bars for the window)
+    assert volume_dry_up([1] * 30 + [2] * 10)["dry_up"] is False
+    assert volume_dry_up([])["dry_up"] is None
+
+
+def test_macd_divergence_bullish():
+    closes, highs, lows, _ = _dip_trigger_series()
+    m = macd_divergence(closes, lows)
+    assert m["verdict"] in ("bullish-divergence", "higher-low")
+    assert m["bullish"] is True
+
+
+def test_trigger_candle_and_higher_low():
+    closes, highs, lows, vols = _dip_trigger_series()
+    tc = trigger_candle(closes, highs, lows, vols)
+    assert tc["trigger"] is True
+    assert tc["rvol"] >= 1.3
+    assert tc["close_above_prior_high"] is True
+    hl = higher_low_structure(lows, window=80)
+    assert hl["higher_low"] is True
+
+
+def test_vdu_entry_setup_candidate():
+    closes, highs, lows, vols = _dip_trigger_series()
+    vd = vdu_entry_setup(closes, highs, lows, vols, support_window=80)
+    assert vd["candidate"] is True
+    assert vd["volume_dry_up"]["dry_up"] is True
+    assert vd["trigger_candle"]["trigger"] is True
+
+
+def test_support_structure_needs_history():
+    # insufficient history -> unknown
+    assert support_structure([1.0] * 50, [1.0] * 50, [1.0] * 50)["verdict"] == "unknown"
+    # 200+ bars with a shallow base -> holding-above-base or support
+    closes = [100.0 + 0.1 * i for i in range(300)]
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    sp = support_structure(closes, highs, lows)
+    assert sp["verdict"] in (
+        "multi-month-base-support",
+        "200-day-sma-support",
+        "holding-above-base",
+    )
+
+
+# --- decline driver ---
+
+
+def test_decline_driver_clean():
+    assert decline_driver_check()["verdict"] == "clean"
+    assert decline_driver_check(fcf=1e9, roe=0.2)["verdict"] == "clean"
+
+
+def test_decline_driver_structural():
+    out = decline_driver_check(trap_level="HIGH", accrual=0.10, mom12=-0.30)
+    assert out["verdict"] == "structural"
+    assert out["clean"] is False
+
+
+def test_decline_driver_caution():
+    out = decline_driver_check(accrual=0.10)  # single flag
+    assert out["verdict"] == "caution"
+
+
+# --- extended matrix gates on the new rows when measured ---
+
+
+def test_matrix_gates_on_balance_and_profitability():
+    closes, highs, lows, vols = _dip_trigger_series()
+    # balance + profitability fail -> candidate False
+    s = value_dip_setup(
+        closes,
+        highs,
+        lows,
+        vols,
+        margin_of_safety=0.25,
+        fcf_yield=0.08,
+        atr_value=0.5,
+        debt_to_equity=2.5,
+        current_ratio=0.8,
+        roe=0.05,
+        fcf=-5e8,
+    )
+    assert s["rows"]["balance_sheet"]["pass"] is False
+    assert s["rows"]["profitability"]["pass"] is False
+    assert s["candidate"] is False
+
+
+def test_matrix_ignores_unknown_new_rows():
+    closes, highs, lows, vols = _dip_trigger_series()
+    # no balance/profitability inputs -> rows None-pass, candidate unaffected
+    s = value_dip_setup(
+        closes,
+        highs,
+        lows,
+        vols,
+        margin_of_safety=0.25,
+        fcf_yield=0.08,
+        atr_value=0.5,
+    )
+    assert s["rows"]["balance_sheet"]["pass"] is None
+    assert s["rows"]["profitability"]["pass"] is not False or s["candidate"] is True

@@ -167,6 +167,11 @@ A later batch added the six value-dip computed tools wrapping
 | `get_fcf_yield(ticker, date)` | `value_dip.fcf_yield` | fundamentals | FCF / market cap (>= 6% value-floor row) |
 | `get_valuation_z_score(ticker, date, multiple?)` | `value_dip.valuation_z_read` | fundamentals | historical valuation Z (cheap <= -1.5) vs own trailing P/E, EV/EBITDA, P/FCF |
 | `get_value_dip_setup(ticker, date)` | `value_dip.value_dip_setup` | fundamentals | the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one candidate verdict |
+| `get_balance_sheet_health(ticker, date)` | `value_dip.balance_sheet_health` | fundamentals | D/E < 1.0 OR current ratio > 1.5 |
+| `get_macd_divergence(ticker)` | `value_dip.macd_divergence` | market | Daily RSI/MACD bullish divergence or higher-low |
+| `get_vdu_entry_setup(ticker)` | `value_dip.vdu_entry_setup` | market | Step-2 ladder: VDU -> divergence/higher-low -> trigger candle (RVOL>=1.3) |
+| `get_support_structure(ticker)` | `value_dip.support_structure` | market | multi-month base / 200-day SMA support |
+| `get_decline_driver_check(ticker, date)` | `value_dip.decline_driver_check` | fundamentals | negative-force screen (clean/caution/structural) proxying moat/regulatory red flags |
 
 Related: the tranche plan is also folded as a **control** computation into the
 risk governor (`enable_tranche_risk`): `value_dip.tranche_risk_read` feeds the

@@ -5,12 +5,14 @@ from tradingagents.agents.utils.agent_utils import (
     get_analyst_ratings,
     get_analyst_verdict,
     get_balance_sheet,
+    get_balance_sheet_health,
     get_basic_financials,
     get_cashflow,
     get_company_peers,
     get_composite_rank,
     get_corporate_actions,
     get_dcf_valuation,
+    get_decline_driver_check,
     get_dividends,
     get_earnings_quality,
     get_earnings_surprise,
@@ -62,6 +64,8 @@ def create_fundamentals_analyst(llm):
             get_fcf_yield,
             get_valuation_z_score,
             get_value_dip_setup,
+            get_balance_sheet_health,
+            get_decline_driver_check,
         ]
 
         system_message = (
@@ -74,6 +78,7 @@ def create_fundamentals_analyst(llm):
             + " For a multi-name value book, `get_portfolio_weights(...)` computes cap-respecting value weights and `get_allocation(scores, sector_map, ...)` returns the final cap-respected allocation block with per-name weights and the min-names check - report the computed weights when proposing an allocation."
             + " For valuation-safety and cross-sectional standing: `get_margin_of_safety(ticker, intrinsic=...)` reports the (intrinsic - price) / intrinsic safety margin you must cite before any 'undervalued/overvalued' claim (pass ``intrinsic`` from get_dcf_valuation / your own fair-value estimate); `get_composite_rank(ticker)` ranks the ticker among its industry peers cross-sectionally by value+momentum factors (composite percentile 0-1) - cite its standing vs peers before any 'cheap relative to peers / leader in the group' claim."
             + " You also have value-dip computed tools (the Value Dip + Swing hybrid, `Strategies/Value_Dip_swing.md`): `get_fcf_yield(ticker, current_date)` returns the free cash flow yield (FCF / market cap; >= 6% is the framework's value-floor row) - cite it before any 'strong cash generation supports the value' claim; `get_valuation_z_score(ticker, current_date, multiple=...)` returns the historical valuation Z (current vs its own trailing P/E, EV/EBITDA or P/FCF; Z <= -1.5 = cheap vs history) - cite it before any 'trades below its historical norm' claim; `get_value_dip_setup(ticker, current_date)` returns the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict - call it before proposing a value-dip (discounted entry with oversold timing) setup."
+            + " You also have two Step-1 fundamental-dip gates: `get_balance_sheet_health(ticker, current_date)` returns the balance-sheet health (debt/equity < 1.0 OR current ratio > 1.5) - cite it before any 'low leverage / strong balance sheet' claim; `get_decline_driver_check(ticker, current_date)` returns the negative-force screen (clean / caution / structural) - if it says 'structural', the dip is company-specific (fraud/distress, deeply negative momentum, negative FCF/ROE, severe EPS decline) and the value-dip setup should be rejected, not bought."
             + get_language_instruction(),
         )
 

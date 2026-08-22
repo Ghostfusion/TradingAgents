@@ -267,7 +267,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_composite_rank`, `get_tail_risk`, `get_credit_spread_read`,
   `get_session_discipline`, `get_earnings_quality`,
   `get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy`,
-  `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`
+  `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`,
+  `get_balance_sheet_health`, `get_macd_divergence`, `get_vdu_entry_setup`,
+  `get_support_structure`, `get_decline_driver_check`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -390,6 +392,11 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_fcf_yield(ticker, date)` | `strategies.value_dip.fcf_yield` | fundamentals | FCF / market cap (>= 6% is the value-dip value-floor row) |
 | `get_valuation_z_score(ticker, date, multiple?)` | `strategies.value_dip.valuation_z_read` | fundamentals | historical valuation Z (current vs own trailing P/E, EV/EBITDA or P/FCF; Z <= -1.5 = cheap vs history) |
 | `get_value_dip_setup(ticker, date)` | `strategies.value_dip.value_dip_setup` | fundamentals | the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict |
+| `get_balance_sheet_health(ticker, date)` | `strategies.value_dip.balance_sheet_health` | fundamentals | D/E < 1.0 OR current ratio > 1.5 (Step-1 balance-sheet gate) |
+| `get_macd_divergence(ticker)` | `strategies.value_dip.macd_divergence` | market | Daily RSI(14) / MACD-histogram momentum divergence (bullish-divergence / higher-low / lower-low-confirmation) |
+| `get_vdu_entry_setup(ticker)` | `strategies.value_dip.vdu_entry_setup` | market | Step-2 entry ladder: volume dry-up near support -> divergence/higher-low -> trigger candle (close above prior high, RVOL >= 1.3x) |
+| `get_support_structure(ticker)` | `strategies.value_dip.support_structure` | market | major weekly / multi-month base support + 200-day SMA proximity |
+| `get_decline_driver_check(ticker, date)` | `strategies.value_dip.decline_driver_check` | fundamentals | negative-force screen (clean/caution/structural): trap-HIGH, accruals>6%, negative 12-1m momentum, non-positive FCF/ROE, severe EPS decline |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for
