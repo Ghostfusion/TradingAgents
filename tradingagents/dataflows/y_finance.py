@@ -12,7 +12,7 @@ from .stockstats_utils import (
     load_ohlcv,
     yf_retry,
 )
-from .symbol_utils import NoMarketDataError, normalize_symbol
+from .symbol_utils import NoMarketDataError, require_symbol
 
 
 def get_YFin_data_online(
@@ -25,7 +25,7 @@ def get_YFin_data_online(
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
     # Resolve broker/forex symbols to Yahoo's convention (XAUUSD+ -> GC=F).
-    canonical = normalize_symbol(symbol)
+    canonical = require_symbol(symbol)
     ticker = yf.Ticker(canonical)
 
     # yfinance treats ``end`` as EXCLUSIVE, so it would drop the requested
@@ -276,7 +276,7 @@ def get_fundamentals(
     curr_date: Annotated[str, "current date (not used for yfinance)"] = None
 ):
     """Get company fundamentals overview from yfinance."""
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
         info = yf_retry(lambda: ticker_obj.info)
@@ -344,7 +344,7 @@ def get_balance_sheet(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get balance sheet data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
 
@@ -379,7 +379,7 @@ def get_cashflow(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get cash flow data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
 
@@ -414,7 +414,7 @@ def get_income_statement(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get income statement data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
 
@@ -447,7 +447,7 @@ def get_insider_transactions(
     ticker: Annotated[str, "ticker symbol of the company"]
 ):
     """Get insider transactions data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
         data = yf_retry(lambda: ticker_obj.insider_transactions)

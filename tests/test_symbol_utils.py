@@ -88,3 +88,35 @@ class TestCryptoBase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.unit
+class TestBlankSymbolGuard(unittest.TestCase):
+    """Blank/whitespace symbols must canonicalize to '' and raise the typed
+    NoMarketDataError (never leak yfinance's raw TypeError / HTTP 4xx logs)."""
+
+    def test_whitespace_canonicalizes_to_empty(self):
+        for raw in (" ", "  ", "\t", "\n", " \t\n "):
+            self.assertEqual(normalize_symbol(raw), "")
+
+    def test_none_and_empty_canonicalize_to_empty(self):
+        self.assertEqual(normalize_symbol(None), "")
+        self.assertEqual(normalize_symbol(""), "")
+
+    def test_real_symbols_unaffected(self):
+        self.assertEqual(normalize_symbol("eix"), "EIX")
+        self.assertEqual(normalize_symbol("  msft  "), "MSFT")
+
+    def test_require_symbol_raises_typed_error_on_blank(self):
+        from tradingagents.dataflows.symbol_utils import require_symbol
+
+        for raw in ("", " ", None):
+            with self.assertRaises(NoMarketDataError) as ctx:
+                require_symbol(raw)
+            self.assertIn("blank", str(ctx.exception))
+
+    def test_require_symbol_returns_canonical_on_real(self):
+        from tradingagents.dataflows.symbol_utils import require_symbol
+
+        self.assertEqual(require_symbol("eix "), "EIX")
+        self.assertEqual(require_symbol("XAUUSD"), "GC=F")

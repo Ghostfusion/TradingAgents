@@ -124,3 +124,17 @@ class VendorRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_blank_symbol_degrades_to_sentinel_not_typeerror(self):
+        """A blank/whitespace symbol must produce the clean NO_DATA_AVAILABLE
+        sentinel, never yfinance's raw ``'NoneType' object does not support
+        item assignment`` / HTTP-4xx noise (regression for the batch EIX/SRE
+        run)."""
+        set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
+        with self._route({"yfinance": _no_data}):
+            for blank in ("", " ", None):
+                result = interface.route_to_vendor(
+                    "get_stock_data", blank, "2026-06-01", "2026-08-20"
+                )
+                self.assertIn("NO_DATA_AVAILABLE", result)
+                self.assertIn("blank", result)

@@ -123,6 +123,13 @@ _returns_history_cache: dict[tuple[str, str, str], object] = {}
 
 def _fetch_cached_history(symbol: str, start: str, end: str):
     """yfinance history with a process-lifetime memo (same window, same bars)."""
+    if not symbol or not str(symbol).strip():
+        # A blank symbol (e.g. a malformed memory-log entry) would hit
+        # ``yf.Ticker(' ')`` and raise a raw TypeError + HTTP-4xx noise;
+        # treat it as no data (the caller resolves it to return=None) instead.
+        import pandas as pd
+
+        return pd.DataFrame()
     key = (symbol, start, end)
     cached = _returns_history_cache.get(key)
     if cached is not None:

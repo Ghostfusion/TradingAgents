@@ -110,9 +110,14 @@ def normalize_symbol(raw: str) -> str:
     A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
     matching. The function is purely syntactic — it performs no network
     calls — so it is safe to apply on every request.
+
+    Blank / whitespace-only / non-string input canonicalizes to ``""`` (the
+    raw value is never returned), so a vendor caller can detect "nothing to
+    query" with ``not canonical.strip()`` instead of letting a blank reach
+    yfinance and blow up with a raw TypeError + noisy HTTP ERROR logs.
     """
     if not isinstance(raw, str) or not raw.strip():
-        return raw
+        return ""
 
     s = raw.strip().upper()
     # Broker CFD/qualifier suffixes Yahoo never uses.
@@ -130,4 +135,25 @@ def normalize_symbol(raw: str) -> str:
 
     if canonical != raw.strip().upper():
         logger.info("Resolved symbol %r to Yahoo symbol %r", raw, canonical)
+    return canonical
+
+
+def require_symbol(raw) -> str:
+    """Normalize and require a non-blank symbol for a vendor call.
+
+    Returns the canonical symbol, or raises ``NoMarketDataError`` (the typed
+    vendor error the router understands) when the input is blank/whitespace -
+    so the chain degrades to a clean ``NO_DATA_AVAILABLE: blank ticker``
+    sentinel instead of leaking yfinance's raw ``TypeError`` / HTTP-error
+    logs into the run. Every yfinance entry point should resolve its symbol
+    through this helper.
+    """
+    canonical = normalize_symbol(raw)
+    if not canonical or not canonical.strip():
+        shown = "''" if raw in (None, "") else repr(raw)
+        raise NoMarketDataError(
+            str(raw or ""),
+            "<blank>",
+            detail=f"blank/empty ticker symbol {shown}: nothing to query",
+        )
     return canonical

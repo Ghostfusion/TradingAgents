@@ -16,7 +16,7 @@ import logging
 
 from .errors import NoMarketDataError
 from .stockstats_utils import yf_retry
-from .symbol_utils import normalize_symbol
+from .symbol_utils import require_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def get_short_interest_yfinance(ticker: str) -> str:
     Returns a markdown report with shares short, days-to-cover, short % of
     float, and float / insider / institutional ownership where available.
     """
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     import yfinance as yf
 
     try:

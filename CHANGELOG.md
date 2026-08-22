@@ -8,6 +8,24 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Blank-symbol yfinance hardening** - a whitespace/empty ticker reaching a
+  yfinance entry point (e.g. a malformed LLM tool call during
+  `batch.py --symbols ...`) used to canonicalize through `normalize_symbol`
+  unchanged (`' '` stayed `' '`), hit `yf.Ticker(' ')`, and leak
+  `TypeError: 'NoneType' object does not support item assignment` plus noisy
+  yfinance HTTP-404/400 ERROR logs. `normalize_symbol` now canonicalizes
+  blank/whitespace to `""`, and a new `require_symbol` helper raises the
+  typed `NoMarketDataError` (`detail="blank/empty ticker symbol"`) at every
+  yfinance entry point (`y_finance` statements/stock/insider,
+  `stockstats_utils.load_ohlcv`, `yfinance_options`, `yfinance_short_interest`,
+  `yfinance_news`) plus the graph's `_fetch_cached_history`. The router now
+  returns one clean `NO_DATA_AVAILABLE: ... blank ticker ...` sentinel the
+  agents can report honestly instead of a raw TypeError. Tests:
+  `test_symbol_utils` (blank canonicalization + `require_symbol` raises),
+  `test_vendor_routing` (blank -> sentinel across the chain).
+
 ### Added
 
 - **Value Dip Step-1/Step-2 gap strategies** - five more deterministic

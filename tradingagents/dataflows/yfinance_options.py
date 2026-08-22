@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 
 from .errors import NoMarketDataError
 from .stockstats_utils import yf_retry
-from .symbol_utils import normalize_symbol
+from .symbol_utils import require_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
       - total open interest and volume for calls vs puts
       - the put/call OI ratio and a short interpretation note
     """
-    canonical = normalize_symbol(ticker)
+    canonical = require_symbol(ticker)
     tk = __import__("yfinance", fromlist=["Ticker"]).Ticker(canonical)
 
     try:

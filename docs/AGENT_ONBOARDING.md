@@ -283,6 +283,15 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-22 `(working tree)` - Blank-symbol hardening: a whitespace/empty
+  ticker reaching a yfinance entry point (e.g. a malformed LLM tool call in
+  ``batch.py --symbols ...``) previously leaked a raw TypeError + noisy
+  yfinance HTTP-4xx ERROR logs; it now canonicalizes to ``""``
+  (``normalize_symbol``) and raises the typed NoMarketDataError via
+  ``require_symbol`` at every yfinance entry point, so the router returns the
+  clean ``NO_DATA_AVAILABLE: blank/empty ticker symbol`` sentinel the agents
+  can report honestly.
+
 - 2026-08-22 `(working tree)` - Value Dip Step-1/Step-2 gap strategies:
   balance_sheet_health (D/E + current ratio), profitability_quality (FCF +
   ROE), the Step-2 technical ladder (macd_divergence / volume_dry_up /

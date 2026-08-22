@@ -9,7 +9,7 @@ from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
-from .symbol_utils import NoMarketDataError, normalize_symbol
+from .symbol_utils import NoMarketDataError, require_symbol
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
     # then reject values that would escape the cache directory when
     # interpolated into the cache filename (e.g. ``../../tmp/x``).
-    canonical = normalize_symbol(symbol)
+    canonical = require_symbol(symbol)
     safe_symbol = safe_ticker_component(canonical)
 
     config = get_config()
