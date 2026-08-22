@@ -72,6 +72,12 @@ in `batch.py`).
 | `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` |
 | `TRADINGAGENTS_ANTHROPIC_EFFORT` | `anthropic_effort` |
 | `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` |
+| `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
+| `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
+| `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
+| `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |
+| `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` |
+| `TRADINGAGENTS_TRANCHE_ACCOUNT` | `tranche_account` |
 | `TRADINGAGENTS_RESULTS_DIR` | `results_dir` |
 | `TRADINGAGENTS_CACHE_DIR` | `data_cache_dir` |
 | `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` |
@@ -123,6 +129,14 @@ B1 catalyst gate. Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
 `target_atr=4.0`, `sector_cap_limit=0.35`, `risk_max_drawdown_pct=0.10`,
 `risk_daily_cvar_budget_pct=0.03`, `risk_max_position_pct=0.45`,
+`enable_tranche_risk` (default **False**) + `tranche_weights` (0.3,0.3,0.4),
+`tranche_stop_mult` (1.5), `tranche_risk_pct` (0.015), `tranche_account` (100000)
+— the deterministic tranche-scaling risk fold (`Value_Dip_swing_Continue.md`):
+with `enable_position_contract` + `enable_risk_governor` on, the governor sizes
+and throttles against the worst-case 3-tranche scale-in with config-frozen
+parameters (never the LLM), enforcing BOTH the capital-at-risk budget (sum of
+per-tranche losses at the hard stop) and the peak-deployed-at-scale-in
+per-trade cap;
 `risk_stress_shock_pct_1` / `risk_stress_shock_pct_2` (R2 scenario shocks, def -10%/-30%)
 `evaluate_cost_bps=10`, `calibration_min_n=5`, `consensus_seeds=1`,
 `max_book_names=10`, `max_name_weight=0.25`, `risk_audit_enabled` default True.
@@ -251,7 +265,9 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_analyst_verdict`, `get_earnings_surprise`, `get_portfolio_weights`,
   `get_sector_rank`, `get_strategy_quality`, `get_margin_of_safety`,
   `get_composite_rank`, `get_tail_risk`, `get_credit_spread_read`,
-  `get_session_discipline`, `get_earnings_quality`
+  `get_session_discipline`, `get_earnings_quality`,
+  `get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy`,
+  `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -368,6 +384,12 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
 | `get_session_discipline(ticker, peak_pnl?, current_pnl?)` | `strategies.momentum.session_flags` + `psych_level` + `past_optimal_window` | market | intraday walk-away rules (giveback, max-daily-loss, past 10:00 ET optimal) + nearest psych levels |
 | `get_earnings_quality(ticker, date)` | `strategies.normalized.accruals_ratio` + `trap_verdict` | fundamentals | Sloan accruals ratio + the forensic trap verdict incl. the accrual evidence trigger |
+| `get_bollinger_pct_b(ticker)` | `strategies.value_dip.bollinger_pct_b` | market | Bollinger %b (price position inside the 20-day 2-sigma band); %b <= 0 at/piercing the lower band, <= 0.10 the mean-reversion entry zone |
+| `get_tranche_plan(ticker, weights?, risk_pct?, account?)` | `strategies.value_dip.tranche_plan` | market | 3-tranche scale-in plan (P1/P2/P3 at 1.0/2.0 ATR, weighted avg entry, composite stop P3-1.5ATR, capital-at-risk check, 1.8R/3.0R targets + blended R:R + breakeven win rate) |
+| `get_trade_expectancy(p_win, avg_win, avg_loss, rr?)` | `strategies.value_dip.expectancy` + `breakeven_win_rate` | market | per-trade expectancy E = p*W - (1-p)*L and breakeven win rate 1/(1+R:R) |
+| `get_fcf_yield(ticker, date)` | `strategies.value_dip.fcf_yield` | fundamentals | FCF / market cap (>= 6% is the value-dip value-floor row) |
+| `get_valuation_z_score(ticker, date, multiple?)` | `strategies.value_dip.valuation_z_read` | fundamentals | historical valuation Z (current vs own trailing P/E, EV/EBITDA or P/FCF; Z <= -1.5 = cheap vs history) |
+| `get_value_dip_setup(ticker, date)` | `strategies.value_dip.value_dip_setup` | fundamentals | the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict |
 
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for
@@ -432,7 +454,7 @@ preserves `Risk Gate (computed)` blocks.
   `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap` `--min-eps-yoy`
   `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision` `--inst-accum`
   `--intraday` `--scan`
-  (value|trend-pullback|breakout|momentum|swing|vcp|all)
+  (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
   `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
 
 ## 10. Docs index

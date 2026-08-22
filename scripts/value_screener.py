@@ -641,6 +641,9 @@ def _watchlist_markdown(results: list) -> str:
     show_vcp = any(r.get("vcp_flag") for r in results)
     if show_vcp:
         heads += ["VCP", "Brk"]
+    show_vdip = any(r.get("vdip_flag") for r in results)
+    if show_vdip:
+        heads += ["VDip", "FCFy", "RSI", "%b", "Stp%"]
     show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
     if show_trap:
         heads.append("Trap")
@@ -708,6 +711,12 @@ def _watchlist_markdown(results: list) -> str:
         if show_vcp:
             cells.append("yes" if r.get("vcp_flag") else "no")
             cells.append(cell(r.get("vcp_brk"), "{:.1%}"))
+        if show_vdip:
+            cells.append("yes" if r.get("vdip_flag") else "no")
+            cells.append(cell(r.get("vdip_fcfy"), "{:.1%}"))
+            cells.append(cell(r.get("vdip_rsi"), "{:.0f}"))
+            cells.append(cell(r.get("vdip_pctb"), "{:.0%}"))
+            cells.append(cell(r.get("vdip_stop_pct"), "{:.1%}"))
         if show_trap:
             cells.append(cell(r.get("trap")))
         if show_chg:
@@ -859,6 +868,76 @@ def _vcp_scan(ohlcv: dict) -> dict | None:
             return None
         return vcp_setup(closes, highs, lows, vols)
     except Exception:  # noqa: BLE001 - a failed vcp read must not abort a run
+        return None
+
+
+def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "") -> dict | None:
+    """Value Dip + Swing hybrid setup read for one symbol.
+
+    Runs the value-dip allocation matrix (value floor + technical entry +
+    trade risk + exit target) against the symbol's OHLCV and its canonical
+    financials (margin of safety, FCF yield, valuation Z). Returns None when
+    there is insufficient price history or the strategy import fails.
+    """
+    try:
+        from tradingagents.strategies.size import atr as _atr
+        from tradingagents.strategies.value_dip import (
+            fcf_yield as _fcfy,
+            value_dip_setup as _setup,
+        )
+
+        closes = ohlcv.get("closes") or []
+        highs = ohlcv.get("highs") or []
+        lows = ohlcv.get("lows") or []
+        vols = ohlcv.get("volumes") or []
+        if len(closes) < 20:
+            return None
+        # Value inputs from the canonical financials (best-effort; a missing
+        # value renders the row unknown rather than failing the gate).
+        try:
+            from tradingagents.agents.utils.value_dip_tools import (
+                _fcf_series_from_cashflow as _fcf_series,
+            )
+            from tradingagents.dataflows.interface import route_to_vendor
+
+            mc = _latest(fin.get("market_cap"))
+            cf_payload = (
+                route_to_vendor("get_cashflow", symbol, "annual", current_date)
+                if current_date
+                else ""
+            )
+            fcf_series = _fcf_series(cf_payload) if cf_payload else None
+            fy = _fcfy(fcf_series[0] if fcf_series else None, mc)  # newest period first
+            mos = None  # intrinsic unavailable here; value floor falls back to FCF yield
+        except Exception:  # noqa: BLE001 - value inputs degrade
+            fy = None
+            mos = None
+        atr_v = _atr(highs, lows, closes, window=14)
+        setup = _setup(
+            closes,
+            highs,
+            lows,
+            vols,
+            margin_of_safety=mos,
+            fcf_yield=fy,
+            val_z=None,
+            atr_value=atr_v,
+        )
+        if not setup.get("rows"):
+            return None
+        rows = setup["rows"]
+        te = rows.get("technical_entry") or {}
+        tr = rows.get("trade_risk") or {}
+        vf = rows.get("value_floor") or {}
+        return {
+            "candidate": bool(setup.get("candidate")),
+            "fcf_yield": vf.get("fcf_yield"),
+            "rsi": te.get("rsi"),
+            "pct_b": te.get("pct_b"),
+            "stop_pct": tr.get("stop_pct"),
+            "reasons": setup.get("reasons") or [],
+        }
+    except Exception:  # noqa: BLE001 - a failed value-dip read must not abort a run
         return None
 
 
@@ -1154,14 +1233,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--scan",
-        choices=("value", "trend-pullback", "breakout", "momentum", "swing", "vcp", "all"),
+        choices=(
+            "value",
+            "trend-pullback",
+            "breakout",
+            "momentum",
+            "swing",
+            "vcp",
+            "value-dip",
+            "all",
+        ),
         default="all",
         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
         "dip in uptrend), 'breakout' (volatility contraction/breakout), "
         "'momentum' (day-trade pre-filter + first pullback), 'swing' "
         "(techno-fundamental swing: stacked trend + RS vs benchmark + "
         "pullback + stops/targets), 'vcp' (volatility contraction pattern: "
-        "successively shallower pullbacks on fading volume), or 'all' "
+        "successively shallower pullbacks on fading volume), 'value-dip' "
+        "(Value Dip + Swing hybrid: value floor + RSI/%%b oversold entry + "
+        "trade risk + exit target), or 'all' "
         "(default: keep all, flag strategies)",
     )
     parser.add_argument(
@@ -1337,6 +1427,13 @@ def main(argv: list[str] | None = None) -> int:
                             scan_meta[symbol]["vcp"] = vc
                         if not (vc and vc.get("candidate")):
                             continue
+                    if args.scan == "value-dip":
+                        fin = fetch_ticker(symbol, args.date)
+                        vd = _value_dip_scan(symbol, ohlcv, fin, args.date)
+                        if vd is not None:
+                            scan_meta[symbol]["value_dip"] = vd
+                        if not (vd and vd.get("candidate")):
+                            continue
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
                         avg_vol = sum(vols) / len(vols) if vols else 0.0
@@ -1502,6 +1599,12 @@ def main(argv: list[str] | None = None) -> int:
             _vc = (sig or {}).get("vcp") if sig else None
             row["vcp_flag"] = bool(_vc and _vc.get("candidate"))
             row["vcp_brk"] = (_vc or {}).get("close_to_base")
+            _vd = (sig or {}).get("value_dip") if sig else None
+            row["vdip_flag"] = bool(_vd and _vd.get("candidate"))
+            row["vdip_fcfy"] = (_vd or {}).get("fcf_yield")
+            row["vdip_rsi"] = (_vd or {}).get("rsi")
+            row["vdip_pctb"] = (_vd or {}).get("pct_b")
+            row["vdip_stop_pct"] = (_vd or {}).get("stop_pct")
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None

@@ -70,12 +70,19 @@ def build_position_contract(
     agreement: float | None = None,
     calibrated_p: float | None = None,
     catalyst_scale: float | None = None,
+    entry_price: float | None = None,
 ) -> PositionContract | None:
     """Compute the authoritative size + stop from config budgets.
 
     cfg keys: risk_per_trade (default 0.01), max_position_pct (0.30),
     atr_mult (2.0), target_vol (0.15), position_odds (1.0), kelly_fraction
     (0.25). Returns None when no usable close prices are provided.
+
+    ``entry_price`` (optional): the reference entry for the stop/risk. When
+    set (e.g. a tranche plan's weighted average entry), dollar stop/risk
+    levels are measured from it instead of the last close so the G1 contract
+    matches the tranche execution. Position sizing stays a fraction of the
+    book and is unchanged; None keeps the last-close behaviour.
     """
     if not closes:
         return None
@@ -96,6 +103,11 @@ def build_position_contract(
 
     a = _atr_or_proxy(closes_f, high, low)
     stop_pct = _clamp(atr_mult * a / last if a > 0 else 0.02, 0.005, 0.50)
+
+    # Reference entry for the dollar stop: the weighted tranche entry when a
+    # tranche plan is in play, else the last close (unchanged behaviour).
+    entry = entry_price if (entry_price is not None and float(entry_price) > 0) else last
+    stop = float(entry) * (1.0 - stop_pct)
 
     p = calibrated_p if calibrated_p is not None else 0.5
     kelly_part = position_size_kelly(p, odds=odds, fraction=kelly_frac, max_size=max_pct)
@@ -136,16 +148,16 @@ def build_position_contract(
             target_level,
         )
 
-        be_stop = stop_to_breakeven(last, a, cushion_atr=float(cfg.get("breakeven_atr", 1.0)))
-        target = target_level(last, a, atr_mult=float(cfg.get("target_atr", 4.0)))
+        be_stop = stop_to_breakeven(entry, a, cushion_atr=float(cfg.get("breakeven_atr", 1.0)))
+        target = target_level(entry, a, atr_mult=float(cfg.get("target_atr", 4.0)))
     note = None
     if be_stop is not None:
         note = f"exits: BE @ {be_stop:.2f}, target @ {target:.2f}"
     return PositionContract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
-        stop_loss=round(last * (1.0 - stop_pct), 4),
+        stop_loss=round(stop, 4),
         stop_pct=round(stop_pct, 4),
-        reason_parts=reasons,
+        reason_parts=reasons + (["tranche weighted entry"] if entry is not last else []),
         breakeven_stop=round(be_stop, 4) if be_stop is not None else None,
         target=round(target, 4) if target is not None else None,
         exit_note=note,

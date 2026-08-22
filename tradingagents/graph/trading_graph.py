@@ -87,6 +87,14 @@ from tradingagents.agents.utils.analysis_tools import (
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
+from tradingagents.agents.utils.value_dip_tools import (
+    get_bollinger_pct_b,
+    get_fcf_yield,
+    get_trade_expectancy,
+    get_tranche_plan,
+    get_valuation_z_score,
+    get_value_dip_setup,
+)
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -303,6 +311,10 @@ class TradingAgentsGraph:
                     get_strategy_quality,
                     get_tail_risk,
                     get_credit_spread_read,
+                    # Value Dip + Swing hybrid (deterministic, computed signals).
+                    get_bollinger_pct_b,
+                    get_tranche_plan,
+                    get_trade_expectancy,
                 ]
             ),
             "social": ToolNode(
@@ -364,6 +376,10 @@ class TradingAgentsGraph:
                     get_dcf_valuation,
                     get_margin_of_safety,
                     get_composite_rank,
+                    # Value Dip + Swing hybrid (deterministic, computed signals).
+                    get_fcf_yield,
+                    get_valuation_z_score,
+                    get_value_dip_setup,
                 ]
             ),
         }
@@ -790,6 +806,10 @@ class TradingAgentsGraph:
                         flow_use = {"distribution_score": flow.get("distribution_score")}
                     agreement = self._agreement_from_state(final_state)
                     calibrated_p = self._calibrated_p()
+                    tranche_read = self._tranche_risk_read(closes)
+                    entry_price = None
+                    if tranche_read and tranche_read.get("valid"):
+                        entry_price = tranche_read.get("avg_entry")
                     contract = build_position_contract(
                         cfg=self.config,
                         closes=closes,
@@ -797,6 +817,7 @@ class TradingAgentsGraph:
                         agreement=agreement,
                         calibrated_p=calibrated_p,
                         catalyst_scale=(catalyst_snapshot or {}).get("scale"),
+                        entry_price=entry_price,
                     )
                     if contract is not None:
                         final_state["position_contract"] = (
@@ -829,6 +850,26 @@ class TradingAgentsGraph:
                         m = _re.search(r"size ([0-9.]+)%", cand)
                         if m:
                             size_pct = float(m.group(1)) / 100.0
+                    # Tranche fold: the governor sizes against the worst-case
+                    # fully-scaled position (peak-deployed) and enforces the
+                    # capital-at-risk budget, both from config-frozen params.
+                    govern_size = size_pct
+                    cap_at_risk = None
+                    risk_cap = None
+                    tranche_read = self._tranche_risk_read(closes)
+                    if tranche_read and tranche_read.get("valid"):
+                        govern_size = tranche_read.get("peak_deployed_pct")
+                        cap_at_risk = tranche_read.get("capital_at_risk_pct")
+                        risk_cap = self.config.get("tranche_risk_pct")
+                        final_state.setdefault("tranche_context", {}).update(
+                            {
+                                "avg_entry": tranche_read.get("avg_entry"),
+                                "peak_deployed_pct": tranche_read.get("peak_deployed_pct"),
+                                "capital_at_risk_pct": tranche_read.get("capital_at_risk_pct"),
+                                "peak_ok": tranche_read.get("peak_ok"),
+                                "book_ok": tranche_read.get("book_ok"),
+                            }
+                        )
                     rets = None
                     if closes:
                         rets = __import__(
@@ -857,10 +898,12 @@ class TradingAgentsGraph:
                     if single_name_cvar is not None:
                         risk_ctx["single_cvar"] = single_name_cvar
                     verdict = govern(
-                        size_pct,
+                        govern_size,
                         self.config,
                         cvar_pct=cvar_pct,
                         drawdown_pct=self.config.get("risk_max_drawdown_pct"),
+                        capital_at_risk_pct=cap_at_risk,
+                        risk_cap_pct=risk_cap,
                     )
                     # Catalyst hard block (framework Phase 4): "never initiate"
                     # inside the earnings window - a scheduled print within
@@ -878,7 +921,11 @@ class TradingAgentsGraph:
                     final_state["risk_gate"] = verdict
                     if verdict["verdict"] in ("WARN", "REJECT"):
                         final_state["risk_snapshot"] = build_risk_snapshot(
-                            verdict, size_pct, stop_pct, cvar_pct
+                            verdict,
+                            govern_size,
+                            stop_pct,
+                            cvar_pct,
+                            capital_at_risk_pct=cap_at_risk,
                         )
                     if verdict["verdict"] == "REJECT":
                         final_state["risk_halt"] = True
@@ -949,6 +996,34 @@ class TradingAgentsGraph:
         return __import__(
             "tradingagents.strategies.contract", fromlist=["_log_returns"]
         )._log_returns(closes)
+
+    def _tranche_risk_read(self, closes) -> dict | None:
+        """Deterministic tranche worst-case read for the risk fold, or None.
+
+        Only computes when ``enable_tranche_risk`` is on; uses measured closes
+        (last close = P1) and config-frozen weights/stop/risk/account (never
+        the LLM) so an agent's tranche choice can not inflate approved size.
+        Returns the peak-deployed and capital-at-risk fractions, or None when
+        the fold is off / the plan is unusable.
+        """
+        if not self.config.get("enable_tranche_risk"):
+            return None
+        try:
+            from tradingagents.strategies.value_dip import tranche_risk_read
+
+            return tranche_risk_read(
+                closes,
+                weights=tuple(self.config.get("tranche_weights") or (0.3, 0.3, 0.4)),
+                stop_mult=float(self.config.get("tranche_stop_mult", 1.5)),
+                risk_pct=float(self.config.get("tranche_risk_pct", 0.015)),
+                account=float(self.config.get("tranche_account", 100_000.0)),
+                atr_value=None,
+                max_position_pct=float(self.config.get("max_position_pct", 0.30)),
+                max_book_position_pct=float(self.config.get("risk_max_position_pct", 0.45)),
+            )
+        except Exception as tranche_exc:  # noqa: BLE001 - fold degrades silently
+            logger.warning("tranche risk read skipped: %s", tranche_exc)
+            return None
 
     def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> float | None:
         """True portfolio CVaR for the configured risk basket, or None.

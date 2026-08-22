@@ -42,11 +42,20 @@ def govern(
     sector_pct: float | None = None,
     sector_cap: float | None = None,
     halted: bool = False,
+    capital_at_risk_pct: float | None = None,
+    risk_cap_pct: float | None = None,
 ) -> dict:
     """Evaluate decision size against limits; PASS/WARN/REJECT + reasons.
 
     size_pct: the computed position fraction (0..1). Use None for limits that
     have no data - unknown limits never fail the gate.
+
+    ``capital_at_risk_pct`` / ``risk_cap_pct`` (both keyword-only, optional)
+    add a tranche-scaling control: the worst-case capital exposed at the hard
+    stop must stay within the configured risk budget. When ``size_pct`` is the
+    peak-deployed-at-scale-in fraction (from a tranche plan), the per-trade cap
+    bounds the fully-scaled position, not the first entry. Both default None ->
+    the check is skipped, keeping existing callers/tests unchanged.
     """
     limits = default_limits(cfg)
     reasons = []
@@ -76,6 +85,12 @@ def govern(
         elif cvar_pct >= 0.7 * budget:
             touches.append(f"cvar {cvar_pct:.2%} near budget {budget:.2%}")
 
+    if capital_at_risk_pct is not None and risk_cap_pct is not None:
+        if capital_at_risk_pct > float(risk_cap_pct):
+            reasons.append(f"capital-at-risk {capital_at_risk_pct:.2%} > cap {risk_cap_pct:.2%}")
+        elif capital_at_risk_pct >= 0.9 * float(risk_cap_pct):
+            touches.append(f"capital-at-risk {capital_at_risk_pct:.2%} near cap {risk_cap_pct:.2%}")
+
     if drawdown_pct is not None:
         lim = limits["risk_max_drawdown_pct"]
         if drawdown_pct > lim:
@@ -99,6 +114,7 @@ def build_risk_snapshot(
     stop_pct: float | None = None,
     cvar_pct: float | None = None,
     drawdown_pct: float | None = None,
+    capital_at_risk_pct: float | None = None,
 ) -> str:
     """Compact numbers-only snapshot for the risk debate (kills prose)."""
     parts = [f"verdict={verdict.get('verdict', '?')}"]
@@ -108,6 +124,8 @@ def build_risk_snapshot(
         parts.append(f"stop={stop_pct:.1%}")
     if cvar_pct is not None:
         parts.append(f"cvar={cvar_pct:.2%}")
+    if capital_at_risk_pct is not None:
+        parts.append(f"cap_at_risk={capital_at_risk_pct:.2%}")
     if drawdown_pct is not None:
         parts.append(f"dd={drawdown_pct:.1%}")
     if verdict.get("reasons"):

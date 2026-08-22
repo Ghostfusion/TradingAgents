@@ -14,6 +14,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_dividends,
     get_earnings_quality,
     get_earnings_surprise,
+    get_fcf_yield,
     get_form4_insider,
     get_fundamentals,
     get_income_statement,
@@ -25,6 +26,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_ratios,
     get_revenue_breakdown,
     get_smart_money,
+    get_valuation_z_score,
+    get_value_dip_setup,
 )
 
 
@@ -56,6 +59,9 @@ def create_fundamentals_analyst(llm):
             get_dcf_valuation,
             get_margin_of_safety,
             get_composite_rank,
+            get_fcf_yield,
+            get_valuation_z_score,
+            get_value_dip_setup,
         ]
 
         system_message = (
@@ -67,6 +73,7 @@ def create_fundamentals_analyst(llm):
             + " You also have three Finnhub-powered tools (free tier, key-gated): `get_basic_financials(ticker)` returns the metric block (EPS/revenue YoY growth, ROE/ROA, margins, payout, current ratio) - use it before any growth/quality metric claim; `get_insider_activity(ticker)` returns the net 12-month insider change + latest mspr (use before any net insider-buy/sell claim); `get_company_peers(ticker)` returns the comparable peer group for 'cheap vs peers / relative valuation' reasoning. "
             + " For a multi-name value book, `get_portfolio_weights(...)` computes cap-respecting value weights and `get_allocation(scores, sector_map, ...)` returns the final cap-respected allocation block with per-name weights and the min-names check - report the computed weights when proposing an allocation."
             + " For valuation-safety and cross-sectional standing: `get_margin_of_safety(ticker, intrinsic=...)` reports the (intrinsic - price) / intrinsic safety margin you must cite before any 'undervalued/overvalued' claim (pass ``intrinsic`` from get_dcf_valuation / your own fair-value estimate); `get_composite_rank(ticker)` ranks the ticker among its industry peers cross-sectionally by value+momentum factors (composite percentile 0-1) - cite its standing vs peers before any 'cheap relative to peers / leader in the group' claim."
+            + " You also have value-dip computed tools (the Value Dip + Swing hybrid, `Strategies/Value_Dip_swing.md`): `get_fcf_yield(ticker, current_date)` returns the free cash flow yield (FCF / market cap; >= 6% is the framework's value-floor row) - cite it before any 'strong cash generation supports the value' claim; `get_valuation_z_score(ticker, current_date, multiple=...)` returns the historical valuation Z (current vs its own trailing P/E, EV/EBITDA or P/FCF; Z <= -1.5 = cheap vs history) - cite it before any 'trades below its historical norm' claim; `get_value_dip_setup(ticker, current_date)` returns the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict - call it before proposing a value-dip (discounted entry with oversold timing) setup."
             + get_language_instruction(),
         )
 

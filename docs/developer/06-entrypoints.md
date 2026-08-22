@@ -51,12 +51,12 @@ Flags: `tickers` `-f/--file` `-d/--date` `-l/--limit`
 `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap`
 `--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
-(value|trend-pullback|breakout|momentum|swing|vcp|all)
+(value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
 `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
 
 Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F,
 Beneish M, Altman Z, Net-Net + trend-pullback / breakout / momentum / swing /
-vcp scans.
+vcp / value-dip scans.
 
 ## 6.5 `scripts/*` utilities
 

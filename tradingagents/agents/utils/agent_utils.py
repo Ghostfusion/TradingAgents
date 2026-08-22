@@ -86,6 +86,14 @@ from tradingagents.agents.utils.news_data_tools import (
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
+from tradingagents.agents.utils.value_dip_tools import (
+    get_bollinger_pct_b,
+    get_fcf_yield,
+    get_trade_expectancy,
+    get_tranche_plan,
+    get_valuation_z_score,
+    get_value_dip_setup,
+)
 
 # Public surface: the data tools are imported here so agents and the graph
 # import them from one place, plus the instrument/language helpers defined below.
@@ -156,6 +164,12 @@ __all__ = [
     "get_margin_of_safety",
     "get_composite_rank",
     "get_tail_risk",
+    "get_bollinger_pct_b",
+    "get_tranche_plan",
+    "get_trade_expectancy",
+    "get_fcf_yield",
+    "get_valuation_z_score",
+    "get_value_dip_setup",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",

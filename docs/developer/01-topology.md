@@ -93,7 +93,7 @@ category/tool methods in `interface.py`.
 overlays / size / book_risk / catalyst / events / risk_governor /
 contract / calibration / consensus / exits / factors / normalized /
 portfolio / reflection / sentiment / orderflow / debate_context / evaluate
-journal
+journal / value_dip
 ```
 
 Each wraps one signal the agents argue over (see 04-strategies.md).

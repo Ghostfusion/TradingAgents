@@ -8,7 +8,7 @@ exists, explicit 'unavailable' text (never a fabricated figure) otherwise.
 import math
 from unittest import mock
 
-from tradingagents.agents.utils import analysis_tools as T
+from tradingagents.agents.utils import analysis_tools as T, value_dip_tools as V
 
 
 def _ohlcv_csv(closes, vols, start="2026-01-01", dates_daily=True):
@@ -424,14 +424,15 @@ def test_exit_check_requires_positive_atr():
 
 
 def test_allocation_caps_weight():
-    out = T.get_allocation.invoke(
-        {"scores": {"A": 50, "B": 30, "C": 20, "D": 10}}
-    )
+    out = T.get_allocation.invoke({"scores": {"A": 50, "B": 30, "C": 20, "D": 10}})
     assert "Allocation plan" in out
     # every weight <= 25% max_name cap
     import re
 
-    pcts = [float(x) for x in re.findall(rb"- [A-Z]+: ([0-9.]+)%", out.encode() if isinstance(out, str) else out)]
+    pcts = [
+        float(x)
+        for x in re.findall(rb"- [A-Z]+: ([0-9.]+)%", out.encode() if isinstance(out, str) else out)
+    ]
     assert all(x <= 25.0 for x in pcts)
 
 
@@ -451,8 +452,13 @@ def test_beat_miss_sizing_side_mult():
 
 
 def test_regime_components_uses_ohlcv(monkeypatch):
-    fake = {"closes": _uptrend(260), "highs": _uptrend(260), "lows": _uptrend(260),
-            "volumes": [100] * 260, "opens": _uptrend(260)}
+    fake = {
+        "closes": _uptrend(260),
+        "highs": _uptrend(260),
+        "lows": _uptrend(260),
+        "volumes": [100] * 260,
+        "opens": _uptrend(260),
+    }
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
     out = T.get_regime_components.invoke({"ticker": "AAPL"})
     assert "label=" in out
@@ -485,7 +491,6 @@ def test_momentum_detail_empty_history_degrades(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
     out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
     assert "unavailable" in out
-
 
 
 # --------------------------------------------------------------------------
@@ -524,11 +529,10 @@ def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
         if method == "get_cashflow":
             return "NO_DATA_AVAILABLE: ..."
         return "Beta: 1.1\nMarket Cap: 3000000000000"
+
     monkeypatch.setattr(T, "route_to_vendor", side)
     out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
     assert "no usable free cash flow" in out
-
-
 
 
 # --------------------------------------------------------------------------
@@ -537,9 +541,7 @@ def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
 
 
 def test_strategy_quality_explicit_returns():
-    out = T.get_strategy_quality.invoke(
-        {"ticker": "AAPL", "returns": [0.01] * 50, "cost_bps": 0}
-    )
+    out = T.get_strategy_quality.invoke({"ticker": "AAPL", "returns": [0.01] * 50, "cost_bps": 0})
     assert "strategy quality AAPL" in out
     assert "net_cagr=" in out and "sharpe=" in out and "max_dd=" in out
 
@@ -593,6 +595,7 @@ def test_composite_rank_with_peers(monkeypatch):
         if t == "MSFT":
             return {"closes": _uptrend(260)}
         return {"closes": [100.0 + 0.1 * i for i in range(260)]}
+
     monkeypatch.setattr(T, "_ohlcv", _prices)
     with mock.patch(
         "tradingagents.dataflows.finnhub.get_company_peers_finnhub",
@@ -677,9 +680,7 @@ def test_credit_spread_read_degrades_with_no_key(monkeypatch):
 
 def test_session_discipline_reports_walk_away(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0, 101.0, 102.0]})
-    out = T.get_session_discipline.invoke(
-        {"ticker": "AAPL", "peak_pnl": 0.04, "current_pnl": 0.01}
-    )
+    out = T.get_session_discipline.invoke({"ticker": "AAPL", "peak_pnl": 0.04, "current_pnl": 0.01})
     assert "session discipline AAPL" in out
     assert "walk_away=" in out
     assert "giveback_50=" in out  # 50% giveback (0.04 -> 0.01) should be True
@@ -719,9 +720,7 @@ def _eq_canonical():
 
 
 def test_earnings_quality_reports_accruals(monkeypatch):
-    monkeypatch.setattr(
-        "scripts.value_screener.fetch_ticker", lambda ticker, date: _eq_canonical()
-    )
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda ticker, date: _eq_canonical())
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "earnings quality AAPL" in out
     assert "accrual_ratio=" in out  # (100 - 45) / 1000 = 0.055 (moderate)
@@ -744,8 +743,182 @@ def test_earnings_quality_high_accruals_flagged(monkeypatch):
 
 
 def test_earnings_quality_no_data_degrades(monkeypatch):
-    monkeypatch.setattr(
-        "scripts.value_screener.fetch_ticker", lambda ticker, date: {}
-    )
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda ticker, date: {})
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "unavailable" in out.lower()
+
+
+# --------------------------------------------------------------------------
+# Value Dip + Swing hybrid tools (value_dip_tools) - computed signals
+# --------------------------------------------------------------------------
+
+
+def _vdip_ohlcv():
+    """A sustained dip series: RSI <= 35, %b <= 0.10 (oversold)."""
+    closes = []
+    px = 140.0
+    for i in range(60):
+        drift = -1.2
+        if i % 5 == 2:
+            drift = 0.3
+        px += drift
+        closes.append(px)
+    return {
+        "closes": closes,
+        "highs": [c + 1.0 for c in closes],
+        "lows": [c - 1.0 for c in closes],
+        "volumes": [1_000_000] * len(closes),
+        "opens": closes[:],
+        "dates": [f"2026-{i % 12 + 1:02d}-{(i % 27) + 1:02d}" for i in range(len(closes))],
+    }
+
+
+def _vdip_fundamentals_markdown():
+    """Moomoo-style concatenated fundamentals markdown with 4 periods, each
+    carrying Diluted EPS / Free Cash Flow / EBITDA rows (income+balance+cashflow
+    concatenated into one payload, newest first)."""
+    lines = ["## Income Statement — TEST", ""]
+    for year, eps, fcf, ebitda in (
+        ("2026", "5.00", "10.00B", "50.00B"),
+        ("2025", "4.50", "9.00B", "45.00B"),
+        ("2024", "4.00", "8.00B", "40.00B"),
+        ("2023", "3.50", "7.00B", "35.00B"),
+    ):
+        lines.append(f"### {year}  (FY {year}, currency: USD)")
+        lines += [
+            "| Item | Value | YoY | QoQ |",
+            "| --- | --- | --- | --- |",
+            f"| Diluted EPS | {eps} | -- | -- |",
+            f"| EBITDA | {ebitda} | -- | -- |",
+            f"| Free Cash Flow | {fcf} | -- | -- |",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def test_bollinger_pct_b_computes_entry_zone(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = V.get_bollinger_pct_b.invoke({"ticker": "AAPL"})
+    assert "bollinger %b AAPL" in out
+    assert "entry-zone" in out or "lower-band" in out
+
+
+def test_bollinger_pct_b_insufficient_history_degrades(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: {"closes": [100.0, 101.0]})
+    out = V.get_bollinger_pct_b.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+def test_tranche_plan_computes_levels(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = V.get_tranche_plan.invoke({"ticker": "AAPL"})
+    assert "tranche plan AAPL" in out
+    assert "P1=" in out and "P2=" in out and "P3=" in out
+    assert "stop=" in out and "avg_entry=" in out
+    assert "blended_rr=" in out and "risk_ok=" in out
+
+
+def test_tranche_plan_bad_weights_degrade(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = V.get_tranche_plan.invoke({"ticker": "AAPL", "weights": "0.5,0.5"})
+    assert "unavailable" in out.lower() or "weights" in out
+
+
+def test_tranche_plan_no_price_degrades(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: {"closes": []})
+    out = V.get_tranche_plan.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+def test_trade_expectancy_computes(monkeypatch):
+    out = V.get_trade_expectancy.invoke(
+        {"p_win": 0.6, "avg_win": 200.0, "avg_loss": 100.0, "rr": 2.4}
+    )
+    assert "trade expectancy" in out
+    assert "E=$80.00" in out
+    assert "breakeven_win_rate=29.4%" in out
+
+
+def test_trade_expectancy_missing_inputs_degrades():
+    out = V.get_trade_expectancy.invoke({"p_win": 0.6, "avg_win": 200.0, "avg_loss": None})
+    assert "unavailable" in out.lower()
+
+
+def test_fcf_yield_computes(monkeypatch):
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {"market_cap": 1e11})
+    monkeypatch.setattr(
+        V,
+        "route_to_vendor",
+        lambda method, *a, **k: (
+            _vdip_fundamentals_markdown() if method == "get_cashflow" else "NO_DATA_AVAILABLE"
+        ),
+    )
+    out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "fcf yield AAPL" in out
+    assert "10.00%" in out  # 10B / 100B
+
+
+def test_fcf_yield_missing_data_degrades(monkeypatch):
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {})
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "unavailable" in out.lower()
+
+
+def test_valuation_z_score_computes(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    monkeypatch.setattr(
+        V,
+        "route_to_vendor",
+        lambda method, *a, **k: (
+            _vdip_fundamentals_markdown() if method == "get_fundamentals" else "NO_DATA_AVAILABLE"
+        ),
+    )
+    out = V.get_valuation_z_score.invoke(
+        {"ticker": "AAPL", "current_date": "2026-08-19", "multiple": "pe"}
+    )
+    assert "valuation z-score AAPL (pe)" in out
+    assert "z=" in out
+
+
+def test_valuation_z_score_too_few_periods_degrades(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    short = "\n".join(
+        [
+            "### 2026  (FY 2026, currency: USD)",
+            "| Item | Value | YoY | QoQ |",
+            "| --- | --- | --- | --- |",
+            "| Diluted EPS | 5.00 | -- | -- |",
+            "",
+        ]
+    )
+    monkeypatch.setattr(
+        V,
+        "route_to_vendor",
+        lambda method, *a, **k: short if method == "get_fundamentals" else "NO_DATA_AVAILABLE",
+    )
+    out = V.get_valuation_z_score.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "unavailable" in out.lower()
+
+
+def test_value_dip_setup_reports_matrix(monkeypatch):
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {"market_cap": 1e11})
+    monkeypatch.setattr(
+        V,
+        "route_to_vendor",
+        lambda method, *a, **k: (
+            _vdip_fundamentals_markdown() if method == "get_cashflow" else "NO_DATA_AVAILABLE"
+        ),
+    )
+    monkeypatch.setattr(V, "margin_of_safety_impl", lambda dcf_out, closes: 0.25)
+    out = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "value dip setup AAPL" in out
+    assert "value_floor" in out and "technical_entry" in out
+    assert "candidate=" in out
+
+
+def test_value_dip_setup_no_data_degrades(monkeypatch):
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {})
+    out = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()

@@ -95,3 +95,22 @@ def test_contract_stop_uses_atr_when_provided():
     c = build_position_contract(cfg=_cfg(), closes=closes, high=high, low=low)
     assert c is not None
     assert c.stop_loss < 100.0
+
+
+def test_contract_entry_price_hook():
+    """When a tranche plan's weighted entry is supplied, the dollar stop is
+    measured from it (the tranche execution), not the last close."""
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    base = build_position_contract(cfg=_cfg(), closes=closes)
+    tranched = build_position_contract(cfg=_cfg(), closes=closes, entry_price=95.0)
+    assert base is not None and tranched is not None
+    assert tranched.stop_loss < base.stop_loss  # Pbar < P1 -> lower stop level
+    assert "tranche weighted entry" in tranched.reason()
+    assert "tranche weighted entry" not in base.reason()
+
+
+def test_contract_entry_price_ignored_when_nonpositive():
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    base = build_position_contract(cfg=_cfg(), closes=closes)
+    c = build_position_contract(cfg=_cfg(), closes=closes, entry_price=0.0)
+    assert c.stop_loss == base.stop_loss  # falls back to last close

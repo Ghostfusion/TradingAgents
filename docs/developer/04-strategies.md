@@ -20,6 +20,15 @@ involved. This is the "compute, don't narrate" core.
 - `size.py` — Kelly / vol-target / position sizing (position_sizing).
 - `portfolio.py` — `value_ratio_weights`, cap adjustments (watchlist alloc).
 - `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile.
+- `value_dip.py` — Value Dip + Swing hybrid (`Strategies/Value_Dip_swing*.md`):
+  Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
+  expectancy, 3-tranche scale-in plan (P1/P2/P3, weighted avg entry, composite
+  stop, capital-at-risk, blended R:R), the hybrid allocation matrix
+  (`value_dip_setup`) AND the deterministic tranche-scaling risk fold
+  (`tranche_risk_read`) that feeds the governor's worst-case peak-deployed /
+  capital-at-risk measures with config-frozen params (gate:
+  `enable_tranche_risk`). Exposed as the six value-dip analyst tools,
+  `--scan value-dip`, and the folded risk gate.
 - `factors.py` — composite rank (EY + momentum + 52w).
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
   EV->equity bridge) powering `get_dcf_valuation`.

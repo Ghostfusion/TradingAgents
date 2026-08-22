@@ -73,6 +73,16 @@ _ENV_OVERRIDES = {
     # Opt-in analyst parallelism: >1 runs the analyst teams concurrently
     # (each in its own thread with isolated messages). Multiplies LLM/data load.
     "TRADINGAGENTS_ANALYST_CONCURRENCY": "analyst_concurrency",
+    # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md): gate for the
+    # screener --scan value-dip mode; the analyst @tools stay bound regardless.
+    "TRADINGAGENTS_ENABLE_VALUE_DIP": "enable_value_dip",
+    # Tranche-scaling risk fold (Value_Dip_swing_Continue.md): frozen config
+    # drives the worst-case tranche plan the governor sizes/throttles against.
+    "TRADINGAGENTS_ENABLE_TRANCHE_RISK": "enable_tranche_risk",
+    "TRADINGAGENTS_TRANCHE_WEIGHTS": "tranche_weights",
+    "TRADINGAGENTS_TRANCHE_STOP_MULT": "tranche_stop_mult",
+    "TRADINGAGENTS_TRANCHE_RISK_PCT": "tranche_risk_pct",
+    "TRADINGAGENTS_TRANCHE_ACCOUNT": "tranche_account",
 }
 
 
@@ -335,6 +345,25 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit
         "risk_compact_report": False,  # R1b: verdict-only 4_risk/ instead of chat transcripts
         "consensus_seeds": 1,  # Phase 6: LLM samples for consensus; >1 enables
+        # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md). On = the
+        # screener's --scan value-dip mode runs; the deterministic analyst
+        # @tools (get_bollinger_pct_b / get_tranche_plan / get_trade_expectancy /
+        # get_fcf_yield / get_valuation_z_score / get_value_dip_setup) stay bound
+        # to the market/fundamentals analyst tool loops regardless of the flag.
+        "enable_value_dip": False,
+        # Value Dip tranche-scaling risk fold (Strategies/Value_Dip_swing_Continue.md).
+        # When enable_position_contract + enable_risk_governor are also on, the
+        # risk governor sizes and throttles against the *worst-case tranche
+        # plan* with config-frozen parameters (weights / stop multiple / risk
+        # budget / account - never the LLM). Enforces BOTH the capital-at-risk
+        # budget (sum of per-tranche losses at the hard stop) and the
+        # peak-deployed-capital-at-scale-in per-trade cap (scale-in ties up
+        # more capital near the lows than a single entry).
+        "enable_tranche_risk": False,
+        "tranche_weights": [0.3, 0.3, 0.4],
+        "tranche_stop_mult": 1.5,
+        "tranche_risk_pct": 0.015,
+        "tranche_account": 100_000.0,
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

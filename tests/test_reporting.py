@@ -121,3 +121,23 @@ def test_slugify():
     assert _slugify("## I. Analyst Team Reports") == "i-analyst-team-reports"
     assert _slugify("### Market Analyst") == "market-analyst"
     assert _slugify("### Aggressive Analyst") == "aggressive-analyst"
+
+
+def test_risk_gate_renders_tranche_worst_case(tmp_path):
+    """When the tranche fold ran, the report surfaces the peak-deployed and
+    capital-at-risk measures the gate sized/throttled against."""
+    state = _state(verdict="WARN", reasons=["capital-at-risk near cap"])
+    state["tranche_context"] = {
+        "avg_entry": 283.26,
+        "peak_deployed_pct": 0.1133,
+        "capital_at_risk_pct": 0.0148,
+        "peak_ok": True,
+        "book_ok": True,
+    }
+    write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Tranche peak-deployed: 11.3% (cap-ok=True)" in decision
+    assert "Tranche capital-at-risk: 1.48%" in decision
+    # no tranche_context -> neither line (backward compatible)
+    clean = write_report_tree(_state(verdict="WARN"), "TST2", tmp_path)
+    assert "Tranche peak-deployed" not in clean.read_text(encoding="utf-8")

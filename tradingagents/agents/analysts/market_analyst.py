@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_bollinger_pct_b,
     get_capital_flow,
     get_credit_spread_read,
     get_exit_check,
@@ -25,6 +26,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_swing_set,
     get_tail_risk,
     get_top_movers,
+    get_trade_expectancy,
+    get_tranche_plan,
     get_verified_market_snapshot,
     get_volatility_contraction,
 )
@@ -61,6 +64,9 @@ def create_market_analyst(llm):
             get_strategy_quality,
             get_tail_risk,
             get_credit_spread_read,
+            get_bollinger_pct_b,
+            get_tranche_plan,
+            get_trade_expectancy,
         ]
 
         system_message = (
@@ -120,6 +126,11 @@ You also have decision-grounding tools:
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
 - get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.
 - get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).
+
+You also have value-dip computed tools (the Value Dip + Swing hybrid):
+- get_bollinger_pct_b(ticker) - the deterministic Bollinger %b: price position inside the 20-day 2-sigma band. %b <= 0 = at/piercing the lower band; <= 0.10 is the mean-reversion entry zone. Use it before any 'oversold / at the lower Bollinger / mean-reversion entry' claim.
+- get_tranche_plan(ticker, weights=..., risk_pct=..., account=...) - the 3-tranche scale-in plan (P1/P2/P3 at 1.0/2.0 ATR, weighted avg entry, composite stop P3-1.5ATR, capital-at-risk check, 1.8R/3.0R targets + blended R:R and breakeven win rate). Use its computed levels whenever you propose a scale-in entry for a value dip.
+- get_trade_expectancy(p_win, avg_win, avg_loss, rr=...) - the per-trade expectancy E = p*W - (1-p)*L and breakeven win rate 1/(1+R:R). Use it before any 'this setup has positive expectancy / the win rate needed to break even' claim.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

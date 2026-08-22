@@ -93,12 +93,44 @@ before a breakout (framework Phase 3: 15% -> 8% -> 3%).
   ignored, never a failure)
 - `Brk` column = distance from the close to the base high (the "spring")
 
+## `value-dip` (Value Dip + Swing hybrid)
+
+Buys fundamentally sound assets at a margin of safety into an oversold
+technical dip with a tranche scale-in execution plan and strict portfolio
+risk (`Strategies/Value_Dip_swing.md` + `_Continue.md`). Implemented by
+`tradingagents/strategies/value_dip.py::value_dip_setup`; the candidate gate
+is the hybrid allocation matrix:
+
+- **value floor** - margin of safety >= 20% OR free cash flow yield >= 6%
+  (FCF / market cap from the canonical financials; the screener's intrinsic is
+  unavailable so the floor falls back to FCF yield)
+- **technical entry** - RSI(14) <= 35 AND Bollinger %b <= 0.10 (price near /
+  piercing the lower 2-sigma band)
+- **trade risk** - the 2-ATR stop distance <= 2% of price
+- **exit target** - R:R to the 2.5R target (definitionally true, kept for
+  the audit trail)
+
+Table columns: `VDip` (yes/no candidate), `FCFy` (FCF yield), `RSI` (RSI-14),
+`%b` (Bollinger %b) and `Stp%` (stop distance % of price). The deterministic
+calculators behind the matrix are also exposed as analyst tools
+(`get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy` on the
+market node; `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`
+on the fundamentals node) so the analyst LLMs reason over the same computed
+numbers.
+
 ## `all` (default)
 
 Everything survives; `ScanA`/`ScanB` columns flag trend-pullback and breakout
 setups, `ScanC`/`RS`/`Stp`/`T2` appear when any swing setup is present and
 `VCP`/`Brk` when a volatility-contraction base is detected. A dedicated
 `--scan <mode>` filters to that one setup; `all` only flags.
+
+## Strategy specs
+
+- `Strategies/Value_Dip_swing.md` / `Value_Dip_swing_Continue.md` - the Value
+  Dip + Swing hybrid (margin of safety, valuation Z, FCF yield, RSI/%b entry,
+  tranche scale-in, blended expectancy) -> `strategies/value_dip.py` + the six
+  value-dip analyst tools + `--scan value-dip` (see `Strategies/index.md`).
 
 ## Benchmark note
 

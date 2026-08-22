@@ -281,6 +281,22 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-22 `(working tree)` - Tranche risk fold for the Value Dip + Swing
+  hybrid: `tranche_risk_read` (config-frozen weights/stop/risk/account, never
+  the LLM) feeds the risk governor the worst-case peak-deployed-at-scale-in
+  fraction (per-trade cap) + capital-at-risk budget (sum of per-tranche losses
+  at the hard stop); `build_position_contract` takes a weighted `entry_price`
+  hook; `govern()` gains a `capital_at_risk_pct`/`risk_cap_pct` check; reports
+  show `Tranche peak-deployed` / `Tranche capital-at-risk` in the Risk Gate
+  block. Gated by `enable_tranche_risk` (+ `tranche_*` keys).
+
+- 2026-08-22 `(working tree)` - Value Dip + Swing hybrid: `strategies/value_dip.py`
+  (Bollinger %b, historical valuation Z, FCF yield, breakeven rate / expectancy,
+  tranche scale-in plan, hybrid allocation matrix) + six analyst `@tool`s
+  (market: get_bollinger_pct_b / get_tranche_plan / get_trade_expectancy;
+  fundamentals: get_fcf_yield / get_valuation_z_score / get_value_dip_setup) +
+  `--scan value-dip` screener mode; `enable_value_dip` config gate.
+
 - 2026-08-21 `(working tree)` - Risk Gate renders both CVaRs: with a risk
   basket configured, `5_portfolio/decision.md`'s `Risk Gate (computed)` block
   shows `Analyzed-name CVaR` (the analyzed ticker's own daily tail) next to

@@ -104,6 +104,15 @@ def _risk_gate_block(final_state: dict) -> str:
         parts.append(f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}")
     if ctx.get("book_cvar") is not None:
         parts.append(f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%} — this fed the gate")
+    # Tranche fold: worst-case scale-in measures (config-frozen tranche plan)
+    # that the gate sized/throttled against (Value_Dip_swing_Continue.md).
+    tc = final_state.get("tranche_context") or {}
+    if tc.get("peak_deployed_pct") is not None:
+        parts.append(
+            f"Tranche peak-deployed: {tc['peak_deployed_pct']:.1%} (cap-ok={tc.get('peak_ok')})"
+        )
+    if tc.get("capital_at_risk_pct") is not None:
+        parts.append(f"Tranche capital-at-risk: {tc['capital_at_risk_pct']:.2%}")
     reasons = gate.get("reasons") or []
     if reasons:
         parts.append("Reasons: " + "; ".join(reasons))

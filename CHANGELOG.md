@@ -10,6 +10,44 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Tranche risk fold for the risk governor** - the Value Dip + Swing tranche
+  plan is now a *control* computation, not just a planning one:
+  `strategies/value_dip.py::tranche_risk_read` derives the worst-case measures
+  from the measured close (P1) + config-frozen weights / stop multiple / risk
+  budget / account (never the LLM), and the governor enforces:
+  - **peak-deployed-at-scale-in** (sum of per-tranche capital at full scale-in,
+    typically > risk budget because capital is added near the lows) against the
+    per-trade cap - the missing check neither the standalone tool nor the
+    single-entry governor performed;
+  - **capital-at-risk** (sum of per-tranche losses at the hard stop, == the
+    risk budget by construction) via `govern()`'s new
+    `capital_at_risk_pct`/`risk_cap_pct` check;
+  - `build_position_contract` accepts an `entry_price` hook (the weighted
+    tranche entry) so the G1 dollar stop/risk matches the tranche execution;
+  - the report's `Risk Gate (computed)` block shows `Tranche peak-deployed` /
+    `Tranche capital-at-risk` (+ cap-ok) when the fold ran.
+  Config: `enable_tranche_risk` (default False), `tranche_weights`,
+  `tranche_stop_mult`, `tranche_risk_pct`, `tranche_account` +
+  `TRADINGAGENTS_*` env overrides. Tests: `test_strategies_risk_governor` (5),
+  `test_strategies_contract` (2), `test_strategies_value_dip` (graph wiring,
+  4 + pure 5), `test_reporting` (1).
+
+- **Value Dip + Swing hybrid** - new `tradingagents/strategies/value_dip.py`
+  implements the missing calculations from `Strategies/Value_Dip_swing.md` +
+  `Value_Dip_swing_Continue.md`: Bollinger %b, historical valuation Z-score
+  (vs own trailing P/E / EV/EBITDA / P/FCF), FCF yield, breakeven win rate /
+  per-trade expectancy, the 3-tranche scale-in plan (P1/P2/P3 at 1.0/2.0 ATR,
+  weighted avg entry, composite stop P3-1.5ATR, capital-at-risk check, 1.8R /
+  3.0R targets + blended R:R), and the hybrid allocation matrix
+  (`value_dip_setup`). Exposed as six analyst `@tool`s
+  (`get_bollinger_pct_b` / `get_tranche_plan` / `get_trade_expectancy` on the
+  market node; `get_fcf_yield` / `get_valuation_z_score` / `get_value_dip_setup`
+  on the fundamentals node) and as a new `--scan value-dip` screener mode
+  (`VDip` / `FCFy` / `RSI` / `%b` / `Stp%` columns). Config: `enable_value_dip`
+  (+ `TRADINGAGENTS_ENABLE_VALUE_DIP`). Hermetic tests:
+  `tests/test_strategies_value_dip.py` + `tests/test_analysis_tools.py`
+  (value-dip cases).
+
 - **Risk basket cash-remainder semantics** - `book_risk.portfolio_cvar` now
   treats a weight sum `< 1.0` as "weights + implicit zero-return cash": the raw
   weights are used (not renormalized), so the mixed daily series is scaled by

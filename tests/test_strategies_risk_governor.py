@@ -63,3 +63,42 @@ def test_snapshot_is_compact():
 def test_default_limits():
     limits = default_limits({"max_position_pct": 0.5})
     assert limits["max_position_pct"] == 0.5
+
+
+# --------------------------------------------------------------------------
+# Tranche fold: capital-at-risk budget (Value_Dip_swing_Continue.md)
+# --------------------------------------------------------------------------
+
+
+def test_capital_at_risk_over_budget_rejects():
+    v = govern(0.05, {}, capital_at_risk_pct=0.03, risk_cap_pct=0.015)
+    assert v["verdict"] == "REJECT"
+    assert "capital-at-risk 3.00% > cap 1.50%" in v["reasons"][0]
+
+
+def test_capital_at_risk_within_budget_passes():
+    v = govern(0.05, {}, capital_at_risk_pct=0.012, risk_cap_pct=0.015)
+    assert v["verdict"] == "PASS"
+
+
+def test_capital_at_risk_near_budget_warns():
+    v = govern(0.05, {}, capital_at_risk_pct=0.0142, risk_cap_pct=0.015)
+    assert v["verdict"] == "WARN"
+    assert "near cap" in v["touches"][0]
+
+
+def test_capital_at_risk_skipped_when_none():
+    # backward compat: no args -> unchanged
+    v = govern(0.05, {})
+    assert v["verdict"] == "PASS"
+
+
+def test_snapshot_shows_capital_at_risk():
+    snap = build_risk_snapshot(
+        {"verdict": "WARN", "reasons": []},
+        size_pct=0.05,
+        stop_pct=0.03,
+        cvar_pct=0.02,
+        capital_at_risk_pct=0.014,
+    )
+    assert "cap_at_risk=1.40%" in snap
