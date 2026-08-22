@@ -474,6 +474,9 @@ preserves `Risk Gate (computed)` blocks.
   strategies, agents/tools, entrypoints, persistence, dev guide, tests layout,
   Massive)
 - `docs/massive_integration.md` - the Massive.com add-on plan + entitlement map
+- `docs/pre_market_review.md` - design sketch (no code): a pre-market overnight
+  reviewer that CONFIRMs / REVISEs / REJECTs a prior close-time decision against
+  measured deltas (gap, catalyst window, re-anchored tranche/contract, governor)
 - `docs/developer/11-agent-decision-tools.md` - the six decision-grounding tools
   implemented for the analyst LLMs
 - `docs/developer/12-data-providers.md` - the 13 data providers/sources and
