@@ -25,6 +25,9 @@ __all__ = [
     "reanchor_plan",
     "review_decision",
     "load_prior_state",
+    "parse_planned_levels",
+    "record_review",
+    "resolve_ledger",
 ]
 
 
@@ -404,3 +407,139 @@ def load_prior_state(
         "date": date or (state.get("trade_date", "") if state else ""),
         "log_path": path,
     }
+
+
+def parse_planned_levels(state: dict | None, decision_md: str = "") -> dict:
+    """Extract the prior plan's entry/stop levels for the gap read.
+
+    Reads the TraderProposal markdown stored in ``full_states_log``
+    (``trader_investment_decision`` — ``**Entry Price**: X`` / ``**Stop Loss**: Y``),
+    then falls back to the PM decision / ``position_contract`` overlay string
+    (``stop <n>``) when the trader levels are absent. Returns
+    ``{"entry", "stop"}`` (both may be None — the gap read then degrades to
+    magnitude-only, never fabricated).
+    """
+    import re
+
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    text = decision_md or ""
+    trader = (state or {}).get("trader_investment_decision") or ""
+    overlay = (state or {}).get("strategy_overlays") or {}
+    contract = overlay.get("position_contract") if isinstance(overlay, dict) else None
+    if isinstance(contract, str):
+        text = f"{text}\n{contract}"
+    elif isinstance(contract, dict):
+        text = f"{text}\n{contract.get('text', '')}"
+    if trader:
+        text = f"{trader}\n{text}"
+
+    entry = None
+    m = re.search(r"\*?\*Entry Price\*?\*?[:\s]*([0-9.]+)", text, re.IGNORECASE)
+    if m:
+        entry = _num(m.group(1))
+    stop = None
+    m = re.search(r"\*?\*Stop Loss\*?\*?[:\s]*([0-9.]+)", text, re.IGNORECASE)
+    if m:
+        stop = _num(m.group(1))
+    if stop is None:
+        m = re.search(r"\bstop[:\s]*([0-9.]+)", text, re.IGNORECASE)
+        if m:
+            stop = _num(m.group(1))
+    return {"entry": entry, "stop": stop}
+
+
+# ---------------------------------------------------------------------------
+# Paper-book ledger (feature 3): measure the reviewer, don't just run it
+# ---------------------------------------------------------------------------
+
+
+def record_review(
+    ledger_path: str,
+    *,
+    ticker: str,
+    prior_date: str,
+    trade_date: str,
+    verdict: str,
+    reasons: list[str],
+    gap_pct: float | None = None,
+    catalyst_verdict: str | None = None,
+) -> None:
+    """Append one pre-market review row to the paper-book ledger (JSONL).
+
+    Each row mirrors the memory-log pending pattern: the ``realized_return``
+    field starts None and is filled by :func:`resolve_ledger` on a later run
+    (measured open vs prior close), so the reviewer's CONFIRM/REVISE/REJECT
+    track record is measurable — not a feel-good toggle.
+    """
+    import json
+    import os
+
+    os.makedirs(os.path.dirname(os.path.abspath(ledger_path)), exist_ok=True)
+    row = {
+        "ticker": ticker,
+        "prior_date": prior_date,
+        "trade_date": trade_date,
+        "verdict": verdict,
+        "reasons": reasons or [],
+        "gap_pct": gap_pct,
+        "catalyst_verdict": catalyst_verdict,
+        "realized_return": None,
+    }
+    with open(ledger_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
+def resolve_ledger(ledger_path: str, ticker: str, trade_date: str, open_price: float | None) -> int:
+    """Resolve pending reviews for ``ticker`` with a fresh measured price.
+
+    Sets ``realized_return = (open_price - prior_close)/prior_close`` on every
+    pending (``realized_return is None``) row for the ticker, rewriting the
+    ledger atomically. Returns how many rows were resolved. ``prior_close`` is
+    taken from the row's own ``gap_pct`` + stored trade date (we store the
+    prior close implicitly via the gap and the review open; the realized return
+    is the open move vs the review's prior close). If the row has no ``gap_pct``
+    the realized return is None (nothing to measure).
+
+    This is intentionally cheap and side-effect-light — it makes the paper book
+    a time series, matching the memory-log's pending→resolve loop.
+    """
+    import json
+    import os
+
+    if not os.path.exists(ledger_path):
+        return 0
+    rows = []
+    with open(ledger_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    n_resolved = 0
+    for row in rows:
+        if row.get("ticker") != ticker or row.get("realized_return") is not None:
+            continue
+        gap = row.get("gap_pct")
+        if gap is None or open_price is None:
+            continue
+        # gap = (open_at_review - prior_close)/prior_close  -> prior_close = open/(1+gap)
+        prior_close = open_price / (1.0 + gap) if (1.0 + gap) else None
+        if prior_close:
+            row["realized_return"] = round((open_price - prior_close) / prior_close, 6)
+            row["resolved_date"] = trade_date
+            n_resolved += 1
+    # rewrite atomically
+    tmp = ledger_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    os.replace(tmp, ledger_path)
+    return n_resolved

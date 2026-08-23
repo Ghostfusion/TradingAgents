@@ -336,7 +336,7 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
         )
         from tradingagents.strategies.pre_market import load_prior_state, review_decision
 
-        prior = load_prior_state(report_dir)
+        prior = load_prior_state(report_dir, results_dir=DEFAULT_CONFIG.get("results_dir"))
         decision_text = prior.get("decision_md") or ""
         if not decision_text:
             decision_text = (prior.get("state") or {}).get("final_trade_decision", "")

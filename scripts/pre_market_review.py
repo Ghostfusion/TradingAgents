@@ -32,6 +32,9 @@ import os
 import sys
 from pathlib import Path
 
+from tradingagents.dataflows.config import get_config as _get_config
+from tradingagents.default_config import DEFAULT_CONFIG
+
 # scripts/ is not a package; load like pipeline.py does for value_screener.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -66,23 +69,26 @@ def _fetch_deltas(ticker: str, trade_date: str, prior_date: str, prior_state: di
     """Fetch measured overnight deltas: a price window + B1 catalyst snapshot.
 
     The vendor CSV is ``Date,Open,High,Low,Close,Volume``. ``prior_close`` =
-    the last close on or before ``prior_date``; ``open_price`` = the latest
-    close in the window (today's / pre-market price, which is after
-    ``prior_date`` for a pre-open review). The gap the arbiter computes is
+    the last close on or before ``prior_date``; ``open_price`` is a real-time
+    pre-market/latest price when available (Alpaca 1m snapshot when enabled,
+    else yfinance ``fast_info.last_price``), falling back to the latest daily
+    close. ``atr`` = ATR(14) over the window. The gap the arbiter computes is
     therefore the genuine overnight delta, not a noise artifact.
     """
     from tradingagents.dataflows.interface import route_to_vendor
     from tradingagents.default_config import DEFAULT_CONFIG
     from tradingagents.strategies.catalyst import build_catalyst_snapshot, fetch_catalyst_data
+    from tradingagents.strategies.size import atr as _atr
 
     prior_dt = _dt.date.fromisoformat(prior_date)
-    start = (prior_dt - _dt.timedelta(days=10)).isoformat()
+    start = (prior_dt - _dt.timedelta(days=30)).isoformat()
     end = (_dt.date.fromisoformat(trade_date) + _dt.timedelta(days=1)).isoformat()
-    deltas: dict = {"catalyst": None, "open_price": None, "prior_close": None}
+    deltas: dict = {"catalyst": None, "open_price": None, "prior_close": None, "atr": None}
+    closes, highs, lows = [], [], []
     try:
         out = route_to_vendor("get_stock_data", ticker, start, end) or ""
         prior_close = None
-        latest = None
+        latest_close = None
         for line in out.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or line.lower().startswith("date,"):
@@ -92,17 +98,29 @@ def _fetch_deltas(ticker: str, trade_date: str, prior_date: str, prior_state: di
                 continue
             try:
                 d = parts[0].strip()
+                h = float(parts[2])
+                lo = float(parts[3])
                 c = float(parts[4])
             except (ValueError, IndexError):
                 continue
+            closes.append(c)
+            highs.append(h)
+            lows.append(lo)
             # Last close on or before the prior trade date = the prior close.
             if d <= prior_date and prior_close is None:
                 prior_close = c
-            latest = c
+            latest_close = c
         deltas["prior_close"] = prior_close
-        deltas["open_price"] = latest
+        deltas["open_price"] = latest_close  # daily fallback; overridden below
+        if len(closes) >= 15:
+            deltas["atr"] = _atr(highs, lows, closes, window=14)
     except Exception:  # noqa: BLE001 - degrade like the router
         deltas["open_price"] = None
+
+    # Defect-4 / feature-1: prefer a real-time pre-market/latest price.
+    realtime = _realtime_price(ticker)
+    if realtime is not None:
+        deltas["open_price"] = realtime
 
     try:
         data = fetch_catalyst_data(ticker, trade_date)
@@ -110,7 +128,67 @@ def _fetch_deltas(ticker: str, trade_date: str, prior_date: str, prior_state: di
             deltas["catalyst"] = build_catalyst_snapshot(data, trade_date, DEFAULT_CONFIG)
     except Exception:  # noqa: BLE001
         deltas["catalyst"] = None
+
+    # Feature 5: guarded headline delta for the reviewer's context (never a hard
+    # gate — titles only, degrades to []).
+    deltas["news_titles"] = _headline_delta(ticker, start, end)
     return deltas
+
+
+def _headline_delta(ticker: str, start: str, end: str, limit: int = 3) -> list[str]:
+    """First ``limit`` overnight headlines for the reviewer context (feature 5).
+
+    Uses the configured news chain (moomoo/yfinance/...); any failure degrades to
+    [] (the reviewer then has no news line — never a fabricated headline).
+    """
+    try:
+        from tradingagents.dataflows.interface import route_to_vendor
+
+        out = route_to_vendor("get_news", ticker, start, end) or ""
+        titles = []
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("-"):
+                cand = line.lstrip("- ").strip().strip("*").strip()
+                if len(cand) > 8 and cand not in titles:
+                    titles.append(cand)
+            if len(titles) >= limit:
+                break
+        return titles
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _realtime_price(ticker: str) -> float | None:
+    """A real-time/latest pre-market price, guarded by source.
+
+    Order: Alpaca 1-minute snapshot (when ``enable_alpaca``) -> yfinance
+    ``fast_info.last_price`` -> None (caller keeps the daily close). Any
+    failure degrades to None; never raises, never invents.
+    """
+    try:
+        cfg = _get_config()
+        if cfg.get("enable_alpaca"):
+            from tradingagents.dataflows.alpaca import get_intraday as _ai
+
+            snap = _ai([ticker])
+            price = (snap or {}).get(ticker, {}).get("price")
+            if price:
+                return float(price)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import yfinance as yf
+
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        fi = yf.Ticker(normalize_symbol(ticker)).fast_info
+        price = fi.get("last_price") if hasattr(fi, "get") else getattr(fi, "last_price", None)
+        if price and price > 0:
+            return float(price)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 def _extract_prior_close(state: dict) -> float | None:
@@ -138,6 +216,8 @@ def _build_summary(deltas: dict, verdict: dict) -> str:
             f"- re-anchored: entry {ra.get('avg_entry')} stop {ra.get('stop')} "
             f"peak-deployed {ra.get('peak_deployed_pct', 0):.1%}"
         )
+    if (deltas or {}).get("news_titles"):
+        lines.append("- overnight headlines: " + " | ".join(deltas["news_titles"]))
     if not lines:
         lines.append("- no measurable overnight gap / catalyst delta")
     return "\n".join(lines)
@@ -159,23 +239,41 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no prior report found for {args.ticker}", file=sys.stderr)
         return 3
 
-    from tradingagents.strategies.pre_market import load_prior_state, review_decision
+    from tradingagents.strategies.pre_market import (
+        load_prior_state,
+        parse_planned_levels,
+        reanchor_plan,
+        review_decision,
+    )
 
     prior = load_prior_state(report_dir, args.prior_date)
     if not prior["state"]:
         print(f"[warn] no full_states_log for {args.ticker} in {report_dir}; using decision.md only")
 
     deltas = _fetch_deltas(args.ticker, trade_date, args.prior_date or trade_date, prior)
-    verdict = review_decision(
-        prior_close=deltas.get("prior_close"),
-        open_price=deltas.get("open_price"),
-        catalyst_snapshot=deltas.get("catalyst"),
-    )
-    summary = _build_summary(deltas, verdict)
-
     decision_text = prior["decision_md"] or (prior["state"] or {}).get(
         "final_trade_decision", ""
     )
+    # Defect-1 fix: extract the prior plan's entry/stop and re-anchor the
+    # tranche plan to the measured open so the gap/through-stop/adverse-fill
+    # checks (and the re-anchored REVISE levels) actually run.
+    planned = parse_planned_levels(prior.get("state") or {}, decision_text)
+    anchor = reanchor_plan(
+        deltas.get("open_price"),
+        deltas.get("atr"),
+        max_position_pct=float(DEFAULT_CONFIG.get("max_position_pct", 0.30)),
+        max_book_position_pct=float(DEFAULT_CONFIG.get("risk_max_position_pct", 0.45)),
+    )
+    verdict = review_decision(
+        prior_close=deltas.get("prior_close"),
+        open_price=deltas.get("open_price"),
+        prior_stop=planned.get("stop"),
+        entry_price=planned.get("entry"),
+        atr_value=deltas.get("atr"),
+        catalyst_snapshot=deltas.get("catalyst"),
+        reanchor=anchor,
+    )
+    summary = _build_summary(deltas, verdict)
 
     reviewed = None
     if not args.skip_llm:
@@ -183,7 +281,6 @@ def main(argv: list[str] | None = None) -> int:
             from tradingagents.agents.overrides.pre_market_reviewer import (
                 create_pre_market_reviewer,
             )
-            from tradingagents.default_config import DEFAULT_CONFIG
             from tradingagents.llm_clients.factory import create_llm_client
 
             client = create_llm_client(
@@ -228,6 +325,27 @@ def main(argv: list[str] | None = None) -> int:
     out_path = out_dir / f"pre_market_review_{trade_date}.md"
     out_path.write_text(out_text, encoding="utf-8")
     print(f"wrote {out_path}")
+
+    # Feature 3: paper-book ledger — one row per review; resolved next review.
+    try:
+        from tradingagents.strategies.pre_market import record_review, resolve_ledger
+
+        ledger_path = os.path.join(DEFAULT_CONFIG["data_cache_dir"], "pre_market_ledger.jsonl")
+        record_review(
+            ledger_path,
+            ticker=args.ticker,
+            prior_date=args.prior_date or trade_date,
+            trade_date=trade_date,
+            verdict=final_verdict,
+            reasons=verdict.get("reasons") or [],
+            gap_pct=(verdict.get("gap") or {}).get("gap_pct"),
+            catalyst_verdict=(verdict.get("catalyst") or {}).get("verdict"),
+        )
+        n = resolve_ledger(ledger_path, args.ticker, trade_date, deltas.get("open_price"))
+        if n:
+            print(f"[ledger] resolved {n} prior review(s) for {args.ticker}")
+    except Exception as exc:  # noqa: BLE001 - ledger is best-effort
+        print(f"[ledger] skipped for {args.ticker}: {exc}")
 
     return 0 if final_verdict != "REJECT" else 2
 

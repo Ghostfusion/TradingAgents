@@ -33,6 +33,30 @@ Breaking changes within the 0.x line are called out explicitly.
   Config: `enable_pre_market_review` (+ `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW`).
   Tests: `test_strategies_pre_market` (pure, 19) + `test_pre_market_review`
   (script + batch, 3). Docs: `docs/pre_market_review.md` status -> implemented.
+- **Pre-market review follow-up: defect fixes + 6 features** -
+  - Fix 1: the standalone script now extracts the prior plan's entry/stop
+    (`parse_planned_levels`) and re-anchors the tranche plan to the measured
+    open, so the gap / through-stop / adverse-fill / cap-breach checks in
+    `review_decision` actually run (previously the stand-alone passed no
+    `prior_stop`/`reanchor` and degenerated to catalyst-only).
+  - Fix 2: `batch._batch_pre_market_check` passes `results_dir`, so the
+    same-night step finds the full state JSON (not just `decision.md`).
+  - Fix 4 (+ feature 1): `_fetch_deltas` prefers a real-time pre-market price
+    (Alpaca `get_intraday` when `enable_alpaca`, else yfinance
+    `fast_info.last_price`) over the daily close, and adds ATR(14).
+  - Feature 2: `scripts/nightly_review.py` drives pre-open reviews from the
+    latest `reports/batch_summary_*.jsonl`.
+  - Feature 3: paper-book ledger (`data_cache_dir/pre_market_ledger.jsonl`)
+    via `record_review` / `resolve_ledger` (pending -> realized return).
+  - Feature 4: `scripts/decision_history.py` prints a per-ticker decision
+    series from the per-date `full_states_log_*.json` files.
+  - Feature 5: guarded overnight-headline context (`_headline_delta`) into the
+    reviewer summary (never a hard gate, titles only).
+  - Feature 6: scheduler notes (cron / Task Scheduler) in
+    `docs/pre_market_review.md` §15.
+  Tests: `test_strategies_pre_market` + `test_pre_market_review` extended
+  (planned-levels parse, results_dir lookup, headline delta, decision history,
+  nightly driver). Full suite green; ruff clean.
 
 ### Fixed
 

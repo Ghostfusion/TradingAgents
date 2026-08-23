@@ -43,6 +43,16 @@
   `scripts/pre_market_review.py` for the pre-open gap/anchor path, and an
   opt-in same-night `batch.py` step (`enable_pre_market_review`). Design in
   `docs/pre_market_review.md`.
+- [2026-08-22] **Pre-market review follow-up (fixes + features)** - defect
+  fixes: the standalone script now extracts the prior plan's entry/stop and
+  re-anchors the tranche plan to the measured open (gap/through-stop/adverse-fill
+  checks actually run), the batch hook passes `results_dir` so it finds the
+  full state JSON, and `_fetch_deltas` prefers a real-time pre-market price
+  (Alpaca when enabled else yfinance `fast_info.last_price`) + ATR(14).
+  Features: `scripts/nightly_review.py` (drive reviews from the batch summary),
+  a paper-book ledger (`pre_market_ledger.jsonl` with pending->realized
+  resolution), guarded overnight-headline context for the reviewer, and
+  `scripts/decision_history.py` (per-ticker decision series).
 
 - [2026-08-22] **Blank-symbol yfinance hardening** - a whitespace/empty ticker
   (e.g. a malformed LLM tool call in `batch.py --symbols ...`) previously

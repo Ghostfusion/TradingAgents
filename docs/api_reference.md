@@ -478,9 +478,11 @@ preserves `Risk Gate (computed)` blocks.
 - `docs/pre_market_review.md` - design + **implemented** (choice (a)): a pre-market overnight
   reviewer that CONFIRMs / REVISEs / REJECTs a prior close-time decision against
   measured deltas (gap, catalyst window, re-anchored tranche/contract, governor)
-  — `strategies/pre_market.py` (deterministic arbiter) + `scripts/pre_market_review.py`
-  (standalone pre-open) + the opt-in `batch.py` same-night step
-  (`enable_pre_market_review`).
+  — `strategies/pre_market.py` (deterministic arbiter + paper-book ledger) +
+  `scripts/pre_market_review.py` (standalone pre-open; real pre-market quote,
+  planned-level re-anchor), `scripts/nightly_review.py` (batch-summary driver),
+  `scripts/decision_history.py` (decision series), and the opt-in `batch.py`
+  same-night step (`enable_pre_market_review`).
 - `docs/developer/11-agent-decision-tools.md` - the six decision-grounding tools
   implemented for the analyst LLMs
 - `docs/developer/12-data-providers.md` - the 13 data providers/sources and

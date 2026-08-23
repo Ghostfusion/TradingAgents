@@ -215,3 +215,80 @@ def test_load_prior_state_reads_log_and_decision(tmp_path):
     assert out["state"] is not None
     assert out["state"]["final_trade_decision"] == "**Rating**: Buy"
     assert out["date"] == "2026-08-21"
+
+
+# ---------------------------------------------------------------------------
+# Defect-1 fix: planned entry/stop extraction for the gap/through-stop checks
+# ---------------------------------------------------------------------------
+
+
+def test_parse_planned_levels_from_trader_plan():
+    from tradingagents.strategies.pre_market import parse_planned_levels
+
+    state = {
+        "trader_investment_decision": "**Action**: Buy\n**Entry Price**: 102.0\n**Stop Loss**: 96.5"
+    }
+    p = parse_planned_levels(state, "**Rating**: Buy")
+    assert p["entry"] == pytest.approx(102.0)
+    assert p["stop"] == pytest.approx(96.5)
+
+
+def test_parse_planned_levels_overlay_fallback():
+    from tradingagents.strategies.pre_market import parse_planned_levels
+
+    state = {"strategy_overlays": {"position_contract": "size 10.0%, stop 95.0, reason: kelly"}}
+    p = parse_planned_levels(state, "**Rating**: Buy")
+    assert p["entry"] is None  # no entry in the overlay
+    assert p["stop"] == pytest.approx(95.0)
+
+
+def test_parse_planned_levels_missing_returns_none():
+    from tradingagents.strategies.pre_market import parse_planned_levels
+
+    p = parse_planned_levels({"trader_investment_decision": "**Action**: HOLD"}, "")
+    assert p == {"entry": None, "stop": None}
+
+
+def test_review_uses_planned_stop_for_through_stop():
+    # Regression: prior_stop must feed the gap read (defect-1 wiring).
+    v = review_decision(
+        prior_close=100.0,
+        open_price=95.0,
+        prior_stop=96.5,
+        entry_price=102.0,
+        atr_value=4.0,
+    )
+    assert v["verdict"] == "REJECT"
+    assert v["gap"]["through_stop"] is True
+
+
+# ---------------------------------------------------------------------------
+# Defect-2 fix: load_prior_state finds the JSON under an explicit results_dir
+# ---------------------------------------------------------------------------
+
+
+def test_load_prior_state_with_results_dir(tmp_path):
+    logs = tmp_path / "logs" / "EIX" / "TradingAgentsStrategy_logs"
+    logs.mkdir(parents=True)
+    (logs / "full_states_log_2026-08-21.json").write_text(
+        json.dumps(
+            {
+                "company_of_interest": "EIX",
+                "trade_date": "2026-08-21",
+                "final_trade_decision": "**Rating**: Buy",
+                "trader_investment_decision": "**Entry Price**: 102.0\n**Stop Loss**: 96.5",
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = tmp_path / "reports" / "EIX_20260821_181500"
+    report.mkdir(parents=True)
+    (report / "5_portfolio").mkdir()
+    (report / "5_portfolio" / "decision.md").write_text("**Rating**: Buy\n", encoding="utf-8")
+
+    out = load_prior_state(str(report), results_dir=str(tmp_path / "logs"))
+    assert out["state"] is not None
+    assert out["state"]["final_trade_decision"] == "**Rating**: Buy"
+    # defect-1 levels parse straight out of the located JSON
+    p = {"entry": out["state"]["trader_investment_decision"].split("Entry Price**: ")[1].split()[0]}
+    assert float(p["entry"]) == pytest.approx(102.0)

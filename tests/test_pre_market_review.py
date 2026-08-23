@@ -5,9 +5,13 @@ same-night in-batch path (``batch._batch_pre_market_check``). Every vendor call
 is mocked; no network. Each test inherits the pytest-timeout deadline.
 """
 
+import json
 import os
 import sys
+import types
 from unittest import mock
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -111,3 +115,114 @@ def test_batch_same_night_factor_unavailable_never_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(batch, "DEFAULT_CONFIG", {"enable_pre_market_review": True})
     # Must not raise: the batch symbol must not be marked failed by the review.
     batch._batch_pre_market_check("EIX", str(report), "2026-08-21")
+
+
+
+
+# Explicit timer for this module (repo default is 180s/test; keep it visible).
+pytestmark = pytest.mark.timeout(180)
+
+
+def _load_script_module():
+    import importlib.util
+
+    for name in ("pre_market_review", "pre_market_review_mod"):
+        if name in sys.modules:
+            del sys.modules[name]
+    path = os.path.join(os.path.dirname(__file__), "..", "scripts", "pre_market_review.py")
+    spec = importlib.util.spec_from_file_location("pre_market_review_mod", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_headline_delta_parses_titles():
+    mod = _load_script_module()
+    fake_news = (
+        "- **Edison beats earnings** (2026-08-22)\n"
+        "- **Sempra dividend raised**\n"
+    )
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=lambda method, *a, **k: fake_news if method == "get_news" else "NO_DATA_AVAILABLE",
+    ):
+        titles = mod._headline_delta("EIX", "2026-08-16", "2026-08-22", limit=2)
+    assert len(titles) == 2
+    assert "Edison beats earnings" in titles[0]
+
+
+def test_headline_delta_degrades_to_empty():
+    mod = _load_script_module()
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+    ):
+        assert mod._headline_delta("EIX", "2026-08-16", "2026-08-22") == []
+
+
+def test_decision_history_reads_logs(tmp_path):
+    logs_dir = tmp_path / "EIX" / "TradingAgentsStrategy_logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "full_states_log_2026-08-20.json").write_text(
+        json.dumps(
+            {
+                "company_of_interest": "EIX",
+                "trade_date": "2026-08-20",
+                "final_trade_decision": "**Rating**: Buy\n**Executive Summary**: x",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "full_states_log_2026-08-21.json").write_text(
+        json.dumps(
+            {
+                "company_of_interest": "EIX",
+                "trade_date": "2026-08-21",
+                "final_trade_decision": "**Rating**: Hold\n**Executive Summary**: y",
+            }
+        ),
+        encoding="utf-8",
+    )
+    from scripts.decision_history import history_for
+
+    rows = history_for("EIX", str(tmp_path))
+    assert [r["date"] for r in rows] == ["2026-08-20", "2026-08-21"]
+    assert rows[0]["rating"] == "Buy"
+    assert rows[1]["rating"] == "Hold"
+
+
+def test_decision_history_missing_returns_empty(tmp_path):
+    from scripts.decision_history import history_for
+
+    assert history_for("NOPE", str(tmp_path)) == []
+
+
+def test_nightly_review_drives_from_summary(tmp_path, monkeypatch):
+    """The batch-summary driver calls the review per symbol and maps REJECTs."""
+    import scripts.nightly_review as nr
+
+    summary = tmp_path / "batch_summary_20260822_190000.jsonl"
+    summary.write_text(
+        json.dumps({"symbol": "EIX", "report_dir": str(tmp_path / "EIX_20260821_181500"), "depth": "deep"})
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "EIX_20260821_181500" / "5_portfolio").mkdir(parents=True)
+    (tmp_path / "EIX_20260821_181500" / "5_portfolio" / "decision.md").write_text(
+        "**Rating**: Buy\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    called = []
+
+    def fake_main(argv):
+        called.append(argv)
+        return 2  # simulate a REJECT review
+
+    fake_mod = types.ModuleType("pre_market_review_mod")
+    fake_mod.main = fake_main
+    monkeypatch.setattr(nr, "_load_pre_market_script", lambda: fake_mod)
+    rc = nr.main(["--summary", str(summary), "--skip-llm", "--dry-run"])
+    assert rc == 2
+    assert len(called) == 1
+    assert "--ticker" in called[0] and "EIX" in called[0]

@@ -2,10 +2,14 @@
 
 **Status:** design sketch → **implemented** (choice (a): same-night in-batch
 catalyst/quality re-check + standalone pre-open gap/anchor script). Build map
-in §12; entry points: `scripts/pre_market_review.py` and the opt-in
-`batch.py` same-night step (`enable_pre_market_review`). This doc now records
-what shipped and the seams it uses, so the build-from-here checklist is
-reality, not plan.
+in §12; entry points: `scripts/pre_market_review.py`, `scripts/nightly_review.py`
+(driver), `scripts/decision_history.py` (series), and the opt-in `batch.py`
+same-night step (`enable_pre_market_review`). Follow-up fixes & features
+shipped 2026-08-22: real-time pre-market quote (defect-4 fix), planned-entry/
+stop extraction + tranche re-anchor in the standalone path (defect-1 fix),
+batch `results_dir` wiring (defect-2), a paper-book ledger
+(`pre_market_ledger.jsonl`, feature 3), guarded overnight-headline context for
+the reviewer (feature 5), and scheduler notes (§15, feature 6).
 
 ---
 
@@ -259,7 +263,11 @@ never an opaque LLM decision.
 | Tranche re-anchor | `strategies/value_dip.py::tranche_plan/tranche_risk_read` (measured P1, config-frozen params) |
 | Contract re-anchor | `strategies/contract.py::build_position_contract(entry_price=...)` |
 | Governor gate | `strategies/risk_governor.py::govern(... capital_at_risk_pct=..., risk_cap_pct=...)` |
-| Overnight news/filings/ratings | news chain + `get_massive_news`, `get_sec_filings`, `get_analyst_ratings` |
+| Overnight news/filings/ratings | news chain + `get_massive_news`, `get_sec_filings`, `get_analyst_ratings` (headline context via `_headline_delta`, feature 5) |
+| Real-time pre-market price | Alpaca `get_intraday` (when enabled) else yfinance `fast_info.last_price` else daily close (`_realtime_price`) |
+| Pre-open batch driver | `scripts/nightly_review.py` (reads `reports/batch_summary_*.jsonl`; feature 2) |
+| Paper-book ledger | `strategies/pre_market.py::record_review/resolve_ledger` → `data_cache_dir/pre_market_ledger.jsonl` (feature 3) |
+| Decision history series | `scripts/decision_history.py` (reads per-ticker `full_states_log_*.json`; feature 4) |
 | Macro stress | `get_credit_spread_read` (FRED) |
 | Structured verdict | `agents/schemas.py` pydantic pattern + free-text fallback |
 | Memory loop | `memory.py` pending→resolve (`_resolve_pending_entries`) |
@@ -304,3 +312,28 @@ tightening** and **gap risk**, both fully deterministic. The one thing that
 must stay true is the guardrail: **REVISE/REJECT only on measured deltas,
 CONFIRM by default** — otherwise the reviewer becomes opinion drift instead of
 a risk control.
+## 15. Operationalizing the two-point-in-time design (feature 6 — schedulers)
+
+Choice (a) is a **two-step daily cadence**: a close-time batch + a pre-open
+review. Wire it with a scheduler:
+
+**Linux cron (crontab)**
+```cron
+# 17:35 after US close on weekdays -> nightly close-time batch (example)
+35 17 * * 1-5  cd /path/to/TradingAgents && py -3.12 batch.py --symbols "$(cat universe.txt)" --depth deep
+# 07:35 before the open -> pre-open review of the whole batch
+35 7  * * 1-5  cd /path/to/TradingAgents && py -3.12 scripts/nightly_review.py
+```
+
+**Windows Task Scheduler**
+- Task 1: `py -3.12 batch.py --symbols ... --depth deep` at 17:35 weekday.
+- Task 2: `py -3.12 scripts/nightly_review.py` at 07:35 weekday (uses the
+  latest `reports/batch_summary_*.jsonl`, so it needs no args).
+
+Notes
+- Skip review on weekends/holidays via the *weekday* (`1-5`) schedule; the
+  script itself also degrades to CONFIRM when there is no quote.
+- `nightly_review.py` reads the latest batch summary; run it **before the
+  open** so the gap read reflects the pre-market price (see §10).
+- All runs are `py -3.12` (the environment with pytest/deps; bare `python` is
+  the wrong venv on this machine — `docs/AGENT_ONBOARDING.md` §1).
