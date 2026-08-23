@@ -74,6 +74,7 @@ in `batch.py`).
 | `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` |
 | `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
 | `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
+| `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
 | `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
 | `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |
 | `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` |
@@ -474,9 +475,12 @@ preserves `Risk Gate (computed)` blocks.
   strategies, agents/tools, entrypoints, persistence, dev guide, tests layout,
   Massive)
 - `docs/massive_integration.md` - the Massive.com add-on plan + entitlement map
-- `docs/pre_market_review.md` - design sketch (no code): a pre-market overnight
+- `docs/pre_market_review.md` - design + **implemented** (choice (a)): a pre-market overnight
   reviewer that CONFIRMs / REVISEs / REJECTs a prior close-time decision against
   measured deltas (gap, catalyst window, re-anchored tranche/contract, governor)
+  — `strategies/pre_market.py` (deterministic arbiter) + `scripts/pre_market_review.py`
+  (standalone pre-open) + the opt-in `batch.py` same-night step
+  (`enable_pre_market_review`).
 - `docs/developer/11-agent-decision-tools.md` - the six decision-grounding tools
   implemented for the analyst LLMs
 - `docs/developer/12-data-providers.md` - the 13 data providers/sources and

@@ -8,6 +8,32 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **Pre-market review (overnight reviewer)** - closes the gap between a
+  close-time decision and the next open (design `docs/pre_market_review.md`,
+  choice (a)):
+  - `strategies/pre_market.py` - deterministic deltas + verdict arbiter:
+    `premarket_gap` (gap % / ATR, through-stop / adverse-fill detection),
+    `catalyst_window_read` (B1 hard-block / window tighten),
+    `reanchor_plan` (tranche re-anchor with per-trade + book caps),
+    `review_decision` (CONFIRM / REVISE / REJECT from measured deltas only),
+    `load_prior_state` (fail-open loader for `full_states_log_*.json` +
+    `5_portfolio/decision.md`).
+  - `PreMarketVerdict` schema + `agents/overrides/pre_market_reviewer.py` - a
+    deep-think prompt variant (reuses the PM's LLM; no new graph node) that reads
+    the prior decision + a number-only deltas summary and emits a structured
+    verdict; the deterministic REJECT is never downgraded by the LLM.
+  - `scripts/pre_market_review.py` - standalone pre-open path (gap/anchor),
+    default = newest report folder, `--prior-date` / `--report-dir` overrides,
+    `--skip-llm` (deterministic only) / `--dry-run`.
+  - `batch.py` - opt-in same-night step (`enable_pre_market_review`): after each
+    symbol's report, a catalyst/quality re-check writes `pre_market_review_<date>.md`
+    next to the report; never fails the symbol.
+  Config: `enable_pre_market_review` (+ `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW`).
+  Tests: `test_strategies_pre_market` (pure, 19) + `test_pre_market_review`
+  (script + batch, 3). Docs: `docs/pre_market_review.md` status -> implemented.
+
 ### Fixed
 
 - **Blank-symbol yfinance hardening** - a whitespace/empty ticker reaching a

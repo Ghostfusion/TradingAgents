@@ -413,3 +413,77 @@ def _computed_line(report) -> str:
     elif report.sample_size is not None:
         extra += f" (n={report.sample_size})"
     return f"**Computed Sentiment:** {extra}"
+
+
+# ---------------------------------------------------------------------------
+# Pre-Market Reviewer
+# ---------------------------------------------------------------------------
+
+
+class PreMarketVerdict(BaseModel):
+    """Structured verdict produced by the pre-market reviewer (design
+    ``docs/pre_market_review.md`` §7).
+
+    Re-validates a prior close-time decision against measured overnight
+    deltas. ``CONFIRM`` = the prior decision still stands; ``REVISE`` = keep
+    the idea but re-anchor entry/stop/size to the open; ``REJECT`` = drop the
+    plan (gap through the stop, catalyst hard block, or a cap breach on the
+    re-anchored size). Every reason must cite a measured delta — a no-fabrication
+    rule identical to the analyst tools; when nothing measurable changed the
+    verdict must be ``CONFIRM``.
+    """
+
+    verdict: Literal["CONFIRM", "REVISE", "REJECT"] = Field(
+        description=(
+            "Exactly one of CONFIRM (the prior decision still stands), REVISE "
+            "(keep the idea but re-anchor entry/stop/size to the measured open), "
+            "or REJECT (drop the plan - gap through the stop, catalyst hard "
+            "block, or a re-anchored size cap breach). Default to CONFIRM when "
+            "nothing measurable changed."
+        ),
+    )
+    entry_price: float | None = Field(
+        default=None,
+        description="Re-anchored entry price (usually the pre-market/open price) when REVISE.",
+    )
+    stop_loss: float | None = Field(
+        default=None,
+        description="Re-anchored stop-loss price when REVISE.",
+    )
+    position_size: float | None = Field(
+        default=None,
+        description="Re-anchored position size as a fraction (0..1) when REVISE; None = keep prior size.",
+    )
+    reasons: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every reason must cite a measured delta (gap % / ATR, catalyst "
+            "window days, re-anchored capital-at-risk). Empty reasons are only "
+            "allowed for CONFIRM."
+        ),
+    )
+    catalyst_days_to_print: int | None = Field(
+        default=None,
+        description="Days until the next scheduled earnings print, when known.",
+    )
+
+    @field_validator("entry_price", "stop_loss", "position_size", mode="before")
+    @classmethod
+    def _nullish_float_to_none(cls, v):
+        return _coerce_optional_float(v)
+
+
+def render_pre_market_verdict(verdict: PreMarketVerdict) -> str:
+    """Render a PreMarketVerdict to the markdown the saved report consumes."""
+    parts = [f"**Verdict**: {verdict.verdict}"]
+    if verdict.entry_price is not None:
+        parts.append(f"**Entry Price**: {verdict.entry_price}")
+    if verdict.stop_loss is not None:
+        parts.append(f"**Stop Loss**: {verdict.stop_loss}")
+    if verdict.position_size is not None:
+        parts.append(f"**Position Size**: {verdict.position_size:.2%}")
+    if verdict.catalyst_days_to_print is not None:
+        parts.append(f"**Days to Earnings**: {verdict.catalyst_days_to_print}")
+    if verdict.reasons:
+        parts.append("**Reasons**: " + "; ".join(verdict.reasons))
+    return "\n".join(parts)

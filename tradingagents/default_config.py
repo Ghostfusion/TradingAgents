@@ -83,6 +83,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_TRANCHE_STOP_MULT": "tranche_stop_mult",
     "TRADINGAGENTS_TRANCHE_RISK_PCT": "tranche_risk_pct",
     "TRADINGAGENTS_TRANCHE_ACCOUNT": "tranche_account",
+    # Pre-market review (docs/pre_market_review.md): opt-in gate for the
+    # in-batch same-night catalyst/quality re-check (choice (a)).
+    "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
 }
 
 
@@ -364,6 +367,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "tranche_stop_mult": 1.5,
         "tranche_risk_pct": 0.015,
         "tranche_account": 100_000.0,
+        # Pre-market review (docs/pre_market_review.md, choice (a)): when on,
+        # batch.py writes a same-night catalyst/quality re-check
+        # (pre_market_review_<date>.md) next to each report. The pre-open gap /
+        # re-anchor path stays the standalone scripts/pre_market_review.py.
+        "enable_pre_market_review": False,
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

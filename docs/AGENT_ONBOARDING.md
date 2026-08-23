@@ -283,6 +283,14 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-22 `(working tree)` - Pre-market review (design `docs/pre_market_review.md`):
+  deterministic arbiter `strategies/pre_market.py` (gap / catalyst-window /
+  re-anchored tranche / cap breach -> CONFIRM/REVISE/REJECT), `PreMarketVerdict`
+  schema + `agents/overrides/pre_market_reviewer.py` (deep-think prompt variant,
+  no new graph node), standalone `scripts/pre_market_review.py` (pre-open,
+  `--report-dir` / `--prior-date` / `--skip-llm` / `--dry-run`), and the opt-in
+  same-night `batch.py` step (`enable_pre_market_review`).
+
 - 2026-08-22 `(working tree)` - Blank-symbol hardening: a whitespace/empty
   ticker reaching a yfinance entry point (e.g. a malformed LLM tool call in
   ``batch.py --symbols ...``) previously leaked a raw TypeError + noisy

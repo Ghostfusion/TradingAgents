@@ -1,0 +1,217 @@
+"""Pre-market review deterministic layer - pure/offline tests.
+
+Covers tradingagents/strategies/pre_market.py: the gap read, catalyst-window
+re-check, re-anchored tranche plan, and the CONFIRM/REVISE/REJECT arbiter, plus
+the prior-state loader. Every test inherits the repo's pytest-timeout deadline
+(180s per-test / 30-min session) so a hung call can never block the session.
+"""
+
+import json
+
+import pytest
+
+from tradingagents.strategies.pre_market import (
+    catalyst_window_read,
+    load_prior_state,
+    premarket_gap,
+    reanchor_plan,
+    review_decision,
+)
+
+# ---------------------------------------------------------------------------
+# Gap read
+# ---------------------------------------------------------------------------
+
+
+def test_gap_normal_favorable():
+    g = premarket_gap(100.0, 103.0, prior_stop=96.5, entry_price=102.0, atr=4.0)
+    assert g["gap_pct"] == pytest.approx(0.03)
+    assert g["gap_atr"] == pytest.approx(0.75)
+    assert g["through_stop"] is False
+    assert g["vacuum_to_stop"] is False
+    assert g["direction"] == "long"
+
+
+def test_gap_through_stop():
+    g = premarket_gap(100.0, 95.0, prior_stop=96.5, entry_price=102.0, atr=4.0)
+    assert g["through_stop"] is True
+    assert g["gap_pct"] == pytest.approx(-0.05)
+    assert g["gap_atr"] == pytest.approx(-1.25)
+
+
+def test_gap_adverse_fill_zone():
+    g = premarket_gap(100.0, 98.0, prior_stop=96.5, entry_price=102.0, atr=4.0)
+    assert g["through_stop"] is False
+    assert g["vacuum_to_stop"] is True  # filled between entry and stop on the adverse side
+
+
+def test_gap_missing_quote_none():
+    g = premarket_gap(None, 100.0)
+    assert g["gap_pct"] is None
+    assert g["gap_atr"] is None
+
+
+# ---------------------------------------------------------------------------
+# Catalyst window re-check
+# ---------------------------------------------------------------------------
+
+
+def test_catalyst_no_imminent():
+    out = catalyst_window_read({"verdict": "no-imminent-catalyst", "scale": 1.0})
+    assert out["hard_block"] is False
+    assert out["tightened"] is False
+
+
+def test_catalyst_window_tightens():
+    out = catalyst_window_read({"verdict": "earnings-window", "scale": 0.5})
+    assert out["tightened"] is True
+    assert out["hard_block"] is False
+
+
+def test_catalyst_hard_block():
+    snap = {
+        "verdict": "earnings-hard-block",
+        "scale": 0.0,
+        "hard_block": {"days_until": 2, "earnings_date": "2026-08-25", "window_days": 5},
+    }
+    out = catalyst_window_read(snap)
+    assert out["hard_block"] is True
+    assert out["days_until"] == 2
+    assert out["scale"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Re-anchored tranche plan
+# ---------------------------------------------------------------------------
+
+
+def test_reanchor_valid_and_caps():
+    r = reanchor_plan(103.0, 4.0, max_position_pct=0.30, max_book_position_pct=0.45)
+    assert r["valid"]
+    assert r["avg_entry"] > 0
+    assert r["stop"] < r["avg_entry"]
+    assert r["cap_ok"] is True
+    assert r["book_ok"] is True
+    assert r["peak_deployed_pct"] is not None
+
+
+def test_reanchor_tight_cap_breaches():
+    r = reanchor_plan(95.0, 1.0, max_position_pct=0.02)
+    assert r["valid"]
+    assert r["cap_ok"] is False
+
+
+def test_reanchor_no_price_invalid():
+    assert reanchor_plan(None, 4.0)["valid"] is False
+    assert reanchor_plan(103.0, None)["valid"] is False
+
+
+# ---------------------------------------------------------------------------
+# The deterministic verdict arbiter
+# ---------------------------------------------------------------------------
+
+
+def test_same_night_no_deltas_confirm():
+    v = review_decision(catalyst_snapshot=None)
+    assert v["verdict"] == "CONFIRM"
+    assert v["reasons"]
+
+
+def test_same_night_hard_block_reject():
+    snap = {
+        "verdict": "earnings-hard-block",
+        "scale": 0.0,
+        "hard_block": {"days_until": 1, "earnings_date": "2026-08-25", "window_days": 5},
+    }
+    v = review_decision(catalyst_snapshot=snap)
+    assert v["verdict"] == "REJECT"
+    assert any("hard block" in r for r in v["reasons"])
+
+
+def test_same_night_window_revise():
+    v = review_decision(catalyst_snapshot={"verdict": "earnings-window", "scale": 0.5})
+    assert v["verdict"] == "REVISE"
+    assert any("window" in r for r in v["reasons"])
+
+
+def test_pre_open_gap_through_stop_rejects():
+    v = review_decision(
+        prior_close=100.0,
+        open_price=95.0,
+        prior_stop=96.5,
+        entry_price=102.0,
+        atr_value=4.0,
+    )
+    assert v["verdict"] == "REJECT"
+    assert v["gap"]["through_stop"] is True
+    assert any("stop" in r.lower() for r in v["reasons"])
+
+
+def test_pre_open_adverse_fill_revises():
+    v = review_decision(
+        prior_close=100.0,
+        open_price=98.0,
+        prior_stop=96.5,
+        entry_price=102.0,
+        atr_value=4.0,
+    )
+    assert v["verdict"] == "REVISE"
+    assert any("re-anchor" in r.lower() for r in v["reasons"])
+
+
+def test_pre_open_big_gap_revises():
+    v = review_decision(
+        prior_close=100.0,
+        open_price=93.0,  # -7% > 1 ATR
+        prior_stop=90.0,
+        entry_price=102.0,
+        atr_value=2.0,
+    )
+    assert v["verdict"] == "REVISE"
+    assert v["gap"]["gap_atr"] == pytest.approx(-3.5)
+
+
+def test_pre_open_cap_breach_rejects():
+    # Re-anchor with a tight cap -> the arbiter rejects the REVISE.
+    r = reanchor_plan(95.0, 1.0, max_position_pct=0.02)
+    v = review_decision(
+        prior_close=100.0,
+        open_price=95.0,
+        prior_stop=90.0,
+        entry_price=102.0,
+        atr_value=1.0,
+        reanchor=r,
+    )
+    assert v["verdict"] == "REJECT"
+    assert any("cap" in r.lower() for r in v["reasons"])
+
+
+# ---------------------------------------------------------------------------
+# Prior-state loader (fail-open, never raises)
+# ---------------------------------------------------------------------------
+
+
+def test_load_prior_state_missing_folder_fail_open(tmp_path):
+    out = load_prior_state(str(tmp_path / "does_not_exist"))
+    assert out["state"] is None
+    assert out["decision_md"] == ""
+    assert out["log_path"] is None
+
+
+def test_load_prior_state_reads_log_and_decision(tmp_path):
+    logs = tmp_path / "EIX" / "TradingAgentsStrategy_logs"
+    logs.mkdir(parents=True)
+    (logs / "full_states_log_2026-08-21.json").write_text(
+        json.dumps(
+            {
+                "company_of_interest": "EIX",
+                "trade_date": "2026-08-21",
+                "final_trade_decision": "**Rating**: Buy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = load_prior_state(str(tmp_path / "EIX"), results_dir=str(tmp_path))
+    assert out["state"] is not None
+    assert out["state"]["final_trade_decision"] == "**Rating**: Buy"
+    assert out["date"] == "2026-08-21"

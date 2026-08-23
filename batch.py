@@ -262,6 +262,11 @@ def main() -> int:
                 results.append((sym, decision, report_dir))
                 print(f"[done] {sym} -> {decision}")
                 print(f"       report: {report_dir}")
+                # Same-night pre-market re-check (choice (a) of the design):
+                # a catalyst/quality re-read of the just-written decision, not
+                # a gap re-anchor (that is the pre-open standalone script).
+                if DEFAULT_CONFIG.get("enable_pre_market_review"):
+                    _batch_pre_market_check(sym, report_dir, args.date)
                 # Append one JSON line per completed symbol (thread-safe enough
                 # here since the main thread is the only writer).
                 with open(summary_path, "a", encoding="utf-8") as f:
@@ -311,3 +316,59 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
+    """Same-night pre-market re-check for one batch symbol (choice (a)).
+
+    Runs right after ``save_reports``: a catalyst/quality re-read of the
+    just-written decision using the deterministic arbiter
+    (``strategies/pre_market.review_decision``) in same-night mode (catalyst
+    snapshot only — no quote, no gap, no re-anchor; the pre-open gap/anchor
+    path is the standalone ``scripts/pre_market_review.py``). Writes
+    ``pre_market_review_<trade_date>.md`` next to the report. Best-effort:
+    any failure is logged and never fails the batch symbol.
+    """
+    try:
+        from tradingagents.strategies.catalyst import (
+            build_catalyst_snapshot,
+            fetch_catalyst_data,
+        )
+        from tradingagents.strategies.pre_market import load_prior_state, review_decision
+
+        prior = load_prior_state(report_dir)
+        decision_text = prior.get("decision_md") or ""
+        if not decision_text:
+            decision_text = (prior.get("state") or {}).get("final_trade_decision", "")
+        snapshot = None
+        try:
+            data = fetch_catalyst_data(symbol, trade_date)
+            if data is not None:
+                snapshot = build_catalyst_snapshot(data, trade_date, DEFAULT_CONFIG)
+        except Exception as exc:  # noqa: BLE001 - degrade like the router
+            print(f"[pre-market] catalyst unavailable for {symbol}: {exc}")
+        verdict = review_decision(catalyst_snapshot=snapshot)
+        cat_line = (
+            f"- catalyst: {verdict['catalyst']['verdict']} "
+            f"scale {verdict['catalyst']['scale']:.2f}"
+            if verdict.get("catalyst")
+            else "- no measurable catalyst delta"
+        )
+        body = [
+            f"# Pre-Market Review (same-night) — {symbol} ({trade_date})",
+            "",
+            f"**Prior decision**: {decision_text[:300]}",
+            "",
+            "## Measured deltas",
+            cat_line,
+            "",
+            "## Deterministic verdict",
+            f"**{verdict['verdict']}**",
+            "; ".join(verdict["reasons"]),
+            "",
+        ]
+        out = Path(report_dir) / f"pre_market_review_{trade_date}.md"
+        out.write_text("\n".join(body), encoding="utf-8")
+        print(f"[pre-market] {symbol}: {verdict['verdict']} -> {out}")
+    except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
+        print(f"[pre-market] review skipped for {symbol}: {exc}")

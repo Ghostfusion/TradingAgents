@@ -1,10 +1,11 @@
 # Pre-Market Decision Review (Overnight Reviewer) — Design
 
-**Status:** design sketch / brainstorm — no code yet. This doc explores why a
-daily pre-market "review the prior close decision" step is financially sound,
-how it slots onto the existing seams, and what guardrails it needs. It is a
-planning document: every seam mentioned is already implemented somewhere in
-this repo (`docs/api_reference.md` §3-§6, `docs/AGENT_ONBOARDING.md`).
+**Status:** design sketch → **implemented** (choice (a): same-night in-batch
+catalyst/quality re-check + standalone pre-open gap/anchor script). Build map
+in §12; entry points: `scripts/pre_market_review.py` and the opt-in
+`batch.py` same-night step (`enable_pre_market_review`). This doc now records
+what shipped and the seams it uses, so the build-from-here checklist is
+reality, not plan.
 
 ---
 
@@ -278,14 +279,20 @@ the `pytest-timeout` deadline (180 s/test, 30-min session) per
 1. **Reviewer identity**: reuse the Portfolio Manager (deep-think) with a
    pre-market system prompt, or add a new `agents/` node? (Repo pattern favors
    reuse + a prompt variant.)
+    answer: reuse + prompt variant, but allow a new node for future separation
 2. **`--prior-date` discovery**: default = "the last report folder for this
    ticker" vs an explicit flag.
+    answer: default to last report folder, but allow explicit override,
 3. **Batch integration**: per-symbol review in `batch.py`'s existing loop vs a
    standalone script invoked after the nightly batch.
+    answer: per-symbol review in batch.py, but allow standalone script for manual runs
 4. **Verdict storage**: one `pre_market_review_<date>.md` beside the report
    (like `5_portfolio/decision.md`) vs appending to the memory log.
+    answer: one `pre_market_review_<date>.md` next to the report
 5. **Config gate**: an `enable_pre_market_review` flag + `TRADINGAGENTS_*`
    override, mirroring every other feature's opt-in convention.
+    answer: yes, confirmed.
+
 
 ---
 

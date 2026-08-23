@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-22] **Pre-market review (overnight reviewer)** - closes the gap
+  between a close-time decision and the next open: a deterministic arbiter
+  (`strategies/pre_market.py` - gap / catalyst-window / re-anchored tranche /
+  cap breach -> CONFIRM/REVISE/REJECT), a `PreMarketVerdict` schema + a
+  deep-think prompt-variant reviewer (no new graph node), a standalone
+  `scripts/pre_market_review.py` for the pre-open gap/anchor path, and an
+  opt-in same-night `batch.py` step (`enable_pre_market_review`). Design in
+  `docs/pre_market_review.md`.
+
 - [2026-08-22] **Blank-symbol yfinance hardening** - a whitespace/empty ticker
   (e.g. a malformed LLM tool call in `batch.py --symbols ...`) previously
   leaked yfinance's raw `TypeError: 'NoneType' object does not support item
