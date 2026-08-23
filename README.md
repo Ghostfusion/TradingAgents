@@ -35,6 +35,13 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-23] **Web UI (sibling project)** - `TradingNew/trading_web/` (outside this
+  repo, per the layout rule): a React SPA + FastAPI interface covering every
+  capability (batch/pipeline/screener/pre-market/nightly/decision-history/
+  reports/raw-read-only) with login security (scrypt passwords, HMAC-signed
+  sessions, CSRF, lockout, path-defense, CSP, audit log). See
+  `TradingNew/trading_web/README.md`.
+
 - [2026-08-22] **Pre-market review (overnight reviewer)** - closes the gap
   between a close-time decision and the next open: a deterministic arbiter
   (`strategies/pre_market.py` - gap / catalyst-window / re-anchored tranche /

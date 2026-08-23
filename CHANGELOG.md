@@ -10,6 +10,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Web UI (sibling project, not in this repo)** - `TradingNew/trading_web/`
+  adds a React SPA + FastAPI web front-end over every TradingAgents capability
+  (batch / pipeline / screener / pre-market / nightly / decision-history /
+  report viewer / raw read-only), with security-first auth: scrypt password
+  hashes, HMAC-SHA256-signed session cookies, CSRF double-submit, login
+  lockout, strict path defense on report reads, an allowlisted raw-command
+  shell, CSP + security headers, and a JSONL audit log. Serves the SPA from
+  the FastAPI backend; 127.0.0.1:8000 by default with `TRADINGAGENTS_WEB_*`
+  overrides for a later public deployment. See
+  `TradingNew/trading_web/README.md` (not tracked by this repo, per the
+  layout rule).
+
 - **Pre-market review (overnight reviewer)** - closes the gap between a
   close-time decision and the next open (design `docs/pre_market_review.md`,
   choice (a)):
