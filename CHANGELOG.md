@@ -9,6 +9,19 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **SEC EDGAR -> Massive insider fallback** - `get_sec_filings` (`agents/utils/
+  market_position_tools.py`) now falls back to Massive's `get_form4_insider_massive`
+  (Form 4 open-market insider transactions) whenever official SEC EDGAR is
+  unavailable: HTTP 403 from SEC fair-access throttling, network failure, or a
+  non-US ticker with no EDGAR record (which previously surfaced as
+  `NO_DATA_AVAILABLE` / a raised error and degraded the signal). The fallback
+  text is explicitly labelled "Massive insider-activity fallback (Form 4 — NOT
+  the 8-K/10-K/S-1 set)" so the agent never confuses the datasets; if Massive
+  also returns nothing it degrades to an explicit unavailable message (no
+  fabrication). Bound to the news analyst's `get_sec_filings` tool + prompt.
+  Tests: `test_market_toolnode` (5 fallback cases: EDGAR ok, raise-on-403,
+  no-data sentinel, insider body, both-down degrade). Docs: api_reference
+  §6.2, data-providers, README, AGENT_ONBOARDING.
 
 - **Web UI (sibling project, not in this repo)** - `TradingNew/trading_web/`
   adds a React SPA + FastAPI web front-end over every TradingAgents capability

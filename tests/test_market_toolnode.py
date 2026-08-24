@@ -21,3 +21,75 @@ def test_market_toolnode_can_execute_verified_snapshot():
     )
     # the other core market tools must remain too
     assert {"get_stock_data", "get_indicators"} <= market_tools
+
+
+# ---------------------------------------------------------------------------
+# get_sec_filings -> Massive insider fallback (when SEC EDGAR fails)
+# ---------------------------------------------------------------------------
+
+
+def test_sec_filings_returns_edgar_when_available(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    monkeypatch.setattr(
+        mpt, "route_to_vendor", lambda *a, **k: "## Recent SEC Filings\n| 8-K | 2026-08-01 | ..."
+    )
+    out = mpt.get_sec_filings.invoke({"ticker": "AAPL"})
+    assert "## Recent SEC Filings" in out
+    assert "Massive" not in out
+
+
+def test_sec_filings_falls_back_to_massive_on_error(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    def boom(*a, **k):
+        raise RuntimeError("HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(mpt, "route_to_vendor", boom)
+    monkeypatch.setattr(
+        mpt,
+        "_sec_filings_massive_fallback",
+        lambda t: "MASSIVE_FALLBACK_FORM4 " + t.upper(),
+    )
+    out = mpt.get_sec_filings.invoke({"ticker": "MSFT"})
+    assert "MASSIVE_FALLBACK_FORM4 MSFT" in out
+
+
+def test_sec_filings_falls_back_on_no_data_sentinel(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    monkeypatch.setattr(
+        mpt, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE: no EDGAR record"
+    )
+    monkeypatch.setattr(
+        mpt, "_sec_filings_massive_fallback", lambda t: "FALLBACK " + t
+    )
+    out = mpt.get_sec_filings.invoke({"ticker": "0700.HK"})
+    assert "FALLBACK 0700.HK" in out
+
+
+def test_sec_filings_massive_fallback_returns_insider_body(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    fake_massive = "## EIX Insider Transactions (Form 4, Massive.com)\n- BUY 100 sh"
+    monkeypatch.setattr("tradingagents.dataflows.massive.get_form4_insider_massive", lambda *a, **k: fake_massive)
+    out = mpt.get_sec_filings.invoke({"ticker": "EIX"})
+    assert "Massive insider-activity fallback" in out
+    assert "Form 4" in out
+    assert "Insider Transactions" in out
+
+
+def test_sec_filings_massive_fallback_degrades_when_both_down(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    def boom(*a, **k):
+        raise RuntimeError("HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(mpt, "route_to_vendor", boom)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.get_form4_insider_massive",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("massive down")),
+    )
+    out = mpt.get_sec_filings.invoke({"ticker": "EIX"})
+    assert "unavailable" in out.lower()
+    assert "fabricate" in out.lower()

@@ -283,6 +283,12 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-23 `(working tree)` - SEC EDGAR -> Massive insider fallback:
+  `get_sec_filings` falls back to `get_form4_insider_massive` (Form-4 insider
+  activity) when EDGAR fails (403/network/non-US no-CIK); result is labelled
+  so the agent distinguishes it from the full 8-K/10-K set; both-down degrades
+  to unavailable (no fabrication).
+
 - 2026-08-22 `(working tree)` - Pre-market review (design `docs/pre_market_review.md`):
   deterministic arbiter `strategies/pre_market.py` (gap / catalyst-window /
   re-anchored tranche / cap breach -> CONFIRM/REVISE/REJECT), `PreMarketVerdict`

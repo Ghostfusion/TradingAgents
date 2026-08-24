@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-23] **SEC EDGAR -> Massive insider fallback** - `get_sec_filings` now
+  falls back to Massive's Form-4 insider-activity data when official SEC EDGAR
+  fails for any reason (HTTP 403 from SEC fair-access throttling, network
+  failure, or a non-US ticker with no EDGAR record). The fallback result is
+  clearly labelled as insider-activity-only so the agent never mistakes Form-4
+  for the full 8-K/10-K set; if both sources fail it returns an explicit
+  unavailable message (no fabrication).
+
 - [2026-08-23] **Web UI (sibling project)** - `TradingNew/trading_web/` (outside this
   repo, per the layout rule): a React SPA + FastAPI interface covering every
   capability (batch/pipeline/screener/pre-market/nightly/decision-history/

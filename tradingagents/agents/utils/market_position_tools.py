@@ -32,21 +32,81 @@ def get_sec_filings(
     limit: Annotated[int | None, "Max filings to summarize; omit for a default of 10"] = None,
 ) -> str:
     """
-    Retrieve recent SEC EDGAR filings for a ticker: 8-K (material events), 10-K/10-Q
-    (annual/quarterly reports), S-1/S-3 (capital raises), and SC 13D/G (stake
-    disclosures). Uses the configured sec_filings vendor.
+    Retrieve recent SEC filings for a ticker: primarily SEC EDGAR 8-K (material
+    events), 10-K/10-Q (annual/quarterly reports), S-1/S-3 (capital raises), and
+    SC 13D/G (stake disclosures).
+
+    **Fallback**: when official SEC EDGAR is unavailable for any reason (HTTP
+    403 from SEC fair-access throttling, network failure, no EDGAR record for a
+    non-US listing), this falls back to insider filing activity from Massive
+    (Form 4 open-market insider transactions), which is a different, narrower
+    dataset — the returned text states it is the Massive insider-activity
+    fallback so the agent never mistakes Form-4 insider filings for the full
+    8-K/10-K set.
 
     Args:
         ticker (str): Ticker symbol of the company
         limit (int): Max filings to return; omit for a default of 10
+        start_date (str): Input for the Massive form-4 fallback window (default:
+            one year ago today)
+        end_date (str): End of the massive form-4 fallback window (default: today)
 
     Returns:
-        str: A formatted report of recent filings with dates and links
+        str: SEC EDGAR filings, or a clearly-labelled Massive insider-activity
+        fallback, or an explicit unavailable message.
     """
     if limit is None:
         limit = 10
-    return route_to_vendor("get_sec_filings", ticker, limit)
+    try:
+        result = route_to_vendor("get_sec_filings", ticker, limit)
+        # The router returns an explicit sentinel for a clean "no data" (e.g. no
+        # CIK / EDGAR record). Treat any sentinel as an EDGAR miss -> fallback.
+        if result and result.startswith(("NO_DATA", "DATA_UNAVAILABLE", "DATA_DISABLED")):
+            return _sec_filings_massive_fallback(ticker)
+        return result
+    except Exception as exc:  # noqa: BLE001 - this category raises on primary failure
+        _log_sec_fallback(ticker, exc)
+        return _sec_filings_massive_fallback(ticker)
 
+
+def _sec_filings_massive_fallback(ticker: str) -> str:
+    """Insider filing activity from Massive when SEC EDGAR is unavailable.
+
+    Returns Form-4 open-market insider transactions over the trailing 365 days,
+    clearly labelled so the agent treats it as the insider-activity subset, not
+    the full 8-K/10-K filing set. Degrades to an explicit unavailable message
+    if Massive also fails (no fabrication).
+    """
+    from datetime import date, timedelta
+
+    try:
+        from tradingagents.dataflows.massive import get_form4_insider_massive
+
+        end = date.today().isoformat()
+        start = (date.today() - timedelta(days=365)).isoformat()
+        header = (
+            f"SEC EDGAR filings unavailable for {ticker.upper()}; showing the "
+            "**Massive insider-activity fallback** (Form 4 open-market "
+            "transactions — this is NOT the 8-K/10-K/S-1 filing set)."
+        )
+        body = get_form4_insider_massive(ticker, start, end)
+        return f"{header}\n\n{body}"
+    except Exception as exc:  # noqa: BLE001 - fallback also degraded
+        return (
+            f"SEC filings unavailable for {ticker.upper()}: SEC EDGAR failed and "
+            f"the Massive insider fallback also had no data ({exc}). Do not "
+            f"fabricate filing information."
+        )
+
+
+def _log_sec_fallback(ticker: str, exc: Exception) -> None:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "sec_edgar unavailable for %s; falling back to Massive insider filings: %s",
+        ticker,
+        exc,
+    )
 
 @tool
 def get_short_interest(

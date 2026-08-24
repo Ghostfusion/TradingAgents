@@ -31,7 +31,7 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 3 | **polymarket** | Polymarket | prediction markets (market-implied event probabilities) |
 | 4 | **alpha_vantage** | Alpha Vantage | stock data, indicators, fundamentals, statements, news |
 | 5 | **finnhub** | Finnhub (free tier) | company news, analyst ratings, earnings calendar, basic financials, insider activity, company peers |
-| 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G) |
+| 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G); when EDGAR fails the `get_sec_filings` tool falls back to Massive Form-4 insider activity |
 | 7 | **moomoo** | Moomoo OpenAPI (via the local OpenD gateway) | US/HK/JP/SH/SZ/AU/CA/SG/MY quotes, fundamentals, earnings calendar, economic calendar, Fed watch, capital flow, corporate actions, options, short interest, top movers |
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
 

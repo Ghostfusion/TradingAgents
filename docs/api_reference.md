@@ -292,7 +292,11 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_company_peers`, `get_insider_activity` (insider sentiment);
   `get_fundamentals` also accepts `finnhub` as a vendor
 - options chain: `yfinance`, `moomoo`
-- SEC filings: `sec_edgar`
+- SEC filings: `sec_edgar` (when EDGAR fails for any reason — e.g. HTTP 403 from
+  SEC fair-access throttling or a non-US ticker with no EDGAR record — the
+  `get_sec_filings` tool falls back to Massive's `get_form4_insider_massive`
+  Form-4 insider-activity data, returned under an explicit label so the agent
+  does not mistake it for the full 8-K/10-K set)
 - short interest: `yfinance`, `moomoo`, `massive`
 - short volume (daily short-sale ratio, Massive-only): `massive`
 - all A-series/tier tools: `moomoo` only (optional)
