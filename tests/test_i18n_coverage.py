@@ -57,3 +57,18 @@ def test_report_agent_applies_language_instruction(rel):
         f"{rel} does not apply get_language_instruction(); its output would "
         f"ignore the configured output_language (#740/#801)."
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rel", REPORT_AGENTS)
+def test_report_agent_applies_output_budget(rel):
+    # Every report-producing agent must apply the per-role output budget, or
+    # its report can silently exceed the tier's max_tokens cap mid-token and
+    # truncate at the LLM layer (see docs/api_reference.md max_output_tokens).
+    path = _AGENTS_DIR / rel
+    assert path.exists(), f"missing agent module: {rel}"
+    src = path.read_text(encoding="utf-8")
+    assert "get_output_budget(" in src, (
+        f"{rel} does not apply get_output_budget(); its report could exceed "
+        f"the configured per-role max_tokens cap."
+    )

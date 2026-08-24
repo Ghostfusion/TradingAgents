@@ -18,7 +18,7 @@ Breaking changes within the 0.x line are called out explicitly.
     per-tier value (quick vs deep) to each client.
   - `get_output_budget(section)` in `agent_utils`: per-role prompt directive
     (dense, bounded ~250-1400 words by role; tool-call-first: never approximate
-    a number that a tool can return). Wired into all 11 agent prompts
+    a number that a tool can return). Wired into all 12 agent prompts
     (4 analysts, bull/bear, 3 risk debators, RM, PM, trader).
   - Values grounded in your formula `min(1,048,576, 1,310,720 - input)` +
     measured per-role report maxes (analysts ~5k, RM 1.9k, trader .7k, PM 1.4k).

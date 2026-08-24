@@ -284,7 +284,7 @@ has changed before); never assume an endpoint works — the SDK's
 ## Changelog of this fork (most recent first)
 - 2026-08-24 `(working tree)` - Per-role max output tokens
   (`TRADINGAGENTS_MAX_OUTPUT_TOKENS[_QUICK|_DEEP]`, 6000/6000/2500) + per-role
-  density/tool-call directives (`get_output_budget`) wired into all 11 agent
+  density/tool-call directives (`get_output_budget`) wired into all 12 agent
   prompts; grounded in measured report sizes + the
   `min(1,048,576, 1,310,720 - input)` formula.
 

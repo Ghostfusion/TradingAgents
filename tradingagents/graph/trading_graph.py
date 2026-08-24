@@ -195,7 +195,7 @@ class TradingAgentsGraph:
             llm_kwargs["callbacks"] = self.callbacks
 
         def _tier_kwargs(tier: str) -> dict:
-            """Per-role max output tokens: quick = analysts/debaters/trader,
+            """Per-role max output tokens: quick = analysts/researchers/debaters/trader,
             deep = RM/PM. Only when the provider accepts max_tokens (OpenAI /
             OpenRouter / Anthropic / Bedrock all do).
             """

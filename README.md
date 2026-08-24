@@ -37,8 +37,9 @@
 
 - [2026-08-24] **Per-role max output tokens + density directives** - new env keys
   `TRADINGAGENTS_MAX_OUTPUT_TOKENS(_QUICK/_DEEP)` cap the LLM output via
-  `max_tokens` (quick=analysts/debaters/trader 6000, deep=RM/PM 2500, based on
-  measured report sizes + your `min(1,048,576, 1,310,720 - input)` formula).
+  `max_tokens` (quick=analysts/researchers/debaters/trader 6000, deep=RM/PM
+  2500, based on measured report sizes + your `min(1,048,576, 1,310,720 - input)`
+  formula).
   Every agent prompt now carries a `get_output_budget(...)` directive: dense,
   bounded, tool-call-first (never approximate a number you can fetch).
 
