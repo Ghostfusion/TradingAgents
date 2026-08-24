@@ -9,6 +9,16 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Free computed ratios (no paid Massive plan)** - `strategies/ratios.py`
+  replicates the plan-gated Massive `get_ratios` block from the project's own
+  canonical statements: EV, EV/EBIT, EV/EBITDA, EV/Sales, P/E, P/B, P/S,
+  P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, cash ratio, dividend yield, FCF,
+  market cap. Exposed as `get_ratios` on the fundamentals analyst (computed =
+  free; missing inputs render n/a, never fabricated). Adds the `inventory`
+  canonical alias so Quick ratio computes. Also fixes a latent double-`@tool`
+  decorator bug in `analysis_tools.py` that broke import once the file grew.
+  Tests: `test_strategies_ratios` (6 pure) + `test_analysis_tools` (2 tool).
+  Docs: api_reference 6.4, developer/04, tests-layout.
 - **SEC EDGAR -> Massive insider fallback** - `get_sec_filings` (`agents/utils/
   market_position_tools.py`) now falls back to Massive's `get_form4_insider_massive`
   (Form 4 open-market insider transactions) whenever official SEC EDGAR is

@@ -20,8 +20,7 @@ involved. This is the "compute, don't narrate" core.
 - `size.py` — Kelly / vol-target / position sizing (position_sizing).
 - `portfolio.py` — `value_ratio_weights`, cap adjustments (watchlist alloc).
 - `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile.
-- `value_dip.py` — Value Dip + Swing hybrid (`Strategies/Value_Dip_swing*.md`):
-  Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
+- `value_dip.py` — Value Dip + Swing hybrid (`Strategies/Value_Dip_swing*.md`):  Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
   expectancy, 3-tranche scale-in plan (P1/P2/P3, weighted avg entry, composite
   stop, capital-at-risk, blended R:R), the hybrid allocation matrix
   (`value_dip_setup`), the deterministic tranche-scaling risk fold
@@ -36,6 +35,12 @@ involved. This is the "compute, don't narrate" core.
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
   EV->equity bridge) powering `get_dcf_valuation`.
 - `journal.py` — `--journal` alloc/journal.
+- `ratios.py` — computed valuation & profitability ratios (EV, EV/EBIT,
+  EV/EBITDA, EV/Sales, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, liquidity,
+  cash ratio, dividend yield, FCF, market cap) derived from the project's own
+  canonical statements — a free, offline replication of the plan-gated Massive
+  ratio block; exposed as `get_ratios` on the fundamentals analyst.
+  Also adds the `inventory` canonical alias so Quick ratio computes.
 
 ## 4.2 Overlays
 

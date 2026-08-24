@@ -118,6 +118,7 @@ _ROW_ALIASES = {
         "financial assets",
         "available for sale securities",
     ],
+    "inventory": ["inventory"],
     "sector": ["sector", "industrygroup"],
     "roe": ["roe ttm", "roe rfy", "roettm", "roerfy"],
     "net_receivables": [

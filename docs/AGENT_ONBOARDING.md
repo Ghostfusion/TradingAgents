@@ -283,6 +283,12 @@ has changed before); never assume an endpoint works — the SDK's
 
 ## Changelog of this fork (most recent first)
 
+- 2026-08-23 `(working tree)` - Free computed ratios: `strategies/ratios.py`
+  replicates the plan-gated Massive `get_ratios` (EV/EBITDA, P/E, P/B, ROE…)
+  from our own canonical statements, exposed as `get_ratios` on the
+  fundamentals analyst; added `inventory` canonical alias for Quick ratio; fixed
+  a latent double-`@tool` bug in analysis_tools.py.
+
 - 2026-08-23 `(working tree)` - SEC EDGAR -> Massive insider fallback:
   `get_sec_filings` falls back to `get_form4_insider_massive` (Form-4 insider
   activity) when EDGAR fails (403/network/non-US no-CIK); result is labelled

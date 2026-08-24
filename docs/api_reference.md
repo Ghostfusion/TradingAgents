@@ -375,7 +375,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_insider_activity(ticker)` | `finnhub.get_insider_activity_finnhub` | fundamentals | 12m net insider change + mspr + trend |
 | `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
 | `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
-| `get_ratios(ticker, date?)` | `massive.get_ratios_massive` | fundamentals | precomputed EV/EBITDA, P/E, P/B, ROE/ROA, FCF (plan-gated) |
+| `get_ratios(ticker, date?)` | `strategies.ratios.compute_ratios` (local derivation; Massive plan-gated cross-check via `get_fundamentals`) | fundamentals | computed EV/EBITDA, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, cash ratio, dividend yield, FCF, market cap (free, no paid plan; missing inputs n/a) |
 | `get_exit_check(entry, close, atr)` | `strategies.exits.exit_check` | market | stop-to-breakeven, ATR target, holding action |
 | `get_allocation(scores, sector_map?)` | `strategies.portfolio.adjust_for_caps` | fundamentals | cap-respecting book allocation |
 | `get_regime_components(ticker)` | `strategies.regime` | market | vol_pct / trend / chop / regime label breakdown |

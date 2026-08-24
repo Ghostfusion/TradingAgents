@@ -11,7 +11,7 @@ five domains by naming convention:
 
 | Group | Convention | Approx count | Guards |
 | --- | --- | --- | --- |
-| Strategy calculators | `test_strategies_*.py` | 24 | every `strategies/*` pure function (incl. `test_strategies_value_dip.py` + `test_strategies_pre_market.py`) |
+| Strategy calculators | `test_strategies_*.py` | 25 | every `strategies/*` pure function (incl. `test_strategies_value_dip.py`, `test_strategies_pre_market.py`, `test_strategies_ratios.py`) |
 | Dataflow / vendors | `test_*vendor*, test_*moomoo*, test_*finnhub*, test_*fred*, test_*fmp*, test_*polymarket*, test_*alpaca*, test_*alpha*, test_dataflows_config, test_symbol*, test_*reddit*, test_stocktwits*, test_*short*, test_*float*` | 19 | routing / errors / cache / symbol map |
 | Graph / wiring | `test_*analyst*, test_*execution*, test_*parallel*, test_*checkpoint*, test_*signal*, test_*router*, test_*toolnode*, test_*instrument*, test_*ticker*, test_*crypto*, test_*i18n*, test_news_lookahead` | 19 | graph edges, state, i18n, tool nodes |
 | LLM / providers | `test_*provider*, test_*api_key*, test_*openai*, test_*anthropic*, test_*google*, test_*bedrock*, test_*ollama*, test_*model*, test_*reasoning*, test_*temperature*, test_*retries*, test_*minimax*, test_*deepseek*, test_capabilities` | 22 | factory, model select, key precedence |

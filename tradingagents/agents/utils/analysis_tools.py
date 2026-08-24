@@ -927,34 +927,6 @@ def get_form4_insider(
         return f"form-4 insider activity unavailable for {ticker}: {exc}"
 
 
-@tool
-def get_ratios(
-    ticker: Annotated[str, "ticker symbol"],
-    current_date: Annotated[str | None, "as-of date (yyyy-mm-dd)"] = None,
-) -> str:
-    """Precomputed valuation & profitability ratios for a ticker (Massive.com).
-
-    Returns EV/EBITDA, EV/Sales, P/E, P/B, P/S, ROE/ROA, D/E, liquidity and
-    FCF so the analyst reads precomputed numbers instead of deriving them.
-    Cross-check against the screener value screens (EY / EV-EBIT / F / Z)
-    before a final cheap/quality claim. Returns an explicit 'unavailable'
-    message when the Massive account plan lacks ratios access.
-
-    Args:
-        ticker: single ticker symbol.
-        current_date: optional as-of date (yyyy-mm-dd).
-
-    Returns:
-        A ``key: value`` block, or an explicit 'unavailable' message.
-    """
-    try:
-        from tradingagents.dataflows.massive import get_ratios_massive
-
-        return get_ratios_massive(ticker, current_date)
-    except Exception as exc:  # noqa: BLE001
-        return f"ratios unavailable for {ticker}: {exc}"
-
-
 # ---------------------------------------------------------------------------
 # Decision-grounding tools (agent-decision plan P0/P1/P2)
 #   Expose deterministic strategy functions so the trader / PM / analysts
@@ -1582,7 +1554,47 @@ def get_tail_risk(
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'} "
         f"stress_-10pct={stress:.2%} alpha={alpha:.0%}"
-    )  # ---------------------------------------------------------------------------
+    )
+
+
+@tool
+def get_ratios(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str | None, "as-of date (yyyy-mm-dd)"] = None,
+) -> str:
+    """Computed valuation & profitability ratios (free, local derivation).
+
+    Replicates the block Massive's plan-gated ``/stocks/financials/v1/ratios``
+    returns, computed from this project's own canonical line items
+    (moomoo/yfinance/alpha_vantage): EV, EV/EBIT, EV/EBITDA, EV/Sales, P/E,
+    P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, Cash ratio,
+    dividend yield, FCF, market cap. Use before any 'cheap / richly valued /
+    quality' claim. Missing inputs render ``n/a`` (never fabricated).
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: optional as-of date (yyyy-mm-dd).
+
+    Returns:
+        A ``key: value`` block of the computable ratios.
+    """
+    try:
+        from tradingagents.strategies.ratios import compute_ratios, render_ratios
+    except Exception as exc:  # noqa: BLE001
+        return f"ratios unavailable for {ticker}: {exc}"
+    try:
+        from scripts.value_screener import fetch_ticker
+
+        fin = fetch_ticker(ticker, current_date or "2026-08-24") or {}
+    except Exception as exc:  # noqa: BLE001
+        return f"ratios unavailable for {ticker}: {exc}"
+    ratios = compute_ratios(fin)
+    if not any(v is not None for v in ratios.values()):
+        return (
+            f"ratios unavailable for {ticker}: no usable statement line items; "
+            "do not fabricate valuation ratios."
+        )
+    return f"## {ticker.upper()} Ratios (computed)\n\n" + render_ratios(ratios)
 
 
 # Item-5: credit-stress read (market analyst) - HY/CCC/BB OAS from FRED

@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-23] **Free computed ratios (no paid Massive plan)** - new
+  `strategies/ratios.py` replicates the plan-gated Massive `get_ratios` block
+  locally from the project's own canonical statements: EV, EV/EBIT, EV/EBITDA,
+  EV/Sales, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, cash
+  ratio, dividend yield, FCF, market cap. Exposed as `get_ratios` on the
+  fundamentals analyst (computed, free). Adds the `inventory` canonical alias
+  so Quick ratio computes. A latent double-`@tool` bug in analysis_tools.py
+  (which broke import once the file grew) was also fixed.
+
 - [2026-08-23] **SEC EDGAR -> Massive insider fallback** - `get_sec_filings` now
   falls back to Massive's Form-4 insider-activity data when official SEC EDGAR
   fails for any reason (HTTP 403 from SEC fair-access throttling, network

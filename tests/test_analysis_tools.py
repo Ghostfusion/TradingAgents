@@ -1066,3 +1066,33 @@ def _vdip_dip_trigger():
         vols[i] = 300_000
     vols[-1] = 4_500_000
     return closes, highs, lows, vols
+
+
+# --------------------------------------------------------------------------
+# get_ratios (computed, free) - local derivation, no paid plan
+# --------------------------------------------------------------------------
+
+
+def test_get_ratios_returns_computed_block(monkeypatch):
+    fin = {
+        "market_cap": 1000e6, "total_debt": 200e6, "cash": 50e6,
+        "operating_income": 120e6, "depreciation": 30e6, "revenue": 900e6,
+        "net_income": 80e6, "total_equity": 500e6, "total_assets": 800e6,
+        "operating_cashflow": 90e6, "capex": 30e6,
+        "current_assets": 300e6, "current_liabilities": 150e6, "inventory": 60e6,
+        "dividends_paid": 20e6,
+    }
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: fin)
+    out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "Ratios (computed)" in out
+    assert "EV/EBITDA: 7.67" in out
+    assert "ROE: 16.00%" in out
+    assert "P/E: 12.50" in out
+    assert "Quick: 1.60" in out
+
+
+def test_get_ratios_degrades_when_no_data(monkeypatch):
+    monkeypatch.setattr("scripts.value_screener.fetch_ticker", lambda t, d: {})
+    out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "unavailable" in out.lower()
+    assert "fabricate" in out.lower()
