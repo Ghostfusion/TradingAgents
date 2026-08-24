@@ -98,3 +98,52 @@ def test_structured_output_suppresses_object_tool_choice(monkeypatch):
     assert out == "BOUND"
     assert captured["method"] == "function_calling"
     assert captured["tool_choice"] is None  # not the object form
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter provider-routing ignore list (slow-provider blocking)
+# ---------------------------------------------------------------------------
+
+
+def test_openrouter_ignore_provider_extra_body(monkeypatch):
+    """provider.ignore must be sent via extra_body on OpenRouter."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"openrouter_ignore_providers": ["venice", "io-net", "akashml"]},
+    )
+    from tradingagents.llm_clients.openai_client import OpenAIClient
+
+    c = OpenAIClient("deepseek/deepseek-v4-flash-0731", provider="openrouter")
+    llm = c.get_llm()
+    assert llm is not None
+    eb = getattr(llm, "extra_body", None) or {}
+    assert eb.get("provider") == {"ignore": ["venice", "io-net", "akashml"]}
+
+
+def test_openrouter_ignore_empty_no_extra_body(monkeypatch):
+    """Empty ignore list must NOT add a provider payload."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config", lambda: {"openrouter_ignore_providers": []}
+    )
+    from tradingagents.llm_clients.openai_client import OpenAIClient
+
+    c = OpenAIClient("deepseek/deepseek-v4-flash-0731", provider="openrouter")
+    llm = c.get_llm()
+    eb = getattr(llm, "extra_body", None) or {}
+    assert "provider" not in eb
+
+
+def test_openrouter_ignore_not_applied_to_other_providers(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"openrouter_ignore_providers": ["venice"]},
+    )
+    from tradingagents.llm_clients.openai_client import OpenAIClient
+
+    c = OpenAIClient("gpt-5.5", provider="openai")
+    llm = c.get_llm()
+    eb = getattr(llm, "extra_body", None) or {}
+    assert "provider" not in eb

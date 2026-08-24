@@ -73,6 +73,10 @@ _ENV_OVERRIDES = {
     # Opt-in analyst parallelism: >1 runs the analyst teams concurrently
     # (each in its own thread with isolated messages). Multiplies LLM/data load.
     "TRADINGAGENTS_ANALYST_CONCURRENCY": "analyst_concurrency",
+    # OpenRouter provider routing: comma-separated provider slugs to always skip
+    # (e.g. slow/unreliable endpoints). Sent as provider.ignore in the request
+    # body via extra_body. Empty = no restriction.
+    "TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS": "openrouter_ignore_providers",
     # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md): gate for the
     # screener --scan value-dip mode; the analyst @tools stay bound regardless.
     "TRADINGAGENTS_ENABLE_VALUE_DIP": "enable_value_dip",
@@ -179,6 +183,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # provider-specific URL here would leak (e.g. OpenAI's /v1 was previously
         # being forwarded to Gemini, producing malformed request URLs).
         "backend_url": None,
+        # OpenRouter provider routing: provider slugs to always skip (slow /
+        # unreliable endpoints). Sent as provider.ignore via extra_body. Empty
+        # list = downstream of OpenRouter's own defaults.
+        "openrouter_ignore_providers": [],
         # Provider-specific thinking configuration
         "google_thinking_level": None,  # "high", "minimal", etc.
         "openai_reasoning_effort": None,  # "medium", "high", "low"

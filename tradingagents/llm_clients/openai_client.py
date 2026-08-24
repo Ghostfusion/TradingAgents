@@ -329,8 +329,37 @@ class OpenAIClient(BaseLLMClient):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
+        # OpenRouter provider routing: block slow/unreliable providers via
+        # provider.ignore in the request body (sent as extra_body so it nests
+        # correctly). The list is configurable through
+        # TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS in .env.
+        ignore = self._openrouter_ignore()
+        if ignore:
+            llm_kwargs.setdefault("extra_body", {})
+            llm_kwargs["extra_body"]["provider"] = {"ignore": ignore}
+
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)
+
+    def _openrouter_ignore(self):
+        """Provider slugs to skip for OpenRouter, from config/env, or None.
+
+        Read here (not in get_llm) so it is only computed for OpenRouter. The
+        value is the config list ``openrouter_ignore_providers`` (a comma-
+        separated string in .env is coerced to a list by default_config).
+        """
+        if self.provider != "openrouter":
+            return None
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001
+            cfg = {}
+        ignore = cfg.get("openrouter_ignore_providers") or []
+        if isinstance(ignore, str):
+            ignore = [s.strip() for s in ignore.split(",") if s.strip()]
+        return [s for s in ignore if s] or None
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""

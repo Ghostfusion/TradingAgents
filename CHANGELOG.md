@@ -9,6 +9,15 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **OpenRouter provider-ignore routing** - `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS`
+  (.env, comma-separated provider slugs) lets you block slow/unreliable
+  OpenRouter endpoints for every request. The list is sent as `provider.ignore`
+  in the OpenRouter Chat-Completions body via `extra_body` (nested under the
+  `provider` key, per OpenRouter's provider-routing docs). Applied only when
+  `llm_provider=openrouter` and the list is non-empty; erased if empty.
+  `default_config._ENV_OVERRIDES` coerces the CSV string to a list; default `[]`.
+  Tests: `test_openai_compatible_provider` (3: payload present, empty omitted,
+  non-openrouter ignored). Docs: api_reference env table, README, CHANGELOG.
 - **Free computed ratios (no paid Massive plan)** - `strategies/ratios.py`
   replicates the plan-gated Massive `get_ratios` block from the project's own
   canonical statements: EV, EV/EBIT, EV/EBITDA, EV/Sales, P/E, P/B, P/S,

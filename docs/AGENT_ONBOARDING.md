@@ -282,6 +282,10 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-24 `(working tree)` - OpenRouter provider-ignore routing:
+  `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` (.env, CSV) -> `provider.ignore`
+  in the request body via `extra_body` to block slow OpenRouter endpoints.
+
 
 - 2026-08-23 `(working tree)` - Free computed ratios: `strategies/ratios.py`
   replicates the plan-gated Massive `get_ratios` (EV/EBITDA, P/E, P/B, ROE…)

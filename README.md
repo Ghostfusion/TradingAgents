@@ -35,6 +35,13 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-24] **OpenRouter provider-ignore routing** - add a configurable
+  slow-provider blocklist: set `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` in
+  `.env` (comma-separated provider slugs). It is sent as `provider.ignore` in
+  the OpenRouter request body via `extra_body`, so OpenRouter skips those
+  endpoints (e.g. slow/unreliable ones) on every request. No restriction when
+  unset.
+
 - [2026-08-23] **Free computed ratios (no paid Massive plan)** - new
   `strategies/ratios.py` replicates the plan-gated Massive `get_ratios` block
   locally from the project's own canonical statements: EV, EV/EBIT, EV/EBITDA,

@@ -74,6 +74,7 @@ in `batch.py`).
 | `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` |
 | `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
 | `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
+| `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
 | `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
 | `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |
