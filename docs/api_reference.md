@@ -471,6 +471,8 @@ preserves `Risk Gate (computed)` blocks.
 
 - `docs/AGENT_ONBOARDING.md` - environment runbook (interpreter, quirks, layout)
 - `docs/howto_end_to_end.md` - screener -> pipeline -> reports walkthrough
+- `docs/EasyManual.md` - the same project explained for a teenager (no finance
+  degree needed): web app first, then terminal, reading reports, glossary
 - `docs/developer/` - full developer map (topology, graph/workflow, dataflow,
   strategies, agents/tools, entrypoints, persistence, dev guide, tests layout,
   Massive)
