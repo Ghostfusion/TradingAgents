@@ -693,7 +693,7 @@ def get_analyst_verdict(
         'unavailable' message when the vendor chain yields no statements.
     """
     try:
-        from scripts.value_screener import fetch_ticker, screen_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker, screen_ticker
     except Exception as exc:  # noqa: BLE001
         return f"analyst verdict unavailable for {ticker}: {exc}"
     fin = fetch_ticker(ticker, current_date)
@@ -1129,7 +1129,7 @@ def _dcf_latest(d):
 
 
 def _dcf_canonical(payload):
-    from scripts.value_screener import _canonicalize
+    from tradingagents.dataflows.statement_parsing import _canonicalize
 
     return _canonicalize(payload)
 
@@ -1145,7 +1145,7 @@ def _dcf_yf_rows(payload):
     import csv as _csv
     import io as _io
 
-    from scripts.value_screener import _first_number
+    from tradingagents.dataflows.statement_parsing import _first_number
 
     rows = {}
     try:
@@ -1183,8 +1183,60 @@ def _dcf_yf_rows(payload):
 
 
 def _dcf_fcf_series(cashflow_payload):
-    """Time-ordered positive FCF series from the cashflow CSV (Free Cash Flow
-    row, else operating cash flow minus capex)."""
+    """Time-ordered positive FCF series from a cashflow payload.
+
+    Supports both shapes the vendor chain returns for "annual" cashflow:
+    yfinance-style CSV rows (``_dcf_yf_rows``) and moomoo per-period markdown
+    tables (``statement_parsing._markdown_period_tables``, which arranges the
+    rows newest-first). FCF is the "Free Cash Flow" row when present, else
+    operating cash flow minus capex; only positive values enter the series
+    (compute_dcf's contract). moomoo is the default first vendor, so a
+    CSV-only parser previously degraded DCF to "no usable free cash flow".
+    """
+    if not cashflow_payload or str(cashflow_payload).lstrip().startswith(
+        ("NO_DATA", "DATA_DISABLED", "DATA_UNAVAILABLE")
+    ):
+        return []
+    # moomoo markdown: period tables (newest first) -> per-year FCF.
+    try:
+        from tradingagents.dataflows.statement_parsing import (
+            _markdown_period_tables,
+            _period_year,
+        )
+
+        tables = _markdown_period_tables(cashflow_payload)
+    except Exception:  # noqa: BLE001 - CSV payloads parse to no tables
+        tables = []
+    if tables:
+        by_year = {}
+        for period, rows in tables:
+            fcf = None
+            for label, value in rows.items():
+                if "free cash flow" in str(label).lower():
+                    fcf = value
+                    break
+            if fcf is None:
+                op = cap = None
+                for label, value in rows.items():
+                    low = str(label).lower()
+                    if "operating cash flow" in low or "cash flow from operating" in low:
+                        op = value
+                    if "capital expenditure" in low or "purchase of property" in low:
+                        cap = value
+                if op is not None and cap is not None:
+                    try:
+                        fcf = float(op) - float(cap)
+                    except (TypeError, ValueError):
+                        fcf = None
+            if fcf is not None:
+                try:
+                    by_year[_period_year(period)] = float(fcf)
+                except (TypeError, ValueError):
+                    continue
+        series = [v for _, v in sorted(by_year.items()) if v > 0]
+        if series:
+            return series
+    # yfinance-style CSV: per-date columns parsed by _dcf_yf_rows.
     rows = _dcf_yf_rows(cashflow_payload)
     fcf_row = None
     for label, vals in rows.items():
@@ -1268,14 +1320,16 @@ def get_dcf_valuation(
         if not fcf:
             return f"dcf unavailable for {ticker}: no usable free cash flow series."
         rf = _dcf_rf(current_date)
-        fund = _dcf_canonical(route_to_vendor("get_fundamentals", ticker, current_date) or "")
-        bal = _dcf_canonical(
-            route_to_vendor("get_balance_sheet", ticker, "annual", current_date) or ""
-        )
-        market_cap = _dcf_market_cap(fund)
-        beta = _dcf_beta(fund)
-        cash, debt = _dcf_cash_debt(bal)
-        shares = _dcf_shares(fund, bal, market_cap, ticker)
+        # Screener-grade canonical line items (fundamentals + balance sheet +
+        # income statement + finnhub gap-fill), so market cap / shares resolve
+        # even when moomoo's statement payload has no "Market Cap" row.
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
+
+        fin = fetch_ticker(ticker, current_date) or {}
+        market_cap = _dcf_market_cap(fin)
+        beta = _dcf_beta(fin)
+        cash, debt = _dcf_cash_debt(fin)
+        shares = _dcf_shares(fin, fin, market_cap, ticker)
         if not shares:
             return f"dcf unavailable for {ticker}: no shares outstanding."
         if rf is None:
@@ -1583,7 +1637,7 @@ def get_ratios(
     except Exception as exc:  # noqa: BLE001
         return f"ratios unavailable for {ticker}: {exc}"
     try:
-        from scripts.value_screener import fetch_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
 
         fin = fetch_ticker(ticker, current_date or "2026-08-24") or {}
     except Exception as exc:  # noqa: BLE001
@@ -1743,7 +1797,7 @@ def get_earnings_quality(
         message when the vendor chain yields no statements.
     """
     try:
-        from scripts.value_screener import fetch_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
     except Exception as exc:  # noqa: BLE001
         return f"earnings quality unavailable for {ticker}: {exc}"
     fin = fetch_ticker(ticker, current_date)
@@ -1753,7 +1807,7 @@ def get_earnings_quality(
             "the vendor chain; do not fabricate quality screens."
         )
     try:
-        from scripts.value_screener import _latest
+        from tradingagents.dataflows.statement_parsing import _latest
         from tradingagents.strategies.normalized import accruals_ratio, trap_verdict
     except Exception as exc:  # noqa: BLE001
         return f"earnings quality unavailable for {ticker}: {exc}"
@@ -1776,7 +1830,7 @@ def get_earnings_quality(
     try:
         # Reuse the screener's screens so the trap verdict includes the accrual,
         # which screen_ticker's own trap call currently omits.
-        from scripts.value_screener import screen_ticker
+        from tradingagents.dataflows.statement_parsing import screen_ticker
 
         row = screen_ticker(ticker, fin)
         m, z, f = row.get("beneish_m"), row.get("altman_z"), row.get("f_score")

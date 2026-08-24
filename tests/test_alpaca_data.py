@@ -1,6 +1,26 @@
 """Alpaca data-only vendor unit tests (offline; mock the HTTP layer)."""
 
+from contextlib import ExitStack, contextmanager
 from unittest import mock
+
+import scripts.value_screener as vs
+from tradingagents.dataflows import statement_parsing as _sp_parsing
+
+
+@contextmanager
+def _patched_router(route):
+    """Patch the vendor router wherever this module reaches it.
+
+    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
+    contract), so patching only ``vs.route_to_vendor`` leaks live vendor
+    calls; patch both bindings.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
+        stack.enter_context(
+            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
+        )
+        yield
 
 
 def _patch(payload):
@@ -183,7 +203,7 @@ def test_screener_intraday_columns(capsys):
         }
     }
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_route),
+        _patched_router(_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=_losers),
         mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=_losers),
         mock.patch(
@@ -224,7 +244,7 @@ def test_screener_ohlcv_falls_back_to_alpaca():
         for i in range(250)
     ]
     with (
-        mock.patch.object(vs, "route_to_vendor", return_value="NO_DATA_AVAILABLE"),
+        _patched_router(lambda *a, **k: "NO_DATA_AVAILABLE"),
         mock.patch(
             "tradingagents.dataflows.config.get_config", return_value={"enable_alpaca": True}
         ),

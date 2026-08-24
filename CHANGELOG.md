@@ -119,6 +119,40 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Installed-CLI import bug: analyst tools could not find `scripts/`** -
+  the agent analysis tools imported the vendor-output -> canonical parsing
+  helpers from `scripts.value_screener`, but the installed `tradingagents` CLI
+  wheel ships only `tradingagents*` and `cli*` (no `scripts/` on `sys.path`),
+  so every DCF / fcf-yield / z-score / ratios / earnings-quality call degraded
+  to `No module named 'scripts.value_screener'` (DCF) or a bare
+  "unavailable ... from the vendor chain". The parsing layer moved to
+  `tradingagents/dataflows/statement_parsing.py` (pure parsers + canonical
+  aliases + `fetch_ticker`/`screen_ticker`), `scripts/value_screener.py`
+  re-exports the same names (backend CLI + tests unchanged), and all 14 tool
+  import sites now load from the package module. In a real NVDA run the three
+  symptoms became: DCF returns a fair value (WACC from Beta, shares from
+  market cap/close), fcf-yield returns a computed yield band, z-score compute
+  from 4 real moomoo periods.
+- **DCF tool: moomoo-markdown cashflow support** - `_dcf_fcf_series` only
+  parsed yfinance-style CSV rows, so with moomoo (the default first vendor)
+  serving `get_cashflow` the DCF degraded to "no usable free cash flow"
+  series. It now parses moomoo per-period markdown tables too (Free Cash Flow
+  row, else OCF - capex, positive-only, chronological), falling back to the
+  CSV parser.
+- **DCF market-cap / beta / shares resolution** - `get_dcf_valuation` now
+  resolves the financial background with the screener-grade `fetch_ticker`
+  (fundamentals + balance sheet + income + finnhub gap-fill) instead of a
+  single raw `get_fundamentals` call, so market cap / shares resolve even
+  when moomoo's statements have no "Market Cap" row; new canonical aliases
+  `beta` and `shares` (shares outstanding / diluted / weighted-average) mean
+  provider betas are no longer silently dropped to 1.0.
+  Tests: `tests/test_statement_parsing.py` (new; imports + parsers + aliases
+  + scripts re-export parity), moomoo-markdown DCF case in
+  `test_analysis_tools`, hermetic-router updates across the screener/growth/
+  scan/v2-v5/alpaca suites (patch `statement_parsing.route_to_vendor`
+  alongside `scripts.value_screener`). Full suite 1250 passed / 2 skipped;
+  ruff clean.
+
 - **Blank-symbol yfinance hardening** - a whitespace/empty ticker reaching a
   yfinance entry point (e.g. a malformed LLM tool call during
   `batch.py --symbols ...`) used to canonicalize through `normalize_symbol`

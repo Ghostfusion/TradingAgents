@@ -1,10 +1,30 @@
 """Phase-1 growth / sector / institutional screens - parsing + CLI gates."""
 
+from contextlib import ExitStack, contextmanager
 from unittest import mock
 
 import pytest
 
 import scripts.value_screener as vs
+from tradingagents.dataflows import statement_parsing as _sp_parsing
+
+
+@contextmanager
+def _patched_router(route):
+    """Patch the vendor router wherever this module reaches it.
+
+    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
+    contract), so patching only ``vs.route_to_vendor`` would leak live vendor
+    calls; patch both bindings.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
+        stack.enter_context(
+            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
+        )
+        yield
+
+
 
 # Tests drive vs.main() end-to-end (benchmark closes, growth/ROE/revision
 # gates) on live vendor data; 15-60s each under a slow network. Keep the
@@ -94,7 +114,7 @@ def test_inst_accumulation_parse():
 
 
 def test_growth_gates_pass_when_measured_ok(capsys):
-    with mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route):
+    with _patched_router(_fund_route):
         vs.main(
             [
                 "AAPL",
@@ -116,14 +136,14 @@ def test_growth_gates_pass_when_measured_ok(capsys):
 
 
 def test_growth_gate_eps_filters(capsys):
-    with mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route):
+    with _patched_router(_fund_route):
         vs.main(["AAPL", "-d", "2026-01-02", "--min-eps-yoy", "30"])
     out = capsys.readouterr().out
     assert "AAPL" not in out  # measured below the gate -> row dropped
 
 
 def test_growth_gate_roe_filters(capsys):
-    with mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route):
+    with _patched_router(_fund_route):
         vs.main(["AAPL", "-d", "2026-01-02", "--min-roe", "150"])
     out = capsys.readouterr().out
     assert "AAPL" not in out
@@ -138,14 +158,14 @@ def test_max_mcap_gate(capsys):
             return INCOME_MD + ("\n" + BALANCE_MD if method == "get_balance_sheet" else "")
         return "NO_DATA_AVAILABLE: no usable data"
 
-    with mock.patch.object(vs, "route_to_vendor", side_effect=cap_route):
+    with _patched_router(cap_route):
         vs.main(["AAPL", "-d", "2026-01-02", "--max-mcap", "20000000000"])
     out = capsys.readouterr().out
     assert "AAPL" not in out  # 50B market cap above the 20B ceiling
 
     # Below the ceiling -> kept (no SystemExit).
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=cap_route),
+        _patched_router(cap_route),
         mock.patch.object(vs, "print_watchlist", return_value=None),
     ):
         vs.main(["AAPL", "-d", "2026-01-02", "--max-mcap", "1000000000000"])
@@ -161,7 +181,7 @@ def test_inst_accum_gate_distribution_rejects(capsys):
             )
         return _fund_route(method, *a, **k)
 
-    with mock.patch.object(vs, "route_to_vendor", side_effect=dist_route):
+    with _patched_router(dist_route):
         vs.main(["AAPL", "-d", "2026-01-02", "--inst-accum"])
     out = capsys.readouterr().out
     assert "AAPL" not in out
@@ -180,7 +200,7 @@ def test_sector_rank_gate(capsys):
     }
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(vs, "_sector_ranking", return_value=fake_ranking),
         mock.patch.object(vs, "_fetch_sector_guarded", return_value="Technology"),
         mock.patch(
@@ -194,7 +214,7 @@ def test_sector_rank_gate(capsys):
     assert "T1" in out  # top-3 rank marker
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(vs, "_sector_ranking", return_value=fake_ranking),
         mock.patch.object(vs, "_fetch_sector_guarded", return_value="Energy"),
         mock.patch(
@@ -209,7 +229,7 @@ def test_sector_rank_gate(capsys):
 
 def test_sector_rank_unknown_sector_keeps(capsys):
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(
             vs, "_sector_ranking", return_value={"ranked": [], "top3_3m": [], "top3_1m": []}
         ),
@@ -222,7 +242,7 @@ def test_sector_rank_unknown_sector_keeps(capsys):
 def test_revision_gate(capsys):
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(
             vs, "_fetch_revision_guarded", return_value={"up": 3, "down": 1, "net": 2}
         ),
@@ -232,7 +252,7 @@ def test_revision_gate(capsys):
     assert "RevUp" in out
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(
             vs, "_fetch_revision_guarded", return_value={"up": 1, "down": 3, "net": -2}
         ),
@@ -244,7 +264,7 @@ def test_revision_gate(capsys):
 
 def test_revision_unknown_data_kept():
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fund_route),
+        _patched_router(_fund_route),
         mock.patch.object(vs, "_fetch_revision_guarded", return_value=None),
         mock.patch(
             "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",

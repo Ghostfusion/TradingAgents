@@ -1,10 +1,33 @@
 """--scan strategies: trend-pullback (A) and breakout (B) signal tests."""
 
+from contextlib import ExitStack, contextmanager
 from unittest import mock
 
 import pytest
 
 import scripts.value_screener as vs
+from tradingagents.dataflows import statement_parsing as _sp_parsing
+
+
+@contextmanager
+def _patched_router(route):
+    """Patch the vendor router wherever this module reaches it.
+
+    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
+    contract), so patching only ``vs.route_to_vendor`` leaks live vendor
+    calls; patch both bindings.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
+        stack.enter_context(
+            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
+        )
+        yield
+
+
+
+
+
 
 # Tests drive vs.main() end-to-end (benchmark SPDR closes, OHLCV scan bases,
 # sector/revision lookups) that fetch live vendor data and can take 15-60s per
@@ -24,7 +47,7 @@ def _ohlcv(closes, vols, hi_off=0.5, lo_off=0.5):
 @pytest.fixture(autouse=True)
 def _patch_network():
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fixture_route),
+        _patched_router(_fixture_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=_fake_losers_offline
         ),
@@ -74,7 +97,7 @@ def _breakout_route(method, *a, **k):
 
 def test_scan_all_keeps_rows_and_flags(capsys):
     """--scan all keeps everything and adds ScanA/ScanB columns."""
-    with mock.patch.object(vs, "route_to_vendor", side_effect=_breakout_route):
+    with _patched_router(_breakout_route):
         vs.main(
             [
                 "--universe",
@@ -144,7 +167,7 @@ def _fake_losers_mom(*a, **k):
 def test_scan_momentum_passes_and_shows_pills(capsys):
     """--scan momentum keeps in-band names and shows Pills/Pull/RR columns."""
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_momentum_route),
+        _patched_router(_momentum_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=_fake_losers_mom
         ),
@@ -175,7 +198,7 @@ def test_scan_momentum_filters_out_non_rvol(capsys):
     import pytest as _pytest
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_momentum_flat_route),
+        _patched_router(_momentum_flat_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,
@@ -219,7 +242,7 @@ def test_scan_breakout_filters_non_matches(capsys):
     import pytest as _pytest
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_fixture_route),
+        _patched_router(_fixture_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,
@@ -314,7 +337,7 @@ def _swing_route(method, *a, **k):
 def test_scan_swing_passes_and_shows_columns(capsys):
     """--scan swing keeps RS-backed swing setups and shows ScanC/RS/Stp/T2."""
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_swing_route),
+        _patched_router(_swing_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,
@@ -355,7 +378,7 @@ def test_scan_swing_filters_non_matches(capsys):
         return "NO_DATA_AVAILABLE"
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=flat_route),
+        _patched_router(flat_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,
@@ -412,7 +435,7 @@ def _vcp_route(method, *a, **k):
 def test_scan_vcp_passes_and_shows_columns(capsys):
     """--scan vcp keeps VCP bases and shows VCP/Brk columns."""
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=_vcp_route),
+        _patched_router(_vcp_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,
@@ -452,7 +475,7 @@ def test_scan_vcp_filters_non_matches(capsys):
         return "NO_DATA_AVAILABLE"
 
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=flat_route),
+        _patched_router(flat_route),
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,

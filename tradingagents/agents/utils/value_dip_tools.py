@@ -98,7 +98,7 @@ def _fcf_series_from_cashflow(payload: str) -> list | None:
     if not payload or str(payload).startswith(("NO_DATA", "DATA_")):
         return None
     try:
-        from scripts.value_screener import (
+        from tradingagents.dataflows.statement_parsing import (
             _markdown_period_tables,
             _parse_csv_statements,
         )
@@ -165,7 +165,7 @@ def _fcf_series_from_cashflow(payload: str) -> list | None:
 def _canonical_financials(ticker: str, current_date: str) -> dict:
     """Canonical line items via the screener's own fetch_ticker."""
     try:
-        from scripts.value_screener import fetch_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
 
         return fetch_ticker(ticker, current_date) or {}
     except Exception:  # noqa: BLE001
@@ -379,7 +379,7 @@ def get_valuation_z_score(
     if price is None:
         return f"valuation z-score unavailable for {ticker}: no price history."
     try:
-        from scripts.value_screener import _markdown_period_tables
+        from tradingagents.dataflows.statement_parsing import _markdown_period_tables
 
         payload = route_to_vendor("get_fundamentals", ticker, current_date) or ""
         tables = _markdown_period_tables(payload) if payload else []
@@ -754,7 +754,7 @@ def _period_multiple(rows: dict, multiple: str, price: float | None = None) -> f
     so the series measures today's price against each period's fundamentals).
     """
     try:
-        from scripts.value_screener import _first_number as _fn
+        from tradingagents.dataflows.statement_parsing import _first_number as _fn
     except Exception:  # noqa: BLE001
         _fn = None
 
@@ -836,7 +836,7 @@ def _trap_level_from_fin(fin: dict, ticker: str, current_date: str) -> str | Non
     net-net) via ``screen_ticker``; best-effort, None when unavailable.
     """
     try:
-        from scripts.value_screener import fetch_ticker, screen_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker, screen_ticker
 
         if not fin:
             fin = fetch_ticker(ticker, current_date)
@@ -852,7 +852,7 @@ def _accrual_from_fin(fin: dict, ticker: str, current_date: str) -> float | None
     tool; best-effort from the canonical items + cashflow, None when missing.
     """
     try:
-        from scripts.value_screener import fetch_ticker
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
         from tradingagents.strategies.normalized import accruals_ratio
 
         if not fin:
@@ -877,7 +877,10 @@ def _cfo_from_payload(payload: str) -> float | None:
     if not payload or str(payload).startswith(("NO_DATA", "DATA_")):
         return None
     try:
-        from scripts.value_screener import _markdown_period_tables, _parse_csv_statements
+        from tradingagents.dataflows.statement_parsing import (
+            _markdown_period_tables,
+            _parse_csv_statements,
+        )
 
         tables = _markdown_period_tables(payload)
         if tables:

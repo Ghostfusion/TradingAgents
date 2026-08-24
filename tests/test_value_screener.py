@@ -4,11 +4,34 @@ Offline: moomoo ranks and vendor statements are mocked; nothing hits the
 network or OpenD.
 """
 
+from contextlib import ExitStack, contextmanager
 from unittest import mock
 
 import pytest
 
 import scripts.value_screener as vs
+from tradingagents.dataflows import statement_parsing as _sp_parsing
+
+
+@contextmanager
+def _patched_router(route):
+    """Patch the vendor router wherever this module reaches it.
+
+    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
+    contract), so patching only ``vs.route_to_vendor`` leaks live vendor
+    calls; patch both bindings.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
+        stack.enter_context(
+            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
+        )
+        yield
+
+
+
+
+
 
 # Several tests drive vs.main() end-to-end, which fetches real OHLCV/statements
 # (benchmark SPDR closes, scan bases) through the vendor chain; those calls can
@@ -116,7 +139,7 @@ def fake_hot(count=50, market="US", min_market_cap=0.0):
 @pytest.fixture(autouse=True)
 def _patch_vendors():
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=fake_route),
+        _patched_router(fake_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
         mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=fake_hot),
     ):

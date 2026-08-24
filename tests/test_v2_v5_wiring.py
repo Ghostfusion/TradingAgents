@@ -1,12 +1,30 @@
 """V2/V3 wiring unit tests: screener composite rank + allocation; exits; alloc block."""
 
+from contextlib import ExitStack, contextmanager
 from unittest import mock
 
 import pytest
 
 import scripts.value_screener as vs
+from tradingagents.dataflows import statement_parsing as _sp_parsing
 from tradingagents.strategies.contract import build_position_contract
 from tradingagents.strategies.portfolio import allocation_block
+
+
+@contextmanager
+def _patched_router(route):
+    """Patch the vendor router wherever this module reaches it.
+
+    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
+    contract), so patching only ``vs.route_to_vendor`` leaks live vendor
+    calls; patch both bindings.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
+        stack.enter_context(
+            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
+        )
+        yield
 
 
 def _closes_csv(step):
@@ -67,7 +85,7 @@ def fake_losers(sort_dir="losers", count=50, market="US", min_market_cap=0.0):
 @pytest.fixture(autouse=True)
 def _patch():
     with (
-        mock.patch.object(vs, "route_to_vendor", side_effect=fake_route),
+        _patched_router(fake_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
         mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=fake_losers),
     ):
@@ -99,7 +117,7 @@ def test_allocation_block_sums_to_one_when_uncapped():
 
 def test_volume_and_atr_gates_defaults_pass():
     """Default gates (vol>=1M, ATR%>2) accept the fixture OHLCV."""
-    with mock.patch.object(vs, "route_to_vendor", side_effect=fake_route):
+    with _patched_router(fake_route):
         o = vs._fetch_ohlcv("MSFT")
     assert len(o["closes"]) >= 100
     avg_vol = sum(o["volumes"][-30:]) / 30
