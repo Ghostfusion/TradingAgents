@@ -194,17 +194,32 @@ class TradingAgentsGraph:
         if self.callbacks:
             llm_kwargs["callbacks"] = self.callbacks
 
+        def _tier_kwargs(tier: str) -> dict:
+            """Per-role max output tokens: quick = analysts/debaters/trader,
+            deep = RM/PM. Only when the provider accepts max_tokens (OpenAI /
+            OpenRouter / Anthropic / Bedrock all do).
+            """
+            cfg = self.config or {}
+            if tier == "deep":
+                v = cfg.get("max_output_tokens_deep") or cfg.get("max_output_tokens")
+            else:
+                v = cfg.get("max_output_tokens_quick") or cfg.get("max_output_tokens")
+            out = dict(llm_kwargs)
+            if v:
+                out["max_tokens"] = int(v)
+            return out
+
         deep_client = create_llm_client(
             provider=self.config["llm_provider"],
             model=self.config["deep_think_llm"],
             base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            **_tier_kwargs("deep"),
         )
         quick_client = create_llm_client(
             provider=self.config["llm_provider"],
             model=self.config["quick_think_llm"],
             base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            **_tier_kwargs("quick"),
         )
 
         self.deep_thinking_llm = deep_client.get_llm()

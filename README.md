@@ -35,6 +35,13 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-24] **Per-role max output tokens + density directives** - new env keys
+  `TRADINGAGENTS_MAX_OUTPUT_TOKENS(_QUICK/_DEEP)` cap the LLM output via
+  `max_tokens` (quick=analysts/debaters/trader 6000, deep=RM/PM 2500, based on
+  measured report sizes + your `min(1,048,576, 1,310,720 - input)` formula).
+  Every agent prompt now carries a `get_output_budget(...)` directive: dense,
+  bounded, tool-call-first (never approximate a number you can fetch).
+
 - [2026-08-24] **OpenRouter provider-ignore routing** - add a configurable
   slow-provider blocklist: set `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` in
   `.env` (comma-separated provider slugs). It is sent as `provider.ignore` in

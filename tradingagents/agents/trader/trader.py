@@ -10,6 +10,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_output_budget,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -35,6 +36,7 @@ def create_trader(llm):
                     "Anchor your reasoning in the analysts' reports and the research plan. "
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
+                    + get_output_budget("trader")
                 ),
             },
             {

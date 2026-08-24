@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_breadth,
     get_massive_news,
     get_news,
+    get_output_budget,
     get_prediction_markets,
     get_sec_filings,
 )
@@ -55,7 +56,7 @@ def create_news_analyst(llm):
             + "get_beat_miss_sizing(side, catalyst) - the deterministic position multiplier implied by a beat/miss side (with the catalyst scale). Use its multiplier when the market will size an event-window position, not a guess. "
             + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + get_language_instruction()
+            + get_language_instruction() + get_output_budget("analyst")
         )
 
         prompt = ChatPromptTemplate.from_messages(

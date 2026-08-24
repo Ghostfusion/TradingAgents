@@ -207,6 +207,39 @@ def get_language_instruction() -> str:
     return f" Write your entire response in {lang}."
 
 
+def get_output_budget(section: str = "analyst") -> str:
+    """Return a prompt directive that keeps output dense + tool-calling healthy.
+
+    Goal (per measured report sizes + the max-output formula): give the LLM a
+    per-role output budget so it maximizes information, does NOT overflow, and
+    still calls tools. Different sections get different budgets:
+
+    * ``analyst`` / ``debater``: richest (analysts measured up to ~5k tokens)
+    * ``research_manager`` / ``portfolio_manager``: compact, structured
+    * ``trader``: terse proposal
+    """
+    common = (
+        "Do not restate the prompt or the tool outputs; go straight to analysis. "
+        "Every number you cite must come from a tool call - if you lack a number, "
+        "call the tool rather than approximate. Prefer bullets and a compact table "
+        "over dense prose."
+    )
+    if section in ("research", "portfolio"):
+        return " Keep the response tight and information-dense (about 250-400 words). " + common
+    if section == "trader":
+        return " Keep the proposal concise and actionable. " + common
+    # analysts + debaters: let them be rich but bounded
+    return (
+        " Keep the response information-dense but bounded (about 1,000-1,400 "
+        "words: one verdict sentence, one bullet per signal with the exact "
+        "number, then a summary table). " + common
+    )
+
+
+
+
+
+
 def _clean_identity_value(value: Any) -> str | None:
     """Return a trimmed string, or None for empty / placeholder-ish values."""
     if not isinstance(value, str):

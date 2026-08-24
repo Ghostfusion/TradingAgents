@@ -13,6 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_momentum_detail,
     get_options_chain,
     get_orderflow_read,
+    get_output_budget,
     get_position_sizing,
     get_regime_components,
     get_regime_read,
@@ -144,6 +145,7 @@ You also have value-dip computed tools (the Value Dip + Swing hybrid):
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
+            + get_output_budget("analyst")
         )
 
         prompt = ChatPromptTemplate.from_messages(

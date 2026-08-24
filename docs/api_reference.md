@@ -75,6 +75,9 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
 | `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
 | `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 6000; the fallback for both tiers |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / debaters / trader); default 6000 |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
 | `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
 | `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |

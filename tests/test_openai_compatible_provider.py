@@ -147,3 +147,34 @@ def test_openrouter_ignore_not_applied_to_other_providers(monkeypatch):
     llm = c.get_llm()
     eb = getattr(llm, "extra_body", None) or {}
     assert "provider" not in eb
+
+
+# ---------------------------------------------------------------------------
+# Per-role max output tokens (quick=6000, deep=2500), most-info-not-overflow
+# ---------------------------------------------------------------------------
+
+
+def test_openrouter_max_tokens_passthrough(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens": 6000, "max_output_tokens_quick": 6000,
+                 "max_output_tokens_deep": 2500},
+    )
+    from tradingagents.llm_clients.openai_client import OpenAIClient
+
+    # quick tier
+    c = OpenAIClient("deepseek/deepseek-v4-flash-0731", provider="openrouter", max_tokens=6000)
+    llm = c.get_llm()
+    assert getattr(llm, "max_tokens", None) == 6000
+
+
+def test_output_budget_helper_density_and_tool_call():
+    from tradingagents.agents.utils.agent_utils import get_output_budget
+
+    a = get_output_budget("analyst")
+    assert "tool" in a and "bullet" in a and "table" in a
+    r = get_output_budget("research")
+    assert "250-400" in r
+    t = get_output_budget("trader")
+    assert "concise" in t.lower()

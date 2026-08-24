@@ -24,6 +24,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_margin_of_safety,
+    get_output_budget,
     get_portfolio_weights,
     get_ratios,
     get_revenue_breakdown,
@@ -80,7 +81,7 @@ def create_fundamentals_analyst(llm):
             + " `get_ratios(ticker)` returns the computed valuation/profitability block (EV, EV/EBIT, EV/EBITDA, EV/Sales, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, Cash ratio, dividend yield, FCF, market cap) derived from this project's own statements - cite these numbers before any 'cheap / richly valued / quality' claim; missing inputs render n/a (never invented)."
             + " You also have value-dip computed tools (the Value Dip + Swing hybrid, `Strategies/Value_Dip_swing.md`): `get_fcf_yield(ticker, current_date)` returns the free cash flow yield (FCF / market cap; >= 6% is the framework's value-floor row) - cite it before any 'strong cash generation supports the value' claim; `get_valuation_z_score(ticker, current_date, multiple=...)` returns the historical valuation Z (current vs its own trailing P/E, EV/EBITDA or P/FCF; Z <= -1.5 = cheap vs history) - cite it before any 'trades below its historical norm' claim; `get_value_dip_setup(ticker, current_date)` returns the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict - call it before proposing a value-dip (discounted entry with oversold timing) setup."
             + " You also have two Step-1 fundamental-dip gates: `get_balance_sheet_health(ticker, current_date)` returns the balance-sheet health (debt/equity < 1.0 OR current ratio > 1.5) - cite it before any 'low leverage / strong balance sheet' claim; `get_decline_driver_check(ticker, current_date)` returns the negative-force screen (clean / caution / structural) - if it says 'structural', the dip is company-specific (fraud/distress, deeply negative momentum, negative FCF/ROE, severe EPS decline) and the value-dip setup should be rejected, not bought."
-            + get_language_instruction(),
+            + get_language_instruction() + get_output_budget("analyst"),
         )
 
         prompt = ChatPromptTemplate.from_messages(

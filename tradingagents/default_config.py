@@ -77,6 +77,11 @@ _ENV_OVERRIDES = {
     # (e.g. slow/unreliable endpoints). Sent as provider.ignore in the request
     # body via extra_body. Empty = no restriction.
     "TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS": "openrouter_ignore_providers",
+    # Per-role max output tokens (cap; most-information-but-not-overflow).
+    # quick/global is applied to analysts + debaters + trader; deep to RM/PM.
+    "TRADINGAGENTS_MAX_OUTPUT_TOKENS": "max_output_tokens",
+    "TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK": "max_output_tokens_quick",
+    "TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP": "max_output_tokens_deep",
     # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md): gate for the
     # screener --scan value-dip mode; the analyst @tools stay bound regardless.
     "TRADINGAGENTS_ENABLE_VALUE_DIP": "enable_value_dip",
@@ -187,6 +192,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # unreliable endpoints). Sent as provider.ignore via extra_body. Empty
         # list = downstream of OpenRouter's own defaults.
         "openrouter_ignore_providers": [],
+        # Per-role max output tokens (hard ceiling via max_tokens when the
+        # provider accepts it). Basis: measured max outputs in this repo
+        # (analysts ~5k, RM 1.9k, trader .7k, PM 1.4k) + ~20% headroom, well
+        # under the formula's 1,310,720 - input ceiling for these inputs.
+        # quick/global = analysts + debaters + trader (6000),
+        # deep = RM + PM (2500).
+        "max_output_tokens": 6000,
+        "max_output_tokens_quick": 6000,
+        "max_output_tokens_deep": 2500,
         # Provider-specific thinking configuration
         "google_thinking_level": None,  # "high", "minimal", etc.
         "openai_reasoning_effort": None,  # "medium", "high", "low"
