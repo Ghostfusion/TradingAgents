@@ -226,3 +226,32 @@ def test_nightly_review_drives_from_summary(tmp_path, monkeypatch):
     assert rc == 2
     assert len(called) == 1
     assert "--ticker" in called[0] and "EIX" in called[0]
+
+
+def test_decision_history_report_folder_fallback(tmp_path):
+    """Batch reports carry only markdown (no full_states_log json); the history
+    must fall back to 5_portfolio/decision.md per report folder."""
+    from scripts.decision_history import history_for
+
+    rep = tmp_path / "MSFT_20260811_143655"
+    (rep / "5_portfolio").mkdir(parents=True)
+    (rep / "5_portfolio" / "decision.md").write_text(
+        "**Rating**: Buy\n**Executive Summary**: x\n", encoding="utf-8"
+    )
+    rep2 = tmp_path / "msft_20260730_135724"
+    (rep2 / "5_portfolio").mkdir(parents=True)
+    (rep2 / "5_portfolio" / "decision.md").write_text(
+        "**Rating**: Hold\n", encoding="utf-8"
+    )
+    rows = history_for("MSFT", results_dir=str(tmp_path))
+    assert len(rows) == 2
+    assert {r["rating"] for r in rows} == {"Buy", "Hold"}
+    assert all(r["flags"] == "report-folder" for r in rows)
+    # lowercase ticker still matches
+    assert len(history_for("msft", results_dir=str(tmp_path))) == 2
+
+
+def test_decision_history_case_insensitive(tmp_path):
+    from scripts.decision_history import history_for
+
+    assert history_for("nope", results_dir=str(tmp_path)) == []

@@ -58,30 +58,98 @@ def _flags(state: dict) -> str:
 
 
 def history_for(ticker: str, results_dir: str | None = None) -> list[dict]:
-    """Sorted (date asc) decision rows for one ticker; never raises."""
-    base = results_dir or _results_dir()
-    logs = os.path.join(base, ticker.upper(), "TradingAgentsStrategy_logs")
-    rows = []
-    if not os.path.isdir(logs):
-        return rows
-    for path in glob.glob(os.path.join(logs, "full_states_log_*.json")):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                state = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        d = state.get("trade_date") or Path(path).stem.replace("full_states_log_", "")
-        rows.append(
-            {
-                "date": d,
-                "rating": _rating(state.get("final_trade_decision") or ""),
-                "decision": (state.get("final_trade_decision") or "").splitlines()[0]
-                if state.get("final_trade_decision")
-                else "",
-                "flags": _flags(state),
-            }
+    """Sorted (date asc) decision rows for one ticker; never raises.
+
+    Searches BOTH the configured ``results_dir`` (the graph's
+    ``full_states_log_<date>.json`` layout) and the batch ``reports/<SYM>_<ts>/``
+    tree (which may embed a ``TradingAgentsStrategy_logs/`` folder when a run
+    saved there). Ticker matching is case-insensitive so web input like ``msft``
+    works.
+    """
+
+    roots = [results_dir] if results_dir else []
+    if not results_dir:
+        roots.append(_results_dir())
+        # batch report folders live in the repo root reports/ (config.REPORTS_DIR)
+        reports_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports"
         )
+        roots.append(reports_root)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    upper = (ticker or "").upper()
+    for base in roots:
+        if not base or not os.path.isdir(base):
+            continue
+        # 1) default layout: <base>/<TICKER>/TradingAgentsStrategy_logs
+        logs = os.path.join(base, upper, "TradingAgentsStrategy_logs")
+        for path in glob.glob(os.path.join(logs, "full_states_log_*.json")):
+            rows += _parse_log(path, seen)
+        # 2) batch layout: <base>/<SYM>_<ts>/TradingAgentsStrategy_logs (any case)
+        for folder in os.listdir(base):
+            if not folder.upper().startswith(upper + "_"):
+                continue
+            flogs = os.path.join(base, folder, "TradingAgentsStrategy_logs")
+            if os.path.isdir(flogs):
+                for path in glob.glob(os.path.join(flogs, "full_states_log_*.json")):
+                    rows += _parse_log(path, seen)
+        # 3) batch layout WITHOUT json logs: the report folders themselves carry
+        #    the decision in 5_portfolio/decision.md — surface a row per folder
+        #    (the graph's _log_state writes the JSON only to the default
+        #    results_dir, which batch's ./reports saves don't populate).
+        for folder in os.listdir(base):
+            if not folder.upper().startswith(upper + "_"):
+                continue
+            decision_md = os.path.join(base, folder, "5_portfolio", "decision.md")
+            if not os.path.isfile(decision_md):
+                continue
+            # derive a date from the folder stamp <TICKER>_YYYYMMDD_HHMMSS
+            stamp = folder.split("_")[1] if "_" in folder else ""
+            d = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) >= 8 else folder
+            if d in seen:
+                continue
+            seen.add(d)
+            text = ""
+            try:
+                with open(decision_md, encoding="utf-8") as fh:
+                    text = fh.read()
+            except OSError:
+                text = ""
+            rows.append(
+                {
+                    "date": d,
+                    "rating": _rating(text),
+                    "decision": next(
+                        (ln.strip()[:120] for ln in text.splitlines() if ln.strip()),
+                        "",
+                    ),
+                    "flags": "report-folder",
+                }
+            )
     return sorted(rows, key=lambda r: r["date"])
+
+
+def _parse_log(path: str, seen: set[str]) -> list[dict]:
+    """Parse one full_states_log JSON into a decision row; dedupe by (date)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    d = state.get("trade_date") or Path(path).stem.replace("full_states_log_", "")
+    if d in seen:
+        return []
+    seen.add(d)
+    return [
+        {
+            "date": d,
+            "rating": _rating(state.get("final_trade_decision") or ""),
+            "decision": (state.get("final_trade_decision") or "").splitlines()[0]
+            if state.get("final_trade_decision")
+            else "",
+            "flags": _flags(state),
+        }
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
