@@ -177,7 +177,10 @@ def main(argv: list[str] | None = None) -> int:
     out_all = []
     rc = 0
     for t in tickers:
-        rows = history_for(t, base)
+        # Pass None (not base) so history_for uses its full default search
+        # (results_dir + repo reports/ tree). Only an explicit --results-dir
+        # restricts the search (hermetic).
+        rows = history_for(t, args.results_dir)
         if args.max_days > 0:
             rows = rows[-args.max_days :]
         if not rows:

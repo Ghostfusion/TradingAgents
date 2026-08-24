@@ -38,6 +38,7 @@ def _load_script():
 def test_script_dry_run_writes_nothing(tmp_path):
     mod = _load_script()
     report = _make_prior_report(tmp_path)
+
     # route_to_vendor returns a tiny CSV window; catalyst returns a benign snapshot
     def fake_route(method, *a, **k):
         if method == "get_stock_data":
@@ -49,18 +50,21 @@ def test_script_dry_run_writes_nothing(tmp_path):
             )
         return "NO_DATA_AVAILABLE"
 
-    with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor", fake_route
-    ), mock.patch(
-        "tradingagents.strategies.catalyst.fetch_catalyst_data",
-        return_value={"ok": True},
-    ), mock.patch(
-        "tradingagents.strategies.catalyst.build_catalyst_snapshot",
-        return_value={"verdict": "no-imminent-catalyst", "scale": 1.0},
-    ), mock.patch(
-        # discovery: the script looks under cwd/reports
-        "pathlib.Path.cwd",
-        return_value=tmp_path,
+    with (
+        mock.patch("tradingagents.dataflows.interface.route_to_vendor", fake_route),
+        mock.patch(
+            "tradingagents.strategies.catalyst.fetch_catalyst_data",
+            return_value={"ok": True},
+        ),
+        mock.patch(
+            "tradingagents.strategies.catalyst.build_catalyst_snapshot",
+            return_value={"verdict": "no-imminent-catalyst", "scale": 1.0},
+        ),
+        mock.patch(
+            # discovery: the script looks under cwd/reports
+            "pathlib.Path.cwd",
+            return_value=tmp_path,
+        ),
     ):
         pass
     # discovery uses Path.cwd()/reports — point it at tmp_path
@@ -117,8 +121,6 @@ def test_batch_same_night_factor_unavailable_never_fails(tmp_path, monkeypatch):
     batch._batch_pre_market_check("EIX", str(report), "2026-08-21")
 
 
-
-
 # Explicit timer for this module (repo default is 180s/test; keep it visible).
 pytestmark = pytest.mark.timeout(180)
 
@@ -138,13 +140,12 @@ def _load_script_module():
 
 def test_headline_delta_parses_titles():
     mod = _load_script_module()
-    fake_news = (
-        "- **Edison beats earnings** (2026-08-22)\n"
-        "- **Sempra dividend raised**\n"
-    )
+    fake_news = "- **Edison beats earnings** (2026-08-22)\n- **Sempra dividend raised**\n"
     with mock.patch(
         "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=lambda method, *a, **k: fake_news if method == "get_news" else "NO_DATA_AVAILABLE",
+        side_effect=lambda method, *a, **k: (
+            fake_news if method == "get_news" else "NO_DATA_AVAILABLE"
+        ),
     ):
         titles = mod._headline_delta("EIX", "2026-08-16", "2026-08-22", limit=2)
     assert len(titles) == 2
@@ -203,7 +204,9 @@ def test_nightly_review_drives_from_summary(tmp_path, monkeypatch):
 
     summary = tmp_path / "batch_summary_20260822_190000.jsonl"
     summary.write_text(
-        json.dumps({"symbol": "EIX", "report_dir": str(tmp_path / "EIX_20260821_181500"), "depth": "deep"})
+        json.dumps(
+            {"symbol": "EIX", "report_dir": str(tmp_path / "EIX_20260821_181500"), "depth": "deep"}
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -240,9 +243,7 @@ def test_decision_history_report_folder_fallback(tmp_path):
     )
     rep2 = tmp_path / "msft_20260730_135724"
     (rep2 / "5_portfolio").mkdir(parents=True)
-    (rep2 / "5_portfolio" / "decision.md").write_text(
-        "**Rating**: Hold\n", encoding="utf-8"
-    )
+    (rep2 / "5_portfolio" / "decision.md").write_text("**Rating**: Hold\n", encoding="utf-8")
     rows = history_for("MSFT", results_dir=str(tmp_path))
     assert len(rows) == 2
     assert {r["rating"] for r in rows} == {"Buy", "Hold"}
@@ -255,3 +256,23 @@ def test_decision_history_case_insensitive(tmp_path):
     from scripts.decision_history import history_for
 
     assert history_for("nope", results_dir=str(tmp_path)) == []
+
+
+def test_decision_history_cli_main_finds_report_folders(tmp_path, monkeypatch, capsys):
+    """Regression: main() used to pass the default results_dir into history_for,
+    which treated it as an explicit override and skipped the reports/ tree (so
+    the CLI/web path returned 'no history' even with report folders present)."""
+    import scripts.decision_history as dh
+
+    rep = tmp_path / "MSFT_20260811_143655"
+    (rep / "5_portfolio").mkdir(parents=True)
+    (rep / "5_portfolio" / "decision.md").write_text(
+        "**Rating**: Buy\n**Executive Summary**: x\n", encoding="utf-8"
+    )
+    # fake _results_dir so the default path points at tmp_path (hermetic),
+    # then run main(['msft']) which must discover the report folder.
+    monkeypatch.setattr(dh, "_results_dir", lambda: str(tmp_path))
+    rc = dh.main(["msft"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "MSFT" in out.out and "Buy" in out.out
