@@ -239,7 +239,10 @@ def write_report_tree(
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     body = "\n\n---\n\n".join(sections)
     toc = _build_toc(sections)
+    # Fixed trailing newline: the last section (PM decision) ends without a \n,
+    # making the report look truncated at the final byte even though it is
+    # complete. rstrip + a single trailing newline removes that illusion.
     (save_path / "complete_report.md").write_text(
-        header + toc + "\n\n---\n\n" + body, encoding="utf-8"
+        (header + toc + "\n\n---\n\n" + body).rstrip() + "\n", encoding="utf-8"
     )
     return save_path / "complete_report.md"

@@ -141,3 +141,16 @@ def test_risk_gate_renders_tranche_worst_case(tmp_path):
     # no tranche_context -> neither line (backward compatible)
     clean = write_report_tree(_state(verdict="WARN"), "TST2", tmp_path)
     assert "Tranche peak-deployed" not in clean.read_text(encoding="utf-8")
+
+
+def test_complete_report_ends_with_trailing_newline(tmp_path):
+    """complete_report.md must end with a single trailing newline so the final
+    PM decision (which has no trailing \n) doesn't look cut off."""
+    state = _state(verdict="WARN", reasons=["near cap"])
+    path = write_report_tree(state, "TST", tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert not text.endswith("\n\n")
+    # the last content line is the PM decision's final field (non-empty)
+    assert text.rstrip().splitlines()[-1].strip() != ""
+    assert "Executive Summary" in text.rstrip().splitlines()[-1]
