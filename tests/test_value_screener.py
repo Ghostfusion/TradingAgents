@@ -175,8 +175,11 @@ def test_save_watchlist_writes_md(tmp_path):
 def test_classic_path_has_no_mover_columns(capsys):
     vs.main(["AAPL", "-d", "2026-01-02"])
     out = capsys.readouterr().out
-    assert "DayChg" not in out
-    assert "Name |" not in out
+    # Mover columns (Name/DayChg) must NOT be table columns on the classic
+    # path. Check the table header row (pipe-delimited), not the legend
+    # bullets below the table (which list every column for reference).
+    assert "| Name " not in out
+    assert "| DayChg " not in out
     assert "AAPL" in out
 
 
@@ -237,3 +240,21 @@ def test_help_renders(capsys):
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "--inst-accum" in out and "--scan" in out
+
+
+def test_report_headers_renamed_and_legend_added(capsys):
+    """ScanA/ScanB are renamed TrendPB/Breakout and every report gets a column legend."""
+    # Build a minimal result with a scan flag so the scan columns appear.
+    results = [{
+        "ticker": "MOG-A", "earnings_yield": 0.08, "ev_ebit": 12.0, "ev": 1e10,
+        "f_score": 6, "beneish_m": -2.0, "altman_z": 4.0, "net_net": False,
+        "scan_a": True, "scan_b": False,
+    }]
+    md = vs._watchlist_markdown(results)
+    assert "TrendPB" in md and "Breakout" in md
+    assert "ScanA" not in md and "ScanB" not in md
+    # Legend present and explains the renamed columns.
+    assert "#### Column legend" in md
+    assert "**TrendPB**" in md and "trend-pullback" in md
+    assert "**Breakout**" in md and "breakout" in md
+    assert "**EY**" in md and "earnings yield" in md

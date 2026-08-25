@@ -72,7 +72,7 @@ Multi-day to multi-week setups from `Strategies/framework.md`:
 - **RSI discipline** - RSI in the 45-70 operating band or the 40-50 reset
   zone; broken below 40 is invalidated
 
-Table columns for swing mode: `ScanC` (yes/no), `RS` (lead/up/lag/div/n/a),
+Table columns for swing mode: `Swing` (yes/no), `RS` (lead/up/lag/div/n/a),
 `Stp` (risk % to the structure stop = 1 ATR below the swing low) and
 `T2` (upside % to the 3R target). Position management per the framework
 (50% off at 2R, break-even on the rest, trail the 20-day EMA) is covered by
@@ -128,10 +128,14 @@ numbers.
 
 ## `all` (default)
 
-Everything survives; `ScanA`/`ScanB` columns flag trend-pullback and breakout
-setups, `ScanC`/`RS`/`Stp`/`T2` appear when any swing setup is present and
-`VCP`/`Brk` when a volatility-contraction base is detected. A dedicated
-`--scan <mode>` filters to that one setup; `all` only flags.
+Everything survives; `TrendPB`/`Breakout` columns flag trend-pullback and
+breakout setups, `Swing`/`RS`/`Stp`/`T2` appear when any swing setup is
+present and `VCP`/`Brk` when a volatility-contraction base is detected. A
+dedicated `--scan <mode>` filters to that one setup; `all` only flags.
+
+Every report also carries a **Column legend** (see `_legend_markdown` in
+`scripts/value_screener.py`) listing each header abbreviation and its meaning,
+so the table is self-explanatory without cross-referencing docs.
 
 ## Strategy specs
 

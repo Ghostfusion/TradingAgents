@@ -96,7 +96,7 @@ def _breakout_route(method, *a, **k):
 
 
 def test_scan_all_keeps_rows_and_flags(capsys):
-    """--scan all keeps everything and adds ScanA/ScanB columns."""
+    """--scan all keeps everything and adds TrendPB/Breakout columns."""
     with _patched_router(_breakout_route):
         vs.main(
             [
@@ -113,7 +113,7 @@ def test_scan_all_keeps_rows_and_flags(capsys):
             ]
         )
     out = capsys.readouterr().out
-    assert "ScanA" in out and "ScanB" in out
+    assert "TrendPB" in out and "Breakout" in out
 
 
 def _fixture_route(method, *a, **k):
@@ -335,7 +335,7 @@ def _swing_route(method, *a, **k):
 
 
 def test_scan_swing_passes_and_shows_columns(capsys):
-    """--scan swing keeps RS-backed swing setups and shows ScanC/RS/Stp/T2."""
+    """--scan swing keeps RS-backed swing setups and shows Swing/RS/Stp/T2."""
     with (
         _patched_router(_swing_route),
         mock.patch(
@@ -364,7 +364,7 @@ def test_scan_swing_passes_and_shows_columns(capsys):
             ]
         )
     out = capsys.readouterr().out
-    assert "ScanC" in out and "RS" in out and "Stp" in out and "T2" in out
+    assert "Swing" in out and "RS" in out and "Stp" in out and "T2" in out
 
 
 def test_scan_swing_filters_non_matches(capsys):

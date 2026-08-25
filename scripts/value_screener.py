@@ -81,11 +81,69 @@ def rank_watchlist(results: list) -> list:
     return sorted(results, key=key)
 
 
+# Legend for every column that can appear in the watchlist report table.
+# Header name -> one-line meaning. Emitted as a bullet list after the table in
+# every screener report so the terse header abbreviations are self-explanatory.
+_WATCHLIST_LEGEND = (
+    ("Rank", "row position in the results (1 = best match)"),
+    ("Ticker", "symbol screened"),
+    ("Name", "company name (from the intraday movers rank)"),
+    ("EY", "earnings yield = EBIT / enterprise value (higher = cheaper)"),
+    ("EV/EBIT", "acquirer's multiple = EV / EBIT (lower = cheaper)"),
+    ("EV", "enterprise value = market cap + total debt - cash"),
+    ("F", "Piotroski F-Score (0-9 accounting quality; >=7 strong)"),
+    ("M", "Beneish M-Score (earnings-manipulation likelihood > -1.78 elevated)"),
+    ("Z", "Altman Z-Score (bankruptcy risk; < 1.8 distress zone)"),
+    ("NetNet", "net-net flag: market cap < 2/3 x (current assets - total liabilities)"),
+    ("Pills", "momentum 5-pillar score passed (0-5 day-trade prefilter)"),
+    ("Pull", "momentum first-pullback candidate (yes/no)"),
+    ("RR", "momentum reward/risk ratio"),
+    ("L1Px", "live Alpaca L1 last price"),
+    ("VWAP1m", "1-minute VWAP (Alpaca)"),
+    ("1mVol", "1-minute volume (Alpaca)"),
+    ("NEV/EBIT", "EV / 5-yr median-margin normalized EBIT (NEBIT)"),
+    ("PE5Y", "5-year P/E percentile (0-1 position vs own history)"),
+    ("TrendPB", "trend-pullback setup flag (Strategy A, yes/no)"),
+    ("Breakout", "breakout setup flag (Strategy B, yes/no)"),
+    ("EpsYoY", "diluted EPS year-over-year growth"),
+    ("RevYoY", "revenue year-over-year growth"),
+    ("ROE", "return on equity (net income / equity)"),
+    ("Sec", "sector name"),
+    ("SecRank", "sector rank within its 11-SPDR group (T# = top-3)"),
+    ("RevUp", "net analyst revisions (up - down)"),
+    ("Inst", "institutional accumulation: latest quarterly %-of-float change (pp; += accumulating)"),
+    ("Swing", "swing setup candidate (yes/no)"),
+    ("RS", "relative strength vs benchmark (verdict)"),
+    ("Stp", "swing stop distance (% of price)"),
+    ("T2", "swing target-2 distance (% of price)"),
+    ("VCP", "volatility-contraction-pattern base flag (yes/no)"),
+    ("Brk", "distance below the VCP base high (%, 0 = at breakout)"),
+    ("VDip", "value-dip candidate flag (yes/no)"),
+    ("FCFy", "free cash flow yield (FCF / market cap)"),
+    ("RSI", "RSI-14"),
+    ("%b", "Bollinger %b (price position inside the band)"),
+    ("Stp%", "value-dip stop distance (% of price)"),
+    ("Trap", "forensic trap-risk verdict (low / medium / high)"),
+    ("DayChg", "intraday change % (from the movers rank)"),
+)
+
+
+def _legend_markdown() -> str:
+    """Render the column legend as a markdown bullet list."""
+    lines = ["\n#### Column legend", ""]
+    for name, meaning in _WATCHLIST_LEGEND:
+        lines.append(f"- **{name}** - {meaning}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _watchlist_markdown(results: list) -> str:
     """Print the ranked watchlist as a table.
 
     ``Name`` / ``DayChg`` columns appear only when the run carried mover
-    metadata (i.e. the universe came from moomoo's top-losers rank).
+    metadata (i.e. the universe came from moomoo's top-losers rank). A column
+    legend (see ``_legend_markdown``) is appended to every report so the terse
+    header abbreviations are self-explanatory.
     """
     show_name = any(r.get("name") for r in results)
     show_chg = any(r.get("day_change") is not None for r in results)
@@ -105,8 +163,8 @@ def _watchlist_markdown(results: list) -> str:
         heads.append("PE5Y")
     show_scan = any(r.get("scan_a") or r.get("scan_b") for r in results)
     if show_scan:
-        heads.append("ScanA")
-        heads.append("ScanB")
+        heads.append("TrendPB")
+        heads.append("Breakout")
     show_growth = any(
         r.get("eps_yoy") is not None or r.get("revenue_yoy") is not None or r.get("roe") is not None
         for r in results
@@ -115,7 +173,7 @@ def _watchlist_markdown(results: list) -> str:
         heads += ["EpsYoY", "RevYoY", "ROE"]
     show_sector = any(r.get("sec_rank") is not None for r in results)
     if show_sector:
-        heads += ["Sec", "Rank"]
+        heads += ["Sec", "SecRank"]
     show_rev = any(r.get("rev_net") is not None for r in results)
     if show_rev:
         heads.append("RevUp")
@@ -124,7 +182,7 @@ def _watchlist_markdown(results: list) -> str:
         heads.append("Inst")
     show_swing = any(r.get("scan_c") for r in results)
     if show_swing:
-        heads += ["ScanC", "RS", "Stp", "T2"]
+        heads += ["Swing", "RS", "Stp", "T2"]
     show_vcp = any(r.get("vcp_flag") for r in results)
     if show_vcp:
         heads += ["VCP", "Brk"]
@@ -209,6 +267,7 @@ def _watchlist_markdown(results: list) -> str:
         if show_chg:
             cells.append(cell(r.get("day_change"), "{:+.2%}"))
         out.append("| " + " | ".join(cells) + " |")
+    out.append(_legend_markdown())
     return "\n".join(out)
 
 
