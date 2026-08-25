@@ -414,6 +414,133 @@ def _period_year(period_label: str) -> int:
     return int(m.group(1)) if m else -1
 
 
+_INCOME_ROW_KEYS = {
+    "revenue": ("total revenue", "total operating revenue", "revenue", "sales"),
+    "ebit": ("operating profit", "operating income", "ebit", "operating income loss"),
+    "net_income": ("net income to common", "net income", "net profit", "profit for the period"),
+}
+
+
+def _match_income_row(rows: dict, needles: tuple) -> float | None:
+    """First non-contra row whose label contains any needle; value via
+    ``_first_number`` so display strings like ``$391.04B`` parse."""
+    for label, value in rows.items():
+        low = str(label).lower()
+        if low.startswith("-"):
+            continue  # moomoo sub-item / contra breakdowns
+        if any(n in low for n in needles):
+            parsed = _first_number(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _income_rows_from_markdown(tables: list) -> list[dict] | None:
+    """Per-period {revenue, ebit, net_income} from markdown period tables,
+    newest first as returned. Rows are matched by label (e.g. moomoo's
+    "Total Operating Revenue" / "Operating Profit" / "Net Income to Common").
+    """
+    out = []
+    for period, rows in tables:
+        rev = _match_income_row(rows, _INCOME_ROW_KEYS["revenue"])
+        eb = _match_income_row(rows, _INCOME_ROW_KEYS["ebit"])
+        ni = _match_income_row(rows, _INCOME_ROW_KEYS["net_income"])
+        if rev is not None and eb is not None:
+            rec = {"year": _period_year(period), "revenue": float(rev), "ebit": float(eb), "net_income": ni}
+            out.append(rec)
+    return out or None
+
+
+def _income_rows_from_csv(payload: str) -> list[dict] | None:
+    """Per-period {revenue, ebit, net_income} from a yfinance-style CSV
+    (``label: {date: value}`` via the statement CSV parse). Dates sorted.
+    """
+    rows = _parse_csv_statement_rows(payload)
+    if not rows:
+        return None
+    dates = sorted({d for vals in rows.values() for d in vals})
+    if not dates:
+        return None
+    out = []
+    for date in dates:
+        def _pick(needles, _date=date):
+            for label, vals in rows.items():
+                low = str(label).lower()
+                if low.startswith("-"):
+                    continue
+                if any(n in low for n in needles) and _date in vals:
+                    return vals[_date]
+            return None
+        rev = _pick(_INCOME_ROW_KEYS["revenue"])
+        eb = _pick(_INCOME_ROW_KEYS["ebit"])
+        ni = _pick(_INCOME_ROW_KEYS["net_income"])
+        if rev is not None and eb is not None:
+            year = int(str(date)[:4]) if str(date)[:4].isdigit() else 0
+            out.append({"year": year, "revenue": float(rev), "ebit": float(eb), "net_income": ni})
+    return out or None
+
+
+def income_series(payload: str) -> list[dict] | None:
+    """Time-ordered (oldest->newest) annual {revenue, ebit, net_income} rows
+    from an income-statement payload (moomoo markdown or yfinance CSV).
+
+    Returns a list of dicts (oldest first) suitable for ``median_norm_ebit``
+    (which reads ``revenues``/``ebits`` and only needs both per period), or
+    None when <2 usable periods or no payload. Never fabricates: missing rows
+    drop the period entirely, and a non-parsable payload yields None.
+    """
+    if not payload or str(payload).lstrip().startswith(("NO_DATA", "DATA_DISABLED", "DATA_UNAVAILABLE")):
+        return None
+    try:
+        tables = _markdown_period_tables(payload)
+    except Exception:  # noqa: BLE001
+        tables = []
+    if tables:
+        rows = _income_rows_from_markdown(tables)
+        if rows:
+            rows.reverse()  # markdown is newest-first -> oldest first
+            return rows
+    rows = _income_rows_from_csv(payload)
+    if rows:
+        rows.sort(key=lambda r: r.get("_y", 0))  # CSV dates already sorted
+    return rows
+
+
+def _parse_csv_statement_rows(payload: str) -> dict:
+    """yfinance-style CSV -> {label: {date: value}} (header date columns)."""
+    import io as _io
+
+    rows = {}
+    try:
+        reader = csv.reader(_io.StringIO(payload or ""))
+        lines = [r for r in reader if r and not (r[0] or "").startswith("#")]
+    except Exception:
+        return rows
+    if not lines:
+        return rows
+    header = None
+    data_start = 0
+    for idx, row in enumerate(lines):
+        if not (row[0] or "").strip():
+            header = row[1:]
+            data_start = idx + 1
+            break
+    if header is None:
+        return rows
+    for row in lines[data_start:]:
+        if not row or not (row[0] or "").strip():
+            continue
+        label = row[0].strip()
+        vals = {}
+        for i, cell in enumerate(row[1:]):
+            parsed = _first_number(cell)
+            if parsed is not None and i < len(header):
+                vals[str(header[i])[:10]] = parsed
+        if vals:
+            rows[label] = vals
+    return rows
+
+
 def _latest(v):
     """Current-period value of a canonical item (flat float or a
     ``{"current": .., "prior": ..}`` dict)."""

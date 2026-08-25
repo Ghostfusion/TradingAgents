@@ -111,3 +111,27 @@ def test_scripts_value_screener_re_exports_parsers():
     assert vs._latest({"current": 1.0, "prior": 2.0}) == 1.0
     assert vs.screen_ticker.__name__ == "screen_ticker"
     assert vs._canonicalize("Beta: 1.35\nMarket Cap: 3000000000000").get("beta") == 1.35
+
+
+@pytest.mark.unit
+def test_income_series_csv_form():
+    csv_payload = (
+        ",2025-09-30,2024-09-30,2023-09-30,2022-09-30\n"
+        "Total Revenue,416160000000,391040000000,383290000000,394330000000\n"
+        "Operating Income,133050000000,123220000000,114300000000,119440000000\n"
+        "Net Income,112010000000,93740000000,97000000000,99800000000\n"
+    )
+    s = sp.income_series(csv_payload)
+    assert s is not None and len(s) == 4
+    assert s[0]["year"] == 2022  # oldest first
+    assert s[-1]["year"] == 2025
+    assert s[-1]["revenue"] == pytest.approx(416.16e9, rel=0.01)
+    assert s[-1]["ebit"] == pytest.approx(133.05e9, rel=0.01)
+    assert s[-1]["net_income"] == pytest.approx(112.01e9, rel=0.01)
+
+
+@pytest.mark.unit
+def test_income_series_degraded_forms():
+    assert sp.income_series("") is None
+    assert sp.income_series("NO_DATA_AVAILABLE: x") is None
+    assert sp.income_series("not a statement at all") is None

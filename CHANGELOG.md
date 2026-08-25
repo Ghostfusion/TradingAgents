@@ -119,6 +119,25 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Screener FMP 429 rate-limit noise - normalized enrichment now uses the
+  vendor chain** - the value screener's ``normalized_score()`` enrichment
+  (columns ``nebit_ev_ebit`` / ``pe_pct5`` / ``fmp_ev``) fetched multi-year
+  income + enterprise-values straight from FMP, so on the free tier it
+  logged ``fmp income-statement: status 429`` / ``fmp enterprise-values:
+  status 429`` warnings every run and blanked those columns. ``income_series``
+  (new in ``statement_parsing``) now extracts 2+ annual
+  ``{year, revenue, ebit, net_income}`` rows from the income statement the
+  vendor chain already returns (moomoo markdown period tables or yfinance
+  CSV), and ``normalized_score`` computes NEBIT / EV / EV-NEBIT from that +
+  canonical fundamentals (market cap, debt, cash), reconstructing the 5y
+  P/E percentile best-effort from historical closes x current shares. FMP is
+  now only a last-resort fallback when the vendor chain has no income history
+  AND an FMP key is set. No more 429s on the default moomoo,yfinance chain;
+  the columns compute offline. Tests: `test_fmp` (vendor-chain normalized
+  score, fmp_get never called on the default path, no-income degrade, CSV
+  income series), `test_statement_parsing` (markdown + CSV income_series).
+  Live: AAPL -> ev_nebit 33.96 / pe_pct5 0.75 with no FMP key.
+
 - **Yahoo can't resolve moomoo's dotted US share-class symbols** - moomoo's
   US movers rank returns dotted share classes (`PBR.A`, `MOG.A`, `MOG.B`) but
   Yahoo only resolves the hyphen form (`PBR-A`, `MOG-A`, `MOG-B`, `BRK-B`), so
