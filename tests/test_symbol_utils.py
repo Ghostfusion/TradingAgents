@@ -14,8 +14,22 @@ from tradingagents.dataflows.symbol_utils import (
 @pytest.mark.unit
 class TestNormalizeSymbol(unittest.TestCase):
     def test_plain_equities_unchanged(self):
-        for sym in ("AAPL", "MSFT", "TSM", "BRK.B", "0700.HK", "^GSPC", "GC=F"):
+        # Multi-letter exchange suffixes, indices, Yahoo futures, plain tickers.
+        for sym in ("AAPL", "MSFT", "TSM", "0700.HK", "BHP.AX", "AZN.L",
+                    "^GSPC", "GC=F", "PETR4.SA", "FRC-PL"):
             self.assertEqual(normalize_symbol(sym), sym)
+
+    def test_us_share_class_dot_becomes_hyphen(self):
+        # moomoo returns dotted US share classes (PBR.A, MOG.A, MOG.B) but
+        # Yahoo only resolves the hyphen form (PBR-A, MOG-A, MOG-B, BRK-B).
+        self.assertEqual(normalize_symbol("PBR.A"), "PBR-A")
+        self.assertEqual(normalize_symbol("MOG.A"), "MOG-A")
+        self.assertEqual(normalize_symbol("MOG.B"), "MOG-B")
+        self.assertEqual(normalize_symbol("BRK.B"), "BRK-B")
+        self.assertEqual(normalize_symbol("BF.B"), "BF-B")
+        self.assertEqual(normalize_symbol("brk.b"), "BRK-B")
+        # Already-hyphenated stay put (idempotent).
+        self.assertEqual(normalize_symbol("BRK-B"), "BRK-B")
 
     def test_lowercases_are_upper(self):
         self.assertEqual(normalize_symbol("aapl"), "AAPL")
@@ -47,6 +61,14 @@ class TestNormalizeSymbol(unittest.TestCase):
         # GOOGLE-style 6-letter tickers that aren't two currency codes
         # must not be mangled into a fake forex pair.
         self.assertEqual(normalize_symbol("ABCDEF"), "ABCDEF")
+
+    def test_london_and_exchange_suffixes_kept(self):
+        # ``.L`` is the single-letter London exchange, not a share class;
+        # multi-letter exchange suffixes (SA/TO/AX/HK/NS/BO) are kept too.
+        self.assertEqual(normalize_symbol("AZN.L"), "AZN.L")
+        self.assertEqual(normalize_symbol("BHP.AX"), "BHP.AX")
+        self.assertEqual(normalize_symbol("0700.HK"), "0700.HK")
+        self.assertEqual(normalize_symbol("PETR4.SA"), "PETR4.SA")
 
     def test_empty_input_passthrough(self):
         self.assertEqual(normalize_symbol(""), "")

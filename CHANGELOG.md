@@ -119,6 +119,25 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Yahoo can't resolve moomoo's dotted US share-class symbols** - moomoo's
+  US movers rank returns dotted share classes (`PBR.A`, `MOG.A`, `MOG.B`) but
+  Yahoo only resolves the hyphen form (`PBR-A`, `MOG-A`, `MOG-B`, `BRK-B`), so
+  yfinance (the second vendor in the default `core_stock_apis=moomoo,yfinance`
+  chain) degraded those symbols to "Quote not found / possibly delisted" when
+  moomoo couldn't serve them. `normalize_symbol` now converts a dotted
+  single-letter US share-class suffix (`.A`/`.B`/`.C`/`.D`/`.K`...) to the
+  Yahoo hyphen form, while leaving the `.L` London exchange and all multi-letter
+  exchange suffixes (`.SA` Brazil, `.TO`, `.AX`, `.HK`, `.NS`, `.BO`, ...) untouched.
+  Because moomoo's `_moomoo_code` doesn't use `normalize_symbol`, moomoo still
+  receives the raw dotted form it understands (its own origin format), and the
+  yfinance-facing paths hyphenate locally - so both vendors resolve. Also fixes
+  manually-typed `BRK.B`/`BF.B` and the graph's `_fetch_cached_history` for
+  dotted US share classes.
+  Tests: `test_symbol_utils` (share-class dot->hyphen, idempotent hyphen,
+  London/multi-letter exchange suffixes kept, plain/US futures unchanged).
+  Verified live: `get_stock_data` now returns rows for MOG.A/PBR.A/MOG.B
+  through the default chain (was empty). See docs/api_reference §5 symbol table.
+
 - **Installed-CLI import bug: analyst tools could not find `scripts/`** -
   the agent analysis tools imported the vendor-output -> canonical parsing
   helpers from `scripts.value_screener`, but the installed `tradingagents` CLI

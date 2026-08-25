@@ -96,6 +96,38 @@ def _normalize_crypto(s: str) -> str | None:
     return f"{base}-USD" if base else None
 
 
+# Single-letter dotted suffix that is a Yahoo *exchange* market, not a US
+# share class. Yahoo's only single-letter exchange is London (``.L``), e.g.
+# ``AZN.L``; every other single-letter dotted suffix on Yahoo (``.A``/``.B``/
+# ``.C``/``.D``/``.K``...) is a US share class, which Yahoo quotes with a
+# HYPHEN (``BRK-B``, ``BF-A``), not a dot. Converting ``.X -> -X`` fixes e.g.
+# moomoo's ``MOG.A``/``PBR.A`` (which Yahoo cannot resolve) into ``MOG-A``/
+# ``PBR-A``. Multi-letter suffixes (``.SA`` Brazil, ``.TO``, ``.AX``, ``.HK``,
+# ``.NS``, ``.BO``, ...) are real exchange markets and are never touched.
+_SINGLE_LETTER_EXCHANGE_SUFFIXES = frozenset({"L"})  # London
+
+
+def _normalize_share_class(s: str) -> str | None:
+    """Return the hyphen form of a dotted US share-class symbol, else None.
+
+    Yahoo quotes US share classes with a hyphen: ``BRK.B`` -> ``BRK-B``,
+    ``MOG.A`` -> ``MOG-A``, ``PBR.A`` -> ``PBR-A``. A trailing ``.X`` where
+    ``X`` is a single letter (not the ``.L`` London exchange) and the ticker
+    part is alphanumeric qualifies; anything else (multi-letter exchange
+    suffixes like ``.SA``/``.TO``/``.AX``, indices, forex, crypto) is left
+    unchanged.
+    """
+    if len(s) < 3 or s[-2] != ".":
+        return None
+    letter = s[-1]
+    if not letter.isalpha() or letter in _SINGLE_LETTER_EXCHANGE_SUFFIXES:
+        return None
+    head = s[:-2]
+    if not head or not head.isalnum():
+        return None
+    return f"{head}-{letter}"
+
+
 def normalize_symbol(raw: str) -> str:
     """Map a user/broker symbol to its canonical Yahoo Finance symbol.
 
@@ -104,7 +136,10 @@ def normalize_symbol(raw: str) -> str:
       2. Crypto rule: a known crypto base quoted in USD/USDT/USDC (dashed or
          not) -> ``BASE-USD``.
       3. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
-      4. Otherwise the upper-cased symbol is returned unchanged (plain
+      4. US share class: a dotted single-letter suffix (``.A``/``.B``/...) ->
+         hyphen form (``-A``/``-B``) for Yahoo (``BRK.B`` -> ``BRK-B``). The
+         ``.L`` London suffix and all multi-letter exchange suffixes are kept.
+      5. Otherwise the upper-cased symbol is returned unchanged (plain
          equities, ETFs, Yahoo-native symbols like ``GC=F`` or ``^GSPC``).
 
     A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
@@ -131,7 +166,8 @@ def normalize_symbol(raw: str) -> str:
     elif len(s) == 6 and s[:3] in _FOREX_CURRENCIES and s[3:] in _FOREX_CURRENCIES:
         canonical = f"{s}=X"
     else:
-        canonical = s
+        share = _normalize_share_class(s)
+        canonical = share if share is not None else s
 
     if canonical != raw.strip().upper():
         logger.info("Resolved symbol %r to Yahoo symbol %r", raw, canonical)

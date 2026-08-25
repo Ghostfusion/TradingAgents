@@ -348,6 +348,15 @@ gold `XAUUSD -> GC=F`, forex `EURUSD -> EURUSD=X`, crypto
 `BTCUSD -> BTC-USD`, indices `SPX500 -> ^GSPC`; moomoo code map
 (`_moomoo_code()`: US., HK. pad, JP., SH., SZ., AU., CA., SG., MY., CC.USD).
 
+**US share classes are quoted with a hyphen on Yahoo** (`BRK-B`, `BF-A`), but
+moomoo emits dotted (`BRK.B`, `MOG.A`, `MOG.B`, `PBR.A`), which Yahoo cannot
+resolve. `normalize_symbol` converts a dotted single-letter share-class suffix
+(`.A`/`.B`/`.C`/`.K`...) to the hyphen form (`BRK.B -> BRK-B`), while leaving
+London's single-letter `.L` exchange and all multi-letter exchange suffixes
+(`.SA` Brazil, `.TO`, `.AX`, `.HK`, `.NS`, `.BO`, ...) untouched. Moomoo's
+`_moomoo_code` deliberately does NOT use this - it keeps the raw dotted form
+the movers rank returns - so both vendors resolve the same symbol.
+
 ### 6.4 Computed-analysis tools
 
 **Market-analyst house tools** (bound only to the market node, not part of the
