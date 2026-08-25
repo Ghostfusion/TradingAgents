@@ -439,6 +439,13 @@ _MARKET_MAP: dict[str, tuple[str, bool]] = {
 # silently re-interpreting e.g. AZN.L as a US ticker.
 _UNSUPPORTED_SUFFIXES = (".L", ".NS", ".BO")
 
+# Known common US share classes that use the same ``-X`` Yahoo syntax as
+# preferreds (Berkshire Class B ``BRK-B``, Brown-Forman Class B ``BF-B``).
+# moomoo codes these as a dotted line (``US.BRK.B``) rather than a preferred
+# (``US.BRK.PRB`` which does not exist), so they must not be treated as
+# preferred. Everything else in ``TICKER-X`` form is a US preferred.
+_US_COMMON_CLASS_TICKERS = frozenset({"BRK", "BF"})
+
 # Crypto bases that map to CC. prefix
 _CRYPTO_BASES = frozenset(
     {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "LTC", "BCH", "DOT", "AVAX", "LINK"}
@@ -461,6 +468,24 @@ def _moomoo_code(symbol: str) -> str:
     # 2. Indices starting with ^ — not supported
     if upper.startswith("^"):
         raise NoMarketDataError(symbol, symbol, detail="moomoo does not support this index symbol")
+    # 2.5 US preferreds / hyphenated share classes (Yahoo ``TICKER-PX`` /
+    # ``TICKER-X``). Moomoo codes a US preferred as ``US.<T>.PR<LETTER>``
+    # (verified live: GS-PD -> US.GS.PRD, BAC-PL -> US.BAC.PRL, T-PC ->
+    # US.T.PRC), while a common share class is a dotted line share ``US.<T>.<LETTER>``
+    # (BRK-B -> US.BRK.B). The hyphen form disambiguates:
+    #   ``-P<LETTER>`` = preferred (series letter after the P),
+    #   ``-<LETTER>``  = common share class when the ticker is in the known set.
+    _hm = upper.rsplit("-", 1)
+    if len(_hm) == 2 and _hm[1]:
+        _tick = _hm[0]
+        _sfx = _hm[1]
+        if "-" not in _tick and "." not in _tick:
+            # Preferred: TICKER-P<LETTER>
+            if len(_sfx) == 2 and _sfx[0] == "P" and _sfx[1].isalpha():
+                return f"US.{_tick}.PR{_sfx[1]}"
+            # Common share class: TICKER-<LETTER>
+            if len(_sfx) == 1 and _sfx.isalpha() and _tick in _US_COMMON_CLASS_TICKERS:
+                return f"US.{_tick}.{_sfx}"
     # 3. Known exchange suffixes
     for suffix, (prefix, do_fill) in _MARKET_MAP.items():
         if upper.endswith(suffix):

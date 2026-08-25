@@ -73,6 +73,28 @@ class MoomooCodeTests(unittest.TestCase):
         self.assertEqual(_moomoo_code("BTCUSDT"), "CC.BTCUSD")
         self.assertEqual(_moomoo_code("ETH-USD"), "CC.ETHUSD")
 
+    def test_us_preferred_hybrid_form(self):
+        # Yahoo ``TICKER-P<LETTER>`` preferreds map to moomoo ``US.<T>.PR<LETTER>``
+        # (confirmed live on the gateway).
+        self.assertEqual(_moomoo_code("GS-PD"), "US.GS.PRD")
+        self.assertEqual(_moomoo_code("BAC-PL"), "US.BAC.PRL")
+        self.assertEqual(_moomoo_code("T-PC"), "US.T.PRC")
+        self.assertEqual(_moomoo_code("WFC-PL"), "US.WFC.PRL")
+        self.assertEqual(_moomoo_code("JPM-PM"), "US.JPM.PRM")
+        self.assertEqual(_moomoo_code("MS-PK"), "US.MS.PRK")
+        self.assertEqual(_moomoo_code("MS-PF"), "US.MS.PRF")
+        self.assertEqual(_moomoo_code("WFC-PZ"), "US.WFC.PRZ")
+        self.assertEqual(_moomoo_code("KEY-PJ"), "US.KEY.PRJ")
+        self.assertEqual(_moomoo_code("C-PK"), "US.C.PRK")
+
+    def test_us_common_share_class_uses_dotted_line(self):
+        # BRK-B / BF-B are COMMON share classes, not preferreds: moomoo codes
+        # them as a dotted line (US.<T>.<LETTER>), never a phantom preferred.
+        self.assertEqual(_moomoo_code("BRK-B"), "US.BRK.B")
+        self.assertEqual(_moomoo_code("BRK-A"), "US.BRK.A")
+        self.assertEqual(_moomoo_code("BF-B"), "US.BF.B")
+        self.assertEqual(_moomoo_code("BRK.B"), "US.BRK.B")
+
     def test_unsupported_market_raises(self):
         # LSE / India are not covered by moomoo → typed NoMarketDataError
         with self.assertRaises(NoMarketDataError):
