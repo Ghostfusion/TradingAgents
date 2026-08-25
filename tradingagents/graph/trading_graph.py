@@ -929,6 +929,70 @@ class TradingAgentsGraph:
                         risk_ctx["book_cvar"] = basket_budget
                     if single_name_cvar is not None:
                         risk_ctx["single_cvar"] = single_name_cvar
+                    # risk2.md liquidity/ownership gate (opt-in). When
+                    # enable_liquidity_gate is on, compute the composite
+                    # liquidity verdict from the vendor OHLCV + float + short
+                    # interest and pass it to the governor (ILLIQUID REJECTs,
+                    # CAUTION WARNs). Off by default -> no behavior change.
+                    liq_verdict = None
+                    liq_dangers = None
+                    if self.config.get("enable_liquidity_gate"):
+                        try:
+                            from tradingagents.strategies.liquidity_risk import (
+                                amihud_illiquidity,
+                                float_turnover as _ft,
+                                free_float_factor as _iwf,
+                                liquidity_verdict as _lv,
+                            )
+
+                            closes = final_state.get("closes") or []
+                            volumes = final_state.get("volumes") or []
+                            illiq = amihud_illiquidity(closes, volumes)
+                            adv = (
+                                sum(volumes[-30:]) / len(volumes[-30:])
+                                if len(volumes) >= 30
+                                else None
+                            )
+                            float_sh = None
+                            try:
+                                from tradingagents.dataflows.float_shares import (
+                                    fetch_float_shares,
+                                )
+
+                                float_sh = fetch_float_shares(ticker)
+                            except Exception:  # noqa: BLE001
+                                float_sh = None
+                            tot_sh = None
+                            try:
+                                from tradingagents.dataflows.statement_parsing import (
+                                    fetch_ticker as _ftk,
+                                )
+
+                                fin = _ftk(ticker, self.config.get("date") or "") or {}
+                                tot_sh = (fin.get("shares") or {}).get("current") if isinstance(
+                                    fin.get("shares"), dict
+                                ) else fin.get("shares")
+                            except Exception:  # noqa: BLE001
+                                tot_sh = None
+                            ft = _ft(adv, float_sh)
+                            iwf = _iwf(float_sh, tot_sh)
+                            lv = _lv(
+                                illiq,
+                                ft,
+                                None,  # days-to-absorb needs a liquidation block
+                                iwf=iwf,
+                            )
+                            liq_verdict = lv.get("verdict")
+                            liq_dangers = lv.get("dangers")
+                            risk_ctx["liquidity"] = {
+                                "verdict": liq_verdict,
+                                "illiq": illiq,
+                                "float_turnover": ft,
+                                "iwf": iwf,
+                                "dangers": liq_dangers,
+                            }
+                        except Exception:  # noqa: BLE001 - gate must never crash
+                            liq_verdict = None
                     verdict = govern(
                         govern_size,
                         self.config,
@@ -936,6 +1000,8 @@ class TradingAgentsGraph:
                         drawdown_pct=self.config.get("risk_max_drawdown_pct"),
                         capital_at_risk_pct=cap_at_risk,
                         risk_cap_pct=risk_cap,
+                        liquidity_verdict=liq_verdict,
+                        liquidity_dangers=liq_dangers,
                     )
                     # Catalyst hard block (framework Phase 4): "never initiate"
                     # inside the earnings window - a scheduled print within

@@ -1139,3 +1139,83 @@ def test_get_ratios_degrades_when_no_data(monkeypatch):
     out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "unavailable" in out.lower()
     assert "fabricate" in out.lower()
+
+
+# --------------------------------------------------------------------------
+# Liquidity / ownership tools (Strategies/risk2.md) - hermetic
+# --------------------------------------------------------------------------
+
+
+def test_get_liquidity_risk_computes(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as MPT
+
+    closes = [100.0 + i for i in range(40)]
+    vols = [1_000_000] * 40
+    fake = {"closes": closes, "opens": closes, "highs": [c + 1 for c in closes],
+            "lows": [c - 1 for c in closes], "volumes": vols}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: 30e6
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+    )
+    out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "liquidity risk AAPL" in out
+    assert "verdict=" in out
+    assert "illiq=" in out and "float_turnover=" in out and "iwf=" in out
+
+
+def test_get_liquidity_risk_missing_data_degrades(monkeypatch):
+    from tradingagents.agents.utils import market_position_tools as MPT
+
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": [], "volumes": []})
+    monkeypatch.setattr(
+        "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: None
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {}
+    )
+    out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "liquidity risk AAPL" in out
+    assert "n/a" in out  # honest degrade, never fabricated
+
+
+def test_get_ownership_concentration_computes(monkeypatch):
+    from tradingagents.agents.utils import analysis_tools as AT
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: 30e6
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        lambda *a, **k: "| 2025-Q4 | 5123 | 8.42B | 71.2% | +0.8pp |",
+    )
+    out = AT.get_ownership_concentration.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "ownership concentration AAPL" in out
+    assert "iwf=30.00%" in out  # 30M / 100M
+    assert "hhi=" in out
+
+
+def test_get_ownership_concentration_no_holder_data(monkeypatch):
+    from tradingagents.agents.utils import analysis_tools as AT
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: 30e6
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.interface.route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE"
+    )
+    out = AT.get_ownership_concentration.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "ownership concentration AAPL" in out
+    assert "iwf=30.00%" in out
+    assert "hhi=n/a" in out  # best-effort: no per-holder breakdown

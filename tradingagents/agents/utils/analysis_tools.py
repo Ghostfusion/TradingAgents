@@ -1851,6 +1851,76 @@ def get_earnings_quality(
     return chr(10).join(lines)
 
 
+@tool
+def get_ownership_concentration(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Ownership-concentration read (Strategies/risk2.md).
+
+    Computes the free-float factor (IWF = float / total shares) and, when a
+    per-holder breakdown is available, the Herfindahl-Hirschman index (HHI =
+    sum of squared ownership %). IWF < 0.5 signals structural passive
+    under-allocation; HHI > 2500 signals highly concentrated governance risk.
+    Best-effort: HHI is n/a when no per-holder data source is configured.
+    Use before any 'widely held / concentrated ownership / index-eligible'
+    claim.
+
+    Args:
+        ticker: single ticker symbol.
+        current_date: the current trading date (YYYY-mm-dd).
+
+    Returns:
+        IWF + HHI lines, or an explicit 'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.float_shares import fetch_float_shares
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
+        from tradingagents.strategies.liquidity_risk import (
+            free_float_factor as _iwf,
+            ownership_hhi as _hhi,
+        )
+
+        float_sh = fetch_float_shares(ticker)
+        fin = fetch_ticker(ticker, current_date) or {}
+        sh = fin.get("shares")
+        tot_sh = sh.get("current") if isinstance(sh, dict) else sh
+        iwf = _iwf(float_sh, tot_sh)
+        lines = [f"ownership concentration {ticker}:"]
+        lines.append(
+            f"  iwf={iwf:.2%}" if iwf is not None else "  iwf=n/a (needs float + total shares)"
+        )
+        if iwf is not None and iwf < 0.5:
+            lines.append("  note: IWF < 0.5 -> structural passive under-allocation")
+        # HHI needs a per-holder breakdown; best-effort (n/a when unavailable).
+        hhi = None
+        try:
+            from tradingagents.dataflows.interface import route_to_vendor
+
+            payload = route_to_vendor("get_institution_holdings", ticker) or ""
+            # Parse per-holder percentages from the institutional-holdings
+            # payload if it carries them (moomoo aggregate has none).
+            import re
+
+            pcts = [
+                float(m)
+                for m in re.findall(r"([0-9]+(?:\.[0-9]+)?)%", payload)
+                if float(m) <= 100.0
+            ]
+            if pcts:
+                hhi = _hhi(pcts)
+        except Exception:  # noqa: BLE001 - best-effort
+            hhi = None
+        lines.append(
+            f"  hhi={hhi:.0f}" if hhi is not None else "  hhi=n/a (no per-holder breakdown)"
+        )
+        if hhi is not None and hhi > 2500:
+            lines.append("  note: HHI > 2500 -> highly concentrated governance risk")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"ownership concentration unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_sector_rank",
     "get_strategy_quality",
@@ -1884,4 +1954,5 @@ __all__ = [
     "get_dcf_valuation",
     "get_session_discipline",
     "get_earnings_quality",
+    "get_ownership_concentration",
 ]

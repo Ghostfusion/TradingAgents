@@ -26,6 +26,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_margin_of_safety,
     get_momentum_detail,
     get_orderflow_read,
+    get_ownership_concentration,
     get_portfolio_weights,
     get_position_sizing,
     get_ratios,
@@ -56,6 +57,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
 from tradingagents.agents.utils.market_position_tools import (
+    get_liquidity_risk,
     get_market_snapshot,
     get_options_chain,
     get_sec_filings,
@@ -121,6 +123,8 @@ __all__ = [
     "get_sec_filings",
     "get_short_interest",
     "get_short_volume",
+    "get_liquidity_risk",
+    "get_ownership_concentration",
     "get_market_snapshot",
     "get_top_movers",
     "get_capital_flow",

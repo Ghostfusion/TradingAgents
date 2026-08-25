@@ -117,7 +117,26 @@ Breaking changes within the 0.x line are called out explicitly.
   (planned-levels parse, results_dir lookup, headline delta, decision history,
   nightly driver). Full suite green; ruff clean.
 
-### Fixed
+### Added
+
+- **Liquidity & ownership risk (Strategies/risk2.md)** - implements the five
+  institutional risk metrics as a pure, offline module
+  (`strategies/liquidity_risk.py`): free-float factor (IWF), float turnover
+  (ADV / float), Amihud ILLIQ (price impact per $ traded), days-to-absorb
+  (overhang), and ownership HHI (concentration), plus a composite
+  LIQUID / CAUTION / ILLIQUID verdict. No-fabrication: every metric returns
+  None on missing input.
+  - **Risk governor gate (opt-in)**: `govern()` accepts a liquidity verdict;
+    ILLIQUID REJECTs, CAUTION WARNs. Enabled via `enable_liquidity_gate`
+    (default False - preserves current behavior); the graph computes the
+    verdict from vendor OHLCV + float + shares when on.
+  - **Analyst tools**: `get_liquidity_risk` (market analyst) and
+    `get_ownership_concentration` (fundamentals analyst, HHI best-effort -
+    n/a when no per-holder breakdown) + prompt directives.
+  - **Screener columns**: `ILLIQ` / `FltTurn` / `IWF` added to the report
+    (pure-calculable from OHLCV + float + shares) + legend entries.
+  Tests: `test_strategies_liquidity` (16 pure), governor liquidity cases,
+  tool cases. Full suite green; ruff clean.
 
 - **Screener: fill the n/a columns (compute + enrich)** - most columns were
   blank because they were gated behind a scan mode or a CLI flag, not because

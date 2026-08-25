@@ -44,6 +44,8 @@ def govern(
     halted: bool = False,
     capital_at_risk_pct: float | None = None,
     risk_cap_pct: float | None = None,
+    liquidity_verdict: str | None = None,
+    liquidity_dangers: list[str] | None = None,
 ) -> dict:
     """Evaluate decision size against limits; PASS/WARN/REJECT + reasons.
 
@@ -56,6 +58,12 @@ def govern(
     peak-deployed-at-scale-in fraction (from a tranche plan), the per-trade cap
     bounds the fully-scaled position, not the first entry. Both default None ->
     the check is skipped, keeping existing callers/tests unchanged.
+
+    ``liquidity_verdict`` / ``liquidity_dangers`` (keyword-only, optional) add
+    the risk2.md liquidity/ownership gate: an ILLIQUID verdict REJECTs, a
+    CAUTION verdict WARNs. Only active when the caller passes a verdict (the
+    graph enables it via ``enable_liquidity_gate``); default None -> skipped,
+    preserving current behavior.
     """
     limits = default_limits(cfg)
     reasons = []
@@ -100,6 +108,20 @@ def govern(
         lim = limits["safety_cap_pct"]
         if sector_pct + (size_pct if sector_pct > 0 else 0.0) > lim:
             reasons.append(f"sector {sector_pct:.1%} near cap {lim:.1%}")
+
+    # risk2.md liquidity/ownership gate (opt-in via the caller passing a
+    # verdict; the graph enables it with enable_liquidity_gate). ILLIQUID
+    # REJECTs, CAUTION WARNs - unknown inputs never fail the gate.
+    if liquidity_verdict is not None:
+        lv = str(liquidity_verdict).lower()
+        if lv == "illiquid":
+            reasons.append("liquidity: ILLIQUID")
+            if liquidity_dangers:
+                reasons.append("liquidity: " + "; ".join(liquidity_dangers))
+        elif lv == "caution":
+            touches.append("liquidity: CAUTION")
+            if liquidity_dangers:
+                touches.append("liquidity: " + "; ".join(liquidity_dangers))
 
     if reasons:
         return {"verdict": "REJECT", "reasons": reasons, "touches": touches}

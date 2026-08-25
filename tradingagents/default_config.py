@@ -92,6 +92,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_TRANCHE_STOP_MULT": "tranche_stop_mult",
     "TRADINGAGENTS_TRANCHE_RISK_PCT": "tranche_risk_pct",
     "TRADINGAGENTS_TRANCHE_ACCOUNT": "tranche_account",
+    # Liquidity / ownership gate (Strategies/risk2.md): when on, the risk
+    # governor REJECTs ILLIQUID names and WARNs on CAUTION ones (Amihud ILLIQ,
+    # float turnover, days-to-absorb, IWF, HHI). Off by default - preserves
+    # current behavior.
+    "TRADINGAGENTS_ENABLE_LIQUIDITY_GATE": "enable_liquidity_gate",
     # Pre-market review (docs/pre_market_review.md): opt-in gate for the
     # in-batch same-night catalyst/quality re-check (choice (a)).
     "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
@@ -389,6 +394,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "tranche_stop_mult": 1.5,
         "tranche_risk_pct": 0.015,
         "tranche_account": 100_000.0,
+        # Liquidity / ownership gate (Strategies/risk2.md). When on, the risk
+        # governor REJECTs ILLIQUID names and WARNs on CAUTION ones using the
+        # computed Amihud ILLIQ / float turnover / days-to-absorb / IWF / HHI.
+        # Off by default - preserves current behavior.
+        "enable_liquidity_gate": False,
         # Pre-market review (docs/pre_market_review.md, choice (a)): when on,
         # batch.py writes a same-night catalyst/quality re-check
         # (pre_market_review_<date>.md) next to each report. The pre-open gap /

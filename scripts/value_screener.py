@@ -124,6 +124,9 @@ _WATCHLIST_LEGEND = (
     ("%b", "Bollinger %b (price position inside the band)"),
     ("Stp%", "value-dip stop distance (% of price)"),
     ("Trap", "forensic trap-risk verdict (low / medium / high)"),
+    ("ILLIQ", "Amihud illiquidity (price impact per $ traded; higher = more illiquid)"),
+    ("FltTurn", "float turnover = ADV / float shares (daily; <0.5% thin, >100% squeeze)"),
+    ("IWF", "free-float factor = float / total shares (<0.5 = passive under-allocation)"),
     ("DayChg", "intraday change % (from the movers rank)"),
 )
 
@@ -170,7 +173,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "DayChg",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "DayChg",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -206,7 +209,11 @@ def _watchlist_markdown(results: list) -> str:
             flag(r.get("vdip_flag")), cell(r.get("vdip_fcfy"), "{:.1%}"),
             cell(r.get("vdip_rsi"), "{:.0f}"), cell(r.get("vdip_pctb"), "{:.0%}"),
             cell(r.get("vdip_stop_pct"), "{:.1%}"),
-            cell(r.get("trap")), cell(r.get("day_change"), "{:+.2%}"),
+            cell(r.get("trap")),
+            cell(r.get("illiq"), "{:.2e}"),
+            cell(r.get("float_turnover"), "{:.3%}"),
+            cell(r.get("iwf"), "{:.2%}"),
+            cell(r.get("day_change"), "{:+.2%}"),
         ]
         out.append("| " + " | ".join(cells) + " |")
     out.append(_legend_markdown())
@@ -1299,6 +1306,36 @@ def main(argv: list[str] | None = None) -> int:
                 name_fill = fin.get("name") or fin.get("company_name") or fin.get("long_name")
             row["name"] = name_fill
             row["day_change"] = meta.get("day_change")
+            # risk2.md liquidity columns (pure-calculable from OHLCV + float +
+            # shares; n/a when the inputs are missing - never fabricated).
+            try:
+                from tradingagents.strategies.liquidity_risk import (
+                    amihud_illiquidity as _illiq,
+                    float_turnover as _ft,
+                    free_float_factor as _iwf,
+                )
+
+                _ohl = _RUN_OHLCV_CACHE.get(ticker.upper())
+                if _ohl is None:
+                    _ohl = _fetch_ohlcv(ticker)
+                    _RUN_OHLCV_CACHE[ticker.upper()] = _ohl
+                _cl = _ohl.get("closes") or []
+                _vl = _ohl.get("volumes") or []
+                row["illiq"] = _illiq(_cl, _vl)
+                _adv = sum(_vl[-30:]) / len(_vl[-30:]) if len(_vl) >= 30 else None
+                _fs = None
+                try:
+                    from tradingagents.dataflows.float_shares import fetch_float_shares
+
+                    _fs = fetch_float_shares(ticker)
+                except Exception:  # noqa: BLE001
+                    _fs = None
+                row["float_turnover"] = _ft(_adv, _fs)
+                _sh = fin.get("shares")
+                _tot = _sh.get("current") if isinstance(_sh, dict) else _sh
+                row["iwf"] = _iwf(_fs, _tot)
+            except Exception:  # noqa: BLE001 - liquidity columns degrade to n/a
+                pass
             results.append(row)
             logger.info("screened %s", ticker)
         except Exception as exc:  # noqa: BLE001

@@ -102,3 +102,35 @@ def test_snapshot_shows_capital_at_risk():
         capital_at_risk_pct=0.014,
     )
     assert "cap_at_risk=1.40%" in snap
+
+
+def test_liquidity_illiquid_rejects():
+    from tradingagents.strategies.risk_governor import govern
+
+    v = govern(0.1, {}, liquidity_verdict="illiquid", liquidity_dangers=["ILLIQ high"])
+    assert v["verdict"] == "REJECT"
+    assert any("liquidity" in r for r in v["reasons"])
+
+
+def test_liquidity_caution_warns():
+    from tradingagents.strategies.risk_governor import govern
+
+    v = govern(0.1, {}, liquidity_verdict="caution", liquidity_dangers=["thin turnover"])
+    assert v["verdict"] == "WARN"
+    assert any("liquidity" in t for t in v["touches"])
+
+
+def test_liquidity_liquid_passes():
+    from tradingagents.strategies.risk_governor import govern
+
+    v = govern(0.1, {}, liquidity_verdict="liquid")
+    assert v["verdict"] == "PASS"
+
+
+def test_liquidity_gate_off_by_default():
+    """No liquidity args -> the gate is skipped (current behavior preserved)."""
+    from tradingagents.strategies.risk_governor import govern
+
+    v = govern(0.1, {})
+    assert v["verdict"] == "PASS"
+    assert v["reasons"] == []

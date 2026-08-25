@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_liquidity_risk,
     get_macd_divergence,
     get_market_snapshot,
     get_momentum_detail,
@@ -52,6 +53,7 @@ def create_market_analyst(llm):
             get_options_chain,
             get_short_interest,
             get_short_volume,
+            get_liquidity_risk,
             get_capital_flow,
             get_swing_set,
             get_relative_strength,
@@ -108,6 +110,7 @@ Before writing the final report, call get_verified_market_snapshot for this tick
 You also have Massive.com verification tools (plan-gated): get_market_snapshot(ticker) returns a consolidated latest trade/bar/VWAP/change block you can cross-check against the verified snapshot when available; get_top_movers('gainers'|'losers') lists the day's biggest movers for market-context / relative-breadth framing. If either returns 'unavailable', proceed without it.
 
 You also have two forward-looking positioning tools: call get_options_chain(ticker, current_date) for implied volatility, open interest, and the put/call ratio (leading positioning/expectation signals), and get_short_interest(ticker) for short % of float, days-to-cover, and ownership split (squeeze and conviction signals). For intraday shorting conviction, call get_short_volume(ticker, start_date, end_date) for the daily short-sale volume ratio (% of total volume sold short) — elevated readings indicate heavy shorting pressure. Weigh these as positioning gauges, not directional price calls.
+You also have a liquidity tool: call get_liquidity_risk(ticker, current_date) for the computed Amihud ILLIQ (price impact per dollar traded), float turnover (ADV / float), the free-float factor (IWF) and a LIQUID / CAUTION / ILLIQUID verdict (Strategies/risk2.md). Cite it (or its explicit 'unavailable') before any 'liquid enough to trade / thin book / slippage risk / index-eligible' claim.
 
 You also have a money-flow tool: call get_capital_flow(ticker) for weekly net capital inflow/outflow split by order size (super/big/mid/small) and the latest session's capital distribution. Sustained large/super-order outflows suggest institutional distribution; sustained inflows suggest accumulation. Weigh this as a positioning gauge alongside the options and short-interest signals.
 

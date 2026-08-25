@@ -204,3 +204,55 @@ def get_top_movers(
         return get_top_movers_massive(direction, count)
     except Exception as exc:  # noqa: BLE001
         return f"top movers unavailable: {exc}"
+
+
+@tool
+def get_liquidity_risk(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str | None, "current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """Liquidity / price-impact risk read (Strategies/risk2.md).
+
+    Computes Amihud ILLIQ (price impact per dollar traded), float turnover
+    (ADV / float shares), the free-float factor (IWF) and a composite
+    LIQUID / CAUTION / ILLIQUID verdict from the vendor OHLCV + float +
+    shares. Use before any 'liquid enough to trade / thin book / slippage
+    risk' claim. Missing inputs render n/a - never fabricated.
+    """
+    try:
+        from tradingagents.strategies.liquidity_risk import (
+            amihud_illiquidity,
+            float_turnover as _ft,
+            free_float_factor as _iwf,
+            liquidity_verdict as _lv,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"liquidity risk unavailable for {ticker}: {exc}"
+    try:
+        from tradingagents.agents.utils.analysis_tools import _ohlcv
+        from tradingagents.dataflows.float_shares import fetch_float_shares
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
+
+        ohlcv = _ohlcv(ticker)
+        closes = ohlcv.get("closes") or []
+        volumes = ohlcv.get("volumes") or []
+        illiq = amihud_illiquidity(closes, volumes)
+        adv = sum(volumes[-30:]) / len(volumes[-30:]) if len(volumes) >= 30 else None
+        float_sh = fetch_float_shares(ticker)
+        fin = fetch_ticker(ticker, current_date or "") or {}
+        sh = fin.get("shares")
+        tot_sh = sh.get("current") if isinstance(sh, dict) else sh
+        ft = _ft(adv, float_sh)
+        iwf = _iwf(float_sh, tot_sh)
+        lv = _lv(illiq, ft, None, iwf=iwf)
+        lines = [
+            f"liquidity risk {ticker}: verdict={lv['verdict']}",
+            f"  illiq={illiq:.4e}" if illiq is not None else "  illiq=n/a",
+            f"  float_turnover={ft:.3%}" if ft is not None else "  float_turnover=n/a",
+            f"  iwf={iwf:.2%}" if iwf is not None else "  iwf=n/a",
+        ]
+        if lv["dangers"]:
+            lines.append("  dangers: " + "; ".join(lv["dangers"]))
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"liquidity risk unavailable for {ticker}: {exc}"
