@@ -482,7 +482,7 @@ preserves `Risk Gate (computed)` blocks.
   `-u/--universe` `--market` `-n/--movers-count` `--min-mcap` `--price-min`
   `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap` `--min-eps-yoy`
   `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision` `--inst-accum`
-  `--intraday` `--scan`
+  `--intraday` `--enrich-sector` `--enrich-rev` `--enrich-inst` `--scan`
   (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
   `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
 

@@ -119,6 +119,32 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Screener: fill the n/a columns (compute + enrich)** - most columns were
+  blank because they were gated behind a scan mode or a CLI flag, not because
+  the data was missing:
+  - **Piotroski F-Score now computes** - added `enrich_screen_ratios` in
+    `statement_parsing` which derives the ratio inputs no vendor row provides
+    directly (`roa`, `leverage`, `current_ratio`, `gross_margin`,
+    `asset_turnover`, `shares_issued`, with prior periods) from the canonical
+    statements the chain already fetches, so the F column (previously always
+    `n/a`) computes from the moomoo data (- in a live AAPL run F=7, was n/a).
+  - **`--scan all` now fills every technical column** - a new
+    `_compute_scan_row` helper runs all scan buckets (TrendPB/Breakout/RSI +
+    momentum `Pills/Pull/RR` + `Swing/RS/Stp/T2` + `VCP/Brk` +
+    `VDip/FCFy/RSI/%b/Stp%`) for every symbol on the default `all` mode, so a
+    standard positional run shows these columns instead of `n/a`. Added shared
+    run-wide OHLCV/float/benchmark caches (reset per run) so the movers
+    gating and the results loop fetch each symbol's OHLCV once. Dedicated
+    `--scan <mode>` still filters (now also honoured on the positional path).
+  - **New non-gating enrich flags** - `--enrich-sector`, `--enrich-rev`,
+    `--enrich-inst` populate `Sec/SecRank`, `RevUp` and `Inst` without the
+    filtering that `--sector-rank` / `--revision` / `--inst-accum` apply.
+  - `Name` stays mover-metadata-only (classic path shows `n/a`) and
+    `L1Px/VWAP1m/1mVol` stay behind `--intraday` (Alpaca cost) by design.
+  Tests: F-score derivation, a positional `--scan all` that populates the
+  technical columns, and `--enrich-sector` without gating. Full suite 1265
+  passed / 2 skipped; ruff clean.
+
 - **Screener FMP 429 rate-limit noise - normalized enrichment now uses the
   vendor chain** - the value screener's ``normalized_score()`` enrichment
   (columns ``nebit_ev_ebit`` / ``pe_pct5`` / ``fmp_ev``) fetched multi-year

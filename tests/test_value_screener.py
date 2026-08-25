@@ -288,3 +288,89 @@ def test_report_headers_renamed_and_legend_added(capsys):
     assert "**TrendPB**" in md and "trend-pullback" in md
     assert "**Breakout**" in md and "breakout" in md
     assert "**EY**" in md and "earnings yield" in md
+
+
+def _full_route(method, *a, **k):
+    """Router for --scan all positional tests: statements + a steady uptrend
+    so the momentum/swing/vcp/value-dip buckets compute."""
+    if method == "get_stock_data":
+        rows = ["Date,Open,High,Low,Close,Volume"]
+        # Steady rising trend for the scan indicators.
+        p = 100.0
+        for i in range(260):
+            p += 0.3
+            vol = 8000000
+            rows.append(
+                f"2026-01-{i % 28 + 1:02d},{p + 0.1:.2f},{p + 2:.2f},{p - 2:.2f},{p:.2f},{vol}"
+            )
+        return "\n".join(rows) + "\n"
+    if method == "get_fundamentals":
+        return (
+            "### 2025/FY (FY 2025, currency: USD)\n"
+            "| Item | Value | YoY |\n| --- | --- | --- |\n"
+            "| Total Operating Revenue | 80000000000 | -- |\n| Operating Profit | 20000000000 | -- |\n"
+            "| Net Income | 15000000000 | -- |\n| Total Assets | 200000000000 | -- |\n"
+            "| Total Shareholder Equity | 100000000000 | -- |\n| Total Current Assets | 60000000000 | -- |\n"
+            "| Total Current Liabilities | 30000000000 | -- |\n| Cost of Revenue | 50000000000 | -- |\n"
+            "| Operating Cash Flow | 18000000000 | -- |\n| Common Shares Outstanding | 1000000000 | -- |\n"
+        )
+    if method in ("get_income_statement", "get_balance_sheet", "get_cashflow"):
+        return _full_route("get_fundamentals", *a, **k)
+    if method == "get_macro_indicators":
+        return "## FRED 10Y\nLatest: 4.2"
+    return "NO_DATA_AVAILABLE"
+
+
+def test_scan_all_positional_populates_technical_columns(capsys):
+    """A positional (non-movers) --scan all now fills the technical columns
+    that used to be n/a (F, Pills, Swing, VCP, VDip, TrendPB, Breakout)."""
+    from tradingagents.dataflows import interface as _iface
+
+    with (
+        _patched_router(_full_route),
+        mock.patch.object(_iface, "route_to_vendor", side_effect=_full_route),
+    ):
+        vs.main(
+            ["AAPL", "-d", "2026-01-02", "--min-mcap", "0", "--min-atr-pct", "0",
+             "--min-avg-vol", "0", "--pe-max", "0", "--price-min", "0",
+             "--scan", "all", "--out-dir", "screener"]
+        )
+    out = capsys.readouterr().out
+    row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
+    assert "TrendPB" in out and "Breakout" in out
+    assert row, "no data row rendered"
+    # The technical / scan columns must be populated (not all n/a): F/M/Z band
+    # and the scan flags should carry real values now.
+    fields = row.split("|")
+    fmz = [f.strip() for f in fields[7:10]]
+    assert any(v not in ("n/a", "") for v in fmz)  # F/M/Z not all blank
+    assert "Swing" in out and "VDip" in out
+
+
+def test_enrich_sector_populates_without_gating(capsys):
+    """--enrich-sector adds Sec/SecRank but never drops rows (unlike
+    --sector-rank which filters to top-3)."""
+    from tradingagents.dataflows import interface as _iface
+
+    fake_rank = {
+        "ranked": [{"etf": "XLK", "name": "Technology", "ret_3m": 0.1, "rank": 1}],
+        "top3_3m": ["XLK"],
+        "top3_1m": ["XLK"],
+    }
+    with (
+        _patched_router(_full_route),
+        mock.patch.object(_iface, "route_to_vendor", side_effect=_full_route),
+        mock.patch.object(vs, "_fetch_sector_guarded", return_value="Technology"),
+        mock.patch.object(vs, "_sector_ranking", return_value=fake_rank),
+    ):
+        vs.main(
+            ["AAPL", "-d", "2026-01-02", "--min-mcap", "0", "--min-atr-pct", "0",
+             "--min-avg-vol", "0", "--pe-max", "0", "--price-min", "0",
+             "--scan", "value", "--enrich-sector", "--out-dir", "screener"]
+        )
+        out = capsys.readouterr().out
+        # Sector value is present in the row (not n/a), and AAPL was NOT dropped.
+        assert "Sec" in out
+        row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
+        assert row and "Technology" in row
+        assert "AAPL" in out

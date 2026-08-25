@@ -135,3 +135,49 @@ def test_income_series_degraded_forms():
     assert sp.income_series("") is None
     assert sp.income_series("NO_DATA_AVAILABLE: x") is None
     assert sp.income_series("not a statement at all") is None
+
+
+@pytest.mark.unit
+def test_enrich_screen_ratios_derives_piotroski_inputs():
+    fin = {
+        "net_income": {"current": 100e6, "prior": 80e6},
+        "total_assets": {"current": 1000e6, "prior": 900e6},
+        "total_equity": {"current": 500e6, "prior": 450e6},
+        "current_assets": {"current": 300e6, "prior": 280e6},
+        "current_liabilities": {"current": 150e6, "prior": 140e6},
+        "revenue": {"current": 800e6, "prior": 700e6},
+        "cogs": {"current": 500e6, "prior": 450e6},
+        "cost_of_revenue": {"current": 500e6, "prior": 450e6},
+        "shares": {"current": 1e9, "prior": 1.05e9},
+    }
+    sp.enrich_screen_ratios(fin)
+    assert fin["roa"]["current"] == pytest.approx(0.10, rel=0.01)
+    assert fin["roa"]["prior"] == pytest.approx(0.0889, rel=0.01)
+    assert fin["current_ratio"]["current"] == pytest.approx(2.0)
+    assert fin["gross_margin"]["current"] == pytest.approx(0.375, rel=0.01)
+    assert fin["asset_turnover"]["current"] == pytest.approx(0.8, rel=0.01)
+    # share reduction -> negative shares_issued (repurchase) for the F score.
+    assert fin["shares_issued"] == pytest.approx(-50e6, rel=0.01)
+
+
+@pytest.mark.unit
+def test_screen_ticker_computes_piotroski_f_score():
+    fin = {
+        "market_cap": 3e9,
+        "net_income": {"current": 100e6, "prior": 80e6},
+        "total_assets": {"current": 1000e6, "prior": 900e6},
+        "total_equity": {"current": 500e6, "prior": 450e6},
+        "current_assets": {"current": 300e6, "prior": 280e6},
+        "current_liabilities": {"current": 150e6, "prior": 140e6},
+        "revenue": {"current": 800e6, "prior": 700e6},
+        "cogs": {"current": 500e6, "prior": 450e6},
+        "operating_cashflow": {"current": 120e6, "prior": 90e6},
+        "shares": {"current": 1e9, "prior": 1.05e9},
+    }
+    sp.enrich_screen_ratios(fin)
+    from tradingagents.dataflows.quantitative_scores import piotroski_f_score
+
+    score = piotroski_f_score(fin)
+    assert score is not None
+    assert 0 <= score <= 9
+    assert score > 0  # previously n/a because the ratio inputs were missing

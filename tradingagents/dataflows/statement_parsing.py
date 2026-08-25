@@ -549,6 +549,76 @@ def _latest(v):
     return v
 
 
+def _prior(v):
+    """Prior-period value of a canonical item (dict with a ``prior`` key)."""
+    return v.get("prior") if isinstance(v, dict) else None
+
+
+def _ratio_num(n, d):
+    """n/d guarded: None when either side missing or the denominator is 0."""
+    if n is None or d is None:
+        return None
+    try:
+        d = float(d)
+        n = float(n)
+    except (TypeError, ValueError):
+        return None
+    if d == 0:
+        return None
+    return n / d
+
+
+def enrich_screen_ratios(fin: dict) -> None:
+    """Derive the ratio inputs the Piotroski F-Score needs but no vendor row
+    provides directly (``roa``, ``leverage``, ``current_ratio``,
+    ``gross_margin``, ``asset_turnover``, ``shares_issued``), including their
+    prior-period values, and store them back into ``fin`` in place.
+
+    Every input is pure-computed from the canonical financials the chain
+    already fetches (net income, total assets, equity, current assets /
+    liabilities, revenue, cogs, shares), with current+prior so the F-Score's
+    period-over-period checks can run. A missing side leaves the sub-ratio
+    unset (n/a) - never fabricated. Returns None; mutates ``fin`` only.
+    """
+
+    def _pair(n_key, d_key):
+        n, n_p = _latest(fin.get(n_key)), _prior(fin.get(n_key))
+        d, d_p = _latest(fin.get(d_key)), _prior(fin.get(d_key))
+        cur = _ratio_num(n, d)
+        prv = _ratio_num(n_p, d_p)
+        if cur is None and prv is None:
+            return None
+        return {"current": cur, "prior": prv}
+
+    roa = _pair("net_income", "total_assets")
+    if roa is not None:
+        fin["roa"] = roa
+    lev = _pair("total_assets", "total_equity")
+    if lev is not None:
+        fin["leverage"] = lev
+    cr = _pair("current_assets", "current_liabilities")
+    if cr is not None:
+        fin["current_ratio"] = cr
+    rev = _latest(fin.get("revenue"))
+    cog = _latest(fin.get("cogs")) or _latest(fin.get("cost_of_revenue"))
+    rev_p, cog_p = _prior(fin.get("revenue")), (_prior(fin.get("cogs")) or _prior(fin.get("cost_of_revenue")))
+    gm = _ratio_num((rev - cog) if (rev is not None and cog is not None) else None, rev)
+    gm_p = _ratio_num((rev_p - cog_p) if (rev_p is not None and cog_p is not None) else None, rev_p)
+    if gm is not None or gm_p is not None:
+        fin["gross_margin"] = {"current": gm, "prior": gm_p}
+    at = _pair("revenue", "total_assets")
+    if at is not None:
+        fin["asset_turnover"] = at
+    sh, sh_p = _latest(fin.get("shares")), _prior(fin.get("shares"))
+    if sh is not None:
+        # Net share change proxy: <= 0 means shares reduced (buyback) -> +
+        # the Piotroski share-issuance sub-score.
+        fin["shares_issued"] = (
+            (sh - sh_p) if sh_p is not None else sh
+        )
+
+
+
 def _canonicalize(payload: str) -> dict:
     """Turn a vendor payload string into a canonical line-item dict.
 
@@ -657,6 +727,10 @@ def _usd_consistent(fin: dict) -> bool:
 
 def screen_ticker(ticker: str, fin: dict) -> dict:
     """Compute every screen for one ticker's canonical items."""
+    # Derive the ratio inputs the Screens need that no vendor row provides
+    # directly (roa / leverage / current_ratio / gross_margin / asset_turnover /
+    # shares_issued), so the Piotroski F-Score computes on the vendor chain.
+    enrich_screen_ratios(fin)
     usd = _usd_consistent(fin)
     ev = enterprise_value(fin) if usd else None
     am = acquirers_multiple(fin) if usd else None

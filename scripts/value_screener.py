@@ -341,6 +341,96 @@ def _benchmark_closes() -> list:
     return _BENCHMARK_CACHE[bench]
 
 
+# Shared run-wide caches so OHLCV / float are fetched at most once per symbol
+# across the movers gating pass and the results loop (avoids double network).
+_RUN_OHLCV_CACHE: dict = {}
+_RUN_FLOAT_CACHE: dict = {}
+
+
+def _compute_scan_row(
+    symbol: str,
+    ohlcv: dict,
+    fin: dict,
+    current_date: str = "",
+    enable_float: bool = False,
+) -> dict:
+    """All scan intelligence for one symbol -> a flat dict of flags + metrics.
+
+    Returns top-level ``a``/``b`` (TrendPB/Breakout), ``rsi``/``rvol``/``qret``
+    and sub-dicts ``momentum``/``swing``/``vcp``/``value_dip`` so every scan
+    column can be filled regardless of the active ``--scan`` mode. Each bucket
+    is best-effort (a failure leaves that bucket absent -> the row shows n/a).
+    """
+    out: dict = {}
+    try:
+        sig = scan_signals(ohlcv) or {}
+        for k in ("a", "b", "rsi", "rvol", "qret"):
+            if k in sig:
+                out[k] = sig[k]
+    except Exception:  # noqa: BLE001
+        pass
+    # Momentum (day-trade pre-filter + first pullback).
+    try:
+        from tradingagents.strategies.momentum import (
+            first_pullback as _fp,
+            pillars as _pill,
+            rvol as _rvol,
+        )
+
+        closes = ohlcv.get("closes") or []
+        vols = ohlcv.get("volumes") or []
+        opens = ohlcv.get("opens") or []
+        rv = _rvol(vols) if vols else None
+        fl = None
+        if enable_float:
+            from tradingagents.dataflows.float_shares import fetch_float_shares
+
+            fl = _RUN_FLOAT_CACHE.get(symbol)
+            if fl is None and fl != 0:
+                fl = fetch_float_shares(symbol)
+                _RUN_FLOAT_CACHE[symbol] = fl
+        pill = _pill(
+            close=closes[-1] if closes else None,
+            day_volume=vols[-1] if vols else None,
+            prev_close=closes[-2] if len(closes) >= 2 else None,
+            day_open=opens[-1] if opens else None,
+            rv=rv,
+            float_shares=fl,
+        )
+        pull = _fp(
+            closes, ohlcv.get("highs") or [], ohlcv.get("lows") or [], vols, opens=opens or None
+        )
+        out["momentum"] = {
+            "pillars": {kk: bool(vv) for kk, vv in pill.items() if vv is not None},
+            "pullback": bool(pull.get("candidate")),
+            "mom_rr": pull.get("rr"),
+        }
+    except Exception:  # noqa: BLE001
+        pass
+    # Swing (techno-fundamental, uses the benchmark close series).
+    try:
+        sw = _swing_scan(symbol, ohlcv, _benchmark_closes())
+        if sw is not None:
+            out["swing"] = sw
+    except Exception:  # noqa: BLE001
+        pass
+    # VCP base.
+    try:
+        vc = _vcp_scan(ohlcv)
+        if vc is not None:
+            out["vcp"] = vc
+    except Exception:  # noqa: BLE001
+        pass
+    # Value-dip (needs the canonical financials).
+    try:
+        vd = _value_dip_scan(symbol, ohlcv, fin, current_date)
+        if vd is not None:
+            out["value_dip"] = vd
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def _swing_scan(symbol: str, ohlcv: dict, benchmark: list) -> dict | None:
     """Composite swing read for one symbol + display metrics for the table."""
     try:
@@ -766,6 +856,21 @@ def main(argv: list[str] | None = None) -> int:
         help="append live Alpaca L1 price / 1m VWAP / volume columns",
     )
     parser.add_argument(
+        "--enrich-sector",
+        action="store_true",
+        help="populate Sec/SecRank columns without gating (unlike --sector-rank)",
+    )
+    parser.add_argument(
+        "--enrich-rev",
+        action="store_true",
+        help="populate RevUp (net analyst revisions) without gating (unlike --revision)",
+    )
+    parser.add_argument(
+        "--enrich-inst",
+        action="store_true",
+        help="populate Inst (institutional accumulation) without gating (unlike --inst-accum)",
+    )
+    parser.add_argument(
         "--scan",
         choices=(
             "value",
@@ -824,6 +929,9 @@ def main(argv: list[str] | None = None) -> int:
     mover_meta: dict = {}
     float_cache: dict = {}
     scan_meta: dict = {}
+    _RUN_OHLCV_CACHE.clear()
+    _RUN_FLOAT_CACHE.clear()
+    _BENCHMARK_CACHE.clear()
     tickers = list(args.tickers)
     if args.universe in ("top-losers", "heat-proxy"):
         try:
@@ -854,8 +962,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             # Equity-only, price, P/E (TTM), market-cap, 30d volume, ATR gates.
             need_ohlcv = bool(args.min_avg_vol or args.min_atr_pct or args.scan != "value")
-            ohlcv_cache: dict = {}
-            scan_meta: dict = {}
             gated = []
             for m in movers[: args.movers_count * 4]:
                 if _is_non_equity(m.get("name")):
@@ -871,10 +977,10 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if need_ohlcv:
                     symbol = (m.get("symbol") or "").upper()
-                    ohlcv = ohlcv_cache.get(symbol)
+                    ohlcv = _RUN_OHLCV_CACHE.get(symbol)
                     if ohlcv is None:
                         ohlcv = _fetch_ohlcv(symbol)
-                        ohlcv_cache[symbol] = ohlcv
+                        _RUN_OHLCV_CACHE[symbol] = ohlcv
                     if args.scan != "value":
                         sig = scan_signals(ohlcv) or {}
                         scan_meta[symbol] = sig
@@ -1074,6 +1180,34 @@ def main(argv: list[str] | None = None) -> int:
                     args.max_mcap / 1e9,
                 )
                 continue
+            # Compute every scan bucket (TrendPB/Breakout/RSI/volume + momentum +
+            # swing + VCP + value-dip) so the report columns are filled for both
+            # the movers and the positional/file universes. For a dedicated
+            # --scan mode, filter to that setup (mirrors the movers gating).
+            row_scan: dict = {}
+            if args.scan != "value":
+                sym = ticker.upper()
+                ohlcv = _RUN_OHLCV_CACHE.get(sym)
+                if ohlcv is None:
+                    ohlcv = _fetch_ohlcv(ticker)
+                    _RUN_OHLCV_CACHE[sym] = ohlcv
+                row_scan = _compute_scan_row(
+                    ticker, ohlcv, fin, args.date, args.enable_float
+                )
+                if args.scan == "trend-pullback" and not row_scan.get("a"):
+                    continue
+                if args.scan == "breakout" and not row_scan.get("b"):
+                    continue
+                if args.scan == "momentum":
+                    _p = (row_scan.get("momentum") or {}).get("pillars") or {}
+                    if any(v is False for v in _p.values()):
+                        continue
+                if args.scan == "swing" and not (row_scan.get("swing") or {}).get("candidate"):
+                    continue
+                if args.scan == "vcp" and not (row_scan.get("vcp") or {}).get("candidate"):
+                    continue
+                if args.scan == "value-dip" and not (row_scan.get("value_dip") or {}).get("candidate"):
+                    continue
             if args.sector_rank:
                 from tradingagents.strategies.sector_rank import sector_standing
 
@@ -1105,6 +1239,24 @@ def main(argv: list[str] | None = None) -> int:
                         "skip %s: institutional distribution (2q pp %.2f)", ticker, inst["two_q_pp"]
                     )
                     continue
+            # Non-gating enrichments: populate Sec/SecRank / RevUp / Inst columns
+            # without applying the filtering of --sector-rank / --revision /
+            # --inst-accum, so the report shows these values but never drops rows.
+            if args.enrich_sector:
+                from tradingagents.strategies.sector_rank import sector_standing
+
+                sector = row.get("sector") or _fetch_sector_guarded(ticker)
+                standing = sector_standing(sector, _sector_ranking())
+                row["sector"] = standing.get("sector") or sector
+                row["sec_rank"] = standing.get("rank")
+                row["sec_top3"] = standing.get("top3_3m")
+            if args.enrich_rev:
+                rev = _fetch_revision_guarded(ticker)
+                row["rev_net"] = rev.get("net") if rev else None
+            if args.enrich_inst:
+                inst = _inst_accumulation(route_to_vendor("get_institution_holdings", ticker))
+                row["inst_latest_pp"] = inst.get("latest_pp") if inst else None
+                row["inst_two_q_pp"] = inst.get("two_q_pp") if inst else None
             if fmp_use:
                 _nf = None
                 try:
@@ -1117,7 +1269,7 @@ def main(argv: list[str] | None = None) -> int:
                     row["nebit_ev_ebit"] = _nf.get("ev_nebit")
                     row["pe_pct5"] = _nf.get("pe_pct5")
                     row["fmp_ev"] = _nf.get("ev")
-            sig = scan_meta.get(ticker.upper())
+            sig = row_scan
             row["scan_a"] = bool(sig and sig.get("a"))
             row["scan_b"] = bool(sig and sig.get("b"))
             _mom = (sig or {}).get("momentum") if sig else None
@@ -1142,7 +1294,10 @@ def main(argv: list[str] | None = None) -> int:
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None
-            row["name"] = meta.get("name")
+            name_fill = meta.get("name")
+            if not name_fill:
+                name_fill = fin.get("name") or fin.get("company_name") or fin.get("long_name")
+            row["name"] = name_fill
             row["day_change"] = meta.get("day_change")
             results.append(row)
             logger.info("screened %s", ticker)
