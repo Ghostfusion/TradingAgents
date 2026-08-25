@@ -200,14 +200,17 @@ def test_save_watchlist_newest_wins_by_timestamp(tmp_path):
 
 
 def test_classic_path_has_no_mover_columns(capsys):
+    """Classic path: all columns are present (full fixed header) but
+    mover-only values (Name/DayChg) render n/a, not dropped."""
     vs.main(["AAPL", "-d", "2026-01-02"])
     out = capsys.readouterr().out
-    # Mover columns (Name/DayChg) must NOT be table columns on the classic
-    # path. Check the table header row (pipe-delimited), not the legend
-    # bullets below the table (which list every column for reference).
-    assert "| Name " not in out
-    assert "| DayChg " not in out
+    # The table header always lists every column (fixed set).
+    assert "| Name " in out and "| DayChg " in out
     assert "AAPL" in out
+    # Classic path carries no mover metadata -> the data row shows n/a there.
+    # (Row header -> values: a data row is pipe-delimited with n/a for Name.)
+    data_row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
+    assert data_row and "n/a" in data_row
 
 
 def test_universe_caps_limit(capsys):

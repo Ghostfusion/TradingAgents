@@ -138,134 +138,76 @@ def _legend_markdown() -> str:
 
 
 def _watchlist_markdown(results: list) -> str:
-    """Print the ranked watchlist as a table.
+    """Render the ranked watchlist as a complete table.
 
-    ``Name`` / ``DayChg`` columns appear only when the run carried mover
-    metadata (i.e. the universe came from moomoo's top-losers rank). A column
-    legend (see ``_legend_markdown``) is appended to every report so the terse
-    header abbreviations are self-explanatory.
+    Every screenable column is shown on every row (fixed order); a column the
+    run did not compute is rendered ``n/a`` rather than dropped, so the set of
+    columns is identical from one report to the next (the ``_WATCHLIST_LEGEND``
+    always matches the table). ``Name`` / ``DayChg`` etc. show ``n/a`` when the
+    run carried no such metadata.
     """
-    show_name = any(r.get("name") for r in results)
-    show_chg = any(r.get("day_change") is not None for r in results)
-    heads = ["Rank", "Ticker"]
-    if show_name:
-        heads.append("Name")
-    heads += ["EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet"]
-    show_mom = any(r.get("pills") is not None for r in results)
-    if show_mom:
-        heads += ["Pills", "Pull", "RR"]
-    show_live = any(r.get("line_price") is not None for r in results)
-    if show_live:
-        heads += ["L1Px", "VWAP1m", "1mVol"]
-    show_norm = any(r.get("nebit_ev_ebit") is not None for r in results)
-    if show_norm:
-        heads.append("NEV/EBIT")
-        heads.append("PE5Y")
-    show_scan = any(r.get("scan_a") or r.get("scan_b") for r in results)
-    if show_scan:
-        heads.append("TrendPB")
-        heads.append("Breakout")
-    show_growth = any(
-        r.get("eps_yoy") is not None or r.get("revenue_yoy") is not None or r.get("roe") is not None
-        for r in results
-    )
-    if show_growth:
-        heads += ["EpsYoY", "RevYoY", "ROE"]
-    show_sector = any(r.get("sec_rank") is not None for r in results)
-    if show_sector:
-        heads += ["Sec", "SecRank"]
-    show_rev = any(r.get("rev_net") is not None for r in results)
-    if show_rev:
-        heads.append("RevUp")
-    show_inst = any(r.get("inst_latest_pp") is not None for r in results)
-    if show_inst:
-        heads.append("Inst")
-    show_swing = any(r.get("scan_c") for r in results)
-    if show_swing:
-        heads += ["Swing", "RS", "Stp", "T2"]
-    show_vcp = any(r.get("vcp_flag") for r in results)
-    if show_vcp:
-        heads += ["VCP", "Brk"]
-    show_vdip = any(r.get("vdip_flag") for r in results)
-    if show_vdip:
-        heads += ["VDip", "FCFy", "RSI", "%b", "Stp%"]
-    show_trap = any(r.get("trap") not in (None, "n/a") for r in results)
-    if show_trap:
-        heads.append("Trap")
-    if show_chg:
-        heads.append("DayChg")
+
+    def cell(v, fmt=None):
+        if v is None:
+            return "n/a"
+        return fmt.format(v) if fmt else str(v)
+
+    def flag(v):
+        # None -> n/a (not computed); True/False -> yes/no.
+        if v is None:
+            return "n/a"
+        return "yes" if v else "no"
+
+    heads = [
+        "Rank", "Ticker", "Name",
+        "EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet",
+        "Pills", "Pull", "RR",
+        "L1Px", "VWAP1m", "1mVol",
+        "NEV/EBIT", "PE5Y",
+        "TrendPB", "Breakout",
+        "EpsYoY", "RevYoY", "ROE",
+        "Sec", "SecRank", "RevUp", "Inst",
+        "Swing", "RS", "Stp", "T2",
+        "VCP", "Brk",
+        "VDip", "FCFy", "RSI", "%b", "Stp%",
+        "Trap", "DayChg",
+    ]
     seps = ["---"] * len(heads)
-    header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+    header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
     out = [
         header,
+        "",
         "| " + " | ".join(heads) + " |",
         "| " + " | ".join(seps) + " |",
     ]
     for i, r in enumerate(results, 1):
-
-        def cell(v, fmt=None):
-            if v is None:
-                return "n/a"
-            return fmt.format(v) if fmt else str(v)
-
-        cells = [str(i), r["ticker"]]
-        if show_name:
-            cells.append(cell(r.get("name")))
-        cells += [
-            cell(r["earnings_yield"], "{:.2%}"),
-            cell(r["ev_ebit"]),
-            cell(r["ev"]),
-            cell(r["f_score"]),
-            cell(r["beneish_m"]),
-            cell(r["altman_z"]),
-            "yes" if r["net_net"] else "no",
+        rank = r.get("sec_rank")
+        sec_rank = (
+            cell(rank) if rank is None else (f"T{rank}" if r.get("sec_top3") else str(rank))
+        )
+        cells = [
+            str(i), r["ticker"], cell(r.get("name")),
+            cell(r.get("earnings_yield"), "{:.2%}"),
+            cell(r.get("ev_ebit")), cell(r.get("ev")),
+            cell(r.get("f_score")), cell(r.get("beneish_m")), cell(r.get("altman_z")),
+            flag(r.get("net_net")),
+            cell(r.get("pills")), flag(r.get("pullback")), cell(r.get("mom_rr")),
+            cell(r.get("line_price")), cell(r.get("line_vwap")), cell(r.get("line_vol")),
+            cell(r.get("nebit_ev_ebit")), cell(r.get("pe_pct5"), "{:.0%}"),
+            flag(r.get("scan_a")), flag(r.get("scan_b")),
+            cell(r.get("eps_yoy"), "{:.1%}"),
+            cell(r.get("revenue_yoy"), "{:.1%}"),
+            cell(r.get("roe"), "{:.1%}"),
+            cell(r.get("sector")), sec_rank,
+            cell(r.get("rev_net"), "%+d"), cell(r.get("inst_latest_pp"), "%+.1f"),
+            flag(r.get("scan_c")), cell(r.get("swing_rs") or "n/a"),
+            cell(r.get("swing_stop_pct"), "{:.1%}"), cell(r.get("swing_t2_pct"), "{:.1%}"),
+            flag(r.get("vcp_flag")), cell(r.get("vcp_brk"), "{:.1%}"),
+            flag(r.get("vdip_flag")), cell(r.get("vdip_fcfy"), "{:.1%}"),
+            cell(r.get("vdip_rsi"), "{:.0f}"), cell(r.get("vdip_pctb"), "{:.0%}"),
+            cell(r.get("vdip_stop_pct"), "{:.1%}"),
+            cell(r.get("trap")), cell(r.get("day_change"), "{:+.2%}"),
         ]
-        if show_mom:
-            cells.append(cell(r.get("pills")))
-            cells.append("yes" if r.get("pullback") else "no")
-            cells.append(cell(r.get("mom_rr")))
-        if show_live:
-            cells.append(cell(r.get("line_price")))
-            cells.append(cell(r.get("line_vwap")))
-            cells.append(cell(r.get("line_vol")))
-        if show_norm:
-            cells.append(cell(r.get("nebit_ev_ebit")))
-            cells.append(cell(r.get("pe_pct5"), "{:.0%}"))
-        if show_scan:
-            cells.append("yes" if r.get("scan_a") else "no")
-            cells.append("yes" if r.get("scan_b") else "no")
-        if show_growth:
-            cells.append(cell(r.get("eps_yoy"), "{:.1%}"))
-            cells.append(cell(r.get("revenue_yoy"), "{:.1%}"))
-            cells.append(cell(r.get("roe"), "{:.1%}"))
-        if show_sector:
-            cells.append(cell(r.get("sector")))
-            rank = r.get("sec_rank")
-            cells.append(
-                cell(rank) if rank is None else (f"T{rank}" if r.get("sec_top3") else str(rank))
-            )
-        if show_rev:
-            cells.append(cell(r.get("rev_net"), "%+d"))
-        if show_inst:
-            cells.append(cell(r.get("inst_latest_pp"), "%+.1f"))
-        if show_swing:
-            cells.append("yes" if r.get("scan_c") else "no")
-            cells.append(cell(r.get("swing_rs") or "n/a"))
-            cells.append(cell(r.get("swing_stop_pct"), "{:.1%}"))
-            cells.append(cell(r.get("swing_t2_pct"), "{:.1%}"))
-        if show_vcp:
-            cells.append("yes" if r.get("vcp_flag") else "no")
-            cells.append(cell(r.get("vcp_brk"), "{:.1%}"))
-        if show_vdip:
-            cells.append("yes" if r.get("vdip_flag") else "no")
-            cells.append(cell(r.get("vdip_fcfy"), "{:.1%}"))
-            cells.append(cell(r.get("vdip_rsi"), "{:.0f}"))
-            cells.append(cell(r.get("vdip_pctb"), "{:.0%}"))
-            cells.append(cell(r.get("vdip_stop_pct"), "{:.1%}"))
-        if show_trap:
-            cells.append(cell(r.get("trap")))
-        if show_chg:
-            cells.append(cell(r.get("day_change"), "{:+.2%}"))
         out.append("| " + " | ".join(cells) + " |")
     out.append(_legend_markdown())
     return "\n".join(out)

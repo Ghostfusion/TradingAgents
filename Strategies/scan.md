@@ -133,7 +133,11 @@ breakout setups, `Swing`/`RS`/`Stp`/`T2` appear when any swing setup is
 present and `VCP`/`Brk` when a volatility-contraction base is detected. A
 dedicated `--scan <mode>` filters to that one setup; `all` only flags.
 
-Every report also carries a **Column legend** (see `_legend_markdown` in
+The report table always renders the **full fixed column set** (every column
+in `_WATCHLIST_LEGEND`, in a stable order); a metric the run did not compute
+shows `n/a` rather than dropping the column, so the column set is identical
+from one report to the next and the legend always matches the table. Every
+report also carries a **Column legend** (see `_legend_markdown` in
 `scripts/value_screener.py`) listing each header abbreviation and its meaning,
 so the table is self-explanatory without cross-referencing docs.
 
