@@ -1001,7 +1001,12 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     return config
 
 
-def run_analysis(checkpoint: bool | None = None):
+def run_analysis(
+    checkpoint: bool | None = None,
+    save_report: bool = True,
+    display_report: bool = True,
+    save_path_arg: Path | None = None,
+):
     # First get all user selections
     selections = get_user_selections()
 
@@ -1253,20 +1258,16 @@ def run_analysis(checkpoint: bool | None = None):
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-    # Post-analysis prompts (outside Live context for clean interaction)
+    # Post-analysis actions: save + display are ON by default (auto, no prompt)
+    # so the run always persists and shows the report. Pass --no-save-report /
+    # --no-display-report to skip either.
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
-    # Prompt to save report
-    save_choice = typer.prompt("Save report?", default="Y").strip().upper()
-    if save_choice in ("Y", "YES", ""):
+    if save_report:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
-        save_path_str = typer.prompt(
-            "Save path (press Enter for default)",
-            default=str(default_path)
-        ).strip()
-        save_path = Path(save_path_str)
+        save_path = save_path_arg or default_path
         try:
             report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
@@ -1274,9 +1275,7 @@ def run_analysis(checkpoint: bool | None = None):
         except Exception as e:
             console.print(f"[red]Error saving report: {e}[/red]")
 
-    # Prompt to display full report
-    display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
-    if display_choice in ("Y", "YES", ""):
+    if display_report:
         display_complete_report(final_state)
 
 
@@ -1293,13 +1292,35 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    save_report: bool = typer.Option(
+        True,
+        "--save-report/--no-save-report",
+        help="Save the report to reports/ after the run (default: on - no prompt). "
+        "Pass --no-save-report to skip saving.",
+    ),
+    display_report: bool = typer.Option(
+        True,
+        "--display-report/--no-display-report",
+        help="Display the full report on screen after the run (default: on - no "
+        "prompt). Pass --no-display-report to skip it.",
+    ),
+    save_path: Path | None = typer.Option(  # noqa: B008 - typer evaluates at CLI-parse, not import
+        None,
+        "--save-path",
+        help="Override the report save location (default: ./reports/<ticker>_<ts>).",
+    ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     try:
-        run_analysis(checkpoint=checkpoint)
+        run_analysis(
+            checkpoint=checkpoint,
+            save_report=save_report,
+            display_report=display_report,
+            save_path_arg=save_path,
+        )
     except _NO_CONSOLE_ERRORS:
         # A terminal with no console buffer cannot host the interactive prompts.
         # Emit one actionable line on stderr instead of a prompt_toolkit

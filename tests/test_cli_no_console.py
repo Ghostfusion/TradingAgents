@@ -7,6 +7,7 @@ The Windows-only exception import must also stay inert on other platforms.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -55,3 +56,56 @@ def test_unrelated_errors_still_propagate(monkeypatch):
     monkeypatch.setattr(m, "run_analysis", _boom)
     result = CliRunner().invoke(m.app, [])
     assert isinstance(result.exception, ValueError)
+
+
+def test_analyze_accepts_save_and_display_flags(monkeypatch):
+    """--save-report/--display-report/--save-path are accepted and passed
+    through to run_analysis (save+display default ON). `analyze` is the app's
+    single command, so the flags go directly (no subcommand prefix)."""
+    captured = {}
+
+    def _fake_run(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(m, "run_analysis", _fake_run)
+    result = CliRunner().invoke(
+        m.app,
+        ["--save-report", "--display-report", "--save-path", "out/x"],
+    )
+    assert result.exit_code == 0
+    assert captured["save_report"] is True
+    assert captured["display_report"] is True
+    assert captured["save_path_arg"] == Path("out/x")
+
+
+def test_analyze_defaults_save_and_display_on(monkeypatch):
+    """Default behavior: save + display stay ON (user's requirement)."""
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(m, "run_analysis", fake_run)
+    result = CliRunner().invoke(m.app, [])
+    assert result.exit_code == 0
+    assert captured["save_report"] is True
+    assert captured["display_report"] is True
+    assert captured["save_path_arg"] is None
+
+
+def test_analyze_no_save_no_display_flags(monkeypatch):
+    """--no-save-report / --no-display-report turn the defaults off."""
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(m, "run_analysis", fake_run)
+    result = CliRunner().invoke(m.app, ["--no-save-report", "--no-display-report"])
+    assert result.exit_code == 0
+    assert captured["save_report"] is False
+    assert captured["display_report"] is False
+    assert captured["save_path_arg"] is None
