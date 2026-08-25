@@ -17,6 +17,8 @@ Examples:
     py -3.12 scripts/capital_income_screener.py --file Strategies/preferred_universe.txt
     py -3.12 scripts/capital_income_screener.py GS-PD T-PC MS-PK --top 20
     py -3.12 scripts/capital_income_screener.py -f my_list.txt --out-dir preferred_income --json
+    py -3.12 scripts/capital_income_screener.py --universe preferred-top   # live ETF top-preferreds
+    py -3.12 scripts/capital_income_screener.py --universe preferred-top --refresh  # update the file
 
 No graph/agent wiring - pure standalone.
 """
@@ -42,6 +44,34 @@ from tradingagents.strategies.capital_income import (  # noqa: E402
     build_capital_income_plan,
     indicated_yield,
 )
+
+# Preferred-stock ETFs whose top holdings are the live universe seed (path 3:
+# no curated list needed - the screener pull the names at runtime).
+PREFERRED_ETFS = ("PFF", "PFFD", "PGF", "PGX", "PFFV")
+
+
+def fetch_preferred_top(max_per_etf: int = 8) -> list[str]:
+    """Collect the top holdings of the major preferred ETFs as a live universe.
+
+    Uses yfinance ``get_funds_data().top_holdings`` (free, no key) and returns
+    the union of the symbols (deduped, uppercased). These are the actual
+    preferred issues the ETFs hold today; the screener then validates each as
+    it screens (price + dividendRate).
+    """
+    import yfinance as yf
+
+    seen: dict[str, int] = {}
+    for etf in PREFERRED_ETFS:
+        try:
+            fd = yf.Ticker(etf).get_funds_data()
+            th = fd.top_holdings
+            for sym in list(th.index)[: max_per_etf]:
+                s = str(sym).strip().upper()
+                if s and not s.startswith("X") and not s.endswith("$"):
+                    seen[s] = seen.get(s, 0) + 1
+        except Exception:  # noqa: BLE001 - a failed ETF must not abort
+            continue
+    return sorted(seen.keys())
 
 
 def _f(v):
@@ -145,6 +175,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tickers", nargs="*", help="ticker symbols (hyphenated preferreds)")
     parser.add_argument("-f", "--file", default=None, help="file with one ticker per line")
+    parser.add_argument(
+        "--universe",
+        choices=("preferred-top",),
+        default=None,
+        help="'preferred-top': live universe from the top holdings of the major "
+        "preferred ETFs (PFF/PFFD/PGF/PGX/PFFV) - validates each at runtime.",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="with --universe preferred-top: also write the collected, validated "
+        "symbols back into the favorite universe file.",
+    )
     parser.add_argument("--top", type=int, default=50, help="top-N by yield (default 50)")
     parser.add_argument("--min-mcap", type=float, default=250, help="min market cap in $M (default 250; 0=off)")
     parser.add_argument("--min-adtv", type=float, default=1, help="min ADTV in $M (default 1; 0=off)")
@@ -154,12 +197,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     universe = [t.strip().upper() for t in args.tickers if t.strip()]
-    if not universe and args.file:
+    if args.universe == "preferred-top":
+        universe = fetch_preferred_top()
+    elif not universe and args.file:
         with open(args.file, encoding="utf-8") as fh:
             universe = [ln.split("#")[0].strip().upper() for ln in fh if ln.strip()]
     universe = [t for t in universe if t]
     if not universe:
-        parser.error("no tickers provided (positional args or --file)")
+        parser.error("no tickers provided (positional args, --file or --universe preferred-top)")
 
     metas = []
     for t in universe:
@@ -194,10 +239,34 @@ def main(argv: list[str] | None = None) -> int:
         liquid_flags=liquid_flags,
     )
 
+    # --refresh: persist the live, validated preferred-top universe back into
+    # the favorite file (only the symbols that resolved with a price + div).
+    if args.refresh:
+        validated = [m["ticker"] for m in ok if m.get("dividend") is not None]
+        if validated:
+            target = Path(args.file) if args.file else Path(
+                __file__).resolve().parents[1] / "Strategies" / "preferred_universe.txt"
+            header = (
+                "# Preferred-income universe (Strategies/capital_income.md) - "
+                "refreshed from the preferred ETF top holdings.\n"
+                "# One ticker per line; '#' lines are comments.\n\n"
+            )
+            target.write_text(
+                header + "\n".join(sorted(validated)) + "\n", encoding="utf-8"
+            )
+            print(f"[refresh] {len(validated)} validated symbols -> {target}")
+        else:
+            print("[refresh] nothing validated; file unchanged.")
+
     if args.json:
         print(json.dumps(plan, indent=2, default=str))
         return 0
-    md = _render_markdown(plan, source=(args.file or "positional"), top=args.top)
+    source = (
+        "preferred-top (live ETF top-holdings)"
+        if args.universe == "preferred-top"
+        else (args.file or "positional")
+    )
+    md = _render_markdown(plan, source=source, top=args.top)
     print(md)
     if not args.dry_run:
         out = Path(args.out_dir)

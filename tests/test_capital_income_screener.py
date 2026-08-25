@@ -130,3 +130,34 @@ def test_screener_json_output(monkeypatch, capsys):
 def test_screener_no_tickers_errors(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         cis.main([])
+
+
+def test_preferred_top_universe_mode(monkeypatch, capsys):
+    """--universe preferred-top uses the live ETF top-holdings seed."""
+    _patch_yf(monkeypatch, {"A": (20.0, 1.5, 500e6), "B": (25.0, 1.0, 300e6)})
+    _patch_route(monkeypatch, {
+        "A": _csv([20.0] * 70, [100_000] * 70),
+        "B": _csv([25.0] * 70, [60_000] * 70),
+    })
+    monkeypatch.setattr(cis, "fetch_preferred_top", lambda max_per_etf=8: ["A", "B"])
+    rc = cis.main(["--universe", "preferred-top", "--top", "2",
+                   "--min-mcap", "0", "--min-adtv", "0", "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "| 1 | A |" in out or "| 1 | B |" in out
+    assert "preferred-top" in out
+
+
+def test_preferred_top_refresh_writes_file(monkeypatch, tmp_path, capsys):
+    """--refresh persists the validated symbols back into the universe file."""
+    _patch_yf(monkeypatch, {"A": (20.0, 1.5, 500e6)})
+    _patch_route(monkeypatch, {"A": _csv([20.0] * 70, [100_000] * 70)})
+    monkeypatch.setattr(cis, "fetch_preferred_top", lambda max_per_etf=8: ["A"])
+    target = tmp_path / "universe.txt"
+    rc = cis.main(["--universe", "preferred-top", "--refresh",
+                   "--top", "5", "--min-mcap", "0", "--min-adtv", "0",
+                   "--file", str(target), "--dry-run"])
+    assert rc == 0
+    written = target.read_text(encoding="utf-8")
+    assert "A" in written  # validated symbol persisted
+    assert written.startswith("#")  # header preserved

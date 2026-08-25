@@ -119,6 +119,17 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Capital-income screener: live `--universe preferred-top` + `--refresh`** -
+  the free providers don't expose a validated 500-symbol preferred list, so
+  the standalone screener now seeds its universe at runtime from the top
+  holdings of the major preferred ETFs (PFF / PFFD / PGF / PGX / PFFV) via
+  yfinance `get_funds_data().top_holdings` (no key). Every candidate is
+  validated during the run (price + dividendRate); only names that resolve
+  are ranked. `--refresh` writes the validated set back to the universe file
+  (header preserved), so the curated list stays current without manual edits.
+  Tests: `test_capital_income_screener` (universe mode + refresh write-back).
+  Full suite 1311 passed / 2 skipped; ruff clean.
+
 - **Standalone preferred-income screener (Strategies/capital_income.md)** -
   a new self-contained screener that does NOT wire into the trading graph or
   any agent. Implements the Global X U.S. High Yield Preferred Index
