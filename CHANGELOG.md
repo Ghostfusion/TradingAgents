@@ -119,6 +119,28 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Standalone preferred-income screener (Strategies/capital_income.md)** -
+  a new self-contained screener that does NOT wire into the trading graph or
+  any agent. Implements the Global X U.S. High Yield Preferred Index
+  methodology: (1) liquidity/quality screen (market cap >= $250M AND 3m ADTV
+  >= $1M), (2) indicated-dividend-yield ranking (annualized dividend / price,
+  top 50), (3) MV weighting (or equal-weight fallback when per-issue shares
+  aren't exposed - preferreds report no per-issue market cap) with the 3% cap
+  + pro-rata renormalization.
+  - `strategies/capital_income.py` - pure math (annualized dividend, indicated
+    yield, ADTV dollar, liquidity gate, top-N, MV/equal weights, cap +
+    renormalize). No-fabrication: None on missing input.
+  - `scripts/capital_income_screener.py` - standalone CLI (positional/--file
+    universe, --top, --min-mcap, --min-adtv, --out-dir, --dry-run, --json);
+    pulls price + dividendRate + market cap + OHLCV via yfinance + the vendor
+    chain. Uses `info.dividendRate` (pre-annualized) - never the trailing-12m
+    sum, which preferreds pollute with special distributions.
+  - `Strategies/preferred_universe.txt` - seeded ~24 liquid US preferreds
+    (hyphenated Yahoo symbols that resolve with a dividendRate).
+  Tests: `test_strategies_capital_income` (10 pure) + `test_capital_income_screener`
+  (5 hermetic, mocked yfinance/OHLCV, asserts no graph/agent imports). Full
+  suite green; ruff clean.
+
 - **Liquidity gate on by default + surfaced in PM prompt & risk report** -
   `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE=1` is set in `.env` (on by default), so
   the risk governor now REJECTs ILLIQUID names / WARNs on CAUTION ones using

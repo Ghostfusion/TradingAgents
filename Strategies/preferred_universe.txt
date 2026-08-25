@@ -1,0 +1,31 @@
+# Preferred-income universe (Strategies/capital_income.md) — liquid US-listed
+# preferred / hybrid / depositary preferred shares, one ticker per line.
+#
+# These are the hyphen-separated Yahoo symbols (the format that resolves on
+# yfinance and carries a `dividendRate`). Lines starting with '#' are comments.
+# Add your own names via this file or `--file`.
+
+GS-PD
+MS-PK
+MS-PF
+T-PC
+BAC-PL
+BAC-PK
+BAC-PM
+WFC-PL
+WFC-PY
+WFC-PZ
+JPM-PM
+JPM-PL
+C-PK
+KEY-PJ
+KEY-PK
+ZIONP
+AGNCN
+AGNCP
+MET-PE
+NLY-PI
+ARR-PC
+SLG-PI
+CHSCL
+PMT-PA

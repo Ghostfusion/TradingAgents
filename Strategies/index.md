@@ -25,6 +25,7 @@ module inventory) alongside this.
 | 11 | `Discounted_Cash_Flow.md` | DCF valuation methodology (pragmatic FCF-DCF built from it) | `strategies/dcf.py`, `get_dcf_valuation` tool (fundamentals) | provider-sourced; growth/ERP overrides |
 | 12 | `Value_Dip_swing.md` + `Value_Dip_swing_Continue.md` | Value Dip + Swing hybrid (margin of safety, valuation Z, FCF yield, RSI/%b oversold entry, tranche scale-in, blended expectancy) | `strategies/value_dip.py` + six value-dip analyst tools + the `tranche_risk_read` fold | `--scan value-dip`, `enable_value_dip` + `enable_tranche_risk` |
 | 13 | `risk2.md` | Liquidity & ownership risk (IWF, float turnover, Amihud ILLIQ, days-to-absorb, HHI) | `strategies/liquidity_risk.py` + `get_liquidity_risk` (market) + `get_ownership_concentration` (fundamentals) + governor gate + screener columns | `enable_liquidity_gate` (off by default) |
+| 14 | `capital_income.md` | Preferred-income index methodology (liquidity screen, indicated yield top-50, MV/equal + 3% cap) | `strategies/capital_income.py` + standalone `scripts/capital_income_screener.py` (no graph wiring) | standalone CLI |
 
 ---
 
