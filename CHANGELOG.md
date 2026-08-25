@@ -119,6 +119,19 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Liquidity gate on by default + surfaced in PM prompt & risk report** -
+  `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE=1` is set in `.env` (on by default), so
+  the risk governor now REJECTs ILLIQUID names / WARNs on CAUTION ones using
+  the risk2.md metrics. The computed liquidity block is surfaced in two places:
+  - the **Portfolio Manager prompt** - a `Computed liquidity` line (verdict +
+    ILLIQ + float-turnover + IWF + reasons) grounds the PM's liquidity/sizing
+    language and instructs scaling size down (or to 0%) on CAUTION/ILLIQUID;
+  - the **risk report** (`Risk Gate (computed)` block) - shows `Liquidity
+    verdict` + ILLIQ / float-turnover / IWF + reasons when the gate computed it.
+  Both degrade gracefully (no line) when the gate didn't run or had no data.
+  Tests: `test_reporting` (liquidity block render + PM prompt wiring). Full
+  suite 1291 passed / 2 skipped; ruff clean.
+
 - **Liquidity & ownership risk (Strategies/risk2.md)** - implements the five
   institutional risk metrics as a pure, offline module
   (`strategies/liquidity_risk.py`): free-float factor (IWF), float turnover

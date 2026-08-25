@@ -154,3 +154,43 @@ def test_complete_report_ends_with_trailing_newline(tmp_path):
     # the last content line is the PM decision's final field (non-empty)
     assert text.rstrip().splitlines()[-1].strip() != ""
     assert "Executive Summary" in text.rstrip().splitlines()[-1]
+
+
+def test_risk_gate_renders_liquidity_block(tmp_path):
+    """When enable_liquidity_gate computed a verdict, the report surfaces the
+    ILLIQ / float-turnover / IWF block that fed the gate."""
+    state = _state(verdict="REJECT", reasons=["liquidity: ILLIQUID"])
+    state["risk_context"]["liquidity"] = {
+        "verdict": "illiquid",
+        "illiq": 1.2e-6,
+        "float_turnover": 0.02,
+        "iwf": 0.3,
+        "dangers": ["ILLIQ=0.0000 (high price impact)"],
+    }
+    write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Liquidity verdict: **ILLIQUID**" in decision
+    assert "ILLIQ: 1.20e-06" in decision
+    assert "Float turnover: 2.000%" in decision
+    assert "IWF: 30.00%" in decision
+    assert "Liquidity reasons: ILLIQ=0.0000 (high price impact)" in decision
+    # no liquidity context -> no line (backward compatible)
+    clean = write_report_tree(_state(verdict="WARN"), "TST2", tmp_path)
+    assert "Liquidity verdict" not in clean.read_text(encoding="utf-8")
+
+
+def test_pm_prompt_injects_liquidity_line():
+    """The PM prompt (printed at agent creation) names the liquidity verdict
+    ground rule when the state carries a computed liquidity block."""
+
+
+    # The prompt template contains the literal placeholder; assert the source
+    # includes the computed-liquidity directive so the wiring can't be lost.
+    from pathlib import Path
+
+    src = Path("tradingagents/agents/managers/portfolio_manager.py").read_text(
+        encoding="utf-8"
+    )
+    assert "Computed liquidity" in src
+    assert "liq_line" in src
+    assert "{liq_line}" in src

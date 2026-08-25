@@ -113,6 +113,19 @@ def _risk_gate_block(final_state: dict) -> str:
         )
     if tc.get("capital_at_risk_pct") is not None:
         parts.append(f"Tranche capital-at-risk: {tc['capital_at_risk_pct']:.2%}")
+    # risk2.md liquidity/ownership block (when enable_liquidity_gate computed
+    # it): the ILLIQ / float-turnover / IWF verdict that fed the gate.
+    liq = (ctx or {}).get("liquidity") or {}
+    if liq.get("verdict"):
+        parts.append(f"Liquidity verdict: **{liq['verdict'].upper()}**")
+        if liq.get("illiq") is not None:
+            parts.append(f"ILLIQ: {liq['illiq']:.2e}")
+        if liq.get("float_turnover") is not None:
+            parts.append(f"Float turnover: {liq['float_turnover']:.3%}")
+        if liq.get("iwf") is not None:
+            parts.append(f"IWF: {liq['iwf']:.2%}")
+        if liq.get("dangers"):
+            parts.append("Liquidity reasons: " + "; ".join(liq["dangers"]))
     reasons = gate.get("reasons") or []
     if reasons:
         parts.append("Reasons: " + "; ".join(reasons))

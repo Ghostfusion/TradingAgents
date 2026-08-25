@@ -88,6 +88,32 @@ def create_portfolio_manager(llm):
         except Exception:  # noqa: BLE001 - degrade to no line
             cvar_line = ""
 
+        # Computed liquidity / ownership risk (Strategies/risk2.md): the
+        # ILLIQ / float-turnover / IWF verdict that fed the risk gate (when
+        # enable_liquidity_gate is on). Grounds the PM's liquidity/sizing
+        # language; absent when the gate didn't run or had no data.
+        liq_line = ""
+        try:
+            liq = (state.get("risk_context") or {}).get("liquidity") or {}
+            if liq.get("verdict"):
+                bits = [f"verdict={liq['verdict'].upper()}"]
+                if liq.get("illiq") is not None:
+                    bits.append(f"ILLIQ={liq['illiq']:.2e}")
+                if liq.get("float_turnover") is not None:
+                    bits.append(f"float-turnover={liq['float_turnover']:.2%}")
+                if liq.get("iwf") is not None:
+                    bits.append(f"IWF={liq['iwf']:.2%}")
+                if liq.get("dangers"):
+                    bits.append("; ".join(liq["dangers"][:3]))
+                liq_line = (
+                    "**Computed liquidity risk** (deterministic, Strategies/risk2.md): "
+                    + "; ".join(bits)
+                    + ". Ground any liquidity/slippage/sizing language in these numbers; "
+                    "adjust position size down (or to 0%) when the verdict is CAUTION or ILLIQUID.\n\n"
+                )
+        except Exception:  # noqa: BLE001 - degrade to no line
+            liq_line = ""
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -108,7 +134,7 @@ def create_portfolio_manager(llm):
 **Risk Analysts Debate History:**
 {history}
 
-{cvar_line}{consensus_line}---
+{cvar_line}{liq_line}{consensus_line}---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
 
