@@ -277,14 +277,37 @@ def print_watchlist(results) -> None:
 
 
 def save_watchlist(markdown, out_dir, ts=None):
-    """Write the watchlist markdown to <out_dir>/<finish_timestamp>.md."""
+    """Write the watchlist markdown to <out_dir>/<finish_timestamp>.md.
+
+    The screener is a single-use daily tool, so only the newest report is
+    kept: after writing, every *older* ``.md`` report in the folder is
+    deleted. The folder keeps at most one report (the one just written). A
+    non-``.md`` file is never touched.
+    """
     from datetime import datetime as _dt
 
+    out_dir = out_dir or "screener"
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     stamp = ts or _dt.now().strftime("%Y%m%d_%H%M%S")
     file = out_path / (stamp + ".md")
     file.write_text(markdown + "\n", encoding="utf-8")
+    # Keep only the newest report (the one just written): delete older .md
+    # reports so the folder never accumulates stale single-use outputs.
+    try:
+        newer = [
+            p
+            for p in out_path.glob("*.md")
+            if p.is_file() and p.resolve() != file.resolve()
+        ]
+        for old in newer:
+            old.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 - cleanup must never abort a save
+        logger.warning(
+            "watchlist cleanup of older reports in %s failed (newest kept): %s",
+            out_path,
+            exc,
+        )
     return file
 
 

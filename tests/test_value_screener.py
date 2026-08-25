@@ -172,6 +172,33 @@ def test_save_watchlist_writes_md(tmp_path):
     assert file.parent == out
 
 
+def test_save_watchlist_keeps_only_newest_report(tmp_path):
+    """The screener is single-use: writing a new report deletes older ones."""
+    out = tmp_path / "screener"
+    out.mkdir(parents=True, exist_ok=True)
+    # Pre-populate older reports (newest-first timestamps) plus a non-.md file.
+    (out / "20260101_000000.md").write_text("old", encoding="utf-8")
+    (out / "20260102_000000.md").write_text("older", encoding="utf-8")
+    (out / "notes.txt").write_text("keep me", encoding="utf-8")
+
+    saved = vs.save_watchlist("# new\n", str(out), ts="20260103_000000")
+
+    assert saved.name == "20260103_000000.md"
+    remaining = {p.name for p in out.glob("*.md")}
+    assert remaining == {"20260103_000000.md"}  # only the newest survives
+    assert (out / "notes.txt").exists()  # non-report files are untouched
+
+
+def test_save_watchlist_newest_wins_by_timestamp(tmp_path):
+    """If two runs share a timestamp the later write is the keeper."""
+    out = tmp_path / "scr2"
+    vs.save_watchlist("# first\n", str(out), ts="20260102_101112")
+    vs.save_watchlist("# second\n", str(out), ts="20260102_101113")
+    remaining = {p.name for p in out.glob("*.md")}
+    assert remaining == {"20260102_101113.md"}
+    assert (out / "20260102_101113.md").read_text(encoding="utf-8").strip() == "# second"
+
+
 def test_classic_path_has_no_mover_columns(capsys):
     vs.main(["AAPL", "-d", "2026-01-02"])
     out = capsys.readouterr().out
