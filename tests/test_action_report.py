@@ -303,6 +303,33 @@ def test_main_json_output(tmp_path, capsys):
     assert rows[0]["verdict"] == "MET"
 
 
+def test_main_llm_max_caps_judge_calls(tmp_path, capsys):
+    """--llm-max caps the number of LLM judge calls; the rest are marked
+    skipped (hermetic: the judge is mocked, the count is captured)."""
+    for sym in ("QCOM", "AMZN", "MSFT"):
+        _make_report(
+            tmp_path, sym, "20260818_105451",
+            _decision_md("Underweight", "Trim into strength at $168-176",
+                         "Add only on confirmation (clean PUC decision)"),
+        )
+    calls = []
+
+    def fake_judge(cond, ohlcv):
+        calls.append(cond)
+        return "judged"
+
+    with (
+        mock.patch.object(ar, "load_basket", return_value={"QCOM": 0.02, "AMZN": 0.02, "MSFT": 0.02}),
+        mock.patch.object(ar, "fetch_ohlcv", return_value=_synth_ohlcv(147.60)),
+        mock.patch.object(ar, "llm_judge", side_effect=fake_judge),
+    ):
+        rc = ar.main(["--reports-dir", str(tmp_path), "--llm", "--llm-max", "2", "--dry-run"])
+    assert rc == 0
+    assert len(calls) == 2  # capped at --llm-max 2
+    out = capsys.readouterr().out
+    assert "skipped (--llm-max 2 reached)" in out
+
+
 def test_main_no_reports(tmp_path, capsys):
     rc = ar.main(["--reports-dir", str(tmp_path / "empty"), "--dry-run"])
     assert rc == 2

@@ -239,17 +239,18 @@ def extract_condition(decision: dict) -> str:
     # Dedup by the set of price levels (ignoring direction and stop/ATR
     # levels): the Position Size and Executive Summary often restate the same
     # trigger with different wording. Keep the LONGEST clause per level-set
-    # (sort by sig size desc, then greedily drop subsets).
+    # (sort by sig size desc, then greedily drop subsets). Clauses with no
+    # price levels (pure unmeasurable conditions like "clean PUC decision")
+    # are kept too — they are still UNKNOWN conditions worth judging.
     ordered = sorted(clauses, key=lambda c: len(_level_sig(c)), reverse=True)
     kept: list[str] = []
     kept_sigs: list[set] = []
     for c in ordered:
         sig = _level_sig(c)
-        if not sig:
-            continue
-        if any(sig <= k for k in kept_sigs):
-            continue
-        kept_sigs.append(sig)
+        if sig:
+            if any(sig <= k for k in kept_sigs):
+                continue
+            kept_sigs.append(sig)
         kept.append(c)
     if not kept:
         return (decision.get("position_size") or "").strip()
@@ -261,16 +262,35 @@ def extract_condition(decision: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def fetch_ohlcv(ticker: str, days: int = 320) -> dict:
-    """Daily OHLCV via the vendor chain; empty on failure (never raises)."""
+def fetch_ohlcv(ticker: str, days: int = 320, timeout: float = 30.0) -> dict:
+    """Daily OHLCV via the vendor chain; empty on failure (never raises).
+
+    ``timeout`` bounds a single vendor call so a hanging moomoo connection
+    degrades to "no data" (UNKNOWN) instead of blocking the whole report.
+    """
     try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
         from datetime import datetime, timedelta
 
         from tradingagents.dataflows.interface import route_to_vendor
 
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        out = route_to_vendor("get_stock_data", ticker, start, end) or ""
+
+        def _fetch():
+            return route_to_vendor("get_stock_data", ticker, start, end) or ""
+
+        # shutdown(wait=False): a moomoo worker that ignores the future timeout
+        # must not block the report (ThreadPoolExecutor.__exit__ would wait).
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(_fetch)
+            try:
+                out = fut.result(timeout=timeout)
+            except _FutTimeout:
+                return {"closes": [], "highs": [], "lows": [], "volumes": []}
+        finally:
+            pool.shutdown(wait=False)
         closes, opens, highs, lows, volumes = [], [], [], [], []
         for line in out.splitlines():
             line = line.strip()
@@ -737,7 +757,7 @@ def build_report(rows: list[dict], basket: dict, reports_root: str, as_of: str) 
                 lines.append(f"- Stop loss: {r['stop_loss']}")
             if r.get("price_target") is not None:
                 lines.append(f"- Price target: {r['price_target']}")
-            lines.append(f"- Verdict: **{r['verdict']}** → {_action(r['kind'], r['verdict'])}")
+            lines.append(f"- Verdict: **{r['verdict']}** -> {_action(r['kind'], r['verdict'])}")
             for c in r["checks"]:
                 lines.append(f"  - {c['label']}: {c['verdict']} ({c['detail']})")
             if r.get("judge"):
@@ -770,6 +790,11 @@ def save_report(markdown: str, out_dir: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The report may carry non-ASCII characters (en/em dashes, ≈, and the
+    # report text itself). Force UTF-8 output so a cp1252 console or a
+    # subprocess that decodes as UTF-8 never crashes on print().
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--basket", default=None,
@@ -780,6 +805,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--llm", action="store_true",
         help="invoke the LLM judge for UNKNOWN conditions (advisory)",
+    )
+    parser.add_argument(
+        "--llm-max", type=int, default=5,
+        help="max LLM judge calls per run (default 5; 0 = unlimited)",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--dry-run", action="store_true", help="print only, write nothing")
@@ -796,6 +825,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     rows = []
+    judge_calls = 0
     for sym in sorted(reports):
         folder = reports[sym]
         decision_md = folder / "5_portfolio" / "decision.md"
@@ -814,7 +844,11 @@ def main(argv: list[str] | None = None) -> int:
         result = check_condition(cond, ohlcv)
         judge = None
         if args.llm and result["verdict"] == "UNKNOWN":
-            judge = llm_judge(cond, ohlcv)
+            if args.llm_max == 0 or judge_calls < args.llm_max:
+                judge = llm_judge(cond, ohlcv)
+                judge_calls += 1
+            else:
+                judge = f"skipped (--llm-max {args.llm_max} reached)"
         rows.append(
             {
                 "symbol": sym,
