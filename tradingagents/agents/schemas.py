@@ -487,3 +487,39 @@ def render_pre_market_verdict(verdict: PreMarketVerdict) -> str:
     if verdict.reasons:
         parts.append("**Reasons**: " + "; ".join(verdict.reasons))
     return "\n".join(parts)
+
+
+class ActionConditionVerdict(BaseModel):
+    """Optional LLM judge verdict for a report condition the deterministic
+    checker could not fully resolve (design: ``scripts/action_report.py``).
+
+    The deterministic checker (price levels, SMA/volume/MACD/RSI refs) is the
+    primary path and never fabricates; this schema is only used when
+    ``--llm`` is passed and a condition is UNKNOWN. The judge must reason over
+    the provided market snapshot only (no external tools) and must say
+    UNKNOWN when the evidence is insufficient — never invent a number.
+    """
+
+    verdict: Literal["MET", "NOT_MET", "UNKNOWN"] = Field(
+        description=(
+            "Exactly one of MET (the condition is satisfied by the snapshot), "
+            "NOT_MET (the snapshot contradicts it), or UNKNOWN (insufficient "
+            "evidence - never guess)."
+        ),
+    )
+    reasons: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every reason must cite a number from the provided market snapshot "
+            "(price, SMA, volume ratio, RSI, MACD). Empty reasons are only "
+            "allowed for UNKNOWN with an explicit 'insufficient evidence' note."
+        ),
+    )
+
+
+def render_action_condition_verdict(verdict: ActionConditionVerdict) -> str:
+    """Render an ActionConditionVerdict to the compact line the report uses."""
+    parts = [f"**Verdict**: {verdict.verdict}"]
+    if verdict.reasons:
+        parts.append("**Reasons**: " + "; ".join(verdict.reasons))
+    return "\n".join(parts)

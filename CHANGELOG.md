@@ -9,6 +9,19 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Conditional action report** - `scripts/action_report.py` checks report
+  verdicts against the risk basket (`TRADINGAGENTS_RISK_BASKET_WEIGHTS`):
+  basket names are kept on their newest Underweight/Sell verdict (reduce/trim),
+  non-basket names on their newest Overweight/Buy verdict (add). The report's
+  stated condition (re-entry level, trim zone, scale-in confirmation) is
+  extracted from Position Size + Executive Summary and checked against live
+  OHLCV via the vendor chain — deterministic MET / NOT_MET / UNKNOWN, never
+  fabricated. Stop/ATR levels are informational; unmeasurable qualifiers
+  (PUC, VDU trigger, stabilization) render UNKNOWN. Optional `--llm` invokes
+  a deep-think judge (`ActionConditionVerdict` schema +
+  `overrides/action_condition_judge.py`) for UNKNOWN conditions. Output: a
+  final action report (ADD/BUY, TRIM/REDUCE, MONITOR) printed + saved
+  (keep-only-newest). Tests: `tests/test_action_report.py` (21).
 - **Screener: full 11-SPDR sector ranking table** - `_sector_table_markdown`
   renders the whole sector ranking (ETF, name, 1m/3m returns, rank, top-3
   flags) and appends it to the report whenever the ranking is computed

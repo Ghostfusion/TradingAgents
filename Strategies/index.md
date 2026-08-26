@@ -29,6 +29,7 @@ module inventory) alongside this.
 | 13 | `risk2.md` | Liquidity & ownership risk (IWF, float turnover, Amihud ILLIQ, days-to-absorb, HHI) | `strategies/liquidity_risk.py` + `get_liquidity_risk` (market) + `get_ownership_concentration` (fundamentals) + governor gate + screener columns | `enable_liquidity_gate` (off by default) |
 | 14 | `capital_income.md` | Preferred-income index methodology (liquidity screen, indicated yield top-50, MV/equal + 3% cap) | `strategies/capital_income.py` + standalone `scripts/capital_income_screener.py` (no graph wiring) | standalone CLI |
 | 15 | (screener sector table) | Full 11-SPDR sector ranking table (1m/3m returns, rank, top-3 flags) appended to the report when the ranking is computed | `scripts/value_screener.py::_sector_table_markdown` + `strategies/sector_rank.py` | `--sector-rank` / `--enrich-sector` |
+| 16 | (conditional action report) | Check report verdicts against the risk basket: basket names on newest Underweight/Sell (reduce), non-basket on newest Overweight/Buy (add); extract the report's condition and check it against live OHLCV (MET/NOT_MET/UNKNOWN) | `scripts/action_report.py` + `agents/schemas.ActionConditionVerdict` + `agents/overrides/action_condition_judge.py` | `--basket` / `--llm` (optional judge) |
 
 ---
 
