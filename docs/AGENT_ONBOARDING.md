@@ -282,6 +282,26 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-26 `7e01b06` - Conditional action report (`scripts/action_report.py`):
+  flags basket names (TRADINGAGENTS_RISK_BASKET_WEIGHTS) on their newest
+  Underweight/Sell verdict (reduce/trim) + non-basket names on their newest
+  Overweight/Buy verdict (add); extracts each report's stated condition
+  (re-entry level, trim zone, scale-in confirmation) from Position Size +
+  Executive Summary and checks it against live OHLCV via the vendor chain —
+  deterministic MET / NOT_MET / UNKNOWN, never fabricated. Stop/ATR levels are
+  informational; unmeasurable qualifiers (PUC, VDU trigger, stabilization)
+  render UNKNOWN. Optional `--llm` judge (`ActionConditionVerdict` schema +
+  `agents/overrides/action_condition_judge.py`, deep-think, snapshot-only,
+  advisory). Output: final action report (ADD/BUY / TRIM/REDUCE / MONITOR)
+  printed + saved keep-only-newest; `--json` for machine-readable rows.
+  Tests: `tests/test_action_report.py` (21).
+
+- 2026-08-26 `26c18eb` - Report truncation marker (`reporting._finalize_section`
+  appends a visible blockquote when a section ends mid-sentence at the LLM
+  max_tokens cap) + full 11-SPDR sector ranking table in the screener report
+  (`value_screener._sector_table_markdown`, appended with `--sector-rank` /
+  `--enrich-sector`).
+
 - 2026-08-24 `(working tree)` - Per-role max output tokens
   (`TRADINGAGENTS_MAX_OUTPUT_TOKENS[_QUICK|_DEEP]`, 6000/6000/2500) + per-role
   density/tool-call directives (`get_output_budget`) wired into all 12 agent

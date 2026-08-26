@@ -187,6 +187,23 @@ py -3.12 scripts/risk_report.py             # risk audit summary (risk_audit.jso
 py -3.12 scripts/smoke_structured_output.py # structured-output smoke
 ```
 
+## 7b. Conditional action report (basket vs report verdicts)
+
+After a batch run, check which report conditions are met by the live market:
+
+```bash
+py -3.12 scripts/action_report.py            # default: config basket, reports/
+py -3.12 scripts/action_report.py --llm      # judge UNKNOWN conditions
+py -3.12 scripts/action_report.py --json
+```
+
+Basket names (TRADINGAGENTS_RISK_BASKET_WEIGHTS) are kept on their newest
+Underweight/Sell verdict (reduce/trim); non-basket names on their newest
+Overweight/Buy verdict (add). Each report's stated condition (re-entry level,
+trim zone, scale-in confirmation) is checked against live OHLCV —
+MET / NOT_MET / UNKNOWN, never fabricated. Output: ADD/BUY / TRIM/REDUCE /
+MONITOR per symbol, saved under `action_reports/` (keep-only-newest).
+
 ## 8. Troubleshooting
 
 - `No module named pytest/pandas` -> you used `python`; use `py -3.12`.

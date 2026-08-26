@@ -466,6 +466,7 @@ preserves `Risk Gate (computed)` blocks.
 | `python batch.py --symbols ...` | headless concurrent; `--vendor`, `--workers`, `--analysts`, `--depth`, `--date` |
 | `python pipeline.py --universe top-losers --top 5` | screener + composite rank + batch (B2) |
 | `python scripts/value_screener.py ...` | value screens / scans / composite |
+| `python scripts/action_report.py ...` | conditional action report (basket vs report verdicts vs live market) |
 | `python scripts/rebuild_complete_report.py reports/<dir>` | re-render TOC reports |
 | `python scripts/smoke_structured_output.py` | smoke structured output |
 | `python main.py` | minimal Python API demo |
@@ -485,6 +486,10 @@ preserves `Risk Gate (computed)` blocks.
   `--intraday` `--enrich-sector` `--enrich-rev` `--enrich-inst` `--scan`
   (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
   `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
+- action_report.py: `--basket` (SYM=W,SYM=W override; default config
+  `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`
+  `--llm` (judge UNKNOWN conditions) `--json` `--dry-run` `--out-dir`
+  (default `action_reports/`, keep-only-newest).
 
 ## 10. Docs index
 

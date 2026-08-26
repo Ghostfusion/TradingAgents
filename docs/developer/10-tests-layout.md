@@ -15,7 +15,7 @@ five domains by naming convention:
 | Dataflow / vendors | `test_*vendor*, test_*moomoo*, test_*finnhub*, test_*fred*, test_*fmp*, test_*polymarket*, test_*alpaca*, test_*alpha*, test_dataflows_config, test_symbol*, test_*reddit*, test_stocktwits*, test_*short*, test_*float*` | 19 | routing / errors / cache / symbol map |
 | Graph / wiring | `test_*analyst*, test_*execution*, test_*parallel*, test_*checkpoint*, test_*signal*, test_*router*, test_*toolnode*, test_*instrument*, test_*ticker*, test_*crypto*, test_*i18n*, test_news_lookahead` | 19 | graph edges, state, i18n, tool nodes |
 | LLM / providers | `test_*provider*, test_*api_key*, test_*openai*, test_*anthropic*, test_*google*, test_*bedrock*, test_*ollama*, test_*model*, test_*reasoning*, test_*temperature*, test_*retries*, test_*minimax*, test_*deepseek*, test_capabilities` | 22 | factory, model select, key precedence |
-| Scripts / screener | `test_value_screener, test_scan_*, test_sector_*, test_growth_*, test_*config_gate, test_*orderflow_evaluate, test_*stress*` | 6 | screens, scans, eval scripts |
+| Scripts / screener | `test_value_screener, test_scan_*, test_sector_*, test_growth_*, test_*config_gate, test_*orderflow_evaluate, test_*stress*, test_action_report` | 7 | screens, scans, eval scripts, conditional action report |
 | Smoke / misc | `test_reporting, test_pipeline, test_batch_*, test_cli_*, test_memory_log, test_news_lookahead`, etc. | rest | reports, batch, CLI flags |
 
 The **Massive** integration has two dedicated files:

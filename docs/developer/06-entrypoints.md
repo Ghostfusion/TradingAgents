@@ -60,6 +60,24 @@ vcp / value-dip scans.
 
 ## 6.5 `scripts/*` utilities
 
+- `action_report.py` — conditional action report: flags basket names on
+  Underweight/Sell (reduce/trim) + non-basket names on Overweight/Buy (add),
+  extracts each report's stated condition (re-entry level, trim zone,
+  scale-in confirmation) and checks it against live OHLCV via the vendor
+  chain — deterministic MET / NOT_MET / UNKNOWN, never fabricated. Optional
+  `--llm` invokes a deep-think judge for UNKNOWN conditions.
+
+  ```
+  py -3.12 scripts/action_report.py
+  py -3.12 scripts/action_report.py --llm
+  py -3.12 scripts/action_report.py --json
+  py -3.12 scripts/action_report.py --basket AAPL=0.1,MSFT=0.2
+  ```
+
+  Flags: `--basket` (SYM=W,SYM=W override; default config
+  `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`
+  `--llm` (judge UNKNOWN conditions) `--json` `--dry-run` `--out-dir`
+  (default `action_reports/`, keep-only-newest).
 - `rebuild_complete_report.py` — re-render a report folder / all.
 - `smoke_structured_output.py` — smoke the structured-output path.
 - `orderflow_evaluate.py` — L4b ledger win-rate/alpha.

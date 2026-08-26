@@ -100,6 +100,17 @@ py -3.12 scripts/value_screener.py --scan value-dip --alloc
 
 Screens like Magic Formula, and fun scans like `swing` / `vcp` / `value-dip`.
 
+### The "should I act now?" report (action report)
+
+```bash
+py -3.12 scripts/action_report.py
+```
+
+Checks the newest report for each basket holding (Underweight/Sell = trim) and
+for each non-basket candidate (Overweight/Buy = add), then checks the report's
+stated condition (e.g. "re-enter at $147.60") against the live price — it tells
+you ADD / TRIM / MONITOR.
+
 ---
 
 ## 4. How to read the report card 📄

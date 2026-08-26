@@ -61,7 +61,7 @@ tradingagents/
 ├─ llm_clients/   # provider registry / factories
 ├─ default_config.py  # DEFAULT_CONFIG + TRADINGAGENTS_* env overrides
 └─ reporting.py   # report tree writer + TOC
-scripts/          # value_screener, rebuild_complete_report, eval, cli helpers
+scripts/          # value_screener, action_report, rebuild_complete_report, eval, cli helpers
 batch.py          # headless concurrent runner
 pipeline.py       # screen→composite-rank→top-N→batch (B2)
 main.py           # minimal python API demo

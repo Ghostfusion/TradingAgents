@@ -49,6 +49,12 @@ Computed-analysis tools (`analysis_tools.get_*`) wrap strategies directly.
   time_horizon, confidence, position_size, stop_loss, consensus)
 - `SentimentReport` (overall_band, overall_score, confidence, narrative, plus
   computed_* injected by the deterministic sentiment layer)
+- `PreMarketVerdict` (CONFIRM/REVISE/REJECT + re-anchored levels) — the
+  pre-market reviewer (`agents/overrides/pre_market_reviewer.py`)
+- `ActionConditionVerdict` (MET/NOT_MET/UNKNOWN + reasons) — the optional
+  action-report judge (`agents/overrides/action_condition_judge.py`, used by
+  `scripts/action_report.py --llm` for conditions the deterministic checker
+  cannot resolve)
 
 `agents/utils/structured.py::bind_structured(llm, schema, name)` returns a
 "structured" bind if the provider supports it; otherwise

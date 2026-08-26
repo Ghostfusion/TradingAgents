@@ -15,7 +15,7 @@ batch.py                # headless concurrent runner (CLI)
 pipeline.py             # multi-universe -> screen -> composite rank -> top-N -> batch
 Strategies/             # strategy spec/plan markdowns (scan, momentum, etc.)
 docs/                   # AGENT_ONBOARDING, api_reference, howto, developer/, massive_integration
-scripts/                # value_screener, rebuild_report, smoke, evaluate scripts
+scripts/                # value_screener, action_report, rebuild_report, smoke, evaluate scripts
 tests/                  # pytest; conftest autouse fixtures
 data/massive_flat/      # drop-folder for the (Starter+) Massive day-aggregates CSV
 reports/                # run output (batch / pipeline)
