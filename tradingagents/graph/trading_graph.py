@@ -850,6 +850,8 @@ class TradingAgentsGraph:
                         calibrated_p=calibrated_p,
                         catalyst_scale=(catalyst_snapshot or {}).get("scale"),
                         entry_price=entry_price,
+                        trail_stop=(final_state.get("swing_exits") or {}).get("chandelier"),
+                        implied_move_pct=(catalyst_snapshot or {}).get("implied_move_pct"),
                     )
                     if contract is not None:
                         final_state["position_contract"] = (

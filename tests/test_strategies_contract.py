@@ -114,3 +114,34 @@ def test_contract_entry_price_ignored_when_nonpositive():
     base = build_position_contract(cfg=_cfg(), closes=closes)
     c = build_position_contract(cfg=_cfg(), closes=closes, entry_price=0.0)
     assert c.stop_loss == base.stop_loss  # falls back to last close
+
+
+def test_contract_trail_stop_tighter_overrides():
+    """A chandelier trail above the ATR stop becomes the live exit."""
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    base = build_position_contract(cfg=_cfg(), closes=closes)
+    # trail above the ATR stop -> the trail is the exit
+    trail = build_position_contract(cfg=_cfg(), closes=closes, trail_stop=base.stop_loss + 5.0)
+    assert trail is not None
+    assert trail.stop_loss == pytest.approx(base.stop_loss + 5.0)
+    assert "trail_stop" in trail.reason()
+
+
+def test_contract_trail_stop_below_keeps_atr():
+    """A trail below the ATR stop is not the live exit (ATR stop stays)."""
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    base = build_position_contract(cfg=_cfg(), closes=closes)
+    trail = build_position_contract(cfg=_cfg(), closes=closes, trail_stop=base.stop_loss - 5.0)
+    assert trail is not None
+    assert trail.stop_loss == pytest.approx(base.stop_loss)
+    assert "trail_stop" not in trail.reason()
+
+
+def test_contract_implied_move_scales_size():
+    """A binary event (implied move) scales the position down."""
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    base = build_position_contract(cfg=_cfg(), closes=closes)
+    ev = build_position_contract(cfg=_cfg(), closes=closes, implied_move_pct=0.10)
+    assert ev is not None
+    assert ev.size_pct <= base.size_pct
+    assert "implied_move" in ev.reason()

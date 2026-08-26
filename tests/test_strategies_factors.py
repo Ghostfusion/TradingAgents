@@ -61,3 +61,38 @@ def test_composite_missing_factor_skipped():
     factors = {"A": {"ey": 0.1}, "B": {"mom": 0.2}}
     scores = composite_score(factors)
     assert 0.0 <= scores["A"] <= 1.0
+
+
+def test_z_score_basic():
+    from tradingagents.strategies.factors import z_score
+
+    assert z_score(5.0, [1, 2, 3, 4, 5, 8, 9]) is not None
+    assert z_score(None, [1, 2, 3]) is None
+    assert z_score(5.0, [5.0]) is None  # need >= 2 samples
+    assert z_score(5.0, [5.0, 5.0]) is None  # zero variance
+
+
+def test_value_momentum_score_ranks_best_first():
+    from tradingagents.strategies.factors import value_momentum_score
+
+    factors = {
+        "A": {"mom": 0.10, "ey": 0.05},
+        "B": {"mom": 0.20, "ey": 0.08},
+        "C": {"mom": -0.10, "ey": 0.02},
+    }
+    scores = value_momentum_score(factors)
+    assert scores["B"] > scores["A"] > scores["C"]
+
+
+def test_value_momentum_score_missing_skipped():
+    from tradingagents.strategies.factors import value_momentum_score
+
+    factors = {
+        "A": {"mom": 0.1},
+        "B": {"mom": 0.2, "ey": 0.08},  # ey only for B
+        "C": {"ey": 0.12},  # mom missing
+    }
+    scores = value_momentum_score(factors)
+    assert 0.0 <= scores["A"] <= 1.0
+    assert 0.0 <= scores["B"] <= 1.0
+    assert 0.0 <= scores["C"] <= 1.0

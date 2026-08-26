@@ -4,6 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_bollinger_pct_b,
     get_capital_flow,
     get_credit_spread_read,
+    get_dip_technical,
     get_exit_check,
     get_indicators,
     get_instrument_context_from_state,
@@ -27,6 +28,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_strategy_quality,
     get_support_structure,
+    get_swing_exits,
     get_swing_set,
     get_tail_risk,
     get_top_movers,
@@ -56,6 +58,8 @@ def create_market_analyst(llm):
             get_liquidity_risk,
             get_capital_flow,
             get_swing_set,
+            get_swing_exits,
+            get_dip_technical,
             get_relative_strength,
             get_position_sizing,
             get_risk_gate,
@@ -118,6 +122,8 @@ You also have an event-risk tool: call get_expected_move(ticker, current_date) f
 
 You also have computed-analysis tools - use these numbers as ground truth, do not re-derive them from raw prices:
 - get_swing_set(ticker) - the deterministic multi-week setup: trend stack, RSI band, the 1-ATR structure stop below the swing low, 2R/3R targets, trail and VCP state. Use its stop/target/risk numbers whenever you propose entry, stop or reward:risk.
+- get_swing_exits(ticker) - the chandelier trailing stop (3x ATR below the 22-bar high) + 20-day EMA trail + 2R/3R targets. Use it before any 'trailing stop / exit level / let winners run' claim on a swing position.
+- get_dip_technical(ticker) - the value-dip timing read: RSI(14), Bollinger %b, Stochastic %K oversold, Money Flow Index and KST momentum. Use it before any 'oversold / dip timing / mean reversion' claim - it separates a turnable value dip from a falling knife.
 - get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
 - get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one.
 - get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT.

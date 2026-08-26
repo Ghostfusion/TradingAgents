@@ -47,6 +47,8 @@ __all__ = [
     "higher_low_structure",
     "vdu_entry_setup",
     "support_structure",
+    "fib_retrace_entry",
+    "_stochastic_oversold",
     "decline_driver_check",
     "value_dip_setup",
 ]
@@ -745,6 +747,54 @@ def support_structure(
 # ---------------------------------------------------------------------------
 
 
+def fib_retrace_entry(
+    closes: list,
+    highs: list,
+    lows: list,
+    window: int = 150,
+) -> dict:
+    """Fibonacci-retracement dip entry from the recent swing range.
+
+    Uses the trailing ``window`` swing high/low, then reports the nearest
+    0.382/0.5/0.618 retracement level to the current price and the
+    retracement fraction. ``zone`` is True when price retraced into the
+    0.382-0.618 golden zone (classic mean-reversion dip-buy). Returns None
+    fields when history is insufficient or the range is flat (no-fabrication).
+    """
+    if not closes or not highs or not lows or len(closes) < 10:
+        return {"near_level": None, "retrace_pct": None, "levels": None, "zone": None}
+    seg_h = highs[-window:]
+    seg_l = lows[-window:]
+    hi = max(float(x) for x in seg_h)
+    lo = min(float(x) for x in seg_l)
+    if hi <= lo:
+        return {"near_level": None, "retrace_pct": None, "levels": None, "zone": None}
+    rng = hi - lo
+    levels = {
+        "0.382": round(hi - 0.382 * rng, 4),
+        "0.5": round(hi - 0.5 * rng, 4),
+        "0.618": round(hi - 0.618 * rng, 4),
+    }
+    price = float(closes[-1])
+    near = min(levels, key=lambda k: abs(price - levels[k]))
+    retrace = (hi - price) / rng
+    return {
+        "near_level": near,
+        "near_price": round(levels[near], 4),
+        "retrace_pct": round(retrace, 4),
+        "levels": levels,
+        "zone": bool(0.382 <= retrace <= 0.618),
+    }
+
+
+def _stochastic_oversold(highs, lows, closes, k_window: int = 14) -> bool | None:
+    """bool: Stochastic %K < 20 (oversold); None when history insufficient."""
+    from tradingagents.strategies.technical_factors import stochastic_oscillator
+
+    s = stochastic_oscillator(highs, lows, closes, k_window=k_window)
+    return s.get("oversold") if s else None
+
+
 def decline_driver_check(
     *,
     trap_level: str | None = None,
@@ -911,6 +961,8 @@ def value_dip_setup(
         "momentum_divergence": mom,
         "vdu": vdu,
         "support": support,
+        "fib_retrace": fib_retrace_entry(closes, highs, lows),
+        "stochastic": _stochastic_oversold(highs, lows, closes),
     }
     val_z_row = None
     if val_z is not None:

@@ -619,6 +619,109 @@ def get_volatility_contraction(
         return f"VCP unavailable for {ticker}: {exc}"
 
 
+
+@tool
+def get_swing_exits(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Swing exit read: chandelier trailing stop + EMA trail + targets.
+
+    Computes the ATR chandelier exit (highest high in 22 bars - 3 x ATR) and
+    the 20-day EMA trail from daily OHLCV, plus the 2R/3R targets. Call
+    before any 'trailing stop / exit level / let winners run' claim on a swing
+    position.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        Compact exit lines (chandelier level + exit flag, EMA trail, targets)
+        or an explicit 'unavailable' when fewer than ~200 bars.
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 200:
+        return (
+            f"swing exits unavailable for {ticker}: fewer than 200 daily bars "
+            f"({len(closes)}); report exits as not computable."
+        )
+    try:
+        from tradingagents.strategies.size import atr
+        from tradingagents.strategies.swing import chandelier_exit, targets_rr, trail_ema
+
+        atr_v = atr(data["highs"], data["lows"], closes, window=14)
+        ch = chandelier_exit(closes, atr_v)
+        tr = trail_ema(closes)
+        last = float(closes[-1])
+        # targets from the chandelier as the trailing reference.
+        stop_ref = ch.get("chandelier")
+        tg = targets_rr(last, stop_ref) if stop_ref else None
+        lines = [
+            f"swing exits {ticker} (close {last:.2f}):",
+            f"  chandelier stop={ch.get('chandelier')} exit={ch.get('exit')} "
+            f"(3x ATR below 22-bar high)",
+            f"  ema20={tr.get('ema')} trail_exit={tr.get('exit')}",
+        ]
+        if tg:
+            lines.append(f"  targets: t1={tg.get('t1')} t2={tg.get('t2')} "
+                         f"r1={tg.get('r1')} r2={tg.get('r2')}")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"swing exits unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_dip_technical(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Value-dip technical read: RSI/%b + Stochastic + MFI + KST momentum.
+
+    Confirms a value-dip's timing with the volume-price oscillators: RSI(14),
+    Bollinger %b, Stochastic %K oversold, Money Flow Index, and the KST
+    momentum oscillator. Call before any 'oversold / dip timing / mean
+    reversion' claim - it separates a turnable value dip from a falling knife.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        The computed oscillator lines, or an explicit 'unavailable' message.
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if not closes or len(closes) < 30:
+        return f"dip technical unavailable for {ticker}: fewer than 30 bars."
+    try:
+        from tradingagents.strategies.swing import rsi
+        from tradingagents.strategies.technical_factors import (
+            kst as _kst,
+            mf_index as _mfi,
+            stochastic_oscillator as _stoch,
+        )
+        from tradingagents.strategies.value_dip import bollinger_pct_b
+
+        rsi_val = rsi(closes)
+        bb = bollinger_pct_b(closes)
+        s = _stoch(data["highs"], data["lows"], closes)
+        mfi = _mfi(data["highs"], data["lows"], closes, data["volumes"])
+        kk = _kst(closes)
+        oversold = bool(
+            (rsi_val is not None and rsi_val <= 35)
+            or (s.get("oversold"))
+        )
+        lines = [
+            f"dip technical {ticker}:",
+            f"  rsi={rsi_val} pct_b={bb.get('pct_b') if bb else None}",
+            f"  stochK={s.get('k')} oversold={s.get('oversold')}",
+            f"  mfi={mfi} kst={kk.get('kst')} kst_up={kk.get('kst_up')}",
+            f"  verdict={'OVERSOLD' if oversold else 'not-oversold'} "
+            f"(dip timing evidence; combine with the value floor)",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"dip technical unavailable for {ticker}: {exc}"
+
+
 @tool
 def get_orderflow_read(
     ticker: Annotated[str, "ticker symbol"],
@@ -1936,6 +2039,8 @@ __all__ = [
     "get_risk_gate",
     "get_regime_read",
     "get_volatility_contraction",
+    "get_swing_exits",
+    "get_dip_technical",
     "get_orderflow_read",
     "get_analyst_verdict",
     "get_earnings_surprise",

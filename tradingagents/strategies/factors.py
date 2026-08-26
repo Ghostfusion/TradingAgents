@@ -58,6 +58,53 @@ def percentile_rank(value, values) -> float:
     return below / len(valid)
 
 
+def z_score(value, values):
+    """(value - mean) / std of a sample; None when insufficient."""
+    valid = [float(v) for v in values if v is not None]
+    if value is None or len(valid) < 2:
+        return None
+    m = sum(valid) / len(valid)
+    var = sum((v - m) ** 2 for v in valid) / (len(valid) - 1)
+    if var <= 0:
+        return None
+    return (float(value) - m) / (var ** 0.5)
+
+
+def value_momentum_score(
+    factors_by_ticker: dict,
+    weights: dict | None = None,
+) -> dict:
+    """Combined value + momentum composite (AQR-style blend).
+
+    Each ticker's factor dict may carry both momentum factors (``mom``,
+    ``dist``, ``vol_adj_mom``) and value factors (``ey``, ``ev_ebit``,
+    ``fcf_yield``, ``val_z``). Positive ``val_z`` means cheap-under-valued is
+    encoded by the caller as already-inverted or via a negative weight. Uses
+    percentile ranks so different magnitudes are comparable; missing factors
+    are skipped (never fabricated).
+    """
+    names: set = set()
+    for f in factors_by_ticker.values():
+        names.update(k for k, v in f.items() if v is not None)
+    names = sorted(names)
+    if weights is None:
+        weights = dict.fromkeys(names, 1.0)
+    scores: dict = {}
+    for ticker, factors in factors_by_ticker.items():
+        acc = 0.0
+        used = 0
+        for name in names:
+            val = factors.get(name)
+            if val is None:
+                continue
+            rank = percentile_rank(val, [f.get(name) for f in factors_by_ticker.values()])
+            w = weights.get(name, 1.0)
+            acc += w * rank if w >= 0 else w * (1.0 - rank)
+            used += 1
+        scores[ticker] = acc / used if used else 0.5
+    return scores
+
+
 def composite_score(factors_by_ticker: dict, weights: dict = None) -> dict:
     """Composite (0-1) per ticker from factor dicts via cross-sectional ranks.
 
@@ -95,5 +142,7 @@ __all__ = [
     "high_distance",
     "vol_adjusted_momentum",
     "percentile_rank",
+    "z_score",
+    "value_momentum_score",
     "composite_score",
 ]

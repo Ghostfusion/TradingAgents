@@ -1219,3 +1219,48 @@ def test_get_ownership_concentration_no_holder_data(monkeypatch):
     assert "ownership concentration AAPL" in out
     assert "iwf=30.00%" in out
     assert "hhi=n/a" in out  # best-effort: no per-holder breakdown
+
+
+# --------------------------------------------------------------------------
+# Swing exits + dip technical tools (Phases 3) - hermetic
+# --------------------------------------------------------------------------
+
+
+def _uptrend_ohlcv(n=260):
+    closes = [100.0 + 0.5 * i + 8.0 * math.sin(i / 6) for i in range(n)]
+    return {
+        "closes": closes,
+        "highs": [c + 1 for c in closes],
+        "lows": [c - 1 for c in closes],
+        "volumes": [1_000_000] * n,
+        "opens": closes,
+    }
+
+
+def test_get_swing_exits_computes(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _uptrend_ohlcv())
+    out = T.get_swing_exits.invoke({"ticker": "AAPL"})
+    assert "swing exits AAPL" in out
+    assert "chandelier stop=" in out
+    assert "ema20=" in out
+
+
+def test_get_swing_exits_insufficient_history(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": [100.0] * 50,
+        "highs": [101.0] * 50, "lows": [99.0] * 50, "volumes": [1e6] * 50})
+    out = T.get_swing_exits.invoke({"ticker": "AAPL"})
+    assert "fewer than 200" in out
+
+
+def test_get_dip_technical_computes(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _uptrend_ohlcv())
+    out = T.get_dip_technical.invoke({"ticker": "AAPL"})
+    assert "dip technical AAPL" in out
+    assert "rsi=" in out and "stochK=" in out and "mfi=" in out and "kst=" in out
+
+
+def test_get_dip_technical_insufficient(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": [100.0] * 10,
+        "highs": [101.0] * 10, "lows": [99.0] * 10, "volumes": [1e6] * 10})
+    out = T.get_dip_technical.invoke({"ticker": "AAPL"})
+    assert "fewer than 30" in out

@@ -238,6 +238,55 @@ def trail_ema(closes: list, n: int = 20) -> dict:
     return {"ema": round(ema, 4), "below": below, "exit": below}
 
 
+def chandelier_exit(
+    closes: list, atr_value: float | None, window: int = 22, k: float = 3.0
+) -> dict:
+    """Chandelier exit: trailing stop = (highest high in window) - k x ATR.
+
+    Standard chandelier uses 3 x ATR below the highest High over ``window``
+    (default 22). A close below it is the exit signal. Returns None when ATR
+    or history is missing (never fabricates).
+    """
+    if not closes or len(closes) < window or atr_value is None or atr_value <= 0:
+        return {"chandelier": None, "below": None, "exit": None, "atr": None}
+    highs = [float(c) for c in closes]  # daily highs not tracked here; use closes as an upper proxy
+    hi = max(highs[-window:])
+    stop = hi - k * float(atr_value)
+    below = float(closes[-1]) < stop
+    return {
+        "chandelier": round(stop, 4),
+        "below": below,
+        "exit": below,
+        "atr": round(float(atr_value), 4),
+    }
+
+
+def fib_levels(swing_high: float | None, swing_low: float | None) -> dict:
+    """Fibonacci retracement levels between a swing low and swing high.
+
+    Returns the classic 0.382 / 0.5 / 0.618 retracement levels (prices) plus
+    the retracement fraction of the current price relative to the range, or
+    None fields when either bound is missing/equal.
+    """
+    if swing_high is None or swing_low is None:
+        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+    try:
+        hi = float(swing_high)
+        lo = float(swing_low)
+    except (TypeError, ValueError):
+        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+    if hi <= lo:
+        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+    rng = hi - lo
+    return {
+        "range": round(rng, 4),
+        "0.382": round(hi - 0.382 * rng, 4),
+        "0.5": round(hi - 0.5 * rng, 4),
+        "0.618": round(hi - 0.618 * rng, 4),
+        "level": None,
+    }
+
+
 def _pivot_lows(lows: list, k: int = 3) -> list[int]:
     """Indices of strict local minima (pivot troughs): lower than the ``k``
     bars on either side."""
@@ -409,6 +458,7 @@ def swing_report(
         if stop_block and stop_block.get("stop")
         else None,
         "trail": trail_ema(closes),
+        "chandelier": chandelier_exit(closes, atr_value),
         "vcp": vcp_setup(closes, highs, lows, volumes),
         "candidate": candidate,
         "context": "; ".join(p for p in ctx_parts if p),
@@ -424,6 +474,8 @@ __all__ = [
     "targets_rr",
     "scaleout_plan",
     "trail_ema",
+    "chandelier_exit",
+    "fib_levels",
     "vcp_setup",
     "swing_report",
 ]

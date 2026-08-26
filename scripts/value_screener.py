@@ -127,6 +127,10 @@ _WATCHLIST_LEGEND = (
     ("ILLIQ", "Amihud illiquidity (price impact per $ traded; higher = more illiquid)"),
     ("FltTurn", "float turnover = ADV / float shares (daily; <0.5% thin, >100% squeeze)"),
     ("IWF", "free-float factor = float / total shares (<0.5 = passive under-allocation)"),
+    ("MFI", "Money Flow Index (volume-weighted RSI; <20 oversold, >80 overbought)"),
+    ("StocK", "Stochastic %K (oscillator; <20 oversold) - dip-entry timing"),
+    ("KST", "Know-Sure-Thing momentum oscillator (KST vs trigger; up = momentum confirm)"),
+    ("Chandel", "Chandelier exit flag (close below highest-high - 3x ATR = trailing exit)"),
     ("DayChg", "intraday change % (from the movers rank)"),
 )
 
@@ -173,7 +177,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "DayChg",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "MFI", "StocK", "KST", "Chandel", "DayChg",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -213,6 +217,10 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("illiq"), "{:.2e}"),
             cell(r.get("float_turnover"), "{:.3%}"),
             cell(r.get("iwf"), "{:.2%}"),
+            cell(r.get("mfi"), "{:.0f}"),
+            cell(r.get("stoch_k"), "{:.0f}"),
+            cell(r.get("kst"), "{:.3f}"),
+            "yes" if r.get("chandel_exit") else "no",
             cell(r.get("day_change"), "{:+.2%}"),
         ]
         out.append("| " + " | ".join(cells) + " |")
@@ -1334,6 +1342,30 @@ def main(argv: list[str] | None = None) -> int:
                 _sh = fin.get("shares")
                 _tot = _sh.get("current") if isinstance(_sh, dict) else _sh
                 row["iwf"] = _iwf(_fs, _tot)
+                # technical factors (Phases 1-3): MFI / Stoch / KST / Chandelier
+                try:
+                    _hi = _ohl.get("highs") or []
+                    _lo = _ohl.get("lows") or []
+                    from tradingagents.strategies.size import atr as _atr14
+                    from tradingagents.strategies.technical_factors import (
+                        kst as _kst,
+                        mf_index as _mfi,
+                        stochastic_oscillator as _stoch,
+                    )
+
+                    row["mfi"] = _mfi(_hi, _lo, _cl, _vl)
+                    _s = _stoch(_hi, _lo, _cl)
+                    row["stoch_k"] = _s.get("k")
+                    row["stoch_os"] = _s.get("oversold")
+                    _kk = _kst(_cl)
+                    row["kst"] = _kk.get("kst")
+                    _at = _atr14(_hi, _lo, _cl, window=14) if len(_hi) >= 15 else None
+                    from tradingagents.strategies.swing import chandelier_exit as _ch
+
+                    _chd = _ch(_cl, _at)
+                    row["chandel_exit"] = _chd.get("exit")
+                except Exception:  # noqa: BLE001 - technical factors degrade to n/a
+                    pass
             except Exception:  # noqa: BLE001 - liquidity columns degrade to n/a
                 pass
             results.append(row)

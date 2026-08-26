@@ -71,6 +71,8 @@ def build_position_contract(
     calibrated_p: float | None = None,
     catalyst_scale: float | None = None,
     entry_price: float | None = None,
+    trail_stop: float | None = None,
+    implied_move_pct: float | None = None,
 ) -> PositionContract | None:
     """Compute the authoritative size + stop from config budgets.
 
@@ -83,6 +85,14 @@ def build_position_contract(
     levels are measured from it instead of the last close so the G1 contract
     matches the tranche execution. Position sizing stays a fraction of the
     book and is unchanged; None keeps the last-close behaviour.
+
+    ``trail_stop`` (optional): a chandelier/ATR trailing stop level. When
+    given, the contract's stop is the tighter of the ATR stop and the trail
+    (a trailing stop below the ATR stop is the live exit).
+
+    ``implied_move_pct`` (optional): the option-implied single-day move (e.g.
+    from the earnings straddle). When set, the position is scaled down by
+    (1 - implied_move_pct) so a binary event can't blow the risk budget.
     """
     if not closes:
         return None
@@ -108,6 +118,21 @@ def build_position_contract(
     # tranche plan is in play, else the last close (unchanged behaviour).
     entry = entry_price if (entry_price is not None and float(entry_price) > 0) else last
     stop = float(entry) * (1.0 - stop_pct)
+    # Chandelier/ATR trailing stop: when given and tighter than the ATR stop,
+    # the live exit is the trail (a trailing stop below the ATR stop is the
+    # active exit level).
+    if trail_stop is not None:
+        try:
+            trail = float(trail_stop)
+            if trail > 0 and trail > stop:
+                stop = trail
+                reasons_extra = [f"trail_stop={trail:.2f}"]
+            else:
+                reasons_extra = []
+        except (TypeError, ValueError):
+            reasons_extra = []
+    else:
+        reasons_extra = []
 
     p = calibrated_p if calibrated_p is not None else 0.5
     kelly_part = position_size_kelly(p, odds=odds, fraction=kelly_frac, max_size=max_pct)
@@ -140,6 +165,17 @@ def build_position_contract(
             reasons.append(f"catalyst_scale={cat_s:.2f}")
 
     sized = min(size_base * vol_s * flow_s * agree * cat_s, max_pct)
+    # Implied-move scaling: a binary event (earnings straddle) widens the
+    # single-day gap; scale the position down by (1 - implied_move_pct) so the
+    # event can't blow the risk budget.
+    if implied_move_pct is not None:
+        try:
+            im = float(implied_move_pct)
+            if 0 < im < 1:
+                sized *= (1.0 - im)
+                reasons.append(f"implied_move={im:.1%}")
+        except (TypeError, ValueError):
+            pass
     be_stop = None
     target = None
     if cfg.get("enable_exits") and a > 0:
@@ -157,7 +193,7 @@ def build_position_contract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
         stop_loss=round(stop, 4),
         stop_pct=round(stop_pct, 4),
-        reason_parts=reasons + (["tranche weighted entry"] if entry is not last else []),
+        reason_parts=reasons + reasons_extra + (["tranche weighted entry"] if entry is not last else []),
         breakeven_stop=round(be_stop, 4) if be_stop is not None else None,
         target=round(target, 4) if target is not None else None,
         exit_note=note,
