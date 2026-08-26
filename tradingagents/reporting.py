@@ -85,6 +85,56 @@ def _build_toc(sections: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+_TRUNCATION_MARKER = (
+    "\n\n> ⚠️ **Section truncated at the LLM output cap** — the report ends "
+    "mid-sentence, so the tail is missing. This is an LLM-layer cut "
+    "(max_tokens), not a file error. Raise `max_output_tokens` / "
+    "`max_output_tokens_deep` in default_config.py or split the section to "
+    "capture the rest."
+)
+
+
+def _looks_truncated(text: str) -> bool:
+    """Heuristic: does an LLM report end mid-sentence (max_tokens cut)?
+
+    Conservative on purpose: only flags endings that are neither sentence
+    punctuation nor a clean markdown construct (table row, bold/italic, code
+    fence, heading, closing bracket/quote, or a bold-label line like
+    ``**Consensus**: High``). A report ending in a bare lowercase word is
+    almost always a cut — the model was stopped before it could finish the
+    sentence. The minimum length keeps terse strings (test fixtures, one-line
+    verdicts) from being mis-flagged: a real report that hit the cap is long.
+    """
+    t = (text or "").rstrip()
+    if not t or len(t) < 120:
+        return False
+    last = t[-1]
+    if last in ".!?;:":
+        return False
+    if last in "|*`#)]}>\"'":
+        return False
+    # A bold-label ending (``**Label**: value``) is a structured, complete
+    # line — the PM/risk verdicts end this way and are not cuts.
+    last_line = t.rsplit("\n", 1)[-1]
+    if "**:" in last_line:
+        return False
+    # Real cuts end mid-word in lowercase (or a digit); an uppercase bare
+    # ending is usually a deliberate verdict word, not a cut.
+    return last.islower() or last.isdigit()
+
+
+def _finalize_section(text: str) -> str:
+    """Append a visible truncation marker when the LLM report was cut.
+
+    The marker is a blockquote (not a heading), so it survives the
+    ``_shift_down`` demotion in the consolidated report unchanged and tells
+    the reader the mid-sentence ending is an LLM-layer cap, not a file bug.
+    """
+    if not text or not _looks_truncated(text):
+        return text
+    return text.rstrip() + _TRUNCATION_MARKER
+
+
 def _risk_gate_block(final_state: dict) -> str:
     """Markdown block of the computed risk gate; '' when no gate ran."""
     gate = final_state.get("risk_gate") or {}
@@ -164,8 +214,10 @@ def write_report_tree(
         if text:
             analysts_dir.mkdir(exist_ok=True)
             safe = key.replace("_report", "")
-            (analysts_dir / f"{safe}.md").write_text(prepend_block(text), encoding="utf-8")
-            analyst_parts.append((name, text))
+            (analysts_dir / f"{safe}.md").write_text(
+                prepend_block(_finalize_section(text)), encoding="utf-8"
+            )
+            analyst_parts.append((name, _finalize_section(text)))
     if analyst_parts:
         content = "\n\n---\n\n".join(
             f"### {name}\n\n{_shift_down(text)}" for name, text in analyst_parts
@@ -184,12 +236,14 @@ def write_report_tree(
             text = debate.get(key)
             if text:
                 research_dir.mkdir(exist_ok=True)
-                (research_dir / fname).write_text(text, encoding="utf-8")
-                research_parts.append((name, text))
+                (research_dir / fname).write_text(_finalize_section(text), encoding="utf-8")
+                research_parts.append((name, _finalize_section(text)))
         if debate.get("judge_decision"):
             research_dir.mkdir(exist_ok=True)
-            (research_dir / "manager.md").write_text(debate["judge_decision"], encoding="utf-8")
-            research_parts.append(("Research Manager", debate["judge_decision"]))
+            (research_dir / "manager.md").write_text(
+                _finalize_section(debate["judge_decision"]), encoding="utf-8"
+            )
+            research_parts.append(("Research Manager", _finalize_section(debate["judge_decision"])))
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts
@@ -201,10 +255,10 @@ def write_report_tree(
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
         (trading_dir / "trader.md").write_text(
-            final_state["trader_investment_plan"], encoding="utf-8"
+            _finalize_section(final_state["trader_investment_plan"]), encoding="utf-8"
         )
         sections.append(
-            f"## III. Trading Team Plan\n\n### Trader\n\n{_shift_down(final_state['trader_investment_plan'])}"
+            f"## III. Trading Team Plan\n\n### Trader\n\n{_shift_down(_finalize_section(final_state['trader_investment_plan']))}"
         )
 
     # 4. Risk Management (debate transcripts + computed gate)
@@ -216,11 +270,11 @@ def write_report_tree(
             risk_dir.mkdir(exist_ok=True)
             verdict_md = gate_block + "\n"
             if risk.get("judge_decision"):
-                verdict_md += "\n**Risk Judge Decision**\n\n" + risk["judge_decision"] + "\n"
+                verdict_md += "\n**Risk Judge Decision**\n\n" + _finalize_section(risk["judge_decision"]) + "\n"
             (risk_dir / "verdict.md").write_text(verdict_md, encoding="utf-8")
             risk_parts.append(("Risk Verdict (computed)", gate_block.strip()))
             if risk.get("judge_decision"):
-                risk_parts.append(("Risk Analyst Verdict", risk["judge_decision"]))
+                risk_parts.append(("Risk Analyst Verdict", _finalize_section(risk["judge_decision"])))
         else:
             for key, fname, name in (
                 ("aggressive_history", "aggressive.md", "Aggressive Analyst"),
@@ -230,8 +284,10 @@ def write_report_tree(
                 text = risk.get(key)
                 if text:
                     risk_dir.mkdir(exist_ok=True)
-                    (risk_dir / fname).write_text(prepend_block(text), encoding="utf-8")
-                    risk_parts.append((name, text))
+                    (risk_dir / fname).write_text(
+                        prepend_block(_finalize_section(text)), encoding="utf-8"
+                    )
+                    risk_parts.append((name, _finalize_section(text)))
         if risk_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts
@@ -242,10 +298,10 @@ def write_report_tree(
         if risk.get("judge_decision"):
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
-            wrapped = prepend_block(risk["judge_decision"])
+            wrapped = prepend_block(_finalize_section(risk["judge_decision"]))
             (portfolio_dir / "decision.md").write_text(wrapped, encoding="utf-8")
             sections.append(
-                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(risk['judge_decision']))}"
+                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(_finalize_section(risk['judge_decision'])))}"
             )
 
     # Write consolidated report (auto Table of Contents above the teams)

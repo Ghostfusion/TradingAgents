@@ -155,6 +155,52 @@ def _legend_markdown() -> str:
     return "\n".join(lines)
 
 
+def _sector_table_markdown(ranking: dict | None) -> str:
+    """Render the full 11-SPDR sector ranking as a markdown table.
+
+    The framework rule (Strategies/framework.md) is that a candidate's sector
+    must be a top performer over a rolling 1-month and 3-month window (top 3
+    of the 11 SPDR groups). The watchlist only shows the *candidate's* rank
+    (SecRank column); this table surfaces the whole ranking so the reader can
+    see which sectors are leading and where the candidate's group stands.
+    Rows with no usable history render n/a and sort last (never top-3).
+    """
+    if not ranking or not ranking.get("ranked"):
+        return ""
+    top3_3m = set(ranking.get("top3_3m") or [])
+    top3_1m = set(ranking.get("top3_1m") or [])
+    lines = [
+        "\n#### Sector ranking (11 SPDR groups)",
+        "",
+        "| Rank | ETF | Sector | 1m ret | 3m ret | Top-3 3m | Top-3 1m |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in ranking.get("ranked", []):
+        etf = r.get("etf", "")
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(r.get("rank")) if r.get("rank") is not None else "n/a",
+                    etf,
+                    str(r.get("name", etf)),
+                    f"{r['ret_1m']:.1%}" if r.get("ret_1m") is not None else "n/a",
+                    f"{r['ret_3m']:.1%}" if r.get("ret_3m") is not None else "n/a",
+                    "yes" if etf in top3_3m else "",
+                    "yes" if etf in top3_1m else "",
+                ]
+            )
+            + " |"
+        )
+    lines.append("")
+    lines.append(
+        "Top-3 3m = the sector groups the framework's top-3 rule requires; "
+        "a candidate's SecRank column shows where its own group stands."
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _watchlist_markdown(results: list) -> str:
     """Render the ranked watchlist as a complete table.
 
@@ -1472,6 +1518,14 @@ def main(argv: list[str] | None = None) -> int:
         markdown = _watchlist_markdown(ranked) + "\n\n" + alloc_extra
     else:
         markdown = _watchlist_markdown(ranked)
+    # Full 11-SPDR sector ranking table: appended whenever the ranking was
+    # computed (--sector-rank / --enrich-sector), so the reader sees the whole
+    # sector table, not just the candidate's SecRank column.
+    if args.sector_rank or args.enrich_sector:
+        sector_table = _sector_table_markdown(_sector_ranking())
+        if sector_table:
+            markdown = markdown.rstrip() + "\n\n" + sector_table
+            print(sector_table)
     print_watchlist(ranked)
     if alloc_extra:
         print(alloc_extra)

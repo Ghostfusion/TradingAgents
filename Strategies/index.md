@@ -28,6 +28,7 @@ module inventory) alongside this.
 | 12c | (value-dip + swing combo research, round 2) | Exhaustive web research gaps: Graham Number, NCAV/net-net, Earnings Power Value (EPV), StochRSI, RSI2, Williams %R, Keltner, Donchian, OBV divergence, Parabolic SAR, Elder thermometer | `strategies/fundamental_floors.py` + `technical_factors` (stoch_rsi/rsi2/williams_r/keltner/donchian/obv/psar/elder) + `value_dip_setup` rows + `get_value_floors` (fundamentals) + `get_mean_reversion_tech` (market) tools + screener Graham/NCAV/EPV/StochRSI/RSI2/W%R/Kelt/Donch/OBV/PSAR/Elder columns | always-on (pure/optional) |
 | 13 | `risk2.md` | Liquidity & ownership risk (IWF, float turnover, Amihud ILLIQ, days-to-absorb, HHI) | `strategies/liquidity_risk.py` + `get_liquidity_risk` (market) + `get_ownership_concentration` (fundamentals) + governor gate + screener columns | `enable_liquidity_gate` (off by default) |
 | 14 | `capital_income.md` | Preferred-income index methodology (liquidity screen, indicated yield top-50, MV/equal + 3% cap) | `strategies/capital_income.py` + standalone `scripts/capital_income_screener.py` (no graph wiring) | standalone CLI |
+| 15 | (screener sector table) | Full 11-SPDR sector ranking table (1m/3m returns, rank, top-3 flags) appended to the report when the ranking is computed | `scripts/value_screener.py::_sector_table_markdown` + `strategies/sector_rank.py` | `--sector-rank` / `--enrich-sector` |
 
 ---
 

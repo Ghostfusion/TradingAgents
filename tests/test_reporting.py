@@ -123,6 +123,62 @@ def test_slugify():
     assert _slugify("### Aggressive Analyst") == "aggressive-analyst"
 
 
+def test_truncation_marker_appended_to_mid_sentence_sections(tmp_path):
+    """A section that ends mid-sentence (LLM max_tokens cut) gets a visible
+    marker in the saved file and the consolidated report, so the reader knows
+    the tail is missing at the LLM layer rather than a file bug. Clean
+    markdown endings (tables, **HOLD**, sentence punctuation) are untouched."""
+    from tradingagents.reporting import _looks_truncated
+
+    long_cut = (
+        "The stock trades at a deep discount to its historical multiple and "
+        "the balance sheet is clean, but the near-term catalyst is missing "
+        "and the technicals are still rolling over, so the entry should wait "
+        "for a confirmed reversal candle before any scale-in is justified "
+        "and the thesis is incomplete and cut"
+    )
+    long_clean = (
+        "The stock trades at a deep discount to its historical multiple and "
+        "the balance sheet is clean, but the near-term catalyst is missing "
+        "and the technicals are still rolling over, so the entry should wait "
+        "for a confirmed reversal candle before any scale-in is justified "
+        "and the thesis is complete."
+    )
+    # heuristic: bare lowercase endings are cuts; clean endings are not
+    assert _looks_truncated(long_cut)
+    assert not _looks_truncated(long_clean)
+    assert not _looks_truncated("FINAL TRANSACTION PROPOSAL: **HOLD**")
+    assert not _looks_truncated("| a | b |")
+    assert not _looks_truncated("```python\nprint(1)\n```")
+    assert not _looks_truncated("Trader plan")  # terse, not a real cut
+
+    state = _full_state()
+    state["market_report"] = "# MKT\n\n## 1. Price\n\n" + long_cut
+    state["trader_investment_plan"] = "Trader plan"  # clean, no marker
+    write_report_tree(state, "TST", tmp_path)
+    mkt = (tmp_path / "1_analysts" / "market.md").read_text(encoding="utf-8")
+    assert "Section truncated at the LLM output cap" in mkt
+    trader = (tmp_path / "3_trading" / "trader.md").read_text(encoding="utf-8")
+    assert "Section truncated" not in trader
+    report = (tmp_path / "complete_report.md").read_text(encoding="utf-8")
+    assert "Section truncated at the LLM output cap" in report
+
+
+def test_finalize_section_roundtrip():
+    from tradingagents.reporting import _finalize_section
+
+    assert _finalize_section("Complete.") == "Complete."
+    out = _finalize_section(
+        "The stock trades at a deep discount to its historical multiple and "
+        "the balance sheet is clean, but the near-term catalyst is missing "
+        "and the technicals are still rolling over, so the entry should wait "
+        "for a confirmed reversal candle before any scale-in is justified "
+        "and the thesis is incomplete and cut"
+    )
+    assert out.endswith("capture the rest.")
+    assert "Section truncated" in out
+
+
 def test_risk_gate_renders_tranche_worst_case(tmp_path):
     """When the tranche fold ran, the report surfaces the peak-deployed and
     capital-at-risk measures the gate sized/throttled against."""

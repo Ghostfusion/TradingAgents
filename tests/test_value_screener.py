@@ -374,3 +374,28 @@ def test_enrich_sector_populates_without_gating(capsys):
         row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
         assert row and "Technology" in row
         assert "AAPL" in out
+        # The full 11-SPDR sector ranking table is appended to the report.
+        assert "Sector ranking (11 SPDR groups)" in out
+        assert "| XLK | Technology |" in out
+
+
+def test_sector_table_markdown_renders_full_ranking():
+    """The sector table shows all 11 SPDR groups with 1m/3m returns, ranks
+    and top-3 flags; rows without history render n/a and never top-3."""
+    ranking = {
+        "ranked": [
+            {"etf": "XLK", "name": "Technology", "ret_1m": 0.05, "ret_3m": 0.12, "rank": 1},
+            {"etf": "XLE", "name": "Energy", "ret_1m": -0.02, "ret_3m": -0.05, "rank": 11},
+            {"etf": "XLU", "name": "Utilities", "ret_1m": None, "ret_3m": None, "rank": None},
+        ],
+        "top3_3m": ["XLK"],
+        "top3_1m": ["XLK"],
+    }
+    md = vs._sector_table_markdown(ranking)
+    assert "Sector ranking (11 SPDR groups)" in md
+    assert "| 1 | XLK | Technology | 5.0% | 12.0% | yes | yes |" in md
+    assert "| 11 | XLE | Energy | -2.0% | -5.0% |  |  |" in md
+    assert "| n/a | XLU | Utilities | n/a | n/a |  |  |" in md
+    # no ranking -> empty (never a broken table)
+    assert vs._sector_table_markdown(None) == ""
+    assert vs._sector_table_markdown({}) == ""

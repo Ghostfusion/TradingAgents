@@ -9,6 +9,33 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Screener: full 11-SPDR sector ranking table** - `_sector_table_markdown`
+  renders the whole sector ranking (ETF, name, 1m/3m returns, rank, top-3
+  flags) and appends it to the report whenever the ranking is computed
+  (`--sector-rank` / `--enrich-sector`). The watchlist previously showed only
+  the candidate's SecRank column; now the reader sees the full table the
+  framework's "top 3 of 11 SPDR groups" rule is based on. Rows without
+  history render n/a and never rank top-3. Tests:
+  `test_sector_table_markdown_renders_full_ranking` +
+  `test_enrich_sector_populates_without_gating` (asserts the table appears).
+- **Report truncation marker** - `reporting._finalize_section` appends a
+  visible blockquote marker when a section ends mid-sentence (LLM max_tokens
+  cut), so the reader knows the tail is missing at the LLM layer, not a file
+  bug. Conservative heuristic: only bare lowercase/digit endings >= 120 chars
+  that aren't sentence punctuation, markdown constructs, or bold-label lines
+  (`**Consensus**: High`). Applied to every section file + the consolidated
+  report. Tests: `test_truncation_marker_appended_to_mid_sentence_sections` +
+  `test_finalize_section_roundtrip`.
+- **Web: value-dip + swing tools page** - `trading_web` gains a `run_value_tools`
+  capability (in-process, read-only) and a "Value tools" SPA page that runs
+  `get_value_floors` / `get_swing_exits` / `get_dip_technical` /
+  `get_mean_reversion_tech` for one ticker — the same computed numbers the
+  analyst LLMs are bound to, inspectable before queueing a full run. Also
+  fixed a pre-existing flaky web test: `security._secret()` read the secret
+  file back with `.strip()`, which silently dropped a leading/trailing
+  whitespace byte from the 32 random bytes and intermittently invalidated
+  every session cookie (401s). Tests: `test_value_tools_capability_registered_and_guarded`
+  + `test_secret_file_roundtrip_preserves_whitespace_bytes`.
 - **Per-role max output tokens + density directives** -
   - Config: `max_output_tokens` (6000), `max_output_tokens_quick` (6000),
     `max_output_tokens_deep` (2500) + env overrides
