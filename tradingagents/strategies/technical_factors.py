@@ -257,4 +257,216 @@ __all__ = [
     "stochastic_oscillator",
     "adx",
     "pivot_points",
+    "stoch_rsi",
+    "rsi2",
+    "williams_r",
+    "keltner_channel",
+    "donchian_channel",
+    "obv_divergence",
+    "parabolic_sar",
+    "elder_thermometer",
 ]
+
+
+def stoch_rsi(closes: list, n: int = 14) -> dict:
+    """StochRSI = (RSI - min RSI) / (max RSI - min RSI) over the window.
+
+    Smoother, more sensitive oversold read than plain RSI: StochRSI < 0.2
+    oversold, > 0.8 overbought. None when history insufficient.
+    """
+    if len(closes) < n + 2:
+        return {"stochrsi": None, "oversold": None, "overbought": None}
+    rsi_valid = []
+    for i in range(n, len(closes)):
+        seg = closes[i - n : i + 1]
+        gains = losses = 0.0
+        for j in range(1, len(seg)):
+            d = seg[j] - seg[j - 1]
+            if d >= 0:
+                gains += d
+            else:
+                losses -= d
+        if gains + losses == 0:
+            r = 50.0
+        elif losses == 0:
+            r = 100.0
+        else:
+            rs = gains / losses
+            r = 100.0 - 100.0 / (1.0 + rs)
+        rsi_valid.append(r)
+    if len(rsi_valid) < n + 1:
+        return {"stochrsi": None, "oversold": None, "overbought": None}
+    window = rsi_valid[-(n + 1) :]
+    mn, mx = min(window), max(window)
+    if mx == mn:
+        return {"stochrsi": 0.5, "oversold": False, "overbought": False}
+    cur = rsi_valid[-1]
+    v = (cur - mn) / (mx - mn)
+    return {
+        "stochrsi": round(v, 4),
+        "oversold": bool(v < 0.2),
+        "overbought": bool(v > 0.8),
+    }
+
+
+def rsi2(closes: list, n: int = 2) -> float | None:
+    """2-period RSI - a fast mean-reversion oversold/overbought read.
+
+    RSI2 < ~10 is an extreme contrarian buy signal (Connors style).
+    """
+    if len(closes) < n + 1:
+        return None
+    seg = closes[-(n + 1) :]
+    gains = losses = 0.0
+    for j in range(1, len(seg)):
+        d = seg[j] - seg[j - 1]
+        if d >= 0:
+            gains += d
+        else:
+            losses -= d
+    if gains + losses == 0:
+        return 50.0
+    if losses == 0:
+        return 100.0
+    rs = gains / losses
+    return round(100.0 - 100.0 / (1.0 + rs), 2)
+
+
+def williams_r(highs, lows, closes, n: int = 14) -> float | None:
+    """Williams %R = (HHn - Close) / (HHn - LLn) x -100. -80..-100 oversold."""
+    if len(highs) < n or len(lows) < n or len(closes) < n:
+        return None
+    hh = max(float(x) for x in highs[-n:])
+    ll = min(float(x) for x in lows[-n:])
+    if hh == ll:
+        return -50.0
+    return round((hh - float(closes[-1])) / (hh - ll) * -100.0, 2)
+
+
+def keltner_channel(closes, atr_value=None, n: int = 20, k: float = 2.0) -> dict:
+    """Keltner Channel: EMA(20) +/- k x ATR. Returns mid/upper/lower + price %b
+    within the channel (mean-reversion). None when history insufficient."""
+    if not closes or len(closes) < n or atr_value is None or atr_value <= 0:
+        return {"mid": None, "upper": None, "lower": None, "pct": None}
+    mid = sum(closes[-n:]) / n
+    upper = mid + float(k) * float(atr_value)
+    lower = mid - float(k) * float(atr_value)
+    if upper == lower:
+        return {"mid": round(mid, 4), "upper": round(upper, 4), "lower": round(lower, 4), "pct": 0.5}
+    pct = (float(closes[-1]) - lower) / (upper - lower)
+    return {
+        "mid": round(mid, 4),
+        "upper": round(upper, 4),
+        "lower": round(lower, 4),
+        "pct": round(pct, 4),
+    }
+
+
+def donchian_channel(highs, lows, n: int = 20) -> dict:
+    """Donchian Channel: N-day highest high / lowest low + breakout signal.
+
+    Close above the upper channel = bullish breakout; below lower = bearish.
+    """
+    if len(highs) < n or len(lows) < n:
+        return {"upper": None, "lower": None, "mid": None, "breakout_up": None, "breakout_dn": None}
+    up = max(float(x) for x in highs[-n:])
+    lo = min(float(x) for x in lows[-n:])
+    mid = (up + lo) / 2.0
+    return {
+        "upper": round(up, 4),
+        "lower": round(lo, 4),
+        "mid": round(mid, 4),
+        "breakout_up": None,  # closes not passed; caller derives
+        "breakout_dn": None,
+    }
+
+
+def obv_divergence(closes, volumes, window: int = 30) -> dict:
+    """On-Balance-Volume vs price: cumulative OBV trend vs price trend.
+
+    Returns {'obv_up': bool, 'bullish_div': bool} for a price lower-low with
+    a higher OBV low (bullish divergence) - a dip-reversal confirmation.
+    """
+    if len(closes) < window or len(volumes) < window:
+        return {"obv_up": None, "bullish_div": None}
+    obv = 0.0
+    obv_series = []
+    prev_c = None
+    for c, v in zip(closes, volumes, strict=False):
+        if prev_c is not None and v is not None:
+            if float(c) > float(prev_c):
+                obv += float(v)
+            elif float(c) < float(prev_c):
+                obv -= float(v)
+        obv_series.append(obv)
+        prev_c = float(c)
+    seg = obv_series[-2 * window :] if len(obv_series) >= 2 * window else obv_series
+    half = len(seg) // 2
+    first_obv, second_obv = seg[:half], seg[half:]
+    first_price = closes[-len(first_obv) : -len(second_obv)] if len(second_obv) else closes[-len(first_obv) :]
+    second_price = closes[-len(second_obv) :]
+    price_dn = bool(
+        len(second_price) and len(first_price) and second_price[-1] < first_price[-1]
+    )
+    obv_up = bool(
+        len(second_obv) and len(first_obv) and second_obv[-1] > first_obv[-1]
+    )
+    return {"obv_up": obv_up, "bullish_div": bool(price_dn and obv_up)}
+
+
+def parabolic_sar(highs, lows, af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2) -> dict:
+    """Parabolic SAR trailing stop (Wilder). Returns current SAR + a below/exit
+    flag (close below SAR = downtrend). None when history insufficient."""
+    if len(highs) < 2 or len(lows) < 2:
+        return {"sar": None, "below": None, "exit": None}
+    try:
+        af = float(af_start)
+        trend = 1  # up
+        sar = float(lows[0])
+        ep = float(highs[0])
+        for i in range(1, len(highs)):
+            sar = sar + af * (ep - sar)
+            hi = float(highs[i])
+            lo = float(lows[i])
+            if trend == 1:
+                if lo < sar:
+                    trend = -1
+                    sar = ep
+                    ep = lo
+                    af = float(af_start)
+                else:
+                    if hi > ep:
+                        ep = hi
+                        af = min(af + float(af_step), float(af_max))
+            else:
+                if hi > sar:
+                    trend = 1
+                    sar = ep
+                    ep = hi
+                    af = float(af_start)
+                else:
+                    if lo < ep:
+                        ep = lo
+                        af = min(af + float(af_step), float(af_max))
+        return {"sar": round(sar, 4), "below": None, "exit": None}
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"sar": None, "below": None, "exit": None}
+
+
+def elder_thermometer(volumes, n: int = 21) -> dict:
+    """Elder's thermometer = current volume / (21-day average volume).
+
+    A ratio > 1.0 = heavy participation, < 1.0 = low participation (a calm
+    dip in a quiet tape). None when history insufficient.
+    """
+    if len(volumes) < n:
+        return {"ratio": None, "heavy": None, "quiet": None}
+    avg = sum(float(x) for x in volumes[-n:]) / n
+    if avg <= 0:
+        return {"ratio": None, "heavy": None, "quiet": None}
+    ratio = float(volumes[-1]) / avg
+    return {
+        "ratio": round(ratio, 4),
+        "heavy": bool(ratio > 1.0),
+        "quiet": bool(ratio < 0.8),
+    }

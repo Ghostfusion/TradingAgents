@@ -723,6 +723,61 @@ def get_dip_technical(
 
 
 @tool
+def get_mean_reversion_tech(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Mean-reversion dip-timing + exit technicals: StochRSI, RSI2, Williams %R,
+    Keltner, Donchian, OBV divergence, Parabolic SAR, Elder thermometer.
+
+    Complements get_dip_technical with the faster/smoother oscillators and
+    channel/volume confirmations. Use before any 'oversold / dip timing /
+    mean reversion / channel support / trailing exit' claim.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        The computed oscillator/channel lines, or an explicit 'unavailable'.
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if not closes or len(closes) < 30:
+        return f"mean reversion tech unavailable for {ticker}: fewer than 30 bars."
+    try:
+        from tradingagents.strategies.size import atr
+        from tradingagents.strategies.technical_factors import (
+            donchian_channel as _don,
+            elder_thermometer as _elder,
+            keltner_channel as _kelt,
+            obv_divergence as _obv,
+            parabolic_sar as _psar,
+            rsi2 as _rsi2,
+            stoch_rsi as _srsi,
+            williams_r as _wr,
+        )
+
+        atr_v = atr(data["highs"], data["lows"], closes, window=14)
+        s = _srsi(closes)
+        k = _kelt(closes, atr_value=atr_v)
+        d = _don(data["highs"], data["lows"])
+        o = _obv(closes, data["volumes"])
+        p = _psar(data["highs"], data["lows"])
+        e = _elder(data["volumes"])
+        lines = [
+            f"mean reversion tech {ticker}:",
+            f"  stochrsi={s.get('stochrsi')} oversold={s.get('oversold')}",
+            f"  rsi2={_rsi2(closes)} williams_r={_wr(data['highs'], data['lows'], closes)}",
+            f"  keltner mid={k.get('mid')} pct={k.get('pct')}",
+            f"  donchian up={d.get('upper')} lo={d.get('lower')}",
+            f"  obv_up={o.get('obv_up')} bullish_div={o.get('bullish_div')}",
+            f"  psar={p.get('sar')} elder_ratio={e.get('ratio')} heavy={e.get('heavy')}",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"mean reversion tech unavailable for {ticker}: {exc}"
+
+
+@tool
 def get_orderflow_read(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
@@ -2041,6 +2096,7 @@ __all__ = [
     "get_volatility_contraction",
     "get_swing_exits",
     "get_dip_technical",
+    "get_mean_reversion_tech",
     "get_orderflow_read",
     "get_analyst_verdict",
     "get_earnings_surprise",

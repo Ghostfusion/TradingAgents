@@ -131,6 +131,17 @@ _WATCHLIST_LEGEND = (
     ("StocK", "Stochastic %K (oscillator; <20 oversold) - dip-entry timing"),
     ("KST", "Know-Sure-Thing momentum oscillator (KST vs trigger; up = momentum confirm)"),
     ("Chandel", "Chandelier exit flag (close below highest-high - 3x ATR = trailing exit)"),
+    ("Graham", "Graham Number = sqrt(22.5 x EPS x BVPS) cheapness floor"),
+    ("NCAV", "net-net = (current assets - total liabilities) / shares (deep-value floor)"),
+    ("EPV", "Earnings Power Value per share (normalized earnings floor)"),
+    ("StochRSI", "StochRSI (0-1; <0.2 oversold) - smoothed RSI oversold"),
+    ("RSI2", "2-period RSI (fast contrarian oversold read)"),
+    ("W%R", "Williams %R (oscillator; < -80 oversold)"),
+    ("Kelt", "Keltner Channel position (price % within EMA +/- 2x ATR)"),
+    ("Donch", "Donchian upper channel (20-day high breakout level)"),
+    ("OBV", "On-Balance-Volume up flag (bullish OBV divergence = dip-reversal confirm)"),
+    ("PSAR", "Parabolic SAR (trailing stop level)"),
+    ("Elder", "Elder thermometer (volume / 21-day avg volume)"),
     ("DayChg", "intraday change % (from the movers rank)"),
 )
 
@@ -177,7 +188,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "MFI", "StocK", "KST", "Chandel", "DayChg",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "DayChg",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -217,10 +228,21 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("illiq"), "{:.2e}"),
             cell(r.get("float_turnover"), "{:.3%}"),
             cell(r.get("iwf"), "{:.2%}"),
+            cell(r.get("graham")),
+            cell(r.get("ncav")),
+            cell(r.get("epv_ps")),
             cell(r.get("mfi"), "{:.0f}"),
             cell(r.get("stoch_k"), "{:.0f}"),
             cell(r.get("kst"), "{:.3f}"),
             "yes" if r.get("chandel_exit") else "no",
+            cell(r.get("stochrsi"), "{:.2f}"),
+            cell(r.get("rsi2"), "{:.0f}"),
+            cell(r.get("wr"), "{:.0f}"),
+            cell(r.get("kelt_pct"), "{:.2f}"),
+            cell(r.get("donch_up")),
+            cell(r.get("obv_up")),
+            cell(r.get("psar")),
+            cell(r.get("elder"), "{:.2f}"),
             cell(r.get("day_change"), "{:+.2%}"),
         ]
         out.append("| " + " | ".join(cells) + " |")
@@ -1342,6 +1364,33 @@ def main(argv: list[str] | None = None) -> int:
                 _sh = fin.get("shares")
                 _tot = _sh.get("current") if isinstance(_sh, dict) else _sh
                 row["iwf"] = _iwf(_fs, _tot)
+                # fundamental floors (Graham / NCAV / EPV)
+                try:
+                    from tradingagents.strategies.fundamental_floors import (
+                        earnings_power_value as _epv,
+                        epv_per_share as _epv_ps,
+                        graham_number as _g,
+                        ncav_per_share as _ncav,
+                    )
+
+                    _eps = _latest(fin.get("eps"))
+                    _te = _latest(fin.get("total_equity"))
+                    _tot_s = _latest(fin.get("shares"))
+                    _bvps = (_te / _tot_s) if (_te and _tot_s) else None
+                    _ca = _latest(fin.get("current_assets"))
+                    _tl = _latest(fin.get("total_liabilities"))
+                    _ebit = _latest(fin.get("operating_income"))
+                    _ta = _latest(fin.get("total_assets"))
+                    _beta = _latest(fin.get("beta"))
+                    from tradingagents.strategies.dcf import wacc_from_beta as _wacc
+
+                    _w = _wacc(0.04, _beta if _beta is not None else 1.0)
+                    row["graham"] = _g(_eps, _bvps)
+                    row["ncav"] = _ncav(_ca, _tl, _tot_s)
+                    _epv_r = _epv(_ebit, 0.21, _w)
+                    row["epv_ps"] = _epv_ps(_epv_r.get("epv"), _tot_s) if _epv_r else None
+                except Exception:  # noqa: BLE001 - floors degrade to n/a
+                    pass
                 # technical factors (Phases 1-3): MFI / Stoch / KST / Chandelier
                 try:
                     _hi = _ohl.get("highs") or []
@@ -1364,6 +1413,32 @@ def main(argv: list[str] | None = None) -> int:
 
                     _chd = _ch(_cl, _at)
                     row["chandel_exit"] = _chd.get("exit")
+                    # mean-reversion technicals (StochRSI / RSI2 / W%R / Kelt /
+                    # Donch / OBV / PSAR / Elder)
+                    from tradingagents.strategies.technical_factors import (
+                        donchian_channel as _don,
+                        elder_thermometer as _elder,
+                        keltner_channel as _kelt,
+                        obv_divergence as _obv,
+                        parabolic_sar as _psar,
+                        rsi2 as _rsi2,
+                        stoch_rsi as _srsi,
+                        williams_r as _wr,
+                    )
+
+                    _sr = _srsi(_cl)
+                    row["stochrsi"] = _sr.get("stochrsi")
+                    row["rsi2"] = _rsi2(_cl)
+                    row["wr"] = _wr(_hi, _lo, _cl)
+                    _ke = _kelt(_cl, atr_value=_at)
+                    row["kelt_pct"] = _ke.get("pct")
+                    _dn = _don(_hi, _lo)
+                    row["donch_up"] = _dn.get("upper")
+                    row["donch_lo"] = _dn.get("lower")
+                    _ov = _obv(_cl, _vl)
+                    row["obv_up"] = _ov.get("obv_up")
+                    row["psar"] = _psar(_hi, _lo).get("sar")
+                    row["elder"] = _elder(_vl).get("ratio")
                 except Exception:  # noqa: BLE001 - technical factors degrade to n/a
                     pass
             except Exception:  # noqa: BLE001 - liquidity columns degrade to n/a

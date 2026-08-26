@@ -856,6 +856,15 @@ def value_dip_setup(
     roe: float | None = None,
     fcf: float | None = None,
     min_closes_support: int = 200,
+    eps: float | None = None,
+    book_value_per_share: float | None = None,
+    current_assets: float | None = None,
+    total_liabilities: float | None = None,
+    shares: float | None = None,
+    adjusted_ebit: float | None = None,
+    tax_rate: float | None = None,
+    wacc: float | None = None,
+    roic: float | None = None,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -964,6 +973,62 @@ def value_dip_setup(
         "fib_retrace": fib_retrace_entry(closes, highs, lows),
         "stochastic": _stochastic_oversold(highs, lows, closes),
     }
+    # Fundamental floors (Graham / NCAV / EPV) - the value-dip's structural
+    # cheapness floor beyond MoS/FCFY. Computed when the inputs are present;
+    # unknown rows never fail the gate (repo convention).
+    try:
+        from tradingagents.strategies.fundamental_floors import (
+            earnings_power_value as _epv,
+            epv_per_share as _epv_ps,
+            graham_cheap as _g_cheap,
+            graham_number as _g,
+            ncav_cheap as _n_cheap,
+            ncav_per_share as _ncav,
+        )
+
+        g_num = _g(eps, book_value_per_share)
+        ncav = _ncav(current_assets, total_liabilities, shares)
+        epv = _epv(adjusted_ebit, tax_rate, wacc, roic=roic)
+        epv_ps = _epv_ps(epv.get("epv"), shares) if epv else None
+        rows["graham"] = {
+            "number": g_num,
+            "cheap": _g_cheap(price, g_num),
+        }
+        rows["ncav"] = {
+            "per_share": ncav,
+            "cheap": _n_cheap(price, ncav),
+        }
+        rows["epv"] = {
+            "epv": epv.get("epv") if epv else None,
+            "per_share": epv_ps,
+            "conclusion": epv.get("conclusion") if epv else None,
+        }
+    except Exception:  # noqa: BLE001 - floors degrade to n/a
+        pass
+    # Mean-reversion technicals (StochRSI / RSI2 / W%R / Keltner / Donchian /
+    # OBV / PSAR / Elder) - dip-timing + exit confirmation rows.
+    try:
+        from tradingagents.strategies.technical_factors import (
+            donchian_channel as _don,
+            elder_thermometer as _elder,
+            keltner_channel as _kelt,
+            obv_divergence as _obv,
+            parabolic_sar as _psar,
+            rsi2 as _rsi2,
+            stoch_rsi as _srsi,
+            williams_r as _wr,
+        )
+
+        rows["stoch_rsi"] = _srsi(closes)
+        rows["rsi2"] = _rsi2(closes)
+        rows["williams_r"] = _wr(highs, lows, closes)
+        rows["keltner"] = _kelt(closes, atr_value=a)
+        rows["donchian"] = _don(highs, lows)
+        rows["obv"] = _obv(closes, volumes)
+        rows["psar"] = _psar(highs, lows)
+        rows["elder"] = _elder(volumes)
+    except Exception:  # noqa: BLE001 - technicals degrade to n/a
+        pass
     val_z_row = None
     if val_z is not None:
         val_z_row = {

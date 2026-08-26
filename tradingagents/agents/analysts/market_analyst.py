@@ -12,6 +12,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_liquidity_risk,
     get_macd_divergence,
     get_market_snapshot,
+    get_mean_reversion_tech,
     get_momentum_detail,
     get_options_chain,
     get_orderflow_read,
@@ -60,6 +61,7 @@ def create_market_analyst(llm):
             get_swing_set,
             get_swing_exits,
             get_dip_technical,
+            get_mean_reversion_tech,
             get_relative_strength,
             get_position_sizing,
             get_risk_gate,
@@ -124,6 +126,7 @@ You also have computed-analysis tools - use these numbers as ground truth, do no
 - get_swing_set(ticker) - the deterministic multi-week setup: trend stack, RSI band, the 1-ATR structure stop below the swing low, 2R/3R targets, trail and VCP state. Use its stop/target/risk numbers whenever you propose entry, stop or reward:risk.
 - get_swing_exits(ticker) - the chandelier trailing stop (3x ATR below the 22-bar high) + 20-day EMA trail + 2R/3R targets. Use it before any 'trailing stop / exit level / let winners run' claim on a swing position.
 - get_dip_technical(ticker) - the value-dip timing read: RSI(14), Bollinger %b, Stochastic %K oversold, Money Flow Index and KST momentum. Use it before any 'oversold / dip timing / mean reversion' claim - it separates a turnable value dip from a falling knife.
+- get_mean_reversion_tech(ticker) - the faster/smoother mean-reversion + channel technicals: StochRSI, RSI2, Williams %R, Keltner, Donchian, OBV divergence, Parabolic SAR, Elder thermometer. Use it before any 'oversold / channel support / trailing exit / volume confirmation' claim.
 - get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
 - get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one.
 - get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT.

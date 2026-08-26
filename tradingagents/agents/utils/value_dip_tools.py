@@ -921,4 +921,71 @@ __all__ = [
     "get_vdu_entry_setup",
     "get_support_structure",
     "get_decline_driver_check",
+    "get_value_floors",
 ]
+
+
+@tool
+def get_value_floors(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Structural value floors: Graham Number, NCAV (net-net), Earnings Power
+    Value (EPV) - the value-dip's asset/earnings-backed cheapness floors.
+
+    Computed from the canonical statements (EPS, book value, current assets,
+    liabilities, shares, EBIT, tax, WACC proxy). Use before any 'cheap on
+    assets / below book / earnings-power floor' claim; missing inputs render
+    n/a (never fabricated).
+    """
+    try:
+        from tradingagents.strategies.fundamental_floors import (
+            earnings_power_value as _epv,
+            epv_per_share as _epv_ps,
+            graham_cheap as _g_cheap,
+            graham_number as _g,
+            ncav_cheap as _n_cheap,
+            ncav_per_share as _ncav,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"value floors unavailable for {ticker}: {exc}"
+    fin = _canonical_financials(ticker, current_date)
+    price = None
+    try:
+        from tradingagents.agents.utils.analysis_tools import _ohlcv
+
+        closes = _ohlcv(ticker).get("closes") or []
+        price = float(closes[-1]) if closes else None
+    except Exception:  # noqa: BLE001
+        price = None
+    eps = _latest(fin.get("eps"))
+    te = _latest(fin.get("total_equity"))
+    sh = _latest(fin.get("shares"))
+    bvps = (te / sh) if (te is not None and sh) else None
+    ca = _latest(fin.get("current_assets"))
+    tl = _latest(fin.get("total_liabilities"))
+    ebit = _latest(fin.get("operating_income"))
+    tax = _latest(fin.get("tax_expense"))
+    ta = _latest(fin.get("total_assets"))
+    # WACC proxy: rf + beta*erp via the DCF helper (beta from canonical).
+    wacc = None
+    try:
+        from tradingagents.strategies.dcf import wacc_from_beta
+
+        beta = _latest(fin.get("beta"))
+        wacc = wacc_from_beta(0.04, beta if beta is not None else 1.0)
+    except Exception:  # noqa: BLE001
+        wacc = None
+    roic = (ebit * (1.0 - (tax / ebit if ebit else 0.0))) / ta if (ebit and ta) else None
+    g = _g(eps, bvps)
+    ncav = _ncav(ca, tl, sh)
+    epv = _epv(ebit, (tax / ebit if ebit else None), wacc, roic=roic)
+    epv_ps = _epv_ps(epv.get("epv"), sh) if epv else None
+    lines = [
+        f"value floors {ticker} (price {price if price is not None else 'n/a'}):",
+        f"  graham_number={g} cheap={_g_cheap(price, g)}",
+        f"  ncav_per_share={ncav} cheap={_n_cheap(price, ncav)}",
+        f"  epv={epv.get('epv') if epv else None} per_share={epv_ps} "
+        f"conclusion={epv.get('conclusion') if epv else None}",
+    ]
+    return "\n".join(lines)

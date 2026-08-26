@@ -1264,3 +1264,40 @@ def test_get_dip_technical_insufficient(monkeypatch):
         "highs": [101.0] * 10, "lows": [99.0] * 10, "volumes": [1e6] * 10})
     out = T.get_dip_technical.invoke({"ticker": "AAPL"})
     assert "fewer than 30" in out
+
+
+def test_get_mean_reversion_tech_computes(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
+    out = T.get_mean_reversion_tech.invoke({"ticker": "AAPL"})
+    assert "mean reversion tech AAPL" in out
+    assert "stochrsi=" in out and "keltner" in out and "obv_up=" in out
+
+
+def test_get_mean_reversion_tech_insufficient(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0] * 10,
+        "highs": [101.0] * 10, "lows": [99.0] * 10, "volumes": [1e6] * 10})
+    out = T.get_mean_reversion_tech.invoke({"ticker": "AAPL"})
+    assert "fewer than 30" in out
+
+
+def test_get_value_floors_computes(monkeypatch):
+    from tradingagents.agents.utils import value_dip_tools as VDT
+
+    fin = {
+        "eps": {"current": 4.0, "prior": 3.5},
+        "total_equity": {"current": 3e9, "prior": 2.8e9},
+        "shares": {"current": 1e8, "prior": 1e8},
+        "current_assets": {"current": 1e9, "prior": 9e8},
+        "total_liabilities": {"current": 4e8, "prior": 3.5e8},
+        "operating_income": {"current": 2e8, "prior": 1.8e8},
+        "tax_expense": {"current": 4e7, "prior": 3.6e7},
+        "total_assets": {"current": 5e9, "prior": 4.5e9},
+        "beta": {"current": 1.1, "prior": 1.0},
+    }
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
+    out = VDT.get_value_floors.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "value floors AAPL" in out
+    assert "graham_number=" in out
+    assert "ncav_per_share=" in out
+    assert "epv=" in out
