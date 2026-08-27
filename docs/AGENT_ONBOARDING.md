@@ -297,6 +297,15 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - EODHD vendor (daily OHLCV):
+  `dataflows/eodhd.py` serves daily bars in the same CSV shape as
+  yfinance/moomoo, registered in the `core_stock_apis` chain
+  (`moomoo,eodhd,yfinance` by default) and as a `--vendor eodhd` preset
+  (`batch.py`/`pipeline.py`). Key `TRADINGAGENTS_EODHD_API_KEY` in `.env`.
+  Free tier 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min,
+  30+ years — replaces the moomoo K-line quota (100 calls/7 days) the value
+  screener exhausts. Tests: `tests/test_eodhd_vendor.py` (8).
+
 - 2026-08-27 `(working tree)` - Value-screener web-timeout fixes: (1)
   `moomoo_call_timeout` (default 5.0s, env `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`)
   wraps every moomoo SDK call in a wall-clock timeout (`_sdk_call`) instead of

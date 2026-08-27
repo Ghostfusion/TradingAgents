@@ -35,6 +35,13 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **EODHD vendor (daily OHLCV)** - new `dataflows/eodhd.py`
+  serves daily bars in the same CSV shape as yfinance/moomoo, wired into the
+  `core_stock_apis` chain (`moomoo,eodhd,yfinance`) and as a `--vendor eodhd`
+  preset. Key: `TRADINGAGENTS_EODHD_API_KEY`. Free tier 20 calls/day; EOD
+  plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years — replaces the moomoo
+  K-line quota (100 calls/7 days) the value screener exhausts.
+
 - [2026-08-27] **Value-screener web-timeout fixes** - (1) every moomoo SDK
   call now runs under a 5s wall-clock timeout (`TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`,
   default 5.0) instead of the SDK's own 20s per-call wait, so a degraded

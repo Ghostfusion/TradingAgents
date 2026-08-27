@@ -21,6 +21,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
+    "TRADINGAGENTS_EODHD_API_KEY": "eodhd_api_key",
     "TRADINGAGENTS_MASSIVE_API_KEY": "massive_api_key",
     "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
     "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
@@ -261,7 +262,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # routed to vendors you didn't choose. For ordered fallback, list several,
         # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
         "data_vendors": {
-            "core_stock_apis": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
+            "core_stock_apis": "moomoo,eodhd,yfinance",  # Options: alpha_vantage, yfinance, moomoo, eodhd
             "technical_indicators": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
             "fundamental_data": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
             "news_data": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo
@@ -292,6 +293,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         },
         "finnhub_api_key": None,
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
+        "eodhd_api_key": None,  # EODHD daily OHLCV (eodhd.py)
         "massive_api_key": None,  # Massive.com US data (massive.py)
         # Optional path to a Massive Flat-File day-aggregates CSV. When set, the
         # value-screener's OHLCV fetch checks it first (bulk history for ATR /

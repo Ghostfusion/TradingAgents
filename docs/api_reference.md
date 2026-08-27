@@ -34,6 +34,7 @@ in `batch.py`).
 | `TRADINGAGENTS_FINNHUB_API_KEY` | `finnhub_api_key` |
 | `TRADINGAGENTS_MASSIVE_API_KEY` | `massive_api_key` |
 | `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |
+| `TRADINGAGENTS_EODHD_API_KEY` | `eodhd_api_key` | EODHD daily OHLCV (free 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota (100 calls/7 days) |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
 | `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |
@@ -258,7 +259,7 @@ Off by default: `enable_regime`, `enable_factors`, `enable_sentiment`,
 
 Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `dataflows/interface.py`. The vendor chain per category is configured in
-`data_vendors` (default chains: `moomoo,yfinance`, `fred,moomoo`,
+`data_vendors` (default chains: `moomoo,eodhd,yfinance`, `fred,moomoo`,
 `polymarket,moomoo`, `moomoo,finnhub`, `sec_edgar`). Errors propagate through
 `dataflows/errors.py`, the router converts to sentinel strings
 (`NO_DATA_AVAILABLE`, `DATA_UNAVAILABLE` optional, `DATA_DISABLED`).
@@ -302,7 +303,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 ### 6.2 Vendor implementations per tool (exact)
 
-- stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`
+- stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only)
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`
 - macro: `fred`, `massive`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
@@ -320,7 +321,16 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - short volume (daily short-sale ratio, Massive-only): `massive`
 - all A-series/tier tools: `moomoo` only (optional)
 
-`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive`.
+`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd`.
+
+**EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — low-cost end-of-day
+OHLCV vendor: `get_stock_data_eodhd` serves daily bars as the same CSV shape
+yfinance/moomoo produce, registered in the `core_stock_apis` chain
+(`moomoo,eodhd,yfinance` by default). Free tier 20 calls/day; the EOD plan
+($19.99/mo) is 100k calls/day @ 1000/min with 30+ years history — a
+replacement for the moomoo K-line quota (100 calls/7 days) that the value
+screener exhausts. A `--vendor eodhd` preset (`batch.py`/`pipeline.py`) puts
+EODHD first in the OHLCV chain and disables the moomoo-only enrichment.
 
 **Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor:
 `get_massive_news` (`get_news` chain + dedicated tool on the news/social

@@ -1,6 +1,6 @@
 # 12. Data providers
 
-This fork uses **13 distinct data providers/sources**, in three tiers. It tells
+This fork uses **14 distinct data providers/sources**, in three tiers. It tells
 a developer exactly which vendor supplies which signal and how each is wired
 (routed `route_to_vendor` chain vs. direct import).
 
@@ -8,20 +8,20 @@ a developer exactly which vendor supplies which signal and how each is wired
 
 | Tier | Count |
 | --- | --- |
-| Routed vendors (`VENDOR_LIST`) | 8 |
+| Routed vendors (`VENDOR_LIST`) | 9 |
 | Direct-but-not-routed sources | 5 |
-| **Total distinct providers** | 13 |
+| **Total distinct providers** | 14 |
 
 ---
 
-## Tier 1 — the 8 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
+## Tier 1 — the 9 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
 
 These sit behind the analyst `@tool` calls and are chosen per-category via
 `data_vendors` chains (see `docs/developer/03-dataflow-vendors.md`).
 
 ```python
 VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
-               'finnhub', 'sec_edgar', 'moomoo', 'massive']
+               'finnhub', 'sec_edgar', 'moomoo', 'massive', 'eodhd']
 ```
 
 | # | Vendor | Provider | What it supplies |
@@ -34,11 +34,12 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G); when EDGAR fails the `get_sec_filings` tool falls back to Massive Form-4 insider activity |
 | 7 | **moomoo** | Moomoo OpenAPI (via the local OpenD gateway) | US/HK/JP/SH/SZ/AU/CA/SG/MY quotes, fundamentals, earnings calendar, economic calendar, Fed watch, capital flow, corporate actions, options, short interest, top movers |
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
+| 9 | **eodhd** | EODHD (added in this fork) | daily OHLCV (EOD Historical Data; free 20 calls/day, EOD plan 100k/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota |
 
 ### Default chains per category (from `data_vendors`)
 
 ```
-core_stock_apis      : moomoo,yfinance
+core_stock_apis      : moomoo,eodhd,yfinance
 technical_indicators : moomoo,yfinance
 fundamental_data     : moomoo,yfinance
 news_data            : moomoo,yfinance
@@ -92,7 +93,7 @@ provides.
   by the screener `--enable-float` momentum pillar. No category, no fallback
   needed.
 
-The 8 routed vendors are the well-behaved *core* feeds (prices, fundamentals,
+The 9 routed vendors are the well-behaved *core* feeds (prices, fundamentals,
 news) where resilience (fallback / TTL cache / typed errors) matters; the 5
 direct sources are one-off / optional / special-purpose inputs that do not need
 that resilience.
@@ -117,6 +118,7 @@ that resilience.
 | FRED | `FRED_API_KEY` | required for `macro_data` fred |
 | Finnhub | `TRADINGAGENTS_FINNHUB_API_KEY` | free tier, key-gated |
 | FMP | `TRADINGAGENTS_FMP_API_KEY` | optional enrich |
+| EODHD | `TRADINGAGENTS_EODHD_API_KEY` | added in this fork (daily OHLCV) |
 | Alpaca | `TRADINGAGENTS_ALPACA_API_KEY_ID` / `TRADINGAGENTS_ALPACA_API_SECRET` | optional; `enable_alpaca` |
 | Massive | `MASSIVE_API_KEY` (a.k.a. `TRADINGAGENTS_MASSIVE_API_KEY`) | added in this fork |
 | Moomoo | none in `.env` — credentials stay in OpenD (logged-in gateway) | not a key |

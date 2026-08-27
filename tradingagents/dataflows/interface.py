@@ -12,6 +12,7 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .eodhd import get_stock_data_eodhd
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -208,6 +209,7 @@ VENDOR_LIST = [
     "sec_edgar",
     "moomoo",
     "massive",
+    "eodhd",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -244,6 +246,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "moomoo": get_stock_data_moomoo,
+        "eodhd": get_stock_data_eodhd,
     },
     # technical_indicators
     "get_indicators": {

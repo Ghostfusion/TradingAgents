@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--analysts", nargs="+", default=list(ALL_ANALYSTS), choices=ALL_ANALYSTS)
     parser.add_argument("--depth", choices=list(DEPTH_LEVELS), default="deep")
-    parser.add_argument("--vendor", choices=("default", "moomoo", "yfinance"), default="moomoo")
+    parser.add_argument("--vendor", choices=("default", "moomoo", "yfinance", "eodhd"), default="moomoo")
     args = parser.parse_args(argv)
 
     vs = _load_screener()

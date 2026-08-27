@@ -110,6 +110,35 @@ VENDOR_PRESETS = {
         "earnings_surprise": "none",
         "expected_move": "none",
     },
+    # EODHD-first OHLCV (daily bars; free 20/day, EOD plan 100k/day). The
+    # moomoo K-line quota (100 calls/7 days) is the screener's bottleneck, so
+    # this preset puts EODHD first in the OHLCV chain and keeps the rest on
+    # the established free vendors.
+    "eodhd": {
+        "core_stock_apis": "eodhd,yfinance",
+        "technical_indicators": "eodhd,yfinance",
+        "fundamental_data": "yfinance",
+        "news_data": "yfinance",
+        "macro_data": "fred",
+        "prediction_markets": "polymarket",
+        "analyst_ratings": "finnhub",
+        "earnings_calendar": "finnhub",
+        "options_data": "yfinance",
+        "sec_filings": "sec_edgar",
+        "short_interest": "yfinance",
+        # moomoo-only enrichment: disabled ("none" = router disable sentinel).
+        "capital_flow": "none",
+        "smart_money": "none",
+        "economic_calendar": "none",
+        "fed_watch": "none",
+        "market_breadth": "none",
+        "revenue_breakdown": "none",
+        "corporate_actions": "none",
+        "earnings_catalyst": "none",
+        "institution_data": "none",
+        "earnings_surprise": "none",
+        "expected_move": "none",
+    },
 }
 
 

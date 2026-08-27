@@ -9,6 +9,14 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **EODHD vendor (daily OHLCV)** - `dataflows/eodhd.py` serves daily bars as
+  the same CSV shape yfinance/moomoo produce, registered in the
+  `core_stock_apis` chain (`moomoo,eodhd,yfinance` by default) and as a
+  `--vendor eodhd` preset (`batch.py`/`pipeline.py`). Key:
+  `TRADINGAGENTS_EODHD_API_KEY` (in `.env`). Free tier 20 calls/day; the EOD
+  plan ($19.99/mo) is 100k calls/day @ 1000/min with 30+ years history — a
+  replacement for the moomoo K-line quota (100 calls/7 days) that the value
+  screener exhausts. Tests: `tests/test_eodhd_vendor.py` (8).
 - **Moomoo per-call timeout + value-dip gating pre-filter + web screener
   budget** - three fixes for the value-screener web timeouts:
   - `moomoo_call_timeout` (default 5.0s, env `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`):
