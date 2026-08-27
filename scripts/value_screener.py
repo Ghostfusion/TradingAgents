@@ -936,9 +936,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-u",
         "--universe",
-        choices=("tickers", "top-losers", "heat-proxy"),
-        default="tickers",
-        help="symbol source: 'tickers' (positional/file, default), "
+        choices=("tickers", "eodhd-us", "top-losers", "heat-proxy"),
+        default="eodhd-us",
+        help="symbol source: 'eodhd-us' (EODHD full US symbol list, default), "
+        "'tickers' (positional/file), "
         "'top-losers' (moomoo intraday decliners; refreshes daily) "
         "or 'heat-proxy' (same as top-losers, US-only - the official "
         "trade-rank proxy for the proprietary in-app Heat List)",
@@ -1101,7 +1102,33 @@ def main(argv: list[str] | None = None) -> int:
     _RUN_FLOAT_CACHE.clear()
     _BENCHMARK_CACHE.clear()
     tickers = list(args.tickers)
-    if args.universe in ("top-losers", "heat-proxy"):
+    # Positional tickers always win: the eodhd-us default only applies when no
+    # explicit symbol source is given (no positional tickers, no --file).
+    if tickers:
+        args.universe = "tickers"
+    if args.universe == "eodhd-us":
+        # EODHD full US symbol list (51k symbols on the EOD plan) is the
+        # default universe: it never hits the moomoo K-line quota and covers
+        # the whole US market. Filter to common stocks, then apply the
+        # price/mcap gates in the results loop. The moomoo movers universes
+        # (top-losers / heat-proxy) remain available as the optional
+        # intraday-momentum source.
+        try:
+            from tradingagents.dataflows.eodhd import get_exchange_symbols_eodhd
+
+            symbols = get_exchange_symbols_eodhd("US")
+            common = [
+                s.get("Code")
+                for s in symbols
+                if s.get("Type") == "Common Stock" and s.get("Code")
+            ]
+            # EODHD codes are bare ("AAPL"); the rest of the pipeline expects
+            # Yahoo-style tickers, which for US common stocks is the bare code.
+            tickers = [c.upper() for c in common]
+            logger.info("eodhd-us universe: %d common stocks from EODHD", len(tickers))
+        except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
+            parser.error(f"eodhd-us universe failed: {exc}")
+    elif args.universe in ("top-losers", "heat-proxy"):
         try:
             from tradingagents.dataflows.moomoo import (
                 MoomooNotConfiguredError,
@@ -1289,7 +1316,9 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.file, encoding="utf-8") as fh:
             tickers += [ln.strip().upper() for ln in fh if ln.strip()]
     if not tickers:
-        parser.error("no tickers provided (positional args, --file, or --universe top-losers)")
+        parser.error(
+            "no tickers provided (positional args, --file, or --universe eodhd-us/top-losers)"
+        )
 
     results = []
     fmp_use = False

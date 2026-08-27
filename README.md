@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **EODHD primary + eodhd-us default universe** - the
+  `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
+  moomoo/yfinance fallback); `news_data` and `corporate_actions` also lead
+  with EODHD. New EODHD endpoints: news, splits/dividends, and the full US
+  symbol list (~18k common stocks) — the screener's default `--universe
+  eodhd-us` (no moomoo quota). moomoo movers (`top-losers`/`heat-proxy`)
+  stay as the optional intraday source. Fundamentals/technicals/intraday/
+  options are not on the EOD plan, so those chains keep moomoo/yfinance.
+
 - [2026-08-27] **EODHD vendor (daily OHLCV)** - new `dataflows/eodhd.py`
   serves daily bars in the same CSV shape as yfinance/moomoo, wired into the
   `core_stock_apis` chain (`moomoo,eodhd,yfinance`) and as a `--vendor eodhd`

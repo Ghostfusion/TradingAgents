@@ -99,3 +99,81 @@ def test_router_falls_through_to_eodhd():
         out = route_to_vendor("get_stock_data", "AAPL", "2026-08-01", "2026-08-27")
     assert "EODHD" in str(out)
     assert "2026-08-24" in str(out)
+
+
+# ---------------------------------------------------------------------------
+# News / corporate actions / exchange symbols (EOD plan endpoints)
+# ---------------------------------------------------------------------------
+
+_NEWS_ROWS = [
+    {
+        "date": "2026-08-27T17:00:46+00:00",
+        "title": "Nvidia Leads the AI Boom",
+        "content": "Megacap technology shares are showing a different response.",
+        "source": "GuruFocus",
+    }
+]
+
+_DIV_ROWS = [
+    {"date": "2026-02-09", "recordDate": "2026-02-09", "paymentDate": "2026-02-12", "value": 0.26, "currency": "USD"},
+    {"date": "2026-05-11", "recordDate": "2026-05-11", "paymentDate": "2026-05-14", "value": 0.26, "currency": "USD"},
+]
+
+_SPLIT_ROWS = [
+    {"date": "2020-08-31", "split": "4.000000/1.000000"},
+]
+
+
+def test_news_formats_headlines():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_NEWS_ROWS):
+        out = eodhd.get_news_eodhd("AAPL", "2026-08-25", "2026-08-27")
+    assert "Nvidia Leads the AI Boom" in out
+    assert "GuruFocus" in out
+    assert "EODHD" in out
+
+
+def test_news_empty_returns_no_news():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=[]):
+        out = eodhd.get_news_eodhd("ZZZZ", "2026-08-25", "2026-08-27")
+    assert "No news found" in out
+
+
+def test_corporate_actions_renders_dividends_and_splits():
+    def fake_get(path, params=None):
+        if path.startswith("div/"):
+            return _DIV_ROWS
+        if path.startswith("splits/"):
+            return _SPLIT_ROWS
+        return None
+
+    with mock.patch.object(eodhd, "_eodhd_get", side_effect=fake_get):
+        out = eodhd.get_corporate_actions_eodhd("AAPL")
+    assert "Recent dividends" in out
+    assert "0.26 USD" in out
+    assert "Stock splits" in out
+    assert "4.000000/1.000000" in out
+
+
+def test_corporate_actions_no_data_raises():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=[]), pytest.raises(
+        NoMarketDataError
+    ):
+        eodhd.get_corporate_actions_eodhd("ZZZZ")
+
+
+def test_exchange_symbols_returns_common_stocks():
+    rows = [
+        {"Code": "AAPL", "Name": "Apple", "Type": "Common Stock"},
+        {"Code": "SPY", "Name": "SPDR", "Type": "ETF"},
+    ]
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=rows):
+        out = eodhd.get_exchange_symbols_eodhd("US")
+    assert len(out) == 2
+    assert out[0]["Code"] == "AAPL"
+
+
+def test_exchange_symbols_empty_raises():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=[]), pytest.raises(
+        NoMarketDataError
+    ):
+        eodhd.get_exchange_symbols_eodhd("US")

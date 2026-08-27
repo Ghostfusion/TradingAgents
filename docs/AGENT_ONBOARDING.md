@@ -297,6 +297,18 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - EODHD primary + eodhd-us default universe:
+  `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
+  moomoo/yfinance fallback); `news_data` = `eodhd,moomoo,yfinance` and
+  `corporate_actions` = `eodhd,moomoo`. New EODHD endpoints on the EOD plan:
+  `get_news_eodhd`, `get_corporate_actions_eodhd` (splits + dividends),
+  `get_exchange_symbols_eodhd` (full US symbol list, ~18k common stocks). The
+  value screener's default `--universe` is now `eodhd-us` (no moomoo quota);
+  `top-losers`/`heat-proxy` (moomoo movers) stay optional. Fundamentals /
+  technicals / intraday / options are NOT on the EOD plan, so those chains
+  keep moomoo/yfinance first. Tests: `test_eodhd_vendor.py` (14) +
+  `test_value_screener.py` eodhd-us (1).
+
 - 2026-08-27 `(working tree)` - EODHD vendor (daily OHLCV):
   `dataflows/eodhd.py` serves daily bars in the same CSV shape as
   yfinance/moomoo, registered in the `core_stock_apis` chain

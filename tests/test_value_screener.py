@@ -471,3 +471,20 @@ def test_value_dip_prefilter_insufficient_data_returns_true():
     fabricate a skip)."""
     ohlcv = {"closes": [100.0, 101.0], "highs": [], "lows": [], "volumes": []}
     assert vs._value_dip_technical_prefilter(ohlcv) is True
+
+
+def test_eodhd_us_universe_filters_common_stocks(monkeypatch, capsys):
+    """eodhd-us universe: pulls the EODHD US symbol list, keeps only common
+    stocks, and screens them (moomoo movers stay optional)."""
+    from tradingagents.dataflows import eodhd
+
+    rows = [
+        {"Code": "AAPL", "Name": "Apple Inc.", "Type": "Common Stock"},
+        {"Code": "SPY", "Name": "SPDR S&P 500", "Type": "ETF"},
+        {"Code": "MSFT", "Name": "Microsoft Corp.", "Type": "Common Stock"},
+    ]
+    monkeypatch.setattr(eodhd, "get_exchange_symbols_eodhd", lambda market: rows)
+    vs.main(["--universe", "eodhd-us", "-l", "2", "-d", "2026-01-02", "--min-mcap", "0"])
+    out = capsys.readouterr().out
+    assert "AAPL" in out and "MSFT" in out
+    assert "SPY" not in out  # ETF filtered out

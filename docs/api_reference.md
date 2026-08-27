@@ -259,7 +259,7 @@ Off by default: `enable_regime`, `enable_factors`, `enable_sentiment`,
 
 Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `dataflows/interface.py`. The vendor chain per category is configured in
-`data_vendors` (default chains: `moomoo,eodhd,yfinance`, `fred,moomoo`,
+`data_vendors` (default chains: `eodhd,moomoo,yfinance`, `fred,moomoo`,
 `polymarket,moomoo`, `moomoo,finnhub`, `sec_edgar`). Errors propagate through
 `dataflows/errors.py`, the router converts to sentinel strings
 (`NO_DATA_AVAILABLE`, `DATA_UNAVAILABLE` optional, `DATA_DISABLED`).
@@ -323,14 +323,19 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 `VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd`.
 
-**EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — low-cost end-of-day
-OHLCV vendor: `get_stock_data_eodhd` serves daily bars as the same CSV shape
-yfinance/moomoo produce, registered in the `core_stock_apis` chain
-(`moomoo,eodhd,yfinance` by default). Free tier 20 calls/day; the EOD plan
-($19.99/mo) is 100k calls/day @ 1000/min with 30+ years history — a
-replacement for the moomoo K-line quota (100 calls/7 days) that the value
-screener exhausts. A `--vendor eodhd` preset (`batch.py`/`pipeline.py`) puts
-EODHD first in the OHLCV chain and disables the moomoo-only enrichment.
+**EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — the **primary OHLCV
+vendor** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years):
+`get_stock_data_eodhd` serves daily bars as the same CSV shape yfinance/moomoo
+produce, registered first in the `core_stock_apis` chain
+(`eodhd,moomoo,yfinance` by default) so moomoo/yfinance stay as fallbacks.
+The EOD plan also unlocks `get_news_eodhd` (news), `get_corporate_actions_eodhd`
+(splits + dividends), and `get_exchange_symbols_eodhd` (full US symbol list,
+~18k common stocks) — the screener's default `--universe eodhd-us` source.
+Fundamentals/technicals/intraday/options are **not** on the EOD plan (they
+need the $59.99 Fundamentals feed), so those chains keep moomoo/yfinance
+first. A `--vendor eodhd` preset (`batch.py`/`pipeline.py`) puts EODHD first
+in the OHLCV + news + corporate-actions chains and disables the moomoo-only
+enrichment.
 
 **Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor:
 `get_massive_news` (`get_news` chain + dedicated tool on the news/social

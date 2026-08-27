@@ -9,6 +9,18 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **EODHD as primary OHLCV vendor + eodhd-us default universe** - the
+  `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
+  moomoo/yfinance as fallbacks); `news_data` is `eodhd,moomoo,yfinance` and
+  `corporate_actions` is `eodhd,moomoo`. New EODHD endpoints on the EOD plan:
+  `get_news_eodhd` (news), `get_corporate_actions_eodhd` (splits +
+  dividends), `get_exchange_symbols_eodhd` (full US symbol list, ~18k common
+  stocks). The value screener's default `--universe` is now `eodhd-us`
+  (EODHD full-US list, no moomoo quota); `top-losers` / `heat-proxy` (moomoo
+  movers) stay as the optional intraday-momentum source. Fundamentals /
+  technicals / intraday / options are NOT on the EOD plan, so those chains
+  keep moomoo/yfinance first. Tests: `test_eodhd_vendor.py` (14) +
+  `test_value_screener.py` eodhd-us universe (1).
 - **EODHD vendor (daily OHLCV)** - `dataflows/eodhd.py` serves daily bars as
   the same CSV shape yfinance/moomoo produce, registered in the
   `core_stock_apis` chain (`moomoo,eodhd,yfinance` by default) and as a

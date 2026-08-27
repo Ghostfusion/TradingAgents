@@ -34,15 +34,15 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G); when EDGAR fails the `get_sec_filings` tool falls back to Massive Form-4 insider activity |
 | 7 | **moomoo** | Moomoo OpenAPI (via the local OpenD gateway) | US/HK/JP/SH/SZ/AU/CA/SG/MY quotes, fundamentals, earnings calendar, economic calendar, Fed watch, capital flow, corporate actions, options, short interest, top movers |
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
-| 9 | **eodhd** | EODHD (added in this fork) | daily OHLCV (EOD Historical Data; free 20 calls/day, EOD plan 100k/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota |
+| 9 | **eodhd** | EODHD (added in this fork) | **primary OHLCV** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) + news + splits/dividends + full US symbol list (~18k common stocks, the screener's default `--universe eodhd-us`) — replaces the moomoo K-line quota |
 
 ### Default chains per category (from `data_vendors`)
 
 ```
-core_stock_apis      : moomoo,eodhd,yfinance
+core_stock_apis      : eodhd,moomoo,yfinance
 technical_indicators : moomoo,yfinance
 fundamental_data     : moomoo,yfinance
-news_data            : moomoo,yfinance
+news_data            : eodhd,moomoo,yfinance
 macro_data           : fred,moomoo
 prediction_markets   : polymarket,moomoo
 analyst_ratings      : moomoo,finnhub
@@ -50,8 +50,10 @@ earnings_calendar    : moomoo,finnhub
 options_data         : moomoo,yfinance
 sec_filings          : sec_edgar
 short_interest       : moomoo,yfinance
+exchange_symbols     : eodhd
+corporate_actions    : eodhd,moomoo
 moomoo-only extras   : capital_flow, smart_money, economic_calendar, fed_watch,
-                       market_breadth, revenue_breakdown, corporate_actions,
+                       market_breadth, revenue_breakdown,
                        earnings_catalyst, institution_data, earnings_surprise,
                        expected_move
 ```

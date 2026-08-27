@@ -12,7 +12,12 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
-from .eodhd import get_stock_data_eodhd
+from .eodhd import (
+    get_corporate_actions_eodhd,
+    get_exchange_symbols_eodhd,
+    get_news_eodhd,
+    get_stock_data_eodhd,
+)
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -181,6 +186,10 @@ TOOLS_CATEGORIES = {
         "description": "Dividend history, buybacks, and stock splits",
         "tools": ["get_corporate_actions"],
     },
+    "exchange_symbols": {
+        "description": "Full exchange symbol list (EODHD; universe source)",
+        "tools": ["get_exchange_symbols"],
+    },
     "earnings_catalyst": {
         "description": "Historical earnings-day implied move, IV crush, and price reaction",
         "tools": ["get_earnings_catalyst"],
@@ -233,6 +242,7 @@ OPTIONAL_CATEGORIES = {
     "market_breadth",
     "revenue_breakdown",
     "corporate_actions",
+    "exchange_symbols",
     "earnings_catalyst",
     "institution_data",
     "earnings_surprise",
@@ -295,6 +305,7 @@ VENDOR_METHODS = {
         "finnhub": get_news_finnhub,
         "moomoo": get_news_moomoo,
         "massive": get_news_massive,
+        "eodhd": get_news_eodhd,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
@@ -364,6 +375,10 @@ VENDOR_METHODS = {
     "get_corporate_actions": {
         "moomoo": get_corporate_actions_moomoo,
         "massive": get_corporate_actions_massive,
+        "eodhd": get_corporate_actions_eodhd,
+    },
+    "get_exchange_symbols": {
+        "eodhd": get_exchange_symbols_eodhd,
     },
     "get_earnings_catalyst": {
         "moomoo": get_earnings_catalyst_moomoo,

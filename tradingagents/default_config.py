@@ -262,10 +262,14 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # routed to vendors you didn't choose. For ordered fallback, list several,
         # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
         "data_vendors": {
-            "core_stock_apis": "moomoo,eodhd,yfinance",  # Options: alpha_vantage, yfinance, moomoo, eodhd
+            # EODHD is the primary OHLCV source (100k calls/day @ 1000/min on
+            # the EOD plan); moomoo/yfinance stay as fallbacks. EODHD cannot
+            # serve fundamentals/technicals/intraday/options on the EOD plan,
+            # so those chains keep moomoo/yfinance first.
+            "core_stock_apis": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo, eodhd
             "technical_indicators": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
             "fundamental_data": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
-            "news_data": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo
+            "news_data": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub",  # Options: finnhub (needs key), moomoo
@@ -273,6 +277,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "options_data": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
             "sec_filings": "sec_edgar",  # Options: sec_edgar (free, no key)
             "short_interest": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
+            "exchange_symbols": "eodhd",  # Options: eodhd (EOD plan)
             # moomoo-only enrichment (Tier 1/2). Optional — failures degrade to
             # a DATA_UNAVAILABLE sentinel and the run proceeds without the signal.
             "capital_flow": "moomoo",
@@ -281,7 +286,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "fed_watch": "moomoo",
             "market_breadth": "moomoo",
             "revenue_breakdown": "moomoo",
-            "corporate_actions": "moomoo",
+            "corporate_actions": "eodhd,moomoo",
             "earnings_catalyst": "moomoo",
             "institution_data": "moomoo",
             "earnings_surprise": "moomoo",

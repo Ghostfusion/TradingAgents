@@ -144,3 +144,90 @@ def get_stock_data_eodhd(symbol: str, start_date: str, end_date: str) -> str:
         f"# Data retrieved via EODHD on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
     return header + "\n".join(lines)
+
+
+def get_news_eodhd(symbol: str, start_date: str, end_date: str) -> str:
+    """News for a ticker via EODHD's ``/news`` endpoint (works on the EOD plan).
+
+    Renders each article with headline, date, source, and a content snippet —
+    the same shape the other news vendors produce so the analyst tool loops
+    consume it unchanged.
+    """
+    datetime.strptime(start_date, "%Y-%m-%d")
+    datetime.strptime(end_date, "%Y-%m-%d")
+    data = _eodhd_get(
+        "news",
+        {
+            "s": symbol,
+            "from": start_date,
+            "to": end_date,
+            "limit": 20,
+            "fmt": "json",
+        },
+    )
+    if not isinstance(data, list) or not data:
+        return f"No news found for {symbol} from {start_date} to {end_date} (EODHD)"
+    lines = [f"## {symbol} News — EODHD", ""]
+    for article in data[:20]:
+        title = article.get("title") or "(no title)"
+        content = article.get("content") or ""
+        news_time = str(article.get("date") or "")[:16]
+        source = article.get("source") or ""
+        if content:
+            content = str(content).replace("\n", " ").strip()[:200]
+        lines.append(f"- **{title}**  ({news_time} {source})")
+        if content:
+            lines.append(f"  {content}")
+    return "\n".join(lines)
+
+
+def get_corporate_actions_eodhd(ticker: str) -> str:
+    """Dividend history + stock splits via EODHD's ``/div`` and ``/splits``.
+
+    Both endpoints work on the EOD plan. Renders the same shape as the moomoo
+    corporate-actions vendor so the analyst tool loops consume it unchanged.
+    """
+    lines = [f"## Corporate Actions — {ticker} (EODHD)", ""]
+    try:
+        div = _eodhd_get(f"div/{ticker}", {"fmt": "json"})
+        if isinstance(div, list) and div:
+            lines.append("### Recent dividends")
+            for d in div[-5:]:  # newest last in EODHD's ascending order
+                lines.append(
+                    f"- {d.get('date', '?')} | ex-date {d.get('date', '?')} "
+                    f"| record {d.get('recordDate', '?')} | payable {d.get('paymentDate', '?')} "
+                    f"| value {d.get('value', '?')} {d.get('currency', '')}"
+                )
+    except Exception:  # noqa: BLE001 - dividends degrade independently
+        pass
+    try:
+        sp = _eodhd_get(f"splits/{ticker}", {"fmt": "json"})
+        if isinstance(sp, list) and sp:
+            lines.append("")
+            lines.append("### Stock splits")
+            for s in sp[-5:]:
+                lines.append(f"- {s.get('date', '?')} | {s.get('split', '?')}")
+    except Exception:  # noqa: BLE001 - splits degrade independently
+        pass
+    if len(lines) == 2:
+        raise NoMarketDataError(ticker, ticker, detail="no corporate action data")
+    lines.append("")
+    lines.append(
+        "Interpretation: consistent dividend growth and share buybacks signal "
+        "management confidence and shareholder return discipline; splits are "
+        "usually cosmetic (note adjustment factors)."
+    )
+    return "\n".join(lines)
+
+
+def get_exchange_symbols_eodhd(market: str = "US") -> list[dict]:
+    """The full symbol list for an exchange via ``/exchange-symbol-list``.
+
+    Works on the EOD plan (verified: 51,198 US symbols). Returns
+    ``[{Code, Name, Country, Exchange, Currency, Type, Isin}]`` so the
+    screener can build a universe without the moomoo movers rank.
+    """
+    data = _eodhd_get(f"exchange-symbol-list/{market}", {"fmt": "json"})
+    if not isinstance(data, list) or not data:
+        raise NoMarketDataError(market, market, detail="no exchange symbols")
+    return data

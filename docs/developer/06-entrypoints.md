@@ -42,12 +42,14 @@ Outputs `reports/pipeline_<ts>.md` (ranked candidates + per-symbol) and
 
 ```
 py -3.12 scripts/value_screener.py AAPL MSFT GOOG -d 2026-06-30
+py -3.12 scripts/value_screener.py --universe eodhd-us --scan all --alloc
 py -3.12 scripts/value_screener.py --universe top-losers --scan all --alloc
 py -3.12 scripts/value_screener.py --file universe.txt --limit 10 --rank composite
 ```
 
 Flags: `tickers` `-f/--file` `-d/--date` `-l/--limit`
-`-u/--universe` `--market` `-n/--movers-count` `--min-mcap` `--price-min`
+`-u/--universe` (eodhd-us default | tickers | top-losers | heat-proxy)
+`--market` `-n/--movers-count` `--min-mcap` `--price-min`
 `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap`
 `--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
@@ -58,10 +60,13 @@ Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F,
 Beneish M, Altman Z, Net-Net + trend-pullback / breakout / momentum / swing /
 vcp / value-dip scans.
 
-On a movers universe (`--universe top-losers/heat-proxy`), the value-dip gating
-pass runs a cheap OHLCV-only pre-filter (`_value_dip_technical_prefilter`: RSI
-<= 35, %b <= 0.10, stop <= 2%) before the heavy fundamentals fetch, so
-non-candidates cost ~1 vendor call instead of ~7 (statements + cashflow).
+**Universe**: `eodhd-us` (the default) pulls the EODHD full US symbol list
+(~18k common stocks, no moomoo quota); `top-losers` / `heat-proxy` use the
+moomoo intraday movers rank (optional, quota-limited). On a movers universe,
+the value-dip gating pass runs a cheap OHLCV-only pre-filter
+(`_value_dip_technical_prefilter`: RSI <= 35, %b <= 0.10, stop <= 2%) before
+the heavy fundamentals fetch, so non-candidates cost ~1 vendor call instead
+of ~7 (statements + cashflow).
 
 ## 6.5 `scripts/*` utilities
 
