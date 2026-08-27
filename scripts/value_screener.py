@@ -837,12 +837,45 @@ def composite_scores(results: list, closes_map: dict) -> dict:
     return composite_score(factors)
 
 
-def allocation_block(scores: dict) -> str:
-    """Capped value-proportional allocation text (V3)."""
+def allocation_block(scores: dict, returns_by_name: dict | None = None) -> str:
+    """Capped value-proportional allocation text (V3).
+
+    ``returns_by_name`` (ticker -> daily return series) enables the opt-in
+    correlation-aware penalty (config ``enable_correlation_penalty``) before
+    the caps; names without a series are left unchanged.
+    """
     from tradingagents.dataflows.config import get_config
     from tradingagents.strategies.portfolio import allocation_block as _ab
 
-    return _ab(scores, cfg=get_config())
+    return _ab(scores, cfg=get_config(), returns_by_name=returns_by_name)
+
+
+def _alloc_returns(results: list) -> dict:
+    """Daily return series per result ticker for the correlation-aware alloc.
+
+    Reuses the run's OHLCV cache (scan modes already fetched the series) and
+    falls back to a guarded fetch; names without >=3 aligned closes are left
+    out (correlation never fabricates).
+    """
+    out: dict = {}
+    for r in results:
+        sym = (r.get("ticker") or "").upper()
+        ohlcv = _RUN_OHLCV_CACHE.get(sym)
+        if ohlcv is None:
+            try:
+                ohlcv = _fetch_ohlcv(sym)
+                _RUN_OHLCV_CACHE[sym] = ohlcv
+            except Exception:  # noqa: BLE001 - alloc degrades to uncorrelated
+                ohlcv = None
+        closes = (ohlcv or {}).get("closes") or []
+        rets = []
+        for i in range(1, len(closes)):
+            prev = closes[i - 1]
+            if prev:
+                rets.append(closes[i] / prev - 1.0)
+        if len(rets) >= 3:
+            out[sym] = rets
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1534,7 +1567,8 @@ def main(argv: list[str] | None = None) -> int:
     alloc_extra = ""
     if args.alloc and results:
         alloc_extra = allocation_block(
-            {r["ticker"]: r.get("earnings_yield") or 0.001 for r in results}
+            {r["ticker"]: r.get("earnings_yield") or 0.001 for r in results},
+            returns_by_name=_alloc_returns(results),
         )
         markdown = _watchlist_markdown(ranked) + "\n\n" + alloc_extra
     else:
@@ -1548,8 +1582,6 @@ def main(argv: list[str] | None = None) -> int:
             markdown = markdown.rstrip() + "\n\n" + sector_table
             print(sector_table)
     print_watchlist(ranked)
-    if alloc_extra:
-        print(alloc_extra)
     if alloc_extra:
         print(alloc_extra)
     try:

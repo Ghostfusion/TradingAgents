@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-26 `(working tree)` - Correlation-aware allocation wired into the
+  allocation plan (industry-practice item 1): `portfolio.allocation_block` and
+  the `get_allocation` tool now accept `returns_by_name` and, when
+  `enable_correlation_penalty` is on (default False, + `correlation_threshold`
+  0.6 / `correlation_penalty_frac` 0.3), down-weight names whose average
+  pairwise correlation with the rest of the book exceeds the threshold before
+  the per-name/per-sector caps; the screener's `--alloc` builds return series
+  from the run's OHLCV cache and passes them through. Names without a
+  measurable series are never penalized (no fabrication).
+
 - 2026-08-26 `(working tree)` - Industry-practice suggestions implemented (7
   items): correlation-aware allocation (`portfolio.correlation_penalty`),
   book-level correlated stress (`book_risk.book_correlated_stress`, surfaced

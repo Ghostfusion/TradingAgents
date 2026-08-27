@@ -399,3 +399,38 @@ def test_sector_table_markdown_renders_full_ranking():
     # no ranking -> empty (never a broken table)
     assert vs._sector_table_markdown(None) == ""
     assert vs._sector_table_markdown({}) == ""
+
+
+def test_alloc_returns_builds_daily_returns_from_closes():
+    """_alloc_returns converts cached closes into daily return series and
+    skips names without enough history (correlation never fabricates)."""
+    vs._RUN_OHLCV_CACHE.clear()
+    vs._RUN_OHLCV_CACHE["AAA"] = {"closes": [100.0, 101.0, 99.0, 102.0, 101.5]}
+    vs._RUN_OHLCV_CACHE["BBB"] = {"closes": [50.0, 51.0]}
+    out = vs._alloc_returns([{"ticker": "AAA"}, {"ticker": "BBB"}])
+    assert "AAA" in out
+    assert len(out["AAA"]) == 4
+    assert abs(out["AAA"][0] - 0.01) < 1e-9  # 101/100 - 1
+    assert "BBB" not in out  # only 1 return < 3 required
+
+
+def test_alloc_returns_falls_back_to_guarded_fetch():
+    """A failed fetch degrades to no series (never raises into the alloc)."""
+    vs._RUN_OHLCV_CACHE.clear()
+    with mock.patch.object(vs, "_fetch_ohlcv", return_value={"closes": []}):
+        out = vs._alloc_returns([{"ticker": "ZZZ"}])
+    assert out == {}
+
+
+def test_allocation_block_wrapper_passes_returns_through():
+    """The screener wrapper forwards returns_by_name to the strategy function;
+    the correlation note appears only when the config gate is on."""
+    from tradingagents.dataflows.config import set_config
+
+    rets = {"A": [1.0, 1.1, 0.9, 1.05, 1.2, 0.95, 1.1, 1.0, 1.15, 0.9, 1.05, 1.2, 0.95, 1.1, 1.0, 1.15, 0.9, 1.05, 1.2, 0.95, 1.1, 1.0, 1.15, 0.9, 1.05, 1.2, 0.95, 1.1, 1.0, 1.15, 0.9, 1.05, 1.2, 0.95, 1.1, 1.0, 1.15, 0.9, 1.05, 1.2], "B": [0.5, 0.6, 0.4, 0.55, 0.7, 0.45, 0.6, 0.5, 0.65, 0.4, 0.55, 0.7, 0.45, 0.6, 0.5, 0.65, 0.4, 0.55, 0.7, 0.45, 0.6, 0.5, 0.65, 0.4, 0.55, 0.7, 0.45, 0.6, 0.5, 0.65, 0.4, 0.55, 0.7, 0.45, 0.6, 0.5, 0.65, 0.4, 0.55, 0.7]}
+    set_config({"enable_correlation_penalty": False})
+    text = vs.allocation_block({"A": 0.5, "B": 0.5}, returns_by_name=rets)
+    assert "correlation-penalized" not in text
+    set_config({"enable_correlation_penalty": True, "correlation_threshold": 0.4})
+    text = vs.allocation_block({"A": 0.5, "B": 0.5}, returns_by_name=rets)
+    assert "correlation-penalized" in text

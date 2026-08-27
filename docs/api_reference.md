@@ -79,6 +79,9 @@ in `batch.py`).
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 6000 |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
+| `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
+| `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
+| `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` | `correlation_penalty_frac` | weight cut for a penalized name, renormalized across the book (default 0.3) |
 | `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
 | `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |
 | `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` |
@@ -145,6 +148,13 @@ per-trade cap;
 `risk_stress_shock_pct_1` / `risk_stress_shock_pct_2` (R2 scenario shocks, def -10%/-30%)
 `evaluate_cost_bps=10`, `calibration_min_n=5`, `consensus_seeds=1`,
 `max_book_names=10`, `max_name_weight=0.25`, `risk_audit_enabled` default True.
+Correlation-aware allocation (industry-practice item 1):
+`enable_correlation_penalty` (default **False**) + `correlation_threshold` (0.6)
++ `correlation_penalty_frac` (0.3) — when on, `allocation_block` and the
+`get_allocation` tool down-weight names whose average pairwise correlation
+with the rest of the book exceeds the threshold before the per-name/per-sector
+caps (risk-parity style concentration control; names without a measurable
+return series are never penalized).
 Catalyst: `catalyst_hard_block_days=0` - when > 0, an earnings print inside
 that many days makes the risk governor **REJECT** new risk (section 5).
 
@@ -390,7 +400,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
 | `get_ratios(ticker, date?)` | `strategies.ratios.compute_ratios` (local derivation; Massive plan-gated cross-check via `get_fundamentals`) | fundamentals | computed EV/EBITDA, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, cash ratio, dividend yield, FCF, market cap (free, no paid plan; missing inputs n/a) |
 | `get_exit_check(entry, close, atr)` | `strategies.exits.exit_check` | market | stop-to-breakeven, ATR target, holding action |
-| `get_allocation(scores, sector_map?)` | `strategies.portfolio.adjust_for_caps` | fundamentals | cap-respecting book allocation |
+| `get_allocation(scores, sector_map?, returns_by_name?)` | `strategies.portfolio.adjust_for_caps` (+ `correlation_penalty` when `enable_correlation_penalty` is on and return series are provided) | fundamentals | cap-respecting book allocation; optionally correlation-penalized (down-weights names whose avg pairwise correlation with the book exceeds the threshold) |
 | `get_regime_components(ticker)` | `strategies.regime` | market | vol_pct / trend / chop / regime label breakdown |
 | `get_consensus(ratings)` | `strategies.consensus` | PM tool + injected | numeric agreement -> high/low consensus |
 | `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |

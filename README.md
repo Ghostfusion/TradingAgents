@@ -35,6 +35,17 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-26] **Correlation-aware allocation** - the allocation plan
+  (`portfolio.allocation_block`, the `get_allocation` analyst tool, and the
+  screener's `--alloc`) now accepts return series and, when
+  `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY=true`, down-weights names whose
+  average pairwise correlation with the rest of the book exceeds
+  `TRADINGAGENTS_CORRELATION_THRESHOLD` (default 0.6) by
+  `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` (default 0.3) before the
+  per-name/per-sector caps - risk-parity style concentration control
+  (industry-practice item 1). Names without a measurable return series are
+  never penalized (no fabrication).
+
 - [2026-08-24] **Per-role max output tokens + density directives** - new env keys
   `TRADINGAGENTS_MAX_OUTPUT_TOKENS(_QUICK/_DEEP)` cap the LLM output via
   `max_tokens` (quick=analysts/researchers/debaters/trader 6000, deep=RM/PM

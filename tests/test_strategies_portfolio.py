@@ -1,8 +1,7 @@
 """Item 1 unit tests: correlation-aware allocation (portfolio.py)."""
 
-import pytest
-
 from tradingagents.strategies.portfolio import (
+    allocation_block,
     correlation_penalty,
     mean_correlation,
     value_ratio_weights,
@@ -68,3 +67,49 @@ def test_correlation_penalty_missing_series_unchanged():
 def test_value_ratio_weights_baseline():
     w = value_ratio_weights({"X": 100, "Y": 100})
     assert abs(w["X"] - 0.5) < 1e-9 and abs(w["Y"] - 0.5) < 1e-9
+
+
+def test_allocation_block_gate_off_ignores_returns():
+    # Gate off: returns_by_name is accepted but never applied (no note).
+    rets = _returns_common_factor()
+    text = allocation_block(
+        {"A": 0.4, "B": 0.4, "C": 0.2},
+        cfg={"max_name_weight": 0.5, "enable_correlation_penalty": False},
+        returns_by_name=rets,
+    )
+    assert "correlation-penalized" not in text
+    assert "- A: 40.0%" in text
+
+
+def test_allocation_block_gate_on_penalizes_high_corr():
+    # Gate on: A/B (highly correlated with the book) are down-weighted and the
+    # block says so; C (the diversifier) gains relative weight.
+    rets = _returns_common_factor()
+    text = allocation_block(
+        {"A": 0.4, "B": 0.4, "C": 0.2},
+        cfg={
+            "max_name_weight": 0.5,
+            "enable_correlation_penalty": True,
+            "correlation_threshold": 0.5,
+            "correlation_penalty_frac": 0.5,
+        },
+        returns_by_name=rets,
+    )
+    assert "correlation-penalized" in text
+    # A and B (highly correlated with the book) were cut 40% -> 20% each, C
+    # (the diversifier) kept 20%, then the book renormalized to 33.3% each -
+    # the correlated names no longer dominate the book.
+    assert "- A: 33.3%" in text
+    assert "- B: 33.3%" in text
+    assert "- C: 33.3%" in text
+
+
+def test_allocation_block_gate_on_missing_series_unchanged():
+    # Only A has a series; B has none -> B is never penalized (no fabrication).
+    text = allocation_block(
+        {"A": 0.5, "B": 0.5},
+        cfg={"max_name_weight": 0.5, "enable_correlation_penalty": True},
+        returns_by_name={"A": [1, 2, 3, 4, 5]},
+    )
+    assert "- A: 50.0%" in text
+    assert "- B: 50.0%" in text

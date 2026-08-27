@@ -436,6 +436,53 @@ def test_allocation_caps_weight():
     assert all(x <= 25.0 for x in pcts)
 
 
+def _corr_returns():
+    # A and B track a common factor tightly; C is independent (a diversifier).
+    base = [1.0 + 0.1 * ((i * 7) % 5) for i in range(40)]
+    return {
+        "A": [b + 0.001 * i for i, b in enumerate(base)],
+        "B": [b * 1.01 for b in base],
+        "C": [0.5 + 0.1 * ((i * 3) % 5) for i in range(40)],
+    }
+
+
+def test_allocation_correlation_penalty_when_enabled():
+    from tradingagents.dataflows.config import set_config
+
+    set_config(
+        {
+            "enable_correlation_penalty": True,
+            "correlation_threshold": 0.4,
+            "correlation_penalty_frac": 0.5,
+        }
+    )
+    out = T.get_allocation.invoke(
+        {
+            "scores": {"A": 50, "B": 30, "C": 20},
+            "returns_by_name": _corr_returns(),
+            "max_name": 0.5,
+        }
+    )
+    assert "correlation-penalized" in out
+    # A (avg corr ~0.50) was cut below its raw 50% share; C (corr ~0.00) rose
+    # above its raw 20% share after renormalization.
+    assert "- A: 4" in out  # 41.7%
+    assert "- C: 3" in out  # 33.3%
+
+
+def test_allocation_correlation_penalty_gate_off():
+    # Default gate off: returns_by_name is accepted but never applied.
+    out = T.get_allocation.invoke(
+        {
+            "scores": {"A": 50, "B": 30, "C": 20},
+            "returns_by_name": _corr_returns(),
+            "max_name": 0.5,
+        }
+    )
+    assert "correlation-penalized" not in out
+    assert "- A: 50.0%" in out
+
+
 def test_consensus_high_when_aligned():
     out = T.get_consensus.invoke({"ratings": ["Buy", "Buy", "Buy"]})
     assert "level=high" in out

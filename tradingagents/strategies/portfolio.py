@@ -56,17 +56,38 @@ def adjust_for_caps(
     return out
 
 
-def allocation_block(scores: dict, cfg: dict | None = None, sector_map: dict | None = None) -> str:
+def allocation_block(
+    scores: dict,
+    cfg: dict | None = None,
+    sector_map: dict | None = None,
+    returns_by_name: dict | None = None,
+) -> str:
     """Capped value-proportional allocation plan as a short markdown block.
 
     cfg keys: max_name_weight (0.25), sector_cap_limit (0.35),
-    max_book_names (10). With a sector_map, per-sector caps apply too.
+    max_book_names (10), enable_correlation_penalty (False),
+    correlation_threshold (0.6), correlation_penalty_frac (0.3). With a
+    sector_map, per-sector caps apply too. When ``returns_by_name`` is
+    provided AND ``enable_correlation_penalty`` is on, names whose average
+    pairwise correlation with the rest of the book exceeds the threshold are
+    down-weighted before the caps (risk-parity style concentration control,
+    industry-practice item 1). Names without a measurable return series are
+    left unchanged - correlation never fabricates.
     """
     cfg = cfg or {}
     max_n = float(cfg.get("max_name_weight", 0.25))
     sec_cap = float(cfg.get("sector_cap_limit", 0.35))
     min_n = int(cfg.get("max_book_names", 10))
     w = value_ratio_weights(scores, min_weight=0.0)
+    corr_note = ""
+    if returns_by_name and cfg.get("enable_correlation_penalty"):
+        w = correlation_penalty(
+            w,
+            returns_by_name,
+            threshold=float(cfg.get("correlation_threshold", 0.6)),
+            penalty=float(cfg.get("correlation_penalty_frac", 0.3)),
+        )
+        corr_note = " · correlation-penalized"
     if sector_map:
         w = adjust_for_caps(w, sector_map, sector_cap_limit=sec_cap, max_name=max_n)
     else:
@@ -80,6 +101,8 @@ def allocation_block(scores: dict, cfg: dict | None = None, sector_map: dict | N
         f"allocated: {info['allocated']:.1%} · names: {info['active']}/{info['names']}"
         f" · min-names-ok: {info['min_names_satisfied']}"
     )
+    if corr_note:
+        lines.append(corr_note)
     return "\n".join(lines)
 
 

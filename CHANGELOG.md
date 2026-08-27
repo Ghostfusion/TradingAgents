@@ -9,6 +9,17 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Correlation-aware allocation wired into the allocation plan** -
+  `portfolio.allocation_block` and the `get_allocation` analyst tool accept
+  `returns_by_name` and, when `enable_correlation_penalty` is on (default
+  False; `correlation_threshold` 0.6 / `correlation_penalty_frac` 0.3),
+  down-weight names whose average pairwise correlation with the rest of the
+  book exceeds the threshold before the per-name/per-sector caps. The
+  screener's `--alloc` builds return series from the run's OHLCV cache and
+  passes them through; names without a measurable series are never penalized.
+  Env: `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` /
+  `TRADINGAGENTS_CORRELATION_THRESHOLD` / `TRADINGAGENTS_CORRELATION_PENALTY_FRAC`.
+  Tests: portfolio + analysis_tools + value_screener.
 - **Industry-practice suggestions implemented (7 items)** -
   - Correlation-aware allocation: `portfolio.correlation_penalty` /
     `mean_correlation` down-weight names highly correlated with the book

@@ -101,6 +101,12 @@ _ENV_OVERRIDES = {
     # Pre-market review (docs/pre_market_review.md): opt-in gate for the
     # in-batch same-night catalyst/quality re-check (choice (a)).
     "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
+    # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
+    # item 1): when on, the allocation plan down-weights names whose average
+    # pairwise correlation with the rest of the book exceeds the threshold.
+    "TRADINGAGENTS_ENABLE_CORRELATION_PENALTY": "enable_correlation_penalty",
+    "TRADINGAGENTS_CORRELATION_THRESHOLD": "correlation_threshold",
+    "TRADINGAGENTS_CORRELATION_PENALTY_FRAC": "correlation_penalty_frac",
 }
 
 
@@ -396,6 +402,16 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "tranche_stop_mult": 1.5,
         "tranche_risk_pct": 0.015,
         "tranche_account": 100_000.0,
+        # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
+        # item 1). When on, allocation_block / get_allocation down-weight names
+        # whose average pairwise correlation with the rest of the book exceeds
+        # ``correlation_threshold`` by ``correlation_penalty_frac`` before the
+        # per-name/per-sector caps (risk-parity style concentration control).
+        # Off by default - preserves current behavior; names without a
+        # measurable return series are never penalized (no fabrication).
+        "enable_correlation_penalty": False,
+        "correlation_threshold": 0.6,
+        "correlation_penalty_frac": 0.3,
         # Liquidity / ownership gate (Strategies/risk2.md). When on, the risk
         # governor REJECTs ILLIQUID names and WARNs on CAUTION ones using the
         # computed Amihud ILLIQ / float turnover / days-to-absorb / IWF / HHI.

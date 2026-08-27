@@ -156,6 +156,17 @@ fetches closes for `_basket_cvar`), and down-weight names that are highly
 correlated with the rest of the book (a simple "correlation penalty" on the
 weight). This is the highest-value portfolio-construction gap.
 
+**Status: implemented + wired.** `portfolio.correlation_penalty` /
+`mean_correlation` (commit 0cb22e3) compute the average pairwise correlation
+of each name vs the rest of the book and down-weight names above the
+threshold. The allocation plan now consumes it: `portfolio.allocation_block`
+and the `get_allocation` analyst tool accept `returns_by_name` and apply the
+penalty before the caps when `enable_correlation_penalty` is on (default
+False; `correlation_threshold` 0.6 / `correlation_penalty_frac` 0.3); the
+screener's `--alloc` builds return series from the run's OHLCV cache and passes
+them through. Names without a measurable return series are never penalized
+(no fabrication).
+
 ---
 
 ## 7. LLM hallucination / no-fabrication
@@ -190,5 +201,16 @@ value). This is a "claim-vs-computed" audit.
 | 7 | **Scheduled strategy-quality report** (run evaluate.py on the ledger, feed PM) | Evaluation | Small |
 
 All 7 fit the project's deterministic-first, no-fabrication philosophy. Items
-2, 3, 5, 7 are small; 1, 4, 6 are medium. No changes made — this is a
-suggestions document for your review.
+2, 3, 5, 7 are small; 1, 4, 6 are medium.
+
+**Implementation status (all 7 shipped):**
+
+| # | Suggestion | Status |
+|---|---|---|
+| 1 | Correlation-aware allocation | ✅ `portfolio.correlation_penalty` + wired into `allocation_block` / `get_allocation` / screener `--alloc` (opt-in `enable_correlation_penalty`) |
+| 2 | Book-level stress test | ✅ `book_risk.book_correlated_stress`, surfaced in the risk snapshot + report risk-gate block |
+| 3 | Liquidity-aware cost model | ✅ `exits.net_of_cost` / `evaluate.net_returns` accept `illiq` (Amihud) |
+| 4 | Paper-trading ledger | ✅ `pre_market.ledger_track_record` (win rate / avg realized) + `scripts/strategy_quality_report.py` reads it |
+| 5 | Limit-order directive in pre-market review | ✅ `pre_market_review.py` thin-liquidity directive |
+| 6 | Claim-vs-computed audit | ✅ `reporting.audit_decision_numbers` (opt-in `enable_decision_audit`) |
+| 7 | Scheduled strategy-quality report | ✅ `scripts/strategy_quality_report.py` (net-of-cost Sharpe / drawdown / win rate) |

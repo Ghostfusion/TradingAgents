@@ -1131,18 +1131,36 @@ def get_allocation(
     sector_map: Annotated[dict | None, "name to sector; optional, enables per-sector caps"] = None,
     max_name: Annotated[float, "max single-name weight, default 0.25"] = 0.25,
     sector_cap_limit: Annotated[float, "max per-sector weight, default 0.35"] = 0.35,
+    returns_by_name: Annotated[
+        dict | None,
+        "name -> daily return series (optional). When provided and the "
+        "enable_correlation_penalty config is on, names whose average pairwise "
+        "correlation with the rest of the book exceeds the threshold are "
+        "down-weighted before the caps (risk-parity concentration control).",
+    ] = None,
 ) -> str:
     "Cap-respecting, value-proportional allocation across a book (hard per-name and per-sector caps)."
     try:
+        from tradingagents.dataflows.config import get_config
         from tradingagents.strategies.portfolio import (
             adjust_for_caps,
             capped_weights,
+            correlation_penalty,
             summary,
             value_ratio_weights,
         )
     except Exception as exc:  # noqa: BLE001
         return f"allocation unavailable: {exc}"
     w = value_ratio_weights(scores, min_weight=0.0)
+    corr_note = ""
+    if returns_by_name and get_config().get("enable_correlation_penalty"):
+        w = correlation_penalty(
+            w,
+            returns_by_name,
+            threshold=float(get_config().get("correlation_threshold", 0.6)),
+            penalty=float(get_config().get("correlation_penalty_frac", 0.3)),
+        )
+        corr_note = " · correlation-penalized"
     if sector_map:
         w = adjust_for_caps(
             w, sector_map, sector_cap_limit=float(sector_cap_limit), max_name=float(max_name)
@@ -1155,6 +1173,8 @@ def get_allocation(
         lines.append(f"- {name}: {wt:.1%}")
     lines.append("")
     lines.append(f"allocated: {info['allocated']:.1%} active_names: {info['active']}")
+    if corr_note:
+        lines.append(corr_note)
     return "\n".join(lines)
 
 
