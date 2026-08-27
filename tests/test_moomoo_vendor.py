@@ -17,6 +17,7 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
+    VendorRateLimitError,
 )
 from tradingagents.dataflows.moomoo import (
     MoomooNotConfiguredError,
@@ -810,6 +811,52 @@ class MoomooTopMoversTests(unittest.TestCase):
             self.assertRaises(MoomooNotConfiguredError),
         ):
             moomoo.get_top_movers_moomoo(count=1)
+
+
+class MoomooSdkCallTimeoutTests(unittest.TestCase):
+    """The per-call wall-clock timeout wrapper (_sdk_call)."""
+
+    def test_fast_callable_returns_result(self):
+        out = moomoo._sdk_call(lambda: (0, "ok"), timeout=2.0)
+        self.assertEqual(out, (0, "ok"))
+
+    def test_slow_callable_raises_rate_limit_after_timeout(self):
+        import time
+
+        def slow():
+            time.sleep(10)
+            return (0, "late")
+
+        t0 = time.time()
+        with self.assertRaises(VendorRateLimitError):
+            moomoo._sdk_call(slow, timeout=0.3)
+        self.assertLess(time.time() - t0, 5.0)  # returned well before the call finished
+
+    def test_exception_in_callable_propagates(self):
+        def boom():
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            moomoo._sdk_call(boom, timeout=2.0)
+
+    def test_timeout_from_config(self):
+        import time
+
+        set_config({"moomoo_call_timeout": 0.2})
+        t0 = time.time()
+        with self.assertRaises(VendorRateLimitError):
+            moomoo._sdk_call(lambda: time.sleep(10))
+        self.assertLess(time.time() - t0, 5.0)
+
+    def test_timeout_closes_context(self):
+        import time
+
+        with (
+            mock.patch.object(moomoo, "_close_ctx") as close_mock,
+            self.assertRaises(VendorRateLimitError),
+        ):
+            moomoo._sdk_call(lambda: time.sleep(10), timeout=0.2)
+        close_mock.assert_called_once()
 
 
 if __name__ == "__main__":

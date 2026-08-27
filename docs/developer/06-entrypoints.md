@@ -58,6 +58,11 @@ Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F,
 Beneish M, Altman Z, Net-Net + trend-pullback / breakout / momentum / swing /
 vcp / value-dip scans.
 
+On a movers universe (`--universe top-losers/heat-proxy`), the value-dip gating
+pass runs a cheap OHLCV-only pre-filter (`_value_dip_technical_prefilter`: RSI
+<= 35, %b <= 0.10, stop <= 2%) before the heavy fundamentals fetch, so
+non-candidates cost ~1 vendor call instead of ~7 (statements + cashflow).
+
 ## 6.5 `scripts/*` utilities
 
 - `action_report.py` — conditional action report: flags basket names on

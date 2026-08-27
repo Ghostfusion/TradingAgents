@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - Value-screener web-timeout fixes: (1)
+  `moomoo_call_timeout` (default 5.0s, env `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`)
+  wraps every moomoo SDK call in a wall-clock timeout (`_sdk_call`) instead of
+  the SDK's own 20s `ReqInfo.wait()`; (2) the value-dip gating pass pre-filters
+  on cheap OHLCV-only technicals (`_value_dip_technical_prefilter`: RSI <= 35,
+  %b <= 0.10, stop <= 2%) before the heavy fundamentals fetch, dropping ~7
+  vendor calls/symbol to 1 for non-candidates; (3) the web `run_screener`
+  budget is 2400s and a timed-out capability kills its whole process tree
+  (`taskkill /F /T`) so no orphaned process holds a moomoo connection.
+
 - 2026-08-26 `(working tree)` - Correlation-aware allocation wired into the
   allocation plan (industry-practice item 1): `portfolio.allocation_block` and
   the `get_allocation` tool now accept `returns_by_name` and, when

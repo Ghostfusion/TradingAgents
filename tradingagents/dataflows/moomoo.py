@@ -330,6 +330,44 @@ def close_context():
     _close_ctx()
 
 
+def _sdk_call(fn, *args, timeout: float | None = None, **kwargs):
+    """Run a moomoo SDK call with a wall-clock timeout (default 5s).
+
+    The SDK's own ``ReqInfo.wait()`` allows 20s per call; a degraded gateway
+    can burn 20s per call across hundreds of calls (the value screener's
+    gating pass makes ~7 calls/symbol), which is how a web job hits its
+    subprocess budget. This wrapper runs the call in a daemon thread and joins
+    with ``timeout``; on expiry it raises ``VendorRateLimitError`` and closes
+    the thread's context so the in-flight request unblocks (the abandoned
+    daemon thread exits at process end).
+    """
+    if timeout is None:
+        try:
+            timeout = float(get_config().get("moomoo_call_timeout", 5.0) or 5.0)
+        except (TypeError, ValueError):
+            timeout = 5.0
+    result: dict = {}
+
+    def _run():
+        try:
+            result["ret"] = fn(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 - capture any failure
+            result["exc"] = exc
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        # Close the context to unblock the in-flight request; the daemon thread
+        # is abandoned (it exits when the process exits).
+        with contextlib.suppress(Exception):
+            _close_ctx()
+        raise VendorRateLimitError(f"moomoo SDK call timed out after {timeout}s")
+    if "exc" in result:
+        raise result["exc"]
+    return result["ret"]
+
+
 def _close_all_ctxs(timeout: float = 3.0):
     """Close every live context; never blocks process exit.
 
@@ -503,7 +541,8 @@ def get_stock_data_moomoo(symbol: str, start_date: str, end_date: str) -> str:
     """OHLCV via ``request_history_kline``, formatted as CSV (matching yfinance shape)."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, data, _page_key = ctx.request_history_kline(
+    ret, data, _page_key = _sdk_call(
+        ctx.request_history_kline,
         code,
         start=start_date,
         end=end_date,
@@ -574,7 +613,8 @@ def get_indicators_moomoo(
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     warmup_days = max(look_back_days * 2 + 100, 300)
     start_dt = end_dt - timedelta(days=warmup_days)
-    ret, data, _page_key = ctx.request_history_kline(
+    ret, data, _page_key = _sdk_call(
+        ctx.request_history_kline,
         code,
         start=start_dt.strftime("%Y-%m-%d"),
         end=curr_date,
@@ -780,7 +820,8 @@ def _get_financials(
         if str(freq).strip().lower() == "quarterly"
         else _FINANCIAL_TYPE_ANNUAL
     )
-    ret, data = ctx.get_financials_statements(
+    ret, data = _sdk_call(
+        ctx.get_financials_statements,
         code,
         statement_type=statement_type,
         financial_type=financial_type,
@@ -826,7 +867,7 @@ def get_news_moomoo(symbol: str, start_date: str, end_date: str) -> str:
     """Search news for the ticker via ``get_search_news``."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_search_news(code, max_count=20)
+    ret, data = _sdk_call(ctx.get_search_news, code, max_count=20)
     _check_ret(ret, data, symbol, code, "get_search_news")
     df: pd.DataFrame = data
     if df.empty:
@@ -855,7 +896,7 @@ def get_options_chain_moomoo(symbol: str, curr_date: str = None) -> str:
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
     # Get expiration dates
-    ret, exp_data = ctx.get_option_expiration_date(code)
+    ret, exp_data = _sdk_call(ctx.get_option_expiration_date, code)
     _check_ret(ret, exp_data, symbol, code, "get_option_expiration_date")
     if exp_data is None or exp_data.empty:
         raise NoMarketDataError(symbol, code, detail="no option expiration dates")
@@ -866,7 +907,7 @@ def get_options_chain_moomoo(symbol: str, curr_date: str = None) -> str:
     except Exception:
         expiry = ""
     # Fetch the chain for the nearest expiry
-    ret, chain_data, _next_key = ctx.get_option_chain(code, start=expiry, end=expiry)
+    ret, chain_data, _next_key = _sdk_call(ctx.get_option_chain, code, start=expiry, end=expiry)
     _check_ret(ret, chain_data, symbol, code, "get_option_chain")
     if chain_data is None or chain_data.empty:
         raise NoMarketDataError(symbol, code, detail=f"empty option chain for {expiry}")
@@ -956,7 +997,7 @@ def get_short_interest_moomoo(symbol: str) -> str:
     """Short interest via ``get_short_interest``."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, us_df, hk_df = ctx.get_short_interest(code)
+    ret, us_df, hk_df = _sdk_call(ctx.get_short_interest, code)
     _check_ret(ret, (us_df, hk_df), symbol, code, "get_short_interest")
     is_us = code.startswith("US.")
     df = us_df if is_us else hk_df
@@ -992,7 +1033,7 @@ def get_analyst_ratings_moomoo(symbol: str) -> str:
     """Analyst consensus via ``get_research_analyst_consensus``."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_research_analyst_consensus(code)
+    ret, data = _sdk_call(ctx.get_research_analyst_consensus, code)
     _check_ret(ret, data, symbol, code, "get_research_analyst_consensus")
     if not data or not isinstance(data, dict):
         raise NoMarketDataError(symbol, code, detail="no analyst consensus data")
@@ -1034,7 +1075,8 @@ def get_earnings_calendar_moomoo(symbol: str, curr_date: str, look_back_days: in
     start_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     window_days = min(int(look_back_days or 7), 7)  # API caps the window at 7 days
     end_dt = start_dt + timedelta(days=window_days)
-    ret, data = ctx.get_earnings_calendar(
+    ret, data = _sdk_call(
+        ctx.get_earnings_calendar,
         market=market_key,
         begin_date=start_dt.strftime("%Y-%m-%d"),
         end_date=end_dt.strftime("%Y-%m-%d"),
@@ -1076,7 +1118,7 @@ def get_insider_transactions_moomoo(symbol: str) -> str:
     """Insider trades via ``get_insider_trade_list``."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_insider_trade_list(code)
+    ret, data = _sdk_call(ctx.get_insider_trade_list, code)
     _check_ret(ret, data, symbol, code, "get_insider_trade_list")
     df: pd.DataFrame = data
     if df.empty:
@@ -1135,7 +1177,7 @@ def get_macro_indicators_moomoo(
     code = _MACRO_ID_MAP[ind]
     ctx = _ensure_ctx()
     max_count = min(look_back_days, 500) if look_back_days is not None else 365
-    ret, data = ctx.get_macro_indicator_history(code, max_count=max_count)
+    ret, data = _sdk_call(ctx.get_macro_indicator_history, code, max_count=max_count)
     _check_ret(ret, data, indicator, code, "get_macro_indicator_history")
     df: pd.DataFrame = data
     if df.empty:
@@ -1171,7 +1213,7 @@ def get_prediction_markets_moomoo(topic: str | None = None, limit: int | None = 
     topic_lower = (topic or "").lower().strip()
 
     # 1. Top-level categories (category / category_name / tags)
-    ret, cats = ctx.get_event_contract_category()
+    ret, cats = _sdk_call(ctx.get_event_contract_category)
     _check_ret(
         ret,
         cats,
@@ -1205,7 +1247,7 @@ def get_prediction_markets_moomoo(topic: str | None = None, limit: int | None = 
         if not cat_id:
             continue
         try:
-            ret, series_df = ctx.get_event_contract_series_list(category=cat_id)
+            ret, series_df = _sdk_call(ctx.get_event_contract_series_list, category=cat_id)
         except Exception:
             continue
         if ret != _RET_OK or series_df is None or series_df.empty:
@@ -1215,7 +1257,7 @@ def get_prediction_markets_moomoo(topic: str | None = None, limit: int | None = 
             if not series_code:
                 continue
             try:
-                ret, events_df = ctx.get_event_contract_event_list(series_code)
+                ret, events_df = _sdk_call(ctx.get_event_contract_event_list, series_code)
             except Exception:
                 continue
             if ret != _RET_OK or events_df is None or events_df.empty:
@@ -1225,7 +1267,7 @@ def get_prediction_markets_moomoo(topic: str | None = None, limit: int | None = 
                 if not event_code:
                     continue
                 try:
-                    ret, cdata, _page = ctx.get_event_contract(event_code, count=20)
+                    ret, cdata, _page = _sdk_call(ctx.get_event_contract, event_code, count=20)
                 except Exception:
                     continue
                 if ret != _RET_OK or not isinstance(cdata, dict):
@@ -1248,7 +1290,7 @@ def get_prediction_markets_moomoo(topic: str | None = None, limit: int | None = 
         )
 
     # 4. Batch snapshot for live YES prices (cap the batch at 20 contracts).
-    ret, snap = ctx.get_event_contract_snapshot(contract_codes[: min(limit, 20)])
+    ret, snap = _sdk_call(ctx.get_event_contract_snapshot, contract_codes[: min(limit, 20)])
     _check_ret(
         ret,
         snap,
@@ -1321,9 +1363,9 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
             "start": (end_dt - timedelta(days=56)).strftime("%Y-%m-%d"),
             "end": curr_date,
         }
-    ret, flow_df = ctx.get_capital_flow(code, period_type="WEEK", **kwargs)
+    ret, flow_df = _sdk_call(ctx.get_capital_flow, code, period_type="WEEK", **kwargs)
     _check_ret(ret, flow_df, ticker, code, "get_capital_flow")
-    ret2, dist_df = ctx.get_capital_distribution(code)
+    ret2, dist_df = _sdk_call(ctx.get_capital_distribution, code)
     _check_ret(ret2, dist_df, ticker, code, "get_capital_distribution")
 
     lines = [f"## Capital Flow — {ticker} (moomoo)", ""]
@@ -1401,7 +1443,7 @@ def get_smart_money_moomoo(ticker: str) -> str:
     """ARK fund activity in the ticker (a high-profile institutional buyer)."""
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_ark_stock_dynamic(code)
+    ret, data = _sdk_call(ctx.get_ark_stock_dynamic, code)
     _check_ret(ret, data, ticker, code, "get_ark_stock_dynamic")
     if not isinstance(data, dict):
         raise NoMarketDataError(ticker, code, detail="unexpected ARK response")
@@ -1438,7 +1480,8 @@ def get_economic_calendar_moomoo(curr_date: str, look_days: int = 14) -> str:
     ctx = _ensure_ctx()
     start_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     end_dt = start_dt + timedelta(days=look_days)
-    ret, data, _next_page, _has_more = ctx.get_economic_calendar(
+    ret, data, _next_page, _has_more = _sdk_call(
+        ctx.get_economic_calendar,
         begin_date=start_dt.strftime("%Y-%m-%d"),
         end_date=end_dt.strftime("%Y-%m-%d"),
     )
@@ -1478,7 +1521,7 @@ def get_economic_calendar_moomoo(curr_date: str, look_days: int = 14) -> str:
 def get_fed_watch_moomoo() -> str:
     """Market-implied Fed target-rate probabilities for upcoming meetings."""
     ctx = _ensure_ctx()
-    ret, data = ctx.get_fed_watch_target_rate()
+    ret, data = _sdk_call(ctx.get_fed_watch_target_rate)
     _check_ret(ret, data, "fed_watch", "fed_watch", "get_fed_watch_target_rate")
     if data is None or data.empty:
         raise NoMarketDataError("fed_watch", "fed_watch", detail="no fed watch data")
@@ -1509,7 +1552,7 @@ def get_market_breadth_moomoo() -> str:
     ctx = _ensure_ctx()
     lines = ["## Market Breadth — US (moomoo)", ""]
     try:
-        ret, hm = ctx.get_heat_map_data("US", count=8)
+        ret, hm = _sdk_call(ctx.get_heat_map_data, "US", count=8)
         if ret == _RET_OK and isinstance(hm, pd.DataFrame) and not hm.empty:
             lines.append("### Sector heat (top movers)")
             lines.append("| Sector | Change % | Up | Down | Leader |")
@@ -1524,7 +1567,7 @@ def get_market_breadth_moomoo() -> str:
     except Exception:
         pass
     try:
-        ret, rf = ctx.get_rise_fall_distribution(market="US")
+        ret, rf = _sdk_call(ctx.get_rise_fall_distribution, market="US")
         if ret == _RET_OK and isinstance(rf, dict):
             buckets = rf.get("range_list") or []
             if buckets:
@@ -1554,7 +1597,7 @@ def get_revenue_breakdown_moomoo(ticker: str) -> str:
     """Segment/regional revenue breakdown for the latest reported period."""
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_financials_revenue_breakdown(code)
+    ret, data = _sdk_call(ctx.get_financials_revenue_breakdown, code)
     _check_ret(ret, data, ticker, code, "get_financials_revenue_breakdown")
     if not isinstance(data, dict):
         raise NoMarketDataError(ticker, code, detail="unexpected revenue breakdown response")
@@ -1590,7 +1633,7 @@ def get_corporate_actions_moomoo(ticker: str) -> str:
     ctx = _ensure_ctx()
     lines = [f"## Corporate Actions — {ticker} (moomoo)", ""]
     try:
-        ret, div = ctx.get_corporate_actions_dividends(code)
+        ret, div = _sdk_call(ctx.get_corporate_actions_dividends, code)
         if ret == _RET_OK and isinstance(div, dict):
             dl = div.get("dividend_list") or []
             if dl:
@@ -1603,7 +1646,7 @@ def get_corporate_actions_moomoo(ticker: str) -> str:
     except Exception:
         pass
     try:
-        ret, sp = ctx.get_corporate_actions_stock_splits(code)
+        ret, sp = _sdk_call(ctx.get_corporate_actions_stock_splits, code)
         if ret == _RET_OK and isinstance(sp, dict):
             sl = sp.get("split_list") or []
             if sl:
@@ -1633,7 +1676,7 @@ def get_earnings_catalyst_moomoo(ticker: str) -> str:
     """
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_financials_earnings_price_history(code)
+    ret, data = _sdk_call(ctx.get_financials_earnings_price_history, code)
     _check_ret(ret, data, ticker, code, "get_financials_earnings_price_history")
     if data is None or data.empty:
         raise NoMarketDataError(ticker, code, detail="no earnings price history")
@@ -1677,7 +1720,7 @@ def get_trading_days_between(symbol: str, start_date: str, end_date: str) -> lis
     code = _moomoo_code(symbol)
     market_key = code.split(".")[0] if "." in code else "US"
     ctx = _ensure_ctx()
-    ret, data = ctx.request_trading_days(market=market_key, start=start_date, end=end_date)
+    ret, data = _sdk_call(ctx.request_trading_days, market=market_key, start=start_date, end=end_date)
     _check_ret(ret, data, symbol, code, "request_trading_days")
     if not isinstance(data, list) or not data:
         raise NoMarketDataError(symbol, code, detail="no trading days returned")
@@ -1788,7 +1831,8 @@ def get_top_movers_moomoo(
     if mcap > 0:
         filters = [SimpleRankFilter(SimpleRankIndicatorType.MARKET_CAP, interval_min=mcap)]
     ctx = _ensure_ctx()
-    ret, data = ctx.get_top_movers_rank(
+    ret, data = _sdk_call(
+        ctx.get_top_movers_rank,
         market=market_enum,
         sort_dir=RankSortDir.ASCENDING if ascending else RankSortDir.DESCENDING,
         count=int(count),
@@ -1840,7 +1884,7 @@ def get_institution_holdings_moomoo(ticker: str) -> str:
     """
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
-    ret, data = ctx.get_shareholders_institutional(code)
+    ret, data = _sdk_call(ctx.get_shareholders_institutional, code)
     _check_ret(ret, data, ticker, code, "get_shareholders_institutional")
     df = data
     if df is None or df.empty:
@@ -1888,7 +1932,8 @@ def _earnings_cal_chunks(ctx, market: str, start: str, end: str) -> list:
     cur = start_dt
     while cur <= end_dt:
         chunk_end = min(cur + timedelta(days=6), end_dt)
-        ret, df = ctx.get_earnings_calendar(
+        ret, df = _sdk_call(
+            ctx.get_earnings_calendar,
             market=market,
             begin_date=cur.strftime("%Y-%m-%d"),
             end_date=chunk_end.strftime("%Y-%m-%d"),
@@ -1937,7 +1982,7 @@ def get_earnings_surprise_history_moomoo(ticker: str, curr_date: str = None) -> 
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
     market = code.split(".")[0] if "." in code else "US"
-    ret, hist = ctx.get_financials_earnings_price_history(code)
+    ret, hist = _sdk_call(ctx.get_financials_earnings_price_history, code)
     _check_ret(ret, hist, ticker, code, "get_financials_earnings_price_history")
     if hist is None or hist.empty:
         raise NoMarketDataError(ticker, code, detail="no earnings price history")
@@ -2027,7 +2072,7 @@ def get_expected_move_moomoo(ticker: str, curr_date: str = None) -> str:
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
     current_move = None
-    ret, hist = ctx.get_financials_earnings_price_history(code)
+    ret, hist = _sdk_call(ctx.get_financials_earnings_price_history, code)
     if ret == 0 and hist is not None and not hist.empty:
         rows = hist.to_dict("records")
         for row in rows:
@@ -2060,9 +2105,14 @@ def get_expected_move_moomoo(ticker: str, curr_date: str = None) -> str:
     try:
         end_dt = datetime.strptime(curr_date, "%Y-%m-%d") if curr_date else datetime.now()
         start_dt = end_dt - timedelta(days=21)
-        ret2, kdf, _page = ctx.request_history_kline(
-            code, start=start_dt.strftime("%Y-%m-%d"), end=end_dt.strftime("%Y-%m-%d"),
-            ktype="K_DAY", autype="qfq", max_count=21,
+        ret2, kdf, _page = _sdk_call(
+            ctx.request_history_kline,
+            code,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_dt.strftime("%Y-%m-%d"),
+            ktype="K_DAY",
+            autype="qfq",
+            max_count=21,
         )
         if ret2 == 0 and kdf is not None and not kdf.empty:
             spot = float(kdf.iloc[-1]["close"])

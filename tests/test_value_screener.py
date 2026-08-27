@@ -434,3 +434,40 @@ def test_allocation_block_wrapper_passes_returns_through():
     set_config({"enable_correlation_penalty": True, "correlation_threshold": 0.4})
     text = vs.allocation_block({"A": 0.5, "B": 0.5}, returns_by_name=rets)
     assert "correlation-penalized" in text
+
+
+def test_value_dip_prefilter_passes_oversold_low_risk():
+    """A symbol with RSI <= 35, %b <= 0.10 and stop <= 2% passes the cheap
+    OHLCV-only pre-filter (so the heavy fundamentals fetch runs for it).
+
+    Series: a flat base (small ATR -> stop <= 2%) followed by a sharp 3-bar
+    drop (price pierces the lower Bollinger band -> %b <= 0.10, RSI <= 35).
+    """
+    closes = [100.0 + (0.1 if i % 2 else -0.1) for i in range(50)] + [99.0, 97.5, 95.0]
+    ohlcv = {
+        "closes": closes,
+        "highs": [c + 0.3 for c in closes],
+        "lows": [c - 0.3 for c in closes],
+        "volumes": [1_000_000] * len(closes),
+    }
+    assert vs._value_dip_technical_prefilter(ohlcv) is True
+
+
+def test_value_dip_prefilter_rejects_uptrend():
+    """A strong uptrend (RSI well above 35) can never be a value-dip candidate
+    -> the pre-filter returns False so the heavy fetch is skipped."""
+    closes = [100.0 + i * 1.5 for i in range(60)]
+    ohlcv = {
+        "closes": closes,
+        "highs": [c + 1.0 for c in closes],
+        "lows": [c - 1.0 for c in closes],
+        "volumes": [1_000_000] * 60,
+    }
+    assert vs._value_dip_technical_prefilter(ohlcv) is False
+
+
+def test_value_dip_prefilter_insufficient_data_returns_true():
+    """Insufficient history -> unknown -> let the full scan decide (never
+    fabricate a skip)."""
+    ohlcv = {"closes": [100.0, 101.0], "highs": [], "lows": [], "volumes": []}
+    assert vs._value_dip_technical_prefilter(ohlcv) is True

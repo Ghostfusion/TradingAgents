@@ -45,6 +45,15 @@ route_to_vendor(method, ...)
 - `VENDOR_METHODS[method][vendor]`: implementations. A method may have multiple
   vendors (fallback chain) or one vendor.
 
+**Moomoo per-call timeout**: every moomoo SDK call runs under a wall-clock
+timeout wrapper (`dataflows/moomoo.py::_sdk_call`, default 5s,
+`moomoo_call_timeout` / `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`). The SDK's own
+`ReqInfo.wait()` allows 20s per call; a degraded gateway can burn 20s per call
+across hundreds of calls (the value screener's gating pass makes ~7
+calls/symbol), which is how a web job hits its subprocess budget. On expiry the
+wrapper raises `VendorRateLimitError` and closes the thread's context so the
+in-flight request unblocks.
+
 ## 3.3 Vendor data contract
 
 When you add a new vendor (e.g. a new REST source):

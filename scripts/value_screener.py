@@ -563,6 +563,50 @@ def _vcp_scan(ohlcv: dict) -> dict | None:
         return None
 
 
+def _value_dip_technical_prefilter(ohlcv: dict) -> bool:
+    """Cheap OHLCV-only pre-filter for the value-dip gating pass.
+
+    The value-dip candidate requires ``technical_entry`` (RSI(14) <= 35 and
+    %b <= 0.10) AND ``trade_risk`` (stop distance <= 2% of price) — both
+    computable from the OHLCV alone. Symbols failing these can never be
+    candidates, so the heavy fundamentals fetch (statements + cashflow, ~6
+    moomoo calls) is skipped for them: the gating pass drops from ~7 vendor
+    calls/symbol to 1. Returns True when the gates pass OR when the inputs
+    are insufficient (unknown -> let the full scan decide, never fabricate).
+    """
+    try:
+        from tradingagents.strategies.size import atr as _atr
+        from tradingagents.strategies.swing import rsi as _rsi
+        from tradingagents.strategies.value_dip import (
+            MAX_ACCOUNT_RISK,
+            PCTB_ENTRY,
+            RSI_ENTRY,
+            STOP_ATR_MULT,
+            bollinger_pct_b,
+        )
+
+        closes = ohlcv.get("closes") or []
+        highs = ohlcv.get("highs") or []
+        lows = ohlcv.get("lows") or []
+        if len(closes) < 20 or not highs or not lows:
+            return True  # insufficient -> let the full scan decide
+        price = float(closes[-1])
+        rsi_val = _rsi(closes, 14)
+        bb = bollinger_pct_b(closes)
+        pct_b = bb.get("pct_b") if bb else None
+        a = _atr(highs, lows, closes, window=14)
+        stop_dist = STOP_ATR_MULT * a if a and a > 0 else None
+        stop_pct = stop_dist / price if (stop_dist is not None and price > 0) else None
+        technical_entry = bool(
+            (rsi_val is not None and rsi_val <= RSI_ENTRY)
+            and (pct_b is not None and pct_b <= PCTB_ENTRY)
+        )
+        trade_risk = bool(stop_pct is not None and stop_pct <= MAX_ACCOUNT_RISK)
+        return technical_entry and trade_risk
+    except Exception:  # noqa: BLE001 - prefilter degrades to "fetch heavy"
+        return True
+
+
 def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "") -> dict | None:
     """Value Dip + Swing hybrid setup read for one symbol.
 
@@ -1192,6 +1236,14 @@ def main(argv: list[str] | None = None) -> int:
                         if not (vc and vc.get("candidate")):
                             continue
                     if args.scan == "value-dip":
+                        # Cheap OHLCV-only pre-filter: symbols failing the
+                        # technical entry + trade-risk gates can never be
+                        # value-dip candidates, so skip the heavy fundamentals
+                        # fetch (statements + cashflow, ~6 moomoo calls) for
+                        # them. This drops the gating pass from ~7 vendor
+                        # calls/symbol to 1 for the non-candidates.
+                        if not _value_dip_technical_prefilter(ohlcv):
+                            continue
                         fin = fetch_ticker(symbol, args.date)
                         vd = _value_dip_scan(symbol, ohlcv, fin, args.date)
                         if vd is not None:

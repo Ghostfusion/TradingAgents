@@ -9,6 +9,23 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Moomoo per-call timeout + value-dip gating pre-filter + web screener
+  budget** - three fixes for the value-screener web timeouts:
+  - `moomoo_call_timeout` (default 5.0s, env `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`):
+    every moomoo SDK call now runs under a wall-clock timeout wrapper
+    (`dataflows/moomoo.py::_sdk_call`) instead of the SDK's own 20s
+    `ReqInfo.wait()`, so a degraded gateway can't burn 20s per call across
+    hundreds of calls.
+  - The value-dip gating pass runs a cheap OHLCV-only pre-filter
+    (`scripts/value_screener.py::_value_dip_technical_prefilter` — RSI <= 35,
+    %b <= 0.10, stop <= 2%) before the heavy fundamentals fetch, dropping the
+    per-symbol vendor calls from ~7 to 1 for non-candidates.
+  - The web `run_screener` capability budget is raised to 2400s (matching the
+    action report's `--llm` budget) and a timed-out capability now kills its
+    whole process tree (`taskkill /F /T`) so no orphaned process keeps a
+    moomoo context / gateway connection open.
+  Tests: `test_moomoo_vendor.py::MoomooSdkCallTimeoutTests` (5),
+  `test_value_screener.py` prefilter (3), `test_backend.py` kill-tree (3).
 - **Correlation-aware allocation wired into the allocation plan** -
   `portfolio.allocation_block` and the `get_allocation` analyst tool accept
   `returns_by_name` and, when `enable_correlation_penalty` is on (default

@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **Value-screener web-timeout fixes** - (1) every moomoo SDK
+  call now runs under a 5s wall-clock timeout (`TRADINGAGENTS_MOOMOO_CALL_TIMEOUT`,
+  default 5.0) instead of the SDK's own 20s per-call wait, so a degraded
+  gateway can't stall a run; (2) the value-dip gating pass pre-filters on
+  cheap OHLCV-only technicals (RSI/%b/stop) before the heavy fundamentals
+  fetch, dropping ~7 vendor calls/symbol to 1 for non-candidates; (3) the
+  web `run_screener` budget is 2400s and a timed-out capability kills its
+  whole process tree so no orphaned process holds a moomoo connection.
+
 - [2026-08-26] **Correlation-aware allocation** - the allocation plan
   (`portfolio.allocation_block`, the `get_allocation` analyst tool, and the
   screener's `--alloc`) now accepts return series and, when

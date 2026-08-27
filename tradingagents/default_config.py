@@ -64,6 +64,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
     "TRADINGAGENTS_RISK_BASKET_WEIGHTS": "risk_basket_weights",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
+    "TRADINGAGENTS_MOOMOO_CALL_TIMEOUT": "moomoo_call_timeout",
     "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
@@ -313,6 +314,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "moomoo_account": None,  # moomoo ID for headless autostart (not a password)
         "moomoo_autostart": False,  # launch OpenD with -login_by_remember=1 when unreachable
         "moomoo_opend_path": None,  # explicit path to the OpenD executable
+        # Per-call wall-clock timeout (seconds) for moomoo SDK calls. The SDK's
+        # own ReqInfo.wait() allows 20s per call; a degraded gateway can burn
+        # 20s per call across hundreds of calls (the value screener's gating
+        # pass makes ~7 calls/symbol), which is how a web job hits its
+        # subprocess budget. 5s keeps a degraded gateway from stalling a run.
+        "moomoo_call_timeout": 5.0,
         # Vendor-result cache (operational): re-serve successful vendor fetches
         # within a TTL instead of re-hitting free-tier APIs on every run.
         # Researched strategies (enhancement_plan.md - Phase 0..6). All off by

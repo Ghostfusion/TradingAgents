@@ -43,6 +43,7 @@ in `batch.py`).
 | `TRADINGAGENTS_MOOMOO_AUTOSTART` | `moomoo_autostart` |
 | `TRADINGAGENTS_MOOMOO_OPEND_PATH` | `moomoo_opend_path` |
 | `TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS` | `moomoo_max_connections` |
+| `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT` | `moomoo_call_timeout` | per-call wall-clock timeout (s) for moomoo SDK calls; the SDK's own `ReqInfo.wait()` allows 20s, this caps a degraded gateway at 5s (default) so a run can't stall on hundreds of slow calls |
 | `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | `enable_strategy_overlays` |
 | `TRADINGAGENTS_ENABLE_REFLECTION` | `enable_reflection` |
 | `TRADINGAGENTS_ENABLE_ORDERFLOW` | `enable_orderflow` |
@@ -121,7 +122,11 @@ benchmarks: `.NS->^NSEI`, `.BO->^BSESN`, `.T->^N225`, `.HK->^HSI`, `.L->^FTSE`,
 **Data vendors** - `data_vendors: dict` (per-category chains), `tool_vendors: dict`
 (per-tool overrides), `finnhub_api_key`, `fmp_api_key`, `alpaca_api_key_id`,
 `alpaca_api_secret`, `enable_alpaca`, `moomoo_host/port/account/autostart/
-opend_path/max_connections`.
+opend_path/max_connections/call_timeout` (`moomoo_call_timeout` = per-call
+wall-clock timeout in seconds, default 5.0; the SDK's own `ReqInfo.wait()`
+allows 20s per call, so a degraded gateway can burn 20s per call across
+hundreds of calls — the value screener's gating pass makes ~7 calls/symbol —
+which is how a web job hits its subprocess budget).
 
 **Vendor cache** - `vendor_cache_enabled=True`, `vendor_cache_ttl_seconds=21600`,
 `vendor_cache_skip_categories={'news_data'}`.
