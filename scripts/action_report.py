@@ -876,6 +876,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         saved = save_report(markdown, args.out_dir)
         print(f"[action_report] saved to {saved}")
+    # Close the moomoo context while the process is healthy (see value_screener
+    # main()): the SDK's receive thread keeps the process alive after main()
+    # returns, and closing at interpreter exit can block.
+    try:
+        from tradingagents.dataflows.moomoo import close_context
+
+        close_context()
+    except Exception:  # noqa: BLE001 - closing is best-effort
+        pass
     return 0
 
 

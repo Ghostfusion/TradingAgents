@@ -1573,6 +1573,17 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("momentum journal summary failed: %s", exc)
     saved = save_watchlist(markdown, args.out_dir)
     print(f"[screener] saved watchlist to {saved}")
+    # Close the moomoo context while the process is healthy: the SDK's
+    # OpenQuoteContext spawns a non-daemon receive thread that keeps the
+    # process alive after main() returns, and closing at interpreter exit can
+    # block on the dead receive loop (the web job then times out even though
+    # the report is written).
+    try:
+        from tradingagents.dataflows.moomoo import close_context
+
+        close_context()
+    except Exception:  # noqa: BLE001 - closing is best-effort
+        pass
     return 0
 
 

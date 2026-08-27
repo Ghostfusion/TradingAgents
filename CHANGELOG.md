@@ -8,6 +8,18 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+- **Moomoo exit-hang** - `dataflows/moomoo.py` had a shadowing duplicate
+  `_close_all_ctxs()` (the atexit one called `ctx.close()` directly, which
+  can block on the dead receive loop and keep the process alive after
+  `main()` returns). Removed the duplicate; the daemon-thread + timeout
+  version is the only one. Added `close_context()` to the end of
+  `value_screener.py`, `action_report.py`, `capital_income_screener.py` and
+  `pre_market_review.py` main() so the moomoo context closes while the
+  process is healthy (the graph already did this). A screener run that
+  previously hung ~15 min after writing its report (web job timed out) now
+  exits cleanly. Regression test: `test_close_all_ctxs_uses_daemon_thread_timeout`.
+
 ### Added
 - **Value-dip + swing + pre/post-market research implementation** -
   - `technical_factors.py`: 6 new pure factors - `aroon` (trend age),

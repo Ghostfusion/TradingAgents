@@ -348,17 +348,6 @@ def _close_all_ctxs(timeout: float = 3.0):
         closer.join(timeout)
 
 
-def _close_all_ctxs():
-    """Close every live context (atexit). Batch workers hold one TCP connection
-    per thread for the whole process; this releases them at interpreter exit."""
-    with _ctx_lock:
-        live = list(_live_ctxs)
-        _live_ctxs.clear()
-    for ctx in live:
-        with contextlib.suppress(Exception):
-            ctx.close()
-
-
 # ---------------------------------------------------------------------------
 # Error classification helper
 # ---------------------------------------------------------------------------

@@ -347,6 +347,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - ledger is best-effort
         print(f"[ledger] skipped for {args.ticker}: {exc}")
 
+    # Close the moomoo context while the process is healthy (see value_screener
+    # main()): the SDK's receive thread keeps the process alive after main()
+    # returns, and closing at interpreter exit can block.
+    try:
+        from tradingagents.dataflows.moomoo import close_context
+
+        close_context()
+    except Exception:  # noqa: BLE001 - closing is best-effort
+        pass
     return 0 if final_verdict != "REJECT" else 2
 
 
