@@ -330,6 +330,16 @@ review. Wire it with a scheduler:
 - Task 2: `py -3.12 scripts/nightly_review.py` at 07:35 weekday (uses the
   latest `reports/batch_summary_*.jsonl`, so it needs no args).
 
+**Registered on this machine (2026-08-27)** — wrappers in
+`C:\Users\vince\tradingagents_tasks\` (outside the git repos), each `cd`s to
+`TradingAgents`, appends to `logs/<name>.log`, and exits with the script's code:
+- `TradingAgents_NightlyReview` — weekly Mon-Fri 07:35 →
+  `nightly_review.cmd` → `scripts/nightly_review.py`.
+- `TradingAgents_StrategyQuality` — daily 07:50 (after the review, so it sees
+  the freshest ledger rows) → `strategy_quality_report.cmd` →
+  `scripts/strategy_quality_report.py`.
+Re-register anytime with `register_tasks.cmd` (idempotent `/f`).
+
 Notes
 - Skip review on weekends/holidays via the *weekday* (`1-5`) schedule; the
   script itself also degrades to CONFIRM when there is no quote.
