@@ -4,6 +4,7 @@ import pytest
 
 from scripts.risk_report import audit_summary
 from tradingagents.strategies.book_risk import (
+    book_correlated_stress,
     cvar,
     drawdown_gate,
     portfolio_cvar,
@@ -64,6 +65,29 @@ def test_portfolio_cvar_normalizes_missing_weights():
 
 def test_stress_loss():
     assert stress_loss({"A": 0.5, "B": 0.5}, shock=-0.10) == pytest.approx(0.10)
+
+
+def test_book_correlated_stress_positive_loss():
+    # two negatively-correlated series only a little -> a small positive tail
+    returns = {
+        "A": [0.01, -0.01, 0.02, -0.02, 0.01, -0.01, 0.01, -0.02, 0.01, -0.02, 0.02, -0.01, 0.01, -0.01, 0.01, -0.02, 0.01, -0.01, 0.01, -0.02],
+        "B": [-0.02, 0.02, -0.01, 0.01, -0.02, 0.01, -0.02, 0.01, -0.01, 0.01, -0.02, 0.01, -0.02, 0.01, -0.01, 0.02, -0.01, 0.01, -0.02, 0.01],
+    }
+    w = {"A": 0.5, "B": 0.5}
+    loss = book_correlated_stress(returns, weights=w, shock=-0.10)
+    assert loss is not None and loss > 0
+
+
+def test_book_correlated_stress_requires_two_names():
+    assert book_correlated_stress({"A": [0.01, 0.02]}) is None
+
+
+def test_book_correlated_stress_equal_weight_no_weights():
+    returns = {"A": [-0.01] * 20, "B": [-0.01] * 20, "C": [-0.01] * 20}
+    loss = book_correlated_stress(returns, weights=None, shock=-0.20)
+    # all names -1% every day -> worst tail is -1%
+    assert loss is not None
+    assert 0.005 <= loss <= 0.015
 
 
 def test_drawdown_gate():

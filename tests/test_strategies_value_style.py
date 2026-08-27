@@ -59,6 +59,9 @@ def test_exits():
     assert stop_to_breakeven(entry, atr, cushion_atr=1.0) == 100.0
     assert target_level(close, atr, atr_mult=4.0) == 108.0
     assert net_of_cost(0.05, cost_bps=10) == pytest.approx(0.049)
+    # item 3: illiquid name scales cost up; None keeps flat cost
+    assert net_of_cost(0.05, cost_bps=10, illiq=1e-5) == pytest.approx(0.049 - 1e-5 * 1e5 / 10000.0)
+    assert net_of_cost(0.05, cost_bps=10, illiq=None) == pytest.approx(0.049)
     assert rebalance_due(31, interval_days=30) is True
     assert rebalance_due(5, 30) is False
     e = exit_check(entry=98.0, close=100.0, atr=0.5, target_mult=4.0)

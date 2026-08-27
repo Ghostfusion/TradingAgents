@@ -931,6 +931,12 @@ class TradingAgentsGraph:
                         risk_ctx["book_cvar"] = basket_budget
                     if single_name_cvar is not None:
                         risk_ctx["single_cvar"] = single_name_cvar
+                    # Book-level correlated stress (item 2): shock the whole
+                    # basket together, not just single names. Surfaces in the
+                    # risk snapshot and the report's risk-gate block.
+                    basket_stress = self._basket_stress(ticker)
+                    if basket_stress is not None:
+                        risk_ctx["book_stress"] = basket_stress
                     # risk2.md liquidity/ownership gate (opt-in). When
                     # enable_liquidity_gate is on, compute the composite
                     # liquidity verdict from the vendor OHLCV + float + short
@@ -1158,6 +1164,39 @@ class TradingAgentsGraph:
             cv = portfolio_cvar(returns_by_name, weights=weights, alpha=alpha)
             return abs(cv) if cv is not None else None
         except Exception:  # noqa: BLE001 - fall back to single-name
+            return None
+
+    def _basket_stress(self, ticker: str, shock: float = -0.10) -> float | None:
+        """Book-level correlated stress loss for the configured basket, or None.
+
+        Shares the basket-resolution logic with ``_basket_cvar``: fetches each
+        basket name's daily returns, mixes them with the config weights, and
+        measures the historical tail loss under a simultaneous ``shock``
+        (``book_risk.book_correlated_stress``). Firms stress the whole book
+        together (not single names), so this surfaces in the risk snapshot as
+        "if the basket drops with correlated moves, the book loses X%".
+        Returns None when the basket can't be resolved.
+        """
+        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
+        if len(tickers) < 2:
+            return None
+        weights = self.config.get("risk_basket_weights") or {}
+        returns_by_name: dict[str, list] = {}
+        for name in tickers:
+            try:
+                closes = self._try_fetch_closes(str(name))
+                rets = self._log_returns_from_closes(closes)
+                if len(rets) >= 5:
+                    returns_by_name[str(name)] = rets
+            except Exception:  # noqa: BLE001 - a missing name just drops out
+                continue
+        if len(returns_by_name) < 2:
+            return None
+        try:
+            from tradingagents.strategies.book_risk import book_correlated_stress
+
+            return book_correlated_stress(returns_by_name, weights=weights, shock=shock)
+        except Exception:  # noqa: BLE001 - fall back gracefully
             return None
 
     def _maybe_record_reflection_outcome(self, ticker, trade_date, alpha):

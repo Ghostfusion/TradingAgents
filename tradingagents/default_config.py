@@ -47,6 +47,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
+    "TRADINGAGENTS_ENABLE_DECISION_AUDIT": "enable_decision_audit",
     "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
     # B1 scheduled-catalyst overlay tuning (on by default via enable_events).
     "TRADINGAGENTS_CATALYST_WINDOW_DAYS": "catalyst_window_days",
@@ -355,6 +356,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "max_book_names": 10,  # V3: minimum names for diversification
         # Risk governor (risk_management_plan.md): deterministic risk gate.
         "enable_risk_governor": False,
+        "enable_decision_audit": False,  # item 6: PM claim-vs-computed audit note
         "risk_max_position_pct": 0.45,  # R0: book cap
         "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget
         "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop

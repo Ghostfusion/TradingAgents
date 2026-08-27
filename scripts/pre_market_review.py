@@ -27,6 +27,7 @@ report found, 4 deltas could not be fetched.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import os
 import sys
@@ -273,6 +274,40 @@ def main(argv: list[str] | None = None) -> int:
         catalyst_snapshot=deltas.get("catalyst"),
         reanchor=anchor,
     )
+    # Item 5 (limit-order directive when pre-market liquidity is thin): firms
+    # avoid market orders pre-open because spreads are wide. When the measured
+    # volume implies a thin/illiquid book, append a deterministic directive to
+    # the verdict reasons so the reviewer/order path prefers limit orders and
+    # reduced size. Best-effort: never changes the verdict, only adds a reason.
+    try:
+        from datetime import datetime as _dt2, timedelta as _td
+
+        from tradingagents.dataflows.interface import route_to_vendor
+        from tradingagents.strategies.market_session import premarket_liquidity
+
+        _end = _dt2.now().strftime("%Y-%m-%d")
+        _start = (_dt2.now() - _td(days=40)).strftime("%Y-%m-%d")
+        _out = route_to_vendor("get_stock_data", args.ticker, _start, _end) or ""
+        _vols = []
+        for _ln in _out.splitlines():
+            _ln = _ln.strip()
+            if not _ln or _ln.startswith("#") or _ln.lower().startswith("date,"):
+                continue
+            _p = _ln.split(",")
+            if len(_p) >= 6:
+                with contextlib.suppress(ValueError):
+                    _vols.append(float(_p[5]))
+        if len(_vols) >= 30:
+            _latest = float(_vols[-1])
+            _avg = sum(_vols[-30:]) / 30
+            _liq = premarket_liquidity(_latest, _avg)
+            if _liq.get("verdict") in ("thin", "illiquid"):
+                verdict["reasons"].append(
+                    f"pre-market liquidity {_liq['verdict']} (ratio {_liq['ratio']:.2f}) "
+                    ": prefer limit orders and reduce size at the open (wide spreads)"
+                )
+    except Exception:  # noqa: BLE001 - the directive is best-effort, never blocks
+        pass
     summary = _build_summary(deltas, verdict)
 
     reviewed = None

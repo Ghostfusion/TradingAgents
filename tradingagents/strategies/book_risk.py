@@ -102,6 +102,45 @@ def stress_loss(weights: dict, shock: float = -0.10) -> float:
     return -float(shock) * sum(max(0.0, float(w)) for w in weights.values())
 
 
+def book_correlated_stress(
+    returns_by_name: dict,
+    weights: dict | None = None,
+    shock: float = -0.10,
+) -> float | None:
+    """Book-level correlated stress loss (positive number), or None.
+
+    Real firms shock the whole book together (a macro event moves every
+    position at once), not just single names. This computes the weighted
+    portfolio return series (names aligned by index, via
+    :func:`portfolio_returns`) and measures the historical tail loss under a
+    uniform ``shock`` using the worst ``shock``-fraction of the mixed series
+    (CVaR-style), so positions that move together are captured - not just a
+    flat -10% arithmetic loss.
+
+    Semantics: ``weights`` follow :func:`portfolio_cvar` (sum <= 1 leaves a
+    cash sleeve; all-zero -> equal weight; > 1 -> normalized). Returns None
+    when the book cannot be resolved (fewer than two aligned names).
+    """
+    names = list(returns_by_name or {})
+    if len(names) < 2:
+        return None
+    w = weights or {}
+    total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
+    if total <= 0:
+        norm = dict.fromkeys(names, 1.0 / len(names))
+    elif total > 1.0:
+        norm = {n: float(w.get(n, 0.0) or 0.0) / total for n in names}
+    else:
+        norm = {n: float(w.get(n, 0.0) or 0.0) for n in names}
+    mixed = portfolio_returns(norm, returns_by_name)
+    if not mixed:
+        return None
+    # tail loss: mean of the worst `shock`-fraction of weighted returns
+    k = max(1, int(abs(float(shock)) * len(mixed)))
+    worst = sorted(mixed)[:k]
+    return -sum(worst) / len(worst) if worst else None
+
+
 def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     """True = new risk blocked while realized drawdown exceeds the limit."""
     if drawdown_pct is None:
@@ -109,4 +148,4 @@ def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     return float(drawdown_pct) > float(limit_pct)
 
 
-__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "drawdown_gate"]
+__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate"]

@@ -18,8 +18,25 @@ def target_level(close: float, atr: float, atr_mult: float = 4.0) -> float:
     return close + max(0.0, float(atr_mult)) * float(atr)
 
 
-def net_of_cost(gross_return: float, cost_bps: float = 10.0) -> float:
-    return float(gross_return) - float(cost_bps) / 10000.0
+def net_of_cost(
+    gross_return: float,
+    cost_bps: float = 10.0,
+    illiq: float | None = None,
+    illiq_cost_mult: float = 1e5,
+) -> float:
+    """Net a per-trade cost (basis points) from a return.
+
+    Item 3 (liquidity-aware costs): when ``illiq`` (Amihud ILLIQ, the
+    screener's price-impact proxy) is provided, scale the cost up for
+    illiquid names — real firms charge more to trade them. The default
+    ``illiq_cost_mult`` maps an ILLIQ of ~1e-5 (a reasonable liquid large-cap)
+    to roughly +1bps extra. ``cost_bps`` stays the base; None ``illiq`` keeps
+    the original flat-cost behavior (backward compatible).
+    """
+    bps = float(cost_bps)
+    if illiq is not None:
+        bps += float(illiq) * float(illiq_cost_mult)
+    return float(gross_return) - bps / 10000.0
 
 
 def rebalance_due(days_since_last: int | None, interval_days: int = 30) -> bool:

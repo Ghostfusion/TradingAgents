@@ -12,9 +12,12 @@ import pytest
 
 from tradingagents.strategies.pre_market import (
     catalyst_window_read,
+    ledger_track_record,
     load_prior_state,
     premarket_gap,
+    record_review,
     reanchor_plan,
+    resolve_ledger,
     review_decision,
 )
 
@@ -292,3 +295,40 @@ def test_load_prior_state_with_results_dir(tmp_path):
     # defect-1 levels parse straight out of the located JSON
     p = {"entry": out["state"]["trader_investment_decision"].split("Entry Price**: ")[1].split()[0]}
     assert float(p["entry"]) == pytest.approx(102.0)
+
+
+def test_ledger_track_record_measures_wins(tmp_path):
+    """Item 4: the paper-ledger track record computes win rate / avg return."""
+    path = str(tmp_path / "ledger.jsonl")
+    record_review(
+        path, ticker="EIX", prior_date="2026-08-20", trade_date="2026-08-21",
+        verdict="CONFIRM", reasons=[], gap_pct=0.0,
+    )
+    record_review(
+        path, ticker="EIX", prior_date="2026-08-21", trade_date="2026-08-22",
+        verdict="REJECT", reasons=[], gap_pct=-0.01,
+    )
+    # resolve both with an "open" price: gap 0 -> prior_close == open; gap -1% -> higher
+    n = resolve_ledger(path, "EIX", "2026-08-23", 100.0)
+    assert n == 2
+    tr = ledger_track_record(path)
+    assert tr["resolved"] == 2
+    assert tr["win_rate"] is not None
+    assert 0 <= float(tr["win_rate"]) <= 1
+    assert tr["sum_realized"] is not None
+
+
+def test_ledger_track_record_direction_filter(tmp_path):
+    path = str(tmp_path / "ledger.jsonl")
+    record_review(
+        path, ticker="EIX", prior_date="2026-08-20", trade_date="2026-08-21",
+        verdict="CONFIRM", reasons=[], gap_pct=0.02,
+    )
+    resolve_ledger(path, "EIX", "2026-08-22", 102.0)
+    # only CONFIRM rows counted
+    tr = ledger_track_record(path, direction="CONFIRM")
+    assert tr["resolved"] == 1
+    # no matching direction -> resolved 0, win_rate None (never fabricated)
+    other = ledger_track_record(path, direction="REVISE")
+    assert other["resolved"] == 0
+    assert other["win_rate"] is None

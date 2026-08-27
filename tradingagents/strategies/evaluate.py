@@ -13,9 +13,21 @@ from __future__ import annotations
 import math
 
 
-def net_returns(returns: list[float], cost_bps: float = 10.0) -> list[float]:
-    """Subtract a per-trade cost (basis points) from each period return."""
+def net_returns(
+    returns: list[float],
+    cost_bps: float = 10.0,
+    illiq: float | None = None,
+    illiq_cost_mult: float = 1e5,
+) -> list[float]:
+    """Subtract a per-trade cost (basis points) from each period return.
+
+    Item 3 (liquidity-aware costs): when ``illiq`` (Amihud ILLIQ) is provided,
+    scale cost up for illiquid names (mirrors ``exits.net_of_cost``). None
+    ``illiq`` keeps the flat-cost behavior (backward compatible).
+    """
     cost = cost_bps / 10000.0
+    if illiq is not None:
+        cost += float(illiq) * float(illiq_cost_mult) / 10000.0
     return [r - cost if r is not None else None for r in returns]
 
 

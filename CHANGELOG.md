@@ -8,6 +8,28 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+- **Industry-practice suggestions implemented (7 items)** -
+  - Correlation-aware allocation: `portfolio.correlation_penalty` /
+    `mean_correlation` down-weight names highly correlated with the book
+    (risk-parity style).
+  - Book-level stress: `book_risk.book_correlated_stress` shocks the whole
+    basket together; surfaced in the risk snapshot + report risk-gate block.
+  - Liquidity-aware costs: `exits.net_of_cost` / `evaluate.net_returns` accept
+    an `illiq` (Amihud) param to scale cost for illiquid names.
+  - Paper-ledger track record: `pre_market.ledger_track_record` measures the
+    reviewer's win rate / avg realized return from resolved rows.
+  - Limit-order directive: `pre_market_review.py` appends a thin-liquidity
+    "prefer limit orders / reduce size" reason when the book is thin/illiquid.
+  - Claim-vs-computed audit: `reporting.audit_decision_numbers` (opt-in via
+    `enable_decision_audit` / `TRADINGAGENTS_ENABLE_DECISION_AUDIT`) flags a PM
+    decision's Stop Loss far from the computed contract stop.
+  - Strategy-quality report: `scripts/strategy_quality_report.py` reads the
+    reflection + pre-market ledgers and reports net-of-cost Sharpe / drawdown /
+    win rate (wired into the web raw allowlist).
+  Tests: portfolio/book_risk/evaluate/pre_market/reporting/value_style.
+  Full suite 1427 passed.
+
 ### Fixed
 - **Moomoo exit-hang** - `dataflows/moomoo.py` had a shadowing duplicate
   `_close_all_ctxs()` (the atexit one called `ctx.close()` directly, which

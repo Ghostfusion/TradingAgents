@@ -20,6 +20,15 @@ def test_net_returns_subtracts_costs():
     assert abs(out[1] - (-0.005 - 0.001)) < 1e-9
 
 
+def test_net_returns_illiq_scales_cost():
+    # item 3: illiquid name scales cost up; None illiq keeps flat cost.
+    out = net_returns([0.01], cost_bps=10, illiq=1e-5)
+    extra = 1e-5 * 1e5 / 10000.0  # +1bp
+    assert abs(out[0] - (0.01 - 0.001 - extra)) < 1e-9
+    flat = net_returns([0.01], cost_bps=10, illiq=None)
+    assert abs(flat[0] - (0.01 - 0.001)) < 1e-9
+
+
 def test_total_return_compounds():
     assert abs(total_return([0.1, 0.1]) - 0.21) < 1e-9
     assert total_return([]) == 0.0

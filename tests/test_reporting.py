@@ -123,6 +123,22 @@ def test_slugify():
     assert _slugify("### Aggressive Analyst") == "aggressive-analyst"
 
 
+def test_audit_decision_numbers_flags_mismatch():
+    """Item 6: the claim-vs-computed audit flags a PM decision's Stop Loss
+    that deviates >15% from the computed contract stop; matching values and
+    missing refs produce no note."""
+    from tradingagents.reporting import audit_decision_numbers
+
+    md = "**Stop Loss**: 100.0\n**Price Target**: 150.0\n"
+    # matching ref -> no note
+    assert audit_decision_numbers(md, {"stop": 102.0, "target": 145.0}) == ""
+    # far stop -> note
+    note = audit_decision_numbers(md, {"stop": 80.0, "target": 145.0})
+    assert "Claim audit" in note and "100.0" in note
+    # no refs -> no note
+    assert audit_decision_numbers(md, {}) == ""
+
+
 def test_truncation_marker_appended_to_mid_sentence_sections(tmp_path):
     """A section that ends mid-sentence (LLM max_tokens cut) gets a visible
     marker in the saved file and the consolidated report, so the reader knows

@@ -297,6 +297,15 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-26 `(working tree)` - Industry-practice suggestions implemented (7
+  items): correlation-aware allocation (`portfolio.correlation_penalty`),
+  book-level correlated stress (`book_risk.book_correlated_stress`, surfaced
+  in the risk snapshot), liquidity-aware costs (`exits`/`evaluate` illiq),
+  paper-ledger track record (`pre_market.ledger_track_record`), limit-order
+  directive in `pre_market_review.py`, claim-vs-computed audit
+  (`reporting.audit_decision_numbers`, opt-in `enable_decision_audit`), and
+  `scripts/strategy_quality_report.py`.
+
 - 2026-08-26 `00a77d1` - Value-dip + swing + pre/post-market research
   implementation: 6 new technical factors (`aroon`, `fisher_transform`,
   `chaikin_oscillator`, `elder_ray`, `supertrend`, `volume_profile`) in

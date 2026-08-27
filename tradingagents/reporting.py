@@ -135,6 +135,45 @@ def _finalize_section(text: str) -> str:
     return text.rstrip() + _TRUNCATION_MARKER
 
 
+def audit_decision_numbers(decision_text: str, refs: dict) -> str:
+    """Claim-vs-computed audit of a PM decision (item 6).
+
+    Deterministically extracts the decision's self-reported ``Stop Loss`` and
+    ``Price Target`` and cross-checks them against the computed reference
+    levels (the risk gate's contract stop / the price target from state).
+    Only flags a discrepancy when BOTH the decision value and the computed
+    reference are present AND the decision value deviates > 15% (avoids noise
+    from prose numbers). Returns a short markdown audit note, or '' when there
+    is nothing to flag. Never modifies the decision - it is advisory.
+    """
+    import re
+
+    def _num(text, label):
+        m = re.findall(rf"\*\*{label}\*\*[^0-9]*([0-9]+(?:\.[0-9]+)?)", decision_text)
+        return float(m[0]) if m else None
+
+    stop_dec = _num(decision_text, "Stop Loss")
+    target_dec = _num(decision_text, "Price Target")
+    stop_ref = refs.get("stop")
+    target_ref = refs.get("target")
+    notes = []
+    if stop_dec is not None and stop_ref is not None and stop_ref > 0 and abs(stop_dec - stop_ref) / stop_ref > 0.15:
+        notes.append(f"decision Stop Loss {stop_dec} deviates >15% from computed stop {stop_ref:.2f}")
+    if (
+        target_dec is not None
+        and target_ref is not None
+        and target_ref > 0
+        and abs(target_dec - target_ref) / target_ref > 0.15
+    ):
+        notes.append(f"decision Price Target {target_dec} deviates >15% from computed target {target_ref:.2f}")
+    if not notes:
+        return ""
+    return (
+        "\n\n> **Claim audit**: " + "; ".join(notes) +
+        " — verify against the computed values before acting."
+    )
+
+
 def _risk_gate_block(final_state: dict) -> str:
     """Markdown block of the computed risk gate; '' when no gate ran."""
     gate = final_state.get("risk_gate") or {}
@@ -154,6 +193,10 @@ def _risk_gate_block(final_state: dict) -> str:
         parts.append(f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}")
     if ctx.get("book_cvar") is not None:
         parts.append(f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%} — this fed the gate")
+    # Item 2: book-level correlated stress - the whole basket shocked together
+    # (real firms stress the book, not just single names).
+    if ctx.get("book_stress") is not None:
+        parts.append(f"Book correlated stress: {ctx['book_stress']:.2%} (-10% correlated shock)")
     # Tranche fold: worst-case scale-in measures (config-frozen tranche plan)
     # that the gate sized/throttled against (Value_Dip_swing_Continue.md).
     tc = final_state.get("tranche_context") or {}
@@ -298,10 +341,26 @@ def write_report_tree(
         if risk.get("judge_decision"):
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
-            wrapped = prepend_block(_finalize_section(risk["judge_decision"]))
+            pm_decision = risk["judge_decision"]
+            if cfg.get("enable_decision_audit"):
+                try:
+                    import re as _re
+
+                    ref_stop = None
+                    contract = final_state.get("position_contract")
+                    if isinstance(contract, str):
+                        m = _re.search(r"\bstop\s+([0-9.]+)", contract, _re.IGNORECASE)
+                        if m:
+                            ref_stop = float(m.group(1))
+                    audit_note = audit_decision_numbers(pm_decision, {"stop": ref_stop})
+                    if audit_note:
+                        pm_decision = pm_decision.rstrip() + audit_note
+                except Exception:  # noqa: BLE001 - audit is advisory, never blocks
+                    pass
+            wrapped = prepend_block(_finalize_section(pm_decision))
             (portfolio_dir / "decision.md").write_text(wrapped, encoding="utf-8")
             sections.append(
-                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(_finalize_section(risk['judge_decision'])))}"
+                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(_finalize_section(pm_decision)))}"
             )
 
     # Write consolidated report (auto Table of Contents above the teams)

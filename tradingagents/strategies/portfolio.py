@@ -99,6 +99,78 @@ def summary(weights: dict, min_n: int = 10) -> dict:
     }
 
 
+def _pearson(a: list, b: list) -> float | None:
+    """Pearson correlation of two aligned numeric lists; None when degraded."""
+    if not a or len(a) != len(b) or len(a) < 3:
+        return None
+    n = len(a)
+    ma = sum(a) / n
+    mb = sum(b) / n
+    sxy = sum((x - ma) * (y - mb) for x, y in zip(a, b, strict=True))
+    sxx = sum((x - ma) ** 2 for x in a)
+    syy = sum((y - mb) ** 2 for y in b)
+    denom = (sxx * syy) ** 0.5
+    if denom <= 0:
+        return None
+    return sxy / denom
+
+
+def mean_correlation(returns_by_name: dict, name: str) -> float | None:
+    """Average Pearson correlation of one name vs every other aligned name.
+
+    None when the series cannot be aligned, the name is absent, or fewer than
+    one peer exists.
+    """
+    if name not in returns_by_name or not returns_by_name[name]:
+        return None
+    peers = [k for k in returns_by_name if k != name and returns_by_name[k]]
+    if not peers:
+        return None
+    base = returns_by_name[name]
+    corrs = []
+    for p in peers:
+        c = _pearson(base, returns_by_name[p])
+        if c is not None:
+            corrs.append(c)
+    if not corrs:
+        return None
+    return sum(corrs) / len(corrs)
+
+
+def correlation_penalty(
+    weights: dict,
+    returns_by_name: dict,
+    threshold: float = 0.6,
+    penalty: float = 0.3,
+    min_weight: float | None = None,
+) -> dict:
+    """Down-weight names whose average pairwise correlation with the rest of
+    the book exceeds ``threshold`` (concentration risk, risk-parity style).
+
+    A name with avg correlation > threshold gets its weight scaled by
+    ``(1 - penalty)``; the freed weight is renormalized back across the book
+    so total still sums to ~1. Returns the adjusted weights (same keys). When
+    a name has no measurable correlation (missing/short series) it is left
+    unchanged - correlation never fabricates. ``min_weight`` (optional) floors
+    any adjusted weight.
+    """
+    out = dict(weights)
+    penalty_frac = float(penalty)
+    for name in list(out):
+        corr = mean_correlation(returns_by_name, name)
+        if corr is None or corr <= float(threshold):
+            continue
+        out[name] = max(0.0, float(out[name]) * (1.0 - penalty_frac))
+    total = sum(float(v) for v in out.values())
+    # renormalize so total sums to 1 (only when all weights are non-negative;
+    # leverage/negative weights are left untouched to avoid distortion).
+    if total > 0 and all(v >= 0 for v in out.values()):
+        out = {k: float(v) / total for k, v in out.items()}
+    if min_weight is not None:
+        out = {k: max(float(min_weight), float(v)) for k, v in out.items()}
+    return out
+
+
 __all__ = [
     "value_ratio_weights",
     "capped_weights",
@@ -107,4 +179,6 @@ __all__ = [
     "min_names_ok",
     "summary",
     "allocation_block",
+    "mean_correlation",
+    "correlation_penalty",
 ]

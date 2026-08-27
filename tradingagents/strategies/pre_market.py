@@ -28,6 +28,7 @@ __all__ = [
     "parse_planned_levels",
     "record_review",
     "resolve_ledger",
+    "ledger_track_record",
 ]
 
 
@@ -543,3 +544,59 @@ def resolve_ledger(ledger_path: str, ticker: str, trade_date: str, open_price: f
             fh.write(json.dumps(row) + "\n")
     os.replace(tmp, ledger_path)
     return n_resolved
+
+
+def ledger_track_record(
+    ledger_path: str,
+    direction: str | None = None,
+) -> dict:
+    """Measured track record of the paper-book reviewer from resolved rows.
+
+    Item 4 (paper-trading ledger): turns the pending→resolved pre-market ledger
+    into a measurable win rate / avg return time series, matching how a firm
+    would grade a strategy on paper before risking money.
+
+    ``direction`` optionally filters to rows whose verdict matches a directional
+    read ('CONFIRM' vs 'REVISE'/'REJECT'); None measures all resolved rows.
+    Returns ``{count, resolved, wins, losses, win_rate, avg_realized, sum_realized}``
+    where a 'win' is a positive realized return on a CONFIRM (or the absence of
+    a through-stop gap), and a negative return is a loss. All None/0 when no
+    rows are resolved (never fabricated).
+    """
+    import json
+    import os
+
+    if not os.path.exists(ledger_path):
+        return {"count": 0, "resolved": 0, "wins": 0, "losses": 0,
+                "win_rate": None, "avg_realized": None, "sum_realized": None}
+    rows = []
+    with open(ledger_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    realized = []
+    for row in rows:
+        if row.get("realized_return") is None:
+            continue
+        if direction and str(row.get("verdict", "")).upper() != direction.upper():
+            continue
+        realized.append(float(row["realized_return"]))
+    if not realized:
+        return {"count": len(rows), "resolved": len(realized), "wins": 0, "losses": 0,
+                "win_rate": None, "avg_realized": None, "sum_realized": None}
+    wins = sum(1 for r in realized if r > 0)
+    losses = sum(1 for r in realized if r < 0)
+    return {
+        "count": len(rows),
+        "resolved": len(realized),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / len(realized), 4),
+        "avg_realized": round(sum(realized) / len(realized), 6),
+        "sum_realized": round(sum(realized), 6),
+    }
