@@ -32,7 +32,22 @@ a fresh agent must follow them without being reminded:
    Never leave uncommitted/pushed work at the end of a task. If the commit
    hash is referenced in a doc (e.g. the onboarding changelog), commit it in a
    follow-up docs commit and push.
-4. No personal info or secrets in commits (see §8 below); offline tests stay
+4. **Every TradingAgents change reflects in trading_web** - the web app
+   (`../TradingNew/trading_web`) is a thin passthrough to the repo's scripts
+   and tools. Whenever a change adds/renames a capability, tool, script flag,
+   or screener column, the matching web surface must be updated in the same
+   task: the backend capability adapter (`backend/capabilities.py`), the job
+   allowlist (`backend/main.py`), the raw-command allowlist
+   (`backend/config.py`), the SPA page/help text (`frontend/src/App.jsx`),
+   and the README sync table. Never leave a repo change that the web cannot
+   reach.
+5. **Every test has a timer** - every test file must carry a pytest-timeout
+   deadline (`pytestmark = pytest.mark.timeout(N)`) so a hung vendor call or
+   infinite loop can never block the session. New test files must include it;
+   existing files without it should gain one when touched. When running tests
+   from the shell, wrap the command in a `timeout` too (e.g.
+   `timeout 900 py -3.12 -m pytest tests/ -q`).
+6. No personal info or secrets in commits (see §8 below); offline tests stay
    hermetic (mock vendor calls); `py -3.12` everywhere (below).
 
 ---
@@ -282,6 +297,17 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-26 `00a77d1` - Value-dip + swing + pre/post-market research
+  implementation: 6 new technical factors (`aroon`, `fisher_transform`,
+  `chaikin_oscillator`, `elder_ray`, `supertrend`, `volume_profile`) in
+  `technical_factors.py`; new `market_session.py` (opening range/ORB, gap
+  type, order imbalance, premarket liquidity, post-close confirmation); 5 new
+  market-analyst tools (`get_opening_range`, `get_gap_type`,
+  `get_order_imbalance`, `get_premarket_liquidity`, `get_post_close_confirmation`);
+  screener columns `Aroon`/`Fisher`/`Supertrend`/`POC`. Tests:
+  `test_strategies_market_session.py` (30) + extended
+  `test_strategies_technical_factors.py` (17 new). Full suite 1413 passed.
+
 - 2026-08-26 `7e01b06` - Conditional action report (`scripts/action_report.py`):
   flags basket names (TRADINGAGENTS_RISK_BASKET_WEIGHTS) on their newest
   Underweight/Sell verdict (reduce/trim) + non-basket names on their newest
