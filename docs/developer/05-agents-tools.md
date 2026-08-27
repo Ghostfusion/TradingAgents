@@ -39,6 +39,9 @@ right args (a `get_news(ticker, start_date, end_date)` style). The route goes:
 ```
 
 Computed-analysis tools (`analysis_tools.get_*`) wrap strategies directly.
+The market-session tools (`get_opening_range` / `get_gap_type` /
+`get_order_imbalance` / `get_premarket_liquidity` / `get_post_close_confirmation`)
+wrap `strategies/market_session.py` and are bound to the market analyst.
 
 ## 5.3 Structured output
 

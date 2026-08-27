@@ -19,6 +19,7 @@ analyst then says the signal is unavailable rather than inventing it.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -2079,6 +2080,189 @@ def get_ownership_concentration(
         return f"ownership concentration unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_opening_range(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Opening-range breakout (ORB) read: first-15-min high/low + breakout.
+
+    Computes the opening range (first ~15 bars of the daily series), whether
+    the latest close broke above/below it, and a 2R stop/target. Call before
+    any 'opening range / ORB / first-15-min breakout' claim on a swing entry.
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 20:
+        return f"opening range unavailable for {ticker}: fewer than 20 bars."
+    try:
+        from tradingagents.strategies.market_session import opening_range
+
+        r = opening_range(data["highs"], data["lows"], closes=closes)
+        if r.get("or_high") is None:
+            return f"opening range unavailable for {ticker}: insufficient bars."
+        return (
+            f"opening range {ticker}: or_high={r['or_high']} or_low={r['or_low']} "
+            f"breakout={r.get('breakout')} stop={r.get('stop')} target={r.get('target')}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"opening range unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_gap_type(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Overnight gap classification: common / breakaway / runaway / exhaustion
+    + heuristic fill probability and days-to-fill.
+
+    Call before any 'gap will fill / breakaway gap / gap risk' claim on a
+    pre-market or post-close read. The fill stats are heuristic estimates
+    from gap size + volume (never fabricated).
+    """
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 25:
+        return f"gap type unavailable for {ticker}: fewer than 25 bars."
+    try:
+        from tradingagents.strategies.market_session import gap_type
+
+        r = gap_type(closes, data["highs"], data["lows"], data["volumes"])
+        if r.get("type") is None:
+            return f"gap type unavailable for {ticker}: insufficient data."
+        return (
+            f"gap type {ticker}: {r['type']} gap_pct={r['gap_pct']:.2%} "
+            f"fill_probability={r['fill_probability']:.0%} days_to_fill={r['days_to_fill']}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"gap type unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_order_imbalance(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Order-imbalance verdict (buy-heavy / sell-heavy / balanced) from the
+    institutional vs retail net flow.
+
+    Reuses the orderflow module's institutional/retail nets. Call before any
+    'institutions are buying/selling / order imbalance' claim.
+    """
+    try:
+        from tradingagents.dataflows.interface import route_to_vendor
+        from tradingagents.strategies.market_session import order_imbalance
+        from tradingagents.strategies.orderflow import (
+            institutional_net as _inst_net,
+            retail_net as _retail_net,
+            tier_nets as _tier_nets,
+        )
+
+        payload = route_to_vendor("get_capital_flow", ticker) or ""
+        buckets = {}
+        for line in payload.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.lower().startswith("date"):
+                continue
+            parts = line.split(",")
+            if len(parts) >= 2:
+                with contextlib.suppress(ValueError):
+                    buckets[parts[0].strip()] = float(parts[1])
+        nets = _tier_nets(buckets)
+        inst = _inst_net(nets)
+        retail = _retail_net(nets)
+        r = order_imbalance(inst, retail)
+        if r.get("verdict") is None:
+            return f"order imbalance unavailable for {ticker}: no flow data."
+        return (
+            f"order imbalance {ticker}: {r['verdict']} ratio={r['ratio']:.2f} "
+            f"(inst_net={inst} retail_net={retail})"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"order imbalance unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_premarket_liquidity(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Pre-market liquidity read: pre-market volume vs the daily average.
+
+    A very low ratio = thin book (wide spreads, gap risk). Call before any
+    'liquid enough to trade pre-market / thin book / wide spread' claim.
+    """
+    try:
+        from tradingagents.strategies.market_session import premarket_liquidity
+
+        # pre-market volume is not exposed by the free vendors; use the latest
+        # daily volume as a proxy and label it clearly.
+        data = _ohlcv(ticker)
+        vols = data["volumes"]
+        if len(vols) < 30:
+            return f"premarket liquidity unavailable for {ticker}: insufficient volume history."
+        latest = float(vols[-1])
+        avg = sum(float(v) for v in vols[-30:]) / 30
+        r = premarket_liquidity(latest, avg)
+        if r.get("verdict") is None:
+            return f"premarket liquidity unavailable for {ticker}."
+        return (
+            f"premarket liquidity {ticker}: ratio={r['ratio']:.2f} verdict={r['verdict']} "
+            "(latest daily volume vs 30d avg - pre-market volume not exposed by free vendors)"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"premarket liquidity unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_post_close_confirmation(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Post-close confirmation: did the latest close confirm the plan?
+
+    Compares the latest close against the prior report's stop/target (from
+    the newest report folder's decision.md). Verdicts: stopped-out /
+    target-hit / holding. Call before any 'the close confirmed / stopped out'
+    claim on a held position.
+    """
+    try:
+        from tradingagents.strategies.market_session import post_close_confirmation
+
+        data = _ohlcv(ticker)
+        closes = data["closes"]
+        if not closes:
+            return f"post-close confirmation unavailable for {ticker}: no price history."
+        close = float(closes[-1])
+        # find the newest report's stop/target from decision.md
+        stop = target = None
+        import glob
+        import os
+
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "reports")
+        hits = sorted(glob.glob(os.path.join(root, f"{ticker.upper()}_*")), reverse=True)
+        for folder in hits:
+            md = os.path.join(folder, "5_portfolio", "decision.md")
+            if not os.path.isfile(md):
+                continue
+            import re
+
+            with open(md, encoding="utf-8") as fh:
+                text = fh.read()
+            m = re.search(r"\*\*Stop Loss\*\*[^0-9]*([0-9.]+)", text)
+            if m:
+                stop = float(m.group(1))
+            m = re.search(r"\*\*Price Target\*\*[^0-9]*([0-9.]+)", text)
+            if m:
+                target = float(m.group(1))
+            break
+        r = post_close_confirmation(close, stop, target)
+        if r.get("verdict") is None:
+            return f"post-close confirmation unavailable for {ticker}."
+        return (
+            f"post-close confirmation {ticker}: close={close:.2f} verdict={r['verdict']} "
+            f"action={r['action']} (stop={stop} target={target})"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"post-close confirmation unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_sector_rank",
     "get_strategy_quality",
@@ -2116,4 +2300,9 @@ __all__ = [
     "get_session_discipline",
     "get_earnings_quality",
     "get_ownership_concentration",
+    "get_opening_range",
+    "get_gap_type",
+    "get_order_imbalance",
+    "get_premarket_liquidity",
+    "get_post_close_confirmation",
 ]

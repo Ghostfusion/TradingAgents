@@ -30,6 +30,7 @@ module inventory) alongside this.
 | 14 | `capital_income.md` | Preferred-income index methodology (liquidity screen, indicated yield top-50, MV/equal + 3% cap) | `strategies/capital_income.py` + standalone `scripts/capital_income_screener.py` (no graph wiring) | standalone CLI |
 | 15 | (screener sector table) | Full 11-SPDR sector ranking table (1m/3m returns, rank, top-3 flags) appended to the report when the ranking is computed | `scripts/value_screener.py::_sector_table_markdown` + `strategies/sector_rank.py` | `--sector-rank` / `--enrich-sector` |
 | 16 | (conditional action report) | Check report verdicts against the risk basket: basket names on newest Underweight/Sell (reduce), non-basket on newest Overweight/Buy (add); extract the report's condition and check it against live OHLCV (MET/NOT_MET/UNKNOWN) | `scripts/action_report.py` + `agents/schemas.ActionConditionVerdict` + `agents/overrides/action_condition_judge.py` | `--basket` / `--llm` (optional judge) |
+| 17 | (value-dip + swing + pre/post-market research) | 6 new technical factors (Aroon, Fisher, Chaikin, Elder-Ray, Supertrend, volume profile) + market-session module (opening range/ORB, gap type, order imbalance, premarket liquidity, post-close confirmation) + 5 market-analyst tools + screener Aroon/Fisher/Supertrend/POC columns | `strategies/technical_factors.py` + `strategies/market_session.py` + `analysis_tools.get_opening_range`/`get_gap_type`/`get_order_imbalance`/`get_premarket_liquidity`/`get_post_close_confirmation` + `value_screener` columns | always-on (pure/optional) |
 
 ---
 

@@ -10,10 +10,16 @@ import pytest
 from tradingagents.strategies.swing import chandelier_exit, fib_levels
 from tradingagents.strategies.technical_factors import (
     adx,
+    aroon,
+    chaikin_oscillator,
+    elder_ray,
+    fisher_transform,
     kst,
     mf_index,
     pivot_points,
     stochastic_oscillator,
+    supertrend,
+    volume_profile,
 )
 from tradingagents.strategies.value_dip import fib_retrace_entry
 
@@ -109,3 +115,59 @@ def test_fib_retrace_entry():
     assert fib_retrace_entry([], [], [])["near_level"] is None
     # short history -> None
     assert fib_retrace_entry([90.0, 92.0], [91, 93], [89, 91])["levels"] is None
+
+
+def _uptrend(n=60):
+    closes = [100.0 + i * 0.5 for i in range(n)]
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    vols = [1_000_000.0] * n
+    return closes, highs, lows, vols
+
+
+def test_aroon_uptrend():
+    _, highs, lows, _ = _uptrend()
+    r = aroon(highs, lows)
+    assert r["aroon_up"] == 100.0
+    assert r["aroon_down"] == 0.0
+    assert r["verdict"] == "uptrend"
+    assert aroon([1, 2], [1, 2])["aroon_up"] is None
+
+
+def test_fisher_transform():
+    closes, _, _, _ = _uptrend()
+    r = fisher_transform(closes)
+    assert r["fisher"] is not None
+    assert r["verdict"] in ("up", "down", "reversal-up", "reversal-down")
+    assert fisher_transform([1, 2])["fisher"] is None
+
+
+def test_chaikin_oscillator():
+    closes, highs, lows, vols = _uptrend()
+    v = chaikin_oscillator(highs, lows, closes, vols)
+    assert v is not None
+    assert chaikin_oscillator([1], [1], [1], [1]) is None
+
+
+def test_elder_ray():
+    closes, highs, lows, _ = _uptrend()
+    r = elder_ray(highs, lows, closes)
+    assert r["bull_power"] is not None
+    assert r["bear_power"] is not None
+    assert elder_ray([1], [1], [1])["bull_power"] is None
+
+
+def test_supertrend():
+    closes, highs, lows, _ = _uptrend()
+    r = supertrend(highs, lows, closes)
+    assert r["line"] is not None
+    assert r["direction"] in ("up", "down")
+    assert supertrend([1], [1], [1])["line"] is None
+
+
+def test_volume_profile():
+    closes, _, _, vols = _uptrend()
+    r = volume_profile(closes, vols)
+    assert r["poc"] is not None
+    assert r["value_area_low"] <= r["poc"] <= r["value_area_high"]
+    assert volume_profile([1], [1])["poc"] is None

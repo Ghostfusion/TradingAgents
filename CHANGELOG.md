@@ -9,6 +9,21 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Value-dip + swing + pre/post-market research implementation** -
+  - `technical_factors.py`: 6 new pure factors - `aroon` (trend age),
+    `fisher_transform` (normalized reversal), `chaikin_oscillator` (buying
+    pressure), `elder_ray` (bull/bear power), `supertrend` (ATR trailing),
+    `volume_profile` (POC + value area). All return None on insufficient data.
+  - `market_session.py` (new): `opening_range` (ORB breakout + 2R stop/target),
+    `gap_type` (common/breakaway/runaway/exhaustion + fill stats),
+    `order_imbalance` (buy/sell-heavy from flow nets), `premarket_liquidity`
+    (thin-book warning), `post_close_confirmation` (stopped-out/target-hit/hold).
+  - 5 new market-analyst tools: `get_opening_range`, `get_gap_type`,
+    `get_order_imbalance`, `get_premarket_liquidity`, `get_post_close_confirmation`
+    (bound to the market analyst + prompt directives).
+  - Screener columns: `Aroon`, `Fisher`, `Supertrend`, `POC` (volume profile).
+  - Tests: `test_strategies_market_session.py` (30) + extended
+    `test_strategies_technical_factors.py` (17 new).
 - **Conditional action report** - `scripts/action_report.py` checks report
   verdicts against the risk basket (`TRADINGAGENTS_RISK_BASKET_WEIGHTS`):
   basket names are kept on their newest Underweight/Sell verdict (reduce/trim),

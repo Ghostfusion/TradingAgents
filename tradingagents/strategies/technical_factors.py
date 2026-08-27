@@ -265,6 +265,12 @@ __all__ = [
     "obv_divergence",
     "parabolic_sar",
     "elder_thermometer",
+    "aroon",
+    "fisher_transform",
+    "chaikin_oscillator",
+    "elder_ray",
+    "supertrend",
+    "volume_profile",
 ]
 
 
@@ -470,3 +476,211 @@ def elder_thermometer(volumes, n: int = 21) -> dict:
         "heavy": bool(ratio > 1.0),
         "quiet": bool(ratio < 0.8),
     }
+
+
+def aroon(highs, lows, n: int = 25) -> dict:
+    """Aroon trend-age oscillator: how long since the N-period high/low.
+
+    AroonUp = (N - bars since highest high) / N x 100; AroonDown mirrors the
+    lowest low. Up > 70 with Down < 30 = strong uptrend; a crossover of the
+    two signals a trend change. None when history insufficient.
+    """
+    if len(highs) < n + 1 or len(lows) < n + 1:
+        return {"aroon_up": None, "aroon_down": None, "verdict": None}
+    seg_h = [float(x) for x in highs[-(n + 1) :]]
+    seg_l = [float(x) for x in lows[-(n + 1) :]]
+    hh = max(seg_h)
+    ll = min(seg_l)
+    bars_since_high = (len(seg_h) - 1) - seg_h.index(hh)
+    bars_since_low = (len(seg_l) - 1) - seg_l.index(ll)
+    up = (n - bars_since_high) / n * 100.0
+    down = (n - bars_since_low) / n * 100.0
+    if up > 70 and down < 30:
+        verdict = "uptrend"
+    elif down > 70 and up < 30:
+        verdict = "downtrend"
+    elif up > down:
+        verdict = "up-bias"
+    else:
+        verdict = "down-bias"
+    return {"aroon_up": round(up, 2), "aroon_down": round(down, 2), "verdict": verdict}
+
+
+def fisher_transform(closes, n: int = 9) -> dict:
+    """Fisher Transform: normalizes price to sharpen turning points.
+
+    Fisher = 0.5 * ln((1 + x) / (1 - x)) where x is a normalized price over
+    the window. A Fisher crossing above its prior value (trigger) after an
+    extreme low is a reversal signal. None when history insufficient.
+    """
+    if len(closes) < n + 1:
+        return {"fisher": None, "trigger": None, "verdict": None}
+    try:
+        import math
+
+        vals = []
+        for i in range(n, len(closes)):
+            seg = [float(c) for c in closes[i - n + 1 : i + 1]]
+            hi, lo = max(seg), min(seg)
+            x = 0.0 if hi == lo else 2.0 * (float(closes[i]) - lo) / (hi - lo) - 1.0
+            # clamp to avoid log(0)
+            x = max(-0.999, min(0.999, x))
+            vals.append(0.5 * math.log((1.0 + x) / (1.0 - x)))
+        fisher = vals[-1]
+        trigger = vals[-2] if len(vals) >= 2 else None
+        verdict = None
+        if trigger is not None:
+            if fisher > trigger and fisher < -1.0:
+                verdict = "reversal-up"
+            elif fisher < trigger and fisher > 1.0:
+                verdict = "reversal-down"
+            elif fisher > trigger:
+                verdict = "up"
+            else:
+                verdict = "down"
+        return {"fisher": round(fisher, 4), "trigger": round(trigger, 4) if trigger is not None else None, "verdict": verdict}
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"fisher": None, "trigger": None, "verdict": None}
+
+
+def chaikin_oscillator(highs, lows, closes, volumes, fast: int = 3, slow: int = 10) -> float | None:
+    """Chaikin Oscillator = EMA(fast) of A/D line - EMA(slow) of A/D line.
+
+    Positive = buying pressure (accumulation); negative = selling pressure.
+    None when history insufficient.
+    """
+    if len(highs) < slow + 2 or len(lows) < slow + 2 or len(closes) < slow + 2 or len(volumes) < slow + 2:
+        return None
+    try:
+        ad = 0.0
+        ad_series = []
+        for i in range(len(closes)):
+            hi, lo, c, v = float(highs[i]), float(lows[i]), float(closes[i]), float(volumes[i])
+            mfm = 0.0 if hi == lo else ((c - lo) - (hi - c)) / (hi - lo)
+            ad += mfm * v
+            ad_series.append(ad)
+        ema_fast = _ema(ad_series, fast)
+        ema_slow = _ema(ad_series, slow)
+        if ema_fast[-1] is None or ema_slow[-1] is None:
+            return None
+        return round(float(ema_fast[-1]) - float(ema_slow[-1]), 4)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def elder_ray(highs, lows, closes, n: int = 13) -> dict:
+    """Elder-Ray: Bull Power = High - EMA(n); Bear Power = Low - EMA(n).
+
+    Rising bull power + falling (less negative) bear power = buying pressure;
+    the reverse = selling pressure. None when history insufficient.
+    """
+    if len(highs) < n or len(lows) < n or len(closes) < n:
+        return {"bull_power": None, "bear_power": None, "verdict": None}
+    try:
+        ema = _ema([float(c) for c in closes], n)
+        if ema[-1] is None:
+            return {"bull_power": None, "bear_power": None, "verdict": None}
+        e = ema[-1]
+        bull = float(highs[-1]) - e
+        bear = float(lows[-1]) - e
+        # compare to the prior bar for the trend of each power line
+        ema_prev = ema[-2] if len(ema) >= 2 else None
+        if ema_prev is None:
+            return {"bull_power": round(bull, 4), "bear_power": round(bear, 4), "verdict": None}
+        bull_prev = float(highs[-2]) - ema_prev
+        bear_prev = float(lows[-2]) - ema_prev
+        if bull > bull_prev and bear > bear_prev:
+            verdict = "buying-pressure"
+        elif bull < bull_prev and bear < bear_prev:
+            verdict = "selling-pressure"
+        elif bull > 0 and bear < 0:
+            verdict = "mixed-bull"
+        else:
+            verdict = "mixed-bear"
+        return {"bull_power": round(bull, 4), "bear_power": round(bear, 4), "verdict": verdict}
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"bull_power": None, "bear_power": None, "verdict": None}
+
+
+def supertrend(highs, lows, closes, atr_mult: float = 3.0, n: int = 10) -> dict:
+    """Supertrend: ATR-based trailing line that flips direction.
+
+    Basic band = (high + low) / 2 +/- atr_mult x ATR(n); the line trails the
+    band on the trend side and flips when price closes through it. Returns
+    the current line + direction (up/down). None when history insufficient.
+    """
+    if len(highs) < n + 1 or len(lows) < n + 1 or len(closes) < n + 1:
+        return {"line": None, "direction": None}
+    try:
+        from tradingagents.strategies.size import atr as _atr
+
+        atr_v = _atr(highs, lows, closes, window=n)
+        if atr_v is None or atr_v <= 0:
+            return {"line": None, "direction": None}
+        # simple single-bar read: basic band around the midpoint
+        mid = (float(highs[-1]) + float(lows[-1])) / 2.0
+        upper = mid + float(atr_mult) * atr_v
+        lower = mid - float(atr_mult) * atr_v
+        c = float(closes[-1])
+        if c > upper:
+            direction = "up"
+            line = lower
+        elif c < lower:
+            direction = "down"
+            line = upper
+        else:
+            # inside the band: keep the prior direction via the close vs mid
+            direction = "up" if c >= mid else "down"
+            line = lower if direction == "up" else upper
+        return {"line": round(line, 4), "direction": direction}
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"line": None, "direction": None}
+
+
+def volume_profile(closes, volumes, bins: int = 20) -> dict:
+    """Volume profile: distribute each bar's volume across price bins.
+
+    Returns the point of control (POC = price bin with the most volume) and
+    the value area (bins containing ~70% of volume around the POC). A dip
+    into the POC / value-area low is a stronger mean-reversion support zone.
+    None when history insufficient.
+    """
+    if len(closes) < 2 or len(volumes) < 2 or bins < 2:
+        return {"poc": None, "value_area_high": None, "value_area_low": None}
+    try:
+        lo = min(float(c) for c in closes)
+        hi = max(float(c) for c in closes)
+        if hi <= lo:
+            return {"poc": None, "value_area_high": None, "value_area_low": None}
+        width = (hi - lo) / bins
+        vol_by_bin = [0.0] * bins
+        for c, v in zip(closes, volumes, strict=False):
+            idx = min(bins - 1, int((float(c) - lo) / width))
+            vol_by_bin[idx] += float(v)
+        total = sum(vol_by_bin)
+        if total <= 0:
+            return {"poc": None, "value_area_high": None, "value_area_low": None}
+        poc_idx = max(range(bins), key=lambda i: vol_by_bin[i])
+        poc = lo + (poc_idx + 0.5) * width
+        # value area: expand around the POC until ~70% of volume is covered
+        target = total * 0.7
+        acc = vol_by_bin[poc_idx]
+        lo_i = hi_i = poc_idx
+        while acc < target and (lo_i > 0 or hi_i < bins - 1):
+            if lo_i > 0 and (hi_i >= bins - 1 or vol_by_bin[lo_i - 1] >= vol_by_bin[hi_i + 1]):
+                lo_i -= 1
+            elif hi_i < bins - 1:
+                hi_i += 1
+            else:
+                lo_i -= 1
+            acc += vol_by_bin[lo_i] if lo_i != hi_i else 0
+            # re-add the moved bin correctly
+            acc = sum(vol_by_bin[lo_i : hi_i + 1])
+        return {
+            "poc": round(poc, 4),
+            "value_area_high": round(lo + (hi_i + 0.5) * width, 4),
+            "value_area_low": round(lo + (lo_i + 0.5) * width, 4),
+        }
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"poc": None, "value_area_high": None, "value_area_low": None}
+

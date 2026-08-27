@@ -142,6 +142,10 @@ _WATCHLIST_LEGEND = (
     ("OBV", "On-Balance-Volume up flag (bullish OBV divergence = dip-reversal confirm)"),
     ("PSAR", "Parabolic SAR (trailing stop level)"),
     ("Elder", "Elder thermometer (volume / 21-day avg volume)"),
+    ("Aroon", "Aroon trend-age oscillator (up/down; >70 = strong trend)"),
+    ("Fisher", "Fisher Transform (normalized reversal signal; extreme = turn)"),
+    ("Supertrend", "ATR-based trailing line (up/down direction)"),
+    ("POC", "Volume-profile point of control (price level with most volume)"),
     ("DayChg", "intraday change % (from the movers rank)"),
 )
 
@@ -234,7 +238,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "DayChg",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -289,6 +293,10 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("obv_up")),
             cell(r.get("psar")),
             cell(r.get("elder"), "{:.2f}"),
+            cell(r.get("aroon_up"), "{:.0f}"),
+            cell(r.get("fisher"), "{:.2f}"),
+            cell(r.get("supertrend_dir")),
+            cell(r.get("poc")),
             cell(r.get("day_change"), "{:+.2%}"),
         ]
         out.append("| " + " | ".join(cells) + " |")
@@ -1462,13 +1470,17 @@ def main(argv: list[str] | None = None) -> int:
                     # mean-reversion technicals (StochRSI / RSI2 / W%R / Kelt /
                     # Donch / OBV / PSAR / Elder)
                     from tradingagents.strategies.technical_factors import (
+                        aroon as _aroon,
                         donchian_channel as _don,
                         elder_thermometer as _elder,
+                        fisher_transform as _fisher,
                         keltner_channel as _kelt,
                         obv_divergence as _obv,
                         parabolic_sar as _psar,
                         rsi2 as _rsi2,
                         stoch_rsi as _srsi,
+                        supertrend as _supertrend,
+                        volume_profile as _volprof,
                         williams_r as _wr,
                     )
 
@@ -1485,6 +1497,15 @@ def main(argv: list[str] | None = None) -> int:
                     row["obv_up"] = _ov.get("obv_up")
                     row["psar"] = _psar(_hi, _lo).get("sar")
                     row["elder"] = _elder(_vl).get("ratio")
+                    # new dip/swing factors (Aroon / Fisher / Supertrend / POC)
+                    _ar = _aroon(_hi, _lo)
+                    row["aroon_up"] = _ar.get("aroon_up")
+                    _fi = _fisher(_cl)
+                    row["fisher"] = _fi.get("fisher")
+                    _st = _supertrend(_hi, _lo, _cl)
+                    row["supertrend_dir"] = _st.get("direction")
+                    _vp = _volprof(_cl, _vl)
+                    row["poc"] = _vp.get("poc")
                 except Exception:  # noqa: BLE001 - technical factors degrade to n/a
                     pass
             except Exception:  # noqa: BLE001 - liquidity columns degrade to n/a

@@ -32,6 +32,16 @@ involved. This is the "compute, don't narrate" core.
   (negative-force screen). Exposed as eleven value-dip analyst tools,
   `--scan value-dip`, and the folded risk gate.
 - `factors.py` — composite rank (EY + momentum + 52w).
+- `technical_factors.py` — KST, MFI, Stochastic, ADX, pivots, StochRSI, RSI2,
+  W%R, Keltner, Donchian, OBV, PSAR, Elder thermometer + the research-added
+  `aroon` (trend age), `fisher_transform` (normalized reversal),
+  `chaikin_oscillator` (buying pressure), `elder_ray` (bull/bear power),
+  `supertrend` (ATR trailing), `volume_profile` (POC + value area).
+- `market_session.py` — pre/post-market session mechanics: `opening_range`
+  (ORB breakout + 2R stop/target), `gap_type` (common/breakaway/runaway/
+  exhaustion + fill stats), `order_imbalance` (buy/sell-heavy from flow
+  nets), `premarket_liquidity` (thin-book warning), `post_close_confirmation`
+  (stopped-out / target-hit / holding).
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
   EV->equity bridge) powering `get_dcf_valuation`.
 - `journal.py` — `--journal` alloc/journal.

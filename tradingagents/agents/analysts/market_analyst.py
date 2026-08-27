@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_credit_spread_read,
     get_dip_technical,
     get_exit_check,
+    get_gap_type,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
@@ -14,10 +15,14 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_snapshot,
     get_mean_reversion_tech,
     get_momentum_detail,
+    get_opening_range,
     get_options_chain,
+    get_order_imbalance,
     get_orderflow_read,
     get_output_budget,
     get_position_sizing,
+    get_post_close_confirmation,
+    get_premarket_liquidity,
     get_regime_components,
     get_regime_read,
     get_relative_strength,
@@ -62,6 +67,11 @@ def create_market_analyst(llm):
             get_swing_exits,
             get_dip_technical,
             get_mean_reversion_tech,
+            get_opening_range,
+            get_gap_type,
+            get_order_imbalance,
+            get_premarket_liquidity,
+            get_post_close_confirmation,
             get_relative_strength,
             get_position_sizing,
             get_risk_gate,
@@ -127,6 +137,11 @@ You also have computed-analysis tools - use these numbers as ground truth, do no
 - get_swing_exits(ticker) - the chandelier trailing stop (3x ATR below the 22-bar high) + 20-day EMA trail + 2R/3R targets. Use it before any 'trailing stop / exit level / let winners run' claim on a swing position.
 - get_dip_technical(ticker) - the value-dip timing read: RSI(14), Bollinger %b, Stochastic %K oversold, Money Flow Index and KST momentum. Use it before any 'oversold / dip timing / mean reversion' claim - it separates a turnable value dip from a falling knife.
 - get_mean_reversion_tech(ticker) - the faster/smoother mean-reversion + channel technicals: StochRSI, RSI2, Williams %R, Keltner, Donchian, OBV divergence, Parabolic SAR, Elder thermometer. Use it before any 'oversold / channel support / trailing exit / volume confirmation' claim.
+- get_opening_range(ticker) - the opening-range breakout (ORB) read: first-15-min high/low + breakout + 2R stop/target. Use it before any 'opening range / ORB / first-15-min breakout' claim on a swing entry.
+- get_gap_type(ticker) - the overnight gap classification (common / breakaway / runaway / exhaustion) + heuristic fill probability and days-to-fill. Use it before any 'gap will fill / breakaway gap / gap risk' claim.
+- get_order_imbalance(ticker) - the order-imbalance verdict (buy-heavy / sell-heavy / balanced) from institutional vs retail net flow. Use it before any 'institutions are buying/selling / order imbalance' claim.
+- get_premarket_liquidity(ticker) - the pre-market liquidity read (latest volume vs 30d avg; thin-book warning). Use it before any 'liquid enough to trade pre-market / thin book / wide spread' claim.
+- get_post_close_confirmation(ticker) - the post-close confirmation (stopped-out / target-hit / holding) vs the prior report's stop/target. Use it before any 'the close confirmed / stopped out' claim on a held position.
 - get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
 - get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one.
 - get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT.
