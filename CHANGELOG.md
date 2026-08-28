@@ -9,6 +9,25 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Tool-wiring audit: 4 new market tools + run-level OHLCV cache + computed
+  sentiment on** - the audit found strategy functions that were implemented
+  but never exposed to the analyst LLMs, and duplicate OHLCV fetches across
+  tools. Fixes:
+  - `get_technical_factors(ticker)` (market) - ADX / pivots / Aroon / Fisher /
+    Chaikin / Elder-Ray / Supertrend / volume-profile in ONE call.
+  - `get_book_tail_risk(ticker, weights?)` (market) - portfolio CVaR +
+    correlated -10% stress + drawdown gate (book-level tail).
+  - `get_liquidation_days(ticker, shares_to_liquidate?)` (market) - days to
+    absorb a block at a 15% participation cap.
+  - `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?,
+    entry_price?)` (market) - deterministic CONFIRM / REVISE / REJECT arbiter.
+  - Run-level OHLCV cache (`_RUN_OHLCV_CACHE` in analysis_tools.py): every
+    tool shares ONE vendor fetch per (ticker, days) per run - no duplicate
+    data / quota burn. Cleared in conftest between tests.
+  - `enable_sentiment` now **True** (was False): the computed StockTwits
+    score + surprise velocity is injected into the sentiment report (the
+    sentiment functions existed but were never delivered).
+  Tests: 8 new hermetic tool tests + cache test + market-toolnode guard.
 - **Fix market tool-node binding gap + raise quick-tier output cap** -
   the market analyst's prompt lists `get_swing_exits` / `get_dip_technical` /
   `get_mean_reversion_tech` and the 5 market-session tools (`get_opening_range` /

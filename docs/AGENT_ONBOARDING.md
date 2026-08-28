@@ -297,6 +297,18 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - Tool-wiring audit: 4 new market tools +
+  run-level OHLCV cache + computed sentiment on. New market tools:
+  `get_technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/
+  Supertrend/volume-profile in one call), `get_book_tail_risk` (portfolio
+  CVaR + correlated stress + drawdown gate), `get_liquidation_days`
+  (block-absorption days), `get_premarket_review` (CONFIRM/REVISE/REJECT
+  arbiter). `_RUN_OHLCV_CACHE` in analysis_tools.py makes every tool share
+  ONE vendor fetch per (ticker, days) per run (no duplicate data / quota
+  burn; cleared in conftest). `enable_sentiment` now True (computed
+  StockTwits score + surprise velocity injected into the sentiment report).
+  Tests: 8 new hermetic tool tests + cache test + market-toolnode guard.
+
 - 2026-08-27 `(working tree)` - Market tool-node binding fix + higher output
   cap: the market analyst's prompt listed `get_swing_exits` / `get_dip_technical`
   / `get_mean_reversion_tech` and the 5 market-session tools, but they were never

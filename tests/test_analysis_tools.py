@@ -1348,3 +1348,130 @@ def test_get_value_floors_computes(monkeypatch):
     assert "graham_number=" in out
     assert "ncav_per_share=" in out
     assert "epv=" in out
+
+
+# ---------------------------------------------------------------------------
+# New Phase-1 tools: technical factors / book tail / liquidation / premarket
+# ---------------------------------------------------------------------------
+
+
+def test_technical_factors_computes_all_reads():
+    """get_technical_factors wraps ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/
+    Supertrend/volume-profile in one call (shares the run-level OHLCV cache)."""
+    closes = _uptrend(260)
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": closes}),
+    ):
+        out = T.get_technical_factors.invoke({"ticker": "AAPL"})
+    assert "technical factors AAPL" in out
+    assert "adx=" in out and "pivots:" in out and "aroon:" in out
+    assert "fisher=" in out and "chaikin=" in out and "elder_ray:" in out
+    assert "supertrend:" in out and "volume_profile:" in out
+
+
+def test_technical_factors_insufficient_history():
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": [100.0] * 20}),
+    ):
+        out = T.get_technical_factors.invoke({"ticker": "AAPL"})
+    assert "fewer than 30 bars" in out
+
+
+def test_book_tail_risk_computes():
+    """get_book_tail_risk wraps portfolio CVaR + correlated stress + drawdown."""
+    closes = _uptrend(260)
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": closes}),
+    ):
+        out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
+    assert "book tail risk AAPL" in out
+    assert "portfolio_cvar=" in out and "correlated_stress_-10pct=" in out
+    assert "drawdown=" in out and "drawdown_gate=" in out
+
+
+def test_book_tail_risk_no_series():
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({}),
+    ):
+        out = T.get_book_tail_risk.invoke({"ticker": "ZZZZ"})
+    assert "unavailable" in out.lower()
+
+
+def test_liquidation_days_computes(monkeypatch):
+    """get_liquidation_days wraps days_to_absorb with float + ADV."""
+    closes = _uptrend(260)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: 1e8
+    )
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": closes}),
+    ):
+        out = T.get_liquidation_days.invoke({"ticker": "AAPL"})
+    assert "liquidation days AAPL" in out
+    assert "days to absorb" in out
+
+
+def test_liquidation_days_missing_adv():
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": [100.0] * 5}),
+    ):
+        out = T.get_liquidation_days.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+def test_premarket_review_confirm_when_no_deltas():
+    """No quote -> CONFIRM (never fabricate a REVISE/REJECT)."""
+    closes = _uptrend(260)
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": closes}),
+    ):
+        out = T.get_premarket_review.invoke({"ticker": "AAPL"})
+    assert "premarket review AAPL" in out
+    assert "verdict=" in out
+
+
+def test_premarket_review_rejects_through_stop():
+    """Open beyond the prior stop (long: open < stop) -> REJECT (gap risk
+    realized). Requires entry_price to infer the long/short direction."""
+    closes = _uptrend(260)
+    with mock.patch(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        side_effect=_route({"AAPL": closes}),
+    ):
+        out = T.get_premarket_review.invoke(
+            {
+                "ticker": "AAPL",
+                "prior_close": 100.0,
+                "open_price": 80.0,
+                "prior_stop": 90.0,
+                "entry_price": 105.0,
+            }
+        )
+    assert "REJECT" in out
+
+
+def test_ohlcv_cache_serves_one_fetch_per_ticker():
+    """The run-level OHLCV cache must serve ONE vendor fetch per (ticker, days)
+    so multiple tools sharing the series never re-fetch (no duplicate data)."""
+    T._clear_ohlcv_cache()
+    calls = []
+
+    def route(method, *a, **k):
+        if method == "get_stock_data":
+            calls.append(a[0])
+            return _ohlcv_csv([100.0 + i for i in range(60)], [5_000_000] * 60)
+        return "NO_DATA_AVAILABLE"
+
+    with mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=route):
+        T._ohlcv("AAPL")
+        T._ohlcv("AAPL")
+        T._ohlcv("AAPL", days=60)
+    assert calls.count("AAPL") == 2  # 320-day (default) + 60-day (different keys), not 3
+    T._clear_ohlcv_cache()

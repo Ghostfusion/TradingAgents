@@ -401,6 +401,7 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain)
+        # conftest mocks compute_social_scores -> None, so no computed line.
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):

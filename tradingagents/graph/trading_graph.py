@@ -57,6 +57,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_analyst_verdict,
     get_basic_financials,
     get_beat_miss_sizing,
+    get_book_tail_risk,
     get_catalyst_scale,
     get_company_peers,
     get_composite_rank,
@@ -70,6 +71,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_form4_insider,
     get_gap_type,
     get_insider_activity,
+    get_liquidation_days,
     get_margin_of_safety,
     get_mean_reversion_tech,
     get_momentum_detail,
@@ -80,6 +82,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_position_sizing,
     get_post_close_confirmation,
     get_premarket_liquidity,
+    get_premarket_review,
     get_ratios,
     get_regime_components,
     get_regime_read,
@@ -91,6 +94,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_swing_exits,
     get_swing_set,
     get_tail_risk,
+    get_technical_factors,
     get_volatility_contraction,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
@@ -355,6 +359,11 @@ class TradingAgentsGraph:
                     get_order_imbalance,
                     get_premarket_liquidity,
                     get_post_close_confirmation,
+                    # Extended technicals + book tail + liquidation + premarket review.
+                    get_technical_factors,
+                    get_book_tail_risk,
+                    get_liquidation_days,
+                    get_premarket_review,
                     # Value Dip + Swing hybrid (deterministic, computed signals).
                     get_bollinger_pct_b,
                     get_tranche_plan,

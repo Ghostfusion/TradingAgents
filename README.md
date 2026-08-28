@@ -35,6 +35,18 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **Tool-wiring audit: 4 new market tools + OHLCV cache +
+  computed sentiment on** - the audit found strategy functions that were
+  implemented but never exposed to the analyst LLMs, and duplicate OHLCV
+  fetches across tools. New market tools: `get_technical_factors` (ADX/pivots/
+  Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile in one call),
+  `get_book_tail_risk` (portfolio CVaR + correlated stress + drawdown gate),
+  `get_liquidation_days` (block-absorption days), `get_premarket_review`
+  (CONFIRM/REVISE/REJECT arbiter). A run-level OHLCV cache makes every tool
+  share ONE vendor fetch per ticker per run (no duplicate data).
+  `enable_sentiment` is now on (computed StockTwits score + surprise velocity
+  injected into the sentiment report).
+
 - [2026-08-27] **Market tool-node binding fix + higher output cap** - the
   market analyst's prompt listed `get_swing_exits` / `get_dip_technical` /
   `get_mean_reversion_tech` and the 5 market-session tools, but they were never

@@ -30,14 +30,30 @@ from tradingagents.dataflows.interface import route_to_vendor
 # Shared data helpers (vendor chain CSV, benchmark closes)
 # ---------------------------------------------------------------------------
 
+# Run-level OHLCV cache: every tool that needs daily bars shares ONE fetch per
+# ticker per run (the analyst tool loops call many tools that each wrap
+# strategies/* over the same OHLCV). Without this, a run re-fetches the same
+# vendor CSV N times (duplicate data + quota burn). Keyed by (ticker, days).
+_RUN_OHLCV_CACHE: dict[tuple[str, int], dict] = {}
+
+
+def _clear_ohlcv_cache() -> None:
+    """Drop the run-level OHLCV cache (tests / fresh runs)."""
+    _RUN_OHLCV_CACHE.clear()
+
 
 def _ohlcv(ticker: str, days: int = 320) -> dict:
     """Daily OHLCV via the vendor chain (Date,Open,High,Low,Close,Volume rows).
 
     Returns {"dates", "closes", "highs", "lows", "volumes", "opens"} (all
     empty on failure). Mirrors the graph's close-fetch but keeps the full
-    OHLCV the swing/PEAD calculations need.
+    OHLCV the swing/PEAD calculations need. Cached per (ticker, days) for the
+    run so multiple tools sharing the series never re-fetch it.
     """
+    key = (str(ticker).upper(), int(days))
+    cached = _RUN_OHLCV_CACHE.get(key)
+    if cached is not None:
+        return cached
     try:
         from datetime import datetime, timedelta
 
@@ -63,7 +79,7 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
                 volumes.append(float(parts[5]))
             except ValueError:
                 continue
-        return {
+        result = {
             "dates": dates,
             "closes": closes,
             "highs": highs,
@@ -71,8 +87,10 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "volumes": volumes,
             "opens": opens,
         }
+        _RUN_OHLCV_CACHE[key] = result
+        return result
     except Exception:  # noqa: BLE001 - a fetch failure degrades, never raises
-        return {
+        result = {
             "dates": [],
             "closes": [],
             "opens": [],
@@ -80,6 +98,8 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "lows": [],
             "volumes": [],
         }
+        _RUN_OHLCV_CACHE[key] = result
+        return result
 
 
 def _benchmark_closes() -> list:
@@ -2283,6 +2303,246 @@ def get_post_close_confirmation(
         return f"post-close confirmation unavailable for {ticker}: {exc}"
 
 
+@tool
+
+def get_technical_factors(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Extended technical factors: ADX, pivots, Aroon, Fisher, Chaikin,
+    Elder-Ray, Supertrend, volume profile (POC + value area).
+
+    Complements get_indicators / get_dip_technical with the trend-strength,
+    reversal, accumulation and volume-profile reads the analyst prompt does
+    not otherwise expose. One combined call (shares the run-level OHLCV
+    cache) so no duplicate data is fetched. Use before any 'trend strength /
+    pivot support-resistance / Aroon age / Fisher turn / Chaikin accumulation /
+    Elder-Ray buying pressure / Supertrend direction / POC-value-area' claim.
+    """
+    try:
+        from tradingagents.strategies.technical_factors import (
+            adx as _adx,
+            aroon as _aroon,
+            chaikin_oscillator as _chaikin,
+            elder_ray as _elder_ray,
+            fisher_transform as _fisher,
+            pivot_points as _pivots,
+            supertrend as _supertrend,
+            volume_profile as _volprof,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"technical factors unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 30:
+        return f"technical factors unavailable for {ticker}: fewer than 30 bars."
+    try:
+        a = _adx(data["highs"], data["lows"], closes)
+        piv = _pivots(data["highs"][-1], data["lows"][-1], closes[-1])
+        ar = _aroon(data["highs"], data["lows"])
+        fi = _fisher(closes)
+        ch = _chaikin(data["highs"], data["lows"], closes, data["volumes"])
+        er = _elder_ray(data["highs"], data["lows"], closes)
+        st = _supertrend(data["highs"], data["lows"], closes)
+        vp = _volprof(closes, data["volumes"])
+        lines = [
+            f"technical factors {ticker} (close {closes[-1]:.2f}):",
+            f"  adx={a.get('adx')} di+={a.get('di_plus')} di-={a.get('di_minus')} "
+            f"strong={a.get('strong')}",
+            f"  pivots: p={piv.get('p')} r1={piv.get('r1')} s1={piv.get('s1')} "
+            f"r2={piv.get('r2')} s2={piv.get('s2')}",
+            f"  aroon: up={ar.get('aroon_up')} down={ar.get('aroon_down')} "
+            f"verdict={ar.get('verdict')}",
+            f"  fisher={fi.get('fisher') if fi else None} trigger={fi.get('trigger') if fi else None}",
+            f"  chaikin={ch} (positive=buying pressure)",
+            f"  elder_ray: bull={er.get('bull_power')} bear={er.get('bear_power')} "
+            f"verdict={er.get('verdict')}",
+            f"  supertrend: line={st.get('line')} direction={st.get('direction')}",
+            f"  volume_profile: poc={vp.get('poc')} va_high={vp.get('value_area_high')} "
+            f"va_low={vp.get('value_area_low')}",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"technical factors unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_book_tail_risk(
+    ticker: Annotated[str, "ticker symbol"],
+    weights: Annotated[
+        dict | None, "name -> weight map for the book (optional; defaults to the ticker alone)"
+    ] = None,
+) -> str:
+    """Book-level tail risk: portfolio CVaR, correlated stress loss and the
+    drawdown gate.
+
+    Complements get_tail_risk (single-name VaR/CVaR) with the book-level
+    reads: portfolio CVaR from a weighted return mix, the correlated -10%
+    stress loss (a macro event moves every position at once), and the
+    drawdown gate (new risk blocked while realized drawdown exceeds the
+    limit). Use before any 'book tail / correlated stress / drawdown gate'
+    claim. One combined call (shares the run-level OHLCV cache).
+    """
+    try:
+        from tradingagents.strategies.book_risk import (
+            book_correlated_stress as _stress,
+            drawdown_gate as _gate,
+            portfolio_cvar as _pcvar,
+            portfolio_returns as _prets,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"book tail risk unavailable for {ticker}: {exc}"
+    try:
+        w = dict(weights or {})
+        if not w:
+            w = {ticker: 1.0}
+        returns_by_name = {}
+        for name in w:
+            closes = _ohlcv(name).get("closes") or []
+            rets = _daily_returns(closes)
+            if len(rets) >= 30:
+                returns_by_name[name] = rets
+        if not returns_by_name:
+            return f"book tail risk unavailable for {ticker}: no return series."
+        pcvar = _pcvar(returns_by_name, weights=w)
+        stress = _stress(returns_by_name, weights=w, shock=-0.10)
+        # realized drawdown of the weighted book (best-effort)
+        dd = None
+        try:
+            from tradingagents.strategies.evaluate import max_drawdown
+
+            eq = []
+            acc = 1.0
+            for r in _prets(w, returns_by_name):
+                acc *= 1.0 + r
+                eq.append(acc)
+            dd = max_drawdown(eq) if eq else None
+        except Exception:
+            dd = None
+        gate = _gate(dd) if dd is not None else None
+        pcvar_s = f"{abs(pcvar):.2%}" if pcvar is not None else "n/a"
+        stress_s = f"{stress:.2%}" if stress is not None else "n/a"
+        dd_s = f"{dd:.2%}" if dd is not None else "n/a"
+        gate_s = str(gate) if gate is not None else "n/a"
+        return (
+            f"book tail risk {ticker}: portfolio_cvar={pcvar_s} "
+            f"correlated_stress_-10pct={stress_s} "
+            f"drawdown={dd_s} drawdown_gate={gate_s} (True=block new risk)"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"book tail risk unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_liquidation_days(
+    ticker: Annotated[str, "ticker symbol"],
+    shares_to_liquidate: Annotated[
+        float | None, "shares to liquidate (optional; defaults to the float)"
+    ] = None,
+) -> str:
+    """Days for the market to absorb a block liquidation (Strategies/risk2.md).
+
+    Wraps liquidity_risk.days_to_absorb: how many days of heavy supply the
+    float must absorb at a 15% participation cap. Use before any 'can the
+    market absorb this block / days to liquidate / unwind risk' claim.
+    """
+    try:
+        from tradingagents.dataflows.float_shares import fetch_float_shares
+        from tradingagents.strategies.liquidity_risk import days_to_absorb as _dta
+    except Exception as exc:  # noqa: BLE001
+        return f"liquidation days unavailable for {ticker}: {exc}"
+    try:
+        vols = _ohlcv(ticker).get("volumes") or []
+        adv = sum(vols[-30:]) / len(vols[-30:]) if len(vols) >= 30 else None
+        fs = fetch_float_shares(ticker)
+        shares = shares_to_liquidate if shares_to_liquidate is not None else fs
+        d = _dta(shares, adv)
+        if d is None:
+            return f"liquidation days unavailable for {ticker}: missing shares/ADV."
+        return (
+            f"liquidation days {ticker}: {d:.1f} days to absorb "
+            f"{shares:,.0f} shares at 15% of ADV ({adv:,.0f}/day)"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"liquidation days unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_premarket_review(
+    ticker: Annotated[str, "ticker symbol"],
+    prior_close: Annotated[float | None, "prior close price"] = None,
+    open_price: Annotated[float | None, "pre-market / opening price"] = None,
+    prior_stop: Annotated[float | None, "prior report stop loss"] = None,
+    entry_price: Annotated[float | None, "prior report entry price"] = None,
+) -> str:
+    """Deterministic pre-market review: gap read + catalyst window + re-anchor.
+
+    Wraps pre_market.premarket_gap / catalyst_window_read / reanchor_plan /
+    review_decision into one CONFIRM / REVISE / REJECT arbiter from measured
+    deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use
+    before any 'gap risk / re-anchor / pre-market review' claim on a held
+    plan. Missing inputs degrade to CONFIRM (never fabricate).
+    """
+    try:
+        from tradingagents.strategies.pre_market import review_decision as _review
+    except Exception as exc:  # noqa: BLE001
+        return f"premarket review unavailable for {ticker}: {exc}"
+    try:
+        closes = _ohlcv(ticker).get("closes") or []
+        atr_v = None
+        if len(closes) >= 15:
+            from tradingagents.strategies.size import atr as _atr
+
+            atr_v = _atr(_ohlcv(ticker).get("highs") or [], _ohlcv(ticker).get("lows") or [], closes)
+        r = _review(
+            prior_close=prior_close,
+            open_price=open_price,
+            prior_stop=prior_stop,
+            entry_price=entry_price,
+            atr_value=atr_v,
+        )
+        return (
+            f"premarket review {ticker}: verdict={r.get('verdict')} "
+            f"entry={r.get('entry')} stop={r.get('stop')} size_pct={r.get('size_pct')} "
+            f"reasons={r.get('reasons') or []}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"premarket review unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_sentiment_computed(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Deterministic computed sentiment: score + surprise velocity + counts.
+
+    Wraps sentiment.compute_social_scores (StockTwits labeled counts ->
+    signed score, z-scored surprise velocity vs the ticker's own baseline,
+    sample size). Use before any 'sentiment is bullish/bearish / sentiment
+    surprise / crowd positioning' claim - it is the computed number, not a
+    vibe. Degrades to an explicit 'unavailable' when StockTwits has no data.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.sentiment import (
+            compute_social_scores as _scores,
+            computed_sentiment_line as _line,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"computed sentiment unavailable for {ticker}: {exc}"
+    try:
+        cfg = get_config()
+        result = _scores(ticker, cache_dir=cfg.get("data_cache_dir"), limit=30)
+        if not result:
+            return f"computed sentiment unavailable for {ticker}: no StockTwits data."
+        return _line(result)
+    except Exception as exc:  # noqa: BLE001
+        return f"computed sentiment unavailable for {ticker}: {exc}"
+
+
 __all__ = [
     "get_sector_rank",
     "get_strategy_quality",
@@ -2325,4 +2585,9 @@ __all__ = [
     "get_order_imbalance",
     "get_premarket_liquidity",
     "get_post_close_confirmation",
+    "get_technical_factors",
+    "get_book_tail_risk",
+    "get_liquidation_days",
+    "get_premarket_review",
+    "get_sentiment_computed",
 ]

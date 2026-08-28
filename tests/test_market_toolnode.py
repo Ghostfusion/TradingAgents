@@ -44,6 +44,10 @@ def test_market_toolnode_binds_swing_dip_and_market_session_tools():
         "get_order_imbalance",
         "get_premarket_liquidity",
         "get_post_close_confirmation",
+        "get_technical_factors",
+        "get_book_tail_risk",
+        "get_liquidation_days",
+        "get_premarket_review",
     }
     missing = expected - market_tools
     assert not missing, (

@@ -40,6 +40,7 @@ _ENV_OVERRIDES = {
     # Strategy overlays + reflection (Phase wiring) - settable via .env.
     "TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS": "enable_strategy_overlays",
     "TRADINGAGENTS_ENABLE_REFLECTION": "enable_reflection",
+    "TRADINGAGENTS_ENABLE_SENTIMENT": "enable_sentiment",
     "TRADINGAGENTS_ENABLE_ORDERFLOW": "enable_orderflow",
     "TRADINGAGENTS_ENABLE_POSITION_CONTRACT": "enable_position_contract",
     "TRADINGAGENTS_ENABLE_CALIBRATION": "enable_calibration",
@@ -351,7 +352,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "catalyst_hard_block_days": 0,  # >0: REJECT new risk within N calendar
         #   days of a scheduled earnings print (framework Phase-4 hard rule)
         "enable_reflection": True,  # Phase 5: post-trade analyst critique
-        "enable_sentiment": False,  # Phase 6: sentiment velocity
+        "enable_sentiment": True,  # Phase 6: sentiment velocity (computed score + surprise velocity injected into the sentiment report)
         "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)
         "enable_orderflow": False,  # L1-L4: capital-flow signals + flow-scaled sizing
         "orderflow_distribution_threshold": 0.7,

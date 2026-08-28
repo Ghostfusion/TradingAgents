@@ -47,6 +47,7 @@ in `batch.py`).
 | `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT` | `moomoo_call_timeout` | per-call wall-clock timeout (s) for moomoo SDK calls; the SDK's own `ReqInfo.wait()` allows 20s, this caps a degraded gateway at 5s (default) so a run can't stall on hundreds of slow calls |
 | `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | `enable_strategy_overlays` |
 | `TRADINGAGENTS_ENABLE_REFLECTION` | `enable_reflection` |
+| `TRADINGAGENTS_ENABLE_SENTIMENT` | `enable_sentiment` | when on (default True), the sentiment report gets the computed StockTwits score + surprise velocity injected |
 | `TRADINGAGENTS_ENABLE_ORDERFLOW` | `enable_orderflow` |
 | `TRADINGAGENTS_ENABLE_POSITION_CONTRACT` | `enable_position_contract` |
 | `TRADINGAGENTS_ENABLE_CALIBRATION` | `enable_calibration` |
@@ -133,7 +134,9 @@ which is how a web job hits its subprocess budget).
 `vendor_cache_skip_categories={'news_data'}`.
 
 **Strategy flags** - see section 5; `enable_regime`, `enable_factors`,
-`enable_sentiment`, `enable_threshold_gate` default **False**; the rest
+`enable_threshold_gate` default **False**; `enable_sentiment` default **True**
+(computed sentiment score + surprise velocity injected into the sentiment
+report); the rest
 (`enable_strategy_overlays`, `enable_orderflow`, `enable_position_contract`,
 `enable_calibration`, `enable_agreement`, `enable_composite_rank`,
 `enable_exits`, `enable_computed_context`, `enable_risk_governor`,
@@ -250,8 +253,10 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |
 | Composite rank | `enable_composite_rank` (T) | `strategies/factors.py` | EY + momentum + 52w composite |
 
-Off by default: `enable_regime`, `enable_factors`, `enable_sentiment`,
-`enable_threshold_gate`. Strategy-eval scripts: `scripts/evaluate_config_gate.py`
+Off by default: `enable_regime`, `enable_factors`,
+`enable_threshold_gate`. `enable_sentiment` is now **on** (computed sentiment
+score + surprise velocity injected into the sentiment report). Strategy-eval
+scripts: `scripts/evaluate_config_gate.py`
 (G5 walk-forward/PBO), `scripts/orderflow_evaluate.py` (ledger evaluation),
 `scripts/risk_report.py` (risk audit).
 
@@ -411,6 +416,10 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
 | `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
+| `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
+| `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` | market | book-level portfolio CVaR + correlated -10% stress + drawdown gate |
+| `get_liquidation_days(ticker, shares_to_liquidate?)` | `liquidity_risk.days_to_absorb` | market | days for the market to absorb a block at a 15% participation cap |
+| `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?, entry_price?)` | `pre_market.review_decision` | market | deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas |
 | `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |
 | `get_earnings_event_read(ticker, date)` | `events.post_earnings_play` + `catalyst.last_earnings_surprise` | news | surprise %, drift side, print-day move, PEAD setup |
 | `get_catalyst_scale(ticker, date)` | `catalyst.build_catalyst_snapshot` | news | 0..1 scale + verdict + reasons |

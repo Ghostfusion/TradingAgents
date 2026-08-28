@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_bollinger_pct_b,
+    get_book_tail_risk,
     get_capital_flow,
     get_credit_spread_read,
     get_dip_technical,
@@ -10,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_liquidation_days,
     get_liquidity_risk,
     get_macd_divergence,
     get_market_snapshot,
@@ -23,6 +25,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_position_sizing,
     get_post_close_confirmation,
     get_premarket_liquidity,
+    get_premarket_review,
     get_regime_components,
     get_regime_read,
     get_relative_strength,
@@ -37,6 +40,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_swing_exits,
     get_swing_set,
     get_tail_risk,
+    get_technical_factors,
     get_top_movers,
     get_trade_expectancy,
     get_tranche_plan,
@@ -92,6 +96,10 @@ def create_market_analyst(llm):
             get_macd_divergence,
             get_vdu_entry_setup,
             get_support_structure,
+            get_technical_factors,
+            get_book_tail_risk,
+            get_liquidation_days,
+            get_premarket_review,
         ]
 
         system_message = (
@@ -160,6 +168,10 @@ You also have decision-grounding tools:
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
 - get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.
 - get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).
+- get_technical_factors(ticker) - the extended technicals in one call: ADX (trend strength), classic pivots (P/R1/S1/R2/S2), Aroon (trend age), Fisher Transform (reversal), Chaikin Oscillator (accumulation), Elder-Ray (bull/bear power), Supertrend (ATR trailing direction) and the volume profile (POC + value area). Use it before any 'trend strength / pivot support-resistance / Aroon age / Fisher turn / Chaikin accumulation / Elder-Ray pressure / Supertrend direction / POC-value-area' claim.
+- get_book_tail_risk(ticker, weights=...) - the book-level tail: portfolio CVaR from a weighted return mix, the correlated -10% stress loss (a macro event moves every position at once), and the drawdown gate (True = new risk blocked). Use it before any 'book tail / correlated stress / drawdown gate' claim; complements get_tail_risk (single-name).
+- get_liquidation_days(ticker, shares_to_liquidate=...) - days for the market to absorb a block at a 15% participation cap. Use it before any 'can the market absorb this block / unwind risk / days to liquidate' claim.
+- get_premarket_review(ticker, prior_close=..., open_price=..., prior_stop=..., entry_price=...) - the deterministic pre-market CONFIRM / REVISE / REJECT arbiter from measured deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use it before any 'gap risk / re-anchor / pre-market review' claim on a held plan.
 
 You also have value-dip computed tools (the Value Dip + Swing hybrid):
 - get_bollinger_pct_b(ticker) - the deterministic Bollinger %b: price position inside the 20-day 2-sigma band. %b <= 0 = at/piercing the lower band; <= 0.10 is the mean-reversion entry zone. Use it before any 'oversold / at the lower Bollinger / mean-reversion entry' claim.

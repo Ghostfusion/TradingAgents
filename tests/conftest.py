@@ -55,9 +55,15 @@ def _isolate_config():
     from tradingagents.dataflows.vendor_cache import vendor_cache
 
     vendor_cache.clear()
+    # The analysis-tools run-level OHLCV cache is a module-level singleton too;
+    # clear it so a prior test's mocked OHLCV can't leak into this one.
+    from tradingagents.agents.utils import analysis_tools as _atools
+
+    _atools._clear_ohlcv_cache()
     yield
     config_module.reset_config()
     vendor_cache.clear()
+    _atools._clear_ohlcv_cache()
     # Close any real moomoo OpenQuoteContext a test created. The SDK's
     # background threads only tear down while the process is healthy; contexts
     # left open until interpreter exit hang the run for minutes.
@@ -76,6 +82,21 @@ def _disable_reddit_killswitch(monkeypatch):
     kill-switch is removed for every test.
     """
     monkeypatch.delenv("TRADINGAGENTS_DISABLE_REDDIT", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_computed_sentiment(monkeypatch):
+    """Keep the sentiment analyst's computed layer hermetic.
+
+    ``enable_sentiment`` is on by default, so the sentiment analyst calls
+    ``sentiment.compute_social_scores`` (a live StockTwits fetch). Unit tests
+    must not hit the network; mock it to return None (the analyst then skips
+    the computed line) unless a test explicitly overrides it.
+    """
+    monkeypatch.setattr(
+        "tradingagents.strategies.sentiment.compute_social_scores", lambda *a, **k: None
+    )
     yield
 
 
