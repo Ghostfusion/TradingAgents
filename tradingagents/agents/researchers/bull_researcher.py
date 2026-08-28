@@ -43,7 +43,7 @@ Latest world affairs news: {news_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
-""" + get_language_instruction() + get_output_budget("analyst")
+""" + get_language_instruction() + get_output_budget("debater")
 
         response = llm.invoke(prompt)
 

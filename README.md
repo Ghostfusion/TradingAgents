@@ -45,6 +45,15 @@
   tranche ladders, and an R-based breakeven (`exits.stop_to_breakeven_r`).
   See CHANGELOG.
 
+- [2026-08-28] **Dedupe repeated debate tables in reports** - deep runs
+  rendered 4-6 near-identical summary tables per debate agent (one per round)
+  - e.g. the latest NVDA report carried 28 tables in `complete_report.md`.
+  Fix: debaters now append their summary table only in the FINAL round
+  (`get_output_budget("debater")`), and `reporting._collapse_repeated_tables`
+  keeps only the last table per header as a render-time guarantee (existing
+  reports fixed via `rebuild_complete_report.py`). NVDA sample: complete
+  report 28 -> 14 tables.
+
 - [2026-08-28] **Audit-driven correctness fixes (data integrity + wiring)** - a
   repo-wide audit fixed ~26 defects with hermetic tests (1490 passed, 2
   skipped, ruff clean). Highlights: Piotroski ROA point no longer awarded to

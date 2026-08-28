@@ -135,6 +135,72 @@ def _finalize_section(text: str) -> str:
     return text.rstrip() + _TRUNCATION_MARKER
 
 
+def _collapse_repeated_tables(text: str) -> str:
+    """Drop repeated markdown tables whose header repeats within a section.
+
+    Debate agents (bull/bear researchers, risk debators) run in rounds and
+    each round's message historically carried a summary table with the same
+    header (e.g. ``| Signal | Data | Bull Read |``) but slightly re-derived
+    rows - so a deep run rendered 4-6 near-identical tables per agent. This
+    deterministic pass keeps ONLY the LAST table per distinct header (the
+    final round's table is the sharpest) and removes the earlier duplicates,
+    leaving all non-table text untouched. ``text`` may be any markdown blob
+    (kept idempotent: no stateful assumptions).
+    """
+    if not text or "|" not in text:
+        return text
+    lines = text.split("\n")
+
+    def _is_sep(line: str) -> bool:
+        s = line.strip()
+        return s.startswith("|") and "-" in s and set(s.replace("|", "").replace("-", "").replace(":", "").replace(" ", "")).issubset("")
+
+    def _is_header(line: str) -> bool:
+        s = line.strip()
+        return s.startswith("|") and s.endswith("|")
+
+    # Locate tables: header line followed by a separator line.
+    tables = []  # (index_of_header, header_key, body_lines, end_index)
+    i = 0
+    n = len(lines)
+    while i < n:
+        if _is_header(lines[i]) and i + 1 < n and _is_sep(lines[i + 1]):
+            key = lines[i].strip().lower()
+            start = i
+            j = i + 2
+            while j < n and lines[j].startswith("|"):
+                j += 1
+            tables.append((start, key, lines[i:j], j - 1))
+            i = j
+        else:
+            i += 1
+    if not tables:
+        return text
+
+    last_index = {}
+    for idx, key, _body, _end in tables:
+        last_index[key] = idx
+
+    dropped = {key for key, idx in last_index.items() if sum(1 for _t in tables if _t[1] == key) > 1}
+    if not dropped:
+        return text
+
+    keep = {idx for idx, key, _body, _end in tables if idx == last_index[key]}
+    out: list[str] = []
+    tidx = {t[0]: t for t in tables}
+    i = 0
+    while i < n:
+        if i in tidx:
+            start, _key, body, end = tidx[i]
+            if start in keep:
+                out.extend(body)
+            i = end + 1
+        else:
+            out.append(lines[i])
+            i += 1
+    return "\n".join(out)
+
+
 def audit_decision_numbers(decision_text: str, refs: dict) -> str:
     """Claim-vs-computed audit of a PM decision (item 6).
 
@@ -279,8 +345,11 @@ def write_report_tree(
             text = debate.get(key)
             if text:
                 research_dir.mkdir(exist_ok=True)
-                (research_dir / fname).write_text(_finalize_section(text), encoding="utf-8")
-                research_parts.append((name, _finalize_section(text)))
+                cleaned = _collapse_repeated_tables(text)
+                (research_dir / fname).write_text(
+                    _finalize_section(cleaned), encoding="utf-8"
+                )
+                research_parts.append((name, _finalize_section(cleaned)))
         if debate.get("judge_decision"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "manager.md").write_text(
@@ -327,10 +396,11 @@ def write_report_tree(
                 text = risk.get(key)
                 if text:
                     risk_dir.mkdir(exist_ok=True)
+                    cleaned = _collapse_repeated_tables(text)
                     (risk_dir / fname).write_text(
-                        prepend_block(_finalize_section(text)), encoding="utf-8"
+                        prepend_block(_finalize_section(cleaned)), encoding="utf-8"
                     )
-                    risk_parts.append((name, _finalize_section(text)))
+                    risk_parts.append((name, _finalize_section(cleaned)))
         if risk_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts

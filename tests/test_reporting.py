@@ -266,3 +266,53 @@ def test_pm_prompt_injects_liquidity_line():
     assert "Computed liquidity" in src
     assert "liq_line" in src
     assert "{liq_line}" in src
+
+
+def test_collapse_repeated_tables_keeps_last_per_header():
+    """Debate round streams carry the same summary table per round; the
+    collapse keeps ONLY the final table per header and drops earlier ones."""
+    from tradingagents.reporting import _collapse_repeated_tables
+
+    blob = (
+        "Round 1.\n\n"
+        "| Signal | Data | Bull Read |\n|---|---|---|\n| Q2 EPS | a | x |\n\n"
+        "Round 2 prose.\n\n"
+        "| Signal | Data | Bull Read |\n|---|---|---|\n| Q2 EPS | b | y |\n\n"
+        "Final round.\n\n"
+        "| Signal | Data | Bull Read |\n|---|---|---|\n| Q2 EPS | c | z |\n"
+    )
+    out = _collapse_repeated_tables(blob)
+    assert out.count("|---|---|---|") == 1
+    assert "| Q2 EPS | c | z |" in out   # final table kept
+    assert "| Q2 EPS | a | x |" not in out
+    assert "Round 1." in out and "Round 2 prose." in out and "Final round." in out
+
+
+def test_collapse_repeated_tables_keeps_distinct_headers():
+    """A genuinely distinct table (different header) is never dropped."""
+    from tradingagents.reporting import _collapse_repeated_tables
+
+    blob = (
+        "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+        "| Signal | Data | Bull Read |\n|---|---|---|\n| Q2 | x |\n\n"
+        "| A | B |\n|---|---|\n| 3 | 4 |\n"
+    )
+    out = _collapse_repeated_tables(blob)
+    assert sum(1 for ln in out.splitlines() if ln.strip() == "|---|---|") == 1  # A|B collapsed to last
+    assert sum(1 for ln in out.splitlines() if ln.strip() == "|---|---|---|") == 1  # distinct kept
+    assert "| 3 | 4 |" in out and "| 1 | 2 |" not in out
+    assert "| Q2 | x |" in out
+
+
+def test_collapse_repeated_tables_idempotent_and_prose_safe():
+    from tradingagents.reporting import _collapse_repeated_tables
+
+    blob = "Just prose, no tables.\n\n| not a table header line"
+    assert _collapse_repeated_tables(blob) == blob
+    one = "| K | V |\n|---|---|\n| a | 1 |\n"
+    assert _collapse_repeated_tables(one) == one
+    # already-collapsed stays collapsed
+    twice = _collapse_repeated_tables(
+        "| K | V |\n|---|---|\n| a | 1 |\n\n| K | V |\n|---|---|\n| b | 2 |\n"
+    )
+    assert _collapse_repeated_tables(twice) == twice

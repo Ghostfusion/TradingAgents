@@ -41,6 +41,20 @@ Breaking changes within the 0.x line are called out explicitly.
   Tests: `test_strategies_value_dip` (ladder modes, trend, plan-stop),
   `test_strategies_vcp` (halving, final-tight, pivot), `test_strategies_value_style`
   (R-based BE). Docs: README, CHANGELOG.
+- **Dedupe repeated debate tables in reports** - deep runs rendered 4-6
+  near-identical summary tables per debate agent (one per round), inflating
+  every section and `complete_report.md` (28 tables in a sample NVDA report).
+  Two fixes:
+  - `agent_utils.get_output_budget("debater")` - bull/bear researchers + the
+    3 risk debators now append their ONE summary table only in the FINAL
+    round message; earlier rounds are bullets-only (was "then a summary table"
+    every round).
+  - `reporting._collapse_repeated_tables` - render-time safety net applied to
+    the 5 debate histories in `write_report_tree`: keeps ONLY the last table
+    per distinct header, drops earlier duplicates, leaves prose untouched.
+    Applies to existing reports on the next `rebuild_complete_report.py`.
+  Verified on the latest NVDA report: bull 4->2, neutral 6->2, complete report
+  28->14 tables. Tests: `test_reporting` (3 new collapse cases).
 
 ### Fixed
 - **Audit-driven correctness fixes (data integrity + wiring)** - a repo-wide

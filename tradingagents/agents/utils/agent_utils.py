@@ -260,6 +260,18 @@ def get_output_budget(section: str = "analyst") -> str:
         return " Keep the response tight and information-dense (about 250-400 words). " + common
     if section == "trader":
         return " Keep the proposal concise and actionable. " + common
+    if section == "debater":
+        # Debaters run in rounds; the report renders the WHOLE round history, so
+        # a summary table per round repeats near-identically (bull/bear + risk
+        # debate blobs historically carried one table per round). Table ONLY on
+        # the final message; earlier rounds stay bullets.
+        return (
+            " Keep each round information-dense but bounded (about 500-800 "
+            "words: one verdict sentence + one bullet per signal with the exact "
+            "number). Append the single summary table only in your FINAL "
+            "message of the debate; earlier rounds must not include a table."
+            + common
+        )
     # analysts + debaters: let them be rich but bounded
     return (
         " Keep the response information-dense but bounded (about 1,000-1,400 "
