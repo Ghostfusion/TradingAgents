@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import os
 import sys
@@ -1128,6 +1129,18 @@ def run_analysis(
             asset_type=selections["asset_type"],
             instrument_context=instrument_context,
         )
+        # Mirrors propagate(): seed the deterministic risk context BEFORE the
+        # Portfolio Manager runs so the PM sees the computed CVaR/liquidity
+        # inputs (the PM reads state["risk_context"] for its tail/liquidity
+        # lines). Without this the CLI decision omits the risk-gate context the
+        # batch/API path gives the PM.
+        if config.get("enable_risk_governor") and not init_agent_state.get("risk_context"):
+            try:
+                _rc = graph._precompute_risk_context(selections["ticker"])
+                if _rc:
+                    init_agent_state["risk_context"] = _rc
+            except Exception:  # noqa: BLE001 - precompute is best-effort
+                pass
         # Pass callbacks to graph config for tool execution tracking
         # (LLM tracking is handled separately via LLM constructor)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
@@ -1241,6 +1254,20 @@ def run_analysis(
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
+
+        # Mirrors propagate(): apply the deterministic strategy overlays
+        # (regime/sizing -> catalyst -> position contract -> risk governor ->
+        # computed context) so the CLI report carries the same "Risk Gate
+        # (computed)" block, position contract and risk context that the
+        # batch/API path renders. Previously the CLI skipped overlays
+        # entirely, so decision.md differed structurally from a propagate()
+        # run's (no gate block, PM without computed risk inputs).
+        # _apply_strategy_overlays swallows its own errors (returns state
+        # unchanged), so a vendor hiccup can never break saving.
+        with contextlib.suppress(Exception):
+            final_state = graph._apply_strategy_overlays(
+                final_state, selections["ticker"]
+            )
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:

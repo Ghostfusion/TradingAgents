@@ -41,20 +41,20 @@ Breaking changes within the 0.x line are called out explicitly.
   Tests: `test_strategies_value_dip` (ladder modes, trend, plan-stop),
   `test_strategies_vcp` (halving, final-tight, pivot), `test_strategies_value_style`
   (R-based BE). Docs: README, CHANGELOG.
-- **Dedupe repeated debate tables in reports** - deep runs rendered 4-6
-  near-identical summary tables per debate agent (one per round), inflating
-  every section and `complete_report.md` (28 tables in a sample NVDA report).
-  Two fixes:
-  - `agent_utils.get_output_budget("debater")` - bull/bear researchers + the
-    3 risk debators now append their ONE summary table only in the FINAL
-    round message; earlier rounds are bullets-only (was "then a summary table"
-    every round).
-  - `reporting._collapse_repeated_tables` - render-time safety net applied to
-    the 5 debate histories in `write_report_tree`: keeps ONLY the last table
-    per distinct header, drops earlier duplicates, leaves prose untouched.
-    Applies to existing reports on the next `rebuild_complete_report.py`.
-  Verified on the latest NVDA report: bull 4->2, neutral 6->2, complete report
-  28->14 tables. Tests: `test_reporting` (3 new collapse cases).
+- **Interactive CLI now applies the strategy overlays (CLI/batch parity)** -
+  the interactive CLI built state directly and streamed the graph but NEVER
+  called `_apply_strategy_overlays`, so a CLI report omitted the "Risk Gate
+  (computed)" block, position contract and computed risk context that the
+  `propagate()` (batch/API) path renders - two same-day NVDA runs diverged
+  materially (batch 12:02: Hold / PT 323.37 / gate PASS vs CLI 13:48:
+  Underweight / PT 188.32 / no gate block), not from LLM variance alone.
+  Fix (`cli/main.py`): seed `risk_context` into the initial state BEFORE the
+  Portfolio Manager (via `graph._precompute_risk_context`) and apply
+  `graph._apply_strategy_overlays(final_state, ticker)` to the merged state
+  before saving - the same two hooks `propagate()` uses, so the CLI report
+  now carries the same gate/contract/context. Overlay failures degrade
+  silently (cannot break saving, matching propagate). Tests:
+  `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
 - **Audit-driven correctness fixes (data integrity + wiring)** - a repo-wide

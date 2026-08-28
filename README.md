@@ -54,6 +54,15 @@
   reports fixed via `rebuild_complete_report.py`). NVDA sample: complete
   report 28 -> 14 tables.
 
+- [2026-08-28] **Interactive CLI now applies the strategy overlays** - the
+  CLI streamed the graph but skipped `_apply_strategy_overlays`, so a CLI
+  report omitted the Risk Gate block / position contract / computed risk
+  context that the batch/API path renders (two same-day NVDA reports diverged
+  structurally: batch showed a Risk Gate PASS, CLI showed none and a
+  different decision). The CLI now seeds `risk_context` pre-PM and applies
+  the overlays before saving - same hooks as `propagate()`, so CLI and batch
+  reports carry the same computed risk surface.
+
 - [2026-08-28] **Audit-driven correctness fixes (data integrity + wiring)** - a
   repo-wide audit fixed ~26 defects with hermetic tests (1490 passed, 2
   skipped, ruff clean). Highlights: Piotroski ROA point no longer awarded to

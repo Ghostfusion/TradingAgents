@@ -109,3 +109,26 @@ def test_analyze_no_save_no_display_flags(monkeypatch):
     assert captured["save_report"] is False
     assert captured["display_report"] is False
     assert captured["save_path_arg"] is None
+
+
+def test_cli_applies_strategy_overlays_and_seeds_risk_context():
+    """The interactive CLI must mirror propagate(): seed risk_context before
+    the Portfolio Manager and apply the strategy overlays before saving, so a
+    CLI report carries the same Risk Gate block / position contract that the
+    batch/API path renders (a former CLI-vs-batch divergence - a 12:02 batch
+    NVDA report showed a Risk Gate PASS while a 13:48 CLI report showed none
+    and a materially different decision)."""
+    src = Path("cli/main.py").read_text(encoding="utf-8")
+
+    # 1) risk_context seeded into the initial state before the graph streams.
+    assert "_precompute_risk_context(" in src
+    assert 'init_agent_state["risk_context"]' in src
+    seed_pos = src.index("_precompute_risk_context(")
+    stream_pos = src.index("graph.graph.stream(")
+    assert seed_pos < stream_pos, "risk_context must be seeded before the graph runs"
+
+    # 2) overlays applied to the merged final_state before saving.
+    assert "_apply_strategy_overlays(" in src
+    overlay_pos = src.index("_apply_strategy_overlays(")
+    save_pos = src.rindex("save_report_to_disk(")
+    assert overlay_pos < save_pos, "overlays must run before the report is saved"
