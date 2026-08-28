@@ -32,6 +32,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_insider_transactions,
     get_institution_holdings,
     get_ipos,
+    get_liquidity_risk,
     get_macro_indicators,
     get_market_breadth,
     get_market_snapshot,
@@ -78,6 +79,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_opening_range,
     get_order_imbalance,
     get_orderflow_read,
+    get_ownership_concentration,
     get_portfolio_weights,
     get_position_sizing,
     get_post_close_confirmation,
@@ -110,6 +112,7 @@ from tradingagents.agents.utils.value_dip_tools import (
     get_tranche_plan,
     get_valuation_z_score,
     get_value_dip_setup,
+    get_value_floors,
     get_vdu_entry_setup,
 )
 from tradingagents.dataflows.config import set_config
@@ -326,6 +329,8 @@ class TradingAgentsGraph:
                     get_options_chain,
                     get_short_interest,
                     get_short_volume,
+                    # Liquidity (Amihud ILLIQ / float turnover / IWF)
+                    get_liquidity_risk,
                     # Massive.com verification + movers (plan-gated, degrade)
                     get_market_snapshot,
                     get_top_movers,
@@ -438,6 +443,8 @@ class TradingAgentsGraph:
                     get_value_dip_setup,
                     get_balance_sheet_health,
                     get_decline_driver_check,
+                    get_value_floors,
+                    get_ownership_concentration,
                 ]
             ),
         }

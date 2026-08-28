@@ -976,10 +976,11 @@ def get_value_floors(
         wacc = wacc_from_beta(0.04, beta if beta is not None else 1.0)
     except Exception:  # noqa: BLE001
         wacc = None
-    roic = (ebit * (1.0 - (tax / ebit if ebit else 0.0))) / ta if (ebit and ta) else None
+    tax_rate = (tax / ebit) if (ebit and tax is not None) else None
+    roic = (ebit * (1.0 - (tax_rate or 0.0))) / ta if (ebit and ta) else None
     g = _g(eps, bvps)
     ncav = _ncav(ca, tl, sh)
-    epv = _epv(ebit, (tax / ebit if ebit else None), wacc, roic=roic)
+    epv = _epv(ebit, tax_rate, wacc, roic=roic)
     epv_ps = _epv_ps(epv.get("epv"), sh) if epv else None
     lines = [
         f"value floors {ticker} (price {price if price is not None else 'n/a'}):",

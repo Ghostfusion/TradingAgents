@@ -48,11 +48,25 @@ def test_market_toolnode_binds_swing_dip_and_market_session_tools():
         "get_book_tail_risk",
         "get_liquidation_days",
         "get_premarket_review",
+        "get_liquidity_risk",
     }
     missing = expected - market_tools
     assert not missing, (
         "market analyst prompt lists these tools but the market ToolNode does "
         f"not bind them (LLM calls error 'not a valid tool'): {sorted(missing)}"
+    )
+
+    # Same regression guard for the fundamentals node (tools in the prompt but
+    # not bound -> LLM calls error).
+    fund_tools = set(nodes["fundamentals"].tools_by_name)
+    fund_expected = {
+        "get_ownership_concentration",
+        "get_value_floors",
+    }
+    fund_missing = fund_expected - fund_tools
+    assert not fund_missing, (
+        "fundamentals analyst prompt lists these tools but the fundamentals "
+        f"ToolNode does not bind them: {sorted(fund_missing)}"
     )
 
 

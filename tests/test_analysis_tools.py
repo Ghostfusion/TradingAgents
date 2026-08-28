@@ -1475,3 +1475,26 @@ def test_ohlcv_cache_serves_one_fetch_per_ticker():
         T._ohlcv("AAPL", days=60)
     assert calls.count("AAPL") == 2  # 320-day (default) + 60-day (different keys), not 3
     T._clear_ohlcv_cache()
+
+
+def test_get_value_floors_no_tax_does_not_crash(monkeypatch):
+    """Regression: get_value_floors must not crash when ebit is present but
+    tax_expense is missing (None) - tax None -> tax_rate None, epv/roic degrade
+    to None instead of a NoneType / float TypeError."""
+    from tradingagents.agents.utils import value_dip_tools as VDT
+
+    fin = {
+        "eps": {"current": 4.0, "prior": 3.5},
+        "total_equity": {"current": 3e9, "prior": 2.8e9},
+        "shares": {"current": 1e8, "prior": 1e8},
+        "current_assets": {"current": 1e9, "prior": 9e8},
+        "total_liabilities": {"current": 4e8, "prior": 3.5e8},
+        "operating_income": {"current": 2e8, "prior": 1.8e8},
+        # tax_expense intentionally absent (None)
+        "total_assets": {"current": 5e9, "prior": 4.5e9},
+        "beta": {"current": 1.1, "prior": 1.0},
+    }
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
+    out = VDT.get_value_floors.invoke({"ticker": "X", "current_date": "2026-08-19"})
+    assert "value floors X" in out  # no crash
