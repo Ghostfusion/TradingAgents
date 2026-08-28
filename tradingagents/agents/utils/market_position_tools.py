@@ -173,9 +173,22 @@ def get_market_snapshot(
     from tradingagents.dataflows.massive import get_market_snapshot_massive
 
     try:
-        return get_market_snapshot_massive(ticker)
+        out = get_market_snapshot_massive(ticker)
+        # Massive returns an explicit 'unavailable' string when the plan lacks
+        # snapshot access (403) - fall back to the EODHD real-time snapshot
+        # (works on the EOD plan) so the market analyst still gets a live bar.
+        if out and "unavailable" in out.lower():
+            from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
+
+            return get_market_snapshot_eodhd(ticker)
+        return out
     except Exception as exc:  # noqa: BLE001
-        return f"market snapshot unavailable for {ticker}: {exc}"
+        try:
+            from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
+
+            return get_market_snapshot_eodhd(ticker)
+        except Exception as exc2:  # noqa: BLE001
+            return f"market snapshot unavailable for {ticker}: {exc} / {exc2}"
 
 
 @tool
@@ -201,9 +214,22 @@ def get_top_movers(
     from tradingagents.dataflows.massive import get_top_movers_massive
 
     try:
-        return get_top_movers_massive(direction, count)
+        out = get_top_movers_massive(direction, count)
+        # Massive returns an explicit 'unavailable' string when the plan lacks
+        # snapshot access (403) - fall back to the EODHD bulk real-time feed
+        # (works on the EOD plan) so the movers universe source stays up.
+        if out and "unavailable" in out.lower():
+            from tradingagents.dataflows.eodhd import get_top_movers_eodhd
+
+            return get_top_movers_eodhd(direction, count)
+        return out
     except Exception as exc:  # noqa: BLE001
-        return f"top movers unavailable: {exc}"
+        try:
+            from tradingagents.dataflows.eodhd import get_top_movers_eodhd
+
+            return get_top_movers_eodhd(direction, count)
+        except Exception as exc2:  # noqa: BLE001
+            return f"top movers unavailable: {exc} / {exc2}"
 
 
 @tool

@@ -507,14 +507,24 @@ class MassiveFailoverTests(unittest.TestCase):
     def test_get_market_snapshot_degrades(self):
         from tradingagents.agents.utils.market_position_tools import get_market_snapshot
 
-        with self._patch("get_market_snapshot_massive", "tradingagents.dataflows.massive"):
+        # Massive 403s AND the EODHD fallback fails -> the tool degrades to an
+        # explicit 'unavailable' (never fabricates).
+        with self._patch("get_market_snapshot_massive", "tradingagents.dataflows.massive"), mock.patch(
+            "tradingagents.dataflows.eodhd.get_market_snapshot_eodhd",
+            side_effect=RuntimeError("eodhd down"),
+        ):
             out = get_market_snapshot.invoke({"ticker": "nue"})
         self.assertIn("market snapshot unavailable", out)
 
     def test_get_top_movers_degrades(self):
         from tradingagents.agents.utils.market_position_tools import get_top_movers
 
-        with self._patch("get_top_movers_massive", "tradingagents.dataflows.massive"):
+        # Massive 403s AND the EODHD fallback fails -> the tool degrades to an
+        # explicit 'unavailable' (never fabricates).
+        with self._patch("get_top_movers_massive", "tradingagents.dataflows.massive"), mock.patch(
+            "tradingagents.dataflows.eodhd.get_top_movers_eodhd",
+            side_effect=RuntimeError("eodhd down"),
+        ):
             out = get_top_movers.invoke({"direction": "losers"})
         self.assertIn("top movers unavailable", out)
 

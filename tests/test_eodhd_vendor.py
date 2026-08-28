@@ -177,3 +177,100 @@ def test_exchange_symbols_empty_raises():
         NoMarketDataError
     ):
         eodhd.get_exchange_symbols_eodhd("US")
+
+
+# ---------------------------------------------------------------------------
+# Real-time snapshot + top movers (EOD plan endpoints)
+# ---------------------------------------------------------------------------
+
+_REALTIME_ROW = {
+    "code": "AAPL.US",
+    "timestamp": 1787862420,
+    "open": 310.545,
+    "high": 315.4,
+    "low": 309.4001,
+    "close": 314.58,
+    "volume": 31513147,
+    "previousClose": 313.45,
+    "change": 1.13,
+    "change_p": 0.3605,
+}
+
+_BULK_ROWS = [
+    {"code": "A.US", "close": 159.35, "change_p": 1.65},
+    {"code": "B.US", "close": 50.0, "change_p": -2.5},
+    {"code": "C.US", "close": 20.0, "change_p": 0.5},
+]
+
+
+def test_market_snapshot_renders_live_bar():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_REALTIME_ROW):
+        out = eodhd.get_market_snapshot_eodhd("AAPL")
+    assert "AAPL Market Snapshot (EODHD)" in out
+    assert "Last: 314.58" in out
+    assert "Prev close: 313.45" in out
+    assert "Today's change: 1.13 (0.3605%)" in out
+
+
+def test_market_snapshot_no_data_raises():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value={}), pytest.raises(
+        NoMarketDataError
+    ):
+        eodhd.get_market_snapshot_eodhd("ZZZZ")
+
+
+def test_top_movers_sorts_by_change():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_ROWS):
+        gainers = eodhd.get_top_movers_eodhd("gainers", 2)
+        losers = eodhd.get_top_movers_eodhd("losers", 2)
+    assert "A: 159.35 (1.65%)" in gainers  # top gainer first
+    assert "B: 50.0 (-2.5%)" in losers  # top loser first
+    assert "Top U.S. Market Gainers (EODHD)" in gainers
+
+
+def test_top_movers_invalid_direction():
+    out = eodhd.get_top_movers_eodhd("bogus", 3)
+    assert "invalid direction" in out
+
+
+def test_top_movers_no_data_raises():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=[]), pytest.raises(
+        NoMarketDataError
+    ):
+        eodhd.get_top_movers_eodhd("gainers", 3)
+
+
+def test_market_snapshot_tool_falls_back_when_massive_unavailable(monkeypatch):
+    """The get_market_snapshot tool falls back to EODHD when Massive returns
+    an 'unavailable' string (403 on the free plan)."""
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.get_market_snapshot_massive",
+        lambda t: "snapshot unavailable: Massive returned HTTP 403 ...",
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.eodhd.get_market_snapshot_eodhd",
+        lambda t: "## AAPL Market Snapshot (EODHD)\n- Last: 314.58",
+    )
+    out = mpt.get_market_snapshot.invoke({"ticker": "AAPL"})
+    assert "EODHD" in out
+    assert "Last: 314.58" in out
+
+
+def test_top_movers_tool_falls_back_when_massive_unavailable(monkeypatch):
+    """The get_top_movers tool falls back to EODHD when Massive returns an
+    'unavailable' string (403 on the free plan)."""
+    from tradingagents.agents.utils import market_position_tools as mpt
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.massive.get_top_movers_massive",
+        lambda d, c: "top movers unavailable: Massive returned HTTP 403 ...",
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.eodhd.get_top_movers_eodhd",
+        lambda d, c: "## Top U.S. Market Gainers (EODHD)\n- A: 159.35 (1.65%)",
+    )
+    out = mpt.get_top_movers.invoke({"direction": "gainers", "count": 3})
+    assert "EODHD" in out
+    assert "A: 159.35" in out

@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **EODHD real-time snapshot + top movers** - the Massive
+  snapshot / top-movers endpoints are 403 on the free plan; EODHD's
+  `/api/real-time` works on the EOD plan and now backs them:
+  `get_market_snapshot_eodhd` (live OHLCV + prev close + change%) and
+  `get_top_movers_eodhd` (bulk `?ex=US` ~18k stocks sorted by change_p). The
+  `get_market_snapshot` / `get_top_movers` tools fall back to EODHD when
+  Massive 403s.
+
 - [2026-08-27] **Truncation-retry enforcement** - when an LLM response is cut
   at the output cap (ends mid-sentence), the agent re-invokes with a
   continuation prompt and merges, so reports are never truncated. Wired into

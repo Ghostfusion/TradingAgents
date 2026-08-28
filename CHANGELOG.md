@@ -9,6 +9,23 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **EODHD real-time snapshot + top movers (Massive 403 fallback)** - the
+  Massive snapshot / top-movers endpoints are 403 on the free plan; EODHD's
+  `/api/real-time` works on the EOD plan and now backs them:
+  - `get_market_snapshot_eodhd(ticker)` - `/api/real-time/{ticker}`: live
+    15-20 min delayed OHLCV + prev close + change% (the market analyst's
+    "latest verified bar" + gap read).
+  - `get_top_movers_eodhd(direction, count)` - `/api/real-time/{ticker}?ex=US`:
+    one call returns ~18k US stocks sorted by change_p (gainers/losers +
+    universe replacement).
+  - `get_market_snapshot` / `get_top_movers` tools now fall back to EODHD
+    when Massive returns an 'unavailable' string (403) or raises.
+  - Fixed `_eodhd_get` error detection: a dict with a `code` field but no
+    `message` is a normal payload (the real-time response's `code` is the
+    ticker symbol), not an error.
+  Tests: `test_eodhd_vendor.py` (7 new: snapshot render/no-data, movers
+  sort/invalid/no-data, tool fallback x2) + `test_massive_vendor.py`
+  failover updated (both-down degrades).
 - **Truncation-retry enforcement (max_tokens is a ceiling, not a floor)** -
   when an LLM response is cut at the output cap (ends mid-sentence), the
   agent now re-invokes with a continuation prompt and merges, so reports are

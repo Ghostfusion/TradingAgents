@@ -87,8 +87,12 @@ def _eodhd_get(path: str, params: dict | None = None) -> dict | list | None:
             data = resp.json()
         except ValueError:
             raise NoMarketDataError("eodhd", path, detail="non-JSON response") from None
-        # EODHD reports errors as a JSON body with a "code" field.
-        if isinstance(data, dict) and data.get("code") is not None:
+        # EODHD reports errors as a JSON body with a "code" field AND a
+        # "message" field (e.g. {"code": 404, "message": "Not found"}). A
+        # dict with only a "code" field (no "message") is a normal data
+        # payload — e.g. /api/real-time/{ticker} returns {"code": "AAPL.US",
+        # "close": ...} where "code" is the ticker symbol, not an error.
+        if isinstance(data, dict) and data.get("code") is not None and data.get("message") is not None:
             msg = str(data.get("message") or data.get("code"))
             if "limit" in msg.lower() or "quota" in msg.lower():
                 raise VendorRateLimitError(f"EODHD rate limit: {msg}")
@@ -231,3 +235,52 @@ def get_exchange_symbols_eodhd(market: str = "US") -> list[dict]:
     if not isinstance(data, list) or not data:
         raise NoMarketDataError(market, market, detail="no exchange symbols")
     return data
+
+
+def get_market_snapshot_eodhd(ticker: str) -> str:
+    """Latest live (15-20 min delayed) OHLCV + change for one ticker.
+
+    Uses ``/api/real-time/{ticker}`` — works on the EOD plan (verified live:
+    AAPL returns open/high/low/close/volume/previousClose/change/change_p).
+    This is the EODHD replacement for the Massive snapshot (403 on the free
+    plan): the market analyst's "latest verified bar" + gap read. Renders the
+    same key:value block shape as the Massive snapshot so the tool output is
+    interchangeable.
+    """
+    data = _eodhd_get(f"real-time/{ticker}", {"fmt": "json"})
+    if not isinstance(data, dict) or not data.get("code"):
+        raise NoMarketDataError(ticker, ticker, detail="no real-time data")
+    lines = [f"## {ticker.upper()} Market Snapshot (EODHD)", ""]
+    lines.append(
+        f"- Last: {data.get('close')} | O {data.get('open')} "
+        f"H {data.get('high')} L {data.get('low')} | Volume {data.get('volume')}"
+    )
+    lines.append(
+        f"- Prev close: {data.get('previousClose')} | "
+        f"Today's change: {data.get('change')} ({data.get('change_p')}%)"
+    )
+    return "\n".join(lines)
+
+
+def get_top_movers_eodhd(direction: str = "gainers", count: int = 10) -> str:
+    """Top U.S. market gainers/losers from the bulk real-time feed.
+
+    Uses ``/api/real-time/{ticker}?ex=US`` — one call returns ~18k US stocks
+    with live OHLCV + change_p (verified live on the EOD plan). Sorts by
+    change_p (desc = gainers, asc = losers) and renders the top ``count``.
+    This is the EODHD replacement for the Massive top-movers endpoint (403 on
+    the free plan) — a clean, OpenD-independent universe source.
+    """
+    direction = str(direction).strip().lower()
+    if direction not in ("gainers", "losers"):
+        return f"invalid direction '{direction}'; use 'gainers' or 'losers'."
+    data = _eodhd_get("real-time/US.US", {"ex": "US", "fmt": "json"})
+    if not isinstance(data, list) or not data:
+        raise NoMarketDataError("US", "US", detail="no real-time bulk data")
+    rows = [r for r in data if r.get("change_p") is not None]
+    rows.sort(key=lambda r: float(r["change_p"]), reverse=(direction == "gainers"))
+    lines = [f"## Top U.S. Market {direction.title()} (EODHD)", ""]
+    for row in rows[:count]:
+        sym = (row.get("code") or "?").split(".")[0]
+        lines.append(f"- {sym}: {row.get('close')} ({row.get('change_p')}%)")
+    return "\n".join(lines)

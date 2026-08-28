@@ -334,8 +334,14 @@ vendor** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years):
 produce, registered first in the `core_stock_apis` chain
 (`eodhd,moomoo,yfinance` by default) so moomoo/yfinance stay as fallbacks.
 The EOD plan also unlocks `get_news_eodhd` (news), `get_corporate_actions_eodhd`
-(splits + dividends), and `get_exchange_symbols_eodhd` (full US symbol list,
-~18k common stocks) — the screener's default `--universe eodhd-us` source.
+(splits + dividends), `get_exchange_symbols_eodhd` (full US symbol list,
+~18k common stocks) — the screener's default `--universe eodhd-us` source —
+and the **real-time snapshot + movers** endpoints: `get_market_snapshot_eodhd`
+(`/api/real-time/{ticker}`, live 15-20 min delayed OHLCV + prev close +
+change%) and `get_top_movers_eodhd` (`/api/real-time/{ticker}?ex=US`, one
+call returns ~18k US stocks sorted by change_p — a gainers/losers + universe
+replacement). These back the `get_market_snapshot` / `get_top_movers` tools
+when Massive 403s on the free plan.
 Fundamentals/technicals/intraday/options are **not** on the EOD plan (they
 need the $59.99 Fundamentals feed), so those chains keep moomoo/yfinance
 first. A `--vendor eodhd` preset (`batch.py`/`pipeline.py`) puts EODHD first
@@ -375,6 +381,12 @@ moomoo/yfinance non-US coverage. See `docs/massive_integration.md`.
   `pipeline.py --universe top-movers-massive` option supplies a Massive mover
   universe (plan-gated). These degrade to "upgrade at massive.com/pricing"
   on the free plan and activate when the account's plan includes them.
+  **EODHD fallback**: when Massive 403s (free plan), `get_market_snapshot`
+  falls back to `eodhd.get_market_snapshot_eodhd` (`/api/real-time/{ticker}`,
+  live 15-20 min delayed OHLCV + change, works on the EOD plan) and
+  `get_top_movers` falls back to `eodhd.get_top_movers_eodhd`
+  (`/api/real-time/{ticker}?ex=US`, one call returns ~18k US stocks sorted by
+  change_p — a movers + universe replacement).
 
 ### 6.3 Symbol mapping (Yahoo <-> moomoo / broker)
 

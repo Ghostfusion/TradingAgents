@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - EODHD real-time snapshot + top movers
+  (Massive 403 fallback): `get_market_snapshot_eodhd` (`/api/real-time/
+  {ticker}`, live OHLCV + prev close + change%) and `get_top_movers_eodhd`
+  (`/api/real-time/{ticker}?ex=US`, ~18k US stocks sorted by change_p). The
+  `get_market_snapshot` / `get_top_movers` tools fall back to EODHD when
+  Massive returns 'unavailable' (403) or raises. Fixed `_eodhd_get` error
+  detection (a `code` field without `message` is a normal payload). Tests:
+  `test_eodhd_vendor.py` (7 new) + `test_massive_vendor.py` failover
+  updated.
+
 - 2026-08-27 `(working tree)` - Truncation-retry enforcement: when an LLM
   response is cut at the output cap (ends mid-sentence), the agent re-invokes
   with a continuation prompt and merges, so reports are never truncated.
