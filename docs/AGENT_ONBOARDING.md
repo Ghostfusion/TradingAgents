@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - Market tool-node binding fix + higher output
+  cap: the market analyst's prompt listed `get_swing_exits` / `get_dip_technical`
+  / `get_mean_reversion_tech` and the 5 market-session tools, but they were never
+  registered in the market `ToolNode` (a wiring gap from the original
+  value-dip+swing commits) — every run had the LLM call tools that error "not a
+  valid tool". All 8 are now bound (41 market tools). `max_output_tokens` /
+  `max_output_tokens_quick` raised 6000 → 8000 after 2026-08-27 WDC analyst
+  reports truncated mid-sentence at the 6000 cap. Tests:
+  `test_market_toolnode.py` regression guard.
+
 - 2026-08-27 `(working tree)` - EODHD primary + eodhd-us default universe:
   `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
   moomoo/yfinance fallback); `news_data` = `eodhd,moomoo,yfinance` and

@@ -77,8 +77,8 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
 | `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
 | `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
-| `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 6000; the fallback for both tiers |
-| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 6000 |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 8000; the fallback for both tiers |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
@@ -403,6 +403,14 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | Tool | Wraps | Bound to | Returns |
 | --- | --- | --- | --- |
 | `get_swing_set(ticker)` | `swing.swing_report` | market | trend stack, RSI band, 1-ATR stop, 2R/3R targets, VCP, trail |
+| `get_swing_exits(ticker)` | `swing.chandelier_exit` + `trail_ema` + `targets_rr` | market | chandelier trailing stop (3x ATR below 22-bar high) + 20-day EMA trail + 2R/3R targets |
+| `get_dip_technical(ticker)` | `swing.rsi` + `technical_factors` (KST/MFI/Stoch) + `value_dip.bollinger_pct_b` | market | RSI/%b + Stochastic + MFI + KST dip-timing read (OVERSOLD / not-oversold) |
+| `get_mean_reversion_tech(ticker)` | `technical_factors` (StochRSI/RSI2/W%R/Keltner/Donchian/OBV/PSAR/Elder) | market | mean-reversion dip-timing + exit technicals |
+| `get_opening_range(ticker)` | `market_session.opening_range` | market | ORB breakout + 2R stop/target |
+| `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
+| `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
+| `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
+| `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
 | `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |
 | `get_earnings_event_read(ticker, date)` | `events.post_earnings_play` + `catalyst.last_earnings_surprise` | news | surprise %, drift side, print-day move, PEAD setup |
 | `get_catalyst_scale(ticker, date)` | `catalyst.build_catalyst_snapshot` | news | 0..1 scale + verdict + reasons |

@@ -23,6 +23,35 @@ def test_market_toolnode_can_execute_verified_snapshot():
     assert {"get_stock_data", "get_indicators"} <= market_tools
 
 
+@pytest.mark.unit
+def test_market_toolnode_binds_swing_dip_and_market_session_tools():
+    """Regression guard: the market analyst's prompt lists get_swing_exits /
+    get_dip_technical / get_mean_reversion_tech and the 5 market-session tools
+    (get_opening_range / get_gap_type / get_order_imbalance /
+    get_premarket_liquidity / get_post_close_confirmation), but they were NOT
+    registered in the market ToolNode (a wiring gap from the original
+    value-dip+swing commits) - so every run had the LLM call tools that error
+    with "not a valid tool". They must all be executable here.
+    """
+    nodes = TradingAgentsGraph._create_tool_nodes(None)
+    market_tools = set(nodes["market"].tools_by_name)
+    expected = {
+        "get_swing_exits",
+        "get_dip_technical",
+        "get_mean_reversion_tech",
+        "get_opening_range",
+        "get_gap_type",
+        "get_order_imbalance",
+        "get_premarket_liquidity",
+        "get_post_close_confirmation",
+    }
+    missing = expected - market_tools
+    assert not missing, (
+        "market analyst prompt lists these tools but the market ToolNode does "
+        f"not bind them (LLM calls error 'not a valid tool'): {sorted(missing)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # get_sec_filings -> Massive insider fallback (when SEC EDGAR fails)
 # ---------------------------------------------------------------------------

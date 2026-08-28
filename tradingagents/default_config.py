@@ -210,10 +210,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # provider accepts it). Basis: measured max outputs in this repo
         # (analysts ~5k, RM 1.9k, trader .7k, PM 1.4k) + ~20% headroom, well
         # under the formula's 1,310,720 - input ceiling for these inputs.
-        # quick/global = analysts + debaters + trader (6000),
+        # quick/global = analysts + debaters + trader (8000 - raised from 6000
+        # after 2026-08-27 WDC reports truncated mid-sentence at the 6000 cap),
         # deep = RM + PM (2500).
-        "max_output_tokens": 6000,
-        "max_output_tokens_quick": 6000,
+        "max_output_tokens": 8000,
+        "max_output_tokens_quick": 8000,
         "max_output_tokens_deep": 2500,
         # Provider-specific thinking configuration
         "google_thinking_level": None,  # "high", "minimal", etc.

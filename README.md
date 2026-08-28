@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **Market tool-node binding fix + higher output cap** - the
+  market analyst's prompt listed `get_swing_exits` / `get_dip_technical` /
+  `get_mean_reversion_tech` and the 5 market-session tools, but they were never
+  registered in the market `ToolNode` (a wiring gap from the original
+  value-dip+swing commits) — every run had the LLM call tools that error "not a
+  valid tool". All 8 are now bound. `max_output_tokens` / `_quick` raised
+  6000 → 8000 after 2026-08-27 WDC analyst reports truncated mid-sentence at
+  the 6000 cap.
+
 - [2026-08-27] **EODHD primary + eodhd-us default universe** - the
   `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
   moomoo/yfinance fallback); `news_data` and `corporate_actions` also lead

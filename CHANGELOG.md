@@ -9,6 +9,17 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Fix market tool-node binding gap + raise quick-tier output cap** -
+  the market analyst's prompt lists `get_swing_exits` / `get_dip_technical` /
+  `get_mean_reversion_tech` and the 5 market-session tools (`get_opening_range` /
+  `get_gap_type` / `get_order_imbalance` / `get_premarket_liquidity` /
+  `get_post_close_confirmation`), but they were never registered in the market
+  `ToolNode` (a wiring gap from the original value-dip+swing commits) — so every
+  run had the LLM call tools that error "not a valid tool" and the chandelier
+  trail-stop wiring (`final_state["swing_exits"]`) was dead. All 8 are now bound
+  (41 market tools). `max_output_tokens` / `max_output_tokens_quick` raised
+  6000 → 8000 after 2026-08-27 WDC analyst reports truncated mid-sentence at
+  the 6000 cap. Tests: `test_market_toolnode.py` regression guard (8 tools).
 - **EODHD as primary OHLCV vendor + eodhd-us default universe** - the
   `core_stock_apis` chain is now `eodhd,moomoo,yfinance` (EODHD first,
   moomoo/yfinance as fallbacks); `news_data` is `eodhd,moomoo,yfinance` and
