@@ -13,6 +13,17 @@ def stop_to_breakeven(entry_price: float, atr: float, cushion_atr: float = 1.0) 
     return entry_price + max(0.0, float(cushion_atr)) * float(atr)
 
 
+def stop_to_breakeven_r(entry_price: float, stop_price: float, rr: float = 1.0) -> float:
+    """Return the price trigger at which the stop should be moved to
+    break-even: entry + rr x R, where R = entry - stop (the per-share risk).
+    Mirrors the web's "move to BE after ~1R-1.5R in favor".
+    """
+    risk = float(entry_price) - float(stop_price)
+    if risk <= 0:
+        return float(entry_price)
+    return float(entry_price) + float(rr) * risk
+
+
 def target_level(close: float, atr: float, atr_mult: float = 4.0) -> float:
     """ATR-based profit target for longs."""
     return close + max(0.0, float(atr_mult)) * float(atr)
@@ -61,4 +72,4 @@ def exit_check(
     }
 
 
-__all__ = ["stop_to_breakeven", "target_level", "net_of_cost", "rebalance_due", "exit_check"]
+__all__ = ["stop_to_breakeven", "stop_to_breakeven_r", "target_level", "net_of_cost", "rebalance_due", "exit_check"]

@@ -35,6 +35,16 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-28] **Value Dip + Swing enhancements (web-researched)** - compared
+  the setup/exit math against established swing-trading practice and closed
+  the gaps: VCP now enforces a **halving progression** (`contraction_tol=0.65`,
+  default) with a final-tightness gate + a `pivot` breakout field; the
+  **chandelier exit** uses real daily highs (was a closes proxy); the value-dip
+  setup adds a `trend` row (opt-in `require_trend` gate), a `plan_stop_ok`
+  harmonization field, a `strict_vdu` mode, configurable ATR/%-drawdown
+  tranche ladders, and an R-based breakeven (`exits.stop_to_breakeven_r`).
+  See CHANGELOG.
+
 - [2026-08-28] **Audit-driven correctness fixes (data integrity + wiring)** - a
   repo-wide audit fixed ~26 defects with hermetic tests (1490 passed, 2
   skipped, ruff clean). Highlights: Piotroski ROA point no longer awarded to

@@ -8,6 +8,40 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+- **Value Dip + Swing enhancements (web-researched, matched to practice)** -
+  research compared the setup/exit math against established swing-trading
+  practice and closed the gaps:
+  - **VCP halving progression** (`swing.py::vcp_setup`): the default
+    `contraction_tol` is now `0.65` so each pullback must be *successively
+    shallower* (reproducing the named 15%->8%->3%; ratios ~0.53/0.38), with a
+    `max_final_depth` (default 8%) final-tightness gate and a `pivot` field =
+    the highest high of the final contraction (the Minervini breakout buy
+    point). Pass `contraction_tol=1.10` for the old permissive rule.
+  - **Chandelier true-highs** (`swing.py::chandelier_exit`): accepts a real
+    `highs` series so the trailing stop sits below the true 22-bar high
+    (was using closes as an upper proxy); threaded through `swing_report` +
+    `get_swing_exits`.
+  - **Value-dip trend filter** (`value_dip.py::value_dip_setup`): adds a
+    `trend` row (price >= 200-SMA and 50-SMA rising) reported when >=200
+    closes; gates only when the caller opts in via `require_trend` (a value
+    dip is often below its 200-SMA, so it is not a hard default reject).
+  - **Stop harmonization** (`value_dip.py`): the `trade_risk` row now also
+    reports `plan_stop_pct` / `plan_stop_ok` (the composite plan stop,
+    ~3.5 ATR from P1) vs `max_plan_stop_pct` (8%), reconciling the setup's
+    <=2% risk screen with the actual wider tranche stop.
+  - **Strict-VDU** (`value_dip.py::value_dip_setup`): `strict_vdu=True`
+    promotes the Step-2 VDU ladder, valuation-Z and support to hard gates
+    (measured only; unknown still never fails).
+  - **Configurable tranche ladder** (`value_dip.py::tranche_plan/risk_read`):
+    new `steps` (ATR multiples, default 1.0/2.0) and `pct_steps` (fixed
+    %-drawdown-from-P1 ladder) options.
+  - **R-based breakeven** (`exits.py::stop_to_breakeven_r`): move the stop
+    to break-even after `rr` x R in favor (mirrors practice of ~1R-1.5R).
+  Tests: `test_strategies_value_dip` (ladder modes, trend, plan-stop),
+  `test_strategies_vcp` (halving, final-tight, pivot), `test_strategies_value_style`
+  (R-based BE). Docs: README, CHANGELOG.
+
 ### Fixed
 - **Audit-driven correctness fixes (data integrity + wiring)** - a repo-wide
   audit surfaced and fixed ~26 defects across strategies, dataflows, graph

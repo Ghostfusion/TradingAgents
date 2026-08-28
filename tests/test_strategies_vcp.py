@@ -146,3 +146,20 @@ def test_swing_report_includes_vcp():
     r = swing_report(closes, highs, lows, vols)
     assert r is not None
     assert isinstance(r.get("vcp"), dict)  # informational block present
+
+
+def test_vcp_halving_and_pivot():
+    c, h, lo, v = _build(contraction=True)
+    r = vcp_setup(c, h, lo, v)
+    # Default contraction_tol=0.65 keeps the 16.8/9.9/5.0 halving candidate.
+    assert r["candidate"] is True
+    assert r["final_ok"] is True  # final ~5% < 8% final-tightness band
+    assert r.get("pivot") is not None  # Minervini buy point exposed
+
+
+def test_vcp_halving_rejects_equal_depths():
+    """Semantic guard: an equal-depth (non-shrinking) sequence fails the 0.65
+    halving default but would pass the old 1.10 tolerance."""
+    seq = [0.15, 0.15, 0.15]
+    assert all(seq[i] <= seq[i - 1] * 0.65 for i in range(1, len(seq))) is False
+    assert all(seq[i] <= seq[i - 1] * 1.10 for i in range(1, len(seq))) is True

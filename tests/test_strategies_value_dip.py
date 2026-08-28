@@ -576,3 +576,53 @@ def test_matrix_ignores_unknown_new_rows():
     )
     assert s["rows"]["balance_sheet"]["pass"] is None
     assert s["rows"]["profitability"]["pass"] is not False or s["candidate"] is True
+
+
+def test_tranche_plan_percent_ladder():
+    """pct_steps ladder: P2/P3 are fixed % drawdowns from P1, not ATR steps."""
+    plan = tranche_plan(100.0, 4.0, pct_steps=(0.03, 0.06), weights=(0.3, 0.3, 0.4))
+    assert plan["valid"]
+    assert plan["p2"] == pytest.approx(97.0)
+    assert plan["p3"] == pytest.approx(94.0)
+
+
+def test_tranche_plan_custom_atr_steps():
+    plan = tranche_plan(100.0, 2.0, steps=(0.5, 1.0))
+    assert plan["valid"]
+    assert plan["p2"] == pytest.approx(99.0)
+    assert plan["p3"] == pytest.approx(98.0)
+
+
+def test_tranche_plan_bad_steps_invalid():
+    assert not tranche_plan(100.0, 2.0, steps=(2.0, 1.0))["valid"]
+    assert not tranche_plan(100.0, 2.0, pct_steps=(0.06, 0.03))["valid"]
+
+
+def test_value_dip_setup_reports_trend_and_plan_stop():
+    closes, highs, lows, vols = _dip_trigger_series()
+    s = value_dip_setup(
+        closes, highs, lows, vols, margin_of_safety=0.25, fcf_yield=0.08, atr_value=0.5
+    )
+    tr = s["rows"]["trade_risk"]
+    assert "plan_stop_pct" in tr
+    assert "plan_stop_ok" in tr
+    # requires >=200 closes for the trend row; short dip series -> None
+    assert s["rows"]["trend"] is None
+
+
+def test_value_dip_setup_require_trend_opt_in():
+    closes = [100.0 + 0.1 * i for i in range(300)]
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    vols = [1_000_000] * len(closes)
+    s = value_dip_setup(
+        closes, highs, lows, vols, margin_of_safety=0.30, fcf_yield=0.10,
+        atr_value=1.0, require_trend=True,
+    )
+    assert s["rows"]["trend"] is not None
+    assert s["rows"]["trend"]["pass"] is True
+    s2 = value_dip_setup(
+        closes, highs, lows, vols, margin_of_safety=0.30, fcf_yield=0.10,
+        atr_value=1.0,
+    )
+    assert s2["rows"]["trend"]["pass"] is True

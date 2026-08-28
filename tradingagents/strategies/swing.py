@@ -239,18 +239,29 @@ def trail_ema(closes: list, n: int = 20) -> dict:
 
 
 def chandelier_exit(
-    closes: list, atr_value: float | None, window: int = 22, k: float = 3.0
+    closes: list,
+    atr_value: float | None,
+    window: int = 22,
+    k: float = 3.0,
+    highs: list | None = None,
 ) -> dict:
     """Chandelier exit: trailing stop = (highest high in window) - k x ATR.
 
     Standard chandelier uses 3 x ATR below the highest High over ``window``
     (default 22). A close below it is the exit signal. Returns None when ATR
     or history is missing (never fabricates).
+
+    ``highs`` is the true daily-high series when available; it is used as the
+    reference instead of the closes proxy so the stop sits below the real
+    highest High. When ``highs`` is None it falls back to closes (backward
+    compatible with pre-fix callers).
     """
     if not closes or len(closes) < window or atr_value is None or atr_value <= 0:
         return {"chandelier": None, "below": None, "exit": None, "atr": None}
-    highs = [float(c) for c in closes]  # daily highs not tracked here; use closes as an upper proxy
-    hi = max(highs[-window:])
+    if highs is not None and len(highs) >= window:
+        hi = max(float(h) for h in highs[-window:])
+    else:
+        hi = max(float(c) for c in closes[-window:])  # closes as an upper proxy
     stop = hi - k * float(atr_value)
     below = float(closes[-1]) < stop
     return {
@@ -306,23 +317,28 @@ def vcp_setup(
     pivot: int = 3,
     min_contractions: int = 3,
     max_base_depth: float = 0.30,
-    contraction_tol: float = 1.10,
+    contraction_tol: float = 0.65,
     spring_pct: float = 0.05,
+    max_final_depth: float | None = 0.08,
 ) -> dict:
     """Volatility Contraction Pattern (framework Phase 3: 15% -> 8% -> 3%).
 
     A VCP base is a series of successively *shallower* pullbacks off a base
     high on *declining* volume - volatility contracting before a breakout.
 
-    * pivot troughs over the trailing ``window`` (strict, ``pivot``-bar
-      lookback either side)
-    * each pullback depth = (base high - trough low) / base high
-    * contraction_ok: the last ``min_contractions`` depths are non-increasing
-      (later pullbacks shallower, within ``contraction_tol`` for noise)
+    * contraction_ok: the last ``min_contractions`` depths are successively
+      shallower - each <= ``contraction_tol`` * the prior (default 0.65, the
+      "halving" progression that reproduces 15% -> 8% -> 3%: ratios 0.53,
+      0.38). Pass ``contraction_tol=1.10`` to restore the old permissive
+      non-deepening-within-10% rule.
+    * final_ok: when ``max_final_depth`` is set (default 8%), the last
+      contraction stays tight - the near-complete coil before the break
     * base_ok: the deepest pullback stays inside ``max_base_depth`` (30%)
     * volume_fade: mean volume between successive troughs does not expand
     * near_breakout: the close is within ``spring_pct`` of the base high
-      (the "spring", informational - not a gate)
+      (the "spring"); the highest high of the final contraction is exposed as
+      ``pivot`` - the Minervini buy point just above which a breakout entry
+      sits
 
     Unknown volume data never fails the gate: a missing volume series drives
     ``volume_fade`` to None (ignored) rather than False.
@@ -363,7 +379,18 @@ def vcp_setup(
     ds = [d for _, d in last]
     contract_ok = all(ds[i] <= ds[i - 1] * contraction_tol for i in range(1, len(ds)))
     base_ok = ds[0] <= max_base_depth
+    final_ok = True
+    if max_final_depth is not None:
+        final_ok = ds[-1] <= float(max_final_depth)
     idxs = [i for i, _ in last]
+    # Pivot = the highest high inside the final (tightest) contraction - the
+    # Minervini buy point. A breakout entry is a buy-stop just above it.
+    pivot_price = None
+    if idxs:
+        fin_i = idxs[-1]
+        lo = max(0, fin_i - pivot)
+        if len(seg_h) > fin_i:
+            pivot_price = max(seg_h[lo : fin_i + 1])
     vols = []
     for a, b in zip(idxs, idxs[1:] + [len(seg_v)], strict=False):
         seg = seg_v[a:b]
@@ -373,7 +400,11 @@ def vcp_setup(
         vol_fade = all(vols[i] <= vols[i - 1] * 1.05 for i in range(1, len(vols)))
     near = (base_high - closes[-1]) / base_high
     success = bool(
-        contract_ok and base_ok and len(ds) >= min_contractions and (vol_fade is not False)
+        contract_ok
+        and base_ok
+        and final_ok
+        and len(ds) >= min_contractions
+        and (vol_fade is not False)
     )
     ctx_depths = "/".join(f"{d:.1%}" for d in ds)
     return {
@@ -382,6 +413,9 @@ def vcp_setup(
         "base_high": round(base_high, 4),
         "close_to_base": round(near, 4),
         "contraction_ok": contract_ok,
+        "final_ok": final_ok,
+        "max_final_depth": max_final_depth,
+        "pivot": round(pivot_price, 4) if pivot_price else None,
         "volume_fade": vol_fade,
         "near_breakout": near <= spring_pct,
         "context": f"vcp depths={ctx_depths} contract={contract_ok} "
@@ -458,7 +492,7 @@ def swing_report(
         if stop_block and stop_block.get("stop")
         else None,
         "trail": trail_ema(closes),
-        "chandelier": chandelier_exit(closes, atr_value),
+        "chandelier": chandelier_exit(closes, atr_value, highs=highs),
         "vcp": vcp_setup(closes, highs, lows, volumes),
         "candidate": candidate,
         "context": "; ".join(p for p in ctx_parts if p),

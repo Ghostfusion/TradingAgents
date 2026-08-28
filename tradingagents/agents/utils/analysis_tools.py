@@ -671,7 +671,7 @@ def get_swing_exits(
         from tradingagents.strategies.swing import chandelier_exit, targets_rr, trail_ema
 
         atr_v = atr(data["highs"], data["lows"], closes, window=14)
-        ch = chandelier_exit(closes, atr_v)
+        ch = chandelier_exit(closes, atr_v, highs=data["highs"])
         tr = trail_ema(closes)
         last = float(closes[-1])
         # targets from the chandelier as the trailing reference.

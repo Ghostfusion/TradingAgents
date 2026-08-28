@@ -8,6 +8,7 @@ from tradingagents.strategies.exits import (
     net_of_cost,
     rebalance_due,
     stop_to_breakeven,
+    stop_to_breakeven_r,
     target_level,
 )
 from tradingagents.strategies.portfolio import (
@@ -66,6 +67,14 @@ def test_exits():
     assert rebalance_due(5, 30) is False
     e = exit_check(entry=98.0, close=100.0, atr=0.5, target_mult=4.0)
     assert e["holding_action"] in ("target", "stop", "hold")
+
+
+def test_stop_to_breakeven_r():
+    """Entry 100, stop 95 -> R=5; the BE trigger at 1R is 105, at 1.5R is 107.5."""
+    assert stop_to_breakeven_r(100.0, 95.0, rr=1.0) == pytest.approx(105.0)
+    assert stop_to_breakeven_r(100.0, 95.0, rr=1.5) == pytest.approx(107.5)
+    # Non-positive risk (stop >= entry) cannot move to BE below entry.
+    assert stop_to_breakeven_r(100.0, 105.0) == pytest.approx(100.0)
 
 
 def test_build_computed_context():

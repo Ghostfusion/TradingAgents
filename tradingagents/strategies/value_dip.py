@@ -60,6 +60,7 @@ RSI_ENTRY = 35.0  # RSI(14) <= 35
 PCTB_ENTRY = 0.10  # %b <= 0.10 (near/piercing the lower band)
 MAX_ACCOUNT_RISK = 0.02  # <= 2% account risk
 STOP_ATR_MULT = 2.0  # the trade-risk row's 2 x ATR stop
+MAX_PLAN_STOP_PCT = 0.08  # composite plan stop (P1 - 3.5*ATR) <= 8% of price
 RR_TARGET = 2.5  # exit-target row: R:R >= 2.5
 Z_CHEAP = -1.5  # valuation Z <= -1.5 = trading significantly below norm
 
@@ -185,10 +186,14 @@ def tranche_plan(
     stop_mult: float = 1.5,
     account: float = 100_000.0,
     risk_pct: float = 0.015,
+    steps: tuple = (1.0, 2.0),
+    pct_steps: tuple | None = None,
 ) -> dict:
     """Three-tranche scale-in plan (Value_Dip_swing_Continue.md §1-2).
 
-    * P1 = initial signal price; P2 = P1 - 1.0*ATR; P3 = P1 - 2.0*ATR
+    * P1 = initial signal price; P2/P3 below P1 by ATR multiples (``steps``,
+      default 1.0/2.0 ATR) OR, when ``pct_steps`` is given (e.g. (0.03, 0.06)),
+      by fixed % drawdown from P1 (the "predictable rung spacing" ladder)
     * composite stop = P3 - stop_mult*ATR (default 1.5 x ATR below the final
       tranche)
     * weighted average entry Pbar = sum(w_i * P_i) with sum(w_i) = 1
@@ -207,8 +212,18 @@ def tranche_plan(
     w = [float(x) for x in weights]
     p1f = float(p1)
     a = float(atr_value)
-    p2 = p1f - 1.0 * a
-    p3 = p1f - 2.0 * a
+    if pct_steps:
+        s1, s2 = float(pct_steps[0]), float(pct_steps[1])
+        if not (0 < s1 < s2 < 1):
+            return {"valid": False, "reason": "percent ladder steps must be 0 < s1 < s2 < 1"}
+        p2 = p1f * (1.0 - s1)
+        p3 = p1f * (1.0 - s2)
+    else:
+        s1, s2 = float(steps[0]), float(steps[1])
+        if s1 <= 0 or s2 <= s1:
+            return {"valid": False, "reason": "ATR ladder steps must be 0 < s1 < s2"}
+        p2 = p1f - s1 * a
+        p3 = p1f - s2 * a
     stop = p3 - float(stop_mult) * a
     if stop <= 0:
         return {"valid": False, "reason": "stop level is non-positive"}
@@ -270,6 +285,8 @@ def tranche_risk_read(
     atr_value: float | None = None,
     max_position_pct: float = 0.30,
     max_book_position_pct: float | None = None,
+    steps: tuple = (1.0, 2.0),
+    pct_steps: tuple | None = None,
 ) -> dict:
     """Deterministic tranche-scaling risk read for the risk governor.
 
@@ -318,6 +335,8 @@ def tranche_risk_read(
         stop_mult=stop_mult,
         account=account,
         risk_pct=risk_pct,
+        steps=steps,
+        pct_steps=pct_steps,
     )
     if not plan.get("valid"):
         return plan  # carries valid=False + reason
@@ -865,6 +884,9 @@ def value_dip_setup(
     tax_rate: float | None = None,
     wacc: float | None = None,
     roic: float | None = None,
+    require_trend: bool = False,
+    strict_vdu: bool = False,
+    min_closes_trend: int = 200,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -900,6 +922,12 @@ def value_dip_setup(
     a = atr_value if atr_value is not None else _atr(highs, lows, closes, window=14)
     stop_dist = STOP_ATR_MULT * a if a and a > 0 else None
     stop_pct = stop_dist / price if (stop_dist is not None and price > 0) else None
+    # The composite plan stop sits 3.5 x ATR below P1 (2 ATR to P3 + 1.5 ATR
+    # below the final tranche). Report it explicitly so the setup's <=2% risk
+    # screen (STOP_ATR_MULT on the close) is reconciled with the actual plan
+    # stop, which is wider. Always consistent (plan_stop_ok implied) but
+    # surfaced for transparency / an audit hook.
+    plan_stop_pct = 3.5 * a / price if (a and a > 0 and price > 0) else None
 
     value_floor = bool(
         (margin_of_safety is not None and margin_of_safety >= MOS_FLOOR)
@@ -925,6 +953,23 @@ def value_dip_setup(
         if len(closes) >= min_closes_support
         else None
     )
+    # Trend filter (web: "buy dips in an uptrend" — avoid falling knives).
+    # Reported always when history is long enough; only gates when the caller
+    # opts in via ``require_trend`` (a value dip is often below its 200-SMA —
+    # that's normal for a bargain — so it must not hard-reject by default).
+    trend = None
+    if len(closes) >= min_closes_trend:
+        sma200 = _sma(closes, 200)
+        sma50 = _sma(closes, 50)
+        sma50_prev = _sma(closes[:-5], 50) if len(closes) > 55 else None
+        above_200 = sma200 is not None and price >= sma200
+        sma50_rising = sma50_prev is not None and sma50 is not None and sma50 >= sma50_prev
+        trend = {
+            "pass": bool(above_200 and sma50_rising),
+            "above_sma200": above_200,
+            "sma50_rising": sma50_rising,
+            "sma200": sma200,
+        }
 
     reasons = []
     if not value_floor:
@@ -937,6 +982,8 @@ def value_dip_setup(
         reasons.append("balance sheet health missed (D/E >= 1.0 and current ratio <= 1.5)")
     if prof.get("pass") is False:
         reasons.append("profitability missed (FCF not positive or ROE <= 15%)")
+    if require_trend and trend is not None and not trend["pass"]:
+        reasons.append("trend filter missed (not above 200-SMA or 50-SMA not rising)")
 
     rows = {
         "value_floor": {
@@ -959,6 +1006,9 @@ def value_dip_setup(
             "stop_mult": STOP_ATR_MULT,
             "stop_pct": round(stop_pct, 4) if stop_pct is not None else None,
             "max_account_risk": MAX_ACCOUNT_RISK,
+            "plan_stop_pct": round(plan_stop_pct, 4) if plan_stop_pct is not None else None,
+            "plan_stop_ok": bool(plan_stop_pct is not None and plan_stop_pct <= MAX_PLAN_STOP_PCT),
+            "max_plan_stop_pct": MAX_PLAN_STOP_PCT,
         },
         "exit_target": {
             "pass": exit_target,
@@ -970,6 +1020,7 @@ def value_dip_setup(
         "momentum_divergence": mom,
         "vdu": vdu,
         "support": support,
+        "trend": trend,
         "fib_retrace": fib_retrace_entry(closes, highs, lows),
         "stochastic": _stochastic_oversold(highs, lows, closes),
     }
@@ -1050,6 +1101,19 @@ def value_dip_setup(
         measured_gates.append(bs["pass"])
     if prof.get("pass") is not None:
         measured_gates.append(prof["pass"])
+    if require_trend and trend is not None:
+        measured_gates.append(trend["pass"])
+    if strict_vdu:
+        # Promote the Step-2 ladder + valuation + support to hard gates
+        # (measured only; unknown rows still never fail).
+        if vdu and vdu.get("candidate") is not None:
+            measured_gates.append(bool(vdu["candidate"]))
+        if val_z is not None:
+            measured_gates.append(bool(val_z <= Z_CHEAP))
+        if support is not None:
+            measured_gates.append(
+                bool(support.get("verdict") in ("multi-month-base-support", "200-day-sma-support", "holding-above-base"))
+            )
     return {
         "candidate": bool(all(measured_gates)),
         "reasons": reasons,
