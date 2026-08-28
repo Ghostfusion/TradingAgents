@@ -84,6 +84,19 @@ in `batch.py`).
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
+| `TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST` | `value_dip_require_catalyst` | strict: value-dip needs re-rating evidence |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | strict: block dip entries in high-vol/fast-downtrend/catalyst windows |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP` | `value_dip_regime_vol_cap` | vol_pct above this blocks MR entries (gate ON) |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_DOWNTREND_BAND` | `value_dip_regime_downtrend_band` | knife guard: price below 200-SMA by this |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_HALVE` | `value_dip_regime_halve` | instead of block, size x0.5 |
+| `TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT` | `risk_daily_loss_budget_pct` | daily realized-loss cap -> de-risk |
+| `TRADINGAGENTS_RISK_HWM_SOFT_PCT` / `_HARD_PCT` | `risk_hwm_soft_pct` / `risk_hwm_hard_pct` | drawdown-from-HWM tiers |
+| `TRADINGAGENTS_BREAKEVEN_TRIGGER` | `breakeven_trigger` | atr \| r \| structure (BE after confirmation) |
+| `TRADINGAGENTS_STOP_NEVER_WIDEN` | `stop_never_widen` | unified stop never widened |
+| `TRADINGAGENTS_MIN_HOLDING_DAYS` / `_MAX_TRADES_PER_PERIOD` | `min_holding_days` / `max_trades_per_period` | turnover guards |
+| `TRADINGAGENTS_SLEEVE_TAG_ENABLED` | `sleeve_tag_enabled` | tag decisions with style sleeve |
+| `TRADINGAGENTS_DRIFT_THRESHOLD` | `drift_threshold` | alpha-decay win-rate drift trigger |
+
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
 | `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
 | `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` | `correlation_penalty_frac` | weight cut for a penalized name, renormalized across the book (default 0.3) |

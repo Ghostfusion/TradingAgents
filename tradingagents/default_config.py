@@ -50,6 +50,21 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
     "TRADINGAGENTS_ENABLE_DECISION_AUDIT": "enable_decision_audit",
+    "TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST": "value_dip_require_catalyst",
+    "TRADINGAGENTS_VALUE_DIP_REGIME_GATE": "value_dip_regime_gate",
+    "TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP": "value_dip_regime_vol_cap",
+    "TRADINGAGENTS_VALUE_DIP_REGIME_DOWNTREND_BAND": "value_dip_regime_downtrend_band",
+    "TRADINGAGENTS_VALUE_DIP_REGIME_HALVE": "value_dip_regime_halve",
+    "TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT": "risk_daily_loss_budget_pct",
+    "TRADINGAGENTS_RISK_HWM_SOFT_PCT": "risk_hwm_soft_pct",
+    "TRADINGAGENTS_RISK_HWM_HARD_PCT": "risk_hwm_hard_pct",
+    "TRADINGAGENTS_BREAKEVEN_TRIGGER": "breakeven_trigger",
+    "TRADINGAGENTS_STOP_NEVER_WIDEN": "stop_never_widen",
+    "TRADINGAGENTS_MIN_HOLDING_DAYS": "min_holding_days",
+    "TRADINGAGENTS_MAX_TRADES_PER_PERIOD": "max_trades_per_period",
+    "TRADINGAGENTS_SLEEVE_TAG_ENABLED": "sleeve_tag_enabled",
+    "TRADINGAGENTS_DRIFT_THRESHOLD": "drift_threshold",
+
     "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
     # B1 scheduled-catalyst overlay tuning (on by default via enable_events).
     "TRADINGAGENTS_CATALYST_WINDOW_DAYS": "catalyst_window_days",
@@ -382,6 +397,24 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "calibration_min_n": 5,  # RESERVED (not yet wired): min samples per bucket (G2)
         "enable_agreement": False,  # G3: computed consensus / agreement
         "enable_threshold_gate": False,  # RESERVED (not yet wired): G5 PBO tuning gate
+        # Institutional workflow (design_institutional_value_dip_workflow.md).
+        # All advisory rows are computed + injected into the decision agents
+        # (Trader / PM / risk debators); nothing gates by default.
+        "value_dip_require_catalyst": False,  # A2: re-rating evidence required
+        "value_dip_regime_gate": False,  # A1: hard-gate on regime (advisory by default)
+        "value_dip_regime_vol_cap": 0.8,  # A1: vol_pct above this blocks MR entries (opt-in)
+        "value_dip_regime_downtrend_band": 0.08,  # A1: price below 200-SMA by this -> knife guard
+        "value_dip_regime_halve": False,  # A1: instead of block, size x0.5
+        "risk_daily_loss_budget_pct": 0.03,  # B1: daily realized-loss cap -> de-risk
+        "risk_hwm_soft_pct": 0.10,  # B1: drawdown-from-HWM soft tier (WARN)
+        "risk_hwm_hard_pct": 0.20,  # B1: drawdown-from-HWM hard tier (REJECT new risk)
+        "breakeven_trigger": "structure",  # B3: atr | r | structure (BE after confirmation)
+        "stop_never_widen": True,  # B4: enforce unified stop never widened
+        "min_holding_days": 5,  # C2: turnover guard
+        "max_trades_per_period": 4,  # C2: weekly churn cap
+        "sleeve_tag_enabled": True,  # D1: tag decisions with style sleeve
+        "drift_threshold": 0.15,  # D2: alpha-decay win-rate drift trigger
+
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
         "enable_composite_rank": False,  # V2: composite (value+momentum) ranking

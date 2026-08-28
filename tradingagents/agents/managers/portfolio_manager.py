@@ -59,6 +59,9 @@ def create_portfolio_manager(llm):
 
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        # Computed decision context (regime / plan card / risk snapshot) -
+        # advisory hard data compiled by the graph.
+        computed_context = state.get("computed_decision_context") or ""
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -134,7 +137,11 @@ def create_portfolio_manager(llm):
 **Risk Analysts Debate History:**
 {history}
 
-{cvar_line}{liq_line}{consensus_line}---
+{cvar_line}{liq_line}{consensus_line}
+**Computed decision context (deterministic, advisory - ground your final
+decision in these numbers, never invent your own):**
+{computed_context}
+---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
 

@@ -470,6 +470,9 @@ def record_review(
     gap_pct: float | None = None,
     catalyst_verdict: str | None = None,
     prior_close: float | None = None,
+    arrival_price: float | None = None,
+    fill_price: float | None = None,
+    sleeve: str | None = None,
 ) -> None:
     """Append one pre-market review row to the paper-book ledger (JSONL).
 
@@ -491,6 +494,18 @@ def record_review(
         "gap_pct": gap_pct,
         "prior_close": prior_close,
         "catalyst_verdict": catalyst_verdict,
+        # C1 execution-quality (TCA analogue, advisory): the arrival price is
+        # the decision-time quote; fill_price is the measured open / limit
+        # level. slippage_bps = (fill - arrival)/arrival. None = not measured
+        # (never fabricated).
+        "arrival_price": arrival_price,
+        "fill_price": fill_price,
+        "slippage_bps": (
+            round((float(fill_price) - float(arrival_price)) / float(arrival_price) * 1e4, 2)
+            if arrival_price and fill_price and float(arrival_price) > 0
+            else None
+        ),
+        "sleeve": sleeve,
         "realized_return": None,
     }
     with open(ledger_path, "a", encoding="utf-8") as fh:

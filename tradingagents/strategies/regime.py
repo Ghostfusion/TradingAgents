@@ -136,6 +136,94 @@ def hmm_regime(close: list[float], n_states: int = 2) -> str:
         return "unknown"
 
 
+
+
+def _sma(series: list, n: int) -> float | None:
+    if len(series) < n or n <= 0:
+        return None
+    return sum(float(x) for x in series[-n:]) / n
+
+
+def regime_gate_read(
+    closes: list,
+    cfg: dict | None = None,
+    catalyst_window: bool = False,
+) -> dict:
+    """Deterministic tradability regime for MEAN-REVERSION entries (advisory).
+
+    Institutions gate counter-trend fades: allow a dip-buy only when volatility
+    is contained, the market is not in a fast downtrend, and no catalyst window
+    (earnings/Fed/high-macro) is open. Pure read over the close series + an
+    optional catalyst flag:
+
+    * ``vol_pct`` - percentile rank of the latest 21d realized vol vs its own
+      trailing history (the volatility-regime-first rule).
+    * ``fast_downtrend`` - price >= ``value_dip_regime_downtrend_band`` (default
+      8%) below the 200-SMA while the 50-SMA is under the 200-SMA (falling
+      knife guard).
+    * ``catalyst_window`` - caller-supplied (events/catalyst overlay).
+    * ``pass`` - False when high-vol (``value_dip_regime_vol_cap``, default
+      0.8) OR fast_downtrend OR catalyst_window. ADVISORY: this function never
+      blocks anything; hard-gating is opt-in at the caller via ``require_regime``
+      so existing scans keep their behaviour.
+    """
+    cfg = cfg or {}
+    vol_cap = float(cfg.get("value_dip_regime_vol_cap", 0.8))
+    band = float(cfg.get("value_dip_regime_downtrend_band", 0.08))
+    if not closes or len(closes) < 60:
+        return {
+            "pass": None, "verdict": "unknown", "vol_pct": None,
+            "fast_downtrend": None, "above_sma200": None, "sma50_rising": None,
+            "catalyst_window": bool(catalyst_window), "reasons": ["insufficient history"],
+        }
+    price = float(closes[-1])
+    sma200 = _sma(closes, 200)
+    sma50 = _sma(closes, 50)
+    sma50_prev = _sma(closes[:-5], 50) if len(closes) > 55 else None
+    above_200 = sma200 is not None and price >= sma200
+    sma50_rising = sma50_prev is not None and sma50 is not None and sma50 >= sma50_prev
+    fast_downtrend = bool(
+        sma200 is not None
+        and sma50 is not None
+        and price < sma200 * (1.0 - band)
+        and sma50 < sma200
+    )
+    vols = [realized_vol(closes[: i + 1], window=21) for i in range(20, len(closes))]
+    vols = [v for v in vols if v is not None]
+    vol_pct = None
+    if vols:
+        recent = vols[-1]
+        hist = vols[:-1] or [recent]
+        vol_pct = round(sum(1 for v in hist if v <= recent) / len(hist), 4)
+    high_vol = bool(vol_pct is not None and vol_pct > vol_cap)
+    blocked = bool(high_vol or fast_downtrend or catalyst_window)
+    verdict = (
+        "high-vol"
+        if high_vol
+        else ("fast-downtrend" if fast_downtrend else ("catalyst-window" if catalyst_window else "tradable"))
+    )
+    reasons = []
+    if high_vol:
+        reasons.append(f"vol_pct {vol_pct:.2f} > cap {vol_cap:.2f}")
+    if fast_downtrend:
+        reasons.append(f"price {band:.0%}+ below falling 200-SMA (knife guard)")
+    if catalyst_window:
+        reasons.append("catalyst window open")
+    if not blocked:
+        reasons.append("volatility contained + no fast downtrend + no catalyst")
+    return {
+        "pass": not blocked,
+        "verdict": verdict,
+        "vol_pct": vol_pct,
+        "fast_downtrend": fast_downtrend,
+        "above_sma200": above_200,
+        "sma50_rising": sma50_rising,
+        "catalyst_window": bool(catalyst_window),
+        "thresholds": {"vol_cap": vol_cap, "downtrend_band": band},
+        "reasons": reasons,
+    }
+
+
 __all__ = [
     "realized_vol",
     "vol_percentile",
@@ -143,5 +231,5 @@ __all__ = [
     "choppiness",
     "regime_label",
     "hmm_regime",
-    "make_vol_series_of_closes",
+    "make_vol_series_of_closes",    "regime_gate_read",
 ]

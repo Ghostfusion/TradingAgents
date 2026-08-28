@@ -887,6 +887,14 @@ def value_dip_setup(
     require_trend: bool = False,
     strict_vdu: bool = False,
     min_closes_trend: int = 200,
+    regime_gate: dict | None = None,
+    catalyst_window: bool = False,
+    eps_surprise: float | None = None,
+    revision_score: float | None = None,
+    inst_accum: bool | None = None,
+    forward_peg: float | None = None,
+    require_regime: bool = False,
+    require_catalyst: bool = False,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -985,6 +993,64 @@ def value_dip_setup(
     if require_trend and trend is not None and not trend["pass"]:
         reasons.append("trend filter missed (not above 200-SMA or 50-SMA not rising)")
 
+    # Regime gate (advisory; hard-gated only via require_regime). Institutions
+    # block counter-trend fades in high-vol / fast-downtrend / catalyst windows.
+    regime_row = None
+    if regime_gate is not None:
+        regime_row = dict(regime_gate)
+    else:
+        try:
+            from .regime import regime_gate_read
+
+            regime_row = regime_gate_read(closes, cfg=None, catalyst_window=catalyst_window)
+        except Exception:  # noqa: BLE001 - degrade to unknown, never fail
+            regime_row = None
+    if regime_row is not None:
+        regime_row = {
+            **regime_row,
+            "halve": bool(regime_row.get("pass") is False),
+        }
+        if regime_row.get("pass") is False and not require_regime:
+            reasons.append(f"regime advisory: {regime_row.get('verdict')} ({'; '.join(regime_row.get('reasons') or [])})")
+
+    # Re-rating / catalyst evidence (advisory; hard-gated only via
+    # require_catalyst). "Cheap stays cheap without a catalyst" - institutions
+    # want some measured evidence the gap can close: positive EPS surprise,
+    # analyst revisions > 0, institutional accumulation, forward PEG < 1.
+    re_rating_row = None
+    if any(v is not None for v in (eps_surprise, revision_score, forward_peg)) or inst_accum is not None:
+        evidence = []
+        measured = False
+        if eps_surprise is not None:
+            measured = True
+            if eps_surprise > 0:
+                evidence.append(f"eps_surprise={eps_surprise:+.2%}")
+        if revision_score is not None:
+            measured = True
+            if revision_score > 0:
+                evidence.append(f"revisions={revision_score:+.0f}")
+        if inst_accum is not None:
+            measured = True
+            if inst_accum:
+                evidence.append("inst_accum")
+        if forward_peg is not None:
+            measured = True
+            if 0 < forward_peg < 1.0:
+                evidence.append(f"forward_peg={forward_peg:.2f}")
+        re_rating_row = {
+            "pass": bool(evidence) if measured else None,
+            "evidence": evidence,
+            "measured": measured,
+            "inputs": {
+                "eps_surprise": round(eps_surprise, 4) if eps_surprise is not None else None,
+                "revision_score": revision_score,
+                "inst_accum": inst_accum,
+                "forward_peg": forward_peg,
+            },
+        }
+        if re_rating_row.get("pass") is False and not require_catalyst:
+            reasons.append("no measured re-rating catalyst (EPS surprise / revisions / accumulation / forward PEG)")
+
     rows = {
         "value_floor": {
             "pass": value_floor,
@@ -1021,6 +1087,8 @@ def value_dip_setup(
         "vdu": vdu,
         "support": support,
         "trend": trend,
+        "regime_gate": regime_row,
+        "re_rating": re_rating_row,
         "fib_retrace": fib_retrace_entry(closes, highs, lows),
         "stochastic": _stochastic_oversold(highs, lows, closes),
     }
@@ -1103,6 +1171,10 @@ def value_dip_setup(
         measured_gates.append(prof["pass"])
     if require_trend and trend is not None:
         measured_gates.append(trend["pass"])
+    if require_regime and regime_row is not None and regime_row.get("pass") is not None:
+        measured_gates.append(bool(regime_row["pass"]))
+    if require_catalyst and re_rating_row is not None and re_rating_row.get("pass") is not None:
+        measured_gates.append(bool(re_rating_row["pass"]))
     if strict_vdu:
         # Promote the Step-2 ladder + valuation + support to hard gates
         # (measured only; unknown rows still never fail).

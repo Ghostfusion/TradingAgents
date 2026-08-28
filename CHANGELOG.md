@@ -9,6 +9,47 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Institutional workflow for value-dip + swing (Phases A-E, design
+  `docs/design_institutional_value_dip_workflow.md`)** - mapped institutional
+  practice (value-desk funnel, AQR-style mean reversion, risk-first tranches,
+  desk risk policy, TCA, event sizing, regime switching, VCP/SEPA process,
+  quant evaluation) onto the stack. ALL new rows are advisory (computed +
+  injected into the LLMs); nothing gates by default (opt-in strict flags):
+  - **A1 regime gate** (`strategies/regime.py::regime_gate_read`): rolling
+    realized-vol percentile + fast-downtrend knife guard + catalyst window;
+    new `regime_gate` row in `value_dip_setup`. Strict opt-in:
+    `value_dip_regime_gate` (+ vol/downtrend/halve keys).
+  - **A2 re-rating catalyst** (`value_dip.py`): `re_rating` row from REAL EPS
+    surprise (earnings tool), revisions, institutional accumulation, forward
+    PEG - "cheap stays cheap without a catalyst". Strict opt-in:
+    `value_dip_require_catalyst`.
+  - **B1 daily-loss + high-water-mark gates** (`risk_governor.govern`): new
+    `daily_loss_pct` / `hwm_drawdown_pct` inputs; budget + soft/hard tiers
+    (`risk_daily_loss_budget_pct`, `risk_hwm_soft/hard_pct`).
+  - **B2 trade plan card** (new `strategies/trade_plan.py::build_trade_plan`):
+    one markdown plan (unified stop, tranches, tiers, BE rule, trail,
+    adherence checklist) compiled per run and injected into ALL 5 decision
+    agents (Trader, PM, aggressive/conservative/neutral debators) via
+    `graph._compiled_decision_context`, and appended to the report.
+  - **B3 BE-after-confirmation** (`exits.py::breakeven_after_confirmation`,
+    `breakeven_trigger` = atr|r|structure): move stop to BE only after 1R /
+    higher-low - no more too-early BE.
+  - **B4 stop-never-widen** (`stop_never_widen`): unified invalidation stop
+    flagged in the plan card + trader prompt.
+  - **C1 execution/TCA** (`pre_market.py::record_review`): arrival_price /
+    fill_price / slippage_bps columns; `strategy_quality_report` gains an
+    execution block (avg slippage, fill rate).
+  - **C2 turnover guards** (`min_holding_days`, `max_trades_per_period`).
+  - **D1 sleeve tagging** (`memory.store_decision(sleeve)` + parse): honest
+    per-style attribution in `strategy_quality_report` sleeves block.
+  - **D2 drift/alpha-decay monitor** (`strategy_quality_report`): rolling
+    4-wk win-rate/Sharpe vs baseline; `drift_threshold`.
+  - **Agent data-feeding**: every run seeds `computed_decision_context` into
+    state; the 5 decision nodes cite the deterministic numbers (regime /
+    re-rating / plan card / risk snapshot / decay hint) instead of inventing.
+  - Config keys + env overrides + `.env.example`; web Help text updated.
+  Tests: 1503 passed (2 skipped), ruff clean.
+
 - **Value Dip + Swing enhancements (web-researched, matched to practice)** -
   research compared the setup/exit math against established swing-trading
   practice and closed the gaps:

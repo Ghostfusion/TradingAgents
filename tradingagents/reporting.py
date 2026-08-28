@@ -406,6 +406,12 @@ def write_report_tree(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts
             )
             sections.append(f"## IV. Risk Management Team Decision\n\n{content}")
+            # Phase A-E: surface the compiled deterministic context (regime
+            # gate / plan card / risk snapshot) that the 5 decision agents were
+            # given, so the report reader sees the hard numbers under the debate.
+            cc = final_state.get("computed_decision_context") or ""
+            if cc and "Trade plan card" in cc:
+                sections.append(f"## IVa. Computed Decision Context (advisory)\n\n{cc}\n")
 
         # 5. Portfolio Manager (mirrors the risk gate)
         if risk.get("judge_decision"):

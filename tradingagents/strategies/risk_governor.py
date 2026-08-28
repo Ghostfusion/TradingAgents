@@ -39,6 +39,8 @@ def govern(
     book_total_pct: float | None = None,
     cvar_pct: float | None = None,
     drawdown_pct: float | None = None,
+    daily_loss_pct: float | None = None,
+    hwm_drawdown_pct: float | None = None,
     sector_pct: float | None = None,
     sector_cap: float | None = None,
     halted: bool = False,
@@ -108,6 +110,26 @@ def govern(
         lim = limits["safety_cap_pct"]
         if sector_pct + (size_pct if sector_pct > 0 else 0.0) > lim:
             reasons.append(f"sector {sector_pct:.1%} near cap {lim:.1%}")
+
+    # B1 daily-loss budget: a session-level realized loss over the budget is a
+    # REJECT (no new risk today), matching desk "daily loss limit" practice.
+    if daily_loss_pct is not None:
+        lim = float(cfg.get("risk_daily_loss_budget_pct", 0.03))
+        if daily_loss_pct > lim:
+            reasons.append(f"daily_loss {daily_loss_pct:.2%} > budget {lim:.2%} (de-risk)")
+        elif daily_loss_pct >= 0.7 * lim:
+            touches.append(f"daily_loss {daily_loss_pct:.2%} near budget {lim:.2%}")
+
+    # B1 high-water-mark de-risking: soft tier (WARN) then hard tier (REJECT
+    # new risk) as the book draws down from its peak - "risk budget by
+    # drawdown-from-HWM" control.
+    if hwm_drawdown_pct is not None:
+        soft = float(cfg.get("risk_hwm_soft_pct", 0.10))
+        hard = float(cfg.get("risk_hwm_hard_pct", 0.20))
+        if hwm_drawdown_pct >= hard:
+            reasons.append(f"hwm_drawdown {hwm_drawdown_pct:.1%} >= hard tier {hard:.1%} (de-risk)")
+        elif hwm_drawdown_pct >= soft:
+            touches.append(f"hwm_drawdown {hwm_drawdown_pct:.1%} >= soft tier {soft:.1%} (halve)")
 
     # risk2.md liquidity/ownership gate (opt-in via the caller passing a
     # verdict; the graph enables it with enable_liquidity_gate). ILLIQUID

@@ -723,6 +723,13 @@ class TradingAgentsGraph:
             rc = self._precompute_risk_context(company_name)
             if rc:
                 init_agent_state["risk_context"] = rc
+        # Phase A-E: compile + inject the deterministic decision context (regime
+        # gate, re-rating evidence, trade plan card, risk snapshot, drift hint)
+        # so the Trader / PM / 3 risk debators get hard computed data, not LLM
+        # prose. Always advisory - never blocks.
+        init_agent_state["computed_decision_context"] = self._compiled_decision_context(
+            company_name, init_agent_state
+        )
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date+graph-shape resumes; a different
@@ -1173,6 +1180,86 @@ class TradingAgentsGraph:
         except Exception as tranche_exc:  # noqa: BLE001 - fold degrades silently
             logger.warning("tranche risk read skipped: %s", tranche_exc)
             return None
+
+    def _compiled_decision_context(self, ticker: str, state: dict | None = None) -> str:
+        """Compile the deterministic decision context fed to the Trader, PM
+        and the 3 risk debators (Phase A-E). All advisory; never blocks.
+
+        Includes the regime gate, re-rating evidence, a trade plan card (unified
+        stop + tranche levels + tiers + BE rule + adherence checklist) and the
+        current book risk/daily-loss/HWM snapshot when measurable. Every number
+        is computed or explicit 'unavailable' - never imagined. Best-effort:
+        any hiccup degrades to a short line, never breaks the run.
+        """
+        out = []
+        closes = []
+        try:
+            closes = self._try_fetch_closes(ticker)
+        except Exception:  # noqa: BLE001
+            closes = []
+        try:
+            from tradingagents.strategies.regime import regime_gate_read
+
+            rg = regime_gate_read(closes, cfg=self.config, catalyst_window=False) or {}
+            out.append(
+                "Computed regime gate (mean-reversion entry): "
+                f"verdict={rg.get('verdict')} pass={rg.get('pass')} "
+                f"vol_pct={rg.get('vol_pct')} fast_downtrend={rg.get('fast_downtrend')} "
+                f"reasons={'; '.join(rg.get('reasons') or [])}"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from tradingagents.strategies.trade_plan import build_trade_plan
+
+            plan = build_trade_plan(
+                ticker=ticker,
+                price=(closes[-1] if closes else None),
+                config=self.config,
+            )
+            out.append(plan)
+        except Exception:  # noqa: BLE001
+            pass
+        # Book risk / daily-loss / HWM (B1) - from the memory ledger when the
+        # track record exposes realized returns, else the governor's context.
+        try:
+
+            rctx = (state or {}).get("risk_context") or {}
+            line = "Computed risk snapshot (advisory): "
+            if rctx.get("single_cvar") is not None:
+                line += f"analyzed-name CVaR {rctx['single_cvar']:.2%}; "
+            if rctx.get("book_cvar") is not None:
+                line += f"book CVaR {rctx['book_cvar']:.2%}; "
+            if rctx.get("book_stress") is not None:
+                line += f"book stress {rctx['book_stress']:.2%}; "
+            if line.endswith(": "):
+                line += "no CVaR measured"
+            out.append(line)
+        except Exception:  # noqa: BLE001
+            pass
+        # D2 drift/alpha-decay monitor hint (cheap, from the strategy-quality
+        # report's drift block when available).
+        try:
+
+            mlog = self.memory_log.load_entries() if getattr(self, "memory_log", None) else []
+            resolved = [
+                float(e["raw"]) for e in mlog
+                if e.get("raw") is not None and not e.get("pending")
+                and isinstance(e.get("raw"), (int, float))
+            ]
+            if len(resolved) >= 12:
+                recent = resolved[-8:]
+                base_win = sum(1 for r in resolved if r > 0) / len(resolved)
+                rec_win = sum(1 for r in recent if r > 0) / len(recent)
+                if rec_win < base_win - 0.15:
+                    out.append(
+                        "Alpha-decay monitor: recent win rate "
+                        f"{rec_win:.0%} trails baseline {base_win:.0%} "
+                        "- REVIEW before adding risk."
+                    )
+        except Exception:  # noqa: BLE001
+            pass
+        return "\n\n".join(out) if out else "Computed decision context: unavailable."
 
     def _precompute_risk_context(self, ticker: str) -> dict:
         """Deterministic CVaR/stress context for the PM prompt, computed BEFORE

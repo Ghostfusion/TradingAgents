@@ -473,6 +473,31 @@ def get_value_dip_setup(
     highs = ohlcv.get("highs") or []
     lows = ohlcv.get("lows") or []
     vols = ohlcv.get("volumes") or []
+    # Hard real data for the regime + re-rating rows: the regime read comes
+    # from the actual close series (rolling realized-vol percentile + 200-SMA
+    # trend); the re-rating catalyst uses the REAL last EPS surprise from the
+    # computed-earnings tool when available (never invented - None on failure).
+    regime_row = None
+    eps_surprise = None
+    try:
+        from tradingagents.strategies.regime import regime_gate_read
+
+        regime_row = regime_gate_read(closes, cfg=None, catalyst_window=False) or None
+    except Exception:  # noqa: BLE001 - advisory row degrades to None
+        regime_row = None
+    try:
+        from tradingagents.agents.utils.analysis_tools import get_earnings_surprise
+
+        _sur = get_earnings_surprise.invoke(
+            {"ticker": ticker, "current_date": current_date}
+        ) or ""
+        import re as _re
+
+        m = _re.search(r"[+-]?\d+(?:\.\d+)?%", _sur)
+        if m:
+            eps_surprise = float(m.group(0).rstrip("%")) / 100.0
+    except Exception:  # noqa: BLE001 - degrade to None (no fabrication)
+        eps_surprise = None
     setup = value_dip_setup(
         closes,
         highs,
@@ -485,6 +510,8 @@ def get_value_dip_setup(
         current_ratio=cr,
         roe=roe,
         fcf=fcf,
+        regime_gate=regime_row,
+        eps_surprise=eps_surprise,
     )
     if not setup.get("rows"):
         return f"value dip setup unavailable for {ticker}: insufficient price history."
@@ -526,6 +553,18 @@ def get_value_dip_setup(
         lines.append(
             f"  support: {sup.get('verdict')} dist_base={_txt_pct(sup.get('distance_to_base_pct'))} "
             f"dist_sma200={_txt_pct(sup.get('distance_to_sma200_pct'))}"
+        )
+    rg = rows.get("regime_gate") or {}
+    if rg.get("verdict"):
+        lines.append(
+            f"  regime_gate: {rg.get('verdict')} pass={rg.get('pass')} "
+            f"vol_pct={_txt_round(rg.get('vol_pct'), 3)} fast_downtrend={rg.get('fast_downtrend')} "
+            f"catalyst_window={rg.get('catalyst_window')}"
+        )
+    rr = rows.get("re_rating") or {}
+    if rr.get("measured"):
+        lines.append(
+            f"  re_rating: pass={rr.get('pass')} evidence={rr.get('evidence') or 'none measured'}"
         )
     if setup.get("reasons"):
         lines.append("  reasons: " + "; ".join(setup["reasons"]))

@@ -35,6 +35,16 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-28] **Institutional workflow for value-dip + swing (Phases A-E)** -
+  mapped institutional best practice (regime switching, catalyst-first value,
+  daily-loss/HWM risk gates, trade plan card, arrival-benchmark execution
+  ledger, sleeve attribution, alpha-decay monitor) onto the stack. All new
+  signals are ADVISORY - computed from real data and injected into the 5
+  decision agents (Trader, PM, 3 risk debators) via a compiled decision
+  context, so the LLMs reason over hard numbers; nothing blocks unless you
+  opt into the strict flags. See docs/design_institutional_value_dip_workflow.md
+  and CHANGELOG.
+
 - [2026-08-28] **Value Dip + Swing enhancements (web-researched)** - compared
   the setup/exit math against established swing-trading practice and closed
   the gaps: VCP now enforces a **halving progression** (`contraction_tol=0.65`,

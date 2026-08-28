@@ -72,4 +72,47 @@ def exit_check(
     }
 
 
-__all__ = ["stop_to_breakeven", "stop_to_breakeven_r", "target_level", "net_of_cost", "rebalance_due", "exit_check"]
+
+
+def breakeven_after_confirmation(
+    entry_price: float,
+    stop_price: float | None,
+    trigger: str = "structure",
+    higher_low: float | None = None,
+    rr: float = 1.0,
+    cushion_atr: float = 1.0,
+    atr: float | None = None,
+) -> dict:
+    """Breakeven stop price per the configured trigger (B3, advisory).
+
+    Practice says: move to BE only AFTER confirmation, or ordinary pullbacks
+    stop winners early. Triggers:
+      'atr'       - entry + cushion*ATR (the legacy fixed-cushion rule).
+      'r'         - entry + rr x R, where R = entry - stop (need stop_price).
+      'structure' - the LATER of (higher_low price) and (rr x R), i.e. the
+                    more conservative confirmation. Requires stop_price; falls
+                    back to 'atr' when R is unknown.
+    Returns ``{price, trigger, source}``; ``price`` None when unusable.
+    """
+    t = (trigger or "structure").strip().lower()
+    risk = None
+    if stop_price is not None and float(stop_price) < float(entry_price):
+        risk = float(entry_price) - float(stop_price)
+    if t == "r" or (t == "structure" and risk is not None):
+        r_price = float(entry_price) + float(rr) * risk if risk and risk > 0 else None
+        if t == "r":
+            return {"price": r_price, "trigger": "r", "source": f"entry + {rr:g}R"}
+        if r_price is not None and higher_low is not None:
+            return {"price": max(r_price, float(higher_low)), "trigger": "structure",
+                    "source": "max(r x R, higher-low)"}
+        if higher_low is not None:
+            return {"price": float(higher_low), "trigger": "structure", "source": "higher-low"}
+        if r_price is not None:
+            return {"price": r_price, "trigger": "structure", "source": "r x R (no higher-low)"}
+    # 'atr' or fallback when R is unknowable
+    if atr is not None and atr > 0:
+        return {"price": float(entry_price) + max(0.0, float(cushion_atr)) * float(atr),
+                "trigger": "atr", "source": "entry + cushion x ATR"}
+    return {"price": None, "trigger": t, "source": "insufficient inputs"}
+
+__all__ = ["stop_to_breakeven", "stop_to_breakeven_r", "breakeven_after_confirmation", "target_level", "net_of_cost", "rebalance_due", "exit_check"]

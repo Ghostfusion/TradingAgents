@@ -41,8 +41,15 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
+        sleeve: str | None = None,
     ) -> None:
-        """Append pending entry at end of propagate(). No LLM call."""
+        """Append pending entry at end of propagate(). No LLM call.
+
+        ``sleeve`` (D1) tags the decision's style - value-dip / swing / vcp /
+        momentum / hold - so the strategy-quality report can attribute results
+        per style. The graph cannot always know the screener's scan label, so
+        this is best-effort (None = 'hold'/untagged, never fabricated).
+        """
         if not self._log_path:
             return
         self._invalidate_cache()
@@ -54,7 +61,10 @@ class TradingMemoryLog:
                     return
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
-        entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
+        # Sleeve (D1) rides as an HTML comment so it can never collide with LLM
+        # prose, and is parsed back by _parse_entry.
+        sleeve_line = f"\n<!-- SLEEVE: {sleeve} -->" if sleeve else ""
+        entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{sleeve_line}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
@@ -348,6 +358,9 @@ class TradingMemoryLog:
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""
         entry["reflection"] = reflection_match.group(1).strip() if reflection_match else ""
+        # D1: sleeve round-trips through an HTML comment (never part of prose).
+        sleeve_m = re.search(r"<!-- SLEEVE: ([^>]+) -->", body)
+        entry["sleeve"] = sleeve_m.group(1).strip() if sleeve_m else None
         return entry
 
     def _format_full(self, e: dict) -> str:

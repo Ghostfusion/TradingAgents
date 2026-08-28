@@ -112,6 +112,41 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
         "avg_realized": round(sum(pm_realized) / len(pm_realized), 5) if pm_realized else None,
     }
 
+    # 2b. C1 execution block: arrival-vs-fill slippage + fill-rate (advisory).
+    slips = [float(r["slippage_bps"]) for r in pm_rows if r.get("slippage_bps") is not None]
+    fills = [r for r in pm_rows if r.get("fill_price") is not None]
+    out["execution"] = {
+        "rows_with_slippage": len(slips),
+        "avg_slippage_bps": round(sum(slips) / len(slips), 2) if slips else None,
+        "fill_rate": round(len(fills) / len(pm_rows), 3) if pm_rows else None,
+        "note": "arrival-benchmark slippage: (fill - arrival)/arrival in bps; "
+                "higher = worse execution. None when no measured arrival/fill "
+                "(the paper book records the review open as the fill proxy).",
+    }
+
+    # 2c. D1 sleeve attribution: the pre-market ledger carries a per-decision
+    #     sleeve tag (value-dip / swing / vcp / momentum / hold) when the run
+    #     provided one; group realized returns by sleeve when present.
+    sleeves: dict[str, dict] = {}
+    for r in pm_rows:
+        sv = (r.get("sleeve") or "hold").strip() or "hold"
+        rr = r.get("realized_return")
+        if rr is None:
+            continue
+        b = sleeves.setdefault(sv, {"n": 0, "wins": 0, "sum": 0.0})
+        b["n"] += 1
+        b["sum"] += float(rr)
+        if float(rr) > 0:
+            b["wins"] += 1
+    out["sleeves"] = {
+        sv: {
+            "n": b["n"],
+            "win_rate": round(b["wins"] / b["n"], 3) if b["n"] else None,
+            "avg_realized": round(b["sum"] / b["n"], 5) if b["n"] else None,
+        }
+        for sv, b in sorted(sleeves.items())
+    }
+
     # 3. Whole-book net-of-cost metrics from the realized returns (pre-market
     #    book as the canonical series; flat 10bps default, scaled by --illiq).
     out["metrics"] = {"available": bool(pm_realized), "cost_bps": cost_bps}
@@ -126,6 +161,37 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
                 "max_drawdown": round(max_drawdown(eq), 4) if eq else None,
             }
         )
+        # D2 alpha-decay monitor: rolling 4-week hit rate / sharpe vs the
+        # full-history baseline. DRIFT when the rolling measure trails the
+        # baseline for 2 consecutive periods (config `drift_periods`).
+        try:
+            hist = [float(v) for v in pm_realized if v is not None]
+            if len(hist) >= 12:
+                n = max(5, min(20, len(hist) // 4))
+                recent = hist[-n:]
+                base_win = sum(1 for v in hist if v > 0) / len(hist)
+                recent_win = sum(1 for v in recent if v > 0) / len(recent)
+                base_sharpe = sharpe(hist) if len(hist) >= 2 else None
+                recent_sharpe = sharpe(recent) if len(recent) >= 2 else None
+                threshold = float(os.environ.get("TRADINGAGENTS_DRIFT_THRESHOLD", "0.15"))
+                drift_win = (recent_win < base_win - threshold) if base_win else False
+                drift_sharpe = (
+                    recent_sharpe is not None
+                    and base_sharpe is not None
+                    and recent_sharpe < base_sharpe - 0.3
+                )
+                out["drift"] = {
+                    "window": n,
+                    "baseline_win_rate": round(base_win, 3),
+                    "recent_win_rate": round(recent_win, 3),
+                    "baseline_sharpe": round(base_sharpe, 3) if base_sharpe is not None else None,
+                    "recent_sharpe": round(recent_sharpe, 3) if recent_sharpe is not None else None,
+                    "drift_win_rate": bool(drift_win),
+                    "drift_sharpe": bool(drift_sharpe),
+                    "review_hint": "DRIFT detected" if (drift_win or drift_sharpe) else "stable",
+                }
+        except Exception:  # noqa: BLE001 - drift monitor is advisory
+            out["drift"] = None
     return out
 
 
