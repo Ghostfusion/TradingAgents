@@ -47,7 +47,10 @@ Use this information to deliver a compelling bull argument, refute the bear's co
 
         response = llm.invoke(prompt)
 
-        argument = f"Bull Analyst: {response.content}"
+        from tradingagents.agents.utils.structured import retry_llm_if_truncated
+
+        content = retry_llm_if_truncated(llm, prompt, response.content)
+        argument = f"Bull Analyst: {content}"
 
         new_investment_debate_state = {
             "history": history + "\n" + argument,

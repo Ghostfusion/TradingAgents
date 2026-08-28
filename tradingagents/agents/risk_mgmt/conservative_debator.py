@@ -39,7 +39,10 @@ Engage by questioning their optimism and emphasizing the potential downsides the
 
         response = llm.invoke(prompt)
 
-        argument = f"Conservative Analyst: {response.content}"
+        from tradingagents.agents.utils.structured import retry_llm_if_truncated
+
+        content = retry_llm_if_truncated(llm, prompt, response.content)
+        argument = f"Conservative Analyst: {content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,

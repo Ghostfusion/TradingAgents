@@ -39,7 +39,10 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
 
         response = llm.invoke(prompt)
 
-        argument = f"Neutral Analyst: {response.content}"
+        from tradingagents.agents.utils.structured import retry_llm_if_truncated
+
+        content = retry_llm_if_truncated(llm, prompt, response.content)
+        argument = f"Neutral Analyst: {content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,

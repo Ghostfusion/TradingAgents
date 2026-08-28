@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-27] **Truncation-retry enforcement** - when an LLM response is cut
+  at the output cap (ends mid-sentence), the agent re-invokes with a
+  continuation prompt and merges, so reports are never truncated. Wired into
+  every agent path: PM/RM/trader/sentiment free-text fallback, the 3 analyst
+  tool-calling chains, and the bull/bear researchers + 3 risk debators. Up
+  to 2 continuation attempts, only when a cut is detected; a failed
+  continuation degrades to the original text.
+
 - [2026-08-27] **Tool-wiring audit: 4 new market tools + OHLCV cache +
   computed sentiment on** - the audit found strategy functions that were
   implemented but never exposed to the analyst LLMs, and duplicate OHLCV

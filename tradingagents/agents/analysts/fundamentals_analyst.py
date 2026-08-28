@@ -121,6 +121,9 @@ def create_fundamentals_analyst(llm):
 
         if len(result.tool_calls) == 0:
             report = result.content
+            from tradingagents.agents.utils.structured import retry_chain_if_truncated
+
+            report = retry_chain_if_truncated(chain, state["messages"], report)
 
         return {
             "messages": [result],

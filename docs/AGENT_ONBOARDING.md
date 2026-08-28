@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-27 `(working tree)` - Truncation-retry enforcement: when an LLM
+  response is cut at the output cap (ends mid-sentence), the agent re-invokes
+  with a continuation prompt and merges, so reports are never truncated.
+  Wired into every agent path: `structured.py::_retry_if_truncated`
+  (PM/RM/trader/sentiment free-text fallback), `retry_chain_if_truncated`
+  (market/news/fundamentals analyst chains), `retry_llm_if_truncated`
+  (bull/bear researchers + 3 risk debators). Up to 2 continuation attempts,
+  only when a cut is detected; a failed continuation degrades to the
+  original text. Tests: `tests/test_truncation_retry.py` (7).
+
 - 2026-08-27 `(working tree)` - Tool-wiring audit: 4 new market tools +
   run-level OHLCV cache + computed sentiment on. New market tools:
   `get_technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/

@@ -218,6 +218,12 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
         if len(result.tool_calls) == 0:
             report = result.content
+            # Enforce completeness: if the final content was cut at the output
+            # cap, re-invoke the chain with a continuation so the report is not
+            # truncated mid-sentence.
+            from tradingagents.agents.utils.structured import retry_chain_if_truncated
+
+            report = retry_chain_if_truncated(chain, state["messages"], report)
 
         return {
             "messages": [result],

@@ -9,6 +9,17 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Truncation-retry enforcement (max_tokens is a ceiling, not a floor)** -
+  when an LLM response is cut at the output cap (ends mid-sentence), the
+  agent now re-invokes with a continuation prompt and merges, so reports are
+  never truncated. Wired into every agent path:
+  - `structured.py::_retry_if_truncated` (free-text fallback of PM/RM/trader/
+    sentiment), `retry_chain_if_truncated` (market/news/fundamentals analyst
+    tool-calling chains), `retry_llm_if_truncated` (bull/bear researchers +
+    aggressive/conservative/neutral risk debators).
+  - Up to 2 continuation attempts, each only when a cut was detected; a
+    failed continuation degrades to the original text (never raises).
+  - Tests: `tests/test_truncation_retry.py` (7).
 - **Tool-wiring audit: 4 new market tools + run-level OHLCV cache + computed
   sentiment on** - the audit found strategy functions that were implemented
   but never exposed to the analyst LLMs, and duplicate OHLCV fetches across
