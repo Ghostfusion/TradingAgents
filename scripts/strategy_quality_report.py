@@ -60,8 +60,12 @@ def _load_jsonl(path: str) -> list:
     return rows
 
 
-def build_report(data_dir: str) -> dict:
-    """Collect ledger metrics into a dict; never raises."""
+def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
+    """Collect ledger metrics into a dict; never raises.
+
+    ``cost_bps`` is the one-way cost used to net the realized returns (default
+    10bps = liquid; a higher value models an illiquid/impactful book).
+    """
     from tradingagents.strategies.evaluate import (
         cagr,
         equity_curve,
@@ -110,9 +114,9 @@ def build_report(data_dir: str) -> dict:
 
     # 3. Whole-book net-of-cost metrics from the realized returns (pre-market
     #    book as the canonical series; flat 10bps default, scaled by --illiq).
-    out["metrics"] = {"available": bool(pm_realized)}
+    out["metrics"] = {"available": bool(pm_realized), "cost_bps": cost_bps}
     if pm_realized:
-        net = net_returns(pm_realized, cost_bps=10.0)
+        net = net_returns(pm_realized, cost_bps=cost_bps)
         eq = equity_curve(net)
         out["metrics"].update(
             {
@@ -129,12 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default=None, help="ledger dir (default: config data_cache_dir)")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--illiq", action="store_true",
+                        help="scale net cost up to 50bps (illiquid / impact-heavy book)")
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir or _default_data_dir()
     # Ensure the data dir is absolute so ledger paths resolve regardless of CWD.
     data_dir = os.path.abspath(os.path.expanduser(data_dir))
-    report = build_report(data_dir)
+    cost_bps = 50.0 if args.illiq else 10.0
+    report = build_report(data_dir, cost_bps=cost_bps)
 
     if args.json:
         print(json.dumps(report, indent=2, default=str))
@@ -150,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     lines.append(f"- win_rate={pm['win_rate']} avg_realized={pm['avg_realized']}")
     m = report["metrics"]
     if m.get("available"):
-        lines.append("\n## Book metrics (net of 10bps)")
+        lines.append(f"\n## Book metrics (net of {m.get('cost_bps', 10.0):g}bps)")
         lines.append(
             f"- total_return={m['total_return']} sharpe={m['sharpe']} "
             f"max_drawdown={m['max_drawdown']}"

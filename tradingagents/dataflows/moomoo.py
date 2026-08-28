@@ -429,7 +429,6 @@ def _check_ret(ret_code, data, symbol: str, canonical: str, action: str = "reque
         "lv1",
         "lv2",
         "lv3",
-        "quota",
         "not purchased",
         "未开通",
         "未购买",
@@ -437,9 +436,24 @@ def _check_ret(ret_code, data, symbol: str, canonical: str, action: str = "reque
     )
     if any(kw in msg_lower for kw in perm_keywords):
         raise NoMarketDataError(symbol, canonical, detail=f"quote permission: {msg}")
-    # Rate limit
-    if any(kw in msg_lower for kw in ("429", "too many", "rate limit", "throttle")):
-        raise VendorRateLimitError(f"mozmo rate limit: {msg}")
+    # Rate limit / quota exhaustion — classified BEFORE the permission check,
+    # which previously swallowed "quota" as a permanent "no-data" verdict. A
+    # throttled/quota-exhausted vendor is retryable and must let the router
+    # fall back to the next vendor (VendorRateLimitError), not report "symbol
+    # not covered". Includes moomoo's Chinese throttle phrasing (请求过于频繁).
+    rate_keywords = (
+        "429",
+        "too many",
+        "rate limit",
+        "throttle",
+        "quota",
+        "请求过于频繁",
+        "访问过于频繁",
+        "调用过于频繁",
+        "请求频率",
+    )
+    if any(kw in msg_lower for kw in rate_keywords):
+        raise VendorRateLimitError(f"moomoo rate limit: {msg}")
     # Everything else — treat as "no data" so the router falls back
     raise NoMarketDataError(symbol, canonical, detail=msg)
 
@@ -492,6 +506,18 @@ def _moomoo_code(symbol: str) -> str:
     base = crypto_base(raw)
     if base and base in _CRYPTO_BASES:
         return f"CC.{base}USD"
+    # 0. Instruments moomoo cannot price must raise a typed NoMarketDataError so
+    # the router falls back to yfinance, NOT be silently re-cast to a bogus
+    # US.<sym> code (EURUSD=X -> US.EURUSD=X, GC=F -> US.GC=F, UNI-USD ->
+    # US.UNI-USD) whose quote is empty/garbage.
+    if upper.endswith("=X"):
+        raise NoMarketDataError(symbol, symbol, detail="moomoo does not cover forex (=X) symbols")
+    if upper.endswith("=F"):
+        raise NoMarketDataError(symbol, symbol, detail="moomoo does not cover futures (=F) symbols")
+    # Non-whitelisted crypto: symbol_utils recognizes the base, but the moomoo
+    # CC. gate only quotes a fixed set — anything else must fall back.
+    if base and base not in _CRYPTO_BASES:
+        raise NoMarketDataError(symbol, symbol, detail="moomoo does not quote this crypto symbol")
     # 2. Indices starting with ^ — not supported
     if upper.startswith("^"):
         raise NoMarketDataError(symbol, symbol, detail="moomoo does not support this index symbol")

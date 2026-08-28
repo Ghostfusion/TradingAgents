@@ -70,7 +70,7 @@ def main(argv=None) -> int:
     csvs = sorted(folder_path.glob("*.csv"))
     if not csvs:
         print("no day-aggregates CSV found here (drop a Massive day-aggregates file).")
-        return 0
+        return 2  # a failure a wrapper must not treat as "READY"
     print(f"CSVs found  : {len(csvs)}")
     for c in csvs:
         print(f"  - {c.name} ({_fmt(c.stat().st_size)} bytes)")

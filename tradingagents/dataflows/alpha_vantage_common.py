@@ -77,8 +77,20 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         "source": "trading_agents",
     })
 
-    response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
+    try:
+        response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
+        # A 4xx/5xx is a real failure, not "no data": translating it lets the
+        # router fall back to the next vendor (or degrade optional categories)
+        # instead of the raw HTTPError escaping and hard-crashing the primary
+        # price path. A transient 429/5xx is retryable -> VendorRateLimitError.
+        if response.status_code in (429,) or 500 <= response.status_code < 600:
+            raise AlphaVantageRateLimitError(
+                f"Alpha Vantage HTTP {response.status_code}"
+            )
+        response.raise_for_status()
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+        # Network stall / drop: retryable, let the router skip to the next vendor.
+        raise AlphaVantageRateLimitError(f"Alpha Vantage request failed: {exc}") from exc
 
     response_text = response.text
 

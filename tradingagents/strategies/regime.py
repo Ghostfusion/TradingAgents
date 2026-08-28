@@ -26,7 +26,7 @@ def realized_vol(
     """Annualized realized volatility over the last `window` daily closes."""
     prices = close_prices[-window:]
     if len(prices) < 3:
-        return 0.0
+        return None
     rets = []
     prev = prices[0]
     for p in prices[1:]:
@@ -34,7 +34,7 @@ def realized_vol(
             rets.append(math.log(max(p, 1e-12) / max(prev, 1e-12)))
         prev = p
     if len(rets) < 2:
-        return 0.0
+        return None
     mean = sum(rets) / len(rets)
     var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
     return math.sqrt(var * periods)

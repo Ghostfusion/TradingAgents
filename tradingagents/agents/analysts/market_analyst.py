@@ -7,6 +7,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_credit_spread_read,
     get_dip_technical,
     get_exit_check,
+    get_expected_move,
     get_gap_type,
     get_indicators,
     get_instrument_context_from_state,
@@ -48,6 +49,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_verified_market_snapshot,
     get_volatility_contraction,
 )
+
+# These two live in their own tool modules (not re-exported by agent_utils),
+# matching how graph/trading_graph.py imports them for the market ToolNode.
+from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
+from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 
 
 def create_market_analyst(llm):
@@ -100,6 +106,9 @@ def create_market_analyst(llm):
             get_book_tail_risk,
             get_liquidation_days,
             get_premarket_review,
+            get_expected_move,
+            get_momentum_scan,
+            get_market_snapshot_alpaca,
         ]
 
         system_message = (

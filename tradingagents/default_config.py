@@ -139,7 +139,22 @@ def _coerce(value: str, reference):
         return float(value)
     if isinstance(reference, list):
         # Comma-separated list, e.g. "SPY,QQQ,AAPL" -> ["SPY", "QQQ", "AAPL"].
-        return [item.strip() for item in value.split(",") if item.strip()]
+        items = [item.strip() for item in value.split(",") if item.strip()]
+        # Coerce each element to the existing default's element type so a
+        # numeric list (e.g. TRADINGAGENTS_TRANCHE_WEIGHTS=0.3,0.3,0.4) lands
+        # as floats, not strings. Previously this returned raw strings, which
+        # made value_dip.tranche_plan's sum(weights) raise and silently disabled
+        # the tranche risk fold precisely for .env-configured runs.
+        if items and reference and not isinstance(reference[0], bool):
+            elem_type = type(reference[0])
+            if elem_type in (int, float):
+                try:
+                    return [elem_type(item) for item in items]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"expected a comma-separated list of numbers, got {value!r}"
+                    ) from exc
+        return items
     if isinstance(reference, dict):
         # Accept either JSON ("{\"SPY\": 0.4}") or comma-separated key=value
         # pairs ("SPY=0.4,QQQ=0.6").
@@ -335,10 +350,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # default; each phase is a pure module under tradingagents/strategies/
         # with offline unit tests (tests/test_strategies_*).
         "evaluate_cost_bps": 10,  # Phase 0: per-trade cost in basis points
-        "enable_regime": False,  # Phase 1: regime gate (vol/trend/HMM)
+        "enable_regime": False,  # RESERVED (not yet wired): regime gate (vol/trend/HMM)
         "position_sizing": "kelly",  # Phase 2: kelly | vol_target | flat
         "target_vol": 0.15,  # Phase 2: annualized vol target
-        "enable_factors": False,  # Phase 3: value+momentum composite
+        "enable_factors": False,  # RESERVED (not yet wired): value+momentum composite
         "enable_events": True,  # Phase 4: PEAD / catalyst sizing (B1, on by default)
         # B1 scheduled-catalyst overlay tuning (used when enable_events is on).
         "catalyst_window_days": 5,  # earnings within N days -> scale down
@@ -364,9 +379,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "position_odds": 1.0,  # win/loss payoff (G1)
         "kelly_fraction": 0.25,  # quarter-Kelly (G1)
         "enable_calibration": False,  # G2: bucket win-rates from ledger
-        "calibration_min_n": 5,  # min samples per bucket (G2)
+        "calibration_min_n": 5,  # RESERVED (not yet wired): min samples per bucket (G2)
         "enable_agreement": False,  # G3: computed consensus / agreement
-        "enable_threshold_gate": False,  # G5: require PBO-clean tuning
+        "enable_threshold_gate": False,  # RESERVED (not yet wired): G5 PBO tuning gate
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
         "enable_composite_rank": False,  # V2: composite (value+momentum) ranking
@@ -382,8 +397,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "risk_max_position_pct": 0.45,  # R0: book cap
         "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget
         "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop
-        "risk_stress_shock_pct_1": -10.0,  # R2: scenario shock 1 (%)
-        "risk_stress_shock_pct_2": -30.0,  # R2: scenario shock 2 (%)
+        "risk_stress_shock_pct_1": -10.0,  # RESERVED (not yet wired): R2 scenario shock 1 (%)
+        "risk_stress_shock_pct_2": -30.0,  # RESERVED (not yet wired): R2 scenario shock 2 (%)
         # R2: true portfolio CVaR. When ``risk_basket_tickers`` is non-empty and
         # at least two of its names resolve aligned return series via the vendor
         # chain, the risk governor computes the daily tail budget from the
@@ -398,7 +413,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Moomoo connection guard (parallel batch): cap open gateway contexts
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit
         "risk_compact_report": False,  # R1b: verdict-only 4_risk/ instead of chat transcripts
-        "consensus_seeds": 1,  # Phase 6: LLM samples for consensus; >1 enables
+        "consensus_seeds": 1,  # RESERVED (not yet wired): LLM samples for consensus
         # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md). On = the
         # screener's --scan value-dip mode runs; the deterministic analyst
         # @tools (get_bollinger_pct_b / get_tranche_plan / get_trade_expectancy /

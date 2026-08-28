@@ -156,15 +156,28 @@ class MassiveFlatValidatorTests(unittest.TestCase):
     """The helper reports a usable-vs-too-few verdict for the screener."""
 
     def test_validator_flags_ticker_present_usable(self):
+        import os
+        from contextlib import suppress
         from unittest import mock as m
 
         import scripts.validate_massive_flat as validator
         from tradingagents.dataflows import massive_flat
 
-        fake = {"closes": [100.0] * 20, "opens": [], "highs": [], "lows": [],
-                "volumes": [], "dates": ["2026-01-01"]}
-        with m.patch.object(massive_flat, "ohlcv_for_ticker_dir", return_value=fake):
-            # A present, usable symbol should be flagged ready (rc 0).
-            rc = validator.main(["data/massive_flat", "-t", "AAPL"])
-            self.assertEqual(rc, 0)
+        folder = "test_vm_dir"
+        os.makedirs(folder, exist_ok=True)
+        rows = [f"AAPL,{1000+i},{100+i},{101+i},{102+i},{99+i},{1700000000000000000+i},100"
+                for i in range(20)]
+        with open(os.path.join(folder, "days.csv"), "w", encoding="utf-8") as f:
+            f.write("ticker,volume,open,close,high,low,window_start,transactions\n" + "\n".join(rows))
+        try:
+            fake = {"closes": [100.0] * 20, "opens": [], "highs": [], "lows": [],
+                    "volumes": [], "dates": ["2026-01-01"]}
+            with m.patch.object(massive_flat, "ohlcv_for_ticker_dir", return_value=fake):
+                # A present, usable symbol should be flagged ready (rc 0).
+                rc = validator.main([folder, "-t", "AAPL"])
+                self.assertEqual(rc, 0)
+        finally:
+            with suppress(OSError):
+                os.remove(os.path.join(folder, "days.csv"))
+                os.rmdir(folder)
 

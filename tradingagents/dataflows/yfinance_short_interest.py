@@ -72,15 +72,17 @@ def get_short_interest_yfinance(ticker: str) -> str:
     if short_ratio is not None:
         lines.append(f"- Short ratio (days-to-cover): {_num(short_ratio)}")
     if short_pct_float is not None:
-        lines.append(f"- Short % of float: {_num(short_pct_float)}")
+        # yfinance reports these as decimal fractions (0.05 = 5%); render with a
+        # % marker so the agent reads 5%, not 0.05% (100x unit drift).
+        lines.append(f"- Short % of float: {_num(float(short_pct_float) * 100)}%")
     if float_shares is not None:
         lines.append(f"- Float shares: {_num(float_shares)}")
     if shares_out is not None:
         lines.append(f"- Shares outstanding: {_num(shares_out)}")
     if insiders is not None:
-        lines.append(f"- Insider ownership: {_num(insiders)}")
+        lines.append(f"- Insider ownership: {_num(float(insiders) * 100)}%")
     if institutions is not None:
-        lines.append(f"- Institutional ownership: {_num(institutions)}")
+        lines.append(f"- Institutional ownership: {_num(float(institutions) * 100)}%")
 
     lines.append("")
     lines.append(

@@ -469,6 +469,7 @@ def record_review(
     reasons: list[str],
     gap_pct: float | None = None,
     catalyst_verdict: str | None = None,
+    prior_close: float | None = None,
 ) -> None:
     """Append one pre-market review row to the paper-book ledger (JSONL).
 
@@ -488,6 +489,7 @@ def record_review(
         "verdict": verdict,
         "reasons": reasons or [],
         "gap_pct": gap_pct,
+        "prior_close": prior_close,
         "catalyst_verdict": catalyst_verdict,
         "realized_return": None,
     }
@@ -528,12 +530,16 @@ def resolve_ledger(ledger_path: str, ticker: str, trade_date: str, open_price: f
     for row in rows:
         if row.get("ticker") != ticker or row.get("realized_return") is not None:
             continue
-        gap = row.get("gap_pct")
-        if gap is None or open_price is None:
+        if open_price is None:
             continue
-        # gap = (open_at_review - prior_close)/prior_close  -> prior_close = open/(1+gap)
-        prior_close = open_price / (1.0 + gap) if (1.0 + gap) else None
-        if prior_close:
+        prior_close = row.get("prior_close")
+        if prior_close is None and row.get("gap_pct") is not None:
+            # Legacy rows (written before prior_close was stored): gap-derived
+            # approximation; NEW rows carry the true prior close so the measured
+            # open actually moves the realized return (not circular).
+            gap = row.get("gap_pct")
+            prior_close = open_price / (1.0 + gap) if (1.0 + gap) else None
+        if prior_close and float(prior_close) > 0:
             row["realized_return"] = round((open_price - prior_close) / prior_close, 6)
             row["resolved_date"] = trade_date
             n_resolved += 1

@@ -135,6 +135,17 @@ def test_list_coercion(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["risk_basket_tickers"], list)
 
 
+def test_numeric_list_coercion_tranche_weights(monkeypatch):
+    """Regression: list-typed defaults were coerced to strings, so
+    TRADINGAGENTS_TRANCHE_WEIGHTS=0.3,0.3,0.4 landed as ['0.3',...] and made
+    value_dip.tranche_plan's sum() raise (silently disabling the tranche fold).
+    A numeric default list must come back as numbers."""
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_TRANCHE_WEIGHTS="0.3,0.3,0.4")
+    w = dc.DEFAULT_CONFIG["tranche_weights"]
+    assert w == [0.3, 0.3, 0.4]
+    assert all(isinstance(x, float) for x in w)
+
+
 def test_dict_coercion_kv_pairs(monkeypatch):
     dc = _reload_with_env(
         monkeypatch, TRADINGAGENTS_RISK_BASKET_WEIGHTS="SPY=0.4,QQQ=0.6"

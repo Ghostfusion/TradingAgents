@@ -100,8 +100,11 @@ def compute_dcf(
     fcf = [float(x) for x in historical_fcf if x is not None]
     if not fcf or not shares:
         return None
-    latest = max(fcf) if fcf else None
-    if not latest or float(latest) <= 0 or float(shares) <= 0:
+    # Project the LATEST reported FCF forward (per the docstring), not the
+    # historical peak: a declining/hump-shaped FCF history must not inflate the
+    # intrinsic value by reusing an old high.
+    latest = fcf[-1]
+    if latest is None or float(latest) <= 0 or float(shares) <= 0:
         return None
     wacc = _wacc_from_beta(rf, beta, erp)
     if wacc is None or growth >= wacc:

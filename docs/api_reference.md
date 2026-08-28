@@ -56,6 +56,8 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
 | `TRADINGAGENTS_ENABLE_RISK_GOVERNOR` | `enable_risk_governor` |
+| `TRADINGAGENTS_ENABLE_DECISION_AUDIT` | `enable_decision_audit` | on, the PM's report shows a claim-vs-computed audit note |
+| `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
 | `TRADINGAGENTS_ENABLE_EVENTS` | `enable_events` |
 | `TRADINGAGENTS_CATALYST_WINDOW_DAYS` | `catalyst_window_days` |
 | `TRADINGAGENTS_CATALYST_BASELINE_MOVE` | `catalyst_baseline_move` |
@@ -136,13 +138,12 @@ which is how a web job hits its subprocess budget).
 **Strategy flags** - see section 5; `enable_regime`, `enable_factors`,
 `enable_threshold_gate` default **False**; `enable_sentiment` default **True**
 (computed sentiment score + surprise velocity injected into the sentiment
-report); the rest
-(`enable_strategy_overlays`, `enable_orderflow`, `enable_position_contract`,
-`enable_calibration`, `enable_agreement`, `enable_composite_rank`,
-`enable_exits`, `enable_computed_context`, `enable_risk_governor`,
-`enable_events`, `enable_reflection`) default **True**; `enable_events` is the
-B1 catalyst gate. Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
-`risk_per_trade=0.01`, `max_position_pct=0.30`, `atr_mult=2.0`,
+report). Only `enable_events` (B1 catalyst gate), `enable_reflection`,
+`enable_sentiment`, and `enable_strategy_overlays` default **True**;
+`enable_orderflow`, `enable_position_contract`, `enable_calibration`,
+`enable_agreement`, `enable_composite_rank`, `enable_exits`,
+`enable_computed_context`, and `enable_risk_governor` default **False** (opt-in;
+the dev machine enables most via the gitignored `.env`). Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
 `target_atr=4.0`, `sector_cap_limit=0.35`, `risk_max_drawdown_pct=0.10`,
 `risk_daily_cvar_budget_pct=0.03`, `risk_max_position_pct=0.45`,
@@ -242,16 +243,16 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Layer | Flag (default) | Module | Effect |
 | --- | --- | --- | --- |
 | Regime / size | `enable_strategy_overlays` (T) | `strategies/regime.py`, `size.py` | vol-percentile/trend label + vol-target scale |
-| Order flow | `enable_orderflow` (T) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
+| Order flow | `enable_orderflow` (F) | `strategies/orderflow.py` | distribution/divergence fold -> scale |
 | Catalyst (B1) | `enable_events` (T) | `strategies/catalyst.py` | earnings/macro/Fed scale + verdict; `catalyst_hard_block_days` > 0 turns an imminent print into a risk-governor REJECT |
-| Position contract | `enable_position_contract` (T) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst; when a tranche plan is in play (`enable_tranche_risk`) the dollar stop/BE/target are measured from the weighted tranche `entry_price` hook |
-| Risk governor | `enable_risk_governor` (T) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio". With `enable_tranche_risk` on it also sizes/throttles against the worst-case 3-tranche scale-in (`strategies/value_dip.py::tranche_risk_read`): the peak-deployed-at-scale-in fraction vs the per-trade cap and the capital-at-risk budget (sum of per-tranche losses at the hard stop vs `tranche_risk_pct`) |
-| Calibration | `enable_calibration` (T) | `strategies/calibration.py` | calibrated P from ledger |
-| Agreement | `enable_agreement` (T) | `strategies/consensus.py` | debate agreement -> size |
-| Computed context | `enable_computed_context` (T) | `strategies/debate_context.py` | numbers into debate |
-| Exits | `enable_exits` (T) | `strategies/exits.py` | stops/BE/targets |
+| Position contract | `enable_position_contract` (F) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst; when a tranche plan is in play (`enable_tranche_risk`) the dollar stop/BE/target are measured from the weighted tranche `entry_price` hook |
+| Risk governor | `enable_risk_governor` (F) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio". With `enable_tranche_risk` on it also sizes/throttles against the worst-case 3-tranche scale-in (`strategies/value_dip.py::tranche_risk_read`): the peak-deployed-at-scale-in fraction vs the per-trade cap and the capital-at-risk budget (sum of per-tranche losses at the hard stop vs `tranche_risk_pct`) |
+| Calibration | `enable_calibration` (F) | `strategies/calibration.py` | calibrated P from ledger |
+| Agreement | `enable_agreement` (F) | `strategies/consensus.py` | debate agreement -> size |
+| Computed context | `enable_computed_context` (F) | `strategies/debate_context.py` | numbers into debate |
+| Exits | `enable_exits` (F) | `strategies/exits.py` | stops/BE/targets |
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |
-| Composite rank | `enable_composite_rank` (T) | `strategies/factors.py` | EY + momentum + 52w composite |
+| Composite rank | `enable_composite_rank` (F) | `strategies/factors.py` | EY + momentum + 52w composite |
 
 Off by default: `enable_regime`, `enable_factors`,
 `enable_threshold_gate`. `enable_sentiment` is now **on** (computed sentiment
@@ -532,12 +533,14 @@ preserves `Risk Gate (computed)` blocks.
 
 ### Entry points: detailed flags
 
-- batch.py: `--symbols` (required) `--date` `--workers` (1-3 default=capped)
+- batch.py: `--symbols` (required) `--date` `--workers` (1-4 default=capped,
+  via `batch.effective_workers`; `TRADINGAGENTS_MAX_WORKERS` raises the cap)
   `--depth` (shallow|medium|deep) `--analysts` (market|social|news|fundamentals)
-  `--vendor` (default|moomoo|yfinance).
-- pipeline.py: `--universe` (tickers|top-losers|heat-proxy) `--file` `--top`
-  `--limit` `--market` `--movers-count` `--min-mcap` `--price-min` `--pe-max`
-  `--workers` `--analysts` `--depth` `--vendor`.
+  `--vendor` (default|moomoo|yfinance|eodhd).
+- pipeline.py: `--universe` (tickers|top-losers|heat-proxy|top-movers-massive)
+  `--file` `--top` `--limit` `--market` `--movers-count` `--min-mcap`
+  `--price-min` `--pe-max` `--workers` (capped via `batch.effective_workers`)
+  `--analysts` `--depth` `--vendor`.
 - value_screener.py: `tickers` `-f/--file` `-d/--date` `-l/--limit`
   `-u/--universe` `--market` `-n/--movers-count` `--min-mcap` `--price-min`
   `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap` `--min-eps-yoy`

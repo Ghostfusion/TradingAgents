@@ -67,13 +67,21 @@ def opening_range(highs, lows, closes=None, n_minutes: int = 15) -> dict:
         else:
             breakout = None
             stop = or_low  # default long-side stop
+        # A 2R target only makes sense for a real ORB breakout. A flat close
+        # inside the range got `stop = or_low` (long-side) — emitting the
+        # short-side target (`or_low - 2*width`, BELOW the stop) was incoherent.
+        target = None
+        if breakout == "up":
+            target = or_high + 2.0 * width
+        elif breakout == "down":
+            target = or_low - 2.0 * width
         return {
             "or_high": round(or_high, 4),
             "or_low": round(or_low, 4),
             "mid": round(mid, 4),
             "breakout": breakout,
             "stop": round(stop, 4),
-            "target": round(or_high + 2.0 * width, 4) if breakout == "up" else round(or_low - 2.0 * width, 4),
+            "target": round(target, 4) if target is not None else None,
         }
     except (TypeError, ValueError, ZeroDivisionError):
         return {

@@ -35,6 +35,26 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-28] **Audit-driven correctness fixes (data integrity + wiring)** - a
+  repo-wide audit fixed ~26 defects with hermetic tests (1490 passed, 2
+  skipped, ruff clean). Highlights: Piotroski ROA point no longer awarded to
+  negative-ROA firms; the vendor router records rate-limit errors so an
+  all-throttled optional chain degrades instead of crashing; Alpha Vantage HTTP
+  429/5xx/timeout map to a retryable error (was a hard crash of the price
+  path); DCF projects the LATEST FCF (was the historical max); OBV bullish
+  divergence slice fixed; yfinance statement/insider functions re-raise instead
+  of caching prose as truth; `TRANCHE_WEIGHTS` env coerces to floats (was
+  silently disabling the tranche fold); and six analyst tools the prompts
+  instructed (get_expected_move, get_institution_holdings,
+  get_earnings_surprise_history, get_momentum_scan, get_market_snapshot_alpaca,
+  get_insider_transactions) are now actually bound. Edge fixes: percent-field
+  unit drift, moomoo rate-limit classification + forex/futures fallback,
+  non-circular pre-market ledger realized return, `--rank composite` wiring,
+  pipeline worker cap, `--illiq` flag. The Portfolio Manager now receives the
+  deterministic CVaR/liquidity context it was meant to argue from. Docs/config
+  aligned (overlay defaults, missing env overrides, entry-point flags); web
+  `--illiq` forwarded. See CHANGELOG for the full list.
+
 - [2026-08-27] **EODHD real-time snapshot + top movers** - the Massive
   snapshot / top-movers endpoints are 403 on the free plan; EODHD's
   `/api/real-time` works on the EOD plan and now backs them:

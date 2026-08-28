@@ -477,8 +477,14 @@ def route_to_vendor(method: str, *args, **kwargs):
             logger.info("Vendor %r served %s (%s)", vendor, method, category)
             vendor_cache.set(method, category, args, kwargs, result)
             return result
-        except VendorRateLimitError:
+        except VendorRateLimitError as e:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            # A rate limit is a real failure (the vendor could not serve), not
+            # "no data": record it so an all-throttled chain surfaces a typed
+            # error / degrades optional categories instead of raising a raw
+            # RuntimeError. It sorts below a clean no-data verdict.
+            if first_error is None:
+                first_error = e
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)

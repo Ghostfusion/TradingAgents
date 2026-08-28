@@ -1126,6 +1126,12 @@ def main(argv: list[str] | None = None) -> int:
             # Yahoo-style tickers, which for US common stocks is the bare code.
             tickers = [c.upper() for c in common]
             logger.info("eodhd-us universe: %d common stocks from EODHD", len(tickers))
+            if len(tickers) > args.limit:
+                print(
+                    f"[screener] eodhd-us universe has {len(tickers)} symbols; "
+                    f"--limit {args.limit} caps the scan to the first {args.limit} "
+                    f"(pass a larger --limit to broaden the scan)."
+                )
         except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
             parser.error(f"eodhd-us universe failed: {exc}")
     elif args.universe in ("top-losers", "heat-proxy"):
@@ -1644,7 +1650,25 @@ def main(argv: list[str] | None = None) -> int:
                     r["line_vol"] = info.get("volume")
         except Exception:
             pass
-    ranked = rank_watchlist(results)
+    # Resolve the ranking mode: an explicit --rank wins, else the env/config
+    # flag (enable_composite_rank). Previously --rank composite / the config
+    # key were parsed but never read — the screener always used value ranking.
+    from tradingagents.dataflows.config import get_config as _get_cfg
+
+    rank_mode = args.rank or ("composite" if _get_cfg().get("enable_composite_rank") else "value")
+    if rank_mode == "composite":
+        closes_map = {}
+        for r in results:
+            try:
+                closes = _fetch_closes(r["ticker"])
+                if len(closes) >= 70:
+                    closes_map[r["ticker"]] = closes
+            except Exception:
+                pass
+        scores = composite_scores(results, closes_map) or {}
+        ranked = sorted(results, key=lambda r2: scores.get(r2["ticker"]) or -1.0, reverse=True)
+    else:
+        ranked = rank_watchlist(results)
     alloc_extra = ""
     if args.alloc and results:
         alloc_extra = allocation_block(

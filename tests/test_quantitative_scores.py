@@ -58,6 +58,16 @@ def test_piotroski(fin):
     assert 0 <= f <= 9
 
 
+def test_piotroski_negative_roa_does_not_score(fin):
+    """Regression: `if _num(roa) or 0 > 0` parsed as `roa or False`, so ANY
+    non-None ROA (including negative) won the ROA>0 point. A loss-making firm
+    must not get the profitability point."""
+    loss = {**fin, "roa": {"current": -0.05, "prior": -0.02}, "net_income": -50.0}
+    profit = {**fin, "roa": {"current": 0.08, "prior": -0.02}}
+    assert piotroski_f_score(loss) is not None
+    assert piotroski_f_score(loss) < piotroski_f_score(profit)
+
+
 def test_value(fin):
     ev = enterprise_value(fin)
     ey = earnings_yield(fin)

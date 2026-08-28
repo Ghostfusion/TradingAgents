@@ -11,10 +11,11 @@ running anything.
 These are permanent repo-wide rules the maintainer expects on **every** task;
 a fresh agent must follow them without being reminded:
 
-1. **Compute as tools, feed the agents** - the project has `~15` "computed"
-   LangChain tools in `tradingagents/agents/utils/analysis_tools.py` (swing,
+1. **Compute as tools, feed the agents** - the project has ~40 "computed"
+   LangChain `@tool`s in `tradingagents/agents/utils/analysis_tools.py` (swing,
    relative strength, catalyst scale, risk gate, position sizing, VCP, regime,
-   orderflow, analyst verdict, ...) that wrap the deterministic `strategies/*`
+   orderflow, analyst verdict, ...) plus the value-dip / market-session / tool
+   modules — all wrapping the deterministic `strategies/*`
    calculators so the LLM analysts reason over computed numbers instead of
    re-deriving (or inventing) them from raw vendor output. When building or
    extending any calculation/analysis function, ALWAYS consider exposing it as

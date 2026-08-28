@@ -193,13 +193,13 @@ def piotroski_f_score(fin):
     if cfo is None or ni is None:
         return None
     score = 0
-    if _num(fin.get("roa")) or 0 > 0:
+    roa = _num(fin.get("roa"))
+    if roa is not None and roa > 0:
         score += 1
     if cfo > 0:
         score += 1
     if _sub(cfo, ni) and _sub(cfo, ni) > 0:
         score += 1
-    roa = _num(fin.get("roa"))
     roa_p = _num(_prv(fin.get("roa")))
     if roa is not None and roa_p is not None and roa > roa_p:
         score += 1

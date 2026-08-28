@@ -316,8 +316,22 @@ def get_fundamentals(
         ]
 
         lines = []
+        # yfinance reports ratio fields as decimal fractions (0.24 = 24%); the
+        # ratio/margin labels below imply a percentage, so widen to % to avoid
+        # a 100x unit drift in the LLM's read (see yfinance_short_interest).
+        _PCT_FIELDS = {
+            "Dividend Yield",
+            "Profit Margin",
+            "Operating Margin",
+            "Return on Equity",
+            "Return on Assets",
+        }
         for label, value in fields:
-            if value is not None:
+            if value is None:
+                continue
+            if label in _PCT_FIELDS:
+                lines.append(f"{label}: {float(value) * 100:.2f}%")
+            else:
                 lines.append(f"{label}: {value}")
 
         # yfinance returns a stub dict (e.g. {"trailingPegRatio": None}) for
@@ -334,8 +348,13 @@ def get_fundamentals(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+    except Exception:
+        # Re-raise, never return an "Error retrieving..." prose blob as a
+        # SUCCESS: a returned string is cached by the router and skips the
+        # vendor fallback, so a transient failure would masquerade as an
+        # authoritative (stale) answer. Letting it bubble lets route_to_vendor
+        # skip to the next vendor and never caches the failure.
+        raise
 
 
 def get_balance_sheet(
@@ -369,8 +388,8 @@ def get_balance_sheet(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+    except Exception:
+        raise
 
 
 def get_cashflow(
@@ -404,8 +423,8 @@ def get_cashflow(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+    except Exception:
+        raise
 
 
 def get_income_statement(
@@ -439,8 +458,8 @@ def get_income_statement(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+    except Exception:
+        raise
 
 
 def get_insider_transactions(
@@ -466,5 +485,8 @@ def get_insider_transactions(
 
         return header + csv_string
 
-    except Exception as e:
-        return f"Error retrieving insider transactions for {ticker}: {str(e)}"
+    except Exception:
+        # Keep the empty-result path above (a real "no filings" answer); only
+        # the failure path changes: re-raise so the router falls back instead
+        # of caching an "Error retrieving..." string as truth.
+        raise

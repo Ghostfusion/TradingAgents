@@ -68,7 +68,9 @@ def stop_loss_atr(
     """Stop level = close - atr_mult * ATR; None when insufficient data."""
     a = atr(high, low, close)
     if a <= 0 or not close:
-        return 0.0
+        # No-fabrication contract: insufficient/degenerate data -> None, never a
+        # fabricated stop at 0 (a "stop at zero" read as a plausible level).
+        return None
     return close[-1] - atr_mult * a
 
 

@@ -158,7 +158,12 @@ def _run_batch(picks: list, args) -> list:
     analysts = tuple(args.analysts)
     depth = DEPTH_LEVELS[args.depth]
     results = []
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+    # Cap concurrency with batch.py's effective_workers() so a high --workers
+    # can't spawn more concurrent moomoo OpenQuoteContexts than the OpenD
+    # gateway allows (128-connection limit) — previously this built the pool
+    # straight from --workers and bypassed the cap.
+    workers = batch.effective_workers(args.workers)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(batch.analyze, r["ticker"], args.date, analysts, depth, args.vendor): r
             for r in picks

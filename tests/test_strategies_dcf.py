@@ -56,6 +56,25 @@ class TestComputeDcf:
         assert r is not None
         assert r["terminal_share"] > 0.5  # TV dominates (doc note)
 
+    def test_declining_fcf_uses_latest_not_max(self):
+        """Regression: DCF projected max(fcf) instead of the latest fcf, so a
+        declining/hump-shaped history inflated intrinsic value. The projected
+        base must be the LATEST value, and a declining series must price lower
+        than a flat peak series."""
+        decl = [150.0, 140.0, 130.0, 120.0, 110.0]
+        peak = [150.0] * 5
+        r = compute_dcf(
+            decl, rf=0.04, beta=1.0, erp=0.06, growth=0.025, years=5,
+            shares=100.0, cash=0.0, debt=0.0,
+        )
+        r_peak = compute_dcf(
+            peak, rf=0.04, beta=1.0, erp=0.06, growth=0.025, years=5,
+            shares=100.0, cash=0.0, debt=0.0,
+        )
+        assert r is not None and r_peak is not None
+        assert r["fcf_latest"] == pytest.approx(110.0)
+        assert r["price"] < r_peak["price"]
+
     def test_discount_and_growth_helpers(self):
         assert discount_factor(0.10, 0) == 1.0
         assert [round(x, 2) for x in project_fcf(100.0, 0.10, years=3)] == [110.0, 121.0, 133.1]

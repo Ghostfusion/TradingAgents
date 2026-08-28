@@ -8,6 +8,7 @@ string, not a dict).
 import json
 
 import pytest
+import requests
 
 import tradingagents.dataflows.alpha_vantage_common as av
 import tradingagents.dataflows.alpha_vantage_fundamentals as avf
@@ -16,6 +17,7 @@ import tradingagents.dataflows.alpha_vantage_fundamentals as avf
 class _FakeResponse:
     def __init__(self, text):
         self.text = text
+        self.status_code = 200
 
     def raise_for_status(self):
         pass
@@ -56,6 +58,45 @@ def test_invalid_key_not_mislabeled_as_rate_limit(monkeypatch):
         av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
     with pytest.raises(av.AlphaVantageRateLimitError):  # sanity: rate-limit path still distinct
         monkeypatch.setattr(av.requests, "get", _patched_get('{"Note": "API call frequency is 5 calls per minute."}'))
+        av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+
+
+class _ErrResponse:
+    def __init__(self, status_code):
+        self.status_code = status_code
+        self.text = ""
+
+    def raise_for_status(self):
+        raise requests.exceptions.HTTPError(str(self.status_code))
+
+
+@pytest.mark.unit
+def test_http_429_maps_to_rate_limit(monkeypatch):
+    monkeypatch.setattr(av.requests, "get", lambda url, params=None, **kw: _ErrResponse(429))
+    with pytest.raises(av.AlphaVantageRateLimitError):
+        av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+
+
+@pytest.mark.unit
+def test_http_5xx_maps_to_rate_limit(monkeypatch):
+    monkeypatch.setattr(av.requests, "get", lambda url, params=None, **kw: _ErrResponse(503))
+    with pytest.raises(av.AlphaVantageRateLimitError):
+        av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+
+
+@pytest.mark.unit
+def test_http_401_still_raise_for_status(monkeypatch):
+    monkeypatch.setattr(av.requests, "get", lambda url, params=None, **kw: _ErrResponse(401))
+    with pytest.raises(requests.exceptions.HTTPError):
+        av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+
+
+@pytest.mark.unit
+def test_timeout_maps_to_rate_limit(monkeypatch):
+    def boom(url, params=None, **kw):
+        raise requests.exceptions.Timeout("stalled")
+    monkeypatch.setattr(av.requests, "get", boom)
+    with pytest.raises(av.AlphaVantageRateLimitError):
         av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
 
 

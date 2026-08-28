@@ -44,7 +44,7 @@ def vol_adjusted_momentum(
 
     mom = momentum(closes, lookback=lookback, skip=0)
     vol = realized_vol(closes, window=vol_window)
-    if mom is None or vol <= 0:
+    if mom is None or vol is None or vol <= 0:
         return None
     return mom / vol
 

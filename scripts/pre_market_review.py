@@ -375,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
             reasons=verdict.get("reasons") or [],
             gap_pct=(verdict.get("gap") or {}).get("gap_pct"),
             catalyst_verdict=(verdict.get("catalyst") or {}).get("verdict"),
+            prior_close=deltas.get("prior_close"),
         )
         n = resolve_ledger(ledger_path, args.ticker, trade_date, deltas.get("open_price"))
         if n:

@@ -8,6 +8,77 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+- **Audit-driven correctness fixes (data integrity + wiring)** - a repo-wide
+  audit surfaced and fixed ~26 defects across strategies, dataflows, graph
+  wiring, config, and entry points. All with hermetic regression tests.
+  Correctness (HIGH):
+  - `quantitative_scores.py`: Piotroski ROA point no longer awarded to
+    negative-ROA firms (`if roa or 0 > 0` parsed as `roa or False`).
+  - `interface.py`: `VendorRateLimitError` now recorded in `first_error`, so an
+    all-throttled optional chain degrades to `DATA_UNAVAILABLE` instead of
+    raising a raw `RuntimeError`.
+  - `alpha_vantage_common.py`: HTTP 429/5xx / timeout mapped to
+    `VendorRateLimitError` (was an untyped crash of the prime price path).
+  - `strategies/dcf.py`: projects the LATEST FCF, not the historical max (a
+    declining/hump series was overstated ~30-40%).
+  - `strategies/technical_factors.py`: OBV bullish-divergence slice fixed
+    (was always False).
+  - `y_finance.py`: fundamentals/statement/insider functions re-raise instead
+    of returning an "Error retrieving..." prose blob that the router cached as
+    truth and never fell back from.
+  - `default_config.py`: list-typed env overrides (e.g.
+    `TRADINGAGENTS_TRANCHE_WEIGHTS`) coerce to the default's element type; a
+    numeric list was landing as strings and silently disabling the tranche fold.
+  - `market_analyst.py`/`fundamentals_analyst.py`/`news_analyst.py`: bound
+    tools the prompts instruct (get_expected_move, get_institution_holdings,
+    get_earnings_surprise_history, get_momentum_scan,
+    get_market_snapshot_alpaca, get_insider_transactions), closing a
+    no-fabrication gap (the model could not fetch those figures).
+  Edge/wiring (MEDIUM):
+  - `yfinance_short_interest.py` / `y_finance.py`: percent fields scaled x100
+    with a `%` marker (was 100x unit drift).
+  - `moomoo.py`: `_check_ret` classifies quota/throttle (incl. Chinese
+    phrasing) as `VendorRateLimitError` before the permission check;
+    `_moomoo_code` raises on forex/futures/non-whitelisted-crypto instead of
+    returning a bogus `US.` code.
+  - `pre_market.py`: `resolve_ledger` uses a stored `prior_close`
+    (non-circular - was recomputing the exact review gap); `record_review` now
+    stores it.
+  - `size.py` `stop_loss_atr` returns None on insufficient data (was 0.0);
+    `market_session.py` `opening_range` emits a target only for a real ORB
+    breakout (was a below-stop short target on a flat close).
+  - `normalized.py` `trap_verdict` accrual default 0.06 (consistent with
+    `value_dip.decline_driver_check`; was 0.02).
+  - `pipeline.py`: `_run_batch` caps workers via `batch.effective_workers()`
+    (was bypassing the moomoo connection cap).
+  - `value_screener.py`: `--rank composite` / `enable_composite_rank` now wired
+    (were dead); eodhd-us universe truncation is warned, not silent.
+  - `strategy_quality_report.py`: real `--illiq` flag + cost threading (was
+    documented but rejected by argparse); `validate_massive_flat.py` returns a
+    non-zero code when no CSV is present.
+  - `trading_graph.py`: seeds deterministic `risk_context` into the initial
+    state so the Portfolio Manager actually receives CVaR/liquidity context
+    (was computed only after the graph, never reaching the PM).
+  - `regime.py` `realized_vol` returns None on insufficient data
+    (`factors.py` guard updated); `parabolic_sar` computes `below`/`exit` when
+    a `closes` series is supplied.
+  Docs/config truth:
+  - `api_reference.md` §1.2/§5 + `.env.example`: strategy-overlay defaults
+    aligned to code (only `enable_events`/`enable_reflection`/
+    `enable_sentiment`/`enable_strategy_overlays` default True; the rest
+    opt-in) - docs previously claimed default True.
+  - Documented the two missing `TRADINGAGENTS_ENABLE_DECISION_AUDIT` /
+    `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` overrides; corrected the stale
+    `enable_sentiment` "no override / off" comment.
+  - `api_reference.md` §9: batch `--vendor` eodhd, `--workers` 1-4,
+    pipeline `--universe` top-movers-massive; AGENT_ONBOARDING "~40" tools.
+  - `default_config.py`: marked reserved-but-not-yet-wired keys
+    (`enable_regime`, `enable_factors`, `enable_threshold_gate`,
+    `consensus_seeds`, `calibration_min_n`, `risk_stress_shock_pct_1/2`).
+  Web (`TradingNew/trading_web`): `run_strategy_quality` now forwards `--illiq`
+  (+ SPA checkbox). Tests: 1490 passed, 2 skipped; ruff clean repo-wide.
+
 ### Added
 - **EODHD real-time snapshot + top movers (Massive 403 fallback)** - the
   Massive snapshot / top-movers endpoints are 403 on the free plan; EODHD's

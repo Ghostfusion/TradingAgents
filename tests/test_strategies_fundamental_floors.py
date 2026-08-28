@@ -128,6 +128,21 @@ def test_obv_divergence():
     assert obv_divergence([100.0] * 5, [1e6] * 5)["obv_up"] is None
 
 
+def test_obv_bullish_divergence_detected():
+    """Regression: first_price was sliced closes[-h:-h] (= empty on equal
+    halves), so price_dn was always False and bullish_div could never be True.
+    A lower-low price + higher-OBV-low must register a bullish divergence."""
+    window = 30
+    c1 = [200 - i * 0.5 for i in range(window)]       # downtrend, OBV falls
+    v1 = [1e6] * window
+    c2 = [170 - i * 0.5 for i in range(window)]
+    c2[-4:] = [130.0, 140.0, 150.0, 160.0]            # up-kick at the tail
+    v2 = [1e6] * window
+    v2[-4:] = [1e8] * 4                               # huge volume on the recover
+    o = obv_divergence(c1 + c2, v1 + v2, window=window)
+    assert o["bullish_div"] is True
+
+
 def test_parabolic_sar():
     _, highs, lows, _ = _series()
     p = parabolic_sar(highs, lows)

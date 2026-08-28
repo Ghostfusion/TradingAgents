@@ -713,6 +713,16 @@ class TradingAgentsGraph:
             past_context=past_context,
             instrument_context=instrument_context,
         )
+        # Seed the deterministic risk context BEFORE the Portfolio Manager runs:
+        # the PM reads state["risk_context"] to ground its tail-risk / liquidity
+        # language, but it was previously only computed in _apply_strategy_overlays
+        # AFTER the graph completed, so the PM never saw it (cvar_line/liq_line
+        # were always empty). The post-graph overlays still recompute the
+        # authoritative gate; this only makes the PM's *reasoning inputs* real.
+        if self.config.get("enable_risk_governor") and not init_agent_state.get("risk_context"):
+            rc = self._precompute_risk_context(company_name)
+            if rc:
+                init_agent_state["risk_context"] = rc
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date+graph-shape resumes; a different
@@ -1163,6 +1173,29 @@ class TradingAgentsGraph:
         except Exception as tranche_exc:  # noqa: BLE001 - fold degrades silently
             logger.warning("tranche risk read skipped: %s", tranche_exc)
             return None
+
+    def _precompute_risk_context(self, ticker: str) -> dict:
+        """Deterministic CVaR/stress context for the PM prompt, computed BEFORE
+        the graph runs so the Portfolio Manager can ground its tail-risk
+        language. Reuses the same calculators as the post-graph overlays (which
+        remain authoritative for the gate). Best-effort — never raises.
+        """
+        out: dict = {}
+        try:
+            closes = self._try_fetch_closes(ticker)
+            rets = self._log_returns_from_closes(closes)
+            if len(rets) >= 5:
+                from tradingagents.strategies.book_risk import cvar as _cvar
+
+                cv = _cvar(rets, alpha=0.05)
+                if cv is not None:
+                    out["single_cvar"] = abs(cv)
+            basket = self._basket_cvar(ticker)
+            if basket is not None:
+                out["book_cvar"] = basket
+        except Exception:  # noqa: BLE001 - precompute is best-effort
+            pass
+        return out
 
     def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> float | None:
         """True portfolio CVaR for the configured risk basket, or None.

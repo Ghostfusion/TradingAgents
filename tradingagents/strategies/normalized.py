@@ -74,7 +74,7 @@ def trap_verdict(
         evidence.append(f"beneish_m={m_score:.2f} (manipulation-risk)")
     if mom12 is not None and mom12 < th.get("mom_floor", 0.0):
         evidence.append("12-1m momentum negative")
-    if accrual is not None and accrual > th.get("accrual_cap", 0.02):
+    if accrual is not None and accrual > th.get("accrual_cap", 0.06):
         evidence.append(f"accruals={accrual:.3f}")
     if f_score is not None and f_score < th.get("f_floor", 4):
         evidence.append(f"f_score={f_score} (< {th.get('f_floor', 4)})")

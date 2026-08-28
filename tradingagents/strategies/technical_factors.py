@@ -409,8 +409,11 @@ def obv_divergence(closes, volumes, window: int = 30) -> dict:
     seg = obv_series[-2 * window :] if len(obv_series) >= 2 * window else obv_series
     half = len(seg) // 2
     first_obv, second_obv = seg[:half], seg[half:]
-    first_price = closes[-len(first_obv) : -len(second_obv)] if len(second_obv) else closes[-len(first_obv) :]
-    second_price = closes[-len(second_obv) :]
+    # Mirror the price slice off the SAME tail `seg` was cut from, so the first
+    # half's price aligns with the first half's OBV (previously the offset
+    # slice came out empty for equal halves, dead-coding bullish_div).
+    seg_closes = closes[-len(seg) :] if len(seg) else []
+    first_price, second_price = seg_closes[:half], seg_closes[half:]
     price_dn = bool(
         len(second_price) and len(first_price) and second_price[-1] < first_price[-1]
     )
@@ -420,9 +423,13 @@ def obv_divergence(closes, volumes, window: int = 30) -> dict:
     return {"obv_up": obv_up, "bullish_div": bool(price_dn and obv_up)}
 
 
-def parabolic_sar(highs, lows, af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2) -> dict:
+def parabolic_sar(highs, lows, af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2, closes=None) -> dict:
     """Parabolic SAR trailing stop (Wilder). Returns current SAR + a below/exit
-    flag (close below SAR = downtrend). None when history insufficient."""
+    flag (close below SAR = downtrend). None when history insufficient.
+
+    ``closes`` is optional; ``below``/``exit`` are only computed when it is
+    provided (the function cannot know the close from highs/lows alone).
+    """
     if len(highs) < 2 or len(lows) < 2:
         return {"sar": None, "below": None, "exit": None}
     try:
@@ -454,7 +461,8 @@ def parabolic_sar(highs, lows, af_start: float = 0.02, af_step: float = 0.02, af
                     if lo < ep:
                         ep = lo
                         af = min(af + float(af_step), float(af_max))
-        return {"sar": round(sar, 4), "below": None, "exit": None}
+        below = bool(float(closes[-1]) < sar) if closes is not None and len(closes) else None
+        return {"sar": round(sar, 4), "below": below, "exit": below}
     except (TypeError, ValueError, ZeroDivisionError):
         return {"sar": None, "below": None, "exit": None}
 
