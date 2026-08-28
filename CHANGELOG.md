@@ -25,6 +25,13 @@ Breaking changes within the 0.x line are called out explicitly.
     leak / adverse selection" test. All advisory, default-ONLY-injected into
     the pre-market reviewer (never gates).
   - Web Pre-Market screen Help updated; config + env keys added
+  - **Agent + web sync**: the 5 decision agents (Trader, PM, 3 risk debators)
+    now receive the pre-open RVOL / gap / book-depth reads (plus the existing
+    regime + re-rating + plan card) via `computed_decision_context`; the
+    value-dip analyst tool renders regime_gate + re_rating rows (visible in
+    the web Value Tools page), the pre-market reviewer prints them (web
+    Pre-Market job output), and the report's `IVa. Computed Decision Context`
+    section surfaces the full advisory set.
     (`enable_preopen_rvol` / `enable_preopen_depth` / `enable_alpha_profile`).
   - **Probed data availability** (your tiers): Alpaca free IEX = pre-market
     bars + live quote + news AVAILABLE; EODHD lowest tier = real-time OHLCV

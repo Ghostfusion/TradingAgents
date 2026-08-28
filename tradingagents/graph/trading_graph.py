@@ -1259,6 +1259,42 @@ class TradingAgentsGraph:
                     )
         except Exception:  # noqa: BLE001
             pass
+        # P1/P2/C3 pre-open + execution-quality advisory reads (Alpaca free
+        # IEX). All degrade to '' on missing data - never fabricated. Feed the
+        # 5 decision agents the same measurements the pre-market reviewer sees.
+        try:
+            if self.config.get("enable_preopen_rvol"):
+                from tradingagents.dataflows.preopen import (
+                    premarket_rvol,
+                    preopen_book_depth,
+                    preopen_gap,
+                )
+
+                rv = premarket_rvol(ticker) or {}
+                if rv.get("rvol") is not None:
+                    x = float(self.config.get("preopen_rvol_institutional_x", 2.0))
+                    tag = "institutional" if rv["rvol"] >= x else "retail/quiet"
+                    out.append(
+                        f"Pre-market RVOL {rv['rvol']:.2f}x ({tag}; "
+                        f"today {rv.get('today_vol'):.0f} vs "
+                        f"{rv.get('avg_vol'):.0f} 30d pre-open avg)"
+                    )
+                pg = preopen_gap(ticker) or {}
+                if pg.get("gap_pct") is not None:
+                    out.append(
+                        f"Pre-open gap {pg['gap_pct']:+.2%} vs live pre-open "
+                        f"price {pg.get('preopen_price')}"
+                    )
+                if self.config.get("enable_preopen_depth"):
+                    pd = preopen_book_depth(ticker) or {}
+                    if pd.get("thin") is not None:
+                        out.append(
+                            f"Pre-open book: spread_bps={pd.get('spread_bps')} "
+                            f"bid/ask imbalance={pd.get('bid_ask_imbalance')} "
+                            f"thin={'YES' if pd.get('thin') else 'no'}"
+                        )
+        except Exception:  # noqa: BLE001 - advisory, never breaks a run
+            pass
         return "\n\n".join(out) if out else "Computed decision context: unavailable."
 
     def _precompute_risk_context(self, ticker: str) -> dict:
