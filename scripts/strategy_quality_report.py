@@ -124,7 +124,26 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
                 "(the paper book records the review open as the fill proxy).",
     }
 
-    # 2c. D1 sleeve attribution: the pre-market ledger carries a per-decision
+    # 2c2. C3 alpha-profile: post-fill drift vs arrival (the "did our fill
+    #      leak / did price move against us" test). Uses the paper ledger's own
+    #      arrival_price + realized_return proxies (no new vendor).
+    fills = [r for r in pm_rows if r.get("arrival_price") and r.get("prior_close")]
+    drift_rows = []
+    for r in fills:
+        arr = float(r["arrival_price"])
+        # fill proxy = prior_close (the decision-time close) - C1 semantics
+        drift_rows.append((float(r.get("prior_close")) - arr) / arr if arr else None)
+    drift_rows = [d for d in drift_rows if d is not None]
+    out["alpha_profile"] = {
+        "rows": len(drift_rows),
+        "avg_postfill_drift_pct": round(sum(drift_rows) / len(drift_rows) * 100, 3) if drift_rows else None,
+        "pos_drift_share": round(sum(1 for d in drift_rows if d > 0) / len(drift_rows), 3) if drift_rows else None,
+        "note": "post-fill drift: (decision-close - arrival)/arrival over the paper "
+                "book. Positive share = fills benign; sustained negative = possible "
+                "adverse selection / leak (review execution).",
+    }
+
+    # 2d. D1 sleeve attribution: the pre-market ledger carries a per-decision
     #     sleeve tag (value-dip / swing / vcp / momentum / hold) when the run
     #     provided one; group realized returns by sleeve when present.
     sleeves: dict[str, dict] = {}

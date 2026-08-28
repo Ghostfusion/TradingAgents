@@ -9,6 +9,29 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **P1/P2/C3: pre-open + execution-quality advisory rows (Alpaca free IEX)** -
+  implemented the measurable slices of the institutional extended-hours
+  workflow with the tiers this machine actually has (probed live):
+  - **P1 pre-market RVOL** (`dataflows/preopen.py::premarket_rvol`): today's
+    pre-open volume / 30-day pre-open average (Alpaca 15-min bars pre 09:30
+    ET) - the text's "RVOL > 2.0x institutional" read. Verified live on AAPL.
+  - **P1 pre-open gap** (`preopen_gap`): gap anchored to the LIVE pre-open
+    price (Alpaca latest trade), not yesterday's close.
+  - **P2 live IEX quote-depth** (`preopen_book_depth`): spread_bps, bid/ask
+    size imbalance, thin-book flag - the free-tier stand-in for NOII opening
+    imbalance (true NOII is plan-gated; documented as a proxy).
+  - **C3 alpha-profile** (`postfill_drift` + `strategy_quality_report`):
+    post-fill N-day drift vs arrival on the paper ledger - the "did our fill
+    leak / adverse selection" test. All advisory, default-ONLY-injected into
+    the pre-market reviewer (never gates).
+  - Web Pre-Market screen Help updated; config + env keys added
+    (`enable_preopen_rvol` / `enable_preopen_depth` / `enable_alpha_profile`).
+  - **Probed data availability** (your tiers): Alpaca free IEX = pre-market
+    bars + live quote + news AVAILABLE; EODHD lowest tier = real-time OHLCV
+    only (no pre-open volume baseline), Massive free = NOI 404 (plan-gated),
+    short-locate/HTB = NOT AVAILABLE (out of scope, analysis-only).
+  Tests: `test_preopen.py` (7, hermetic, mocked Alpaca). Full suite green.
+
 - **Institutional workflow for value-dip + swing (Phases A-E, design
   `docs/design_institutional_value_dip_workflow.md`)** - mapped institutional
   practice (value-desk funnel, AQR-style mean reversion, risk-first tranches,

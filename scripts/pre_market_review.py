@@ -123,6 +123,23 @@ def _fetch_deltas(ticker: str, trade_date: str, prior_date: str, prior_state: di
     if realtime is not None:
         deltas["open_price"] = realtime
 
+    # P1/P2 advisory pre-open reads (Alpaca free IEX; all degrade to 'unavailable'
+    # when Alpaca is off - never fabricated). Fed to the reviewer as context only.
+    try:
+        from tradingagents.dataflows.preopen import (
+            premarket_rvol,
+            preopen_book_depth,
+            preopen_gap,
+        )
+
+        deltas["premarket_rvol"] = premarket_rvol(ticker)
+        deltas["preopen_gap"] = preopen_gap(ticker, prev_close=deltas.get("prior_close"))
+        deltas["preopen_depth"] = preopen_book_depth(ticker)
+    except Exception:  # noqa: BLE001 - advisory reads degrade to None
+        deltas["premarket_rvol"] = None
+        deltas["preopen_gap"] = None
+        deltas["preopen_depth"] = None
+
     try:
         data = fetch_catalyst_data(ticker, trade_date)
         if data is not None:
@@ -219,6 +236,22 @@ def _build_summary(deltas: dict, verdict: dict) -> str:
         )
     if (deltas or {}).get("news_titles"):
         lines.append("- overnight headlines: " + " | ".join(deltas["news_titles"]))
+        rv = deltas.get("premarket_rvol") or {}
+        if rv.get("rvol") is not None:
+            lines.append(
+                f"- pre-market RVOL {rv['rvol']:.2f}x "
+                f"(today {rv['today_vol']:.0f} vs {rv['avg_vol']:.0f} 30d pre-open avg; "
+                f"{'>2.0x institutional' if rv['rvol'] >= 2.0 else 'retail/quiet'})"
+            )
+        pg = deltas.get("preopen_gap") or {}
+        if pg.get("gap_pct") is not None:
+            lines.append(f"- pre-open gap {pg['gap_pct']:+.2%} vs live pre-open "
+                         f"price {pg.get('preopen_price')}")
+        pd = deltas.get("preopen_depth") or {}
+        if pd.get("thin") is not None:
+            lines.append(f"- pre-open book: spread_bps={pd.get('spread_bps')} "
+                         f"bid/ask imbalance={pd.get('bid_ask_imbalance')} "
+                         f"thin={'YES' if pd.get('thin') else 'no'}")
     if not lines:
         lines.append("- no measurable overnight gap / catalyst delta")
     return "\n".join(lines)

@@ -94,7 +94,10 @@ in `batch.py`).
 | `TRADINGAGENTS_BREAKEVEN_TRIGGER` | `breakeven_trigger` | atr \| r \| structure (BE after confirmation) |
 | `TRADINGAGENTS_STOP_NEVER_WIDEN` | `stop_never_widen` | unified stop never widened |
 | `TRADINGAGENTS_MIN_HOLDING_DAYS` / `_MAX_TRADES_PER_PERIOD` | `min_holding_days` / `max_trades_per_period` | turnover guards |
-| `TRADINGAGENTS_SLEEVE_TAG_ENABLED` | `sleeve_tag_enabled` | tag decisions with style sleeve |
+| `TRADINGAGENTS_SLEEVE_TAG_ENABLED` | `sleeve_tag_enabled` |
+| `TRADINGAGENTS_ENABLE_PREOPEN_RVOL` / `_PREOPEN_RVOL_INSTITUTIONAL_X` | `enable_preopen_rvol` / `preopen_rvol_institutional_x` | P1: pre-market RVOL vs 30d pre-open avg (Alpaca free IEX) |
+| `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | P2: live IEX quote-depth thin-book proxy |
+| `TRADINGAGENTS_ENABLE_ALPHA_PROFILE` | `enable_alpha_profile` | C3: post-fill drift vs arrival in strategy-quality report | tag decisions with style sleeve |
 | `TRADINGAGENTS_DRIFT_THRESHOLD` | `drift_threshold` | alpha-decay win-rate drift trigger |
 
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |

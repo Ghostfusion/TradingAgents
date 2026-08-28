@@ -64,6 +64,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_TRADES_PER_PERIOD": "max_trades_per_period",
     "TRADINGAGENTS_SLEEVE_TAG_ENABLED": "sleeve_tag_enabled",
     "TRADINGAGENTS_DRIFT_THRESHOLD": "drift_threshold",
+    "TRADINGAGENTS_ENABLE_PREOPEN_RVOL": "enable_preopen_rvol",
+    "TRADINGAGENTS_PREOPEN_RVOL_INSTITUTIONAL_X": "preopen_rvol_institutional_x",
+    "TRADINGAGENTS_ENABLE_PREOPEN_DEPTH": "enable_preopen_depth",
+    "TRADINGAGENTS_ENABLE_ALPHA_PROFILE": "enable_alpha_profile",
 
     "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
     # B1 scheduled-catalyst overlay tuning (on by default via enable_events).
@@ -414,6 +418,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "max_trades_per_period": 4,  # C2: weekly churn cap
         "sleeve_tag_enabled": True,  # D1: tag decisions with style sleeve
         "drift_threshold": 0.15,  # D2: alpha-decay win-rate drift trigger
+        # P1/P2/P3: pre-open + execution-quality advisory rows (Alpaca free IEX).
+        "enable_preopen_rvol": True,  # P1: pre-market RVOL vs 30d pre-open avg
+        "preopen_rvol_institutional_x": 2.0,  # P1: RVOL threshold for institutional read
+        "enable_preopen_depth": True,  # P2: live IEX quote-depth proxy (thin-book)
+        "enable_alpha_profile": True,  # C3: post-fill drift vs arrival in report
 
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets

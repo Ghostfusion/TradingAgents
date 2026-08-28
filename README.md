@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-28] **Pre-open + execution-quality advisory rows** - probed your
+  actual data tiers and built what's available on free: pre-market RVOL vs
+  30-day pre-open average, gap vs the live pre-open price, and a live IEX
+  quote-depth thin-book proxy (all Alpaca free IEX) fed into the pre-market
+  review as advisory context; plus a post-fill drift (alpha-profile) block in
+  the strategy-quality report. True opening-imbalance (NOII) and short-locate
+  are plan-gated / out of scope - documented.
+
 - [2026-08-28] **Institutional workflow for value-dip + swing (Phases A-E)** -
   mapped institutional best practice (regime switching, catalyst-first value,
   daily-loss/HWM risk gates, trade plan card, arrival-benchmark execution
