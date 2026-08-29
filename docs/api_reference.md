@@ -592,3 +592,7 @@ preserves `Risk Gate (computed)` blocks.
 - `docs/developer/12-data-providers.md` - the 13 data providers/sources and
   per-category vendor chains
 - `Strategies/*` - strategy plans and specs (index: `Strategies/index.md`)
+- `docs/design_quantlib_lean_enhancements.md` - research-to-design: deep study
+  of QuantLib (pricing/measurement rigor) + Lean (framework/operational rigor)
+  mapped to concrete deterministic `strategies/*` enhancements, phased
+  (highest ROI first) with quick-wins verdict.
