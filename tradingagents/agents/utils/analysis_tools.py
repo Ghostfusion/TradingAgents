@@ -2802,6 +2802,112 @@ def get_clenow_momentum(
     return f"clenow_momentum {ticker}: {s:.3f}"
 
 
+# ---------------------------------------------------------------------------
+# OpenBB Phase-3 free-tier data surfaces (keyless/free; opt-in via config).
+# Each gate is OFF by default: while disabled the tool returns a clear
+# DISABLED sentinel so the analyst reports "unavailable" instead of inventing
+# data. When enabled, data flows through the vendor chain.
+# ---------------------------------------------------------------------------
+
+
+def _feature_gate(flag_key: str, env_var: str) -> str | None:
+    """Return a DISABLED sentinel when the feature flag is off, else None.
+
+    Reads the thread-local config (which falls back to the process default),
+    so a gate can be flipped per run via ``set_config`` or a
+    ``TRADINGAGENTS_*`` env override. Config problems degrade to "off" — a
+    broken gate must never let a tool pretend data exists.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        enabled = bool(get_config().get(flag_key, False))
+    except Exception:  # noqa: BLE001 - config problems degrade to "off"
+        enabled = False
+    if enabled:
+        return None
+    return (
+        f"DATA_DISABLED: the {flag_key.replace('_', ' ')} feature is off by "
+        f"default. Set {env_var}=true (or the matching config key) to enable "
+        f"it. Do not fabricate data."
+    )
+
+
+@tool
+def get_options_surface(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Free delayed options-chain surface for a ticker from CBOE (no key):
+    strike, days-to-expiry, IV, and the greeks exactly as CBOE delivers them
+    (missing values render 'n/a' — never estimated). Use before any
+    'volatility surface / option greeks / skew' claim. Opt-in (default off).
+    """
+    gate = _feature_gate("enable_options_surface", "TRADINGAGENTS_ENABLE_OPTIONS_SURFACE")
+    if gate:
+        return gate
+    return route_to_vendor("get_options_surface", ticker)
+
+
+@tool
+def get_sofr_curve(
+    current_date: Annotated[str | None, "as-of date, YYYY-MM-DD; default today"] = None,
+) -> str:
+    """Risk-free overnight curve: SOFR history from the NY Fed's free feed
+    (no key). Rows of {date, rate} plus distribution percentiles. Use before
+    any 'risk-free rate / overnight funding' claim. Opt-in (default off).
+    """
+    gate = _feature_gate("enable_risk_free_curve", "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE")
+    if gate:
+        return gate
+    return route_to_vendor("get_sofr_curve", current_date)
+
+
+@tool
+def get_treasury_curve(
+    current_date: Annotated[str | None, "as-of date, YYYY-MM-DD; default today"] = None,
+) -> str:
+    """US Treasury par yield curve (1M-30Y) from home.treasury.gov's free CSV
+    (no key). Rows of {maturity, rate}. Use before any 'yield curve / term
+    premium / carry' claim. Opt-in (default off).
+    """
+    gate = _feature_gate("enable_risk_free_curve", "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE")
+    if gate:
+        return gate
+    return route_to_vendor("get_treasury_curve", current_date)
+
+
+@tool
+def screen_equities(
+    market: Annotated[str, "market/universe to screen, default 'us'"] = "us",
+    limit: Annotated[int, "max rows, default 50"] = 50,
+    filters: Annotated[
+        str | None, "optional Yahoo predefined screener query (e.g. 'day_gainers')"
+    ] = None,
+) -> str:
+    """Universe screen of US equities via yfinance's free screener: rows of
+    {symbol, price, pe, eps, beta, mkt_cap, change_pct, name}. Use before any
+    'universe / screen / valuation basket' claim. Opt-in (default off).
+    """
+    gate = _feature_gate("enable_screener", "TRADINGAGENTS_ENABLE_SCREENER")
+    if gate:
+        return gate
+    return route_to_vendor("screen_equities", market, limit, filters)
+
+
+@tool
+def get_market_movers(
+    kind: Annotated[str, "'gainers', 'losers', or 'active'"] = "gainers",
+) -> str:
+    """Top U.S. market movers via yfinance's free discovery feed: ranked rows
+    of {symbol, price, change_pct, volume, name}. Use before any 'top
+    gainers/losers / most active' claim. Opt-in (default off).
+    """
+    gate = _feature_gate("enable_market_movers", "TRADINGAGENTS_ENABLE_MARKET_MOVERS")
+    if gate:
+        return gate
+    return route_to_vendor("get_market_movers", kind)
+
+
 __all__ = [
     "get_sector_rank",
     "get_normality",
@@ -2854,4 +2960,9 @@ __all__ = [
     "get_liquidation_days",
     "get_premarket_review",
     "get_sentiment_computed",
+    "get_options_surface",
+    "get_sofr_curve",
+    "get_treasury_curve",
+    "screen_equities",
+    "get_market_movers",
 ]

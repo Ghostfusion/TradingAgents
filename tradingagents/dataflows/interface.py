@@ -11,6 +11,7 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
 from .eodhd import (
     get_corporate_actions_eodhd,
@@ -22,6 +23,10 @@ from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
+)
+from .federal_reserve import (
+    get_sofr_curve as get_sofr_curve_federal_reserve,
+    get_treasury_curve as get_treasury_curve_federal_reserve,
 )
 from .finnhub import (
     get_analyst_ratings_finnhub,
@@ -71,6 +76,10 @@ from .moomoo import (
 )
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .schema import VendorResult
+from .screener import (
+    get_market_movers as get_market_movers_yfinance,
+    screen_equities as screen_equities_yfinance,
+)
 from .sec_edgar import get_sec_filings
 from .vendor_cache import vendor_cache
 from .y_finance import (
@@ -208,6 +217,23 @@ TOOLS_CATEGORIES = {
         "description": "Option-implied expected move for the upcoming earnings print",
         "tools": ["get_expected_move"],
     },
+    # Phase-3 free-tier data surfaces (all optional, keyless where possible).
+    "options_surface": {
+        "description": "CBOE delayed options-chain surface (strike, DTE, IV, greeks)",
+        "tools": ["get_options_surface"],
+    },
+    "risk_free_curve": {
+        "description": "Risk-free rate curves: SOFR and the Treasury par yield curve",
+        "tools": ["get_sofr_curve", "get_treasury_curve"],
+    },
+    "equity_screener": {
+        "description": "Universe screening by valuation/size metrics (yfinance)",
+        "tools": ["screen_equities"],
+    },
+    "market_movers": {
+        "description": "Top U.S. gainers / losers / most-actives (yfinance discovery)",
+        "tools": ["get_market_movers"],
+    },
 }
 
 VENDOR_LIST = [
@@ -220,6 +246,8 @@ VENDOR_LIST = [
     "moomoo",
     "massive",
     "eodhd",
+    "cboe",
+    "federal_reserve",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -248,6 +276,11 @@ OPTIONAL_CATEGORIES = {
     "institution_data",
     "earnings_surprise",
     "expected_move",
+    # Phase-3 free-tier data surfaces (all optional, degrade to sentinels).
+    "options_surface",
+    "risk_free_curve",
+    "equity_screener",
+    "market_movers",
 }
 
 # Mapping of methods to their vendor-specific implementations
@@ -392,6 +425,25 @@ VENDOR_METHODS = {
     },
     "get_expected_move": {
         "moomoo": get_expected_move_moomoo,
+    },
+    # options_surface
+    "get_options_surface": {
+        "cboe": get_options_surface_cboe,
+    },
+    # risk_free_curve
+    "get_sofr_curve": {
+        "federal_reserve": get_sofr_curve_federal_reserve,
+    },
+    "get_treasury_curve": {
+        "federal_reserve": get_treasury_curve_federal_reserve,
+    },
+    # equity_screener
+    "screen_equities": {
+        "yfinance": screen_equities_yfinance,
+    },
+    # market_movers
+    "get_market_movers": {
+        "yfinance": get_market_movers_yfinance,
     },
 }
 

@@ -137,6 +137,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_CORRELATION_PENALTY": "enable_correlation_penalty",
     "TRADINGAGENTS_CORRELATION_THRESHOLD": "correlation_threshold",
     "TRADINGAGENTS_CORRELATION_PENALTY_FRAC": "correlation_penalty_frac",
+    # OpenBB Phase-3 free-tier data surfaces (off by default; opt-in via env).
+    "TRADINGAGENTS_ENABLE_OPTIONS_SURFACE": "enable_options_surface",
+    "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE": "enable_risk_free_curve",
+    "TRADINGAGENTS_ENABLE_SCREENER": "enable_screener",
+    "TRADINGAGENTS_ENABLE_MARKET_MOVERS": "enable_market_movers",
 }
 
 
@@ -335,6 +340,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "institution_data": "moomoo",
             "earnings_surprise": "moomoo",
             "expected_move": "moomoo",
+            # OpenBB Phase-3 free-tier data surfaces (all keyless where possible,
+            # all optional, and each gated by its own enable_* flag, default off).
+            "options_surface": "cboe",  # CBOE delayed options quotes (no key)
+            "risk_free_curve": "federal_reserve",  # NY Fed SOFR + Treasury CSV (no key)
+            "equity_screener": "yfinance",  # yfinance screener (free)
+            "market_movers": "yfinance",  # yfinance discovery/movers (free)
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {
@@ -513,7 +524,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # batch.py writes a same-night catalyst/quality re-check
         # (pre_market_review_<date>.md) next to each report. The pre-open gap /
         # re-anchor path stays the standalone scripts/pre_market_review.py.
-        "enable_pre_market_review": False,
+        # OpenBB Phase-3 free-tier data surfaces. Each is keyless/free and
+        # analysis-only; all default OFF. Flip an env override (e.g.
+        # TRADINGAGENTS_ENABLE_OPTIONS_SURFACE=true) to let its @tool fetch
+        # real data; when off the tool returns a clear DISABLED sentinel and
+        # never fabricates.
+        "enable_options_surface": False,
+        "enable_risk_free_curve": False,
+        "enable_screener": False,
+        "enable_market_movers": False,
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely
