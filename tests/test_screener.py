@@ -52,7 +52,9 @@ def test_screen_unknown_query_returns_guidance():
         screener, "_fetch_quotes", return_value=[]
     ):
         out = screener.screen_equities("us", limit=5, filters="not_a_real_query")
-    assert "unknown screener query" in out
+    # A sentinel prefix (not a plain guidance string) so route_to_vendor does
+    # not cache the bad-argument reply for 6h as if it were real data.
+    assert out.startswith("DATA_UNAVAILABLE:")
     assert "Known predefined" in out
 
 

@@ -226,8 +226,11 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
         mu_T = mean * T
         sigma_T = sd * math.sqrt(T)
         out["param_var"] = mu_T + z * sigma_T
-        # normal CVaR = -mu_T + sigma_T * phi(z)/(alpha)
-        out["param_cvar"] = -mu_T + sigma_T * math.exp(-0.5 * z * z) / math.sqrt(2 * math.pi) / alpha
+        # Normal left-tail CVaR = mu_T - sigma_T * phi(z) / q, where
+        # q = 1 - alpha is the tail probability and phi is the standard normal
+        # PDF at the alpha quantile z. (Previously divided by alpha and negated
+        # mu, which returned a wrong-sign, ~19x-too-small "gain".)
+        out["param_cvar"] = mu_T - sigma_T * math.exp(-0.5 * z * z) / math.sqrt(2 * math.pi) / q
     # validity gate: sqrt(T) safe only near-i.i.d. with enough samples
     acf = return_autocorrelation(vals)["acf"]
     out["scaling_valid"] = len(vals) >= 32 and (not acf or abs(acf[0]) < 0.2)

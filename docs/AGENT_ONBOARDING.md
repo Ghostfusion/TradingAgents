@@ -298,6 +298,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - Full-set audit fixes (correctness + wiring):
+  `exit_check` profit target anchored at entry (was never-firing "target"),
+  horizon parametric CVaR sign/tail fix, `first_pullback` R:R dead-pattern fix,
+  yfinance statement CSV parsed newest-first + `# comment` header no longer
+  misroutes to the text parser, `tracking_error` demeaned, `ev_ebitda` no longer
+  P/EBITDA, FCF/dividend sign-safe on negative capex/divs, Alpha-Vantage error
+  string no longer cached, screener/movers invalid-arg sentinels, EODHD routed
+  symbol list is a string; new `get_exit_plan` tool + `get_consensus` /
+  `get_sentiment_computed` now bound to analyst ToolNodes; batch `--vendor`
+  presets keep all 27 data categories. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Tiingo data vendor (free Starter tier): `dataflows/tiingo.py` (EOD OHLCV, fundamental statements JSON, IEX quote, crypto OHLCV) registered in the vendor chains (eodhd/moomoo first, tiingo last) + `get_crypto_prices` market tool + `--vendor tiingo` preset. News/intraday not on free tier. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - NautilusTrader deep-study implementation (all 3 phases): backtest harness (`strategies/backtest_engine.py` + `backtest_models.py` + `scripts/backtest_strategy.py`), risk sizing + pre-trade checks (`strategies/risk_sizing.py`, `risk_checks.py`), `evaluate.py` stats (calmar/ulcer/capture/tail/expectancy), and `validate_config()` in `default_config.py`; web `run_backtest`. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Per-analyst tool-round cap + empty-report guard (NVDA missing `1_analysts/market.md` defect): `graph/conditional_logic.py` forces the terminal report turn after `MAX_TOOL_ROUNDS` (8) tool rounds (market/news/fundamentals routers return the analyst node, not the tool node), `agents/utils/structured.py::finalize_messages` runs that turn with dangling tool_calls stripped, and `reporting.py` writes an explicit "report unavailable" block when an analyst report is empty instead of silently dropping the file. Tests: `tests/test_tool_round_cap.py` (12) + 3 reporting guard tests.

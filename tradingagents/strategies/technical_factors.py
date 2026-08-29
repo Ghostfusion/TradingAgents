@@ -354,7 +354,16 @@ def keltner_channel(closes, atr_value=None, n: int = 20, k: float = 2.0) -> dict
     within the channel (mean-reversion). None when history insufficient."""
     if not closes or len(closes) < n or atr_value is None or atr_value <= 0:
         return {"mid": None, "upper": None, "lower": None, "pct": None}
-    mid = sum(closes[-n:]) / n
+    # Keltner uses an EMA midpoint (the old code used an SMA, which shifted the
+    # channel mid in trending series). EMA = prev_ema*(1-a) + price*a, a=2/(n+1),
+    # seeded on the SMA of the first n observations.
+    prices = [float(x) for x in closes]
+    seed = sum(prices[:n]) / n
+    alpha = 2.0 / (n + 1)
+    ema = seed
+    for p in prices[n:]:
+        ema = ema + alpha * (p - ema)
+    mid = ema
     upper = mid + float(k) * float(atr_value)
     lower = mid - float(k) * float(atr_value)
     if upper == lower:

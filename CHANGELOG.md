@@ -229,6 +229,71 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Full-set audit (read-before-edit): 14 defects across the deterministic
+  calculators, the dataflow/vendor layer, and tool binding — the numbers the
+  LLM agents cite are now correct and reachable.**
+  Correctness (HIGH — silently-wrong numbers):
+  - `strategies/exits.py::exit_check` - profit target was anchored at the
+    current close instead of the entry, so `target_hit`/`holding_action` could
+    never return `target` (target = close + 4*ATR is always > close). Now
+    `target_level(entry, ...)`; the `get_exit_check` tool reports real hits.
+  - `strategies/book_risk.py::var_cvar_horizon` - parametric CVaR had a sign
+    error and divided by the wrong tail probability (`+0.1085` "gain" instead
+    of the true negative tail loss). Now `mu_T - sigma_T*phi(z)/q`.
+  - `strategies/momentum.py::first_pullback` - reward was measured to the
+    already-passed `recent_high`, so `rr = reward/risk < 1` whenever the
+    trigger fired and the 2R gate made the candidate permanently dead. Now the
+    target is a measured-move extension beyond the trigger. `get_momentum_detail`
+    also printed zero pillars because it indexed `pillars()` with keys
+    `("a","m","e","l")` that don't exist — fixed to the real
+    `rvol/high_volume/gap/price_band/float`.
+  - `dataflows/statement_parsing` - (1) yfinance statement CSV payloads
+    (`# Data retrieved on: ...` comment header) were mis-routed to the text
+    parser by the `:` check, so every canonical fundamental silently degraded
+    to n/a; comment lines are now stripped before dispatch. (2)
+    `_parse_csv_statements` took the RIGHTMOST numeric cell as "latest", but
+    yfinance columns are newest-first, so the OLDEST fiscal year was returned
+    as the current value (the M-Score/Piotroski latest-value regression); now
+    takes the first (newest) numeric cell. (3) added `stockholders equity`
+    aliases so yfinance's "Stockholders Equity" row maps.
+  Correctness (MED):
+  - `strategies/evaluate.py::tracking_error` - RMS instead of the standard
+    deviation of active returns (mean not demeaned), inflating tracking error
+    and understating information ratio — now demeaned.
+  - `agents/utils/value_dip_tools.py::_period_multiple` - `ev_ebitda` fell back
+    to P/EBITDA; now derives EV = market cap + debt - cash (never P/EBITDA).
+  - `strategies/ratios.py` + FCF helpers - capex/dividends may be a negative
+    GAAP outflow (yfinance/Tiingo) or a positive magnitude (moomoo); FCF and
+    dividend yield now use `abs()` so capital spend is subtracted, not added.
+  - `dataflows/alpha_vantage_indicator.py` - a generic exception returned an
+    error string that `route_to_vendor` caches as authoritative data; now
+    re-raised so the chain falls through. `screen_equities` /
+    `get_market_movers` invalid-argument replies are now `DATA_UNAVAILABLE`
+    sentinels (not cached). `eodhd.get_exchange_symbols_eodhd` keeps the raw
+    list for the screener, and the routed `VENDOR_METHODS` entry now uses a
+    string renderer to honour the vendor contract.
+  Wiring (compute-as-tools):
+  - `get_exit_plan` (new @tool) wraps `exits.breakeven_after_confirmation` +
+    `max_giveback_exit` — the trade-management exit arithm is now a callable
+    tool, bound to the market node.
+  - `get_consensus` and `get_sentiment_computed` were re-exported in
+    `agent_utils.__all__` but bound to NO ToolNode (unreachable by any agent);
+    now bound (fundamentals / market).
+  Config:
+  - `batch.py` `--vendor` presets (moomoo/yfinance/eodhd/tiingo) omitted the 4
+    OpenBB free-tier data categories (`options_surface`, `risk_free_curve`,
+    `equity_screener`, `market_movers`), so a preset silently dropped those
+    sources from `data_vendors` (failed
+    `test_moomoo_preset_is_moomoo_first_everywhere`). All 4 added to every
+    preset, keeping the full 27-key category set.
+  Low/robustness:
+  - `strategies/value_dip.py::tranche_risk_read` - `book_ok` now includes an
+    existing-book fraction (`book` param) per its docstring.
+  - `strategies/technical_factors.py::keltner_channel` - EMA midpoint (was an
+    SMA, which shifted the channel in trending series).
+  Tests: added/updated in `test_analysis_tools.py` (exit_plan /
+  sentiment_computed / consensus), `test_statement_parsing.py` (newest-first
+  CSV + comment-stripped `_canonicalize`); ruff clean.
 - **Per-analyst tool-round cap + empty-report guard (NVDA missing market.md)** - a market/news/fundamentals analyst whose tool loop never terminates (model keeps calling tools, or a slow/hung vendor call keeps the loop spinning) previously left the analyst report empty, which reporting.py silently dropped - the run completed 'normally' with no `1_analysts/market.md` and no error. Now: `ConditionalLogic` forces the terminal report turn after `MAX_TOOL_ROUNDS` (8) tool rounds (routing back to the analyst node instead of the tool node), `structured.finalize_messages` runs that turn with the dangling tool_calls stripped (one final LLM call; truncation-retry + degrade intact), and `reporting.write_report_tree` writes an explicit "report unavailable" block (file + consolidated report) when an analyst report is empty - never a silent gap. Sequential and parallel (`analyst_concurrency>1`) analyst paths both covered. Tests: `tests/test_tool_round_cap.py` (12) + 3 reporting guard tests; ruff clean, 124 regression tests green.
 - **Empty final decision after structured-output fallback** - a model that
   misses `with_structured_output` can answer the free-text retry with only a

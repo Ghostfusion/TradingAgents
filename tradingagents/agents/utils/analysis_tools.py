@@ -1294,7 +1294,7 @@ def get_momentum_detail(
     if ema is not None:
         parts.append(f"  ema9={ema:.2f}")
     if p:
-        for k in ("a", "m", "e", "l"):
+        for k in ("rvol", "high_volume", "gap", "price_band", "float"):
             if p.get(k) is not None:
                 parts.append(f"  pillar_{k}={p[k]}")
     if fp:
@@ -1424,7 +1424,10 @@ def _dcf_fcf_series(cashflow_payload):
                         cap = value
                 if op is not None and cap is not None:
                     try:
-                        fcf = float(op) - float(cap)
+                        # abs(cap): the vendor may sign capital expenditure as a
+                        # GAAP outflow (yfinance/Tiingo) or a positive magnitude;
+                        # OCF - negative capex would inflate FCF.
+                        fcf = float(op) - abs(float(cap))
                     except (TypeError, ValueError):
                         fcf = None
             if fcf is not None:
@@ -1451,7 +1454,7 @@ def _dcf_fcf_series(cashflow_payload):
             if "capital expenditure" in low or "purchase of property" in low:
                 cap = vals
         if op and cap:
-            fcf_row = {d: op.get(d, 0.0) - cap.get(d, 0.0) for d in op}
+            fcf_row = {d: abs(op.get(d, 0.0)) - abs(cap.get(d, 0.0)) for d in op}
     if not fcf_row:
         return []
     series = [fcf_row[d] for d in sorted(fcf_row) if fcf_row[d] is not None]
@@ -1766,6 +1769,48 @@ def get_trailing_exit(
     return (
         f"trailing_exit {ticker}: {verdict} stop_px={r['stop_px']:.2f} "
         f"drawdown_from_peak={r['drawdown_from_peak']:.1%} (trail {float(trail_pct):.0%})"
+    )
+
+
+@tool
+def get_exit_plan(
+    entry: Annotated[float, "entry price"],
+    atr: Annotated[float, "ATR at exit decision"],
+    current: Annotated[float, "current price"],
+    peak: Annotated[float, "highest price since entry, default = current"] = 0.0,
+    stop: Annotated[float | None, "entry stop price, for the R-based BE rule"] = None,
+    giveback_pct: Annotated[float, "margin give-back fraction, default 0.30"] = 0.30,
+) -> str:
+    """Trade-management exit arithm (B3 + Lean L4).
+
+    Combines the breakeven rule (move to BE only after confirmation - 1R or a
+    higher low, never too early) and the margin-giveback stop (a runner that
+    has surrendered a set fraction of its best peak gain is exited) into one
+    deterministic read the Trader/manager cites. Pass entry/atr/current/peak
+    and optionally the entry stop price for the R-based BE trigger.
+    """
+    try:
+        from tradingagents.strategies.exits import (
+            breakeven_after_confirmation,
+            max_giveback_exit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"exit plan unavailable: {exc}"
+    peak = float(peak) if peak else float(current)
+    be = breakeven_after_confirmation(
+        entry_price=float(entry),
+        stop_price=float(stop) if stop is not None else None,
+        trigger="structure",
+        rr=1.0,
+        atr=float(atr),
+    )
+    gb = max_giveback_exit(float(entry), float(peak), float(current), float(giveback_pct))
+    be_s = f"{be.get('price'):.2f}" if be.get("price") is not None else "unavailable"
+    gb_v = "EXIT" if gb.get("exit") else "hold"
+    return (
+        f"exit_plan: breakeven_stop={be_s} (trigger={be.get('trigger')}) "
+        f"giveback_{gb_v} stop_px={gb.get('stop_px')} "
+        f"remaining_gain_pct={gb.get('remaining_gain_pct')} (giveback {float(giveback_pct):.0%})"
     )
 
 
@@ -2941,6 +2986,7 @@ __all__ = [
     "get_form4_insider",
     "get_ratios",
     "get_exit_check",
+    "get_exit_plan",
     "get_allocation",
     "get_regime_components",
     "get_consensus",

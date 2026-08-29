@@ -250,5 +250,9 @@ def get_indicator(
         # error string that would be cached as if it were real data.
         raise
     except Exception as e:
+        # A generic failure must NOT return an error string: route_to_vendor
+        # caches any returned string as an authoritative result, so this text
+        # would mask a transient Alpha Vantage outage for 6h and block the
+        # yfinance/moomoo fallback. Re-raise so the router degrades cleanly.
         print(f"Error getting Alpha Vantage indicator data for {indicator}: {e}")
-        return f"Error retrieving {indicator} data: {str(e)}"
+        raise

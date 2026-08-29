@@ -126,7 +126,9 @@ def _fcf_series_from_cashflow(payload: str) -> list | None:
                         if "capital expenditure" in low or "purchase of property" in low:
                             cap = value
                     if op is not None and cap is not None:
-                        fcf = float(op) - float(cap)
+                        # abs(cap): capex may be a negative GAAP outflow or a
+                        # positive magnitude depending on the vendor.
+                        fcf = float(op) - abs(float(cap))
                 if fcf is not None:
                     try:
                         series.append(float(fcf))
@@ -151,7 +153,7 @@ def _fcf_series_from_cashflow(payload: str) -> list | None:
                     if "capital expenditure" in low or "purchase of property" in low:
                         cap = value
                 if op is not None and cap is not None:
-                    fcf = float(op) - float(cap)
+                    fcf = float(op) - abs(float(cap))
             if fcf is not None:
                 try:
                     return [float(fcf)]
@@ -832,11 +834,20 @@ def _period_multiple(rows: dict, multiple: str, price: float | None = None) -> f
             return pe
     elif multiple == "ev_ebitda":
         ebitda = num(find("ebitda"))
-        if ebitda and price:
-            return price / ebitda
+        if not ebitda:
+            return None
         ev = num(find("enterprise value", "ev"))
-        if ev and ebitda:
+        if ev:
             return ev / ebitda
+        # No explicit EV row: derive EV = market cap + debt - cash so the
+        # multiple measures enterprise value, not P/EBITDA (which understates
+        # EV for a levered name and corrupts the historical z-score).
+        mc = num(find("market cap", "market capitalization", "market value"))
+        debt = num(find("total debt", "long term debt"))
+        cash = num(find("cash and cash equivalents", "cash"))
+        if mc is not None and mc > 0:
+            return (mc + (debt or 0.0) - (cash or 0.0)) / ebitda
+        return None
     elif multiple == "p_fcf":
         fcf = num(find("free cash flow"))
         if fcf and price:

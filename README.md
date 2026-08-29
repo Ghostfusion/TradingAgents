@@ -35,6 +35,22 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-29] **Full-set audit fixes (correctness + agent wiring)** - a
+  read-everything audit fixed 14 defects so the numbers the LLM agents cite are
+  correct and reachable: `exit_check` target now anchored at entry (was close,
+  so "target" could never fire); parametric horizon CVaR sign/tail-probability
+  fix; `first_pullback` R:R no longer permanently dead; yfinance statement CSV
+  parsed newest-first (was returning the OLDEST year as "latest") and its
+  `# comment` header no longer mis-routes to the text parser; `tracking_error`
+  now demeaned; `ev_ebitda` no longer collapses to P/EBITDA; FCF/dividend-yield
+  sign-safe on GAAP-negative capex/divs; Alpha-Vantage error strings no longer
+  cached as data; screener/movers invalid args return `DATA_UNAVAILABLE`
+  sentinels; routed EODHD symbol list is a string. Wiring: new `get_exit_plan`
+  tool (breakeven-after-confirmation + margin-giveback), and `get_consensus` +
+  `get_sentiment_computed` (previously unbound) are now callable from the
+  analyst ToolNodes; batch `--vendor` presets keep all 27 data categories. See
+  CHANGELOG.
+
 - [2026-08-28] **QuantLib + Lean enhancements (deep-study implementation)** -
   evaluation breadth beyond Sharpe (Sortino / PSR / rolling-beta / underwater
   drawdowns), horizon VaR/CVaR, options IV + Greeks (Black-76), risk-parity /

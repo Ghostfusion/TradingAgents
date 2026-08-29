@@ -15,7 +15,7 @@ from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
 from .eodhd import (
     get_corporate_actions_eodhd,
-    get_exchange_symbols_eodhd,
+    get_exchange_symbols_text_eodhd,
     get_news_eodhd,
     get_stock_data_eodhd,
 )
@@ -425,7 +425,7 @@ VENDOR_METHODS = {
         "eodhd": get_corporate_actions_eodhd,
     },
     "get_exchange_symbols": {
-        "eodhd": get_exchange_symbols_eodhd,
+        "eodhd": get_exchange_symbols_text_eodhd,
     },
     "get_earnings_catalyst": {
         "moomoo": get_earnings_catalyst_moomoo,

@@ -86,12 +86,14 @@ def test_markdown_period_tables_sorted_newest_first():
 
 
 @pytest.mark.unit
-def test_parse_csv_statements_takes_rightmost_column():
+def test_parse_csv_statements_takes_first_column():
+    """yfinance statement columns are newest-first, so the FIRST numeric cell
+    is the latest period (the old rightmost pick returned the OLDEST)."""
     rows = sp._parse_csv_statements(
         ",2025-09-30,2024-09-30,2023-09-30\n"
         "Free Cash Flow,95000000000,83000000000,69000000000\n"
     )
-    assert rows["Free Cash Flow"] == 69_000_000_000.0  # rightmost numeric cell
+    assert rows["Free Cash Flow"] == 95_000_000_000.0  # newest column
 
 
 @pytest.mark.unit

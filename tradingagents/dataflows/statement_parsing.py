@@ -93,6 +93,8 @@ _ROW_ALIASES = {
         "total stockholder equity",
         "total equity",
         "shareholders equity",
+        "stockholders equity",
+        "stockholder equity",
         "common stock equity",
     ],
     "total_liabilities": ["total liabilities"],
@@ -205,9 +207,13 @@ def _parse_csv_statements(payload: str) -> dict:
         if not row or not row[0]:
             continue
         label = row[0].strip()
-        # Pick the rightmost numeric cell (most recent period).
+        # yfinance financial-statement columns are newest-first (like moomoo),
+        # so the FIRST numeric cell is the most recent period and the rightmost
+        # is the OLDEST. Taking the rightmost cell returned the oldest fiscal
+        # year as "latest", corrupting I/R, M-Score, Piotroski and every ratio
+        # screen that reads a single latest value.
         value = None
-        for cell in reversed(row[1:]):
+        for cell in row[1:]:
             parsed = _first_number(cell)
             if parsed is not None:
                 value = parsed
@@ -312,6 +318,8 @@ def _parse_text_report(payload: str) -> dict:
     """Parse yfinance fundamentals-style text (``Label: value`` lines)."""
     rows = {}
     for line in payload.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
         if ":" not in line:
             continue
         label, _, rest = line.partition(":")
@@ -632,14 +640,23 @@ def _canonicalize(payload: str) -> dict:
     text = (payload or "").strip()
     if not text or text.startswith("NO_DATA") or text.startswith("DATA_"):
         return {}
+    # yfinance statement payloads prepend ``# Data retrieved on: ...`` comment
+    # header lines before a CSV body. Those comment lines contain a colon, so a
+    # naive ``":"`` check would win and the CSV body would be mis-routed to
+    # _parse_text_report (empty canonical dict; all fundamentals degrade to n/a).
+    # Use the FULL text for branch selection (moomoo markdown keeps its ``##`` /
+    # ``###`` period headers), but ONLY count ``":"`` lines that are not ``#``
+    # comments, so a comma-separated body falls through to the CSV branch.
+    def _is_comment(ln: str) -> bool:
+        return ln.lstrip().startswith("#") or not ln.strip()
+
     if text.lstrip().startswith("{"):
         rows = _parse_json_statements(text)
         canonical = _flat_canonical(rows)
     elif any(ln.lstrip().startswith("|") for ln in text.splitlines()):
         canonical = _markdown_canonical(text)
-    elif any(":" in ln for ln in text.splitlines()):
-        rows = _parse_text_report(text)
-        canonical = _flat_canonical(rows)
+    elif any(":" in ln and not _is_comment(ln) for ln in text.splitlines()):
+        canonical = _flat_canonical(_parse_text_report(text))
     else:
         rows = _parse_csv_statements(text)
         canonical = _flat_canonical(rows)

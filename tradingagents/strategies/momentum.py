@@ -140,8 +140,15 @@ def first_pullback(closes: list, highs: list, lows: list, volumes: list,
     trigger = c > recent_high
     stop = pull_low
     risk = c - stop if c > stop else None
-    reward = recent_high - stop if risk is not None else None
-    rr = reward / risk if risk and risk > 0 else None
+    # Reward is measured to a real target beyond the trigger (measured-move
+    # extension): target = c + (recent_high - low_start). Anchoring reward to
+    # the already-passed ``recent_high`` (as before) made rr = reward/risk < 1
+    # whenever the trigger fired, so the 2R gate could never pass and the
+    # first-pullback candidate was permanently dead.
+    measured_move = (recent_high - low_start) if recent_high and low_start is not None else None
+    target = (c + measured_move) if measured_move is not None else None
+    reward = (target - c) if target is not None else None
+    rr = reward / risk if (risk and risk > 0 and reward is not None) else None
     volume_ok = _volume_color_ok(opens, closes, volumes, window)
     tail_ok = _top_tail_ok(opens, closes, highs, window)
     candidate = bool(surge_ok and retrace_ok and hold9 and hold_v
@@ -150,7 +157,9 @@ def first_pullback(closes: list, highs: list, lows: list, volumes: list,
     return {"surge": surge_ok, "retrace_ok": retrace_ok,
             "holds_9ema": hold9, "holds_vwap": hold_v, "trigger": trigger,
             "volume_ok": volume_ok, "tail_ok": tail_ok,
-            "stop": round(stop, 4), "rr": round(rr, 2) if rr is not None else None,
+            "stop": round(stop, 4),
+            "target": round(target, 4) if target is not None else None,
+            "rr": round(rr, 2) if rr is not None else None,
             "candidate": candidate}
 
 

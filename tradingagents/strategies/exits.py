@@ -62,7 +62,7 @@ def exit_check(
 ) -> dict:
     """Exit decision flags for a long: stop-break, target-hit, hence trade outcome."""
     be = stop_to_breakeven(entry, atr, cushion_atr=breakeven_cushion)
-    tgt = target_level(close, atr, atr_mult=target_mult)
+    tgt = target_level(entry, atr, atr_mult=target_mult)
     return {
         "breakeven_stop": round(be, 4),
         "target": round(tgt, 4),

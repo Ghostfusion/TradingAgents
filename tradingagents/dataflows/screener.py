@@ -160,9 +160,11 @@ def screen_equities(
     if not query:
         query = _resolve_query(market)
     if query not in _KNOWN_QUERIES:
+        # A sentinel (not a plain guidance string) so the router does not
+        # cache this bad-argument reply for 6h as if it were real data.
         return (
-            f"screen_equities: unknown screener query {query!r}. Known predefined "
-            f"queries: {', '.join(sorted(_KNOWN_QUERIES)) or 'none available'}."
+            f"DATA_UNAVAILABLE: equity screener unavailable - unknown query "
+            f"{query!r}. Known predefined queries: {', '.join(sorted(_KNOWN_QUERIES)) or 'none available'}."
         )
     quotes = _fetch_quotes(query, min(limit, MAX_ROWS))
     if not quotes:
@@ -189,8 +191,8 @@ def get_market_movers(kind: str = "gainers", limit: int = 10) -> str:
     query = MOVERS_QUERIES.get(key)
     if not query:
         return (
-            f"get_market_movers: invalid kind {kind!r}; "
-            f"use one of {sorted(MOVERS_QUERIES)}."
+            f"DATA_UNAVAILABLE: market movers unavailable - invalid kind "
+            f"{kind!r}; use one of {sorted(MOVERS_QUERIES)}."
         )
     limit = max(1, int(limit or DEFAULT_MOVERS_LIMIT))
     quotes = _fetch_quotes(query, min(limit, MAX_ROWS))

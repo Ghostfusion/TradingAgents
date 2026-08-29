@@ -57,7 +57,6 @@ DEPTH_LEVELS = {"shallow": 1, "medium": 3, "deep": 5}
 # Vendor presets for --vendor: full data_vendors chains per category.
 # ``default`` (no flag) leaves the .env / DEFAULT_CONFIG chains untouched.
 VENDOR_PRESETS = {
-    # Moomoo primary, with the established free vendors as fallbacks.
     "moomoo": {
         "core_stock_apis": "moomoo,yfinance",
         "technical_indicators": "moomoo,yfinance",
@@ -83,6 +82,13 @@ VENDOR_PRESETS = {
         "institution_data": "moomoo",
         "earnings_surprise": "moomoo",
         "expected_move": "moomoo",
+        # OpenBB free-tier data surfaces (no moomoo equivalent; key-gated by
+        # their enable_* flags, default off — keep the free chains so a preset
+        # never silently drops a category).
+        "options_surface": "cboe",
+        "risk_free_curve": "federal_reserve",
+        "equity_screener": "yfinance",
+        "market_movers": "yfinance",
     },
     # Pure-yfinance stack (the pre-moomoo defaults).
     "yfinance": {
@@ -111,6 +117,11 @@ VENDOR_PRESETS = {
         "institution_data": "none",
         "earnings_surprise": "none",
         "expected_move": "none",
+        # OpenBB free-tier data surfaces (key-gated, default off).
+        "options_surface": "cboe",
+        "risk_free_curve": "federal_reserve",
+        "equity_screener": "yfinance",
+        "market_movers": "yfinance",
     },
     # EODHD-first OHLCV (daily bars; EOD plan 100k/day @ 1000/min). The
     # moomoo K-line quota (100 calls/7 days) is the screener's bottleneck, so
@@ -141,6 +152,11 @@ VENDOR_PRESETS = {
         "institution_data": "none",
         "earnings_surprise": "none",
         "expected_move": "none",
+        # OpenBB free-tier data surfaces (key-gated, default off).
+        "options_surface": "cboe",
+        "risk_free_curve": "federal_reserve",
+        "equity_screener": "yfinance",
+        "market_movers": "yfinance",
     },
     # Tiingo-as-fallback (additive): eodhd/moomoo/yfinance stay first for
     # OHLCV and fundamentals; Tiingo (free Starter tier, low caps) is a
@@ -170,6 +186,11 @@ VENDOR_PRESETS = {
         "institution_data": "none",
         "earnings_surprise": "none",
         "expected_move": "none",
+        # OpenBB free-tier data surfaces (key-gated, default off).
+        "options_surface": "cboe",
+        "risk_free_curve": "federal_reserve",
+        "equity_screener": "yfinance",
+        "market_movers": "yfinance",
     },
 }
 

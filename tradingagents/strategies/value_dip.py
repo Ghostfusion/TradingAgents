@@ -291,6 +291,7 @@ def tranche_risk_read(
     atr_value: float | None = None,
     max_position_pct: float = 0.30,
     max_book_position_pct: float | None = None,
+    book: float = 0.0,
     steps: tuple = (1.0, 2.0),
     pct_steps: tuple | None = None,
 ) -> dict:
@@ -350,7 +351,7 @@ def tranche_risk_read(
     capital_at_risk_pct = plan["capital_at_risk_pct"]
     book_ok = None
     if max_book_position_pct is not None:
-        book_ok = bool(peak_deployed_pct <= float(max_book_position_pct))
+        book_ok = bool(peak_deployed_pct + float(book) <= float(max_book_position_pct))
     return {
         "valid": True,
         "p1": plan["p1"],

@@ -237,6 +237,23 @@ def get_exchange_symbols_eodhd(market: str = "US") -> list[dict]:
     return data
 
 
+def get_exchange_symbols_text_eodhd(market: str = "US") -> str:
+    """String-rendered symbol list for the routed ``get_exchange_symbols``
+    vendor path (the vendor contract requires a string; the raw list form is
+    kept for the screener's direct import)."""
+    data = get_exchange_symbols_eodhd(market)
+    rows = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "{Code}\t{Name}\t{Country}\t{Exchange}\t{Currency}\t{Type}".format(**item)
+        )
+    if not rows:
+        raise NoMarketDataError(market, market, detail="no exchange symbols")
+    return "{Code}\tName\tCountry\tExchange\tCurrency\tType\n" + "\n".join(rows)
+
+
 def get_market_snapshot_eodhd(ticker: str) -> str:
     """Latest live (15-20 min delayed) OHLCV + change for one ticker.
 

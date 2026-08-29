@@ -98,7 +98,13 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
     ev = _add(mc, _sub(debt, cash)) if (mc is not None) else None
 
     ebitda = _add(op, dep) if (op is not None or dep is not None) else None
-    fcf = _sub(ocf, capex) if (ocf is not None) else None
+    # capex/dividends are expenditures: some vendors report them as a negative
+    # GAAP outflow (yfinance/Tiingo), others as a positive magnitude (moomoo).
+    # abs() makes FCF and dividend yield correct under both conventions
+    # (OCF - capex with a negative capex would ADD capital spending back,
+    # inflating FCF and every FCF-derived screen).
+    fcf = _sub(ocf, abs(capex)) if (ocf is not None) else None
+    divs_abs = abs(divs) if divs is not None else None
 
     return {
         "ev": ev,
@@ -116,7 +122,7 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
         "current": _ratio(ca, cl),
         "quick": _ratio(_sub(ca, inv), cl) if (ca is not None and cl is not None and inv is not None) else None,
         "cash_ratio": _ratio(cash, cl),
-        "dividend_yield": _ratio(divs, mc) if (divs is not None and mc) else None,
+        "dividend_yield": _ratio(divs_abs, mc) if (divs_abs is not None and mc) else None,
         "free_cash_flow": fcf,
         "market_cap": mc,
     }

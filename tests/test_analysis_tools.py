@@ -414,13 +414,49 @@ class _FakeFinnhubClient:
 def test_exit_check_returns_stop_target_action():
     out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 3.0})
     assert "breakeven_stop=103.00" in out
-    assert "target=107.00" in out  # close + 4*atr
+    # Target is anchored at ENTRY (entry + 4*atr = 112), not close — anchoring
+    # at the close made target_hit arithmetically impossible.
+    assert "target=112.00" in out
     assert "action=stop" in out
 
 
 def test_exit_check_requires_positive_atr():
     out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 0.0})
     assert "atr must be > 0" in out
+
+
+def test_exit_plan_breakeven_and_giveback():
+    # entry 100, atr 3, stop 97 -> structure BE = 1R (stop=None) or 1R from stop:
+    # be_after_confirmation uses 1R = entry + 1*(entry-stop); giveback: peak_gain
+    # 30% * 0.7 keep = 21% remaining -> EXIT when current 120 > 121? no -> hold.
+    out = T.get_exit_plan.invoke(
+        {"entry": 100.0, "atr": 3.0, "current": 120.0, "peak": 130.0, "stop": 97.0}
+    )
+    assert "exit_plan" in out
+    assert "breakeven_stop" in out
+    assert "trigger=" in out
+    assert "giveback_" in out
+
+
+def test_exit_plan_degrades_on_unusable_giveback():
+    # entry at 100, peak <= entry -> max_giveback returns exit=False, no crash.
+    out = T.get_exit_plan.invoke({"entry": 100.0, "atr": 3.0, "current": 99.0, "peak": 100.0})
+    assert "exit_plan" in out
+    assert "stop_px=None" in out
+
+
+def test_consensus_tool_high_when_aligned():
+    out = T.get_consensus.invoke({"ratings": ["Buy", "Buy", "Buy"]})
+    assert "level=high" in out
+
+
+def test_sentiment_computed_degrades_without_data(monkeypatch):
+    monkeypatch.setattr(
+        "tradingagents.strategies.sentiment.compute_social_scores",
+        lambda *a, **k: {},
+    )
+    out = T.get_sentiment_computed.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
 
 
 def test_allocation_caps_weight():

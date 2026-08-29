@@ -203,7 +203,8 @@ def tracking_error(returns: list[float], benchmark: list[float],
     if n < 2:
         return None
     diff = [r[i] - b[i] for i in range(n)]
-    var = sum(d * d for d in diff) / (n - 1)
+    md = sum(diff) / n
+    var = sum((d - md) * (d - md) for d in diff) / (n - 1)
     return math.sqrt(var * periods_per_year)
 
 

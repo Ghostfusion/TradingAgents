@@ -508,6 +508,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_downside_read(ticker, target?)` | `strategies.rate_utils.downside_measures` | market | semi-deviation / downside deviation / shortfall probability / average shortfall vs a target (MAR) |
 | `get_horizon_var(ticker, horizon_days?, alpha?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate |
 | `get_trailing_exit(ticker, entry, peak, current, trail_pct?)` | `strategies.exits.trailing_stop_exit` | market | peak-trailing / give-back stop verdict + exit price |
+| `get_exit_plan(entry, atr, current, peak?, stop?, giveback_pct?)` | `strategies.exits.breakeven_after_confirmation` + `max_giveback_exit` | market | structure/R breakeven trigger + margin-giveback stop in one exit-management read |
 | `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + risk_contribution) | market | risk-parity weights, min-variance weights and per-name risk contributions from a real covariance matrix |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
