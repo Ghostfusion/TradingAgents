@@ -35,6 +35,7 @@ in `batch.py`).
 | `TRADINGAGENTS_MASSIVE_API_KEY` | `massive_api_key` |
 | `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |
 | `TRADINGAGENTS_EODHD_API_KEY` | `eodhd_api_key` | EODHD daily OHLCV (free 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota (100 calls/7 days) |
+| `TIINGO_API_KEY` | `tiingo_api_key` | Tiingo market data (free Starter tier: EOD OHLCV + fundamental statements + IEX quote + crypto; ~1,000 calls/day) |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
 | `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |
@@ -360,7 +361,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - short volume (daily short-sale ratio, Massive-only): `massive`
 - all A-series/tier tools: `moomoo` only (optional)
 
-`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd`.
+`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd, tiingo`.
 
 **EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — the **primary OHLCV
 vendor** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years):
@@ -381,6 +382,19 @@ need the $59.99 Fundamentals feed), so those chains keep moomoo/yfinance
 first. A `--vendor eodhd` preset (`batch.py`/`pipeline.py`) puts EODHD first
 in the OHLCV + news + corporate-actions chains and disables the moomoo-only
 enrichment.
+
+**Tiingo** (`TIINGO_API_KEY`, free *Starter* tier, key-gated) — additive market
+data: deep EOD OHLCV (`/tiingo/daily/{t}/prices`, 7+ yrs, with `resampleFreq`
+daily/weekly/monthly/annually), **fundamental statements in JSON**
+(`/tiingo/fundamentals/{t}/statements` — income/balance/cashflow keyed by
+``dataCode``, rendered to canonical-friendly ``label : value`` blocks that
+`statement_parsing` maps via `_ROW_ALIASES`), a delayed **IEX quote**
+(`/iex/{t}`), and **crypto OHLCV** (`/tiingo/crypto/prices`). News (403) and
+intraday (404) are NOT on the free tier. Low caps (~1,000 calls/day, 50/hr,
+500 symbols/mo) mean it sits *last* in the chains after eodhd/moomoo/massive,
+relying on the 6h disk TTL cache; a 429 degrades to the next vendor via
+`VendorRateLimitError`. The IEX snapshot backs `get_market_snapshot` as a
+third fallback (Massive -> EODHD -> Tiingo).
 
 **Massive.com** (`MASSIVE_API_KEY`, key-gated) — US-centric additive vendor:
 `get_massive_news` (`get_news` chain + dedicated tool on the news/social

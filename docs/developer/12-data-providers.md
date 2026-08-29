@@ -8,20 +8,20 @@ a developer exactly which vendor supplies which signal and how each is wired
 
 | Tier | Count |
 | --- | --- |
-| Routed vendors (`VENDOR_LIST`) | 9 |
+| Routed vendors (`VENDOR_LIST`) | 10 |
 | Direct-but-not-routed sources | 5 |
-| **Total distinct providers** | 14 |
+| **Total distinct providers** | 15 |
 
 ---
 
-## Tier 1 — the 9 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
+## Tier 1 — the 10 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
 
 These sit behind the analyst `@tool` calls and are chosen per-category via
 `data_vendors` chains (see `docs/developer/03-dataflow-vendors.md`).
 
 ```python
 VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
-               'finnhub', 'sec_edgar', 'moomoo', 'massive', 'eodhd']
+               'finnhub', 'sec_edgar', 'moomoo', 'massive', 'eodhd', 'tiingo']
 ```
 
 | # | Vendor | Provider | What it supplies |
@@ -35,6 +35,7 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 7 | **moomoo** | Moomoo OpenAPI (via the local OpenD gateway) | US/HK/JP/SH/SZ/AU/CA/SG/MY quotes, fundamentals, earnings calendar, economic calendar, Fed watch, capital flow, corporate actions, options, short interest, top movers |
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
 | 9 | **eodhd** | EODHD (added in this fork) | **primary OHLCV** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) + news + splits/dividends + full US symbol list (~18k common stocks, the screener's default `--universe eodhd-us`) — replaces the moomoo K-line quota |
+| 10 | **tiingo** | Tiingo (added in this fork) | free Starter tier: EOD OHLCV (7+ yrs), fundamental statements (JSON), IEX delayed quote, crypto OHLCV; ~1,000 calls/day so last in chains |
 
 ### Default chains per category (from `data_vendors`)
 

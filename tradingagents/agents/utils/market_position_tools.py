@@ -171,16 +171,21 @@ def get_market_snapshot(
         str: snapshot OHLCV/VWAP/change, or an explicit 'unavailable' message
     """
     from tradingagents.dataflows.massive import get_market_snapshot_massive
+    from tradingagents.dataflows.tiingo import get_market_snapshot_tiingo
 
     try:
         out = get_market_snapshot_massive(ticker)
         # Massive returns an explicit 'unavailable' string when the plan lacks
         # snapshot access (403) - fall back to the EODHD real-time snapshot
-        # (works on the EOD plan) so the market analyst still gets a live bar.
+        # (works on the EOD plan), then Tiingo's delayed IEX quote, so the
+        # market analyst still gets a price-level read.
         if out and "unavailable" in out.lower():
-            from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
+            try:
+                from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
 
-            return get_market_snapshot_eodhd(ticker)
+                return get_market_snapshot_eodhd(ticker)
+            except Exception:  # noqa: BLE001
+                return get_market_snapshot_tiingo(ticker)
         return out
     except Exception as exc:  # noqa: BLE001
         try:
@@ -188,7 +193,10 @@ def get_market_snapshot(
 
             return get_market_snapshot_eodhd(ticker)
         except Exception as exc2:  # noqa: BLE001
-            return f"market snapshot unavailable for {ticker}: {exc} / {exc2}"
+            try:
+                return get_market_snapshot_tiingo(ticker)
+            except Exception as exc3:  # noqa: BLE001
+                return f"market snapshot unavailable for {ticker}: {exc} / {exc2} / {exc3}"
 
 
 @tool
@@ -282,3 +290,32 @@ def get_liquidity_risk(
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         return f"liquidity risk unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_crypto_prices(
+    ticker: Annotated[str, "crypto symbol (e.g. BTC-USD, ETH-USD)"],
+    start_date: Annotated[str, "start date yyyy-mm-dd"],
+    end_date: Annotated[str, "end date yyyy-mm-dd"],
+) -> str:
+    """
+    Native crypto OHLCV via Tiingo (free tier): daily open/high/low/close/
+    volume for a crypto pair such as BTC-USD or ETH-USD. This is a distinct
+    endpoint from the equity ``get_stock_data`` path, giving the market
+    analyst a dedicated crypto price source with per-asset volume and an
+    explicit 'unavailable' degrade when the feed has no rows (no-fabrication).
+
+    Args:
+        ticker (str): Crypto symbol; ``BTC-USD`` / ``ETH-USD`` / ``SOL-USD``.
+        start_date (str): Start date in yyyy-mm-dd format.
+        end_date (str): End date in yyyy-mm-dd format.
+
+    Returns:
+        str: Tinco crypto OHLCV as a Date,Open,High,Low,Close,Volume CSV.
+    """
+    from tradingagents.dataflows.tiingo import _crypto_code, get_crypto_prices_tiingo
+
+    try:
+        return get_crypto_prices_tiingo(_crypto_code(ticker), start_date, end_date)
+    except Exception as exc:  # noqa: BLE001 - degrade, never raise in the tool loop
+        return f"crypto prices unavailable for {ticker}: {exc}"

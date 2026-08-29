@@ -9,7 +9,31 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
-- **NautilusTrader enhancements (deep-study implementation)** (`docs/design_nautilus_trader_enhancements.md`) -
+- **Tiingo data vendor (free Starter tier)** (`dataflows/tiingo.py`) -
+  additive market-data source wired through the vendor contract:
+  - **EOD OHLCV** - `get_stock_data_tiingo` (`/tiingo/daily/{t}/prices`, 7+
+    yrs, `resampleFreq` daily/weekly/monthly/annually) as the yfinance/moomoo
+    CSV shape, registered last in `core_stock_apis` (`eodhd,moomoo,yfinance,
+    tiingo`).
+  - **Fundamental statements** - `get_fundamentals/balance_sheet/cashflow/
+    income_statement_tiingo` render Tiingo `dataCode`s as canonical-friendly
+    `label : value` blocks that `statement_parsing._canonicalize` maps via
+    `_ROW_ALIASES` (a working free fundamentals source; Massive's free-tier
+    fundamentals 403). Registered in the `fundamental_data` +
+    statements chains (`moomoo,yfinance,tiingo`).
+  - **IEX quote** - `get_market_snapshot_tiingo` backs `get_market_snapshot`
+    as a third fallback (Massive -> EODHD -> Tiingo).
+  - **Crypto OHLCV** - `get_crypto_prices_tiingo` + a `get_crypto_prices`
+    tool bound to the market analyst node + prompt (native crypto price
+    source; `BTC-USD` -> `btcusd`).
+  - **`--vendor tiingo`** preset in batch (`eodhd,moomoo,yfinance,tiingo`).
+  - Key `TIINGO_API_KEY` / config `tiingo_api_key`; low free-tier caps
+    (~1,000 calls/day, 50/hr, 500 symbols/mo) keep Tiingo last + behind the
+    TTL cache; a 429 degrades via `VendorRateLimitError`.
+  Tests: `tests/test_tiingo_vendor.py` (17, hermetic). News (403) + intraday
+  (404) are not wired. ruff clean.
+
+ (deep-study implementation)** (`docs/design_nautilus_trader_enhancements.md`) -
   design → implemented (3 phases):
   - **Backtest harness (new capability)** - `strategies/backtest_engine.py`
     (order state machine: SUBMITTED/ACCEPTED/PARTIALLY_FILLED/FILLED/CANCELED/

@@ -84,6 +84,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
 from tradingagents.agents.utils.market_position_tools import (
+    get_crypto_prices,
     get_liquidity_risk,
     get_market_snapshot,
     get_options_chain,
@@ -154,6 +155,7 @@ __all__ = [
     "get_liquidity_risk",
     "get_ownership_concentration",
     "get_market_snapshot",
+    "get_crypto_prices",
     "get_top_movers",
     "get_capital_flow",
     "get_smart_money",

@@ -81,6 +81,13 @@ from .screener import (
     screen_equities as screen_equities_yfinance,
 )
 from .sec_edgar import get_sec_filings
+from .tiingo import (
+    get_balance_sheet_tiingo,
+    get_cashflow_tiingo,
+    get_fundamentals_tiingo,
+    get_income_statement_tiingo,
+    get_stock_data_tiingo,
+)
 from .vendor_cache import vendor_cache
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -248,6 +255,7 @@ VENDOR_LIST = [
     "eodhd",
     "cboe",
     "federal_reserve",
+    "tiingo",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -291,6 +299,7 @@ VENDOR_METHODS = {
         "yfinance": get_YFin_data_online,
         "moomoo": get_stock_data_moomoo,
         "eodhd": get_stock_data_eodhd,
+        "tiingo": get_stock_data_tiingo,
     },
     # technical_indicators
     "get_indicators": {
@@ -305,6 +314,7 @@ VENDOR_METHODS = {
         "moomoo": get_fundamentals_moomoo,
         "finnhub": get_basic_financials_finnhub,
         "massive": get_fundamentals_massive,
+        "tiingo": get_fundamentals_tiingo,
     },
     "get_basic_financials": {
         "finnhub": get_basic_financials_finnhub,
@@ -321,16 +331,19 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "moomoo": get_balance_sheet_moomoo,
+        "tiingo": get_balance_sheet_tiingo,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "moomoo": get_cashflow_moomoo,
+        "tiingo": get_cashflow_tiingo,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "moomoo": get_income_statement_moomoo,
+        "tiingo": get_income_statement_tiingo,
     },
     # news_data
     "get_news": {

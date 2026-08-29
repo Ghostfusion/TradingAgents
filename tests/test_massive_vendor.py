@@ -508,10 +508,14 @@ class MassiveFailoverTests(unittest.TestCase):
         from tradingagents.agents.utils.market_position_tools import get_market_snapshot
 
         # Massive 403s AND the EODHD fallback fails -> the tool degrades to an
-        # explicit 'unavailable' (never fabricates).
+        # explicit 'unavailable' (never fabricates). Tiingo (the third
+        # fallback) is mocked to fail too so no live call leaks from .env.
         with self._patch("get_market_snapshot_massive", "tradingagents.dataflows.massive"), mock.patch(
             "tradingagents.dataflows.eodhd.get_market_snapshot_eodhd",
             side_effect=RuntimeError("eodhd down"),
+        ), mock.patch(
+            "tradingagents.dataflows.tiingo.get_market_snapshot_tiingo",
+            side_effect=RuntimeError("tiingo down"),
         ):
             out = get_market_snapshot.invoke({"ticker": "nue"})
         self.assertIn("market snapshot unavailable", out)
@@ -549,7 +553,17 @@ class MassiveFailoverTests(unittest.TestCase):
     def test_get_ratios_degrades(self):
         from tradingagents.agents.utils.analysis_tools import get_ratios
 
-        with self._patch("get_ratios_massive", "tradingagents.dataflows.massive"):
+        # The canonical fetch routes get_fundamentals/statements through the
+        # fundamental_data chain (now ending in tiingo) and gap-fills from
+        # Finnhub basic financials. Patch Tiingo + the Finnhub gap-fill so
+        # no live call returns data (hermetic, full-chain degrade).
+        with self._patch("get_ratios_massive", "tradingagents.dataflows.massive"), mock.patch(
+            "tradingagents.dataflows.tiingo._tiingo_get",
+            side_effect=NoMarketDataError("x", "x", detail="mocked empty"),
+        ), mock.patch(
+            "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+            side_effect=NoMarketDataError("x", "x", detail="mocked empty"),
+        ):
             out = get_ratios.invoke({"ticker": "x"})
         self.assertIn("ratios unavailable", out)
 

@@ -142,6 +142,35 @@ VENDOR_PRESETS = {
         "earnings_surprise": "none",
         "expected_move": "none",
     },
+    # Tiingo-as-fallback (additive): eodhd/moomoo/yfinance stay first for
+    # OHLCV and fundamentals; Tiingo (free Starter tier, low caps) is a
+    # final fallback and, via tiingo/market_snapshot, the IEX quote.
+    "tiingo": {
+        "core_stock_apis": "eodhd,moomoo,yfinance,tiingo",
+        "technical_indicators": "moomoo,yfinance",
+        "fundamental_data": "moomoo,yfinance,tiingo",
+        "news_data": "eodhd,yfinance",
+        "macro_data": "fred",
+        "prediction_markets": "polymarket",
+        "analyst_ratings": "finnhub",
+        "earnings_calendar": "finnhub",
+        "options_data": "yfinance",
+        "sec_filings": "sec_edgar",
+        "short_interest": "yfinance",
+        "exchange_symbols": "eodhd",
+        "corporate_actions": "eodhd",
+        # moomoo-only enrichment: disabled ("none" = router disable sentinel).
+        "capital_flow": "none",
+        "smart_money": "none",
+        "economic_calendar": "none",
+        "fed_watch": "none",
+        "market_breadth": "none",
+        "revenue_breakdown": "none",
+        "earnings_catalyst": "none",
+        "institution_data": "none",
+        "earnings_surprise": "none",
+        "expected_move": "none",
+    },
 }
 
 

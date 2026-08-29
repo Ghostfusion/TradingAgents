@@ -18,6 +18,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
     get_cashflow,
     get_corporate_actions,
+    get_crypto_prices,
     get_dividends,
     get_earnings_calendar,
     get_earnings_catalyst,
@@ -347,6 +348,7 @@ class TradingAgentsGraph:
                     get_liquidity_risk,
                     # Massive.com verification + movers (plan-gated, degrade)
                     get_market_snapshot,
+                    get_crypto_prices,
                     get_top_movers,
                     # Money-flow positioning (moomoo; optional, degrades)
                     get_capital_flow,

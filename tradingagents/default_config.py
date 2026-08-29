@@ -23,6 +23,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     "TRADINGAGENTS_EODHD_API_KEY": "eodhd_api_key",
     "TRADINGAGENTS_MASSIVE_API_KEY": "massive_api_key",
+    "TIINGO_API_KEY": "tiingo_api_key",
     "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
     "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
@@ -315,9 +316,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # the EOD plan); moomoo/yfinance stay as fallbacks. EODHD cannot
             # serve fundamentals/technicals/intraday/options on the EOD plan,
             # so those chains keep moomoo/yfinance first.
-            "core_stock_apis": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo, eodhd
+            "core_stock_apis": "eodhd,moomoo,yfinance,tiingo",  # Options: alpha_vantage, yfinance, moomoo, eodhd, tiingo
             "technical_indicators": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
-            "fundamental_data": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
+            "fundamental_data": "moomoo,yfinance,tiingo",  # Options: alpha_vantage, yfinance, moomoo, tiingo
             "news_data": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
@@ -355,6 +356,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         "eodhd_api_key": None,  # EODHD daily OHLCV (eodhd.py)
         "massive_api_key": None,  # Massive.com US data (massive.py)
+        "tiingo_api_key": None,  # Tiingo market data (tiingo.py)
         # Optional path to a Massive Flat-File day-aggregates CSV. When set, the
         # value-screener's OHLCV fetch checks it first (bulk history for ATR /
         # scan bases) before falling back to the per-ticker vendor chain. This
