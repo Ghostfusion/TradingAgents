@@ -298,6 +298,14 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - OpenBB deep-study enhancement roadmap
+  (`docs/design_openbb_enhancements.md`): research-to-design mapping OpenBB's
+  typed provider envelopes (VendorResult/error_kind), self-describing
+  REST/CLI/MCP surface, statistical/econometrics toolkit (normality/unit-root/
+  CAPM/VIF/relative-rotation/Clenow/omega/vol-cones), free data surfaces
+  (cboe options IV + greeks, federal_reserve risk-free curve, finviz/yfinance
+  screener), and trading_web product gaps (watchlist/data grid/charts/
+  credentials/presets/MCP). No code yet — phased plan with quick-wins verdict.
 - 2026-08-28 `(working tree)` - QuantLib + Lean enhancements (deep-study
   implementation): new pure `strategies/*` modules `options_math` (Black-76
   IV / Greeks / vol surface), `rate_utils` (discount / compound / equiv-rate +

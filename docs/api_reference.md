@@ -613,3 +613,9 @@ preserves `Risk Gate (computed)` blocks.
   of QuantLib (pricing/measurement rigor) + Lean (framework/operational rigor)
   mapped to concrete deterministic `strategies/*` enhancements, phased
   (highest ROI first) with quick-wins verdict.
+- `docs/design_openbb_enhancements.md` - research-to-design: deep study of
+  OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
+  quantitative/econometrics/technical toolkit, Tauri desktop + SPA product
+  surfaces) mapped to TradingAgents `dataflows/` + `strategies/` and
+  `trading_web` (watchlist/grid/charts/credentials/presets/MCP), phased with a
+  quick-wins verdict.
