@@ -297,6 +297,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+## Changelog of this fork (most recent first)
+- 2026-08-28 `(working tree)` - Empty-final-decision hardening: a model that
+  misses `with_structured_output` can answer the free-text retry with only a
+  bare header (`**Decision`), which silently became an empty
+  `5_portfolio/decision.md`. `invoke_structured_or_freetext` now detects a
+  stub, re-invokes once, and if still degenerate returns an explicit
+  "**Decision**: unavailable" notice. See CHANGELOG [Unreleased] ### Fixed.
 - 2026-08-28 `(working tree)` - End-to-end advisory-context wiring fix: the
   Phase A-E decision context (`computed_decision_context` / `risk_context`)
   were seeded onto `AgentState` but not declared as LangGraph channels, so

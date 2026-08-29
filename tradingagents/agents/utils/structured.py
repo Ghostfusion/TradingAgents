@@ -19,6 +19,7 @@ all three agents log the same warnings when fallback fires.
 from __future__ import annotations
 
 import logging
+import re as _re
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -115,6 +116,84 @@ def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str) -> str:
     return full
 
 
+def _looks_stub(text: str) -> bool:
+    """Is a free-text fallback response a degenerate stub (no usable body)?
+
+    A model that misses structured output can answer with only a section
+    header (e.g. ``**Decision``) or whitespace; downstream that silently
+    becomes an empty final decision in the reports and memory log. Return
+    True only for such degenerate responses (empty, a single label token, or
+    fewer than ~2 words of actual content after stripping markdown
+    decorators), never for real prose.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    body = _re.sub(r"[#*_`|>\-]", "", t)
+    words = [w for w in body.split() if not _re.fullmatch(r"[\W_]+", w)]
+    if len(words) < 2:
+        return True
+    return bool(len(" ".join(words)) < 12 and ":" not in t)
+
+
+def _stub_completion_prompt(original: Any) -> str:
+    """Ask a model that produced only a header/stub to write the real body.
+
+    The stub retry re-invokes with the original instructions + evidence so a
+    context-light model still has everything it needs to deliver the decision
+    (mirrors ``_continuation_prompt``'s grounding-by-context approach).
+    """
+    text = original if isinstance(original, str) else str(original)
+    return (
+        "Your previous response contained only a section header or label "
+        "with no actual decision content. Re-read the instructions and "
+        "evidence below and produce the COMPLETE decision now: the "
+        "recommendation, position action, and reasoning. Cite only computed "
+        "values you were given; state 'unavailable' where none exist. Do not "
+        "echo the instructions back.\n\n"
+        "INSTRUCTIONS + EVIDENCE:\n" + text[:4000]
+    )
+
+
+def _retry_if_stub(
+    plain_llm: Any, prompt: Any, response_text: str, agent_name: str
+) -> str:
+    """A stub free-text fallback is not a usable decision.
+
+    The structured->free-text path can hand back a bare header (live runs
+    have landed a lone ``**Decision`` in the final report). Re-invoke once
+    with a completion directive; if the retry is still degenerate, return an
+    explicit 'unavailable' notice instead of an empty decision, so downstream
+    never renders a bare header.
+    """
+    text = response_text or ""
+    for _ in range(_MAX_TRUNCATION_RETRIES):
+        if not _looks_stub(text):
+            return text
+        try:
+            resp = plain_llm.invoke(_stub_completion_prompt(prompt))
+            nxt = resp.content if hasattr(resp, "content") else str(resp)
+        except Exception as exc:  # noqa: BLE001 - a failed retry degrades
+            logger.warning("%s: stub-completion retry failed: %s", agent_name, exc)
+            break
+        if not nxt or not nxt.strip():
+            break
+        text = nxt
+    if _looks_stub(text):
+        logger.warning(
+            "%s: free-text fallback returned an empty/stub response; "
+            "emitting an explicit unavailable decision",
+            agent_name,
+        )
+        return (
+            "**Decision**: unavailable — the model returned an incomplete "
+            "response after the structured-output fallback. The prior "
+            "research and risk debate stand; re-run to regenerate the final "
+            "decision."
+        )
+    return text
+
+
 def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str) -> str:
     """Re-invoke a tool-calling chain when its final content was cut.
 
@@ -204,7 +283,9 @@ def invoke_structured_or_freetext(
 
     response = plain_llm.invoke(prompt)
     response_text = response.content if hasattr(response, "content") else str(response)
-    # Enforce completeness: if the response was cut at the output cap, re-invoke
-    # with a continuation prompt and merge (max_tokens is a ceiling, not a
-    # floor — this is what guarantees the agent's report is not truncated).
-    return _retry_if_truncated(plain_llm, prompt, response_text)
+    # Enforce completeness: cut-at-cap -> continuation merge.
+    response_text = _retry_if_truncated(plain_llm, prompt, response_text)
+    # Harden: a bare header/stub is not a usable decision. Regenerate once;
+    # if still degenerate, return an explicit 'unavailable' notice so a
+    # structured-output miss can never silently produce an empty decision.
+    return _retry_if_stub(plain_llm, prompt, response_text, agent_name)

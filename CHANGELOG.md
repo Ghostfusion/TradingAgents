@@ -128,6 +128,15 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Empty final decision after structured-output fallback** - a model that
+  misses `with_structured_output` can answer the free-text retry with only a
+  section header (live-run symptom: `**Decision` alone landed in
+  `5_portfolio/decision.md`). `invoke_structured_or_freetext` now detects a
+  degenerate stub, re-invokes once with a completion directive, and if still
+  empty returns an explicit "**Decision**: unavailable" notice — never a bare
+  header. Covers Trader / Research Manager / Portfolio Manager free-text
+  paths. Tests: `test_invoke_structured_stub_freetext_regenerates`,
+  `..._still_empty_returns_notice`, `..._retry_exception_returns_notice`.
 - **End-to-end advisory-context injection (agent + report)** - the Phase A-E
   decision context (`computed_decision_context` / `risk_context`) was seeded
   onto `AgentState` but the keys were not declared as LangGraph channels, so

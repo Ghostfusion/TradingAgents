@@ -166,13 +166,77 @@ def test_invoke_structured_falls_back_when_result_is_none():
     structured = MagicMock()
     structured.invoke.return_value = None
     plain = MagicMock()
-    plain.invoke.return_value = MagicMock(content="FREETEXT")
+    plain.invoke.return_value = MagicMock(
+        content="**Rating**: Hold. Market is flat; keep the current position "
+        "and let the plan play out."
+    )
 
     out = invoke_structured_or_freetext(
         structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
     )
-    assert out == "FREETEXT"
+    assert out.startswith("**Rating**: Hold")
     plain.invoke.assert_called_once()
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_freetext_regenerates():
+    # A model that misses structured output can answer with only a section
+    # header (e.g. `**Decision`). That stub must be retried, not passed through.
+    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.side_effect = [
+        MagicMock(content="**Decision"),
+        MagicMock(content="**Rating**: Sell. Guidance cut; exit on strength."),
+    ]
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+    )
+    assert out == "**Rating**: Sell. Guidance cut; exit on strength."
+    assert plain.invoke.call_count == 2
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_freetext_still_empty_returns_notice():
+    # If the stub retry still comes back degenerate, we must surface an
+    # explicit 'unavailable' decision, never a bare header.
+    from tradingagents.agents.utils.structured import (
+        _MAX_TRUNCATION_RETRIES,
+        invoke_structured_or_freetext,
+    )
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.return_value = MagicMock(content="**Decision")
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+    )
+    assert "unavailable" in out
+    assert out.startswith("**Decision**:")
+    # 1 initial free-text call + the retries.
+    assert plain.invoke.call_count == 1 + _MAX_TRUNCATION_RETRIES
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_retry_exception_returns_notice():
+    # A failed stub retry (provider error) must also degrade to the notice
+    # rather than raise or emit an empty decision.
+    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.side_effect = [MagicMock(content="**Decision"), RuntimeError("boom")]
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+    )
+    assert "unavailable" in out
 
 
 @pytest.mark.unit
