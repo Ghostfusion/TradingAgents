@@ -559,3 +559,118 @@ DEFAULT_CONFIG = _apply_env_overrides(
         },
     }
 )
+
+
+def validate_config(config: dict) -> list[str]:
+    """Range-check runtime config and return human-readable violations.
+
+    The env overrides coerce `TRADINGAGENTS_*` to the default's *type*, but a
+    well-typed value can still be nonsense (negative window, fraction > 1,
+    tranche weights that do not sum to ~1), which silently skews every run.
+    This collects all violations so they can be logged once at startup -
+    advisory, never raised, missing keys are simply skipped (a caller may pass
+    a config sub-slice). Mirrors NautilusTrader's ConfigErrorCollector pattern
+    (collect every field violation instead of failing on the first).
+    """
+    violations: list[str] = []
+
+    def frac(key: str, lo: float = 0.0, hi: float = 1.0) -> None:
+        v = config.get(key)
+        if v is None:
+            return
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            violations.append(f"{key} is not a number: {v!r}")
+            return
+        if not (lo <= v <= hi):
+            violations.append(f"{key}={v} outside [{lo}, {hi}]")
+
+    def positive(key: str, allow_zero: bool = False) -> None:
+        v = config.get(key)
+        if v is None:
+            return
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            violations.append(f"{key} is not a number: {v!r}")
+            return
+        if (not allow_zero and v <= 0) or (allow_zero and v < 0):
+            violations.append(f"{key}={v} must be {'>= 0' if allow_zero else '> 0'}")
+
+    # Fractions / scales / rates that must live in [0, 1].
+    for key in (
+        "kelly_fraction",
+        "target_vol",
+        "position_odds",
+        "catalyst_scale_floor",
+        "catalyst_baseline_move",
+        "catalyst_macro_scale",
+        "catalyst_fed_scale",
+        "catalyst_miss_scale",
+        "risk_daily_cvar_budget_pct",
+        "risk_max_drawdown_pct",
+        "risk_daily_loss_budget_pct",
+        "risk_hwm_soft_pct",
+        "risk_hwm_hard_pct",
+        "risk_manager_drawdown_pct",
+        "tranche_risk_pct",
+        "correlation_threshold",
+        "correlation_penalty_frac",
+        "volume_share_vol_limit",
+        "volume_share_price_impact",
+    ):
+        frac(key)
+
+    # Non-negative numeric knobs (0 allowed where it means "off").
+    for key in (
+        "catalyst_window_days",
+        "catalyst_macro_window_days",
+        "catalyst_fed_window_days",
+        "catalyst_hard_block_days",
+        "rolling_window",
+        "calibration_min_n",
+        "min_holding_days",
+        "max_trades_per_period",
+        "tranche_stop_mult",
+        "atr_mult",
+        "target_atr",
+        "max_debate_rounds",
+        "max_risk_discuss_rounds",
+    ):
+        positive(key, allow_zero=True)
+
+    # Monotonic HWM tiers: soft cannot exceed hard.
+    soft = config.get("risk_hwm_soft_pct")
+    hard = config.get("risk_hwm_hard_pct")
+    if soft is not None and hard is not None:
+        try:
+            if float(soft) > float(hard):
+                violations.append(
+                    f"risk_hwm_soft_pct={soft} must be <= risk_hwm_hard_pct={hard}"
+                )
+        except (TypeError, ValueError):
+            pass
+
+    # Tranche weights: each in [0,1] and sum to ~1.
+    tw = config.get("tranche_weights")
+    if tw is not None:
+        try:
+            vals = list(tw)
+        except TypeError:
+            violations.append(f"tranche_weights is not a sequence: {tw!r}")
+            vals = []
+        if vals:
+            all_num = True
+            for i, v in enumerate(vals):
+                try:
+                    float(v)
+                except (TypeError, ValueError):
+                    all_num = False
+                    violations.append(f"tranche_weights[{i}] is not a number: {v!r}")
+            if all_num:
+                total = sum(float(x) for x in vals)
+                if abs(total - 1.0) > 1e-6:
+                    violations.append(f"tranche_weights sum to {total:.4f}, expected ~1.0")
+
+    return violations

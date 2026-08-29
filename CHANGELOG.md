@@ -9,7 +9,31 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
-- **OpenBB enhancements (deep-study implementation)** (`docs/design_openbb_enhancements.md`) -
+- **NautilusTrader enhancements (deep-study implementation)** (`docs/design_nautilus_trader_enhancements.md`) -
+  design → implemented (3 phases):
+  - **Backtest harness (new capability)** - `strategies/backtest_engine.py`
+    (order state machine: SUBMITTED/ACCEPTED/PARTIALLY_FILLED/FILLED/CANCELED/
+    REJECTED; bar-based limit/stop matching + cash curve) +
+    `strategies/backtest_models.py` (fixed + maker/taker fees, adverse-tick
+    slippage, fill-probability heuristic) + `scripts/backtest_strategy.py`
+    (replays a report's entry/stop/target plan over vendor OHLCV with order-
+    honored entry-then-exit, emitting fills + net-of-cost PnL; auto-reads the
+    newest `full_states_log` stop). Advisory, never emits orders. Web:
+    `run_backtest` capability + Scripts screen option.
+  - **Consistent risk sizing** - `strategies/risk_sizing.py` (commission-aware,
+    tranche-aware fixed-risk sizer: `risk_points` / `riskable_money` /
+    `risk_money` / `risk_quantity`); `value_dip.tranche_plan` now sizes through
+    it (commission shrinks the dollar-risk budget). `strategies/risk_checks.py`
+    (rolling-window `RateLimiter` + per-symbol notional `pre_trade_check`).
+  - **Statistics + config validation** - `strategies/evaluate.py` adds
+    `calmar_ratio`, `ulcer_index`, `capture_ratio`, `tail_ratio`,
+    `expectancy_stats`; `default_config.py` adds `validate_config()`
+    (collects range/fraction/tranche-sum/HWM-monotonic violations - the
+    Nautilus ConfigErrorCollector pattern).
+  Tests: `tests/test_nautilus_phase{1,2,3}.py` (44) + value-dip/governor/
+  contract regression green; ruff clean.
+
+ (`docs/design_openbb_enhancements.md`) -
   design → implemented (Phases 1-4 + cross-cutting):
   - **Strategy depth** - `strategies/statistical.py` (normality, unit_root
     ADF+KPSS, omega, correlation_matrix, cointegration_pair, granger_causality,

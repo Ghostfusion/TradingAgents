@@ -333,6 +333,129 @@ def underwater_drawdowns(equity: list[float]) -> list[dict]:
     return events
 
 
+def calmar_ratio(returns: list[float], periods_per_year: float = 252.0) -> float | None:
+    """Calmar ratio = annualized CAGR / max drawdown magnitude.
+
+    0/positive-drawdown edge returns None (no meaningful risk ratio). Guards
+    on <2 observations like the other CAGR-based stats.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    eq = equity_curve(vals)
+    mdd = max_drawdown(eq)
+    if mdd <= 0:
+        return None
+    c = cagr(vals, periods_per_year)
+    if c is None:
+        return None
+    return c / mdd
+
+
+def ulcer_index(returns: list[float]) -> float | None:
+    """Ulcer index = sqrt(mean(periodic drawdown^2)) over the equity curve.
+
+    Penalizes sustained, not just the deepest, drawdowns (a Nautilus
+    ready-made stat). None on <2 observations.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    eq = equity_curve(vals)
+    peak = eq[0]
+    dds: list[float] = []
+    for v in eq:
+        peak = max(peak, v)
+        dds.append((peak - v) / peak if peak > 0 else 0.0)
+    mean_sq = sum(d * d for d in dds) / len(dds)
+    return math.sqrt(mean_sq)
+
+
+def capture_ratio(returns: list[float], benchmark: list[float], up: bool = True) -> float | None:
+    """Up/down capture: average of (algo / benchmark) moves in up (or down) periods.
+
+    Up capture = geometric mean of (1+r_algo)/(1+r_bench) over periods the
+    benchmark rose; down capture over periods it fell. A value > 1.0 means the
+    algo captured more of that direction than the benchmark. None when fewer
+    than 2 aligned periods exist in that direction, or benchmark is flat.
+    """
+    a = _clean(returns)
+    b = _clean(benchmark)
+    n = min(len(a), len(b))
+    if n < 2:
+        return None
+    ratios: list[float] = []
+    for i in range(n):
+        r_algo = a[i]
+        r_bench = b[i]
+        if r_bench is None or r_algo is None:
+            continue
+        is_up = r_bench > 0
+        if is_up != up:
+            continue
+        try:
+            ratios.append((1.0 + r_algo) / (1.0 + r_bench))
+        except ZeroDivisionError:
+            continue
+    if not ratios:
+        return None
+    prod = 1.0
+    for r in ratios:
+        prod *= r
+    return prod ** (1.0 / len(ratios)) - 1.0
+
+
+def tail_ratio(returns: list[float]) -> float | None:
+    """Tail ratio = average winning return / |average losing return|.
+
+    A summary of payoff asymmetry (the Losses/Hits magnitude split Nautilus
+    reports as winner_avg/loser_avg). None when there are no winners or no
+    losers (>0 no positive mass guard).
+    """
+    vals = _clean(returns)
+    wins = [v for v in vals if v > 0]
+    losses = [v for v in vals if v < 0]
+    if not wins or not losses:
+        return None
+    avg_win = sum(wins) / len(wins)
+    avg_loss = abs(sum(losses) / len(losses))
+    if avg_loss <= 0:
+        return None
+    return avg_win / avg_loss
+
+
+def expectancy_stats(wins: list[float], losses: list[float]) -> dict | None:
+    """Trade-outcome summary: win rate, profit factor, expectancy, tail ratio.
+
+    All sourced from the caller's win/loss per-trade lists (not the return
+    series), the shape the pre-market paper ledger already records. Returns a
+    dict of floats, or None when both lists are empty.
+    """
+    w = [float(x) for x in wins if x is not None]
+    losses_f = [float(x) for x in losses if x is not None]
+    if not w and not losses_f:
+        return None
+    n = len(w) + len(losses_f)
+    win_rate = len(w) / n if n else 0.0
+    gw = sum(w) if w else 0.0
+    gl = abs(sum(losses_f)) if losses_f else 0.0
+    profit_factor = (gw / gl) if gl > 0 else (float("inf") if gw > 0 else 0.0)
+    avg_win = (sum(w) / len(w)) if w else 0.0
+    avg_loss = (abs(sum(losses_f)) / len(losses_f)) if losses_f else 0.0
+    tail = (avg_win / avg_loss) if (w and losses_f and avg_loss > 0) else None
+    # Expectancy E = P(win)*avg_win - P(loss)*avg_loss (matches value_dip.expectancy).
+    expectancy_v = (win_rate * avg_win) - ((1.0 - win_rate) * avg_loss)
+    return {
+        "n_trades": n,
+        "win_rate": win_rate,
+        "profit_factor": profit_factor,
+        "expectancy": expectancy_v,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "tail_ratio": tail,
+    }
+
+
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
@@ -340,4 +463,6 @@ __all__ = [
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",
+    "calmar_ratio", "ulcer_index", "capture_ratio", "tail_ratio",
+    "expectancy_stats",
 ]

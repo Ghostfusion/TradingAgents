@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 
+from .risk_sizing import riskable_money  # noqa: E402 (lazy single-primitive sizer)
 from .size import atr as _atr
 from .swing import rsi as _rsi
 
@@ -186,6 +187,7 @@ def tranche_plan(
     stop_mult: float = 1.5,
     account: float = 100_000.0,
     risk_pct: float = 0.015,
+    commission_rate: float = 0.0,
     steps: tuple = (1.0, 2.0),
     pct_steps: tuple | None = None,
 ) -> dict:
@@ -232,7 +234,11 @@ def tranche_plan(
     risk_per_share = avg_entry - stop
     if risk_per_share <= 0:
         return {"valid": False, "reason": "risk per share is non-positive"}
-    max_dollar_risk = float(account) * float(risk_pct)
+    max_dollar_risk = riskable_money(
+        float(account), float(risk_pct), float(commission_rate)
+    )
+    if max_dollar_risk <= 0:
+        return {"valid": False, "reason": "non-positive dollar risk budget"}
     total_shares = int(max_dollar_risk / risk_per_share)
     n1 = int(total_shares * w[0])
     n2 = int(total_shares * w[1])
