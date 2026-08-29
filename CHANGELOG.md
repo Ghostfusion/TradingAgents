@@ -9,6 +9,23 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Provider-endpoint + calc-wiring pass** - audited every data provider's
+  endpoint surface (docs + SDKs) and every strategy calculator for agent
+  exposure:
+  - **Keyless yfinance fallbacks** (new `y_finance.py` functions —
+    `get_analyst_ratings_yfinance`, `get_earnings_calendar_yfinance`,
+    `get_institution_holdings_yfinance`) registered in `VENDOR_METHODS` and
+    the default `data_vendors` chains (`analyst_ratings`/`earnings_calendar`
+    = `moomoo,finnhub,yfinance`; `institution_data` = `moomoo,yfinance`) so
+    sell-side ratings, earnings dates/EPS surprise and ownership no longer
+    depend on the moomoo gateway or a paid key.
+  - **New market analyst tools** wiring unwrapped deterministic calculators:
+    `get_scaleout_plan` (swing.scaleout_plan tiered profit-taking),
+    `get_payoff_asymmetry` (statistical.omega), `get_book_correlation`
+    (statistical.correlation_matrix). `get_strategy_quality` now also reports
+    Calmar / Ulcer / tail-ratio / expectancy (previously-unwrapped evaluate.*).
+  - All bound to the market ToolNode; hermetic tests
+    (`test_yfinance_keyless_vendor.py`, new analysis-tool cases). ruff clean.
 - **Tiingo data vendor (free Starter tier)** (`dataflows/tiingo.py`) -
   additive market-data source wired through the vendor contract:
   - **EOD OHLCV** - `get_stock_data_tiingo` (`/tiingo/daily/{t}/prices`, 7+

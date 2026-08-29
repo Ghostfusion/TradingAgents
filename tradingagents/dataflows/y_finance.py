@@ -490,3 +490,146 @@ def get_insider_transactions(
         # the failure path changes: re-raise so the router falls back instead
         # of caching an "Error retrieving..." string as truth.
         raise
+
+
+def get_earnings_calendar_yfinance(
+    ticker: Annotated[str, "ticker symbol of the company"],
+    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
+    look_back_days: Annotated[int | None, "Days to look back; unused"] = None,
+) -> str:
+    """Earnings dates + last reported EPS surprise from yfinance (keyless).
+
+    Keyless fallback for the earnings_calendar category: ``get_earnings_dates``
+    returns the upcoming earnings date(s) and the most recent reported
+    EPS/estimate/surprise, so a run never depends on the moomoo/Finnhub path.
+    """
+    canonical = require_symbol(ticker)
+    try:
+        ticker_obj = yf.Ticker(canonical)
+        dates = yf_retry(lambda: ticker_obj.get_earnings_dates(limit=8))
+        if dates is None or dates.empty:
+            raise NoMarketDataError(ticker, canonical, "no earnings dates")
+        rows = []
+        for index, row in dates.iterrows():
+            eps_est = row.get("EPS Estimate")
+            eps_act = row.get("Reported EPS")
+            surprise = row.get("Surprise(%)")
+            parts = []
+            if eps_est is not None and not pd.isna(eps_est):
+                parts.append(f"estimate={eps_est:.2f}")
+            if eps_act is not None and not pd.isna(eps_act):
+                parts.append(f"reported={eps_act:.2f}")
+            if surprise is not None and not pd.isna(surprise):
+                parts.append(f"surprise_pct={surprise:.2f}")
+            rows.append(
+                f"{index.strftime('%Y-%m-%d')} "
+                + ("; ".join(parts) if parts else "scheduled")
+            )
+        if not rows:
+            raise NoMarketDataError(ticker, canonical, "no earnings dates")
+        header = f"# Earnings calendar for {canonical}\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        return header + "\n".join(rows)
+    except NoMarketDataError:
+        raise
+    except Exception:
+        raise
+
+
+def get_institution_holdings_yfinance(
+    ticker: Annotated[str, "ticker symbol of the company"],
+) -> str:
+    """Institutional + major holders from yfinance (keyless).
+
+    Keyless ownership read: institutional holders (shares/change/date, e.g.
+    Vanguard/BlackRock rows) and the major-holders % breakdown (insiders /
+    institutions / public float). Complements moomoo's `get_institution_holdings`.
+    """
+    canonical = require_symbol(ticker)
+    try:
+        ticker_obj = yf.Ticker(canonical)
+        inst = yf_retry(lambda: ticker_obj.institutional_holders)
+        major = yf_retry(lambda: ticker_obj.major_holders)
+        lines = []
+        if inst is not None and not inst.empty:
+            lines.append("Institutional holders (largest):")
+            for _, row in inst.head(15).iterrows():
+                holder = row.get("Holder")
+                shares = row.get("Shares")
+                date = row.get("Date Reported")
+                pct = row.get("% Out")
+                parts = []
+                if shares is not None and not pd.isna(shares):
+                    parts.append(f"shares={float(shares):,.0f}")
+                if pct is not None and not pd.isna(pct):
+                    parts.append(f"pct_out={float(pct):.2f}%")
+                if date is not None and not pd.isna(date):
+                    parts.append(f"date={date}")
+                if parts:
+                    lines.append(f"  {holder}: " + "; ".join(parts))
+        if major is not None and not major.empty:
+            lines.append("Major-holders breakdown:")
+            for _, row in major.iterrows():
+                label = row.get(0)
+                pct = row.get(1)
+                if label is not None and pct is not None:
+                    lines.append(f"  {label}: {pct}")
+        if not lines:
+            raise NoMarketDataError(ticker, canonical, "no ownership data")
+        header = f"# Ownership for {canonical}\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        return header + "\n".join(lines)
+    except NoMarketDataError:
+        raise
+    except Exception:
+        raise
+
+
+def get_analyst_ratings_yfinance(
+    ticker: Annotated[str, "ticker symbol of the company"],
+) -> str:
+    """Analyst recommendation summary + price-target consensus (keyless).
+
+    Keyless sell-side read: yfinance ``recommendations_summary`` (strong
+    buy/buy/hold/underperform/sell counts) + ``analyst_price_targets`` (mean/
+    median/high/low + number of analysts). Complements the Finnhub ratings
+    chain without a key.
+    """
+    canonical = require_symbol(ticker)
+    try:
+        ticker_obj = yf.Ticker(canonical)
+        recs = yf_retry(lambda: ticker_obj.recommendations_summary)
+        targets = yf_retry(lambda: ticker_obj.analyst_price_targets)
+        lines = []
+        if recs is not None and not recs.empty:
+            lines.append("Recommendation summary (latest period):")
+            last = recs.iloc[-1]
+            for col in ("strongBuy", "buy", "hold", "underperform", "sell"):
+                val = last.get(col)
+                if val is not None and not pd.isna(val):
+                    lines.append(f"  {col}: {int(val)}")
+        if targets is not None and not targets.empty:
+            lines.append("Analyst price-target consensus:")
+            t = targets.iloc[-1]
+            for label, col in (
+                ("current", "current"),
+                ("low", "low"),
+                ("high", "high"),
+                ("mean", "mean"),
+                ("median", "median"),
+                ("n_analysts", "numberOfAnalystOpinions"),
+            ):
+                val = t.get(col)
+                if val is not None and not pd.isna(val):
+                    lines.append(
+                        f"  {label}: {val:.2f}" if isinstance(val, float) else f"  {label}: {val}"
+                    )
+        if not lines:
+            raise NoMarketDataError(ticker, canonical, "no analyst data")
+        header = f"# Analyst ratings for {canonical}\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        return header + "\n".join(lines)
+    except NoMarketDataError:
+        raise
+    except Exception:
+        raise

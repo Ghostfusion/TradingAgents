@@ -298,6 +298,16 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - Provider-endpoint + calc-wiring pass: yfinance
+  keyless fallbacks added for `analyst_ratings` (recommendation summary +
+  price-target consensus), `earnings_calendar` (earnings dates + EPS surprise)
+  and `institution_data` (institutional + major holders) — registered in
+  VENDOR_METHODS + default chains (`moomoo,finnhub,yfinance` /
+  `moomoo,yfinance`) so no key is needed for those signals; new market tools
+  `get_scaleout_plan` (swing.scaleout_plan), `get_payoff_asymmetry`
+  (statistical.omega) and `get_book_correlation` (statistical.correlation_matrix),
+  plus `get_strategy_quality` extended with calmar/ulcer/tail_ratio/expectancy.
+  See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Full-set audit fixes (correctness + wiring):
   `exit_check` profit target anchored at entry (was never-firing "target"),
   horizon parametric CVaR sign/tail fix, `first_pullback` R:R dead-pattern fix,

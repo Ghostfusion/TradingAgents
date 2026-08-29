@@ -90,11 +90,14 @@ from .tiingo import (
 )
 from .vendor_cache import vendor_cache
 from .y_finance import (
+    get_analyst_ratings_yfinance,
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
+    get_earnings_calendar_yfinance,
     get_fundamentals as get_yfinance_fundamentals,
     get_income_statement as get_yfinance_income_statement,
     get_insider_transactions as get_yfinance_insider_transactions,
+    get_institution_holdings_yfinance,
     get_stock_stats_indicators_window,
     get_YFin_data_online,
 )
@@ -379,11 +382,13 @@ VENDOR_METHODS = {
     "get_analyst_ratings": {
         "finnhub": get_analyst_ratings_finnhub,
         "moomoo": get_analyst_ratings_moomoo,
+        "yfinance": get_analyst_ratings_yfinance,
     },
     # earnings_calendar
     "get_earnings_calendar": {
         "finnhub": get_earnings_calendar_finnhub,
         "moomoo": get_earnings_calendar_moomoo,
+        "yfinance": get_earnings_calendar_yfinance,
     },
     # options_data
     "get_options_chain": {
@@ -432,6 +437,7 @@ VENDOR_METHODS = {
     },
     "get_institution_holdings": {
         "moomoo": get_institution_holdings_moomoo,
+        "yfinance": get_institution_holdings_yfinance,
     },
     "get_earnings_surprise_history": {
         "moomoo": get_earnings_surprise_history_moomoo,

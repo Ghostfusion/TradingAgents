@@ -1649,12 +1649,16 @@ def get_strategy_quality(
     try:
         from tradingagents.strategies.evaluate import (
             cagr,
+            calmar_ratio,
             equity_curve,
+            expectancy_stats,
             max_drawdown,
             net_returns,
             probabilistic_sharpe,
             sharpe,
             sortino,
+            tail_ratio,
+            ulcer_index,
             volatility,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1676,9 +1680,23 @@ def get_strategy_quality(
     psr = probabilistic_sharpe(net)
     so_txt = f"{so:.2f}" if so is not None else "unavailable"
     psr_txt = f"{psr:.2f}" if psr is not None else "unavailable"
+    # Opportunistic breadth (evaluate.* extras the audit found unwrapped):
+    cal = calmar_ratio(net)
+    ul = ulcer_index(net)
+    tr = tail_ratio(net)
+    ex = expectancy_stats([r for r in net if r > 0], [r for r in net if r < 0])
+
+    def _f(v, nd=2):
+        return "unavailable" if v is None else f"{v:.{nd}f}"
+
+    ex_txt = "unavailable"
+    if ex is not None:
+        ex_txt = f"pf={_f(ex.get('profit_factor'))} win_rate={ex.get('win_rate')!s}"
     return (
         f"strategy quality {ticker}: net_cagr={cg:.2%} vol={vol:.2%} "
-        f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} n={len(net)}"
+        f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} "
+        f"calmar={_f(cal)} ulcer={_f(ul)} tail_ratio={_f(tr)} "
+        f"{ex_txt} n={len(net)}"
     )
 
 
@@ -1811,6 +1829,95 @@ def get_exit_plan(
         f"exit_plan: breakeven_stop={be_s} (trigger={be.get('trigger')}) "
         f"giveback_{gb_v} stop_px={gb.get('stop_px')} "
         f"remaining_gain_pct={gb.get('remaining_gain_pct')} (giveback {float(giveback_pct):.0%})"
+    )
+
+
+@tool
+def get_scaleout_plan(
+    entry: Annotated[float, "entry price"],
+    stop: Annotated[float, "invalidation/stop price"],
+    t1_fraction: Annotated[float, "fraction to sell at target 1, default 0.5"] = 0.5,
+) -> str:
+    """Scale-out profit policy (swing.scaleout_plan, Phase-5 profit mgmt).
+
+    Reports the tiered partial-profit plan: sell ``t1_fraction`` at T1, move
+    the rest to break-even, trail the remainder. Use before any 'take partial
+    profits / scale out / let winners run' claim on a swing position.
+    """
+    try:
+        from tradingagents.strategies.swing import scaleout_plan
+    except Exception as exc:  # noqa: BLE001
+        return f"scaleout plan unavailable: {exc}"
+    r = scaleout_plan(float(entry), float(stop), t1_fraction=float(t1_fraction))
+    if not r.get("valid"):
+        return "scaleout plan unavailable: unusable entry/stop."
+    return (
+        f"scaleout_plan: t1={r['t1']:.2f} t2={r['t2']:.2f} "
+        f"sell_t1_fraction={r['t1_fraction']:.0%} keep_t2={r['t2_fraction']:.0%} "
+        f"breakeven_after_t1={r['breakeven_after_t1']} trail={r['trail']}"
+    )
+
+
+@tool
+def get_payoff_asymmetry(
+    ticker: Annotated[str, "ticker symbol"],
+    returns: Annotated[
+        list[float] | None, "optional return series; default price-derived"
+    ] = None,
+    threshold: Annotated[float, "payoff threshold, default 0"] = 0.0,
+) -> str:
+    """Omega ratio (statistical.omega): parameter-free payoff asymmetry about a
+    threshold - sum of gains / sum of losses; >1 = upside-heavy payoff. Use
+    before any 'positive skew / asymmetric payoff / limited downside' claim.
+    """
+    try:
+        from tradingagents.strategies.statistical import omega
+    except Exception as exc:  # noqa: BLE001
+        return f"payoff asymmetry unavailable for {ticker}: {exc}"
+    if returns is None or not returns:
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 15:
+            return f"payoff asymmetry unavailable for {ticker}: not enough history."
+        returns = _daily_returns(closes)
+    o = omega(returns, threshold=float(threshold))
+    if o is None:
+        return f"payoff asymmetry unavailable for {ticker}: needs gains and losses."
+    return f"payoff asymmetry {ticker}: omega={o:.2f} threshold={threshold} n={len(returns)}"
+
+
+@tool
+def get_book_correlation(
+    returns_by_name: Annotated[
+        dict, "dict of name -> aligned return series"
+    ],
+    method: Annotated[str, "pearson | spearman | kendall, default pearson"] = "pearson",
+) -> str:
+    """Full pairwise correlation matrix over a book (statistical.correlation_matrix).
+
+    Reports the average pairwise correlation and the most-correlated pair - the
+    concentration control behind the correlation-aware allocation. Use before
+    any 'this book is diversified / over-concentrated' claim.
+    """
+    try:
+        from tradingagents.strategies.statistical import correlation_matrix
+    except Exception as exc:  # noqa: BLE001
+        return f"book correlation unavailable: {exc}"
+    m = correlation_matrix(returns_by_name, method=method)
+    if not m or "names" not in m or len(m["names"]) < 2:
+        return "book correlation unavailable: need >= 2 aligned return series."
+    names = m["names"]
+    flat = []
+    for ni, row in m["corr"].items():
+        for nj, r in row.items():
+            if r is not None and ni < nj:
+                flat.append((abs(r), ni, nj))
+    if not flat:
+        return "book correlation unavailable: no computable pairs."
+    avg = sum(v for v, _, _ in flat) / len(flat)
+    max_v, max_i, max_j = max(flat, key=lambda t: t[0])
+    return (
+        f"book_correlation ({method}): n={len(names)} avg_pairwise={avg:.2f} "
+        f"max=|{max_i}/{max_j}|={max_v:.2f}"
     )
 
 
@@ -2987,6 +3094,9 @@ __all__ = [
     "get_ratios",
     "get_exit_check",
     "get_exit_plan",
+    "get_scaleout_plan",
+    "get_payoff_asymmetry",
+    "get_book_correlation",
     "get_allocation",
     "get_regime_components",
     "get_consensus",

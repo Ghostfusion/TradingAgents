@@ -300,7 +300,7 @@ scripts: `scripts/evaluate_config_gate.py`
 Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `dataflows/interface.py`. The vendor chain per category is configured in
 `data_vendors` (default chains: `eodhd,moomoo,yfinance`, `fred,moomoo`,
-`polymarket,moomoo`, `moomoo,finnhub`, `sec_edgar`). Errors propagate through
+`polymarket,moomoo`, `moomoo,finnhub,yfinance`, `sec_edgar`). Errors propagate through
 `dataflows/errors.py`, the router converts to sentinel strings
 (`NO_DATA_AVAILABLE`, `DATA_UNAVAILABLE` optional, `DATA_DISABLED`).
 
@@ -347,7 +347,11 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`
 - macro: `fred`, `massive`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
-- analyst ratings + earnings calendar: `finnhub`, `moomoo`
+- analyst ratings + earnings calendar: `finnhub`, `moomoo`, `yfinance` (keyless
+  fallback: `get_analyst_ratings_yfinance` = recommendation summary +
+  price-target consensus; `get_earnings_calendar_yfinance` = earnings dates +
+  EPS surprise). Institutional holdings also add a keyless `yfinance` option
+  (`get_institution_holdings_yfinance`).
 - finnhub free-tier extra (key-gated): `get_basic_financials` (metrics),
   `get_company_peers`, `get_insider_activity` (insider sentiment);
   `get_fundamentals` also accepts `finnhub` as a vendor
@@ -509,6 +513,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_horizon_var(ticker, horizon_days?, alpha?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate |
 | `get_trailing_exit(ticker, entry, peak, current, trail_pct?)` | `strategies.exits.trailing_stop_exit` | market | peak-trailing / give-back stop verdict + exit price |
 | `get_exit_plan(entry, atr, current, peak?, stop?, giveback_pct?)` | `strategies.exits.breakeven_after_confirmation` + `max_giveback_exit` | market | structure/R breakeven trigger + margin-giveback stop in one exit-management read |
+| `get_scaleout_plan(entry, stop, t1_fraction?)` | `strategies.swing.scaleout_plan` | market | tiered partial-profit plan (sell T1 fraction -> break-even -> trail) |
+| `get_payoff_asymmetry(ticker, returns?, threshold?)` | `strategies.statistical.omega` | market | Omega ratio (gains/losses payoff asymmetry) about a threshold |
+| `get_book_correlation(returns_by_name, method?)` | `strategies.statistical.correlation_matrix` | market | full pairwise correlation (avg + max pair) over a book |
 | `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + risk_contribution) | market | risk-parity weights, min-variance weights and per-name risk contributions from a real covariance matrix |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |

@@ -322,8 +322,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "news_data": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
-            "analyst_ratings": "moomoo,finnhub",  # Options: finnhub (needs key), moomoo
-            "earnings_calendar": "moomoo,finnhub",  # Options: finnhub (needs key), moomoo
+            "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
+            "earnings_calendar": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
             "options_data": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
             "sec_filings": "sec_edgar",  # Options: sec_edgar (free, no key)
             "short_interest": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
@@ -338,7 +338,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "revenue_breakdown": "moomoo",
             "corporate_actions": "eodhd,moomoo",
             "earnings_catalyst": "moomoo",
-            "institution_data": "moomoo",
+            "institution_data": "moomoo,yfinance",  # Options: moomoo, yfinance (keyless holders)
             "earnings_surprise": "moomoo",
             "expected_move": "moomoo",
             # OpenBB Phase-3 free-tier data surfaces (all keyless where possible,

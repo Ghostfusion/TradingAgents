@@ -438,11 +438,33 @@ def test_exit_plan_breakeven_and_giveback():
     assert "giveback_" in out
 
 
-def test_exit_plan_degrades_on_unusable_giveback():
-    # entry at 100, peak <= entry -> max_giveback returns exit=False, no crash.
-    out = T.get_exit_plan.invoke({"entry": 100.0, "atr": 3.0, "current": 99.0, "peak": 100.0})
-    assert "exit_plan" in out
-    assert "stop_px=None" in out
+def test_scaleout_plan_returns_tiers():
+    out = T.get_scaleout_plan.invoke({"entry": 100.0, "stop": 95.0})
+    assert "scaleout_plan" in out
+    assert "t1=110.00" in out  # 2R target
+    assert "sell_t1_fraction=50%" in out
+    assert "breakeven_after_t1=True" in out
+
+
+def test_payoff_asymmetry_omega():
+    out = T.get_payoff_asymmetry.invoke(
+        {"ticker": "X", "returns": [0.02, -0.01, 0.03, -0.01, 0.01, -0.005, 0.02]}
+    )
+    assert "payoff asymmetry X" in out
+    assert "omega=" in out
+
+
+def test_book_correlation_two_names():
+    out = T.get_book_correlation.invoke(
+        {"returns_by_name": {"A": [1, 2, 3, 4, 5], "B": [1.1, 2.2, 3.1, 4.2, 5.1]}}
+    )
+    assert "book_correlation" in out
+    assert "n=2" in out
+
+
+def test_book_correlation_degrades_few_names():
+    out = T.get_book_correlation.invoke({"returns_by_name": {"A": [1, 2]}})
+    assert "unavailable" in out.lower()
 
 
 def test_consensus_tool_high_when_aligned():

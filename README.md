@@ -35,6 +35,17 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-29] **Provider-endpoint + calc-wiring pass** - audited every data
+  provider's docs for exposable endpoints and every strategy calculator for
+  agent wiring. New keyless yfinance fallbacks for `analyst_ratings`
+  (recommendation summary + price-target consensus), `earnings_calendar`
+  (earnings dates + EPS surprise) and `institution_data` (institutional +
+  major holders), registered in the vendor chains — those signals no longer
+  need a moomoo gateway or paid key. New market tools `get_scaleout_plan`
+  (tiered profit-taking), `get_payoff_asymmetry` (Omega ratio) and
+  `get_book_correlation` (book concentration); `get_strategy_quality` now also
+  reports Calmar / Ulcer / tail-ratio / expectancy. See CHANGELOG.
+
 - [2026-08-29] **Full-set audit fixes (correctness + agent wiring)** - a
   read-everything audit fixed 14 defects so the numbers the LLM agents cite are
   correct and reachable: `exit_check` target now anchored at entry (was close,
