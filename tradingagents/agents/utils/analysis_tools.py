@@ -2673,8 +2673,142 @@ def get_sentiment_computed(
         return f"computed sentiment unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_normality(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Distributional hypothesis tests on a return series (OpenBB Q1).
+
+    Reports D'Agostino-Pearson, Jarque-Bera, Shapiro-Wilk, Kolmogorov-Smirnov
+    p-values + an overall 'normal' verdict. Use before any 'returns are
+    Gaussian / not fat-tailed / tail-risk is normal' claim — it is the p-value,
+    not a vibe. Degrades to 'unavailable' on insufficient data.
+    """
+    try:
+        from tradingagents.strategies.statistical import normality
+    except Exception as exc:  # noqa: BLE001
+        return f"normality unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 20:
+        return f"normality unavailable for {ticker}: need >=20 bars."
+    rets = _daily_returns(closes)
+    n = normality(rets)
+    jb = n.get("jarque_bera") or {}
+    sw = n.get("shapiro_wilk") or {}
+    return (
+        f"normality {ticker}: jarque_bera_p={(jb.get('p_value') or 0):.3f} "
+        f"shapiro_p={(sw.get('p_value') or 0):.3f} normal={'yes' if n.get('normal') else 'no'} n={len(rets)}"
+    )
+
+
+@tool
+def get_unit_root(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Stationarity (unit-root) tests on the close series (OpenBB Q1b).
+
+    ADF (H0: unit root) + KPSS (H0: stationary) with p-value approximations.
+    Use before any 'this is a trend-stationary / random-walk / mean-reverting
+    / cointegratable' claim — gates whether momentum/vol estimators are valid.
+    Degrades to 'unavailable' on insufficient data.
+    """
+    try:
+        from tradingagents.strategies.statistical import unit_root
+    except Exception as exc:  # noqa: BLE001
+        return f"unit_root unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 30:
+        return f"unit_root unavailable for {ticker}: need >=30 bars."
+    u = unit_root(closes)
+    adf = u.get("adf") or {}
+    print_adf = f"{adf.get('statistic'):.2f} (p~{adf.get('p_value_approx'):.2f})" if adf else "n/a"
+    st = "stationary" if u.get("stationary") else ("non-stationary" if u.get("stationary") is False else "unknown")
+    return f"unit_root {ticker}: adf={print_adf} verdict={st} n={u.get('n')}"
+
+
+@tool
+def get_relative_rotation(
+    ticker: Annotated[str, "anchor ticker"],
+    benchmark: Annotated[str | None, "benchmark symbol, default SPY"] = None,
+) -> str:
+    """Relative-rotation quadrant vs a benchmark (OpenBB Q6).
+
+    RS ratio x RS momentum -> leading / weakening / lagging / improving.
+    Use before any 'sector/name is rotating into leadership / losing relative
+    strength' claim. Degrades to 'unavailable' when either series is short.
+    """
+    try:
+        from tradingagents.strategies.rotation import relative_rotation
+    except Exception as exc:  # noqa: BLE001
+        return f"relative_rotation unavailable for {ticker}: {exc}"
+    bench = (benchmark or "SPY").upper()
+    closes = _ohlcv(ticker).get("closes") or []
+    bcloses = _ohlcv(bench).get("closes") or []
+    if len(closes) < 300 or len(bcloses) < 300:
+        return f"relative_rotation unavailable for {ticker}: need >=300 bars of {ticker} and {bench}."
+    r = relative_rotation(closes, bcloses, long=252, short=21)
+    if r.get("quadrant") is None:
+        return f"relative_rotation unavailable for {ticker}: not enough aligned history."
+    return (f"relative_rotation {ticker} vs {bench}: {r['quadrant']} "
+            f"(rs_ratio={r['rs_ratio']:.2f} rs_momentum={r['rs_momentum']:.2f})")
+
+
+@tool
+def get_capm_risk(
+    ticker: Annotated[str, "ticker symbol"],
+    benchmark: Annotated[str | None, "benchmark symbol, default SPY"] = None,
+) -> str:
+    """CAPM risk decomposition: beta, systematic & idiosyncratic risk.
+    Use before 'this is market-driven / stock-specific risk' claims.
+    """
+    try:
+        from tradingagents.strategies.statistical import capm_decomposition
+    except Exception as exc:  # noqa: BLE001
+        return f"capm_risk unavailable for {ticker}: {exc}"
+    bench = (benchmark or "SPY").upper()
+    closes = _ohlcv(ticker).get("closes") or []
+    bcloses = _ohlcv(bench).get("closes") or []
+    if len(closes) < 60 or len(bcloses) < 60:
+        return f"capm_risk unavailable for {ticker}: need >=60 bars."
+    a = _daily_returns(closes)
+    b = _daily_returns(bcloses)
+    c = capm_decomposition(a, b)
+    if c.get("beta") is None:
+        return f"capm_risk unavailable for {ticker}: not computable."
+    return (f"capm_risk {ticker} vs {bench}: beta={c['beta']:.2f} "
+            f"systematic={c['systematic_risk']:.0%} idiosyncratic={c['idiosyncratic_risk']:.0%} n={c['n']}")
+
+
+@tool
+def get_clenow_momentum(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Clenow trend-quality momentum (persistence x noise, OpenBB Q7).
+
+    exp(OLS 90d log-slope x 252) x R². Use before any 'strong/clean uptrend'
+    claim — it penalizes a noisy rally. Degrades to 'unavailable' on short
+    history.
+    """
+    try:
+        from tradingagents.strategies.rotation import clenow_momentum
+    except Exception as exc:  # noqa: BLE001
+        return f"clenow momentum unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 120:
+        return f"clenow momentum unavailable for {ticker}: need >=120 bars."
+    s = clenow_momentum(closes, window=90)
+    if s is None:
+        return f"clenow momentum unavailable for {ticker}: not computable."
+    return f"clenow_momentum {ticker}: {s:.3f}"
+
+
 __all__ = [
     "get_sector_rank",
+    "get_normality",
+    "get_unit_root",
+    "get_relative_rotation",
+    "get_capm_risk",
+    "get_clenow_momentum",
     "get_strategy_quality",
     "get_credit_spread_read",
     "get_margin_of_safety",
