@@ -115,4 +115,60 @@ def breakeven_after_confirmation(
                 "trigger": "atr", "source": "entry + cushion x ATR"}
     return {"price": None, "trigger": t, "source": "insufficient inputs"}
 
-__all__ = ["stop_to_breakeven", "stop_to_breakeven_r", "breakeven_after_confirmation", "target_level", "net_of_cost", "rebalance_due", "exit_check"]
+
+def trailing_stop_exit(entry: float, peak: float, current: float,
+                       trail_pct: float = 0.05) -> dict:
+    """Peak-trailing exit (Lean L4): exit when ``current`` has pulled back
+    ``trail_pct`` below the highest value seen since entry.
+
+    Gives acknowledgment to a position that ran +40% and gave back 30% — the
+    fixed ATE/ATR rules never force such a giveback. Long-only. ``exit`` True
+    (and a ``stop_px`` below current) means the peak-trail stop is struck.
+    Returns all-``None``/``exit=False`` on unusable inputs — never fabricates.
+    """
+    if entry is None or peak is None or current is None:
+        return {"exit": False, "stop_px": None, "drawdown_from_peak": None}
+    peak = float(peak)
+    current = float(current)
+    if peak <= 0:
+        return {"exit": False, "stop_px": None, "drawdown_from_peak": None}
+    pct = abs(float(trail_pct))
+    dd = current / peak - 1.0
+    return {
+        "exit": dd < -pct,
+        "stop_px": peak * (1.0 - pct),
+        "drawdown_from_peak": dd,
+    }
+
+
+def max_giveback_exit(entry: float, peak: float, current: float,
+                      giveback_pct: float = 0.30) -> dict:
+    """Margin give-back stop (Lean L4 commit): a position that ran well but
+    has surrendered a fraction of its best peak return is exited. Computes the
+    remaining unrealized vs the peak gain; exits when ``<= giveback_pct`` of
+    the best peak gain is left (drawdown-from-peak crosses the giveback band).
+    Long-only; None on unusable inputs.
+    """
+    if entry is None or peak is None or current is None or float(entry) <= 0:
+        return {"exit": False, "remaining_gain_pct": None, "stop_px": None}
+    entry = float(entry)
+    peak = float(peak)
+    current = float(current)
+    peak_gain = peak / entry - 1.0
+    if peak_gain <= 0:
+        return {"exit": False, "remaining_gain_pct": 0.0, "stop_px": None}
+    remaining = current / entry - 1.0
+    pct = abs(float(giveback_pct))
+    keep = peak_gain * (1.0 - pct)
+    return {
+        "exit": remaining < keep,
+        "remaining_gain_pct": remaining,
+        "stop_px": entry * (1.0 + keep),
+    }
+
+
+__all__ = [
+    "stop_to_breakeven", "stop_to_breakeven_r", "breakeven_after_confirmation",
+    "target_level", "net_of_cost", "rebalance_due", "exit_check",
+    "trailing_stop_exit", "max_giveback_exit",
+]

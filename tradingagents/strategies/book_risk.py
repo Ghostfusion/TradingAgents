@@ -3,7 +3,7 @@
 Pure helpers over return series and weights; deterministic and offline.
 """
 
-from __future__ import annotations
+import math
 
 
 def simple_var(returns: list, alpha: float = 0.05) -> float | None:
@@ -148,4 +148,91 @@ def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     return float(drawdown_pct) > float(limit_pct)
 
 
-__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate"]
+# ---------------------------------------------------------------------------
+# Horizon risk + i.i.d. gate (QuantLib Q1/Q4)
+# ---------------------------------------------------------------------------
+
+
+def return_autocorrelation(returns: list, max_lag: int = 5) -> dict:
+    """Return autocorrelation (lag-1..max_lag) + Ljung-Box style Q stat.
+
+    QuantLib gate: momentum books carry lag-1 autocorrelation, so naive
+    sqrt(T) scaling (in :func:`var_cvar_horizon`) *understates* multi-day
+    risk. ``'is_iidish'`` is True only when lag-1 |ACF| is small and there are
+    enough samples. Returns dict, or ``{'acf': [], 'q_stat': None,
+    'is_iidish': False}`` for an empty/short series — never fabricated.
+    """
+    vals = [float(r) for r in returns if r is not None]
+    out = {"acf": [], "q_stat": None, "is_iidish": False}
+    n = len(vals)
+    if n < 32:
+        return out
+    mean = sum(vals) / n
+    denom = sum((v - mean) ** 2 for v in vals)
+    if denom <= 0:
+        return out
+    ml = max(1, min(int(max_lag), n - 2))
+    acf: list[float] = []
+    for lag in range(1, ml + 1):
+        num = sum((vals[i] - mean) * (vals[i + lag] - mean) for i in range(n - lag))
+        acf.append(num / denom)
+    # Ljung-Box: Q = n(n+2) * sum(acf_k^2 / (n-k))
+    q = (n * (n + 2.0) * sum(a * a / (n - k) for k, a in enumerate(acf, start=1))
+         if acf else None)
+    is_iidish = bool(acf) and abs(acf[0]) < 0.2 and (q is not None and q < 10.0)
+    return {"acf": [round(a, 4) for a in acf], "q_stat": round(q, 2) if q else None,
+            "is_iidish": is_iidish}
+
+
+def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
+                     method: str = "empirical") -> dict:
+    """Value-at-Risk / CVaR at a multi-day horizon (QuantLib Q1).
+
+    - ``empirical``: scale the historical daily VaR/CVaR quantile by sqrt(T)
+      (variance-additive under i.i.d.).
+    - ``parametric``: assume daily returns ~ N(mu, sigma^2); the T-day return
+      is N(T*mu, T*sigma^2) and VaR/CVaR come from the Normal tail.
+
+    Returns dict with float-or-None entries and an ``'scaling_valid'`` flag
+    (False when the series is autocorrelated/short so sqrt(T) is unreliable).
+    """
+    vals = [float(r) for r in returns if r is not None]
+    out = {"emp_var": None, "emp_cvar": None, "param_var": None,
+           "param_cvar": None, "scaling_valid": False, "n": len(vals)}
+    T = max(1, int(horizon_days))
+    n = len(vals)
+    if n < 2:
+        return out
+    alpha = float(alpha)
+    q = 1.0 - alpha  # left-tail probability
+    asc = sorted(vals)
+    k = max(1, int(q * n))
+    daily_var = asc[k - 1]                      # negative (loss)
+    daily_cvar = sum(asc[:k]) / k               # negative (loss)
+    # empirical sqrt(T) scaling
+    out["emp_var"] = daily_var * math.sqrt(T)
+    out["emp_cvar"] = daily_cvar * math.sqrt(T)
+    # parametric (normal)
+    mean = sum(vals) / n
+    sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1))
+    if sd > 0:
+        z = 1.959964  # N(0,1) quantile at 2.5%, adjust to (1-alpha)
+        # two-sided-ish mapping: map q to z via inverse normal approx
+        import statistics as _st
+        try:
+            z = _st.NormalDist().inv_cdf(q)
+        except Exception:  # noqa: BLE001 - fall back to 1.96
+            z = 1.959964
+        mu_T = mean * T
+        sigma_T = sd * math.sqrt(T)
+        out["param_var"] = mu_T + z * sigma_T
+        # normal CVaR = -mu_T + sigma_T * phi(z)/(alpha)
+        out["param_cvar"] = -mu_T + sigma_T * math.exp(-0.5 * z * z) / math.sqrt(2 * math.pi) / alpha
+    # validity gate: sqrt(T) safe only near-i.i.d. with enough samples
+    acf = return_autocorrelation(vals)["acf"]
+    out["scaling_valid"] = len(vals) >= 32 and (not acf or abs(acf[0]) < 0.2)
+    return out
+
+
+__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
+           "return_autocorrelation", "var_cvar_horizon"]

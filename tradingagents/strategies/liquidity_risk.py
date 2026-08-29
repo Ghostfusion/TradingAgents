@@ -188,3 +188,45 @@ def liquidity_verdict(
             verdict = "caution"
         dangers.append(f"HHI={hhi:.0f} > {hhi_max:.0f}")
     return {"verdict": verdict, "dangers": dangers}
+
+
+def volume_share_slippage(order_qty: float, adv: float, price: float,
+                          vol_limit: float = 0.1,
+                          price_impact: float = 0.025) -> float | None:
+    """Lean VolumeShareSlippageModel: per-share cost from participation rate.
+
+    Cost = price * price_impact * min(qty/ADV, vol_limit)^2 — a classic
+    square-root-ish participation model. ``vol_limit`` caps the participation
+    assumption (a 2%-of-ADV order can't assume >10% participation). Returns
+    the per-share slippage cost in price units, or None when ADV/price are
+    missing/non-positive (never fabricated).
+    """
+    try:
+        q = float(order_qty)
+        a = float(adv)
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    if a <= 0 or p <= 0 or q <= 0:
+        return None
+    participation = min(q / a, abs(float(vol_limit)))
+    return p * abs(float(price_impact)) * participation ** 2
+
+
+def market_impact_slippage(order_qty: float, adv: float, price: float,
+                           impact_coeff: float = 0.1) -> float | None:
+    """Lean MarketImpactSlippageModel (Almgren-Chriss style): impact ∝ qty/ADV.
+
+    Per-share cost = price * impact_coeff * (order/ADV). Simpler than the
+    volume-share square term; good for large-block orders. None on missing
+    inputs.
+    """
+    try:
+        q = float(order_qty)
+        a = float(adv)
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    if a <= 0 or p <= 0 or q <= 0:
+        return None
+    return p * abs(float(impact_coeff)) * (q / a)

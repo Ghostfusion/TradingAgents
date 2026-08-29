@@ -131,4 +131,59 @@ def format_summary(stats: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["record_momentum_trade", "momentum_stats", "format_summary"]
+def _trade_pnl(row: dict) -> float | None:
+    """Best-effort net PnL per journal row: exit-based or book value."""
+    entry = row.get("entry_price")
+    exit_px = row.get("exit_price")
+    if entry is None or exit_px is None or float(entry) <= 0:
+        return None
+    return (float(exit_px) - float(entry)) / float(entry)
+
+
+def trade_excursions(trades: list[dict]) -> dict:
+    """MAE / MFE / profit-factor / max intra-trade drawdown (Lean L5).
+
+    Each trade row supplies ``entry_price``, ``exit_price`` and, ideally, the
+    holding OHLC path (``low`` / ``high``) so we can separate
+    exit-motivated-by-luck (large MFE, small realized) from skill. Rows
+    without an entry/exit path contribute only to the counts they can support;
+    no number is fabricated.
+    """
+    maes: list[float] = []
+    mfes: list[float] = []
+    intra_dd: list[float] = []
+    profits: list[float] = []
+    losses: list[float] = []
+    for row in trades:
+        entry = row.get("entry_price")
+        low = row.get("low")
+        high = row.get("high")
+        if entry is not None and float(entry) > 0:
+            if low is not None:
+                maes.append((float(low) - float(entry)) / float(entry))
+            if high is not None:
+                mfes.append((float(high) - float(entry)) / float(entry))
+        pnl = _trade_pnl(row)
+        if pnl is not None:
+            if pnl >= 0:
+                profits.append(pnl)
+            else:
+                losses.append(pnl)
+        if pnl is not None and pnl < 0 and entry is not None and float(entry) > 0:
+            intra_dd.append((float(entry) - float(row.get("low", float(entry)))) / float(entry))
+    gross_win = sum(profits)
+    gross_loss = abs(sum(losses))
+    return {
+        "avg_mae": round(sum(maes) / len(maes), 4) if maes else None,
+        "largest_mae": round(min(maes), 4) if maes else None,
+        "avg_mfe": round(sum(mfes) / len(mfes), 4) if mfes else None,
+        "largest_mfe": round(max(mfes), 4) if mfes else None,
+        "profit_factor": round(gross_win / gross_loss, 3)
+            if (profits and losses and gross_loss > 0) else None,
+        "max_intra_trade_drawdown": round(max(intra_dd), 4) if intra_dd else None,
+        "n": len(trades),
+    }
+
+
+__all__ = ["record_momentum_trade", "momentum_stats", "format_summary",
+           "trade_excursions"]
