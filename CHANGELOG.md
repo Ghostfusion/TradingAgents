@@ -28,6 +28,10 @@ Breaking changes within the 0.x line are called out explicitly.
   - **Web product (trading_web)** - watchlist, SignalTable grid, TickerChart
     (candlestick/volume/drawdown), run presets, credential manager, job
     timeline + rerun (54 backend tests, vite build clean).
+  - **Web user guide screen (trading_web)** - `HelpGuide.jsx` (`/"guide`),
+    plain-language documentation for every screen (purpose, sample UI
+    selections, likely result) written for non-technical / non-financial
+    users; nav entry + route + guide CSS, `npm run build` clean.
   - **QuantLib + Lean enhancements (deep-study implementation)** (`docs/design_quantlib_lean_enhancements.md`) -
   design → implemented (Phases 1-4 + cross-cutting): new pure modules under
   `strategies/`, extended evaluation breadth, 4 new market analyst tools, and
