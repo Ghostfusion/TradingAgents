@@ -230,6 +230,42 @@ def retry_llm_if_truncated(llm: Any, prompt: Any, response_text: str) -> str:
     return _retry_if_truncated(llm, prompt, response_text)
 
 
+def finalize_messages(chain: Any, messages: Any, result: Any) -> str:
+    """Force a terminal report turn when an analyst hit its tool-round cap.
+
+    The analyst routers force back to the analyst node after
+    ``MAX_TOOL_ROUNDS`` tool rounds; on that turn the model must produce the
+    final report instead of more tool calls (the dangling tool_calls are
+    stripped here). The evidence gathered so far stays in ``messages``, so the
+    model writes the report from what it has - never an empty string, never an
+    invented value. Degrades to the current turn's content on any failure so
+    the pipeline never blocks.
+    """
+    if not getattr(result, "tool_calls", None):
+        # No cap turn: normal path unchanged.
+        return result.content if hasattr(result, "content") else str(result)
+    try:
+        # Strip the dangling tool_calls on the last message so the model must
+        # answer with prose, then run one final turn.
+        from langchain_core.messages import AIMessage
+
+        last = messages[-1]
+        cleaned_tail = AIMessage(
+            content=getattr(last, "content", "") or "",
+            id=getattr(last, "id", None),
+            name=getattr(last, "name", None),
+        )
+        cleaned_msgs = [*messages[:-1], cleaned_tail]
+        final = chain.invoke(cleaned_msgs)
+        text = final.content if hasattr(final, "content") else str(final)
+        if text and text.strip():
+            return _retry_if_truncated(chain, cleaned_msgs, text)
+        return text
+    except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-run
+        logger.warning("final-report turn after tool cap failed: %s", exc)
+        return result.content if hasattr(result, "content") else str(result)
+
+
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 

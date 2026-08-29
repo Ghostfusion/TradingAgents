@@ -177,6 +177,7 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Per-analyst tool-round cap + empty-report guard (NVDA missing market.md)** - a market/news/fundamentals analyst whose tool loop never terminates (model keeps calling tools, or a slow/hung vendor call keeps the loop spinning) previously left the analyst report empty, which reporting.py silently dropped - the run completed 'normally' with no `1_analysts/market.md` and no error. Now: `ConditionalLogic` forces the terminal report turn after `MAX_TOOL_ROUNDS` (8) tool rounds (routing back to the analyst node instead of the tool node), `structured.finalize_messages` runs that turn with the dangling tool_calls stripped (one final LLM call; truncation-retry + degrade intact), and `reporting.write_report_tree` writes an explicit "report unavailable" block (file + consolidated report) when an analyst report is empty - never a silent gap. Sequential and parallel (`analyst_concurrency>1`) analyst paths both covered. Tests: `tests/test_tool_round_cap.py` (12) + 3 reporting guard tests; ruff clean, 124 regression tests green.
 - **Empty final decision after structured-output fallback** - a model that
   misses `with_structured_output` can answer the free-text retry with only a
   section header (live-run symptom: `**Decision` alone landed in

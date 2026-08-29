@@ -155,6 +155,15 @@ enable_risk_governor, enable_events, enable_reflection`. Default OFF:
 should_continue_market / social / news / fundamentals (loop)
 should_continue_debate / should_continue_risk_analysis (round)
 get_recur_limit  (false default)
+
+Each tool-loop router (market / news / fundamentals) also forces the terminal
+report turn after ``MAX_TOOL_ROUNDS`` (8) tool rounds - an analyst that never
+stops calling tools (or a run near the recursion limit) is capped so the
+report is written from the evidence gathered instead of looping forever with
+an empty report; ``structured.finalize_messages`` runs that terminal turn
+with the dangling tool_calls stripped. `reporting.write_report_tree` writes an
+explicit "report unavailable" block when a report is still empty, never a
+silent gap.
 ```
 
 It is the single place to add a new analyst loop / new round logic.

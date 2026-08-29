@@ -327,6 +327,24 @@ def write_report_tree(
                 prepend_block(_finalize_section(text)), encoding="utf-8"
             )
             analyst_parts.append((name, _finalize_section(text)))
+        else:
+            # Empty-report guard: an analyst that produced no report (tool
+            # loop wedged on a slow/hung vendor call) must still leave an
+            # on-disk artifact with an explicit "unavailable" block, never
+            # silently vanish - silent absence read as an analysis bug.
+            analysts_dir.mkdir(exist_ok=True)
+            safe = key.replace("_report", "")
+            (analysts_dir / f"{safe}.md").write_text(
+                f"## {name}: report unavailable\n\n"
+                "No report was produced for this section in this run - the "
+                "analyst may not have been selected, or its tool loop stalled "
+                "on a slow or unreachable data source. No numbers are "
+                "inferred or fabricated. Re-run to regenerate this section.\n",
+                encoding="utf-8",
+            )
+            analyst_parts.append(
+                (name, f"## {name}: report unavailable\n\nNo report produced.")
+            )
     if analyst_parts:
         content = "\n\n---\n\n".join(
             f"### {name}\n\n{_shift_down(text)}" for name, text in analyst_parts

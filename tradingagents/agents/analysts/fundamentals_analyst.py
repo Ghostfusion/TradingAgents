@@ -128,6 +128,13 @@ def create_fundamentals_analyst(llm):
             from tradingagents.agents.utils.structured import retry_chain_if_truncated
 
             report = retry_chain_if_truncated(chain, state["messages"], report)
+        else:
+            # Tool-round cap hit: the router forced this turn; the model must
+            # write the final report now (dangling tool_calls stripped, one
+            # terminal LLM call) so the report is never left empty.
+            from tradingagents.agents.utils.structured import finalize_messages
+
+            report = finalize_messages(chain, state["messages"], result)
 
         return {
             "messages": [result],

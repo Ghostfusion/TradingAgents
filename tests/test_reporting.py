@@ -336,3 +336,63 @@ def test_collapse_repeated_tables_idempotent_and_prose_safe():
         "| K | V |\n|---|---|\n| a | 1 |\n\n| K | V |\n|---|---|\n| b | 2 |\n"
     )
     assert _collapse_repeated_tables(twice) == twice
+
+
+# ---------------------------------------------------------------------------
+# Empty-report guard: an analyst that produced no report must leave an
+# on-disk "report unavailable" artifact, never silently vanish (the NVDA
+# empty-market_report defect looked like a missing market.md with no error).
+# ---------------------------------------------------------------------------
+
+
+def _guard_state(market="", news="news prose", fundamentals="fund prose", sentiment="sent prose"):
+    return {
+        "risk_debate_state": {
+            "judge_decision": "**Rating**: Hold\n**Executive Summary**: x\n",
+        },
+        "trader_investment_plan": "Trader plan",
+        "market_report": market,
+        "news_report": news,
+        "fundamentals_report": fundamentals,
+        "sentiment_report": sentiment,
+    }
+
+
+def test_empty_market_report_writes_unavailable_block(tmp_path):
+    path = write_report_tree(_guard_state(market=""), "TST", tmp_path)
+    market_md = (tmp_path / "1_analysts" / "market.md").read_text(encoding="utf-8")
+    assert "report unavailable" in market_md
+    assert "No report was produced" in market_md
+    # The other analysts still render normally.
+    assert "news prose" in (tmp_path / "1_analysts" / "news.md").read_text(encoding="utf-8")
+    # The consolidated report includes the unavailable block too.
+    report = path.read_text(encoding="utf-8")
+    assert "report unavailable" in report
+    assert "news prose" in report
+
+
+def test_empty_fundamentals_report_writes_unavailable_block(tmp_path):
+    write_report_tree(_guard_state(fundamentals=""), "TST", tmp_path)
+    fund_md = (tmp_path / "1_analysts" / "fundamentals.md").read_text(encoding="utf-8")
+    assert "report unavailable" in fund_md
+    assert "No report was produced" in fund_md
+    # Non-empty reports never get the placeholder.
+    news_md = (tmp_path / "1_analysts" / "news.md").read_text(encoding="utf-8")
+    assert "report unavailable" not in news_md
+    assert "news prose" in news_md
+
+
+def test_all_reports_present_no_unavailable_blocks(tmp_path):
+    write_report_tree(
+        _guard_state(
+            market="market prose",
+            news="news prose",
+            fundamentals="fund prose",
+            sentiment="sent prose",
+        ),
+        "TST",
+        tmp_path,
+    )
+    for f in ("market", "news", "fundamentals", "sentiment"):
+        text = (tmp_path / "1_analysts" / f"{f}.md").read_text(encoding="utf-8")
+        assert "report unavailable" not in text
