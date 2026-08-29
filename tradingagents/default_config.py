@@ -66,8 +66,16 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_DRIFT_THRESHOLD": "drift_threshold",
     "TRADINGAGENTS_ENABLE_PREOPEN_RVOL": "enable_preopen_rvol",
     "TRADINGAGENTS_PREOPEN_RVOL_INSTITUTIONAL_X": "preopen_rvol_institutional_x",
-    "TRADINGAGENTS_ENABLE_PREOPEN_DEPTH": "enable_preopen_depth",
-    "TRADINGAGENTS_ENABLE_ALPHA_PROFILE": "enable_alpha_profile",
+    "TRADINGAGENTS_PSR_BENCHMARK_SHARPE": "psr_benchmark_sharpe",
+    "TRADINGAGENTS_ROLLING_WINDOW": "rolling_window",
+    "TRADINGAGENTS_DOWNSIDE_MAR": "downside_mar",
+    "TRADINGAGENTS_TRAILING_STOP_PCT": "trailing_stop_pct",
+    "TRADINGAGENTS_ENABLE_TRAILING_EXIT": "enable_trailing_exit",
+    "TRADINGAGENTS_RISK_PARITY_ENABLED": "risk_parity_enabled",
+    "TRADINGAGENTS_RISK_MANAGER_DRAWDOWN_PCT": "risk_manager_drawdown_pct",
+    "TRADINGAGENTS_ENABLE_RISK_MANAGER": "enable_risk_manager",
+    "TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT": "volume_share_vol_limit",
+    "TRADINGAGENTS_VOLUME_SHARE_PRICE_IMPACT": "volume_share_price_impact",
 
     "TRADINGAGENTS_ENABLE_EVENTS": "enable_events",
     # B1 scheduled-catalyst overlay tuning (on by default via enable_events).
@@ -422,7 +430,18 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_preopen_rvol": True,  # P1: pre-market RVOL vs 30d pre-open avg
         "preopen_rvol_institutional_x": 2.0,  # P1: RVOL threshold for institutional read
         "enable_preopen_depth": True,  # P2: live IEX quote-depth proxy (thin-book)
-        "enable_alpha_profile": True,  # C3: post-fill drift vs arrival in report
+        # QuantLib + Lean enhancements (design_quantlib_lean_enhancements.md).
+        # Read-only deterministic calculators; all advisory, default-off gates.
+        "psr_benchmark_sharpe": 0.0,  # L3: PSR benchmark Sharpe for comparison
+        "rolling_window": 132,  # L3: rolling-beta window (Lean default 132)
+        "downside_mar": 0.0,  # L3: Sortino/downside minimum-return target (MAR)
+        "trailing_stop_pct": 0.05,  # L4: peak-trailing stop (% from peak)
+        "enable_trailing_exit": False,  # L4: emit peak-trail exit overrides
+        "risk_parity_enabled": False,  # L2: use covariance risk-parity in alloc
+        "risk_manager_drawdown_pct": 0.05,  # L1: two-pass exit-minus-% override
+        "enable_risk_manager": False,  # L1: active position-exit override layer
+        "volume_share_vol_limit": 0.1,  # L6: slippage participation cap
+        "volume_share_price_impact": 0.025,  # L6: slippage impact coefficient
 
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
