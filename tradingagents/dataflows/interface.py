@@ -70,6 +70,7 @@ from .moomoo import (
     get_stock_data_moomoo,
 )
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .schema import VendorResult
 from .sec_edgar import get_sec_filings
 from .vendor_cache import vendor_cache
 from .y_finance import (
@@ -544,3 +545,43 @@ def route_to_vendor(method: str, *args, **kwargs):
         raise first_error
 
     raise RuntimeError(f"No available vendor for '{method}'")
+
+
+def route_to_vendor_typed(method: str, *args, **kwargs) -> "VendorResult":
+    """Additive typed wrapper over :func:`route_to_vendor` (OpenBB P1).
+
+    Calls the existing string path, then wraps the result in a ``VendorResult``
+    with provider provenance (the configured vendor chain for the method's
+    category) and an ``error_kind`` when the result is a failure sentinel.
+    New callers (web, reporting, dashboards) use this; existing string callees
+    keep calling :func:`route_to_vendor` unchanged (clean cutover).
+    """
+    category = get_category_for_method(method)
+    try:
+        provider = get_vendor(category, method)
+    except Exception:  # noqa: BLE001
+        provider = None
+    result = route_to_vendor(method, *args, **kwargs)
+    if result is None:
+        return VendorResult(results=None, provider=provider, error_kind="NoMarketDataError")
+    if isinstance(result, str):
+        if result.startswith("NO_DATA_AVAILABLE"):
+            return VendorResult(results=None, provider=provider,
+                                error_kind="NoMarketDataError",
+                                extra={"detail": result})
+        if result.startswith("DATA_UNAVAILABLE"):
+            return VendorResult(results=None, provider=provider,
+                                error_kind="VendorNotConfiguredError",
+                                extra={"detail": result})
+        if result.startswith("DATA_DISABLED"):
+            return VendorResult(results=None, provider=provider,
+                                error_kind="DataDisabled",
+                                extra={"detail": result})
+        return VendorResult(results=result, provider=provider)
+    return VendorResult(results=result, provider=provider)
+
+
+__all__ = [
+    "route_to_vendor", "route_to_vendor_typed", "get_category_for_method",
+    "get_vendor", "OPTIONAL_CATEGORIES",
+]
