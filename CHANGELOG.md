@@ -128,6 +128,23 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **End-to-end advisory-context injection (agent + report)** - the Phase A-E
+  decision context (`computed_decision_context` / `risk_context`) was seeded
+  onto `AgentState` but the keys were not declared as LangGraph channels, so
+  native LangGraph silently dropped them: the Trader / PM / 3 risk debators
+  never saw the regime gate / plan card / pre-open rows, and the report's
+  `IVa. Computed Decision Context` section never rendered. Declared both keys
+  on `AgentState` so they flow to the decision nodes and to `final_state`
+  (report now surfaces IVa). Regression tests:
+  `test_agent_state_declares_decision_context_channels` +
+  `test_agent_state_carries_decision_context_through_graph` (a seeded value
+  now reaches a node and the graph output).
+- **Pre-market reviewer pre-open rows hidden behind news** - in
+  `scripts/pre_market_review.py::_build_summary`, the pre-market RVOL /
+  pre-open gap / book-depth lines were indented inside the `if news_titles:`
+  block, so they only rendered when overnight headlines existed. They now
+  print unconditionally (each still degrades to nothing when its data is
+  unavailable), matching the design's independent-delta contract.
 - **Audit-driven correctness fixes (data integrity + wiring)** - a repo-wide
   audit surfaced and fixed ~26 defects across strategies, dataflows, graph
   wiring, config, and entry points. All with hermetic regression tests.

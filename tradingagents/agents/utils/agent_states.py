@@ -74,3 +74,5 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+    risk_context: Annotated[dict, "Deterministic risk snapshot (CVaR/stress) precomputed for the Portfolio Manager prompt before the graph runs"]
+    computed_decision_context: Annotated[str, "Deterministic Phase A-E advisory context (regime gate / trade plan card / risk snapshot / pre-open rows) injected to the Trader, Portfolio Manager and the 3 risk debators"]

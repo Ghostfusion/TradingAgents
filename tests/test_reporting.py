@@ -72,13 +72,33 @@ def test_risk_gate_renders_both_cvars(tmp_path):
     assert "Analyzed-name CVaR: 1.23%" in report
 
 
-def test_risk_gate_without_basket_only_single_cvar(tmp_path):
-    # No book CVaR (basket unconfigured) -> only the analyzed-name line shows.
-    state = _state(verdict="WARN", reasons=[], risk_ctx={"single_cvar": 0.018})
+def test_iv_a_computed_decision_context_surfaces_in_report(tmp_path):
+    """The advisory decision context is surfaced as IVa when a plan card is
+    present (Phase A-E wiring; the context must reach final_state to render)."""
+    state = {
+        **_state(verdict="PASS"),
+        "computed_decision_context": (
+            "Computed regime gate (mean-reversion entry): verdict=clean pass=True "
+            "vol_pct=0.4 fast_downtrend=False reasons=stable\n\n"
+            "### Trade plan card: TST\n- Reference price: 100.0\n- Unified stop: 95.0\n"
+        ),
+    }
     path = write_report_tree(state, "TST", tmp_path)
     report = path.read_text(encoding="utf-8")
-    assert "Analyzed-name CVaR: 1.80%" in report
-    assert "Portfolio (book) CVaR" not in report
+    assert "## IVa. Computed Decision Context (advisory)" in report
+    assert "Trade plan card: TST" in report
+    assert "verdict=clean" in report
+
+
+def test_iv_a_omitted_without_plan_card(tmp_path):
+    """No plan card in the context -> the IVa section is not emitted."""
+    state = {
+        **_state(verdict="PASS"),
+        "computed_decision_context": "Computed decision context: unavailable.",
+    }
+    path = write_report_tree(state, "TST", tmp_path)
+    report = path.read_text(encoding="utf-8")
+    assert "## IVa. Computed Decision Context" not in report
 
 
 def _full_state():

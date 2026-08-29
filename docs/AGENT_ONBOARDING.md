@@ -297,7 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-## Changelog of this fork (most recent first)
+- 2026-08-28 `(working tree)` - End-to-end advisory-context wiring fix: the
+  Phase A-E decision context (`computed_decision_context` / `risk_context`)
+  were seeded onto `AgentState` but not declared as LangGraph channels, so
+  native LangGraph dropped them — the Trader / PM / 3 risk debators never saw
+  the regime gate / plan card / pre-open rows and the report's IVa section
+  never rendered. Declared both keys on `AgentState` (now flow to nodes +
+  output); also dedented the pre-market reviewer's RVOL / gap / book-depth
+  lines out of the `if news_titles:` block so they print unconditionally.
+  Regression tests in `test_structured_agent_prompts.py` +
+  `test_reporting.py`. (see CHANGELOG.md under [Unreleased] ### Fixed)
 - 2026-08-27 `(working tree)` - EODHD real-time snapshot + top movers
   (Massive 403 fallback): `get_market_snapshot_eodhd` (`/api/real-time/
   {ticker}`, live OHLCV + prev close + change%) and `get_top_movers_eodhd`

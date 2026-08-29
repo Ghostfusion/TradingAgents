@@ -236,22 +236,22 @@ def _build_summary(deltas: dict, verdict: dict) -> str:
         )
     if (deltas or {}).get("news_titles"):
         lines.append("- overnight headlines: " + " | ".join(deltas["news_titles"]))
-        rv = deltas.get("premarket_rvol") or {}
-        if rv.get("rvol") is not None:
-            lines.append(
-                f"- pre-market RVOL {rv['rvol']:.2f}x "
-                f"(today {rv['today_vol']:.0f} vs {rv['avg_vol']:.0f} 30d pre-open avg; "
-                f"{'>2.0x institutional' if rv['rvol'] >= 2.0 else 'retail/quiet'})"
-            )
-        pg = deltas.get("preopen_gap") or {}
-        if pg.get("gap_pct") is not None:
-            lines.append(f"- pre-open gap {pg['gap_pct']:+.2%} vs live pre-open "
-                         f"price {pg.get('preopen_price')}")
-        pd = deltas.get("preopen_depth") or {}
-        if pd.get("thin") is not None:
-            lines.append(f"- pre-open book: spread_bps={pd.get('spread_bps')} "
-                         f"bid/ask imbalance={pd.get('bid_ask_imbalance')} "
-                         f"thin={'YES' if pd.get('thin') else 'no'}")
+    rv = deltas.get("premarket_rvol") or {}
+    if rv.get("rvol") is not None:
+        lines.append(
+            f"- pre-market RVOL {rv['rvol']:.2f}x "
+            f"(today {rv['today_vol']:.0f} vs {rv['avg_vol']:.0f} 30d pre-open avg; "
+            f"{'>2.0x institutional' if rv['rvol'] >= 2.0 else 'retail/quiet'})"
+        )
+    pg = deltas.get("preopen_gap") or {}
+    if pg.get("gap_pct") is not None:
+        lines.append(f"- pre-open gap {pg['gap_pct']:+.2%} vs live pre-open "
+                     f"price {pg.get('preopen_price')}")
+    pd = deltas.get("preopen_depth") or {}
+    if pd.get("thin") is not None:
+        lines.append(f"- pre-open book: spread_bps={pd.get('spread_bps')} "
+                     f"bid/ask imbalance={pd.get('bid_ask_imbalance')} "
+                     f"thin={'YES' if pd.get('thin') else 'no'}")
     if not lines:
         lines.append("- no measurable overnight gap / catalyst delta")
     return "\n".join(lines)

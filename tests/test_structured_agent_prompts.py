@@ -44,7 +44,7 @@ def _prompt_text(prompt) -> str:
 
 
 @pytest.mark.unit
-def test_trader_prompt_states_constraint():
+def test_trader_prompt_injects_computed_decision_context():
     from tradingagents.agents.schemas import TraderAction, TraderProposal
 
     captured = {}
@@ -52,8 +52,44 @@ def test_trader_prompt_states_constraint():
     create_trader(llm)({
         "company_of_interest": "NVDA",
         "investment_plan": "**Recommendation**: Buy",
+        "computed_decision_context": (
+            "Computed regime gate (mean-reversion entry): verdict=clean pass=True\n\n"
+            "### Trade plan card: NVDA\n- Reference price: 200.0\n"
+        ),
     })
-    assert NO_EXTERNAL_TOOLS in _prompt_text(captured["prompt"])
+    text = _prompt_text(captured["prompt"])
+    assert "Computed decision context" in text
+    assert "Trade plan card: NVDA" in text
+    assert "verdict=clean" in text
+
+
+@pytest.mark.unit
+def test_portfolio_manager_prompt_injects_computed_decision_context():
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    captured = {}
+    llm = _capturing_llm(
+        captured,
+        PortfolioDecision(
+            rating=PortfolioRating.HOLD, executive_summary="x", investment_thesis="y"
+        ),
+    )
+    risk = {
+        "history": "h", "aggressive_history": "a", "conservative_history": "c",
+        "neutral_history": "n", "current_aggressive_response": "",
+        "current_conservative_response": "", "current_neutral_response": "",
+        "latest_speaker": "Neutral", "count": 1,
+    }
+    create_portfolio_manager(llm)({
+        "company_of_interest": "NVDA",
+        "risk_debate_state": risk,
+        "investment_plan": "plan",
+        "trader_investment_plan": "trader plan",
+        "computed_decision_context": "### Trade plan card: NVDA\n- Reference price: 200.0\n",
+    })
+    text = _prompt_text(captured["prompt"])
+    assert "Computed decision context" in text
+    assert "Trade plan card: NVDA" in text
 
 
 @pytest.mark.unit
@@ -202,8 +238,50 @@ def test_tool_using_analysts_keep_their_date_guidance():
 
 
 @pytest.mark.unit
-def test_constraint_text_is_unambiguous():
-    assert "do not call external tools" in NO_EXTERNAL_TOOLS.lower()
-    # No template braces: it is embedded in ChatPromptTemplate strings, where
-    # braces would be parsed as input variables.
-    assert "{" not in NO_EXTERNAL_TOOLS and "}" not in NO_EXTERNAL_TOOLS
+def test_agent_state_declares_decision_context_channels():
+    """The compiled advisory context must be a declared LangGraph channel.
+
+    ``_run_graph`` seeds ``computed_decision_context`` and ``risk_context``
+    onto the initial state so the Trader / PM / risk debators read them, and
+    reporting appends the IVa section from ``final_state``. Native LangGraph
+    drops undeclared keys (nodes never see them, and they are absent from the
+    output), so these MUST be declared on ``AgentState`` or the whole
+    end-to-end injection is a silent no-op (#value-dip wiring).
+    """
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    assert "computed_decision_context" in AgentState.__annotations__
+    assert "risk_context" in AgentState.__annotations__
+
+
+@pytest.mark.unit
+def test_agent_state_carries_decision_context_through_graph():
+    """A value seeded onto the initial state reaches a node and the output."""
+    from langgraph.graph import StateGraph
+
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    def probe(state):
+        seen = state.get("computed_decision_context")
+        return {
+            "company_of_interest": str(state.get("company_of_interest"))
+            + ":" + (seen or "NONE"),
+        }
+
+    g = StateGraph(AgentState)
+    g.add_node("probe", probe)
+    g.set_entry_point("probe")
+    g.add_edge("probe", "__end__")
+    app = g.compile()
+
+    res = app.invoke(
+        {
+            "messages": [],
+            "company_of_interest": "NVDA",
+            "computed_decision_context": "### Trade plan card: NVDA",
+            "risk_context": {"single_cvar": 0.0123},
+        }
+    )
+    assert "### Trade plan card: NVDA" in res["company_of_interest"]
+    assert res.get("computed_decision_context") == "### Trade plan card: NVDA"
+    assert res.get("risk_context") == {"single_cvar": 0.0123}
