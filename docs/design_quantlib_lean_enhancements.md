@@ -1,6 +1,6 @@
 # Deep Study: QuantLib + Lean → TradingAgents Enhancements
 
-**Status:** design / research (no code yet).
+**Status:** design → implemented (Phases 1-4 + cross-cutting: modules, tools, tests, config all landed).
 **Source study:** shallow clones read in this session of
 [`quantlib/QuantLib`](https://github.com/quantlib/QuantLib) and
 [`quantconnect/lean`](https://github.com/quantconnect/lean), mapped onto the

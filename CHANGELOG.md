@@ -9,6 +9,36 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **QuantLib + Lean enhancements (deep-study implementation)** (`docs/design_quantlib_lean_enhancements.md`) -
+  design → implemented (Phases 1-4 + cross-cutting): new pure modules under
+  `strategies/`, extended evaluation breadth, 4 new market analyst tools, and
+  10 new config keys (all gates default OFF / advisory-only):
+  - **New modules** - `options_math.py` (black76, implied_vol_and_greeks,
+    black_vol_surface), `rate_utils.py` (discount_factor, compound_factor,
+    equivalent_rate, monotone_fill, downside_measures),
+    `portfolio_optimizer.py` (risk_parity_weights, min_variance_weights,
+    confidence_weights, enforce_sector_exposure, risk_contribution),
+    `risk_manager.py` (two-pass `manage_risk` exit override +
+    `trailing_stop_targets`; advisory, not wired into the runtime graph yet),
+    `alpha_eval.py` (alpha_score, insight_accuracy), `config_robustness.py`.
+  - **Extended modules** - `evaluate.py` (skewness, kurtosis,
+    downside_deviation, sortino, tracking_error, information_ratio, beta,
+    alpha, treynor, rolling_beta, probabilistic_sharpe, underwater_drawdowns),
+    `exits.py` (`trailing_stop_exit`, `max_giveback_exit`), `book_risk.py`
+    (`return_autocorrelation`, `var_cvar_horizon`), `journal.py`
+    (`trade_excursions` MAE/MFE), `liquidity_risk.py` (volume_share_slippage,
+    market_impact_slippage).
+  - **New analyst tools (market ToolNode)** - `get_downside_read`,
+    `get_horizon_var`, `get_trailing_exit`, `get_risk_parity_alloc`;
+    `get_strategy_quality` now also emits sortino + psr.
+  - **Config keys (+ `TRADINGAGENTS_*` env overrides, gates default OFF)** -
+    `psr_benchmark_sharpe` (0.0), `rolling_window` (132), `downside_mar` (0.0),
+    `trailing_stop_pct` (0.05), `enable_trailing_exit` (False),
+    `risk_parity_enabled` (False), `risk_manager_drawdown_pct` (0.05),
+    `enable_risk_manager` (False), `volume_share_vol_limit` (0.1),
+    `volume_share_price_impact` (0.025).
+  Tests: 62 new + 176 regression green, ruff clean.
+
 - **P1/P2/C3: pre-open + execution-quality advisory rows (Alpaca free IEX)** -
   implemented the measurable slices of the institutional extended-hours
   workflow with the tiers this machine actually has (probed live):

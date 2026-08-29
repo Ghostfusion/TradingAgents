@@ -298,6 +298,22 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-28 `(working tree)` - QuantLib + Lean enhancements (deep-study
+  implementation): new pure `strategies/*` modules `options_math` (Black-76
+  IV / Greeks / vol surface), `rate_utils` (discount / compound / equiv-rate +
+  downside measures), `portfolio_optimizer` (risk-parity / min-variance /
+  confidence-weighted alloc from a real covariance matrix), `risk_manager`
+  (two-pass exit override, advisory, off by default, not wired into runtime),
+  `alpha_eval`, `config_robustness`; `evaluate.py` gained sortino /
+  probabilistic_sharpe / rolling_beta / underwater_drawdowns and friends;
+  `exits.py` trailing_stop_exit + max_giveback_exit, `book_risk.py`
+  var_cvar_horizon, `journal.py` trade_excursions (MAE/MFE), `liquidity_risk.py`
+  volume-share / market-impact slippage; 4 new market analyst tools
+  (`get_downside_read`, `get_horizon_var`, `get_trailing_exit`,
+  `get_risk_parity_alloc`) + `get_strategy_quality` sortino/psr; 10 new config
+  keys with `TRADINGAGENTS_*` env overrides, all gates default OFF /
+  advisory-only. See CHANGELOG [Unreleased] ### Added. Web: the 4 new tools
+  added to the Value Tools market-tools whitelist (capabilities.py + App.jsx).
 - 2026-08-28 `(working tree)` - Empty-final-decision hardening: a model that
   misses `with_structured_output` can answer the free-text retry with only a
   bare header (`**Decision`), which silently became an empty

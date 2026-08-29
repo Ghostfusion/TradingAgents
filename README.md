@@ -35,6 +35,16 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-28] **QuantLib + Lean enhancements (deep-study implementation)** -
+  evaluation breadth beyond Sharpe (Sortino / PSR / rolling-beta / underwater
+  drawdowns), horizon VaR/CVaR, options IV + Greeks (Black-76), risk-parity /
+  min-variance / confidence-weighted allocation from a real covariance matrix,
+  a two-pass risk manager (advisory, off), MAE/MFE excursion journaling, and
+  volume-share / market-impact slippage - all as deterministic pure modules
+  under `tradingagents/strategies/` plus 4 new market analyst tools, with every
+  gate default OFF / advisory-only. See
+  docs/design_quantlib_lean_enhancements.md and CHANGELOG.
+
 - [2026-08-28] **Pre-open + execution-quality advisory rows** - probed your
   actual data tiers and built what's available on free: pre-market RVOL vs
   30-day pre-open average, gap vs the live pre-open price, and a live IEX

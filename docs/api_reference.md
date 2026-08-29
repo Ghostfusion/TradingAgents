@@ -99,6 +99,16 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | P2: live IEX quote-depth thin-book proxy |
 | `TRADINGAGENTS_ENABLE_ALPHA_PROFILE` | `enable_alpha_profile` | C3: post-fill drift vs arrival in strategy-quality report | tag decisions with style sleeve |
 | `TRADINGAGENTS_DRIFT_THRESHOLD` | `drift_threshold` | alpha-decay win-rate drift trigger |
+| `TRADINGAGENTS_PSR_BENCHMARK_SHARPE` | `psr_benchmark_sharpe` | PSR benchmark Sharpe (default 0.0) |
+| `TRADINGAGENTS_ROLLING_WINDOW` | `rolling_window` | rolling evaluation window (default 132) |
+| `TRADINGAGENTS_DOWNSIDE_MAR` | `downside_mar` | minimum acceptable return for downside measures (default 0.0) |
+| `TRADINGAGENTS_TRAILING_STOP_PCT` | `trailing_stop_pct` | peak-to-exit trail % for trailing exits (default 0.05) |
+| `TRADINGAGENTS_ENABLE_TRAILING_EXIT` | `enable_trailing_exit` | peak-trailing / give-back exits on (default OFF) |
+| `TRADINGAGENTS_RISK_PARITY_ENABLED` | `risk_parity_enabled` | risk-parity / min-variance allocation on (default OFF) |
+| `TRADINGAGENTS_RISK_MANAGER_DRAWDOWN_PCT` | `risk_manager_drawdown_pct` | risk-manager drawdown trigger (default 0.05) |
+| `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | two-pass risk manager on (default OFF; not wired to runtime) |
+| `TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT` | `volume_share_vol_limit` | volume-share slippage volume limit (default 0.1) |
+| `TRADINGAGENTS_VOLUME_SHARE_PRICE_IMPACT` | `volume_share_price_impact` | volume-share slippage price impact (default 0.025) |
 
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
 | `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
@@ -272,7 +282,10 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 
 Off by default: `enable_regime`, `enable_factors`,
 `enable_threshold_gate`. `enable_sentiment` is now **on** (computed sentiment
-score + surprise velocity injected into the sentiment report). Strategy-eval
+score + surprise velocity injected into the sentiment report). Pure
+`strategies/risk_manager.py` (`manage_risk` two-pass exit override +
+`trailing_stop_targets`) also ships advisory: `enable_risk_manager` is OFF by
+default and it is not wired into the runtime graph yet. Strategy-eval
 scripts: `scripts/evaluate_config_gate.py`
 (G5 walk-forward/PBO), `scripts/orderflow_evaluate.py` (ledger evaluation),
 `scripts/risk_report.py` (risk audit).
@@ -473,7 +486,11 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 | `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown |
 | `get_sector_rank(ticker)` | `strategies.sector_rank.rank_sectors` + `sector_standing` | market | 11-SPDR 1m/3m momentum ranking + the ticker's sector standing |
-| `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` | market | net CAGR / annualized vol / Sharpe / max drawdown over a return series |
+| `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` | market | net CAGR / annualized vol / Sharpe / Sortino / PSR / max drawdown over a return series |
+| `get_downside_read(ticker, target?)` | `strategies.rate_utils.downside_measures` | market | semi-deviation / downside deviation / shortfall probability / average shortfall vs a target (MAR) |
+| `get_horizon_var(ticker, horizon_days?, alpha?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate |
+| `get_trailing_exit(ticker, entry, peak, current, trail_pct?)` | `strategies.exits.trailing_stop_exit` | market | peak-trailing / give-back stop verdict + exit price |
+| `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + risk_contribution) | market | risk-parity weights, min-variance weights and per-name risk contributions from a real covariance matrix |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
 | `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` | market | historical VaR / CVaR tail budget + -10% uniform stress loss |
