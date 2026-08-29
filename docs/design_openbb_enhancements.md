@@ -1,6 +1,8 @@
 # Deep Study: OpenBB → TradingAgents + trading_web Enhancements
 
-**Status:** design / research (no code yet).
+**Status:** design → implemented (Phases 1-4 + cross-cutting: strategies, dataflow
+envelope/registry, free-tier data surfaces, trading_web product features — see
+CHANGELOG [Unreleased] ### Added).
 **Source study:** shallow clone of
 [`OpenBB-finance/OpenBB`](https://github.com/OpenBB-finance/OpenBB) read in this
 session (openbb_platform core + extensions + providers, desktop/, cli/, mcp_server),

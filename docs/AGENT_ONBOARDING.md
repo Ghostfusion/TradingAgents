@@ -298,6 +298,14 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - OpenBB deep-study **implementation** (all 4
+  phases + quick wins): `strategies/statistical.py` + `rotation.py` (normality,
+  unit-root ADF/KPSS, omega, correlation, cointegration/Granger, CAPM, VIF,
+  relative-rotation, Clenow, vol-cones) + 5 market tools; typed dataflow layer
+  (`dataflows/schema.py` VendorResult + `registry.py` + `route_to_vendor_typed`);
+  free-tier data surfaces (`cboe.py` options, `federal_reserve.py` SOFR/treasury,
+  `screener.py` universe+movers); trading_web watchlist/grid/charts/presets/
+  credentials/timeline. Tests: 41 + 14 + 32 + 54. ruff clean.
 - 2026-08-29 `(working tree)` - OpenBB deep-study enhancement roadmap
   (`docs/design_openbb_enhancements.md`): research-to-design mapping OpenBB's
   typed provider envelopes (VendorResult/error_kind), self-describing

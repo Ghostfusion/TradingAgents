@@ -9,7 +9,26 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
-- **QuantLib + Lean enhancements (deep-study implementation)** (`docs/design_quantlib_lean_enhancements.md`) -
+- **OpenBB enhancements (deep-study implementation)** (`docs/design_openbb_enhancements.md`) -
+  design → implemented (Phases 1-4 + cross-cutting):
+  - **Strategy depth** - `strategies/statistical.py` (normality, unit_root
+    ADF+KPSS, omega, correlation_matrix, cointegration_pair, granger_causality,
+    capm_decomposition, ols_factors, variance_inflation_factor) +
+    `strategies/rotation.py` (relative_rotation RRG quadrants, clenow_momentum,
+    vol_cones). 5 new market @tools (get_normality / get_unit_root /
+    get_relative_rotation / get_capm_risk / get_clenow_momentum).
+  - **Typed dataflow layer** - `dataflows/schema.py` VendorResult envelope
+    (results/provider/warnings/error_kind + to_llm/to_markdown),
+    `dataflows/registry.py` (coverage, required_credentials, filter_params,
+    command_map), `route_to_vendor_typed()` mapping sentinels -> error_kind.
+  - **Free-tier data surfaces** - `dataflows/cboe.py` (options surface ->
+    options_math.black_vol_surface), `dataflows/federal_reserve.py` (SOFR +
+    Treasury curve for term-structure discounting), `dataflows/screener.py`
+    (yfinance universe screener + movers). 4 new config gates default OFF.
+  - **Web product (trading_web)** - watchlist, SignalTable grid, TickerChart
+    (candlestick/volume/drawdown), run presets, credential manager, job
+    timeline + rerun (54 backend tests, vite build clean).
+  - **QuantLib + Lean enhancements (deep-study implementation)** (`docs/design_quantlib_lean_enhancements.md`) -
   design → implemented (Phases 1-4 + cross-cutting): new pure modules under
   `strategies/`, extended evaluation breadth, 4 new market analyst tools, and
   10 new config keys (all gates default OFF / advisory-only):

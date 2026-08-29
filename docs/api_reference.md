@@ -109,6 +109,10 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | two-pass risk manager on (default OFF; not wired to runtime) |
 | `TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT` | `volume_share_vol_limit` | volume-share slippage volume limit (default 0.1) |
 | `TRADINGAGENTS_VOLUME_SHARE_PRICE_IMPACT` | `volume_share_price_impact` | volume-share slippage price impact (default 0.025) |
+| `TRADINGAGENTS_ENABLE_OPTIONS_SURFACE` | `enable_options_surface` | CBOE delayed options chain -> IV/greeks surface (default OFF) |
+| `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | `enable_risk_free_curve` | NY Fed SOFR + Treasury par-yield curve (default OFF) |
+| `TRADINGAGENTS_ENABLE_SCREENER` | `enable_screener` | yfinance universe screener (symbol/PE/EPS/beta/mkt-cap) (default OFF) |
+| `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | `enable_market_movers` | yfinance gainers/losers/actives (default OFF) |
 
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
 | `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
