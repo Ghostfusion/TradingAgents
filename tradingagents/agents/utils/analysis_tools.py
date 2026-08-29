@@ -1649,7 +1649,9 @@ def get_strategy_quality(
             equity_curve,
             max_drawdown,
             net_returns,
+            probabilistic_sharpe,
             sharpe,
+            sortino,
             volatility,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1667,9 +1669,137 @@ def get_strategy_quality(
     shr = sharpe(net)
     curve = equity_curve(net)
     mdd = max_drawdown(curve)
+    so = sortino(net)
+    psr = probabilistic_sharpe(net)
+    so_txt = f"{so:.2f}" if so is not None else "unavailable"
+    psr_txt = f"{psr:.2f}" if psr is not None else "unavailable"
     return (
         f"strategy quality {ticker}: net_cagr={cg:.2%} vol={vol:.2%} "
-        f"sharpe={shr:.2f} max_dd={mdd:.2%} n={len(net)}"
+        f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} n={len(net)}"
+    )
+
+
+@tool
+def get_downside_read(
+    ticker: Annotated[str, "ticker symbol"],
+    target: Annotated[float | None, "target/minimum return (MAR), default 0"] = None,
+) -> str:
+    """Downside / regret measures about a target (QuantLib Q7).
+
+    Reports semi-deviation (about the mean), downside deviation (about the
+    target), shortfall probability and average shortfall — the exact
+    target-anchored downside numbers that complement CVaR. Use when the analyst
+    wants to quantify 'how bad is the downside' rather than assert it.
+    """
+    try:
+        from tradingagents.strategies.rate_utils import downside_measures
+    except Exception as exc:  # noqa: BLE001
+        return f"downside read unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 15:
+        return f"downside read unavailable for {ticker}: not enough history."
+    returns = _daily_returns(closes)
+    d = downside_measures(returns, 0.0 if target is None else float(target))
+    if d["n"] == 0:
+        return f"downside read unavailable for {ticker}: no returns."
+    return (
+        f"downside {ticker}: semi_dev={(d['semi_deviation'] or 0):.2%} "
+        f"downside_dev={(d['downside_deviation'] or 0):.2%} "
+        f"shortfall_prob={(d['shortfall_prob'] or 0):.1%} "
+        f"avg_shortfall={(d['avg_shortfall'] or 0):.2%} n={d['n']}"
+    )
+
+
+@tool
+def get_horizon_var(
+    ticker: Annotated[str, "ticker symbol"],
+    horizon_days: Annotated[int, "risk horizon in days"] = 5,
+    alpha: Annotated[float, "confidence level, default 0.95"] = 0.95,
+) -> str:
+    """Horizon VaR/CVaR (QuantLib Q1) gated on autocorrelation.
+
+    Reports empirical + parametric VaR/CVaR at a multi-day horizon and whether
+    the sqrt(T) scaling is valid (i.i.d. gate). Use when the risk-governor /
+    book-tails need a horizon-correct number instead of '~3x daily'.
+    """
+    try:
+        from tradingagents.strategies.book_risk import var_cvar_horizon
+    except Exception as exc:  # noqa: BLE001
+        return f"horizon var unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 60:
+        return f"horizon var unavailable for {ticker}: need >=60 bars."
+    returns = _daily_returns(closes)
+    r = var_cvar_horizon(returns, int(horizon_days), float(alpha))
+    if r["n"] < 2:
+        return f"horizon var unavailable for {ticker}: no returns."
+    valid = "valid" if r["scaling_valid"] else "NOT-iid"
+    return (
+        f"horizon_var {ticker} {horizon_days}d: emp_var={(r['emp_var'] or 0):.2%} "
+        f"emp_cvar={(r['emp_cvar'] or 0):.2%} "
+        f"param_var={(r['param_var'] or 0):.2%} scaling={valid} n={r['n']}"
+    )
+
+
+@tool
+def get_trailing_exit(
+    ticker: Annotated[str, "ticker symbol"],
+    entry: Annotated[float, "entry price"],
+    peak: Annotated[float, "highest price since entry"],
+    current: Annotated[float, "current price"],
+    trail_pct: Annotated[float, "trailing-stop % from peak, default 0.05"] = 0.05,
+) -> str:
+    """Peak-trailing / give-back exit arithm (Lean L4).
+
+    Reports whether a peak-trail stop is struck and the exit price. Use when
+    deciding to hold or take profit on a runner that has given back ground
+    from its peak — the fixed ATR rules never force such an exit.
+    """
+    try:
+        from tradingagents.strategies.exits import trailing_stop_exit
+    except Exception as exc:  # noqa: BLE001
+        return f"trailing exit unavailable for {ticker}: {exc}"
+    r = trailing_stop_exit(float(entry), float(peak), float(current), float(trail_pct))
+    if r["stop_px"] is None:
+        return f"trailing exit unavailable for {ticker}: unusable inputs."
+    verdict = "EXIT" if r["exit"] else "hold"
+    return (
+        f"trailing_exit {ticker}: {verdict} stop_px={r['stop_px']:.2f} "
+        f"drawdown_from_peak={r['drawdown_from_peak']:.1%} (trail {float(trail_pct):.0%})"
+    )
+
+
+@tool
+def get_risk_parity_alloc(
+    ticker: Annotated[str, "anchor ticker (signal context)"],
+    returns_by_name: Annotated[
+        dict, "dict of name -> return series (aligned daily/monthly returns)"
+    ],
+) -> str:
+    """Risk-parity / min-variance / confidence-weighted allocation over a book.
+
+    Reports risk-parity weights (equalized risk contribution), minimum-variance
+    weights and per-name risk contributions from an actual covariance matrix —
+    instead of value-ratio + hard clips. Pass ``returns_by_name`` of the book.
+    """
+    try:
+        from tradingagents.strategies.portfolio_optimizer import (
+            min_variance_weights,
+            risk_contribution,
+            risk_parity_weights,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"risk-parity alloc unavailable: {exc}"
+    rp = risk_parity_weights(returns_by_name)
+    mv = min_variance_weights(returns_by_name)
+    rc = risk_contribution(rp["weights"], returns_by_name)
+    if not rp["weights"]:
+        return "risk-parity alloc unavailable: covariance not computable."
+    rp_s = ", ".join(f"{k}={v:.1%}" for k, v in rp["weights"].items())
+    rc_s = ", ".join(f"{k}={v:.1%}" for k, v in rc.items()) if rc else "n/a"
+    return (
+        f"risk_parity_alloc {ticker}: {rp_s} [{rp['note']}]; "
+        f"min_var={mv['note']}; risk_contribution={{ {rc_s} }}"
     )
 
 
