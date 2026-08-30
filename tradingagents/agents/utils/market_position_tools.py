@@ -268,6 +268,7 @@ def get_liquidity_risk(
             float_turnover as _ft,
             free_float_factor as _iwf,
             liquidity_verdict as _lv,
+            roll_spread,
         )
     except Exception as exc:  # noqa: BLE001
         return f"liquidity risk unavailable for {ticker}: {exc}"
@@ -294,6 +295,15 @@ def get_liquidity_risk(
             f"  float_turnover={ft:.3%}" if ft is not None else "  float_turnover=n/a",
             f"  iwf={iwf:.2%}" if iwf is not None else "  iwf=n/a",
         ]
+        spread = None
+        if closes and len(closes) >= 60:
+            try:
+                spread = roll_spread(closes)
+            except Exception:  # noqa: BLE001 - degrades to n/a
+                spread = None
+        lines.append(
+            f"  roll_spread={spread:.4f} (px)" if spread is not None else "  roll_spread=n/a"
+        )
         if lv["dangers"]:
             lines.append("  dangers: " + "; ".join(lv["dangers"]))
         return "\n".join(lines)

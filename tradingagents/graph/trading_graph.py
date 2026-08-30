@@ -87,6 +87,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_liquidation_days,
     get_margin_of_safety,
     get_market_movers,
+    get_mean_reversion_quality,
     get_mean_reversion_tech,
     get_momentum_detail,
     get_news_sentiment_series,
@@ -407,6 +408,7 @@ class TradingAgentsGraph:
                     get_volatility_estimators,
                     get_garch_volatility,
                     get_tail_decomposition,
+                    get_mean_reversion_quality,
                     # Market-session mechanics (pre/post-market, opening range).
                     get_opening_range,
                     get_gap_type,

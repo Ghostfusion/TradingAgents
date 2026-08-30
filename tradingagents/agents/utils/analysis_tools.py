@@ -3189,6 +3189,59 @@ def get_garch_volatility(
 
 
 @tool
+def get_mean_reversion_quality(
+    ticker: Annotated[str, "ticker symbol"],
+    window: Annotated[int, "Lookback days for the AR(1) / OU fit"] = 120,
+) -> str:
+    """Is this series mean-reverting, and how fast? AR(1) / OU half-life +
+    verdict (mean-reverting / trending / stable) from the closing series.
+    Use before any 'mean reversion / buy the dip / fading the move' claim; a
+    trend, not a mean-reversion, in the measured half-life invalidates a
+    pure fade.
+    """
+    try:
+        from tradingagents.strategies.mean_reversion import (
+            ar1_half_life,
+            mean_reversion_verdict,
+            ou_half_life,
+        )
+
+        ohlcv = _ohlcv(ticker, days=320)
+        closes = ohlcv["closes"]
+        window = max(60, min(int(window), len(closes)))
+        use = closes[-window:] if closes else []
+        if len(use) < 60:
+            return f"mean-reversion quality unavailable for {ticker}: insufficient history"
+        v = mean_reversion_verdict(use)
+        hl_ar1 = ar1_half_life(use)
+        hl_ou = ou_half_life(use)
+        lines = [
+            f"## Mean-Reversion Quality — {ticker}",
+            f"- verdict: {v['verdict']} (n={v['n']})",
+            f"- phi (AR(1) slope): {v['phi'] if v['phi'] is not None else 'n/a'}",
+        ]
+        if hl_ar1 is not None:
+            lines.append(f"- AR(1) half-life: {hl_ar1} days")
+        if hl_ou is not None:
+            lines.append(f"- OU half-life: {hl_ou} days")
+        if v["verdict"] == "mean-reverting":
+            lines.append(
+                "- read: dip entries supported by the measured mean-reversion "
+                f"(half-life {v['half_life']}d); sized to the reversion cadence"
+            )
+        elif v["verdict"] == "trending":
+            lines.append(
+                "- read: the series is TRENDING (phi >= 0); a pure mean-reversion "
+                "entry is unsupported - trend-follow the structure instead"
+            )
+        else:
+            lines.append("- read: not enough signal to classify (stable); treat as trend until evidence")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"mean-reversion quality unavailable for {ticker}: {exc}"
+
+
+@tool
 def get_volatility_estimators(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:

@@ -230,3 +230,35 @@ def market_impact_slippage(order_qty: float, adv: float, price: float,
     if a <= 0 or p <= 0 or q <= 0:
         return None
     return p * abs(float(impact_coeff)) * (q / a)
+
+
+def roll_spread(closes: list, min_obs: int = 30) -> float | None:
+    """Roll (1984) effective-spread estimator from daily prices alone.
+
+    ``spread = 2 * sqrt(-Cov(Delta P_t, Delta P_{t-1}))`` when the first
+    autocovariance of price changes is negative. Returns a spread proxy in
+    **price units** (None when the autocovariance >= 0 or the series is too
+    short). Use as a relative / cross-sectional liquidity proxy - it assumes
+    zero drift, no autocorrelation in the efficient price, and symmetric
+    spreads, so it under-estimates the true spread on daily bars.
+    """
+    import math as _math
+
+    vals = []
+    for c in closes:
+        try:
+            f = float(c)
+        except (TypeError, ValueError):
+            continue
+        if f > 0:
+            vals.append(f)
+    if len(vals) < min_obs + 1:
+        return None
+    dp = [vals[i] - vals[i - 1] for i in range(1, len(vals))]
+    n = len(dp)
+    mean = sum(dp) / n
+    cov = sum((dp[i] - mean) * (dp[i - 1] - mean) for i in range(1, n)) / (n - 1)
+    if cov >= 0:
+        return None
+    spread = 2.0 * _math.sqrt(-cov)
+    return round(spread, 6) if _math.isfinite(spread) and spread > 0 else None
