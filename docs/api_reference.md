@@ -62,6 +62,7 @@ in `batch.py`).
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC` | `sentiment_factor_min_ic` | measured rank-IC floor for the sentiment fold (default 0.02) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE` | `sentiment_factor_max_scale` | max +/- position-scale move from the sentiment fold (default 0.2) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE` | `sentiment_factor_min_scale` | floor for the sentiment fold scale (default 0.5) |
+| `TRADINGAGENTS_VOLATILITY_ESTIMATOR` | `volatility_estimator` | overlay sizing estimator: `close` (default) \| `ewma` \| `garch` (parkinson / garman-klass are analyst tools, need OHLC) |
 | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
@@ -369,6 +370,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`, `gdelt`, `benzinga`, `newsapi` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier - GDELT/Benzinga opt-in via `news_data` chain, not default)
 - news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` tone
+- quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/EWMA/GARCH), `get_garch_volatility`, `get_tail_decomposition` (incremental/component VaR), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread (in `get_liquidity_risk`), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)

@@ -1612,6 +1612,37 @@ daily; output merges name/change columns for picking. See
   so the call degrades to zeroed totals instead of aborting.
 
 ### Added
+- **Quant-formula calculations** (`Strategies/quants.md` + `quant2.md`
+  implementation) - pure deterministic calculators mapped to the repo's gaps:
+  - **Volatility estimators**: `strategies/volatility_models.py`
+    (Parkinson high-low, Garman-Klass OHLC, EWMA RiskMetrics 0.94, GARCH(1,1)
+    pure-NumPy MLE with long-run vol); `volatility_estimator` config
+    (close default | ewma | garch) feeds the overlay sizing; tools
+    `get_volatility_estimators` + `get_garch_volatility` (market).
+  - **Tail decomposition**: `book_risk.incremental_var` + `component_var`
+    (normal-covariance MCR, components sum to the book's historical VaR);
+    `get_tail_decomposition` market tool.
+  - **Mean-reversion quality**: `strategies/mean_reversion.py` (demeaned
+    AR(1)/OU half-life with an OLS t-test gate so a random walk is never
+    mislabeled; `mean_reversion_verdict`); `get_mean_reversion_quality` tool.
+  - **Roll spread**: `liquidity_risk.roll_spread` (effective-spread proxy
+    from daily prices), rendered in `get_liquidity_risk`.
+  - **Preferred/fixed income**: `strategies/fixed_income.py`
+    (indicated_yield, preferred_ytm with honesty for perpetuals,
+    macaulay/modified duration, dv01, convexity); `capital_income_screener
+    --fi / --fi-horizon` adds YTM/DMod/DV01 columns.
+  - **Credit hazard**: `credit_spread.hazard_from_spread` +
+    `default_probability` (s ~= lam(1-RR), RR=0.40), rendered in
+    `get_credit_spread_read`.
+  - **Variance + TCA**: `options_math.variance_swap_strike` (fair variance
+    strike from OTM grid) + `get_variance_premium`; `evaluate.implementation_shortfall`
+    (decision->arrival->fill) wired into `strategy_quality_report` execution
+    block (avg_is_bp).
+  Tests: `test_strategies_volatility_models` (8), `test_strategies_tail_decomposition`
+  (5), `test_strategies_mean_reversion` (8), `test_strategies_fixed_income`
+  (6), `test_quant_phase5` (6). trading_web Value Tools 33->36 tools.
+
+### Added
 - **News-sentiment factor** (`News_Sentiment.md` implementation) - the EODHD
   `/sentiments` feed (live-verified, EOD plan) becomes the primary daily
   news-sentiment series:

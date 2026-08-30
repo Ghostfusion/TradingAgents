@@ -84,6 +84,12 @@ involved. This is the "compute, don't narrate" core.
   multi-horizon Newey-West HAC regression, sector-neutral z /
   size-residualization, rolling IC + IC-IR, IC term structure + half-life,
   weekly quintile long/short, `sentiment_factor_scale` overlay helper).
+- `volatility_models.py` — Parkinson / Garman-Klass / EWMA / GARCH(1,1)
+  volatility estimators (+ `volatility_estimator` overlay switch `close`
+  default | ewma | garch).
+- `mean_reversion.py` — demeaned AR(1)/OU half-life with an OLS t-test gate
+  + `mean_reversion_verdict`.
+- `fixed_income.py` — preferred YTM / duration / DV01 / convexity.
 
 ## 4.3 Evaluation
 

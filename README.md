@@ -50,6 +50,15 @@
   + news analysts; `scripts/sentiment_factor_eval.py` + screener
   `--sentiment` (Sent7/SentZ); opt-in `enable_sentiment_factor` overlay fold;
   trading_web Value Tools. See CHANGELOG.
+- [2026-08-30] **Quant-formula calculations** (`Strategies/quants.md` +
+  `quant2.md`) - volatility estimators (Parkinson / Garman-Klass / EWMA /
+  GARCH(1,1) + `volatility_estimator` overlay switch), book tail
+  decomposition (incremental/component VaR), mean-reversion quality
+  (AR(1)/OU half-life with a t-test gate), Roll effective-spread, preferred
+  fixed-income YTM/duration/DV01 (capital_income `--fi`), credit
+  hazard/default-probability, variance-swap strike, and implementation
+  shortfall (strategy_quality `avg_is_bp`). New market tools + trading_web
+  Value Tools 33->36. See CHANGELOG.
 
 - [2026-08-30] **Extended technical indicators** - the standard
   trend/momentum/volume/structure set the project lacked now computes locally

@@ -305,6 +305,15 @@ has changed before); never assume an endpoint works — the SDK's
   (`dataflows/benzinga.py`, free ticker financial news, `BENZINGA_API_KEY`).
   NewsAPI in the default `news_data` chain; GDELT/Benzinga opt-in (GDELT
   endpoint is network-flaky). See CHANGELOG.
+- 2026-08-30 `(working tree)` - Quant-formula calculations (quants.md +
+  quant2.md implementation): volatility estimators (Parkinson/GK/EWMA/GARCH
+  + `volatility_estimator` overlay switch), book tail decomposition
+  (incremental/component VaR), mean-reversion quality (AR(1)/OU half-life
+  with t-test gate), Roll effective-spread, preferred/fixed-income
+  YTM/duration/DV01/convexity (capital_income `--fi`), credit
+  hazard/default-probability, variance-swap strike, implementation
+  shortfall (strategy_quality execution block). New market tools bound +
+  web Value Tools 33->36. See CHANGELOG.
 - 2026-08-30 `(working tree)` - News-sentiment factor (News_Sentiment.md
   implementation): EODHD `/sentiments` primary daily series +
   Alpha-Vantage/GDELT fallbacks (optional `news_sentiment` chain),
