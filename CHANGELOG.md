@@ -259,6 +259,30 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **G2 calibration feedback loop wired** (`decision_hardening_spec.md` G2) -
+  previously `record_calibration_entry` had zero call sites and `_calibrated_p`
+  always returned `None` (identity), so `enable_calibration` computed buckets
+  but never used them. Now: (a) `_maybe_record_calibration` stamps
+  `{confidence, won=delta_r>0}` into `calibration_ledger.jsonl` at resolve time
+  (confidence parsed from the PM decision's `**Confidence**: X` line);
+  (b) `_calibrated_p(decision_text)` returns `calibrated_confidence` (identity
+  below `calibration_min_n`); (c) `_compiled_decision_context` injects
+  `calibration_table_text` into the Trader/PM/risk-debator prompt when the
+  ledger has samples. Tests: `test_calibration_wiring.py` (5, hermetic).
+- **`get_ratios` abs(None) crash** - `compute_ratios` called `abs(capex)` when
+  `capex` was `None` (OCF present, capex missing) -> `TypeError: bad operand
+  type for abs()`, which aborted the `tools_fundamentals` node mid-run (seen
+  live on NVDA). Both FCF and dividend_yield now guard the missing operand.
+  Regression test added (`test_capex_none_does_not_raise`).
+- **Strategies docs kept true** - corrected the audit's doc-misnomers:
+  `decision_hardening_spec` (`weighted_score` -> `weighted_sentiment`/
+  `decayed_weight`/`computed_sentiment_line`; `evaluate_orderflow.py` ->
+  `orderflow_evaluate.py`), `alpaca_data_analysis.md` (ScheduleGate /
+  `get_clock_calendar` -> the inline `get_clock()` note in `value_screener.py`;
+  `scripts/alpaca_fetch.py` -> inline Alpaca OHLCV fallback; `get_assets` +
+  Alpaca corporate actions now marked NOT implemented), and
+  `value_dip_swing_prepost_research_plan.md` (ROC/TRIX/Force/A-D explicitly
+  marked not implemented).
 - **Canonical output root (reports/screener/action_reports)** - every
   relative output path is now anchored to the TradingAgents repo root instead
   of the process CWD, so runs never write into the launch directory. The web

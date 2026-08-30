@@ -61,6 +61,16 @@ def test_full_ratio_block():
 def test_missing_inputs_render_none_never_fabricate():
     r = compute_ratios({})  # no data
     assert all(v is None for v in r.values())
+
+
+def test_capex_none_does_not_raise():
+    """Regression: OCF present but capex missing must not call abs(None)."""
+    r = compute_ratios(_fin(capex=None))
+    assert r["free_cash_flow"] is None
+    assert r["price_to_free_cash_flow"] is None
+    # the rest of the block still computes (no crash)
+    assert r["ev"] == pytest.approx(1150e6)
+    assert r["dividend_yield"] == pytest.approx(0.02)
     # partial: no inventory -> quick None, others still computed
     r2 = compute_ratios(_fin(inventory=None))
     assert r2["quick"] is None

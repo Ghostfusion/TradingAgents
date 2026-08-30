@@ -103,7 +103,8 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
     # abs() makes FCF and dividend yield correct under both conventions
     # (OCF - capex with a negative capex would ADD capital spending back,
     # inflating FCF and every FCF-derived screen).
-    fcf = _sub(ocf, abs(capex)) if (ocf is not None) else None
+    # abs() on a None capex/divs would raise - guard both operands.
+    fcf = _sub(ocf, abs(capex)) if (ocf is not None and capex is not None) else None
     divs_abs = abs(divs) if divs is not None else None
 
     return {

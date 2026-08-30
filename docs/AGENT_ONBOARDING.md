@@ -298,6 +298,13 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - G2 calibration feedback loop wired:
+  `calibration_ledger.jsonl` now stamped at resolve time (confidence parsed
+  from the PM decision), `_calibrated_p` returns a real calibrated probability,
+  and the calibration table is injected into the decision-context prompt.
+  Fixed a `get_ratios` abs(None) crash (missing capex) that aborted the
+  fundamentals tool node; corrected Strategies/*.md doc-misnomers found in the
+  audit. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - CLI one-input mode: `tradingagents analyze
   --symbol <TICKER>` runs with no other prompts (all 4 analysts, deep research,
   provider + models from TRADINGAGENTS_LLM_PROVIDER/_DEEP_THINK_LLM/

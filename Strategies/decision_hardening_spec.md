@@ -128,11 +128,12 @@ weight, no author weight, no surprise vs baseline.
 **Fix (`strategies/sentiment.py` additions):**
 
 ```
-weighted_score(messages)        # each msg: weight = exp(-age_halflife * days) * (authoriship factor)
+weighted_sentiment(messages)     # each msg: weight = 0.5^(age/half_life) * credibility factor
 surprise_velocity(series)       # (current - 30d mean) / 30d std  (z-score)
+decayed_weight(age_days, half_life=7.0)  # recency weight for a single post
 ```
-`enable_sentiment` gates a `social_snail_*` enrichment appended to the news
-analyst's social tool output, and only when timestamps are present (RSS path
+`enable_sentiment` gates a `computed_sentiment_line` enrichment appended to the
+news analyst's social tool output, and only when timestamps are present (RSS path
 adds `None` → falls back to equal weights). Baseline window from the same
 ticker's prior social fetches (persisted small rolling buffer in cache dir).
 
@@ -147,8 +148,9 @@ walk-forward split + `deflated_sharpe`/`pbo_flag` gate (`enable_threshold_gate=t
 before accepting any new default).
 
 **Deliverables:** move ad-hoc constants to config keys;
-`scripts/evaluate_orderflow.py` and a new `scripts/evaluate_config_gate.py`
-report, in any threshold proposal, the mis-fit risk.
+`scripts/orderflow_evaluate.py` (ledger win-rate/alpha) and a new
+`scripts/evaluate_config_gate.py` report, in any threshold proposal, the
+mis-fit risk.
 
 **Acceptance:** config schema test enumerates thresholds; `pbo_flag` false
 for any default we ship.

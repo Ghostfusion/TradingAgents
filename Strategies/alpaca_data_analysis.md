@@ -37,13 +37,19 @@ are historically the generated field, beneficial to the trend/pullback scan (sca
 
 ### Phase 2 — Screener & session wiring
 - In `scripts/value_screener.py`: when `enable_alpaca`:
-  - `_fetch_ohlcv(..., vendor=None)` is extended: if `route_to_vendor get_stock_data` returns empty CSV, `alpaca_get_bars(ticker)` raw source; also on `--scan` compute the same trend/ATR/volume gates from Alpaca bars (instead of moomoo CSV). Code kept in `scripts/alpaca_fetch.py` (mixes only + unit testable).
-  - `get_clock_calendar()` → `state["market_open"]` + `market_session_note` appended to output (only when enable_alpaca).
-- `tradingagents/graph/trading_graph.py` — a guarded "market-hours" node that annotates state when `enable_alpaca` and `market_status` is "closed": `ScheduleGate` adds "closed: reopen 2026-08-19 09:30" — acts as the risk-measure attachment in phase 4 (market-hours risk gate), no date hard-coding anywhere else.
+  - `_fetch_ohlcv(ticker, ...)` is extended (inline in `value_screener.py`: it
+    calls `get_bars(ticker, timeframe="1Day", limit=330)` when `route_to_vendor
+    get_stock_data` returns an empty CSV, gated by `len>=15`); trend/ATR/volume
+    gates are recomputed from Alpaca bars (instead of moomoo CSV).
+  - A `get_clock()` closed-market note is appended to the output (only when
+    `enable_alpaca`; e.g. `[alpaca] market CLOSED (use /calendar for next open)`).
 
-### Phase 3 — Corporate/asset info (optional, analysis)
-- `get_assets()` → filter the stock universe for the watchlist: `sym, exchange, class="us_equity"`, `status!=trading` exclusion. Also `get_exchanges()`? (if useful, skip in scope).
-- `get_corporate_actions(symbol)` → dividends/splits feed the news-analyst / `earnings_catalyst` context (already partially present via FMP/moomoo); optional tier.
+### Phase 3 — Corporate/asset info (NOT implemented; optional tier)
+- `get_assets()` (filter stock universe, exclude halted/non-tradable) and an
+  Alpaca `get_corporate_actions(symbol)` are **documented but not implemented**.
+  The vendor-agnostic `get_corporate_actions` tool (moomoo/`massive`) already
+  serves dividends/splits to the fundamentals analyst, so this Alpaca tier is
+  left out (low decision value).
 
 ---
 

@@ -196,6 +196,11 @@ Add pure functions (all return None on insufficient data — no fabrication):
 - **Auction cross data** (no vendor exposes it) — informational only.
 - **Intraday VWAP** (needs 1-min bars; Alpaca free tier is daily-only) — defer.
 - **Volume profile** is Phase 1 but POC from daily bars is approximate; label it.
+- **ROC / TRIX / Force Index / A/D line** — Phase-1-listed but **not
+  implemented** (resolved open-question 1: only the high-value subset
+  `aroon` / `fisher_transform` / `chaikin_oscillator` / `elder_ray` /
+  `supertrend` / `volume_profile` shipped; `chaikin_oscillator` computes an
+  A/D line internally). No screener columns for these four.
 
 ---
 

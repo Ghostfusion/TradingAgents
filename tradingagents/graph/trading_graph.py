@@ -619,6 +619,7 @@ class TradingAgentsGraph:
                 benchmark_name=benchmark,
             )
             self._maybe_record_reflection_outcome(ticker, entry["date"], alpha)
+            self._maybe_record_calibration(ticker, entry["date"], alpha)
             updates.append(
                 {
                     "ticker": ticker,
@@ -931,7 +932,9 @@ class TradingAgentsGraph:
                     if flow is not None:
                         flow_use = {"distribution_score": flow.get("distribution_score")}
                     agreement = self._agreement_from_state(final_state)
-                    calibrated_p = self._calibrated_p()
+                    calibrated_p = self._calibrated_p(
+                        str(final_state.get("final_trade_decision") or "")
+                    )
                     tranche_read = self._tranche_risk_read(closes)
                     entry_price = None
                     if tranche_read and tranche_read.get("valid"):
@@ -1339,6 +1342,33 @@ class TradingAgentsGraph:
                         )
         except Exception:  # noqa: BLE001 - advisory, never breaks a run
             pass
+        # G2 calibration: inject the PM's own confidence->win-rate track record
+        # when enable_calibration is on, so it calibrates its declared
+        # confidence against realized outcomes (decision_hardening_spec G2).
+        try:
+            if self.config.get("enable_calibration"):
+                from tradingagents.strategies.calibration import (
+                    calibration_table_text,
+                    fit_buckets,
+                )
+
+                base = Path(self.config.get("data_cache_dir", "~/.tradingagents")).expanduser()
+                cal_file = base / "calibration_ledger.jsonl"
+                if cal_file.exists():
+                    rows = []
+                    import json as _json
+
+                    for ln in cal_file.read_text(encoding="utf-8").splitlines():
+                        if ln.strip():
+                            rows.append(_json.loads(ln))
+                    table = fit_buckets(rows)
+                    txt = calibration_table_text(table)
+                    if txt and txt != "no calibration history yet":
+                        out.append(
+                            f"**Confidence calibration** (deterministic, G2):\n{txt}"
+                        )
+        except Exception:  # noqa: BLE001 - advisory, never breaks a run
+            pass
         return "\n\n".join(out) if out else "Computed decision context: unavailable."
 
     def _precompute_risk_context(self, ticker: str) -> dict:
@@ -1450,6 +1480,49 @@ class TradingAgentsGraph:
         except Exception as exc:
             logger.warning("reflection record skipped: %s", exc)
 
+    def _maybe_record_calibration(self, ticker, trade_date, alpha):
+        """G2: stamp {confidence, won=delta_r>0} into calibration_ledger.jsonl.
+
+        Wired at resolve time (a prior pending decision realized its return) so
+        the PM's declared confidence is paired with a realized win/loss. The
+        confidence is parsed from the decision text the PM already wrote
+        (``**Confidence**: 0.72``); a missing/unparseable confidence skips the
+        stamp (no fabrication). Mirrors decision_hardening_spec G2.
+        """
+        if not self.config.get("enable_calibration") or alpha is None:
+            return
+        try:
+            pending = [
+                e
+                for e in self.memory_log.get_pending_entries()
+                if e.get("ticker") == ticker and e.get("date") == trade_date
+            ]
+            if not pending:
+                return
+            import re as _re
+
+            m = _re.search(
+                r"\*\*Confidence\*\*:?\s*([0-9]*\.?[0-9]+)", pending[-1].get("decision", "")
+            )
+            if not m:
+                return
+            confidence = float(m.group(1))
+            if not (0.0 <= confidence <= 1.0):
+                return
+            from tradingagents.strategies.calibration import record_calibration_entry
+
+            base = Path(self.config.get("data_cache_dir", "~/.tradingagents")).expanduser()
+            record_calibration_entry(
+                str(base / "calibration_ledger.jsonl"),
+                "market",
+                ticker,
+                trade_date,
+                confidence,
+                won=float(alpha) > 0,
+            )
+        except Exception as exc:
+            logger.warning("calibration record skipped: %s", exc)
+
     def _agreement_from_state(self, final_state) -> "float | None":
         if not self.config.get("enable_agreement"):
             return None
@@ -1467,24 +1540,42 @@ class TradingAgentsGraph:
         except Exception:
             return None
 
-    def _calibrated_p(self) -> "float | None":
+    def _calibrated_p(self, decision_text: str = "") -> "float | None":
+        """G2: return the calibrated win-probability for the decision's declared
+        confidence. Reads calibration_ledger.jsonl (written at resolve time),
+        buckets the historical confidence->win-rate, and returns
+        ``calibrated_confidence`` (identity when the bucket has < min_n samples
+        or the ledger is empty). None when calibration is disabled.
+        """
         if not self.config.get("enable_calibration"):
             return None
         try:
+            import re as _re
+
+            m = _re.search(r"\*\*Confidence\*\*:?\s*([0-9]*\.?[0-9]+)", decision_text or "")
+            if not m:
+                return None
+            declared = float(m.group(1))
+            if not (0.0 <= declared <= 1.0):
+                return None
             base = Path(self.config.get("data_cache_dir", "~/.tradingagents")).expanduser()
             cal_file = base / "calibration_ledger.jsonl"
             if not cal_file.exists():
                 return None
-            from tradingagents.strategies.calibration import fit_buckets
+            from tradingagents.strategies.calibration import (
+                calibrated_confidence,
+                fit_buckets,
+            )
 
             rows = []
+            import json as _json
+
             for ln in cal_file.read_text(encoding="utf-8").splitlines():
                 if ln.strip():
-                    import json
-
-                    rows.append(json.loads(ln))
-            _ = fit_buckets(rows)  # warm the table; used at decision-time later
-            return None  # identity until confidence is stamped into the ledger
+                    rows.append(_json.loads(ln))
+            table = fit_buckets(rows)
+            min_n = int(self.config.get("calibration_min_n", 5))
+            return calibrated_confidence(declared, table, min_n=min_n)
         except Exception:
             return None
 
