@@ -33,7 +33,9 @@ from cli.utils import (
     confirm_ollama_endpoint,
     detect_asset_type,
     ensure_api_key,
+    filter_analysts_for_asset_type,
     get_ticker,
+    normalize_ticker_symbol,
     prompt_openai_compatible_url,
     resolve_backend_url,
     select_analysts,
@@ -493,8 +495,15 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def get_user_selections():
-    """Get all user selections before starting the analysis display."""
+def get_user_selections(symbol: str | None = None):
+    """Get all user selections before starting the analysis display.
+
+    When ``symbol`` is passed (CLI ``--symbol``), the workflow is non-interactive:
+    the given ticker is used, the date defaults to today, all four analysts run,
+    research depth is always 'deep' (5 debate/risk rounds), and the LLM provider
+    / thinking models come from TRADINGAGENTS_LLM_PROVIDER /
+    TRADINGAGENTS_DEEP_THINK_LLM / TRADINGAGENTS_QUICK_THINK_LLM in .env.
+    """
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", encoding="utf-8") as f:
         welcome_ascii = f.read()
@@ -546,15 +555,19 @@ def get_user_selections():
         console.print(create_question_box(box_title, box_body))
         return prompt_fn()
 
-    # Step 1: Ticker symbol
-    console.print(
-        create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the ticker, with exchange suffix when needed (e.g. SPY, 0700.HK, BTC-USD)",
-            "SPY",
+    # Step 1: Ticker symbol — from --symbol or (interactive) prompt.
+    if symbol is not None:
+        selected_ticker = normalize_ticker_symbol(symbol.strip()) if symbol.strip() else "SPY"
+        console.print(f"[bold]Analyzing:[/bold] {selected_ticker}")
+    else:
+        console.print(
+            create_question_box(
+                "Step 1: Ticker Symbol",
+                "Enter the ticker, with exchange suffix when needed (e.g. SPY, 0700.HK, BTC-USD)",
+                "SPY",
+            )
         )
-    )
-    selected_ticker = get_ticker()
+        selected_ticker = get_ticker()
     asset_type = detect_asset_type(selected_ticker)
     # Only announce when it's not the default stock path, to avoid printing
     # "stock" on every run.
@@ -563,16 +576,19 @@ def get_user_selections():
             f"[green]Detected asset type:[/green] {asset_type.value}"
         )
 
-    # Step 2: Analysis date
+    # Step 2: Analysis date — today by default in symbol mode.
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    console.print(
-        create_question_box(
-            "Step 2: Analysis Date",
-            "Enter the analysis date (YYYY-MM-DD)",
-            default_date,
+    if symbol is not None:
+        analysis_date = default_date
+    else:
+        console.print(
+            create_question_box(
+                "Step 2: Analysis Date",
+                "Enter the analysis date (YYYY-MM-DD)",
+                default_date,
+            )
         )
-    )
-    analysis_date = get_analysis_date()
+        analysis_date = get_analysis_date()
 
     # Step 3: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
     if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
@@ -580,6 +596,8 @@ def get_user_selections():
         console.print(
             f"[green]✓ Output language from environment:[/green] {output_language}"
         )
+    elif symbol is not None:
+        output_language = DEFAULT_CONFIG["output_language"]
     else:
         console.print(
             create_question_box(
@@ -589,25 +607,45 @@ def get_user_selections():
         )
         output_language = ask_output_language()
 
-    # Step 4: Select analysts
-    console.print(
-        create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+    # Step 4: Select analysts — all four by default in symbol mode.
+    if symbol is not None:
+        from cli.models import AnalystType
+
+        selected_analysts = filter_analysts_for_asset_type(
+            [
+                AnalystType.MARKET,
+                AnalystType.SOCIAL,
+                AnalystType.NEWS,
+                AnalystType.FUNDAMENTALS,
+            ],
+            asset_type,
         )
-    )
-    selected_analysts = select_analysts(asset_type)
-    console.print(
-        f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
-    )
+        console.print(
+            f"[green]Selected analysts:[/green] {', '.join(a.value for a in selected_analysts)}"
+        )
+    else:
+        console.print(
+            create_question_box(
+                "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+            )
+        )
+        selected_analysts = select_analysts(asset_type)
+        console.print(
+            f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
+        )
 
     # Step 5: Research depth (skipped when both round counts are set via env).
     # Research depth maps to the debate + risk round counts; when both are
     # supplied through TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS we keep
     # the run non-interactive and honor the env values (#977).
+    # Research depth is always 'deep' (5) in symbol mode; otherwise env or prompt.
     depth_from_env = bool(os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS")) and bool(
         os.environ.get("TRADINGAGENTS_MAX_RISK_ROUNDS")
     )
-    if depth_from_env:
+    if symbol is not None:
+        selected_research_depth = 5
+        console.print("[green]✓ Research depth:[/green] deep (5 debate / 5 risk rounds)")
+    elif depth_from_env:
         selected_research_depth = DEFAULT_CONFIG["max_debate_rounds"]
         console.print(
             f"[green]✓ Research depth from environment:[/green] "
@@ -626,7 +664,7 @@ def get_user_selections():
     # The backend URL comes from TRADINGAGENTS_LLM_BACKEND_URL when set,
     # otherwise the provider's default endpoint — the same value the menu
     # would have picked.
-    provider_from_env = bool(os.environ.get("TRADINGAGENTS_LLM_PROVIDER"))
+    provider_from_env = bool(os.environ.get("TRADINGAGENTS_LLM_PROVIDER")) or symbol is not None
     if provider_from_env:
         selected_llm_provider = DEFAULT_CONFIG["llm_provider"].lower()
         backend_url = resolve_backend_url(
@@ -676,9 +714,18 @@ def get_user_selections():
         ensure_api_key(selected_llm_provider)
 
     # Step 7: Thinking agents (skipped when either model is set via environment)
-    if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM"):
-        selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
-        selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
+    if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM") or symbol is not None:
+        # .env model wins; else the DEFAULT_CONFIG default; else provider-neutral default.
+        selected_shallow_thinker = (
+            DEFAULT_CONFIG["quick_think_llm"]
+            or os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM")
+            or "gpt-4o-mini"
+        )
+        selected_deep_thinker = (
+            DEFAULT_CONFIG["deep_think_llm"]
+            or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM")
+            or "gpt-4o"
+        )
         console.print(
             f"[green]✓ Thinking agents from environment:[/green] "
             f"quick={selected_shallow_thinker}, deep={selected_deep_thinker}"
@@ -1007,9 +1054,10 @@ def run_analysis(
     save_report: bool = True,
     display_report: bool = True,
     save_path_arg: Path | None = None,
+    symbol: str | None = None,
 ):
     # First get all user selections
-    selections = get_user_selections()
+    selections = get_user_selections(symbol=symbol)
 
     config = _build_run_config(selections, checkpoint)
 
@@ -1293,7 +1341,9 @@ def run_analysis(
 
     if save_report:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
+        from tradingagents.dataflows.utils import resolve_output_path
+
+        default_path = resolve_output_path("reports") / f"{selections['ticker']}_{timestamp}"
         save_path = save_path_arg or default_path
         try:
             report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
@@ -1336,6 +1386,14 @@ def analyze(
         "--save-path",
         help="Override the report save location (default: ./reports/<ticker>_<ts>).",
     ),
+    symbol: str | None = typer.Option(
+        None,
+        "--symbol",
+        help="Ticker to analyze. When given, the CLI runs non-interactively: "
+        "all 4 analysts, deep research, and the LLM provider/models from "
+        "TRADINGAGENTS_LLM_PROVIDER / TRADINGAGENTS_DEEP_THINK_LLM / "
+        "TRADINGAGENTS_QUICK_THINK_LLM. Report auto-saves to reports/.",
+    ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
@@ -1347,6 +1405,7 @@ def analyze(
             save_report=save_report,
             display_report=display_report,
             save_path_arg=save_path,
+            symbol=symbol,
         )
     except _NO_CONSOLE_ERRORS:
         # A terminal with no console buffer cannot host the interactive prompts.

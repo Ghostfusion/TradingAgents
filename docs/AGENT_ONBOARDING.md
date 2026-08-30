@@ -298,6 +298,11 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - CLI one-input mode: `tradingagents analyze
+  --symbol <TICKER>` runs with no other prompts (all 4 analysts, deep research,
+  provider + models from TRADINGAGENTS_LLM_PROVIDER/_DEEP_THINK_LLM/
+  _QUICK_THINK_LLM, report auto-saved to reports/, CWD-independent). Interactive
+  flow unchanged. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Canonical output root: all reports / screener /
   action_report / nightly-review / pre-market-review / rebuild outputs now
   resolve against the TradingAgents repo root (new

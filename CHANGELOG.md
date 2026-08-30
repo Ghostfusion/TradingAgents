@@ -9,6 +9,14 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **CLI one-input mode (`--symbol`)** - `tradingagents analyze --symbol AAPL`
+  runs non-interactively: all 4 analysts, deep research (5 debate/5 risk
+  rounds), today's date, and the LLM provider + thinking models from
+  `TRADINGAGENTS_LLM_PROVIDER` / `TRADINGAGENTS_DEEP_THINK_LLM` /
+  `TRADINGAGENTS_QUICK_THINK_LLM` in `.env`; the report auto-saves to
+  `reports/<TICKER>_<ts>/` (now anchored to the repo root via
+  `resolve_output_path`, not the process CWD). Interactive (no `--symbol`)
+  flow unchanged. Tests: `test_cli_symbol_one_input.py` (3, hermetic).
 - **Alpha Vantage keyed fallback** - `ALPHA_VANTAGE_API_KEY` set in `.env`;
   `alpha_vantage` added as the key-gated last vendor in the
   `technical_indicators` / `fundamental_data` / `news_data` default chains
