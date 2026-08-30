@@ -68,6 +68,33 @@ def _parse_gate(gate_text: str) -> tuple[dict, dict]:
     return gate, extra
 
 
+def _recover_gate(dirpath: Path) -> tuple[str | None, dict, dict]:
+    """Recover a leading ``### Risk Gate (computed)`` block from any file that
+    carries one. Reports written before the layout change carried the gate at
+    the head of the analyst/risk files; the current layout keeps it only in
+    ``4_risk/`` and ``5_portfolio/decision.md``. Scanning them all (decision
+    first, then risk, then analysts) makes a rebuild round-trip the gate no
+    matter which layout a folder was produced with.
+    """
+    order = (
+        "5_portfolio/decision.md",
+        "4_risk/aggressive.md",
+        "4_risk/conservative.md",
+        "4_risk/neutral.md",
+        "4_risk/verdict.md",
+        "1_analysts/market.md",
+        "1_analysts/sentiment.md",
+        "1_analysts/news.md",
+        "1_analysts/fundamentals.md",
+    )
+    for rel in order:
+        gate_text, _ = _split_gate(_read(dirpath, rel))
+        if gate_text:
+            gate, extra = _parse_gate(gate_text)
+            return gate_text, gate, extra
+    return None, {}, {}
+
+
 def rebuild_report(dirpath: Path) -> Path:
     """Regenerate the consolidated report for one folder; returns its path."""
     path = Path(dirpath)
@@ -98,14 +125,13 @@ def rebuild_report(dirpath: Path) -> Path:
     ):
         _, body = _split_gate(_read(path, rel))
         risk[key] = body
-    gate_text, judge = _split_gate(_read(path, "5_portfolio/decision.md"))
+    _, judge = _split_gate(_read(path, "5_portfolio/decision.md"))
     risk["judge_decision"] = judge
     state["risk_debate_state"] = risk
 
-    if gate_text:
-        gate, extra = _parse_gate(gate_text)
-        if gate:
-            state["risk_gate"] = gate
+    gate_text, gate, extra = _recover_gate(path)
+    if gate_text and gate:
+        state["risk_gate"] = gate
         state.update(extra)
 
     return write_report_tree(state, ticker, path, config={"risk_compact_report": False})

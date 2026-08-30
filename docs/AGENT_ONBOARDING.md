@@ -298,6 +298,10 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - Risk gate moved out of the analyst reports
+  (now once in 4_risk + 5_portfolio decision); compact verdict.md no longer
+  duplicates the PM decision; rebuild_complete_report gate recovery hardened
+  + _readable_section idempotent. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Interactive CLI always writes the verbose
   risk-debate files (aggressive/conservative/neutral.md) - an ambient
   TRADINGAGENTS_RISK_COMPACT_REPORT=true was producing a single verdict.md;

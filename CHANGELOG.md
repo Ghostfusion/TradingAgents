@@ -259,6 +259,16 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Risk gate placement + compact verdict** - the computed `Risk Gate (computed)`
+  block was prepended to EVERY analyst report (input evidence, not risk
+  output), so it appeared 6+ times; it now lives once in `4_risk/*.md` and
+  `5_portfolio/decision.md` (and once in the consolidated report's IV section).
+  The compact-mode `4_risk/verdict.md` previously duplicated the PM decision
+  almost byte-for-byte; it now contains the risk gate + a pointer to the
+  decision. `scripts/rebuild_complete_report.py` gate recovery hardened (scans
+  decision/risk/analyst files in order), and `_readable_section` made
+  idempotent (re-render no longer doubles `### Round N` headings or stacks
+  blank lines). Tests: `test_report_readable.py` (+3), `test_rebuild_gate_recovery.py` (3).
 - **Interactive CLI always writes verbose risk-debate files** - the NVDA run
   produced a single `4_risk/verdict.md` instead of `aggressive.md` /
   `conservative.md` / `neutral.md` because an ambient

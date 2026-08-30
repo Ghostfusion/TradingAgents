@@ -35,6 +35,12 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-29] **Risk gate placement + compact verdict** - the computed risk
+  gate is no longer repeated at the top of every analyst report (it appears
+  once, in `4_risk/` + `5_portfolio/decision.md`), the compact `verdict.md` no
+  longer duplicates the PM decision, and report re-renders are idempotent
+  (no doubled `### Round N` headings). See CHANGELOG.
+
 - [2026-08-29] **Readable reports + verbose risk files** - the interactive
   CLI now always writes the full risk-debate transcripts
   (`4_risk/aggressive.md` / `conservative.md` / `neutral.md`) instead of a

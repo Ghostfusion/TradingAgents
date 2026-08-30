@@ -274,34 +274,62 @@ def _readable_section(text: str, role: str = "") -> str:
     if not text:
         return text
     lines = text.split("\n")
-    # --- 1. paragraph spacing ---
+    pat = (role + ":") if role else None
+    occurrences = sum(1 for ln in lines if pat and ln.strip().startswith(pat))
+    # Promote round markers only when the role repeats (a real debate), and
+    # NEVER when the file is already formatted (idempotent: a re-render of an
+    # on-disk report must not double the headings or stack blank lines).
+    promote = occurrences >= 2
+    rn = 0
     out: list[str] = []
     for i, ln in enumerate(lines):
+        if promote and ln.strip().startswith(pat):
+            rn += 1
+            # Idempotency: if the *source* already has this "### Round N"
+            # heading directly above the role line (a re-render of an
+            # on-disk, already-formatted report), do NOT add it again.
+            # Look back past blank lines to the previous non-blank source line
+            # (an already-formatted report has "### Round N" then a blank then
+            # the role line).
+            j = i - 1
+            while j >= 0 and not lines[j].strip():
+                j -= 1
+            src_prev = lines[j].strip() if j >= 0 else ""
+            if src_prev == f"### Round {rn}":
+                out.append(ln)
+                continue
+            out.append(f"### Round {rn}")
+            # ensure a blank line follows the heading (collapse doubles)
+            out.append("")
+            out.append(ln)
+            continue
         out.append(ln)
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        # add a blank line between two plain prose lines (but not before a
-        # markdown block header / list / table / code fence).
-        if _indent_needed(ln) and nxt and _indent_needed(nxt) and ln.strip() and nxt.strip():
+        # paragraph spacing between two plain prose lines; never stack blank
+        # lines (collapse "\n\n" runs) and never insert before a heading/
+        # list/table/code fence.
+        if (
+            _indent_needed(ln)
+            and nxt
+            and _indent_needed(nxt)
+            and ln.strip()
+            and nxt.strip()
+            and out
+            and out[-1].strip() != ""
+        ):
             out.append("")
-    text2 = "\n".join(out)
-    # --- 2. round markers -> headings (only when role repeats) ---
-    if role:
-        pat = role + ":"
-        # Count occurrences; promote only if it appears repeatedly (a debate)
-        # to avoid mangling a single-intro prose report.
-        count = text2.count(pat)
-        if count >= 2:
-            rn = 0
-            lines2 = text2.split("\n")
-            fixed = []
-            for ln in lines2:
-                if ln.startswith(pat):
-                    rn += 1
-                    fixed.append(f"### Round {rn}\n\n{ln}")
-                else:
-                    fixed.append(ln)
-            text2 = "\n".join(fixed)
-    return text2
+    # Collapse any accidental 3+ consecutive blank lines to one.
+    cleaned: list[str] = []
+    blanks = 0
+    for ln in out:
+        if not ln.strip():
+            blanks += 1
+            if blanks > 1:
+                continue
+        else:
+            blanks = 0
+        cleaned.append(ln)
+    return "\n".join(cleaned)
 
 
 
@@ -389,8 +417,11 @@ def write_report_tree(
         if text:
             analysts_dir.mkdir(exist_ok=True)
             safe = key.replace("_report", "")
+            # The analyst files are input evidence, not risk outputs: the
+            # computed risk gate is NOT prepended here (it belongs in
+            # 4_risk/ and 5_portfolio/decision.md, where it appears once).
             (analysts_dir / f"{safe}.md").write_text(
-                prepend_block(_finalize_section(text)), encoding="utf-8"
+                _finalize_section(text), encoding="utf-8"
             )
             analyst_parts.append((name, _finalize_section(text)))
         else:
@@ -469,13 +500,19 @@ def write_report_tree(
         risk_parts = []
         if compact and gate_block:
             risk_dir.mkdir(exist_ok=True)
+            # Compact verdict = the computed risk gate ONLY (verdict, limits,
+            # CVaRs, stress, liquidity, tranche, positions). The PM decision
+            # prose is NOT duplicated here: it already lives once in
+            # 5_portfolio/decision.md, so verdict.md carries the risk-specific
+            # read without a byte-copy of the final call.
             verdict_md = gate_block + "\n"
             if risk.get("judge_decision"):
-                verdict_md += "\n**Risk Judge Decision**\n\n" + _finalize_section(risk["judge_decision"]) + "\n"
+                verdict_md += (
+                    "\n> The full Portfolio Manager decision (rating / thesis / "
+                    "targets) is in 5_portfolio/decision.md.\n"
+                )
             (risk_dir / "verdict.md").write_text(verdict_md, encoding="utf-8")
             risk_parts.append(("Risk Verdict (computed)", gate_block.strip()))
-            if risk.get("judge_decision"):
-                risk_parts.append(("Risk Analyst Verdict", _finalize_section(risk["judge_decision"])))
         else:
             for key, fname, name in (
                 ("aggressive_history", "aggressive.md", "Aggressive Analyst"),
