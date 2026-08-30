@@ -42,6 +42,12 @@ involved. This is the "compute, don't narrate" core.
   exhaustion + fill stats), `order_imbalance` (buy/sell-heavy from flow
   nets), `premarket_liquidity` (thin-book warning), `post_close_confirmation`
   (stopped-out / target-hit / holding).
+- `extended_indicators.py` — the standard trend/momentum/volume/structure
+  group computed locally (no vendor): Ichimoku cloud, golden/death cross,
+  CCI, ROC, momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin
+  Money Flow, anchored VWAP + `scan_candlesticks` (doji/hammer/shooting-star/
+  engulfing/morning+evening star). Exposed as `get_extended_indicators` +
+  `get_candlestick_patterns` on the market analyst.
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
   EV->equity bridge) powering `get_dcf_valuation`.
 - `journal.py` — `--journal` alloc/journal.

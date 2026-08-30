@@ -298,6 +298,12 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-30 `(working tree)` - Extended technical indicators
+  (`strategies/extended_indicators.py`): Ichimoku, golden/death cross, CCI,
+  ROC, momentum oscillator, TRIX, Force Index, A/D, VPT, CMF, anchored VWAP +
+  a candlestick pattern scanner. Two new market tools `get_extended_indicators`
+  + `get_candlestick_patterns` (market analyst prompt + ToolNode). Pure local
+  calc, no vendor/quota. See CHANGELOG.
 - 2026-08-30 `(working tree)` - New free-tier vendors: Twelve Data
   (`dataflows/twelve_data.py`, free 800 credits/day; time-series OHLCV + realtime
   quote + crypto) and StockData.org (`dataflows/stockdata.py`, free 100 req/day;

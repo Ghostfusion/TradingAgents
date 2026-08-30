@@ -2648,6 +2648,114 @@ def get_technical_factors(
 
 
 @tool
+def get_extended_indicators(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Extended trend/momentum/volume indicators: Ichimoku cloud, CCI, ROC,
+    momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin Money Flow,
+    anchored VWAP and the golden/death cross.
+
+    Complements get_technical_factors / get_indicators / get_mean_reversion_tech
+    with the standard indicator group the project did not previously compute.
+    One combined call (shares the run-level OHLCV cache). Use before any
+    'Ichimoku cloud / CCI overbought / ROC momentum / TRIX turn / A-D
+    accumulation / volume-price trend / Chaikin Money Flow / VWAP cost-basis /
+    golden cross' claim.
+    """
+    try:
+        from tradingagents.strategies.extended_indicators import (
+            accumulation_distribution as _ad,
+            anchored_vwap as _avwap,
+            cci as _cci,
+            chaikin_money_flow as _cmf,
+            force_index as _fi,
+            golden_death_cross as _gdc,
+            ichimoku as _ichimoku,
+            momentum_oscillator as _mom_osc,
+            roc as _roc,
+            trix as _trix,
+            vpt as _vpt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"extended indicators unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if len(closes) < 60:
+        return f"extended indicators unavailable for {ticker}: fewer than 60 bars."
+    try:
+        ic = _ichimoku(data["highs"], data["lows"], closes)
+        cc = _cci(data["highs"], data["lows"], closes)
+        rc = _roc(closes)
+        mo = _mom_osc(closes)
+        tr = _trix(closes)
+        fi = _fi(closes, data["volumes"])
+        ad = _ad(data["highs"], data["lows"], closes, data["volumes"])
+        vp = _vpt(closes, data["volumes"])
+        cmf = _cmf(data["highs"], data["lows"], closes, data["volumes"])
+        av = _avwap(closes, data["volumes"])
+        gdc = _gdc(closes)
+        lines = [
+            f"extended indicators {ticker} (close {closes[-1]:.2f}):",
+            f"  ichimoku: conversion={ic.get('conversion')} base={ic.get('base')} "
+            f"span_a={ic.get('span_a')} span_b={ic.get('span_b')} "
+            f"position={ic.get('label')}",
+            f"  golden/death cross: {gdc.get('label')}",
+            f"  cci={cc} (above +100 / below -100)",
+            f"  roc={rc}  momentum_osc={mo}",
+            f"  trix={tr.get('trix')} signal={tr.get('signal')}",
+            f"  force_index={fi} (price x volume momentum)",
+            f"  accumulation_distribution={ad} (rising = accumulation)",
+            f"  vpt={vp} (volume price trend)",
+            f"  cmf={cmf} (above +0.1 = buying pressure)",
+            f"  anchored_vwap={av} (cumulative cost basis)",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"extended indicators unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_candlestick_patterns(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Candlestick pattern scan for the most recent bars: doji, hammer,
+    shooting star, bullish/bearish engulfing, morning/evening star.
+
+    Complements the numeric indicators with price-structure reads. One call
+    (shares the run-level OHLCV cache). Use before any 'doji indecision /
+    hammer reversal / engulfing / morning star / shooting star' claim.
+    """
+    try:
+        from tradingagents.strategies.extended_indicators import scan_candlesticks
+    except Exception as exc:  # noqa: BLE001
+        return f"candlestick patterns unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data["closes"]
+    if not closes or not data.get("opens"):
+        return f"candlestick patterns unavailable for {ticker}: no OHLCV."
+    try:
+        res = scan_candlesticks(
+            data["opens"], data["highs"], data["lows"], closes
+        )
+        pat = res["patterns"]
+        hits = [k for k, v in pat.items() if v]
+        lines = [
+            f"candlestick patterns {ticker} (last {len(res['bars'])} bars):",
+            f"  detected: {', '.join(hits) if hits else 'none'}",
+        ]
+        if res["bars"]:
+            last = res["bars"][-1]
+            if "close" in last:
+                lines.append(
+                    f"  last bar: open={last['open']:.2f} high={last['high']:.2f} "
+                    f"low={last['low']:.2f} close={last['close']:.2f}"
+                )
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"candlestick patterns unavailable for {ticker}: {exc}"
+
+
+@tool
 
 def get_book_tail_risk(
     ticker: Annotated[str, "ticker symbol"],

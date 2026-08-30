@@ -489,6 +489,8 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
 | `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
 | `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
+| `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
+| `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |
 | `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` | market | book-level portfolio CVaR + correlated -10% stress + drawdown gate |
 | `get_liquidation_days(ticker, shares_to_liquidate?)` | `liquidity_risk.days_to_absorb` | market | days for the market to absorb a block at a 15% participation cap |
 | `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?, entry_price?)` | `pre_market.review_decision` | market | deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas |

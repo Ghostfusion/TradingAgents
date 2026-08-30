@@ -3,12 +3,14 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     get_bollinger_pct_b,
     get_book_tail_risk,
+    get_candlestick_patterns,
     get_capital_flow,
     get_credit_spread_read,
     get_crypto_prices,
     get_dip_technical,
     get_exit_check,
     get_expected_move,
+    get_extended_indicators,
     get_gap_type,
     get_indicators,
     get_instrument_context_from_state,
@@ -105,6 +107,8 @@ def create_market_analyst(llm):
             get_vdu_entry_setup,
             get_support_structure,
             get_technical_factors,
+            get_extended_indicators,
+            get_candlestick_patterns,
             get_book_tail_risk,
             get_liquidation_days,
             get_premarket_review,
@@ -180,6 +184,8 @@ You also have decision-grounding tools:
 - get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.
 - get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).
 - get_technical_factors(ticker) - the extended technicals in one call: ADX (trend strength), classic pivots (P/R1/S1/R2/S2), Aroon (trend age), Fisher Transform (reversal), Chaikin Oscillator (accumulation), Elder-Ray (bull/bear power), Supertrend (ATR trailing direction) and the volume profile (POC + value area). Use it before any 'trend strength / pivot support-resistance / Aroon age / Fisher turn / Chaikin accumulation / Elder-Ray pressure / Supertrend direction / POC-value-area' claim.
+- get_extended_indicators(ticker) - the extended trend/momentum/volume group: Ichimoku cloud (trend + support/resistance), CCI (overbought/oversold), ROC, momentum oscillator, TRIX, Force Index, accumulation/distribution (A-D), VPT (volume price trend), Chaikin Money Flow (buying/selling pressure) and anchored VWAP (cost basis). Use it before any 'Ichimoku cloud / CCI / ROC / TRIX / A-D / VPT / CMF / VWAP cost-basis' claim.
+- get_candlestick_patterns(ticker) - a scan of the most recent candles for common patterns: doji (indecision), hammer / shooting star (reversal), bullish/bearish engulfing and morning/evening star. Use it before any 'doji / hammer / engulfing / morning star / shooting star' price-structure claim.
 - get_book_tail_risk(ticker, weights=...) - the book-level tail: portfolio CVaR from a weighted return mix, the correlated -10% stress loss (a macro event moves every position at once), and the drawdown gate (True = new risk blocked). Use it before any 'book tail / correlated stress / drawdown gate' claim; complements get_tail_risk (single-name).
 - get_liquidation_days(ticker, shares_to_liquidate=...) - days for the market to absorb a block at a 15% participation cap. Use it before any 'can the market absorb this block / unwind risk / days to liquidate' claim.
 - get_premarket_review(ticker, prior_close=..., open_price=..., prior_stop=..., entry_price=...) - the deterministic pre-market CONFIRM / REVISE / REJECT arbiter from measured deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use it before any 'gap risk / re-anchor / pre-market review' claim on a held plan.

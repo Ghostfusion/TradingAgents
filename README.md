@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-30] **Extended technical indicators** - the standard
+  trend/momentum/volume/structure set the project lacked now computes locally
+  (`strategies/extended_indicators.py`): Ichimoku cloud, CCI, ROC, momentum
+  oscillator, TRIX, Force Index, A/D line, VPT, Chaikin Money Flow, anchored
+  VWAP, golden/death cross + a candlestick pattern scanner (doji/hammer/
+  engulfing/stars). Two new market-analyst tools `get_extended_indicators` +
+  `get_candlestick_patterns` (no new vendor, no quota). See CHANGELOG.
+
 - [2026-08-30] **Twelve Data + StockData.org vendors** - two new free-tier
   market-data providers: Twelve Data (free "Basic": 800 credits/day, realtime
   US stocks/forex/crypto quotes + historical OHLCV) and StockData.org (free

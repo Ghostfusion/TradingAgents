@@ -1556,3 +1556,82 @@ def test_get_value_floors_no_tax_does_not_crash(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
     out = VDT.get_value_floors.invoke({"ticker": "X", "current_date": "2026-08-19"})
     assert "value floors X" in out  # no crash
+
+
+# ---------------------------------------------------------------------------
+# get_extended_indicators / get_candlestick_patterns (Phase 1 indicator gap)
+# ---------------------------------------------------------------------------
+
+
+def test_extended_indicators_computes_all_reads(monkeypatch):
+    """The extended group wraps Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/
+    CMF/anchored VWAP + golden cross in one call (shares the OHLCV cache)."""
+    closes = _uptrend(260)
+    fake = {
+        "closes": closes,
+        "opens": [c - 1 for c in closes],
+        "highs": [c + 3 for c in closes],
+        "lows": [c - 3 for c in closes],
+        "volumes": [5_000_000.0] * 260,
+    }
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_extended_indicators.invoke({"ticker": "AAPL"})
+    assert "extended indicators AAPL" in out
+    for token in ("ichimoku:", "cci=", "roc=", "trix=", "force_index=",
+                  "accumulation_distribution=", "vpt=", "cmf=",
+                  "anchored_vwap=", "golden/death cross"):
+        assert token in out
+
+
+def test_extended_indicators_insufficient_history(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0] * 20,
+        "highs": [101.0] * 20, "lows": [99.0] * 20, "volumes": [1e6] * 20})
+    out = T.get_extended_indicators.invoke({"ticker": "AAPL"})
+    assert "fewer than 60" in out
+
+
+def test_extended_indicators_no_ohlcv_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [], "highs": [],
+        "lows": [], "volumes": []})
+    out = T.get_extended_indicators.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower() or "fewer than 60" in out
+
+
+def test_candlestick_patterns_computes(monkeypatch):
+    closes = _uptrend(60)
+    fake = {
+        "closes": closes,
+        "opens": [c - 0.5 for c in closes],
+        "highs": [c + 1 for c in closes],
+        "lows": [c - 1 for c in closes],
+        "volumes": [5_000_000.0] * 60,
+    }
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_candlestick_patterns.invoke({"ticker": "AAPL"})
+    assert "candlestick patterns AAPL" in out
+    assert "detected:" in out
+
+
+def test_candlestick_patterns_no_ohlcv_degrades(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [], "opens": [],
+        "highs": [], "lows": [], "volumes": []})
+    out = T.get_candlestick_patterns.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out.lower()
+
+
+def test_indicator_tools_bound_to_market_analyst():
+    """Both new tools must be importable via agent_utils and present in the
+    market analyst's ToolNode list (wiring Phase 3)."""
+    from tradingagents.agents.utils.agent_utils import (
+        get_candlestick_patterns as gcp,
+        get_extended_indicators as gei,
+    )
+    assert callable(getattr(gei, "invoke", None))
+    assert callable(getattr(gcp, "invoke", None))
+
+    import inspect
+
+    import tradingagents.agents.analysts.market_analyst as ma
+    src = inspect.getsource(ma)
+    assert "get_extended_indicators" in src
+    assert "get_candlestick_patterns" in src

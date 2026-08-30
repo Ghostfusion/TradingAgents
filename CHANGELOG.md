@@ -9,6 +9,23 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Extended technical indicators (Phase 1-3 of the indicator-gap plan)** -
+  the standard trend/momentum/volume/structure group the project did not yet
+  compute locally, all as pure offline calculators in
+  `tradingagents/strategies/extended_indicators.py` (no vendor, no quota):
+  Ichimoku cloud, golden/death cross, CCI, ROC, momentum oscillator, TRIX,
+  Force Index, accumulation/distribution (A-D), VPT, Chaikin Money Flow,
+  anchored VWAP, and a candlestick pattern scanner (doji / hammer / shooting
+  star / bullish+bearish engulfing / morning+evening star).
+  - Exposed as two new market-analyst tools `get_extended_indicators`
+    (one combined call, shares the run-level OHLCV cache) and
+    `get_candlestick_patterns`, bound in `agent_utils`, the market analyst
+    tool list+prompt, and the graph market ToolNode.
+  - Twelve Data `/technicals` pull-back deliberately NOT added: the local
+    calculators already cover every indicator off any OHLCV source at zero
+    API cost (per the deterministic/no-fabrication core).
+  Tests: `tests/test_extended_indicators.py` (22) + 6 tool-wiring cases in
+  `test_analysis_tools.py`. ruff clean.
 - **Twelve Data + StockData.org vendors** - two new free-tier market-data
   sources wired through the vendor contract:
   - `dataflows/twelve_data.py` - `get_stock_data_twelve_data`
