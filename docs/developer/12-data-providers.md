@@ -1,6 +1,6 @@
 # 12. Data providers
 
-This fork uses **14 distinct data providers/sources**, in three tiers. It tells
+This fork uses **22 distinct data providers/sources**, in three tiers. It tells
 a developer exactly which vendor supplies which signal and how each is wired
 (routed `route_to_vendor` chain vs. direct import).
 
@@ -8,20 +8,22 @@ a developer exactly which vendor supplies which signal and how each is wired
 
 | Tier | Count |
 | --- | --- |
-| Routed vendors (`VENDOR_LIST`) | 10 |
+| Routed vendors (`VENDOR_LIST`) | 17 |
 | Direct-but-not-routed sources | 5 |
-| **Total distinct providers** | 15 |
+| **Total distinct providers** | 22 |
 
 ---
 
-## Tier 1 — the 10 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
+## Tier 1 — the 17 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
 
 These sit behind the analyst `@tool` calls and are chosen per-category via
 `data_vendors` chains (see `docs/developer/03-dataflow-vendors.md`).
 
 ```python
-VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
-               'finnhub', 'sec_edgar', 'moomoo', 'massive', 'eodhd', 'tiingo']
+VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage', 'finnhub',
+               'sec_edgar', 'moomoo', 'massive', 'eodhd', 'cboe',
+               'federal_reserve', 'tiingo', 'twelve_data', 'stockdata',
+               'gdelt', 'benzinga', 'newsapi']
 ```
 
 | # | Vendor | Provider | What it supplies |
@@ -38,6 +40,11 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 10 | **tiingo** | Tiingo (added in this fork) | free Starter tier: EOD OHLCV (7+ yrs), fundamental statements (JSON), IEX delayed quote, crypto OHLCV; ~1,000 calls/day so last in chains |
 | 11 | **twelve_data** | Twelve Data (added in this fork) | free "Basic" tier: 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV (1 credit/symbol); tail of `core_stock_apis` + market-snapshot/crypto fallbacks |
 | 12 | **stockdata** | StockData.org (added in this fork) | free "$0/mo" plan: 100 requests/day; `/v1/data/quote`, `/v1/data/eod` (~6 months), `/v1/data/intraday`, `/v1/news/all` (2 articles/req); tail of `core_stock_apis` + `news_data` + market-snapshot fallback |
+| 13 | **cboe** | CBOE delayed options chain (added in this fork) | `get_options_surface` (strike/DTE/IV/greeks); free, no key; opt-in `enable_options_surface` |
+| 14 | **federal_reserve** | NY Fed SOFR + Treasury par yields (added in this fork) | `get_sofr_curve` / `get_treasury_curve` (risk-free term structure for DCF/options math); free, no key; opt-in `enable_risk_free_curve` |
+| 15 | **gdelt** | GDELT DOC 2.0 (added in this fork) | keyless global news + native daily tone (`get_news_gdelt`, `get_gdelt_tone_series`, `get_gdelt_sentiment` news tool); **NOT in default `news_data` chain** - endpoint is network-flaky, opt-in via `...,gdelt` |
+| 16 | **benzinga** | Benzinga (added in this fork) | free Basic Financial News API: headline + teaser + link, ticker-scoped (`get_news_benzinga`); `BENZINGA_API_KEY`; opt-in (no real key registered yet) |
+| 17 | **newsapi** | NewsAPI.org (added in this fork) | free Developer 100 req/day: `get_news_newsapi` (ticker) + `get_global_news_newsapi` (macro headlines); `NEWSAPI_API_KEY`; tail of `news_data` + `get_global_news` |
 
 ### Default chains per category (from `data_vendors`)
 
@@ -45,7 +52,7 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 core_stock_apis      : eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata
 technical_indicators : moomoo,yfinance
 fundamental_data     : moomoo,yfinance,tiingo
-news_data            : eodhd,moomoo,yfinance,alpha_vantage,stockdata
+news_data            : eodhd,moomoo,yfinance,alpha_vantage,stockdata,newsapi
 macro_data           : fred,moomoo
 prediction_markets   : polymarket,moomoo
 analyst_ratings      : moomoo,finnhub
@@ -98,7 +105,7 @@ provides.
   by the screener `--enable-float` momentum pillar. No category, no fallback
   needed.
 
-The 9 routed vendors are the well-behaved *core* feeds (prices, fundamentals,
+The routed vendors are the well-behaved *core* feeds (prices, fundamentals,
 news) where resilience (fallback / TTL cache / typed errors) matters; the 5
 direct sources are one-off / optional / special-purpose inputs that do not need
 that resilience.
@@ -127,6 +134,12 @@ that resilience.
 | Alpaca | `TRADINGAGENTS_ALPACA_API_KEY_ID` / `TRADINGAGENTS_ALPACA_API_SECRET` | optional; `enable_alpaca` |
 | Massive | `MASSIVE_API_KEY` (a.k.a. `TRADINGAGENTS_MASSIVE_API_KEY`) | added in this fork |
 | Moomoo | none in `.env` — credentials stay in OpenD (logged-in gateway) | not a key |
+| Tiingo | `TIINGO_API_KEY` | free Starter tier (added in this fork) |
+| Twelve Data | `TWELVEDATA_API_KEY` | free 800 credits/day (added in this fork) |
+| StockData.org | `STOCKDATA_API_KEY` | free 100 req/day (added in this fork) |
+| NewsAPI | `NEWSAPI_API_KEY` | free 100 req/day (added in this fork) |
+| Benzinga | `BENZINGA_API_KEY` | free tier (added in this fork; no real key registered yet) |
+| GDELT | none (keyless) | network-flaky; opt-in only |
 
 ## Coverage notes
 

@@ -338,7 +338,11 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy`,
   `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`,
   `get_balance_sheet_health`, `get_macd_divergence`, `get_vdu_entry_setup`,
-  `get_support_structure`, `get_decline_driver_check`
+  `get_support_structure`, `get_decline_driver_check`,
+  `get_extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/
+  anchored VWAP/golden-death — `strategies.extended_indicators`),
+  `get_candlestick_patterns` (doji/hammer/shooting-star/engulfing/morning+
+  evening star — `strategies.extended_indicators.scan_candlesticks`)
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -375,7 +379,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - short volume (daily short-sale ratio, Massive-only): `massive`
 - all A-series/tier tools: `moomoo` only (optional)
 
-`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd, tiingo`.
+`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd, cboe, federal_reserve, tiingo, twelve_data, stockdata, gdelt, benzinga, newsapi`.
 
 **EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — the **primary OHLCV
 vendor** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years):

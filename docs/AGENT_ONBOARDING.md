@@ -305,6 +305,16 @@ has changed before); never assume an endpoint works — the SDK's
   (`dataflows/benzinga.py`, free ticker financial news, `BENZINGA_API_KEY`).
   NewsAPI in the default `news_data` chain; GDELT/Benzinga opt-in (GDELT
   endpoint is network-flaky). See CHANGELOG.
+- 2026-08-30 `(working tree)` - Docs/reference sync + web mirror: the
+  value-dip research plan's stale "ROC/TRIX/Force/A-D not implemented" note
+  corrected (they shipped in `extended_indicators.py`), its phases marked
+  DONE + open questions resolved; `docs/api_reference.md` §6.1 lists
+  `get_extended_indicators` / `get_candlestick_patterns`, §6.2 `VENDOR_LIST`
+  updated to 17 vendors; `docs/developer/12-data-providers.md` re-tallied
+  (22 providers) with the cboe/federal_reserve/gdelt/benzinga/newsapi rows +
+  corrected `news_data` chain; trading_web Value Tools gained
+  extended-indicator/candlestick/GDELT-sentiment tools (trading_web commit
+  `db3217d`). See CHANGELOG.
 - 2026-08-30 `(working tree)` - Extended technical indicators
   (`strategies/extended_indicators.py`): Ichimoku, golden/death cross, CCI,
   ROC, momentum oscillator, TRIX, Force Index, A/D, VPT, CMF, anchored VWAP +

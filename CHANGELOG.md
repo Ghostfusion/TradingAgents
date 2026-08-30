@@ -1611,6 +1611,24 @@ daily; output merges name/change columns for picking. See
   contribute 0) and skips non-finite implied-volatility values in the mean,
   so the call degrades to zeroed totals instead of aborting.
 
+### Docs
+- **Research-plan + reference sync** - `Strategies/value_dip_swing_prepost_research_plan.md`
+  status flipped to implemented; every Part A/B gap marked closed with the
+  module that shipped it; the stale "Not doing: ROC/TRIX/Force/A-D" note
+  corrected (they shipped in `strategies/extended_indicators.py`); phases
+  marked DONE; open questions resolved. `docs/api_reference.md` §6.1 lists
+  `get_extended_indicators` / `get_candlestick_patterns` and §6.2's
+  `VENDOR_LIST` updated (17 vendors). `docs/developer/12-data-providers.md`
+  re-tallied to 22 providers/17 routed vendors, adds the cboe /
+  federal_reserve / gdelt / benzinga / newsapi rows, fixes the `news_data`
+  chain (…,stockdata,newsapi) and the API-key table.
+- **trading_web Value Tools surface** - `run_value_tools` now imports and
+  registers `get_extended_indicators` / `get_candlestick_patterns`
+  (analysis_tools) + `get_gdelt_sentiment` (news_data_tools) with the matching
+  App.jsx options ("Extended indicators", "Candlestick pattern scan", "GDELT
+  news-tone sentiment"); README sync table updated to 31 tools; hermetic web
+  test added (trading_web commit `db3217d`).
+
 ## [0.3.1] — 2026-07-05
 
 Correctness and stability patch: data look-ahead, graph-router crash-safety,
