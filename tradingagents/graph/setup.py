@@ -237,6 +237,13 @@ class GraphSetup:
                     getattr(self.conditional_logic, f"should_continue_{spec.key}"),
                     [current_tools, current_clear],
                 )
+                # Analyst tool loop: ToolNode feeds back into the analyst node
+                # (re-run with the tool results). Without this edge the
+                # ToolNode has no outgoing target and LangGraph terminates the
+                # graph right after the first tool round - the analyst report
+                # stays empty and the debate chain never runs (regression
+                # guard: tests/test_graph_tool_loop.py).
+                workflow.add_edge(current_tools, current_analyst)
                 # Connect to next analyst or to Bull Researcher if this is the last analyst
                 if i < len(plan.specs) - 1:
                     workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)

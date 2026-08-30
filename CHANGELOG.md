@@ -8,6 +8,23 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+- **Analyst tool-loop edge regression** - the sequential graph lost its
+  `ToolNode -> analyst` edge (introduced in the Option-A wiring pass), so a
+  run TERMINATED right after the market analyst's first tool round: empty
+  analyst reports, no debate / trader / risk / PM chain, and a stub-only
+  report folder (reproduced live: interactive CLI `SKHY`, 2026-08-30). The
+  edge is restored with a structural regression test (every analyst's tool
+  node loops back) + a functional stream test that must complete a tool round
+  and reach the debate. Tests: `tests/test_graph_tool_loop.py` (2).
+- **Short-closes overlay crash** - `build_strategy_overlays` returns `None`
+  for a < 60-bar series (thinly-traded ADR / new listing), and three folds
+  called `.get` on the None (order-flow / position contract / risk governor),
+  logging "'NoneType' object has no attribute 'get'". The overlay pipeline now
+  treats a None overlay as an empty dict and no-ops cleanly with one
+  informative log line. Tests: `tests/test_graph_tool_loop.py`
+  (short-closes guard).
+
 ### Added
 - **Independent pre-debate stances (Option-A hybrid)** -
   `enable_independent_vote` (`TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE`, default

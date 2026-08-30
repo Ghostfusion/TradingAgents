@@ -882,6 +882,19 @@ class TradingAgentsGraph:
             )
 
             overlay = build_strategy_overlays(self.config, closes)
+            # Regime/sizing overlays need >= 60 bars; a thinner series (new
+            # listing, thinly-traded ADR, partial vendor history) yields None.
+            # Treat it as an EMPTY overlay so the order-flow / contract /
+            # governor / context folds below no-op cleanly instead of raising
+            # "'NoneType' object has no attribute 'get'" for each fold.
+
+            if overlay is None:
+                logger.warning(
+                    "strategy overlays skipped for %s: %d close bars (< 60 required)",
+                    ticker,
+                    len(closes) if closes else 0,
+                )
+                overlay = {}
             if self.config.get("enable_orderflow"):
                 try:
                     from tradingagents.strategies.orderflow import fetch_flow, summarize
