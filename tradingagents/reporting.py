@@ -239,6 +239,72 @@ def audit_decision_numbers(decision_text: str, refs: dict) -> str:
         " — verify against the computed values before acting."
     )
 
+def _indent_needed(line: str) -> bool:
+    """True when a non-blank prose line should be separated from its neighbour.
+
+    Conservative: a line that is a markdown block (table row, fence, list,
+    heading, or already-blank) is left untouched; only plain run-on prose
+    lines are re-spaced so a single-`\n` concatenated debate reads as
+    paragraphs instead of one wall of text.
+    """
+    st = line.strip()
+    if not st:
+        return False
+    if st.startswith(("|", "#", "-", "*", ">", "```", "---", "**")):
+        return False
+    return not st.endswith(("|", "```"))
+
+
+def _readable_section(text: str, role: str = "") -> str:
+    """Make a dense LLM report as readable as the analyst reports.
+
+    Debate/research/trader reports are generated as conversational prose and
+    concatenated with single newlines, so they render as one unbroken wall of
+    text (the analyst reports look good because their prompt emits structured
+    markdown). This deterministic, content-preserving pass:
+
+      1. Ensures blank-line paragraph spacing around plain prose (never touches
+         tables, lists, code fences, headings, or existing blank lines).
+      2. Promotes repeated round markers (``Role: ...``) into ``### Round N``
+         headings so a multi-round debate is visually separated.
+
+    All content is preserved verbatim; only whitespace/heading structure is
+    added, mirroring the no-fabrication contract.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    # --- 1. paragraph spacing ---
+    out: list[str] = []
+    for i, ln in enumerate(lines):
+        out.append(ln)
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        # add a blank line between two plain prose lines (but not before a
+        # markdown block header / list / table / code fence).
+        if _indent_needed(ln) and nxt and _indent_needed(nxt) and ln.strip() and nxt.strip():
+            out.append("")
+    text2 = "\n".join(out)
+    # --- 2. round markers -> headings (only when role repeats) ---
+    if role:
+        pat = role + ":"
+        # Count occurrences; promote only if it appears repeatedly (a debate)
+        # to avoid mangling a single-intro prose report.
+        count = text2.count(pat)
+        if count >= 2:
+            rn = 0
+            lines2 = text2.split("\n")
+            fixed = []
+            for ln in lines2:
+                if ln.startswith(pat):
+                    rn += 1
+                    fixed.append(f"### Round {rn}\n\n{ln}")
+                else:
+                    fixed.append(ln)
+            text2 = "\n".join(fixed)
+    return text2
+
+
+
 
 def _risk_gate_block(final_state: dict) -> str:
     """Markdown block of the computed risk gate; '' when no gate ran."""
@@ -365,15 +431,19 @@ def write_report_tree(
                 research_dir.mkdir(exist_ok=True)
                 cleaned = _collapse_repeated_tables(text)
                 (research_dir / fname).write_text(
-                    _finalize_section(cleaned), encoding="utf-8"
+                    _finalize_section(_readable_section(cleaned, role=name.split()[0])),
+                    encoding="utf-8",
                 )
-                research_parts.append((name, _finalize_section(cleaned)))
+                research_parts.append((name, _finalize_section(_readable_section(cleaned, role=name.split()[0]))))
         if debate.get("judge_decision"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "manager.md").write_text(
-                _finalize_section(debate["judge_decision"]), encoding="utf-8"
+                _finalize_section(_readable_section(debate["judge_decision"], role="Research Manager")),
+                encoding="utf-8",
             )
-            research_parts.append(("Research Manager", _finalize_section(debate["judge_decision"])))
+            research_parts.append(
+                ("Research Manager", _finalize_section(_readable_section(debate["judge_decision"], role="Research Manager")))
+            )
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts
@@ -384,11 +454,12 @@ def write_report_tree(
     if final_state.get("trader_investment_plan"):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
+        trader_body = _readable_section(final_state["trader_investment_plan"], role="Trader")
         (trading_dir / "trader.md").write_text(
-            _finalize_section(final_state["trader_investment_plan"]), encoding="utf-8"
+            _finalize_section(trader_body), encoding="utf-8"
         )
         sections.append(
-            f"## III. Trading Team Plan\n\n### Trader\n\n{_shift_down(_finalize_section(final_state['trader_investment_plan']))}"
+            f"## III. Trading Team Plan\n\n### Trader\n\n{_shift_down(_finalize_section(trader_body))}"
         )
 
     # 4. Risk Management (debate transcripts + computed gate)
@@ -415,10 +486,11 @@ def write_report_tree(
                 if text:
                     risk_dir.mkdir(exist_ok=True)
                     cleaned = _collapse_repeated_tables(text)
+                    readable = _readable_section(cleaned, role=name.split()[0] + " Analyst")
                     (risk_dir / fname).write_text(
-                        prepend_block(_finalize_section(cleaned)), encoding="utf-8"
+                        prepend_block(_finalize_section(readable)), encoding="utf-8"
                     )
-                    risk_parts.append((name, _finalize_section(cleaned)))
+                    risk_parts.append((name, _finalize_section(readable)))
         if risk_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts

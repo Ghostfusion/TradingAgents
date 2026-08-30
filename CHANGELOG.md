@@ -259,6 +259,25 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Interactive CLI always writes verbose risk-debate files** - the NVDA run
+  produced a single `4_risk/verdict.md` instead of `aggressive.md` /
+  `conservative.md` / `neutral.md` because an ambient
+  `TRADINGAGENTS_RISK_COMPACT_REPORT=true` (shell env / `.env`) flipped the
+  compact-report mode on. The interactive CLI now forces
+  `risk_compact_report=False` in `_build_run_config`, so a watched run always
+  writes the three per-analyst transcripts; `.env` was also reset to `false`.
+  Headless/web runs still honor their own config (they keep the compact
+  artifact when they opt in).
+- **Readable reports everywhere** - debate/research/trader reports are
+  generated as conversational prose concatenated with single newlines, so
+  they rendered as one unbroken wall. New `reporting._readable_section`
+  (deterministic, content-preserving): adds paragraph spacing between plain
+  prose lines and promotes repeated round markers (`Bull:`/`Aggressive
+  Analyst:`) into `### Round N` headings, applied to research (bull/bear/
+  manager), trading (trader) and risk (aggressive/conservative/neutral)
+  sections. Tables / headings / lists / code fences are never touched.
+  Existing folders re-render via `scripts/rebuild_complete_report.py`.
+  Tests: `test_report_readable.py` (3).
 - **G2 calibration feedback loop wired** (`decision_hardening_spec.md` G2) -
   previously `record_calibration_entry` had zero call sites and `_calibrated_p`
   always returned `None` (identity), so `enable_calibration` computed buckets

@@ -1042,6 +1042,13 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
+    # The interactive CLI always writes the full verbose risk-debate files
+    # (aggressive.md / conservative.md / neutral.md), never the compact
+    # verdict.md. Compact mode is for headless/web runs that want a terse
+    # artifact; an interactive user watches the debate and expects the
+    # per-analyst transcript. This intentionally overrides any ambient
+    # TRADINGAGENTS_RISK_COMPACT_REPORT so verdict.md never appears here.
+    config["risk_compact_report"] = False
     # --checkpoint/--no-checkpoint overrides only when explicitly given; omitting
     # the flag preserves TRADINGAGENTS_CHECKPOINT_ENABLED / the default (#976).
     if checkpoint is not None:

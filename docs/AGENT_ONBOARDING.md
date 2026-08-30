@@ -298,6 +298,14 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - Interactive CLI always writes the verbose
+  risk-debate files (aggressive/conservative/neutral.md) - an ambient
+  TRADINGAGENTS_RISK_COMPACT_REPORT=true was producing a single verdict.md;
+  `.env` reset to false + CLI forces verbose. Reports readability: new
+  `reporting._readable_section` adds paragraph spacing + Round headings to the
+  prose debate/trader reports (analyst-style readability), applied to
+  research/trading/risk sections; re-render with rebuild_complete_report.py.
+  See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - G2 calibration feedback loop wired:
   `calibration_ledger.jsonl` now stamped at resolve time (confidence parsed
   from the PM decision), `_calibrated_p` returns a real calibrated probability,

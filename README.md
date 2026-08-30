@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-29] **Readable reports + verbose risk files** - the interactive
+  CLI now always writes the full risk-debate transcripts
+  (`4_risk/aggressive.md` / `conservative.md` / `neutral.md`) instead of a
+  single `verdict.md`, and debate/trader/research reports are automatically
+  paragraph-spaced with `### Round N` headings (analyst-style readability) via
+  `reporting._readable_section`. Re-render old folders with
+  `scripts/rebuild_complete_report.py`. See CHANGELOG.
+
 - [2026-08-29] **Canonical output root** - all `reports/`, `screener/` and
   `action_reports/` outputs now resolve against the TradingAgents repo,
   regardless of where the CLI or web server is launched from (previously the
