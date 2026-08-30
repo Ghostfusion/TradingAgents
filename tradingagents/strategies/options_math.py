@@ -207,4 +207,68 @@ def black_vol_surface(expiries: list[float], deltas: list[float],
     return {"atm_vol": atm_vol, "forward_vol": fv, "slope": slope}
 
 
-__all__ = ["black76", "implied_vol_and_greeks", "black_vol_surface"]
+def variance_swap_strike(
+    strikes: list,
+    calls_by_strike: list,
+    puts_by_strike: list,
+    forward: float,
+    t: float,
+    r: float = 0.0,
+) -> float | None:
+    """Fair variance-swap strike approximation from OTM calls + puts.
+
+    ``K_var^2 ~= (2 e^{rT} / T) [ int_0^F P(K)/K^2 dK + int_F^infty C(K)/K^2 dK ]``
+    integrated by trapezoid over the provided strike grid (calls at/below F
+    are dropped, puts at/above F dropped). Requires >= 3 usable strikes each
+    side and forward > 0; else None. Returns the variance-swap strike (in
+    price/vol2 terms) - advisory, event-vol cross-check.
+    """
+    import math
+
+    if not strikes or forward is None or forward <= 0 or t is None or t <= 0:
+        return None
+    try:
+        f = float(forward)
+        T = float(t)
+        rr = float(r)
+    except (TypeError, ValueError):
+        return None
+    # Build (strike, price) for the correct side.
+    put_pts = []
+    for k, p in zip(strikes, puts_by_strike, strict=False):
+        try:
+            kf = float(k)
+            pf = float(p)
+        except (TypeError, ValueError):
+            continue
+        if 0 < kf < f and pf > 0:
+            put_pts.append((kf, pf))
+    call_pts = []
+    for k, c in zip(strikes, calls_by_strike, strict=False):
+        try:
+            kf = float(k)
+            cf = float(c)
+        except (TypeError, ValueError):
+            continue
+        if kf > f and cf > 0:
+            call_pts.append((kf, cf))
+    pts = put_pts + call_pts
+    if len(pts) < 6:  # >=3 per side
+        return None
+    pts_sorted = sorted(pts, key=lambda p: p[0])
+    total = 0.0
+    for i in range(1, len(pts_sorted)):
+        k0, v0 = pts_sorted[i - 1]
+        k1, v1 = pts_sorted[i]
+        if k0 <= 0:
+            continue
+        f0 = v0 / (k0 * k0)
+        f1 = v1 / (k1 * k1)
+        total += 0.5 * (f0 + f1) * (k1 - k0)
+    if total <= 0:
+        return None
+    kvar2 = (2.0 * math.exp(rr * T) / T) * total
+    return math.sqrt(max(kvar2, 0.0))
+
+
+__all__ = ["black76", "implied_vol_and_greeks", "black_vol_surface", "variance_swap_strike"]

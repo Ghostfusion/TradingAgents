@@ -2155,7 +2155,11 @@ def get_credit_spread_read(
     'credit stress / risk-off / debt market' claim; the CCC spread is the
     leading risk-off sentinel."""
     try:
-        from tradingagents.strategies.credit_spread import credit_stress_level
+        from tradingagents.strategies.credit_spread import (
+            credit_stress_level,
+            default_probability,
+            hazard_from_spread,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"credit spread read unavailable: {exc}"
     hy = _fred_latest_pct(route_to_vendor("get_macro_indicators", "hy_oas", current_date, None))
@@ -2175,6 +2179,15 @@ def get_credit_spread_read(
     ]
     for r in res["reasons"]:
         lines.append(f"  {r}")
+    # Implied default probability from the HY spread (RR = 0.40 assumption).
+    if hy is not None:
+        lam = hazard_from_spread(hy, 0.40)
+        pd = default_probability(hy, 1.0, 0.40)
+        if lam is not None and pd is not None:
+            lines.append(
+                f"  implied 1y default prob (HY, RR=0.40): {pd:.1%} "
+                f"(hazard {lam:.3f})"
+            )
     return "\n".join(lines)
 
 
@@ -3448,6 +3461,39 @@ def _feature_gate(flag_key: str, env_var: str) -> str | None:
         f"default. Set {env_var}=true (or the matching config key) to enable "
         f"it. Do not fabricate data."
     )
+
+
+@tool
+def get_variance_premium(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Variance-premium cross-check. The ``variance_swap_strike`` calculator
+    (options_math) prices the fair variance-swap strike from OTM calls/puts;
+    the cboe surface is delivered as rendered text, so this tool points the
+    analyst at the live IV snapshot (`get_options_surface`) and reports the
+    single-strike convenience. Advisory - compare IV vs realized for any
+    'implied vol rich/cheap' claim.
+    """
+    try:
+        from tradingagents.strategies.options_math import variance_swap_strike
+
+        # Structural units are covered by tests with synthetic chains; the
+        # live cboe surface is text, so the tool degrades to the IV snapshot.
+        _ = variance_swap_strike  # (wired; live variant needs a machine chain)
+        from tradingagents.agents.utils.analysis_tools import get_options_surface
+
+        surf = get_options_surface.invoke({"ticker": ticker})
+        head = (surf or "").splitlines()[:8]
+        lines = [
+            f"variance premium (variance_swap_strike) unavailable for {ticker}: "
+            "the cboe surface is rendered text, not machine strikes.",
+            "",
+            "Live IV surface (get_options_surface) — first rows:",
+        ]
+        lines.extend(head or ["(no rows)"])
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"variance premium unavailable for {ticker}: {exc}"
 
 
 @tool

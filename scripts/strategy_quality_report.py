@@ -115,13 +115,31 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
     # 2b. C1 execution block: arrival-vs-fill slippage + fill-rate (advisory).
     slips = [float(r["slippage_bps"]) for r in pm_rows if r.get("slippage_bps") is not None]
     fills = [r for r in pm_rows if r.get("fill_price") is not None]
+    # Implementation-shortfall (TCA) per row: (fill - arrival) + (arrival - decision)
+    # proxied over the paper book; decision = prior_close, arrival/fill as stored.
+    is_rows = []
+    for r in pm_rows:
+        if r.get("fill_price") is None or r.get("arrival_price") is None or r.get("prior_close") is None:
+            continue
+        try:
+            from tradingagents.strategies.evaluate import implementation_shortfall
+
+            res = implementation_shortfall(
+                float(r["prior_close"]), float(r["arrival_price"]), float(r["fill_price"])
+            )
+            if res is not None:
+                is_rows.append(res["implementation_shortfall_bp"])
+        except Exception:  # noqa: BLE001 - one bad row degrades
+            continue
     out["execution"] = {
         "rows_with_slippage": len(slips),
         "avg_slippage_bps": round(sum(slips) / len(slips), 2) if slips else None,
         "fill_rate": round(len(fills) / len(pm_rows), 3) if pm_rows else None,
+        "avg_is_bp": round(sum(is_rows) / len(is_rows), 2) if is_rows else None,
         "note": "arrival-benchmark slippage: (fill - arrival)/arrival in bps; "
-                "higher = worse execution. None when no measured arrival/fill "
-                "(the paper book records the review open as the fill proxy).",
+                "avg_is_bp = implementation shortfall (decision->arrival->fill) "
+                "in bps; higher = worse execution. None when no measured "
+                "arrival/fill (the paper book records the review open as fill).",
     }
 
     # 2c2. C3 alpha-profile: post-fill drift vs arrival (the "did our fill

@@ -81,4 +81,50 @@ def credit_stress_level(
     }
 
 
-__all__ = ["credit_stress_level", "CCC_LOW", "CCC_MID", "CCC_HIGH", "HY_LOW", "HY_MID", "HY_HIGH"]
+def hazard_from_spread(spread: float | None, recovery_rate: float = 0.40) -> float | None:
+    """Implied constant hazard rate ``lambda`` from a credit spread.
+
+    ``s ~= lambda * (1 - RR)`` (the classic reduced-form relation), so
+    ``lambda = s / (1 - RR)``. ``spread`` is the OAS in **decimal** (e.g.
+    0.04 for 4%); ``recovery_rate`` default 0.40 (the standard assumption,
+    documented in the tool output). None for non-positive / None spread.
+    """
+    if spread is None:
+        return None
+    try:
+        s = float(spread)
+        rr = float(recovery_rate)
+    except (TypeError, ValueError):
+        return None
+    if s <= 0 or rr >= 1.0:
+        return None
+    return s / (1.0 - rr)
+
+
+def default_probability(
+    spread: float | None,
+    years: float = 1.0,
+    recovery_rate: float = 0.40,
+) -> float | None:
+    """Cumulative default probability by ``years`` under a constant hazard.
+
+    ``PD(0, t) = 1 - exp(-lambda * t)`` with ``lambda`` from
+    :func:`hazard_from_spread`. Returns the probability (0..1); None for
+    non-positive / None spread or horizon. The recovery-rate assumption is
+    stated so the number is auditable (no fabrication).
+    """
+    import math
+
+    lam = hazard_from_spread(spread, recovery_rate)
+    if lam is None or years is None:
+        return None
+    try:
+        t = float(years)
+    except (TypeError, ValueError):
+        return None
+    if t <= 0:
+        return None
+    return 1.0 - math.exp(-lam * t)
+
+
+__all__ = ["credit_stress_level", "CCC_LOW", "CCC_MID", "CCC_HIGH", "HY_LOW", "HY_MID", "HY_HIGH", "hazard_from_spread", "default_probability"]

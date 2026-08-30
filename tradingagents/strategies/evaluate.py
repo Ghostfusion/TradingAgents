@@ -457,6 +457,55 @@ def expectancy_stats(wins: list[float], losses: list[float]) -> dict | None:
     }
 
 
+def implementation_shortfall(
+    decision_price: float | None,
+    arrival_price: float | None,
+    fill_price: float | None,
+    quantity: float | None = None,
+    final_price: float | None = None,
+    opportunity_days: float = 0.0,
+) -> dict | None:
+    """Implementation shortfall (TCA) on the paper ledger.
+
+    ``IS = (fill - decision) - (final - decision) * outstanding/expected``
+    simplified for a fully-filled order:
+       explicit   = (fill - arrival) * qty         (slippage vs arrival)
+       market     = (arrival - decision) * qty     (delay/momentum to arrival)
+       opportunity = (final - decision) * qty * opportunity_frac
+       IS$/notional = (explicit + market + opportunity) / (decision * qty)
+    All prices must be > 0; ``quantity`` defaults to 1 (per-share IS).
+    Returns ``{"explicit", "market_impact", "opportunity", "implementation_shortfall_bp",
+    "notional", "n"}`` or None on missing inputs. Positive IS = cost/worse fill.
+    """
+    try:
+        d = float(decision_price)
+        a = float(arrival_price)
+        fh = float(fill_price)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0 or a <= 0 or fh <= 0:
+        return None
+    qty = 1.0 if quantity is None else float(quantity)
+    if qty <= 0:
+        return None
+    explicit = (fh - a) * qty
+    market = (a - d) * qty
+    opp = 0.0
+    if final_price is not None:
+        raw_final = float(final_price)
+        if raw_final > 0:
+            opp = (raw_final - d) * qty * max(0.0, float(opportunity_days))
+    total = explicit + market + opp
+    notional = d * qty
+    return {
+        "explicit": round(explicit, 4),
+        "market_impact": round(market, 4),
+        "opportunity": round(opp, 4),
+        "implementation_shortfall_bp": round(total / notional * 1e4, 2),
+        "notional": round(notional, 4),
+    }
+
+
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
@@ -465,5 +514,5 @@ __all__ = [
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",
     "calmar_ratio", "ulcer_index", "capture_ratio", "tail_ratio",
-    "expectancy_stats",
+    "expectancy_stats", "implementation_shortfall",
 ]
