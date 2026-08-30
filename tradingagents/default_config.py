@@ -56,6 +56,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC": "sentiment_factor_min_ic",
     "TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE": "sentiment_factor_max_scale",
     "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE": "sentiment_factor_min_scale",
+    "TRADINGAGENTS_VOLATILITY_ESTIMATOR": "volatility_estimator",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
@@ -340,6 +341,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "sentiment_factor_min_ic": 0.02,
             "sentiment_factor_max_scale": 0.2,
             "sentiment_factor_min_scale": 0.5,
+            # Volatility estimator for the strategy-overlay sizing/regime path:
+            # close (default) | ewma | garch (close-series only). Parkinson /
+            # Garman-Klass need OHLC and are exposed as analyst tools instead.
+            "volatility_estimator": "close",
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)

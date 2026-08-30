@@ -55,7 +55,27 @@ def build_strategy_overlays(config: Mapping, closes: list) -> dict | None:
         )
     trend = trend_strength(closes_f, sma_window=min(200, len(closes_f) // 2))
     label = regime_label(vol_pct, trend, 0.4)
-    scale = volatility_target_scale(logrets, target_vol=config.get("target_vol", 0.15))
+    # `volatility_estimator` switch (default close): ewma / garch use only the
+    # closing series (parkinson / garman_klass need OHLC -> tool-only).
+    vol_override = None
+    estimator = config.get("volatility_estimator", "close")
+    try:
+        if estimator == "ewma" and len(logrets) >= 20:
+            from .volatility_models import ewma_vol
+
+            vol_override = ewma_vol(logrets)
+        elif estimator == "garch" and len(logrets) >= 60:
+            from .volatility_models import garch11_fit
+
+            fit = garch11_fit(logrets)
+            vol_override = (fit or {}).get("long_run_vol")
+    except Exception:  # noqa: BLE001 - a bad estimator degrades to close
+        vol_override = None
+    scale = volatility_target_scale(
+        logrets,
+        target_vol=config.get("target_vol", 0.15),
+        vol_override=vol_override,
+    )
     scale = 1.0 if scale <= 0 else round(min(scale, 1.5), 2)
     mom = momentum(closes_f, lookback=60, skip=0)
     dist = high_distance(closes_f, window=min(252, len(closes_f)))

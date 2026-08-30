@@ -3056,6 +3056,123 @@ def get_sentiment_lead_lag(
         return f"sentiment lead/lag unavailable for {ticker}: {exc}"
 
 
+def _vol_models_read(ticker: str, model: str) -> str:
+    """Shared helper: fetch OHLCV via the run cache, run the chosen estimator."""
+    import math
+
+    from tradingagents.strategies import volatility_models as _vm
+
+    ohlcv = _ohlcv(ticker, days=320)
+    closes = ohlcv["closes"]
+    if len(closes) < 60:
+        return f"{model} volatility unavailable for {ticker}: insufficient history"
+    logrets = []
+    for i in range(1, len(closes)):
+        if closes[i - 1] and closes[i]:
+            logrets.append(math.log(closes[i] / closes[i - 1]))
+    if model == "ewma":
+        v = _vm.ewma_vol(logrets)
+        if v is None:
+            return f"ewma volatility unavailable for {ticker}: insufficient returns"
+        return (
+            f"## EWMA Volatility — {ticker}\n"
+            f"- annualized vol (lambda 0.94): {v:.2%}\n"
+            f"- n={len(logrets)}"
+        )
+    if model == "garch":
+        fit = _vm.garch11_fit(logrets)
+        if not fit:
+            return f"garch volatility unavailable for {ticker}: fit did not converge"
+        recent = fit["series"][-1] if fit.get("series") else None
+        lines = [
+            f"## GARCH(1,1) Volatility — {ticker}",
+            f"- omega={fit['omega']} alpha={fit['alpha']} beta={fit['beta']}",
+            f"- long-run annualized vol: {fit['long_run_vol']:.2%}",
+        ]
+        if recent is not None:
+            lines.append(f"- latest conditional annualized vol: {recent:.2%}")
+        lines.append(f"- n={fit['n']}")
+        return "\n".join(lines)
+    highs, lows, opens = ohlcv["highs"], ohlcv["lows"], ohlcv["opens"]
+    if model == "parkinson":
+        v = _vm.parkinson_vol(highs, lows, window=min(60, len(closes)))
+        label = "Parkinson"
+    else:
+        v = _vm.garman_klass_vol(opens, highs, lows, closes, window=min(60, len(closes)))
+        label = "Garman-Klass"
+    if v is None:
+        return f"{label.lower()} volatility unavailable for {ticker}: degenerate OHLC"
+    return (
+        f"## {label} Volatility — {ticker} (day-only estimate)\n"
+        f"- annualized vol: {v:.2%}\n"
+        f"- note: range-based estimator assumes continuous trading (no overnight gaps); "
+        f"use as the intraday-risk read, not a full-period vol"
+    )
+
+
+@tool
+def get_garch_volatility(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Conditional volatility from a GARCH(1,1) fit (omega/alpha/beta,
+    long-run annualized vol, conditional-vol series). Pure MLE, offline.
+    Use before any 'volatility regime / clustering / long-run vol' claim.
+    """
+    try:
+        return _vol_models_read(ticker, model="garch")
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"garch volatility unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_volatility_estimators(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """All four volatility estimators side by side (closing, Parkinson,
+    Garman-Klass, EWMA, GARCH long-run) for the ticker. Use it before any
+    'the stock is/isn't volatile / vol is elevated' claim — the range-based
+    and conditional reads complement the close-to-close number.
+    """
+    try:
+        import math
+
+        from tradingagents.strategies import volatility_models as _vm
+        from tradingagents.strategies.regime import realized_vol
+
+        ohlcv = _ohlcv(ticker, days=320)
+        closes = ohlcv["closes"]
+        if len(closes) < 40:
+            return f"volatility estimators unavailable for {ticker}: insufficient history"
+        logrets = []
+        for i in range(1, len(closes)):
+            if closes[i - 1] and closes[i]:
+                logrets.append(math.log(closes[i] / closes[i - 1]))
+        close_v = realized_vol(closes, window=min(60, len(closes)))
+        par = _vm.parkinson_vol(ohlcv["highs"], ohlcv["lows"], window=min(60, len(closes)))
+        gk = _vm.garman_klass_vol(
+            ohlcv["opens"], ohlcv["highs"], ohlcv["lows"], closes, window=min(60, len(closes))
+        )
+        ew = _vm.ewma_vol(logrets)
+        garch = _vm.garch11_fit(logrets)
+        rows = [
+            ("close-to-close (60d)", close_v),
+            ("parkinson (60d, day-only)", par),
+            ("garman-klass (60d, day-only)", gk),
+            ("ewma 0.94", ew),
+            ("garch long-run", (garch or {}).get("long_run_vol")),
+        ]
+        lines = [f"## Volatility Estimators — {ticker}", ""]
+        for name, v in rows:
+            lines.append(f"- **{name}**: {f'{v:.2%}' if v is not None else 'n/a'}")
+        lines.append(
+            "\nNote: parkinson / garman-klass are day-only (no overnight gap); "
+            "garch long-run is the conditional mean vol."
+        )
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"volatility estimators unavailable for {ticker}: {exc}"
+
+
 @tool
 def get_normality(
     ticker: Annotated[str, "ticker symbol"],

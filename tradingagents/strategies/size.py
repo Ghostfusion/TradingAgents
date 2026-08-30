@@ -30,16 +30,25 @@ def position_size_kelly(
 
 
 def volatility_target_scale(
-    returns: list[float], target_vol: float = 0.15, decay: float = 0.94
+    returns: list[float],
+    target_vol: float = 0.15,
+    decay: float = 0.94,
+    vol_override: float | None = None,
 ) -> float:
     """Scale (0..3) so the portfolio targets `target_vol` annualized vol.
 
-    Uses EWR volatility; smoothing caps turnover. Returns None-safe 0 on no data.
+    Uses EWR volatility by default; ``vol_override`` supplies an externally
+    computed annualized vol (e.g. GARCH long-run vol from the
+    ``volatility_estimator`` config) so the sizing reflects the chosen
+    estimator. Returns None-safe 0 on no data.
     """
     import math
 
     if len(returns) < 5 or target_vol <= 0:
         return 0.0
+    if vol_override is not None and vol_override > 0:
+        raw = target_vol / float(vol_override)
+        return max(0.0, min(raw, 3.0))
     var = 0.0
     for r in returns:
         var = decay * var + (1.0 - decay) * (r * r)

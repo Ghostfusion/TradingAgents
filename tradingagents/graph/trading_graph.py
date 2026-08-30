@@ -113,6 +113,8 @@ from tradingagents.agents.utils.analysis_tools import (
     get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
+    get_volatility_estimators,
+    get_garch_volatility,
     get_sofr_curve,
     get_strategy_quality,
     get_swing_exits,
@@ -401,6 +403,8 @@ class TradingAgentsGraph:
                     get_sentiment_computed,
                     get_news_sentiment_series,
                     get_sentiment_lead_lag,
+                    get_volatility_estimators,
+                    get_garch_volatility,
                     # Market-session mechanics (pre/post-market, opening range).
                     get_opening_range,
                     get_gap_type,
