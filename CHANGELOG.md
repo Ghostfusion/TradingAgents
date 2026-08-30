@@ -251,6 +251,18 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Canonical output root (reports/screener/action_reports)** - every
+  relative output path is now anchored to the TradingAgents repo root instead
+  of the process CWD, so runs never write into the launch directory. The web
+  app (launched from ``TradingNew`` or ``trading_web``) previously caused
+  ``batch.analyze`` to drop ``reports/`` into those parent folders; stale
+  ``TradingNew/reports`` and ``trading_web/reports`` were migrated into
+  ``TradingAgents/reports``. New `repo_root()`/`resolve_output_path()`
+  helpers in ``tradingagents/dataflows/utils.py``; wired into
+  ``batch.py`` (analyze report_dir + batch_summary), ``pipeline.py``,
+  ``value_screener.save_watchlist``, ``action_report`` (--reports-dir /
+  --out-dir), ``nightly_review``, ``pre_market_review`` and
+  ``rebuild_complete_report``. Absolute / ``~`` paths pass through untouched.
 - **Full-set audit (read-before-edit): 14 defects across the deterministic
   calculators, the dataflow/vendor layer, and tool binding — the numbers the
   LLM agents cite are now correct and reachable.**

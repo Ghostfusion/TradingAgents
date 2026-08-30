@@ -23,14 +23,15 @@ import importlib.util
 import json
 import os
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _latest_summary() -> str | None:
+    from tradingagents.dataflows.utils import resolve_output_path
+
     matches = sorted(
-        glob.glob(str(Path.cwd() / "reports" / "batch_summary_*.jsonl")),
+        glob.glob(str(resolve_output_path("reports") / "batch_summary_*.jsonl")),
         key=os.path.getmtime,
         reverse=True,
     )

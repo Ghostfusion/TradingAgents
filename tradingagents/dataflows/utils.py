@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 # Tickers can contain letters, digits, dot, dash, underscore, caret
 # (index symbols like ^GSPC), equals (futures like GC=F), and plus
@@ -34,3 +35,30 @@ def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
     if set(value) == {"."}:
         raise ValueError(f"ticker cannot consist solely of dots: {value!r}")
     return value
+
+
+def repo_root() -> Path:
+    """Canonical TradingAgents repo root (parent of the installed package).
+
+    Derived from this file's location (``tradingagents/dataflows/utils.py``),
+    never from the process CWD, so every output lands in the TradingAgents
+    project no matter where the CLI / web server was launched from.
+    """
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def resolve_output_path(value: str | Path) -> Path:
+    """Anchor a relative output path to the repo root.
+
+    Reports / screener / action-report outputs must always live under the
+    TradingAgents project (``<repo>/reports``, ``<repo>/screener``,
+    ``<repo>/action_reports``) regardless of the launch directory — the web
+    app runs from ``TradingNew`` or ``trading_web`` and an in-process
+    ``batch.analyze`` used to write to the process CWD. Absolute paths and
+    ``~``-expanded paths are returned unchanged (callers that opt into a
+    custom location keep it).
+    """
+    p = Path(value).expanduser()
+    if p.is_absolute():
+        return p
+    return repo_root() / p

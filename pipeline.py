@@ -197,8 +197,10 @@ def _fmt(v):
 
 
 def _write_summary(results, ranked, universe, args, stamp):
-    out_dir = Path("reports")
-    out_dir.mkdir(exist_ok=True)
+    from tradingagents.dataflows.utils import resolve_output_path
+
+    out_dir = resolve_output_path("reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# Cross-Sectional Pipeline - {args.date}",
         "",

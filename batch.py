@@ -22,7 +22,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from tradingagents.dataflows.symbol_utils import crypto_base
-from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.dataflows.utils import resolve_output_path, safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
@@ -265,10 +265,11 @@ def analyze(
     rating = parse_rating(final_state.get("final_trade_decision", decision))
 
     # Save using the CLI's original folder + naming convention:
-    #   ./reports/<TICKER>_<YYYYMMDD_HHMMSS>/...  (no prompt)
+    #   <repo>/reports/<TICKER>_<YYYYMMDD_HHMMSS>/...  (no prompt)
+    # Anchored to the repo root so the web server (which can run from the
+    # TradingNew or trading_web directory) never writes into the launch CWD.
     report_dir = (
-        Path.cwd()
-        / "reports"
+        resolve_output_path("reports")
         / f"{safe_ticker_component(symbol).upper()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     ta.save_reports(final_state, symbol, save_path=report_dir)
@@ -333,7 +334,8 @@ def main() -> int:
 
     results = []
     summary_path = (
-        Path.cwd() / "reports" / f"batch_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        resolve_output_path("reports")
+        / f"batch_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
     )
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(analyze, s, args.date, analysts, depth, vendor): s for s in symbols}

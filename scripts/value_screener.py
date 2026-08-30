@@ -319,8 +319,10 @@ def save_watchlist(markdown, out_dir, ts=None):
     """
     from datetime import datetime as _dt
 
+    from tradingagents.dataflows.utils import resolve_output_path
+
     out_dir = out_dir or "screener"
-    out_path = Path(out_dir)
+    out_path = resolve_output_path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     stamp = ts or _dt.now().strftime("%Y%m%d_%H%M%S")
     file = out_path / (stamp + ".md")

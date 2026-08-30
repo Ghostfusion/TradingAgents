@@ -119,7 +119,9 @@ def main() -> int:
     if args.dirs:
         dirs = [Path(d) for d in args.dirs]
     else:
-        base = Path.cwd() / "reports"
+        from tradingagents.dataflows.utils import resolve_output_path
+
+        base = resolve_output_path("reports")
         dirs = (
             sorted(d for d in base.iterdir() if d.is_dir() and (d / "1_analysts").exists())
             if base.is_dir()

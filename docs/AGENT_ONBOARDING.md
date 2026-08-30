@@ -298,6 +298,14 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-29 `(working tree)` - Canonical output root: all reports / screener /
+  action_report / nightly-review / pre-market-review / rebuild outputs now
+  resolve against the TradingAgents repo root (new
+  `tradingagents.dataflows.utils.repo_root()` / `resolve_output_path()`) instead
+  of the process CWD, so scripts and the web app (launched from TradingNew or
+  trading_web) never write `reports/` into the parent folders. Stale
+  `TradingNew/reports` + `trading_web/reports` migrated into
+  `TradingAgents/reports`. See CHANGELOG [Unreleased].
 - 2026-08-29 `(working tree)` - Provider-endpoint + calc-wiring pass: yfinance
   keyless fallbacks added for `analyst_ratings` (recommendation summary +
   price-target consensus), `earnings_calendar` (earnings dates + EPS surprise)

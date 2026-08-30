@@ -817,11 +817,18 @@ def main(argv: list[str] | None = None) -> int:
 
     from datetime import date as _date
 
+    from tradingagents.dataflows.utils import resolve_output_path
+
+    # Anchor relative inputs/outputs to the TradingAgents repo root so the web
+    # app (launched from TradingNew or trading_web) never reads/writes the CWD.
+    reports_dir = resolve_output_path(args.reports_dir)
+    out_dir = resolve_output_path(args.out_dir)
+
     as_of = args.date or _date.today().isoformat()
     basket = load_basket(args.basket)
-    reports = discover_reports(args.reports_dir)
+    reports = discover_reports(reports_dir)
     if not reports:
-        print(f"no report folders found under {args.reports_dir}", file=sys.stderr)
+        print(f"no report folders found under {reports_dir}", file=sys.stderr)
         return 2
 
     rows = []
@@ -871,10 +878,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(rows, indent=2, default=str))
         return 0
 
-    markdown = build_report(rows, basket, args.reports_dir, as_of)
+    markdown = build_report(rows, basket, reports_dir, as_of)
     print(markdown)
     if not args.dry_run:
-        saved = save_report(markdown, args.out_dir)
+        saved = save_report(markdown, str(out_dir))
         print(f"[action_report] saved to {saved}")
     # Close the moomoo context while the process is healthy (see value_screener
     # main()): the SDK's receive thread keeps the process alive after main()

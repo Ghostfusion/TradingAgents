@@ -44,7 +44,9 @@ def _discover_report_dir(ticker: str, report_dir: str | None, prior_date: str | 
     """None explicitly given: newest ``reports/<TICKER>_<ts>/`` folder."""
     if report_dir:
         return report_dir if os.path.isdir(report_dir) else None
-    reports_root = Path.cwd() / "reports"
+    from tradingagents.dataflows.utils import resolve_output_path
+
+    reports_root = resolve_output_path("reports")
     if not reports_root.is_dir():
         return None
     hits = []

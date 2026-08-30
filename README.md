@@ -35,6 +35,15 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-29] **Canonical output root** - all `reports/`, `screener/` and
+  `action_reports/` outputs now resolve against the TradingAgents repo,
+  regardless of where the CLI or web server is launched from (previously the
+  web app, started from `TradingNew` or `trading_web`, could drop `reports/`
+  into those parent folders). Wired through a shared
+  `resolve_output_path()` helper across batch/pipeline/screener/action-report/
+  nightly-review/pre-market-review/rebuild. Stale stray `reports/` dirs were
+  consolidated into `TradingAgents/reports/`. See CHANGELOG.
+
 - [2026-08-29] **Provider-endpoint + calc-wiring pass** - audited every data
   provider's docs for exposable endpoints and every strategy calculator for
   agent wiring. New keyless yfinance fallbacks for `analyst_ratings`
