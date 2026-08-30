@@ -2756,6 +2756,70 @@ def get_candlestick_patterns(
 
 
 @tool
+def get_tail_decomposition(
+    names: Annotated[str, "Comma-separated ticker list for the book"],
+    weights: Annotated[str, "Comma-separated name=weight pairs (sums to 1)"] = "",
+) -> str:
+    """Which names drive the book tail? Component VaR (sums to the book's
+    historical VaR) + incremental VaR per name. Advisory - the components
+    answer 'who is the tail' before a sizing/tail claim.
+    """
+    try:
+        from tradingagents.strategies.book_risk import component_var, incremental_var
+
+        tickers = [t.strip().upper() for t in str(names).split(",") if t.strip()]
+        if len(tickers) < 3:
+            return "tail decomposition unavailable: need >= 3 names"
+        weights_dict: dict = {}
+        if weights:
+            for pair in str(weights).split(","):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    try:
+                        weights_dict[k.strip().upper()] = float(v)
+                    except ValueError:
+                        continue
+        if not weights_dict:
+            weights_dict = dict.fromkeys(tickers, 1.0 / len(tickers))
+        returns_by_name = {}
+        for t in tickers:
+            ohlcv = _ohlcv(t, days=320)
+            closes = ohlcv["closes"]
+            if len(closes) < 60:
+                return f"tail decomposition unavailable for {t}: insufficient history"
+            rets = []
+            for i in range(1, len(closes)):
+                if closes[i - 1] and closes[i]:
+                    rets.append(closes[i] / closes[i - 1] - 1.0)
+            returns_by_name[t] = rets
+        comp = component_var(returns_by_name, weights_dict)
+        inc = incremental_var(returns_by_name, weights_dict)
+        lines = [f"## Tail Decomposition — {', '.join(tickers)}", ""]
+        if comp:
+            lines.append(f"- Book historical VaR(95%): {comp['total_var']:.4%}")
+            lines.append("| name | component VaR | % of book |")
+            lines.append("| --- | --- | --- |")
+            for n, v in sorted(comp["components"].items(), key=lambda kv: abs(kv[1]), reverse=True):
+                pct = v / comp["total_var"] if comp["total_var"] else 0.0
+                lines.append(f"| {n} | {v:.4%} | {pct:.1%} |")
+            lines.append(
+                f"- components sum to {comp['coverage']:.1%} of total VaR (normal decomposition)"
+            )
+        else:
+            lines.append("- component VaR unavailable (degenerate covariance)")
+        if inc:
+            lines.append("")
+            lines.append("| name | incremental VaR (+1% weight) |")
+            lines.append("| --- | --- |")
+            for n, v in sorted(inc["incremental"].items(), key=lambda kv: abs(kv[1]), reverse=True):
+                lines.append(f"| {n} | {v:+.4%} |")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"tail decomposition unavailable: {exc}"
+
+
+@tool
 
 def get_book_tail_risk(
     ticker: Annotated[str, "ticker symbol"],

@@ -118,6 +118,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_strategy_quality,
     get_swing_exits,
     get_swing_set,
+    get_tail_decomposition,
     get_tail_risk,
     get_technical_factors,
     get_trailing_exit,
@@ -405,6 +406,7 @@ class TradingAgentsGraph:
                     get_sentiment_lead_lag,
                     get_volatility_estimators,
                     get_garch_volatility,
+                    get_tail_decomposition,
                     # Market-session mechanics (pre/post-market, opening range).
                     get_opening_range,
                     get_gap_type,

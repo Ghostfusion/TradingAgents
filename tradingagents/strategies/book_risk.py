@@ -149,6 +149,102 @@ def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Tail decomposition: incremental + component VaR (quants.md §Risk)
+# ---------------------------------------------------------------------------
+
+
+def _book_var(weights: dict, returns_by_name: dict, alpha: float = 0.05) -> float | None:
+    """Historical VaR of the weighted book (negative = loss) or None."""
+    mixed = portfolio_returns(weights, returns_by_name)
+    if not mixed:
+        return None
+    return simple_var(mixed, alpha)
+
+
+def incremental_var(
+    returns_by_name: dict,
+    weights: dict,
+    alpha: float = 0.05,
+    delta: float = 0.01,
+) -> dict | None:
+    """Per-name incremental VaR: ``VaR(w + d_i) - VaR(w)`` for each name.
+
+    IVaR_i answers "how much does the book tail widen if I add delta weight
+    to name i (cash-neutral pull from the others)". Positive = riskier.
+    Returns ``{"total_var": float, "incremental": {name: float}, "alpha",
+    "delta"}`` or None when the book cannot be aligned.
+    """
+    names = list(returns_by_name or {})
+    if len(names) < 3 or not weights:
+        return None
+    base = _book_var(weights, returns_by_name, alpha)
+    if base is None:
+        return None
+    out = {}
+    for n in names:
+        if weights.get(n, 0.0) == 0.0:
+            continue
+        # Add delta to n, scale the others proportionally so weights sum 1.
+        w_adj = {k: float(v) * (1.0 - delta) for k, v in weights.items() if k != n}
+        w_adj[n] = float(weights.get(n, 0.0)) + delta
+        v = _book_var(w_adj, returns_by_name, alpha)
+        if v is not None:
+            out[n] = round(v - base, 6)
+    if not out:
+        return None
+    return {"total_var": round(base, 6), "incremental": out, "alpha": alpha, "delta": delta}
+
+
+def component_var(
+    returns_by_name: dict,
+    weights: dict,
+    alpha: float = 0.05,
+) -> dict | None:
+    """Per-name component VaR via the normal-covariance decomposition.
+
+    Under joint normality ``CVaR_i = w_i * (Sigma w)_i / sqrt(w' Sigma w)``
+    scaled to the book's historical VaR so the components **sum to the total
+    book VaR** (the standard MCR-based decomposition). Answers "which name is
+    the tail". Returns ``{"total_var", "components": {name: float}, "coverage"
+    }`` (coverage = sum(components)/total) or None when degenerate.
+    """
+    names = [n for n in (returns_by_name or {}) if returns_by_name.get(n)]
+    if len(names) < 3 or not weights:
+        return None
+    import numpy as _np
+
+    series = []
+    for n in names:
+        s = [float(x) for x in returns_by_name[n] if x is not None]
+        if len(s) < 2:
+            return None
+        series.append(s)
+    n = min(len(s) for s in series)
+    mat = _np.array([s[-n:] for s in series], dtype=float)
+    w = _np.array([float(weights.get(nn, 0.0)) for nn in names], dtype=float)
+    if w.sum() <= 0:
+        w = _np.ones(len(names)) / len(names)
+    mean = mat.mean(axis=1)
+    demeaned = mat - mean[:, None]
+    Sigma = (demeaned @ demeaned.T) / (n - 1)
+    port_var = float(w @ Sigma @ w)
+    if port_var <= 1e-12:
+        return None
+    mcrs = (Sigma @ w) / (port_var ** 0.5)
+    c = w * mcrs
+    total_hist = _book_var(dict(zip(names, w, strict=False)), returns_by_name, alpha)
+    if total_hist is None:
+        return None
+    scale = total_hist / c.sum() if abs(c.sum()) > 1e-12 else 1.0
+    comps = {nn: round(float(v) * scale, 6) for nn, v in zip(names, c, strict=False)}
+    return {
+        "total_var": round(total_hist, 6),
+        "components": comps,
+        "coverage": round(float((c * scale).sum()) / total_hist, 4) if total_hist else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Horizon risk + i.i.d. gate (QuantLib Q1/Q4)
 # ---------------------------------------------------------------------------
 
@@ -238,4 +334,4 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
 
 
 __all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
-           "return_autocorrelation", "var_cvar_horizon"]
+           "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var"]
