@@ -12,6 +12,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_expected_move,
     get_extended_indicators,
     get_gap_type,
+    get_garch_volatility,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
@@ -50,11 +51,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_top_movers,
     get_trade_expectancy,
     get_tranche_plan,
-    get_volatility_estimators,
-    get_garch_volatility,
     get_vdu_entry_setup,
     get_verified_market_snapshot,
     get_volatility_contraction,
+    get_volatility_estimators,
 )
 
 # These two live in their own tool modules (not re-exported by agent_utils),
