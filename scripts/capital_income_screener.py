@@ -44,6 +44,12 @@ from tradingagents.strategies.capital_income import (  # noqa: E402
     build_capital_income_plan,
     indicated_yield,
 )
+from tradingagents.strategies.fixed_income import (  # noqa: E402
+    dv01,
+    macaulay_duration,
+    modified_duration,
+    preferred_ytm,
+)
 
 # Preferred-stock ETFs whose top holdings are the live universe seed (path 3:
 # no curated list needed - the screener pull the names at runtime).
@@ -138,7 +144,7 @@ def _fetch_ticker_metrics(ticker: str, days: int = 80) -> dict:
     return out
 
 
-def _render_markdown(plan: dict, source: str, top: int) -> str:
+def _render_markdown(plan: dict, source: str, top: int, fi: bool = False, fi_horizon: float | None = None) -> str:
     lines = [
         "# Capital Income Screener (Strategies/capital_income.md)",
         "",
@@ -148,9 +154,13 @@ def _render_markdown(plan: dict, source: str, top: int) -> str:
         + ("equal-weight (per-issue MV n/a)" if plan.get("used_equal_weight") else "market-value")
         + f" with {CLASS_CAP:.0%} cap / {CLASS_MAX:.0%} max",
         "",
-        "| Rank | Ticker | Price | Div | Yield% | MktCap | ADTV$ | Liq | Wt |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+    if fi:
+        lines.append("| Rank | Ticker | Price | Div | Yield% | MktCap | ADTV$ | Liq | Wt | YTM% | DMod | DV01 |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    else:
+        lines.append("| Rank | Ticker | Price | Div | Yield% | MktCap | ADTV$ | Liq | Wt |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for i, r in enumerate(plan.get("ranked", []), 1):
         px = "-" if r["price"] is None else f"{r['price']:.2f}"
         div = "-" if r.get("dividend") is None else f"{r['dividend']:.3f}"
@@ -159,14 +169,39 @@ def _render_markdown(plan: dict, source: str, top: int) -> str:
         adtv = "-" if r.get("adtv") is None else f"{r['adtv'] / 1e6:.2f}M"
         wt = "-" if r.get("weight") is None else f"{r['weight'] * 100:.1f}%"
         liq = "Y" if r.get("liquid") else "n"
-        lines.append(
-            f"| {i} | {r['ticker']} | {px} | {div} | {yld} | {mv} | {adtv} | {liq} | {wt} |"
-        )
+        if fi:
+            ytm = "-"
+            dmod = "-"
+            dv = "-"
+            if r.get("price") is not None and r.get("dividend") is not None:
+                yrs = fi_horizon if fi_horizon else None
+                ytm_v = preferred_ytm(r["dividend"], r["price"], 100.0, yrs)
+                if ytm_v is not None:
+                    ytm = f"{ytm_v * 100:.2f}"
+                    cash = [{"t": float(yrs), "amount": 100.0}]
+                    mac = macaulay_duration(cash, ytm_v)
+                    mod = modified_duration(mac, ytm_v)
+                    dmod = "-" if mod is None else f"{mod:.2f}"
+                    dv_v = dv01(mod, r["price"])
+                    dv = "-" if dv_v is None else f"{dv_v:.4f}"
+            lines.append(
+                f"| {i} | {r['ticker']} | {px} | {div} | {yld} | {mv} | {adtv} | {liq} | {wt} | {ytm} | {dmod} | {dv} |"
+            )
+        else:
+            lines.append(
+                f"| {i} | {r['ticker']} | {px} | {div} | {yld} | {mv} | {adtv} | {liq} | {wt} |"
+            )
     if plan.get("used_equal_weight"):
         lines.append("")
         lines.append(
             "_Note: per-issue market value for preferreds is not exposed by the data "
             "source; weights shown are equal-weight with the 3% cap._"
+        )
+    if fi and not fi_horizon:
+        lines.append("")
+        lines.append(
+            "_YTM/DMod/DV01 require a call/redemption horizon: pass `--fi-horizon <years>` "
+            "for the ones that have one; perpetuals render n/a (no fabricated YTM)._"
         )
     return "\n".join(lines)
 
@@ -194,6 +229,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", default="preferred_income", help="folder for the saved report")
     parser.add_argument("--dry-run", action="store_true", help="print rows without writing a file")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of markdown")
+    parser.add_argument(
+        "--fi",
+        action="store_true",
+        help="add YTM / modified-duration / DV01 columns from the price + "
+        "dividend (requires --fi-horizon for a call/redemption horizon; "
+        "perpetuals render n/a - never a fabricated YTM)",
+    )
+    parser.add_argument(
+        "--fi-horizon",
+        type=float,
+        default=None,
+        help="years to call/redemption for the YTM/duration columns (required "
+        "for meaningful fixed-income reads; perpetuals without one stay n/a)",
+    )
     args = parser.parse_args(argv)
 
     universe = [t.strip().upper() for t in args.tickers if t.strip()]
@@ -266,7 +315,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.universe == "preferred-top"
         else (args.file or "positional")
     )
-    md = _render_markdown(plan, source=source, top=args.top)
+    md = _render_markdown(
+        plan, source=source, top=args.top, fi=args.fi, fi_horizon=args.fi_horizon
+    )
     print(md)
     if not args.dry_run:
         out = Path(args.out_dir)
