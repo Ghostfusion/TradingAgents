@@ -317,9 +317,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # serve fundamentals/technicals/intraday/options on the EOD plan,
             # so those chains keep moomoo/yfinance first.
             "core_stock_apis": "eodhd,moomoo,yfinance,tiingo",  # Options: alpha_vantage, yfinance, moomoo, eodhd, tiingo
-            "technical_indicators": "moomoo,yfinance",  # Options: alpha_vantage, yfinance, moomoo
-            "fundamental_data": "moomoo,yfinance,tiingo",  # Options: alpha_vantage, yfinance, moomoo, tiingo
-            "news_data": "eodhd,moomoo,yfinance",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd
+            "technical_indicators": "moomoo,yfinance,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo
+            "fundamental_data": "moomoo,yfinance,tiingo,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo, tiingo
+            "news_data": "eodhd,moomoo,yfinance,alpha_vantage",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)

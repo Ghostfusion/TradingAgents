@@ -9,6 +9,11 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Alpha Vantage keyed fallback** - `ALPHA_VANTAGE_API_KEY` set in `.env`;
+  `alpha_vantage` added as the key-gated last vendor in the
+  `technical_indicators` / `fundamental_data` / `news_data` default chains
+  (free tier, 25 req/day - only consulted when the primary vendors fail).
+  Live-verified: OVERVIEW returns real fundamentals for AAPL.
 - **Provider-endpoint + calc-wiring pass** - audited every data provider's
   endpoint surface (docs + SDKs) and every strategy calculator for agent
   exposure:

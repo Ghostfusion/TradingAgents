@@ -303,6 +303,8 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `polymarket,moomoo`, `moomoo,finnhub,yfinance`, `sec_edgar`). Errors propagate through
 `dataflows/errors.py`, the router converts to sentinel strings
 (`NO_DATA_AVAILABLE`, `DATA_UNAVAILABLE` optional, `DATA_DISABLED`).
+`technical_indicators` / `fundamental_data` / `news_data` end their chains with
+`alpha_vantage` (key-gated last fallback via `ALPHA_VANTAGE_API_KEY` in `.env`).
 
 ### ## 6.1 Tools by category (auto-generated)
 
