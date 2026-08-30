@@ -47,6 +47,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_CALIBRATION": "enable_calibration",
     "TRADINGAGENTS_ENABLE_AGREEMENT": "enable_agreement",
     "TRADINGAGENTS_ENABLE_COMPOSITE_RANK": "enable_composite_rank",
+    "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
@@ -422,6 +423,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "calibration_min_n": 5,  # RESERVED (not yet wired): min samples per bucket (G2)
         "enable_agreement": False,  # G3: computed consensus / agreement
         "enable_threshold_gate": False,  # RESERVED (not yet wired): G5 PBO tuning gate
+        "enable_independent_vote": False,  # Option-A hybrid: pre-debate independent stances feed G3/consensus
         # Institutional workflow (design_institutional_value_dip_workflow.md).
         # All advisory rows are computed + injected into the decision agents
         # (Trader / PM / risk debators); nothing gates by default.

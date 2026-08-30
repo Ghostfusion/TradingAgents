@@ -9,6 +9,25 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Independent pre-debate stances (Option-A hybrid)** -
+  `enable_independent_vote` (`TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE`, default
+  off) — the 3 risk debators + bull/bear researchers each emit ONE independent
+  structured stance (rating / confidence / strength / reason) BEFORE the
+  debate loop runs, sampled with **no transcript and no opponents' responses**
+  (the independence invariant; prompted without `risk_debate_state` /
+  `investment_debate_state`). The G3 agreement/consensus math and the G1
+  position contract then use the uncontaminated pre-debate agreement
+  (`independent_agreement`), and the PM + Research Manager prompts receive the
+  independent vote/reads alongside the debate history. The debates run
+  unchanged as the risk-surfacing layer — this kills the conformity /
+  adversarial-persuasion bias in consensus (FREE-MAD: consensus pressure
+  reduces reasoning accuracy; a persuasive agent can drag a group to a wrong
+  consensus). When the flag is off, every fallback is byte-for-byte the legacy
+  parse-from-history consensus path. New: `agents/utils/independent_vote.py`,
+  `IndependentStance` schema + `render_stance`, two graph nodes
+  (`Independent Researcher Stances` / `Independent Risk Stances`), three state
+  channels. Tests: `test_independent_vote.py` (12) + 3 prompt-injection
+  contracts in `test_structured_agent_prompts.py`. ruff clean.
 - **CLI one-input mode (`--symbol`)** - `tradingagents analyze --symbol AAPL`
   runs non-interactively: all 4 analysts, deep research (5 debate/5 risk
   rounds), today's date, and the LLM provider + thinking models from

@@ -291,6 +291,81 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Independent pre-debate stance (Option-A hybrid)
+# ---------------------------------------------------------------------------
+
+
+class IndependentStance(BaseModel):
+    """One decision role's independent, pre-debate stance.
+
+    Sampled by the Option-A pre-pass BEFORE any debate cross-talk: the prompt
+    contains no transcript and no opponents' responses, so the G3
+    agreement/consensus math (and the PM's dissent flag) comes from
+    independent opinions, not round-N rhetoric contaminated by conformity.
+    The debate still runs afterwards, unchanged, as the risk-surfacing /
+    explanation layer.
+    """
+
+    rating: PortfolioRating = Field(
+        description=(
+            "This role's independent rating of the trade decision before any "
+            "debate: exactly one of Buy / Overweight / Hold / Underweight / "
+            "Sell, grounded only in the evidence below."
+        ),
+    )
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Conviction in this stance, 0.0 to 1.0, formed before seeing any "
+            "other role's argument."
+        ),
+    )
+    strength: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description=(
+            "Case strength 0-100: how strongly the evidence argues for this "
+            "rating (100 = overwhelming case, 0 = barely any case)."
+        ),
+    )
+    reason: str = Field(
+        default="",
+        description=(
+            "One short, evidence-anchored sentence justifying the stance from "
+            "the reports below. Never invent numbers; cite computed values or "
+            "state 'unavailable'."
+        ),
+    )
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _nullish_float_to_none(cls, v):
+        return _coerce_optional_float(v)
+
+    @field_validator("strength", mode="before")
+    @classmethod
+    def _nullish_int_to_none(cls, v):
+        if isinstance(v, str) and v.strip().lower() in _NULLISH_FLOAT:
+            return None
+        return v
+
+
+def render_stance(stance: IndependentStance) -> str:
+    """Render an IndependentStance to the markdown stored in state."""
+    parts = [f"**Rating**: {stance.rating.value}", ""]
+    if stance.confidence is not None:
+        parts.extend(["", f"**Confidence**: {stance.confidence:.2f}"])
+    if stance.strength is not None:
+        parts.extend(["", f"**Strength**: {stance.strength}/100"])
+    if stance.reason:
+        parts.extend(["", f"**Reason**: {stance.reason}"])
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Sentiment Analyst
 # ---------------------------------------------------------------------------
 

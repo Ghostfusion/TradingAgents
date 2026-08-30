@@ -35,6 +35,16 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-30] **Independent pre-debate stances (Option-A hybrid)** - the 3
+  risk debators + bull/bear researchers each emit ONE independent stance
+  (rating / confidence / strength / reason) BEFORE the debate runs, sampled
+  with **no transcript and no opponents' responses** — so agreement/consensus
+  (`enable_agreement`, G3), the G1 position-contract multiply, the PM's
+  dissent flag and the Research Manager's read all come from uncontaminated,
+  conformity-free opinions while the debate stays the risk-surfacing layer.
+  Opt-in `enable_independent_vote` (`TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE`);
+  every fallback is the legacy parse-from-history path when off. See CHANGELOG.
+
 - [2026-08-29] **Risk gate placement + compact verdict** - the computed risk
   gate is no longer repeated at the top of every analyst report (it appears
   once, in `4_risk/` + `5_portfolio/decision.md`), the compact `verdict.md` no
@@ -796,7 +806,9 @@ All config-gated, off by default:
   realized win-rates from the ledger into `calibrated_confidence` and a
   calibration table for the PM (`enable_calibration`).
 - **G3 measured consensus** (`strategies/consensus.py`) - `agreement_score`
-  from risk-DFV stances replaces the binary narrative flag; feeds G1.
+  replaces the binary narrative flag; feeds G1. With `enable_independent_vote`
+  the agreement comes from the INDEPENDENT pre-debate stances (no
+  conformity/adversarial-persuasion bias) instead of the debate transcript.
 - **G4 sentiment decay/velocity** (`strategies/sentiment.py`) - recency
   half-life weight, credibility factors, surprise z-score vs 30d baseline.
 - **G5 threshold gate** (`scripts/evaluate_config_gate.py`) - walk-forward +

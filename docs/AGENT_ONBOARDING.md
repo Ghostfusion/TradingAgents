@@ -298,6 +298,15 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+
+- 2026-08-30 `(working tree)` - Option-A hybrid: independent pre-debate
+  stances (`independent_vote.py`). With `enable_independent_vote`, the 3 risk
+  + bull/bear roles each emit ONE structured stance BEFORE the debate (no
+  transcript / no opponents' responses — the independence invariant), so G3
+  agreement, the G1 contract multiply, and the PM's dissent flag come from
+  conformity-free opinions; the debate stays the risk-surfacing layer. The PM
+  + Research Manager prompts receive the independent vote/reads; the legacy
+  parse-from-history path is unchanged when the flag is off. See CHANGELOG.
 - 2026-08-29 `(working tree)` - Risk gate moved out of the analyst reports
   (now once in 4_risk + 5_portfolio decision); compact verdict.md no longer
   duplicates the PM decision; rebuild_complete_report gate recovery hardened

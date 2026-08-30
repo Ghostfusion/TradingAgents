@@ -53,6 +53,7 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_POSITION_CONTRACT` | `enable_position_contract` |
 | `TRADINGAGENTS_ENABLE_CALIBRATION` | `enable_calibration` |
 | `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` |
+| `TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE` | `enable_independent_vote` | when on, the 3 risk + bull/bear stances are sampled INDEPENDENTLY before the debate and the agreement/consensus (G3 + the PM's dissent flag + the G1 contract multiply) comes from those uncontaminated pre-debate opinions — the debate stays the risk-surfacing layer |
 | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
@@ -172,8 +173,9 @@ which is how a web job hits its subprocess budget).
 report). Only `enable_events` (B1 catalyst gate), `enable_reflection`,
 `enable_sentiment`, and `enable_strategy_overlays` default **True**;
 `enable_orderflow`, `enable_position_contract`, `enable_calibration`,
-`enable_agreement`, `enable_composite_rank`, `enable_exits`,
-`enable_computed_context`, and `enable_risk_governor` default **False** (opt-in;
+`enable_agreement`, `enable_independent_vote`, `enable_composite_rank`,
+`enable_exits`, `enable_computed_context`, and `enable_risk_governor` default
+**False** (opt-in;
 the dev machine enables most via the gitignored `.env`). Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
 `target_atr=4.0`, `sector_cap_limit=0.35`, `risk_max_drawdown_pct=0.10`,
@@ -279,7 +281,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Position contract | `enable_position_contract` (F) | `strategies/contract.py` | min(Kelly, risk/stop)*vol*flow*agree*catalyst; when a tranche plan is in play (`enable_tranche_risk`) the dollar stop/BE/target are measured from the weighted tranche `entry_price` hook |
 | Risk governor | `enable_risk_governor` (F) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio". With `enable_tranche_risk` on it also sizes/throttles against the worst-case 3-tranche scale-in (`strategies/value_dip.py::tranche_risk_read`): the peak-deployed-at-scale-in fraction vs the per-trade cap and the capital-at-risk budget (sum of per-tranche losses at the hard stop vs `tranche_risk_pct`) |
 | Calibration | `enable_calibration` (F) | `strategies/calibration.py` | calibrated P from ledger |
-| Agreement | `enable_agreement` (F) | `strategies/consensus.py` | debate agreement -> size |
+| Agreement | `enable_agreement` (F) | `strategies/consensus.py` | debate agreement -> size; with `enable_independent_vote` the agreement comes from the INDEPENDENT pre-debate stances, not the debate transcript (no conformity contamination) |
 | Computed context | `enable_computed_context` (F) | `strategies/debate_context.py` | numbers into debate |
 | Exits | `enable_exits` (F) | `strategies/exits.py` | stops/BE/targets |
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |

@@ -92,8 +92,12 @@ def test_portfolio_manager_prompt_injects_computed_decision_context():
     assert "Trade plan card: NVDA" in text
 
 
+
+
 @pytest.mark.unit
-def test_research_manager_prompt_states_constraint():
+def test_research_manager_prompt_injects_independent_researcher_reads():
+    """Option-A: when independent pre-debate researcher stances exist, the RM
+    sees them (uncontaminated bull/bear reads) alongside the debate history."""
     from tradingagents.agents.schemas import PortfolioRating, ResearchPlan
 
     captured = {}
@@ -109,12 +113,23 @@ def test_research_manager_prompt_states_constraint():
             "history": "h", "bull_history": "b", "bear_history": "r",
             "current_response": "", "judge_decision": "", "count": 1,
         },
+        "researcher_independent_stances": {
+            "bull": {"rating": "Buy", "strength": 70, "reason": "moat intact"},
+            "bear": {"rating": "Sell", "strength": 60, "reason": "peak margin"},
+        },
     })
-    assert NO_EXTERNAL_TOOLS in _prompt_text(captured["prompt"])
+    text = _prompt_text(captured["prompt"])
+    assert "Independent pre-debate researcher reads" in text
+    assert "**Bull** (independent, pre-debate): Buy (strength 70/100)" in text
+    assert ".**Bear**" in text or "**Bear**" in text
+
+
 
 
 @pytest.mark.unit
-def test_portfolio_manager_prompt_states_constraint():
+def test_portfolio_manager_uses_independent_vote_when_present():
+    """Option-A: when the graph produced the independent pre-debate vote, the PM
+    prompt must use it (not the legacy parse-from-history consensus line)."""
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
 
     captured = {}
@@ -137,8 +152,54 @@ def test_portfolio_manager_prompt_states_constraint():
         "risk_debate_state": risk,
         "investment_plan": "plan",
         "trader_investment_plan": "trader plan",
+        "computed_independent_vote": (
+            "**Independent pre-debate risk stances** (sampled before any cross-talk):\n"
+            "- **Aggressive**: Buy\n"
+            "**Independent agreement**: agreement=0.50 label=low (n=3)"
+        ),
     })
-    assert NO_EXTERNAL_TOOLS in _prompt_text(captured["prompt"])
+    text = _prompt_text(captured["prompt"])
+    assert "**Independent pre-debate risk stances**" in text
+    assert "agreement=0.50 label=low" in text
+    # The legacy parse-from-history line must NOT appear when the independent vote is present.
+    assert "Computed risk-consensus** (deterministic): agreement=" not in text
+
+
+@pytest.mark.unit
+def test_portfolio_manager_falls_back_to_legacy_consensus_without_independent_vote():
+    """When the independent vote is absent (flag off / sampling failure), the PM
+    still gets the legacy parse-from-history consensus line — no silent gap."""
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    captured = {}
+    llm = _capturing_llm(
+        captured,
+        PortfolioDecision(
+            rating=PortfolioRating.HOLD,
+            executive_summary="x",
+            investment_thesis="y",
+        ),
+    )
+    risk = {
+        "history": "h",
+        "aggressive_history": "Aggressive Analyst: Rating Buy, high risk.",
+        "conservative_history": "Conservative Analyst: Rating Sell.",
+        "neutral_history": "Neutral Analyst: Rating Hold.",
+        "current_aggressive_response": "",
+        "current_conservative_response": "",
+        "current_neutral_response": "",
+        "latest_speaker": "Neutral",
+        "count": 1,
+    }
+    create_portfolio_manager(llm)({
+        "company_of_interest": "NVDA",
+        "risk_debate_state": risk,
+        "investment_plan": "plan",
+        "trader_investment_plan": "trader plan",
+    })
+    text = _prompt_text(captured["prompt"])
+    assert "**Computed risk-consensus**" in text
+    assert "agreement=" in text
 
 
 @pytest.mark.unit

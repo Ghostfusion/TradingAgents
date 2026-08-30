@@ -23,6 +23,34 @@ def create_research_manager(llm):
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
+        # Option-A hybrid: the bull/bear researchers' INDEPENDENT pre-debate
+        # reads (sampled before any cross-talk) — an uncontaminated view of
+        # how strong each side's case really is, before the adversarial loop
+        # converges them. Absent when the flag is off.
+        independent_block = ""
+        researcher_stances = state.get("researcher_independent_stances") or {}
+        if researcher_stances:
+            rows = []
+            for role in ("bull", "bear"):
+                s = researcher_stances.get(role) or {}
+                rating = s.get("rating") or "unavailable"
+                strength = s.get("strength")
+                strength_txt = (
+                    f" (strength {int(strength)}/100)"
+                    if strength is not None
+                    else ""
+                )
+                reason = (s.get("reason") or "").strip()
+                rows.append(
+                    f"- **{role.capitalize()}** (independent, pre-debate): "
+                    f"{rating}{strength_txt}"
+                    + (f" — {reason}" if reason else "")
+                )
+            independent_block = (
+                "\n\n**Independent pre-debate researcher reads** (sampled before "
+                "the debate; no cross-talk — use them to judge how robust the "
+                "debate's conclusion is):\n" + "\n".join(rows)
+            )
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -43,6 +71,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 
 **Debate History:**
 {history}
+{independent_block}
 
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction() + get_output_budget("research")
 

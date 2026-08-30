@@ -1527,6 +1527,21 @@ class TradingAgentsGraph:
         if not self.config.get("enable_agreement"):
             return None
         try:
+            # Option-A hybrid: prefer the INDEPENDENT pre-debate agreement
+            # (sampled before any cross-talk) — the debate transcript can
+            # converge on a wrong answer under conformity pressure, so the
+            # G1 contract multiplies by the uncontaminated number. Falls back
+            # to parsing the debate history when the independent pass did not
+            # run (flag off or a sampling failure).
+            from tradingagents.agents.utils.independent_vote import (
+                independent_agreement,
+            )
+
+            risk_stances = final_state.get("risk_independent_stances") or {}
+            independent = independent_agreement(risk_stances)
+            if independent is not None:
+                return independent
+
             from tradingagents.agents.utils.rating import parse_rating
             from tradingagents.strategies.consensus import agreement_score
 

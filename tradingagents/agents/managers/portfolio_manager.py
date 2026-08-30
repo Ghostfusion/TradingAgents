@@ -32,30 +32,38 @@ def create_portfolio_manager(llm):
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
 
-        # Computed risk-debate consensus (deterministic; the PM must cite it, not
-        # reinvent alignment from prose). Parse the three analysts' last stances
-        # and compute the agreement score + high/low label.
-        try:
-            from tradingagents.agents.utils.rating import parse_rating
-            from tradingagents.strategies.consensus import (
-                agreement_score,
-                consensus_from_score,
-            )
-            stances = []
-            for key in ("aggressive_history", "conservative_history", "neutral_history"):
-                for chunk in (risk_debate_state.get(key) or [])[-3:]:
-                    if isinstance(chunk, str):
-                        stances.append(parse_rating(chunk))
-            score = agreement_score(stances)
-            consensus_line = (
-                f"**Computed risk-consensus** (deterministic): agreement={score:.2f} "
-                f"label={consensus_from_score(score)} (n={len(stances)}) - set your "
-                f"PortfolioDecision.consensus to this level, not a guess.\n\n"
-                if score is not None
-                else "\n"
-            )
-        except Exception:  # noqa: BLE001 - degrade to no line
-            consensus_line = "\n"
+        # Computed risk consensus — the PM must cite it, not reinvent alignment
+        # from prose. Option-A hybrid: when the state carries the independent
+        # pre-debate vote summary (sampled before any debate cross-talk), use
+        # IT — the debate transcript can converge on a wrong answer under
+        # conformity pressure, so the dissent flag should come from
+        # uncontaminated opinions. Otherwise fall back to parsing the three
+        # analysts' last stances from the debate history.
+        independent_vote = state.get("computed_independent_vote") or ""
+        if independent_vote:
+            consensus_line = independent_vote + "\n\n"
+        else:
+            try:
+                from tradingagents.agents.utils.rating import parse_rating
+                from tradingagents.strategies.consensus import (
+                    agreement_score,
+                    consensus_from_score,
+                )
+                stances = []
+                for key in ("aggressive_history", "conservative_history", "neutral_history"):
+                    for chunk in (risk_debate_state.get(key) or [])[-3:]:
+                        if isinstance(chunk, str):
+                            stances.append(parse_rating(chunk))
+                score = agreement_score(stances)
+                consensus_line = (
+                    f"**Computed risk-consensus** (deterministic): agreement={score:.2f} "
+                    f"label={consensus_from_score(score)} (n={len(stances)}) - set your "
+                    f"PortfolioDecision.consensus to this level, not a guess.\n\n"
+                    if score is not None
+                    else "\n"
+                )
+            except Exception:  # noqa: BLE001 - degrade to no line
+                consensus_line = "\n"
 
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
