@@ -58,6 +58,10 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_CALIBRATION` | `enable_calibration` |
 | `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` |
 | `TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE` | `enable_independent_vote` | when on, the 3 risk + bull/bear stances are sampled INDEPENDENTLY before the debate and the agreement/consensus (G3 + the PM's dissent flag + the G1 contract multiply) comes from those uncontaminated pre-debate opinions — the debate stays the risk-surfacing layer |
+| `TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR` | `enable_sentiment_factor` | when on (default off), the position scale multiplies by 1 ± `sentiment_factor_max_scale` ONLY when the name's measured news-sentiment rank IC ≥ `sentiment_factor_min_ic` (else neutral 1.0, never blocks) |
+| `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC` | `sentiment_factor_min_ic` | measured rank-IC floor for the sentiment fold (default 0.02) |
+| `TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE` | `sentiment_factor_max_scale` | max +/- position-scale move from the sentiment fold (default 0.2) |
+| `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE` | `sentiment_factor_min_scale` | floor for the sentiment fold scale (default 0.5) |
 | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
@@ -286,6 +290,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Risk governor | `enable_risk_governor` (F) | `strategies/risk_governor.py` | PASS/WARN/REJECT, `risk_halt`; CVaR from the configured `risk_basket_tickers` weighted mix (`book_risk.portfolio_cvar`) when set, else the analyzed name's series. If the weights sum `< 1.0` the remainder is treated as zero-return cash (dilutes the tail) - "include cash as overall portfolio". With `enable_tranche_risk` on it also sizes/throttles against the worst-case 3-tranche scale-in (`strategies/value_dip.py::tranche_risk_read`): the peak-deployed-at-scale-in fraction vs the per-trade cap and the capital-at-risk budget (sum of per-tranche losses at the hard stop vs `tranche_risk_pct`) |
 | Calibration | `enable_calibration` (F) | `strategies/calibration.py` | calibrated P from ledger |
 | Agreement | `enable_agreement` (F) | `strategies/consensus.py` | debate agreement -> size; with `enable_independent_vote` the agreement comes from the INDEPENDENT pre-debate stances, not the debate transcript (no conformity contamination) |
+| Sentiment factor | `enable_sentiment_factor` (F) | `strategies/sentiment_research.py` + `overlays.fold_sentiment_into_overlay` | position scale x 1 ± `sentiment_factor_max_scale` ONLY when the name's measured rank IC ≥ `sentiment_factor_min_ic`; else neutral 1.0 (never blocks) |
 | Computed context | `enable_computed_context` (F) | `strategies/debate_context.py` | numbers into debate |
 | Exits | `enable_exits` (F) | `strategies/exits.py` | stops/BE/targets |
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |
@@ -320,6 +325,8 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_income_statement`, `get_basic_financials`, `get_company_peers`,
   `get_insider_activity`, `get_form4_insider`
 - `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`, `get_massive_news`
+- `news_sentiment` (optional): `get_news_sentiment` — daily series via
+  `eodhd,alpha_vantage,gdelt` (EODHD `/sentiments` primary)
 - `macro_data` : `get_macro_indicators`
 - `prediction_markets` : `get_prediction_markets`
 - `analyst_ratings` : `get_analyst_ratings`
@@ -342,7 +349,11 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
   `get_extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/
   anchored VWAP/golden-death — `strategies.extended_indicators`),
   `get_candlestick_patterns` (doji/hammer/shooting-star/engulfing/morning+
-  evening star — `strategies.extended_indicators.scan_candlesticks`)
+  evening star — `strategies.extended_indicators.scan_candlesticks`),
+  `get_news_sentiment_series` (daily news-sentiment -1..1 + 7d SMA + latest
+  innovation, `news_sentiment` chain),
+  `get_sentiment_lead_lag` (Pearson/Spearman cross-correlation vs forward
+  returns — `strategies.sentiment_research`)
 - moomoo-only optional: `capital_flow` (`get_capital_flow`),
   `smart_money` (`get_smart_money`), `economic_calendar` (`get_economic_calendar`),
   `fed_watch` (`get_fed_watch`), `market_breadth` (`get_market_breadth`),
@@ -357,6 +368,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`, `gdelt`, `benzinga`, `newsapi` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier - GDELT/Benzinga opt-in via `news_data` chain, not default)
+- news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` tone
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)

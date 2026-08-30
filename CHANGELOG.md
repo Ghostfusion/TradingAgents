@@ -1611,6 +1611,35 @@ daily; output merges name/change columns for picking. See
   contribute 0) and skips non-finite implied-volatility values in the mean,
   so the call degrades to zeroed totals instead of aborting.
 
+### Added
+- **News-sentiment factor** (`News_Sentiment.md` implementation) - the EODHD
+  `/sentiments` feed (live-verified, EOD plan) becomes the primary daily
+  news-sentiment series:
+  - **Feed**: `dataflows/eodhd.get_news_sentiment_eodhd` (daily `normalized`
+    centered to -1..1 + 7d SMA + latest innovation + article count),
+    `dataflows/alpha_vantage_news.get_news_sentiment_alpha_vantage`
+    (parses `ticker_sentiment[]` from the existing `NEWS_SENTIMENT` call,
+    post-16:00 ET next-day bucket) and `dataflows/gdelt.get_news_sentiment_gdelt`
+    (native tone) — new optional `news_sentiment` category chain
+    `eodhd,alpha_vantage,gdelt`.
+  - **Analytics**: `strategies/sentiment.py` (`aggregate_daily_sentiment`,
+    `daily_sentiment_sma`) + new `strategies/sentiment_research.py`
+    (lead/lag, multi-horizon predictive OLS with pure-NumPy Newey-West HAC,
+    sector-neutral z + size residualization, rolling IC / IC-IR, IC term
+    structure / half-life, quintile long/short backtest).
+  - **Tools**: `get_news_sentiment` (routed), `get_news_sentiment_series`,
+    `get_sentiment_lead_lag` bound to the market + news analyst ToolNodes and
+    prompts.
+  - **Eval**: `scripts/sentiment_factor_eval.py` (cross-sectional panel, IC /
+    decay / long-short report) + `scripts/value_screener.py --sentiment`
+    (`Sent7` / `SentZ` columns).
+  - **Overlay (opt-in, OFF)**: `enable_sentiment_factor` folds
+    `position_scale * (1 ± max_scale)` only when the name's measured rank IC ≥
+    `sentiment_factor_min_ic`, else neutral 1.0 (never blocks).
+  - trading_web Value Tools + README (33 tools).
+  Tests: `test_strategies_sentiment` (+6), `test_strategies_sentiment_research`
+  (12), `test_news_sentiment_series` (13), `test_strategies_overlays` (+5).
+
 ### Docs
 - **Research-plan + reference sync** - `Strategies/value_dip_swing_prepost_research_plan.md`
   status flipped to implemented; every Part A/B gap marked closed with the

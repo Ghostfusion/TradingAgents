@@ -305,6 +305,15 @@ has changed before); never assume an endpoint works — the SDK's
   (`dataflows/benzinga.py`, free ticker financial news, `BENZINGA_API_KEY`).
   NewsAPI in the default `news_data` chain; GDELT/Benzinga opt-in (GDELT
   endpoint is network-flaky). See CHANGELOG.
+- 2026-08-30 `(working tree)` - News-sentiment factor (News_Sentiment.md
+  implementation): EODHD `/sentiments` primary daily series +
+  Alpha-Vantage/GDELT fallbacks (optional `news_sentiment` chain),
+  `strategies/sentiment.py` series + `strategies/sentiment_research.py`
+  (lead/lag, Newey-West regression, IC/decay, quintile LS), tools
+  `get_news_sentiment_series` / `get_sentiment_lead_lag` (market + news
+  nodes), `scripts/sentiment_factor_eval.py` + screener `--sentiment`
+  (Sent7/SentZ), opt-in `enable_sentiment_factor` overlay fold. trading_web
+  Value Tools + README. See CHANGELOG.
 - 2026-08-30 `(working tree)` - Docs/reference sync + web mirror: the
   value-dip research plan's stale "ROC/TRIX/Force/A-D not implemented" note
   corrected (they shipped in `extended_indicators.py`), its phases marked

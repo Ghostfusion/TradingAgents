@@ -13,8 +13,7 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -200,6 +199,17 @@ def compute_social_scores(
         return None
 
 
+def computed_sentiment_line(result: dict) -> str:
+    """Compact deterministic line to append to the sentiment report."""
+    if not result:
+        return ""
+    parts = [f"computed_score={result['computed_score']:+.2f}"]
+    if result.get("computed_velocity") is not None:
+        parts.append(f"velocity={result['computed_velocity']:+.2f}sigma")
+    parts.append(f"n={result.get('sample_size', 0)}")
+    return "**Computed Sentiment (deterministic):** " + "; ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # News-sentiment daily series (News_Sentiment.md §1)
 # ---------------------------------------------------------------------------
@@ -281,7 +291,6 @@ def aggregate_daily_sentiment(
     except (ValueError, TypeError):
         cutoff_h, cutoff_m = 16, 0
     by_day: dict[str, dict] = {}
-    fb: dict[str, int] = {}
     for art in articles:
         if not isinstance(art, dict):
             continue

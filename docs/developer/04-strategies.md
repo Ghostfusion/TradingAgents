@@ -77,7 +77,13 @@ involved. This is the "compute, don't narrate" core.
 - `exits.py` — stop/BE/targets.
 - `reflection.py` — ledger, analyst hit-rates.
 - `orderflow.py` — `fetch_flow`, `summarize`, divergence/alignment/exhaustion.
-- `sentiment.py` — `compute_social_scores`, `computed_sentiment_line`.
+- `sentiment.py` — `compute_social_scores`, `computed_sentiment_line`,
+  `aggregate_daily_sentiment` (feed -> daily mean scores, post-16:00 ET
+  next-day bucket) + `daily_sentiment_sma` (calendar 7d SMA + innovation).
+- `sentiment_research.py` — news-sentiment factor analytics (lead/lag,
+  multi-horizon Newey-West HAC regression, sector-neutral z /
+  size-residualization, rolling IC + IC-IR, IC term structure + half-life,
+  weekly quintile long/short, `sentiment_factor_scale` overlay helper).
 
 ## 4.3 Evaluation
 

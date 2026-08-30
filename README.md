@@ -41,6 +41,15 @@
   and Benzinga (free ticker-scoped financial news, `BENZINGA_API_KEY`).
   Registered vendors; NewsAPI in the default chain, GDELT/Benzinga opt-in. See
   CHANGELOG.
+- [2026-08-30] **News-sentiment factor** (`News_Sentiment.md`) - EODHD
+  `/sentiments` daily series (-1..1 + 7d SMA + latest innovation; AV
+  `NEWS_SENTIMENT` + GDELT fallbacks) via a new `news_sentiment` chain;
+  analytics `strategies/sentiment_research.py` (lead/lag, multi-horizon
+  Newey-West regression, rolling IC + half-life, quintile long/short);
+  tools `get_news_sentiment_series` / `get_sentiment_lead_lag` on the market
+  + news analysts; `scripts/sentiment_factor_eval.py` + screener
+  `--sentiment` (Sent7/SentZ); opt-in `enable_sentiment_factor` overlay fold;
+  trading_web Value Tools. See CHANGELOG.
 
 - [2026-08-30] **Extended technical indicators** - the standard
   trend/momentum/volume/structure set the project lacked now computes locally
