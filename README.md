@@ -35,6 +35,13 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-30] **News/sentiment providers (A-C)** - GDELT (keyless native
+  news-tone + daily sentiment, `get_gdelt_sentiment` tool, opt-in chain),
+  NewsAPI.org (free 100 req/day global macro headlines, `NEWSAPI_API_KEY`),
+  and Benzinga (free ticker-scoped financial news, `BENZINGA_API_KEY`).
+  Registered vendors; NewsAPI in the default chain, GDELT/Benzinga opt-in. See
+  CHANGELOG.
+
 - [2026-08-30] **Extended technical indicators** - the standard
   trend/momentum/volume/structure set the project lacked now computes locally
   (`strategies/extended_indicators.py`): Ichimoku cloud, CCI, ROC, momentum

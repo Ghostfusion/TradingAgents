@@ -11,6 +11,7 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .benzinga import get_news_benzinga
 from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
 from .eodhd import (
@@ -38,6 +39,7 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .gdelt import get_news_gdelt
 from .massive import (
     get_corporate_actions_massive,
     get_fundamentals_massive,
@@ -74,6 +76,7 @@ from .moomoo import (
     get_smart_money_moomoo,
     get_stock_data_moomoo,
 )
+from .newsapi import get_global_news_newsapi, get_news_newsapi
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .schema import VendorResult
 from .screener import (
@@ -268,6 +271,9 @@ VENDOR_LIST = [
     "tiingo",
     "twelve_data",
     "stockdata",
+    "gdelt",
+    "benzinga",
+    "newsapi",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -368,11 +374,19 @@ VENDOR_METHODS = {
         "moomoo": get_news_moomoo,
         "massive": get_news_massive,
         "eodhd": get_news_eodhd,
+        "newsapi": get_news_newsapi,
+        # gdelt + benzinga are registered (available via the config chain) but
+        # not in the DEFAULT chain: GDELT's endpoint is network-flaky, Benzinga
+        # needs a registered key. Add to `news_data` to enable.
+        "gdelt": get_news_gdelt,
+        "benzinga": get_news_benzinga,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
         "finnhub": get_global_news_finnhub,
+        "gdelt": get_news_gdelt,
+        "newsapi": get_global_news_newsapi,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,

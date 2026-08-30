@@ -115,6 +115,7 @@ from tradingagents.agents.utils.moomoo_extra_tools import (
     get_smart_money,
 )
 from tradingagents.agents.utils.news_data_tools import (
+    get_gdelt_sentiment,
     get_global_news,
     get_insider_transactions,
     get_massive_news,
@@ -148,6 +149,7 @@ __all__ = [
     "get_income_statement",
     "get_news",
     "get_massive_news",
+    "get_gdelt_sentiment",
     "get_global_news",
     "get_insider_transactions",
     "get_macro_indicators",

@@ -38,6 +38,8 @@ in `batch.py`).
 | `TIINGO_API_KEY` | `tiingo_api_key` | Tiingo market data (free Starter tier: EOD OHLCV + fundamental statements + IEX quote + crypto; ~1,000 calls/day) |
 | `TWELVEDATA_API_KEY` | `twelve_data_api_key` | Twelve Data (free "Basic": 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV; tail of `core_stock_apis`) |
 | `STOCKDATA_API_KEY` | `stockdata_api_key` | StockData.org (free "$0/mo": 100 requests/day; quote/EOD/intraday/news; tail of `core_stock_apis` + `news_data`) |
+| `NEWSAPI_API_KEY` | `newsapi_api_key` | NewsAPI.org (free Developer: 100 req/day; global macro headlines; tail of `news_data`/`get_global_news`) |
+| `BENZINGA_API_KEY` | `benzinga_api_key` | Benzinga Basic Financial News API (free tier; headline+teaser+link; ticker news). GDELT is keyless. |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
 | `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |
@@ -350,7 +352,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 ### 6.2 Vendor implementations per tool (exact)
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
-- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`
+- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`, `gdelt`, `benzinga`, `newsapi` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier - GDELT/Benzinga opt-in via `news_data` chain, not default)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)
@@ -488,6 +490,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
 | `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
+| `get_gdelt_sentiment(ticker, look_back_days?)` | `gdelt.get_gdelt_tone_series` | news | GDELT native daily news-tone series (keyless, -100..100) - a computed sentiment read |
 | `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |

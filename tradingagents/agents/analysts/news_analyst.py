@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_earnings_event_read,
     get_economic_calendar,
     get_fed_watch,
+    get_gdelt_sentiment,
     get_global_news,
     get_insider_transactions,
     get_instrument_context_from_state,
@@ -33,6 +34,7 @@ def create_news_analyst(llm):
         tools = [
             get_news,
             get_massive_news,
+            get_gdelt_sentiment,
             get_global_news,
             get_macro_indicators,
             get_prediction_markets,

@@ -87,3 +87,29 @@ def get_massive_news(
         return get_news_massive(ticker, start_date, end_date)
     except Exception as exc:  # noqa: BLE001
         return f"massive news unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_gdelt_sentiment(
+    ticker: Annotated[str, "Ticker symbol"],
+    look_back_days: Annotated[int, "Days of GDELT tone history to aggregate"] = 7,
+) -> str:
+    """
+    GDELT native news-tone sentiment for a ticker: a daily average-tone series
+    over the trailing ``look_back_days`` (keyless, free). GDELT's tone is a
+    computer-coded -100..100 lexical sentiment score, so it is a *computed*
+    sentiment read the analysts can cite (or see an explicit 'unavailable'
+    when GDELT is unreachable/missing - never fabricated).
+
+    Args:
+        ticker (str): Ticker symbol
+        look_back_days (int): Rolling window in days; default 7.
+    Returns:
+        str: GDELT daily tone series (+ latest), or an explicit 'unavailable'.
+    """
+    from tradingagents.dataflows.gdelt import get_gdelt_tone_series
+
+    try:
+        return get_gdelt_tone_series(ticker, look_back_days)
+    except Exception as exc:  # noqa: BLE001 - degrade, never raise in the tool loop
+        return f"gdelt sentiment unavailable for {ticker}: {exc}"

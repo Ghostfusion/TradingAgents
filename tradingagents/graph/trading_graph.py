@@ -27,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_expected_move,
     get_fed_watch,
     get_fundamentals,
+    get_gdelt_sentiment,
     get_global_news,
     get_income_statement,
     get_indicators,
@@ -437,6 +438,7 @@ class TradingAgentsGraph:
                     # News and insider information
                     get_news,
                     get_massive_news,
+                    get_gdelt_sentiment,
                     get_global_news,
                     get_insider_transactions,
                     get_macro_indicators,

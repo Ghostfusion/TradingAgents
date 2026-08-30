@@ -9,6 +9,27 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- **News/sentiment providers (Phases A-C)** - three additive sources, per the
+  free-tier research:
+  - `dataflows/gdelt.py` - GDELT DOC 2.0 (keyless, free). `get_news_gdelt`
+    (ticker full-text + **native tone**: avg/pos/neg/neutral per article) and
+    `get_gdelt_tone_series` (daily avg-tone timeline). New market/news tool
+    `get_gdelt_sentiment` (computed sentiment read). Note: GDELT's endpoint is
+    network-flaky (connect timeouts), so it is registered but NOT in the default
+    `news_data` chain (opt-in via chain config; fail-fast 8s timeout).
+  - `dataflows/newsapi.py` - NewsAPI.org free Developer plan (100 req/day),
+    key-gated `NEWSAPI_API_KEY`. `get_global_news_newsapi` (macro headlines)
+    + `get_news_newsapi` (ticker keyword); wired into `get_news` /
+    `get_global_news` default chains (tail).
+  - `dataflows/benzinga.py` - Benzinga Basic Financial News API (free tier,
+    headline + teaser + link). Key `BENZINGA_API_KEY`; registered but not in the
+    default chain (needs a registered key; enable via chain config).
+  - `get_gdelt_sentiment` bound to the news analyst (agent_utils, news
+    ToolNode, news_analyst prompt already lists `get_massive_news`; the new tool
+    joins it). Live-verified: NewsAPI returns global macro headlines with the
+    provided key; GDELT endpoint was unreachable from this network (fail-fast
+    degrades, no stall).
+  Tests: `tests/test_news_sentiment_vendors.py` (15). ruff clean.
 - **Extended technical indicators (Phase 1-3 of the indicator-gap plan)** -
   the standard trend/momentum/volume/structure group the project did not yet
   compute locally, all as pure offline calculators in

@@ -26,6 +26,8 @@ _ENV_OVERRIDES = {
     "TIINGO_API_KEY": "tiingo_api_key",
     "TWELVEDATA_API_KEY": "twelve_data_api_key",
     "STOCKDATA_API_KEY": "stockdata_api_key",
+    "NEWSAPI_API_KEY": "newsapi_api_key",
+    "BENZINGA_API_KEY": "benzinga_api_key",
     "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
     "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
@@ -322,7 +324,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "core_stock_apis": "eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata",  # Options: ... , tiingo, twelve_data, stockdata
             "technical_indicators": "moomoo,yfinance,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo
             "fundamental_data": "moomoo,yfinance,tiingo,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo, tiingo
-            "news_data": "eodhd,moomoo,yfinance,alpha_vantage,stockdata",  # Options: alpha_vantage, yfinance, finnhub, moomoo, eodhd, stockdata
+            "news_data": "eodhd,moomoo,yfinance,alpha_vantage,stockdata,newsapi",  # Options: + newsapi; set "...,gdelt" to use GDELT (keyless, may be network-flaky)
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
@@ -362,6 +364,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "tiingo_api_key": None,  # Tiingo market data (tiingo.py)
         "twelve_data_api_key": None,  # Twelve Data (twelve_data.py): 800 credits/day free
         "stockdata_api_key": None,  # StockData.org (stockdata.py): 100 requests/day free
+        "newsapi_api_key": None,  # NewsAPI.org (newsapi.py): free Developer 100 req/day
+        "benzinga_api_key": None,  # Benzinga (benzinga.py): free Basic Financial News tier
         # Optional path to a Massive Flat-File day-aggregates CSV. When set, the
         # value-screener's OHLCV fetch checks it first (bulk history for ATR /
         # scan bases) before falling back to the per-ticker vendor chain. This

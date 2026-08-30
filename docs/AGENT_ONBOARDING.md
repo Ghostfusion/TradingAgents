@@ -298,6 +298,13 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
+- 2026-08-30 `(working tree)` - News/sentiment providers A-C: GDELT
+  (`dataflows/gdelt.py`, keyless native tone + daily sentiment, new
+  `get_gdelt_sentiment` news tool), NewsAPI.org (`dataflows/newsapi.py`,
+  free 100 req/day global headlines, `NEWSAPI_API_KEY`), Benzinga
+  (`dataflows/benzinga.py`, free ticker financial news, `BENZINGA_API_KEY`).
+  NewsAPI in the default `news_data` chain; GDELT/Benzinga opt-in (GDELT
+  endpoint is network-flaky). See CHANGELOG.
 - 2026-08-30 `(working tree)` - Extended technical indicators
   (`strategies/extended_indicators.py`): Ichimoku, golden/death cross, CCI,
   ROC, momentum oscillator, TRIX, Force Index, A/D, VPT, CMF, anchored VWAP +
