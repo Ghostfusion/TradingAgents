@@ -507,15 +507,18 @@ class MassiveFailoverTests(unittest.TestCase):
     def test_get_market_snapshot_degrades(self):
         from tradingagents.agents.utils.market_position_tools import get_market_snapshot
 
-        # Massive 403s AND the EODHD fallback fails -> the tool degrades to an
-        # explicit 'unavailable' (never fabricates). Tiingo (the third
-        # fallback) is mocked to fail too so no live call leaks from .env.
+        # Massive 403s AND the EODHD / Tiingo / Twelve Data fallbacks all fail
+        # -> the tool degrades to an explicit 'unavailable' (never fabricates).
+        # All four vendors must be mocked so no live call leaks from .env.
         with self._patch("get_market_snapshot_massive", "tradingagents.dataflows.massive"), mock.patch(
             "tradingagents.dataflows.eodhd.get_market_snapshot_eodhd",
             side_effect=RuntimeError("eodhd down"),
         ), mock.patch(
             "tradingagents.dataflows.tiingo.get_market_snapshot_tiingo",
             side_effect=RuntimeError("tiingo down"),
+        ), mock.patch(
+            "tradingagents.dataflows.twelve_data.get_market_snapshot_twelve_data",
+            side_effect=RuntimeError("twelve down"),
         ):
             out = get_market_snapshot.invoke({"ticker": "nue"})
         self.assertIn("market snapshot unavailable", out)

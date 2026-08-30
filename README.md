@@ -35,6 +35,14 @@
 
 <sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
 
+- [2026-08-30] **Twelve Data + StockData.org vendors** - two new free-tier
+  market-data providers: Twelve Data (free "Basic": 800 credits/day, realtime
+  US stocks/forex/crypto quotes + historical OHLCV) and StockData.org (free
+  "$0/mo": 100 requests/day, quote/EOD/intraday/news). Both keyed via
+  `TWELVEDATA_API_KEY` / `STOCKDATA_API_KEY` in `.env` and wired as tails of
+  `core_stock_apis` + `news_data`, plus market-snapshot / crypto-prices
+  fallbacks. All key-gated; the existing chains stay first. See CHANGELOG.
+
 - [2026-08-30] **Independent pre-debate stances (Option-A hybrid)** - the 3
   risk debators + bull/bear researchers each emit ONE independent stance
   (rating / confidence / strength / reason) BEFORE the debate runs, sampled

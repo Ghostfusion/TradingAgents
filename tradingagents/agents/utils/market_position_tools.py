@@ -171,32 +171,41 @@ def get_market_snapshot(
         str: snapshot OHLCV/VWAP/change, or an explicit 'unavailable' message
     """
     from tradingagents.dataflows.massive import get_market_snapshot_massive
-    from tradingagents.dataflows.tiingo import get_market_snapshot_tiingo
+
+    def _twelve(tk):
+        from tradingagents.dataflows.twelve_data import get_market_snapshot_twelve_data
+
+        return get_market_snapshot_twelve_data(tk)
+
+    def _eodhd(tk):
+        from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
+
+        return get_market_snapshot_eodhd(tk)
+
+    def _tiingo(tk):
+        from tradingagents.dataflows.tiingo import get_market_snapshot_tiingo
+
+        return get_market_snapshot_tiingo(tk)
 
     try:
         out = get_market_snapshot_massive(ticker)
         # Massive returns an explicit 'unavailable' string when the plan lacks
-        # snapshot access (403) - fall back to the EODHD real-time snapshot
-        # (works on the EOD plan), then Tiingo's delayed IEX quote, so the
-        # market analyst still gets a price-level read.
-        if out and "unavailable" in out.lower():
-            try:
-                from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
+        # snapshot access (403) - fall back to EODHD (EOD plan), then Tiingo's
+        # delayed IEX quote, then Twelve Data's realtime quote. Each degrades
+        # independently so one outage never aborts the read.
+        if out and "unavailable" not in out.lower():
+            return out
+    except Exception:  # noqa: BLE001 - try the fallbacks below
+        pass
 
-                return get_market_snapshot_eodhd(ticker)
-            except Exception:  # noqa: BLE001
-                return get_market_snapshot_tiingo(ticker)
-        return out
-    except Exception as exc:  # noqa: BLE001
+    for getter in (_eodhd, _tiingo, _twelve):
         try:
-            from tradingagents.dataflows.eodhd import get_market_snapshot_eodhd
-
-            return get_market_snapshot_eodhd(ticker)
-        except Exception as exc2:  # noqa: BLE001
-            try:
-                return get_market_snapshot_tiingo(ticker)
-            except Exception as exc3:  # noqa: BLE001
-                return f"market snapshot unavailable for {ticker}: {exc} / {exc2} / {exc3}"
+            out = getter(ticker)
+            if out and "unavailable" not in out.lower():
+                return out
+        except Exception:  # noqa: BLE001 - each vendor degrades independently
+            continue
+    return f"market snapshot unavailable for {ticker}"
 
 
 @tool
@@ -317,5 +326,10 @@ def get_crypto_prices(
 
     try:
         return get_crypto_prices_tiingo(_crypto_code(ticker), start_date, end_date)
-    except Exception as exc:  # noqa: BLE001 - degrade, never raise in the tool loop
-        return f"crypto prices unavailable for {ticker}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - Tiingo first, then Twelve Data
+        try:
+            from tradingagents.dataflows.twelve_data import get_crypto_prices_twelve_data
+
+            return get_crypto_prices_twelve_data(ticker, start_date, end_date)
+        except Exception as exc2:  # noqa: BLE001 - degrade, never raise in the tool loop
+            return f"crypto prices unavailable for {ticker}: {exc} / {exc2}"

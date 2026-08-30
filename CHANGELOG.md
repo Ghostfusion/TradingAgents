@@ -8,6 +8,27 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+- **Twelve Data + StockData.org vendors** - two new free-tier market-data
+  sources wired through the vendor contract:
+  - `dataflows/twelve_data.py` - `get_stock_data_twelve_data`
+    (`/time_series`, 1day, same CSV shape), `get_market_snapshot_twelve_data`
+    (`/quote`, realtime), `get_crypto_prices_twelve_data` (`/time_series`
+    `BTC/USD`). Free "Basic": 800 credits/day, 8/min; key `TWELVEDATA_API_KEY`.
+  - `dataflows/stockdata.py` - `get_stock_data_stockdata` (`/v1/data/eod`,
+    newest-first -> oldest-first CSV), `get_market_snapshot_stockdata`
+    (`/v1/data/quote`), `get_news_stockdata` (`/v1/news/all`, 2/req). Free
+    "$0/mo": 100 requests/day; key `STOCKDATA_API_KEY`.
+  - Both registered in `VENDOR_LIST` + `VENDOR_METHODS` (`get_stock_data`,
+    `get_news`); `core_stock_apis` = `eodhd,moomoo,yfinance,tiingo,
+    twelve_data,stockdata`, `news_data` = `... ,stockdata`; market snapshot
+    fallback chain now Massive -> EODHD -> Tiingo -> Twelve Data; crypto
+    fallback Tiingo -> Twelve Data. All key-gated (degrade to the next vendor on
+    401/403/429/empty, no fabrication). Live-verified: AAPL OHLCV + quote via
+    Twelve Data; AAPL EOD (123 rows) + quote + news via StockData.org.
+    Tests: `tests/test_twelve_data_vendor.py` (12), `tests/test_stockdata_vendor.py`
+    (10), `tests/test_new_provider_wiring.py` (5). ruff clean.
+
 ### Fixed
 - **Analyst tool-loop edge regression** - the sequential graph lost its
   `ToolNode -> analyst` edge (introduced in the Option-A wiring pass), so a

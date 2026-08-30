@@ -36,6 +36,8 @@ in `batch.py`).
 | `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |
 | `TRADINGAGENTS_EODHD_API_KEY` | `eodhd_api_key` | EODHD daily OHLCV (free 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota (100 calls/7 days) |
 | `TIINGO_API_KEY` | `tiingo_api_key` | Tiingo market data (free Starter tier: EOD OHLCV + fundamental statements + IEX quote + crypto; ~1,000 calls/day) |
+| `TWELVEDATA_API_KEY` | `twelve_data_api_key` | Twelve Data (free "Basic": 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV; tail of `core_stock_apis`) |
+| `STOCKDATA_API_KEY` | `stockdata_api_key` | StockData.org (free "$0/mo": 100 requests/day; quote/EOD/intraday/news; tail of `core_stock_apis` + `news_data`) |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
 | `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |
@@ -347,8 +349,10 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 
 ### 6.2 Vendor implementations per tool (exact)
 
-- stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only)
-- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`
+- stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
+- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`
+- market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
+- crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)
 - prediction markets: `polymarket`, `moomoo` (optional, SG/MY-gated)
 - analyst ratings + earnings calendar: `finnhub`, `moomoo`, `yfinance` (keyless

@@ -81,12 +81,19 @@ from .screener import (
     screen_equities as screen_equities_yfinance,
 )
 from .sec_edgar import get_sec_filings
+from .stockdata import (
+    get_news_stockdata,
+    get_stock_data_stockdata,
+)
 from .tiingo import (
     get_balance_sheet_tiingo,
     get_cashflow_tiingo,
     get_fundamentals_tiingo,
     get_income_statement_tiingo,
     get_stock_data_tiingo,
+)
+from .twelve_data import (
+    get_stock_data_twelve_data,
 )
 from .vendor_cache import vendor_cache
 from .y_finance import (
@@ -259,6 +266,8 @@ VENDOR_LIST = [
     "cboe",
     "federal_reserve",
     "tiingo",
+    "twelve_data",
+    "stockdata",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -303,6 +312,8 @@ VENDOR_METHODS = {
         "moomoo": get_stock_data_moomoo,
         "eodhd": get_stock_data_eodhd,
         "tiingo": get_stock_data_tiingo,
+        "twelve_data": get_stock_data_twelve_data,
+        "stockdata": get_stock_data_stockdata,
     },
     # technical_indicators
     "get_indicators": {
@@ -353,6 +364,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
         "finnhub": get_news_finnhub,
+        "stockdata": get_news_stockdata,
         "moomoo": get_news_moomoo,
         "massive": get_news_massive,
         "eodhd": get_news_eodhd,

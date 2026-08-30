@@ -36,14 +36,16 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage',
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
 | 9 | **eodhd** | EODHD (added in this fork) | **primary OHLCV** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) + news + splits/dividends + full US symbol list (~18k common stocks, the screener's default `--universe eodhd-us`) — replaces the moomoo K-line quota |
 | 10 | **tiingo** | Tiingo (added in this fork) | free Starter tier: EOD OHLCV (7+ yrs), fundamental statements (JSON), IEX delayed quote, crypto OHLCV; ~1,000 calls/day so last in chains |
+| 11 | **twelve_data** | Twelve Data (added in this fork) | free "Basic" tier: 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV (1 credit/symbol); tail of `core_stock_apis` + market-snapshot/crypto fallbacks |
+| 12 | **stockdata** | StockData.org (added in this fork) | free "$0/mo" plan: 100 requests/day; `/v1/data/quote`, `/v1/data/eod` (~6 months), `/v1/data/intraday`, `/v1/news/all` (2 articles/req); tail of `core_stock_apis` + `news_data` + market-snapshot fallback |
 
 ### Default chains per category (from `data_vendors`)
 
 ```
-core_stock_apis      : eodhd,moomoo,yfinance
+core_stock_apis      : eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata
 technical_indicators : moomoo,yfinance
-fundamental_data     : moomoo,yfinance
-news_data            : eodhd,moomoo,yfinance
+fundamental_data     : moomoo,yfinance,tiingo
+news_data            : eodhd,moomoo,yfinance,alpha_vantage,stockdata
 macro_data           : fred,moomoo
 prediction_markets   : polymarket,moomoo
 analyst_ratings      : moomoo,finnhub

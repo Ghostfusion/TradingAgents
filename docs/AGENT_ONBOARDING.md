@@ -298,7 +298,13 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 ## Changelog of this fork (most recent first)
-
+- 2026-08-30 `(working tree)` - New free-tier vendors: Twelve Data
+  (`dataflows/twelve_data.py`, free 800 credits/day; time-series OHLCV + realtime
+  quote + crypto) and StockData.org (`dataflows/stockdata.py`, free 100 req/day;
+  EOD OHLCV + quote + news). Registered in `VENDOR_LIST` + `VENDOR_METHODS`
+  (`get_stock_data`, `get_news`) as key-gated tails of `core_stock_apis` /
+  `news_data`; market snapshot + crypto tools gain fallbacks. Keys:
+  `TWELVEDATA_API_KEY` / `STOCKDATA_API_KEY` in `.env` (gitignored). See CHANGELOG.
 - 2026-08-30 `(working tree)` - Option-A hybrid: independent pre-debate
   stances (`independent_vote.py`). With `enable_independent_vote`, the 3 risk
   + bull/bear roles each emit ONE structured stance BEFORE the debate (no
