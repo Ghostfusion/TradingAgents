@@ -8,7 +8,26 @@ fork **already has**, so the work is analytics + wiring, almost no new data.
 
 ---
 
-## 0. What News_Sentiment.md specifies (condensed)
+## 0. Feed decision (2026-08-30 live probe)
+
+**EODHD is the primary sentiment feed.** Live-verified on the current key
+(EOD plan, 100k calls/day; news entitled):
+- `GET /news` returns per-article `sentiment: {polarity, neg, neu, pos}` plus
+  `tags` and `symbols` (multi-ticker → filter to the requested symbol, same
+  rule as Massive).
+- `GET /sentiments` returns the **aggregated daily series** by ticker —
+  `{ticker: [{date, count, normalized}]}` — respecting `from`/`to`; exactly
+  the Phase-1 daily input (score + article count).
+- EODHD is already **first** in the default `news_data` chain and the vendor
+  module's `get_news_eodhd` already fetches `/news` — the `sentiment` field is
+  simply never parsed.
+
+Scale mapping: EODHD `normalized` is **0..1**, not the doc's [-1,1]. Center it
+`(normalized - 0.5) * 2` → [-1,1] so lead/lag, thresholds and IC benchmarks
+stay comparable with AV `ticker_sentiment_score` / GDELT tone (both signed).
+Keep EODHD > Alpha Vantage > GDELT as the series chain.
+
+## 0.1 What News_Sentiment.md specifies (condensed)
 
 | # | Method | What it needs |
 | --- | --- | --- |
@@ -24,24 +43,24 @@ fork **already has**, so the work is analytics + wiring, almost no new data.
 
 ## 1. What the project already has (verified against source)
 
-### 1.1 The data feed is ALREADY live — the vendor layer calls NEWS_SENTIMENT
-- `tradingagents/dataflows/alpha_vantage_news.py::get_news` and
-  `get_global_news` call `_make_api_request("NEWS_SENTIMENT", params)` with
-  `tickers` / `time_from` / `time_to` and return the **raw feed** (dict/JSON
-  string). `get_news` registers as the `alpha_vantage` vendor in the
-  `news_data` chain tail. The doc's exact `ticker_sentiment[]` /
-  `overall_sentiment_score` fields are in the response today but **never
-  parsed** — the analyst sees the raw JSON, not a series.
-- Keyless / additional sentiment feeds already wired:
-  - `dataflows/gdelt.py::get_gdelt_tone_series` — daily avg-tone timeline
-    (keyless; GDELT keeps a rolling ~3-month window; network-flaky, opt-in).
-  - `dataflows/massive.py::get_news_massive` — per-article
-    positive/negative/neutral + reasoning (key-gated, entitled plan).
-  - `strategies/sentiment.py::compute_social_scores` — StockTwits labeled
-    counts → signed score + **surprise velocity z** vs a persisted per-ticker
-    rolling baseline (cache dir file), exposed as the `get_sentiment_computed`
-    market tool and injected into the sentiment report (`enable_sentiment`
-    default True).
+### 1.1 The data feeds are ALREADY live
+- **EODHD (primary):** `dataflows/eodhd.py::get_news_eodhd` already fetches
+  `GET /news` (first in the default `news_data` chain; EOD plan 100k
+  calls/day). Per-article `sentiment: {polarity, pos, neg, neu}` is in the
+  response but not rendered. Aggregated `GET /sentiments` (daily `normalized`
+  0..1 + count) is not called yet — add a `get_news_sentiment_eodhd` vendor
+  function. **Keyless op risk: none** (key already held; endpoint 200 probed).
+- **Alpha Vantage (fallback):** `alpha_vantage_news.get_news` /
+  `get_global_news` call `NEWS_SENTIMENT` and return the raw feed;
+  `ticker_sentiment[]` / `overall_sentiment_score` present but never parsed.
+  25 req/day → chain tail.
+- **GDELT (last):** `get_gdelt_tone_series` keyless daily tone; network-flaky,
+  ~3-month window → opt-in only.
+- Additional sentiment feeds already wired: `massive.get_news_massive`
+  (per-article pos/neg/neu + reasoning, key-gated) and
+  `sentiment.compute_social_scores` (StockTwits → signed score + surprise
+  velocity z vs a persisted rolling baseline, exposed as `get_sentiment_computed`
+  + injected into the sentiment report).
 
 ### 1.2 Statistics (deps verified)
 - `numpy`, `pandas>=2.3`, `scipy` **installed** (`statistical.py` already uses
@@ -134,18 +153,21 @@ predictive tilt), assert IC/decay recovery, HAC Wider-CI sanity vs plain OLS,
 neutralization drives corr(signal, log-mcap) → ~0.
 
 ### Phase 3 — Feed parsing + agent tools (compute-as-tools)
-**File:** `tradingagents/dataflows/alpha_vantage_news.py` (+ gdelt.py, interface.py)
+**Files:** `tradingagents/dataflows/eodhd.py` (+ `alpha_vantage_news.py`, `gdelt.py`, `interface.py`)
 
-- New `get_news_sentiment_series(ticker, start, end)` on the AV module:
-  reuses the existing `NEWS_SENTIMENT` call, **parses** `ticker_sentiment[]`
-  into the Phase-1 daily series (mean + 7d SMA + innovation + n), renders
-  markdown (vendor contract). Register as `alpha_vantage` for a new optional
-  category `news_sentiment` (`VENDOR_METHODS["get_news_sentiment"]["alpha_vantage"]`,
-  `OPTIONAL_CATEGORIES`). GDELT variant aggregates `get_gdelt_tone_series`
-  (keyless); Massive variant aggregates per-article sentiment (key).
-- Free-tier reality: AV is 25 req/day → **tail** of the chain, never first;
-  `vendor_cache` TTL already applies (news excluded → keep exclusion, but the
-  series is computed data — cacheable in the new category).
+- New `get_news_sentiment_eodhd(ticker, start, end)` on the EODHD module:
+  calls `GET /sentiments` (daily `{date, count, normalized}`), centers
+  `normalized` to [-1,1], renders markdown (vendor contract) — the primary
+  series. Register `eodhd` for a new optional category `news_sentiment`
+  (`VENDOR_METHODS["get_news_sentiment"]["eodhd"]`, `OPTIONAL_CATEGORIES`;
+  chain `eodhd,alpha_vantage,gdelt`). Optionally also parse `/news`
+  per-article `sentiment` when a headline-level read is wanted (filter
+  `symbols` to the requested ticker, mirroring Massive).
+- AV variant (`get_news_sentiment_alpha_vantage`) parses `ticker_sentiment[]`
+  from the already-fetched `NEWS_SENTIMENT` feed → tail (25 req/day).
+- GDELT variant aggregates `get_gdelt_tone_series` (keyless, flaky, ~3-month
+  window) → last. The series is computed data — cacheable (the category can
+  join `vendor_cache`; the raw `news_data` exclusion stays).
 
 **Tools** (`agents/utils/analysis_tools.py`, bound to market/sentiment ToolNode):
 - `get_news_sentiment_series(ticker, look_back_days=30)` — daily mean + 7d SMA
@@ -198,14 +220,18 @@ neutralization drives corr(signal, log-mcap) → ~0.
 
 ## 3. Decisions / honest limits
 
-- **No new vendor.** AV `NEWS_SENTIMENT` is already wired; the doc's feed is
-  live today, only its analytics are missing.
+- **No new vendor.** All three sentiment feeds are already wired (EODHD is the
+  new/primary surface; its `/news` + `/sentiments` are entitled on the held
+  key — only the parsing/analytics are missing).
 - **No statsmodels, no plotly.** Newey-West in pure NumPy (repo precedent:
   `statistical.unit_root`); the scripts print tables (the web SPA already has
   charting via existing endpoints if needed later).
-- **GDELT ≈ 3-month window** caps history for long-horizon IC/regression —
-  AV is the historical path (limit 200, paginate via `time_from`/`time_to`;
-  premium 1,000). Document the coverage tradeoff per feed.
+- **History depth caveat:** EODHD `/news` + `/sentiments` history is rolling
+  (depth unverified) — probe a long `from`/`to` (e.g. 400 days) once during
+  Phase 3 implementation before relying on it for ≥1-year regression windows;
+  AV (paginatable 200/1,000) remains the deep-history fallback.
+- **Scale mapping:** EODHD `normalized` is 0..1; center to [-1,1] before
+  mixing with AV/GDELT signed scores (see §0).
 - **Lookahead is structural:** post-16:00 ET articles bucket to the next
   trading day (Phase 1), and the eval's "signal as of t vs return t→t+h"
   alignment must use close-of-t buckets — same discipline as
