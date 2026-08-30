@@ -124,6 +124,8 @@ _WATCHLIST_LEGEND = (
     ("%b", "Bollinger %b (price position inside the band)"),
     ("Stp%", "value-dip stop distance (% of price)"),
     ("Trap", "forensic trap-risk verdict (low / medium / high)"),
+    ("Sent7", "7-day news-sentiment SMA (EODHD /sentiments, -1..1)"),
+    ("SentZ", "latest news-sentiment innovation (score - 7d SMA)"),
     ("ILLIQ", "Amihud illiquidity (price impact per $ traded; higher = more illiquid)"),
     ("FltTurn", "float turnover = ADV / float shares (daily; <0.5% thin, >100% squeeze)"),
     ("IWF", "free-float factor = float / total shares (<0.5 = passive under-allocation)"),
@@ -238,7 +240,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Sent7", "SentZ",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -298,6 +300,8 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("supertrend_dir")),
             cell(r.get("poc")),
             cell(r.get("day_change"), "{:+.2%}"),
+            cell(r.get("sent7"), "{:+.2f}"),
+            cell(r.get("sentz"), "{:+.2f}"),
         ]
         out.append("| " + " | ".join(cells) + " |")
     out.append(_legend_markdown())
@@ -344,6 +348,32 @@ def save_watchlist(markdown, out_dir, ts=None):
             exc,
         )
     return file
+
+
+def _sentiment_cols(ticker: str, curr_date: str) -> tuple[float | None, float | None]:
+    """Sent7 (7-day news-sentiment SMA) + SentZ (latest innovation) per name.
+
+    EODHD ``/sentiments`` via the news_sentiment chain; (None, None) when the
+    feed has no coverage (renders ``n/a`` - never fabricated).
+    """
+    try:
+        from datetime import timedelta
+
+        from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
+        from tradingagents.strategies.sentiment import daily_sentiment_sma
+
+        end = curr_date
+        start = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=45)).strftime("%Y-%m-%d")
+        points = _sentiment_points_eodhd(ticker, start, end)
+        if not points:
+            return None, None
+        series = daily_sentiment_sma(points, window=7)
+        if not series:
+            return None, None
+        latest = series[-1]
+        return latest.get("sma_7d"), latest.get("innovation")
+    except Exception:  # noqa: BLE001 - column degrades to n/a
+        return None, None
 
 
 def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
@@ -1010,6 +1040,12 @@ def main(argv: list[str] | None = None) -> int:
         "adds Sec/Rank columns and keeps only top-3 sectors",
     )
     parser.add_argument(
+        "--sentiment",
+        action="store_true",
+        help="add Sent7/SentZ columns: 7-day news-sentiment SMA and latest "
+        "sentiment innovation (EODHD /sentiments; n/a without coverage)",
+    )
+    parser.add_argument(
         "--revision",
         action="store_true",
         help="require positive net analyst upgrades in the last 60d "
@@ -1507,6 +1543,8 @@ def main(argv: list[str] | None = None) -> int:
             row["scan_rsi"] = sig.get("rsi") if sig else None
             row["scan_rvol"] = sig.get("rvol") if sig else None
             row["scan_qret"] = sig.get("qret") if sig else None
+            if args.sentiment:
+                row["sent7"], row["sentz"] = _sentiment_cols(ticker, args.date)
             name_fill = meta.get("name")
             if not name_fill:
                 name_fill = fin.get("name") or fin.get("company_name") or fin.get("long_name")

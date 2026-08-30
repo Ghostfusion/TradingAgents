@@ -4,6 +4,7 @@ Hermetic: vendor network seams mocked (route_to_vendor / _eodhd_get-style
 points helpers / OHLCV cache), no real API calls.
 """
 
+import numpy as np
 import pytest
 
 from tradingagents.dataflows.eodhd import get_news_sentiment_eodhd
@@ -212,3 +213,47 @@ def test_research_scale_usable_by_overlay():
     scale = _sr.sentiment_factor_scale(0.05, 0.3, min_ic=0.02)
     assert scale == 1.2
     assert _sr.sentiment_factor_scale(-0.05, 0.3) == 0.8
+
+
+# --- Phase 4: factor eval script (hermetic panel + render) ------------------
+
+
+def test_eval_panel_and_render(monkeypatch):
+    from scripts import sentiment_factor_eval as ev
+
+    tickers = [f"T{i}" for i in range(12)]
+    dates = [f"2026-08-{d:02d}" for d in range(1, 61)]
+    rng = np.random.default_rng(11)
+    close_maps, pts = {}, {}
+    for t in tickers:
+        closes = [100.0 * (1 + 0.001 * i + 0.02 * rng.standard_normal()) for i in range(60)]
+
+        closes = list(np.cumprod([1.0] + [0.001 + 0.02 * rng.standard_normal() for _ in range(59)])) * 100
+        cm = {d: float(c) for d, c in zip(dates, closes, strict=False)}
+        close_maps[t] = cm
+        # Planted signal from the name's 3-day forward return + noise.
+        fwd = [cm[d2] / cm[d] - 1.0 for d, d2 in zip(dates[:-3], dates[3:], strict=False)] + [0.0] * 3
+        pts[t] = [
+            {"date": d, "score": float(3.0 * fwd[i] + rng.standard_normal()), "n": 2}
+            for i, d in enumerate(dates)
+        ]
+
+    monkeypatch.setattr(ev, "_fetch_close_map", lambda t, days=320: close_maps[t])
+    monkeypatch.setattr(ev, "_fetch_points", lambda t, s, e: pts[t])
+    sent, prices = ev.build_panel(tickers, dates[0], dates[-1])
+    assert len(sent) >= 10 and len(prices) >= 10
+    report = ev.run_eval(tickers, dates[0], dates[-1], horizons=(3,), holding=3, fees_bps=10, oos_split=0.3)
+    assert report["ok"] is True
+    assert report["rolling_ic"]["metrics"]["periods"] > 5
+    md = ev._render(report, dates[-1])
+    assert "Sentiment Factor Evaluation" in md
+    assert "mean_rank_ic" in md
+
+
+def test_eval_panel_too_thin():
+    from scripts import sentiment_factor_eval as ev
+
+    report = ev.run_eval(["A"], "2026-08-01", "2026-08-10")
+    assert report["ok"] is False
+    assert "insufficient" in report["message"].lower()
+
