@@ -945,6 +945,24 @@ class TradingAgentsGraph:
                         overlay = fold_catalyst_into_overlay(overlay, catalyst_snapshot)
                 except Exception as cat_exc:
                     logger.warning("catalyst overlay skipped: %s", cat_exc)
+            # News-sentiment factor fold (opt-in `enable_sentiment_factor`): the
+            # position scale only moves when the name's measured IC clears the
+            # floor; otherwise neutral 1.0 (never blocks).
+            if self.config.get("enable_sentiment_factor"):
+                try:
+                    from tradingagents.strategies.overlays import fold_sentiment_into_overlay
+
+                    sent_ctx = self._sentiment_factor_read(ticker, closes)
+                    if sent_ctx:
+                        overlay = fold_sentiment_into_overlay(
+                            overlay,
+                            sent_ctx,
+                            min_ic=float(self.config.get("sentiment_factor_min_ic", 0.02)),
+                            max_scale=float(self.config.get("sentiment_factor_max_scale", 0.2)),
+                            min_scale=float(self.config.get("sentiment_factor_min_scale", 0.5)),
+                        )
+                except Exception as sent_exc:
+                    logger.warning("sentiment factor overlay skipped: %s", sent_exc)
             if self.config.get("enable_position_contract"):
                 try:
                     from tradingagents.strategies.contract import (
@@ -1250,6 +1268,70 @@ class TradingAgentsGraph:
             )
         except Exception as tranche_exc:  # noqa: BLE001 - fold degrades silently
             logger.warning("tranche risk read skipped: %s", tranche_exc)
+            return None
+
+    def _sentiment_factor_read(self, ticker: str, closes: list) -> dict | None:
+        """Measured news-sentiment factor read for the opt-in overlay fold.
+
+        Returns ``{"rank_ic", "innovation", "sma_7d", "source"}`` or None when
+        the run-level series is missing / coverage is insufficient (the fold
+        then stays neutral 1.0 — never blocks). ``rank_ic`` is the name's own
+        measured 5-day rank IC over the trailing window (deterministic);
+        ``innovation`` is the latest sentiment innovation.
+        """
+        if not self.config.get("enable_sentiment_factor"):
+            return None
+        try:
+            from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
+            from tradingagents.strategies import sentiment_research as _sr
+
+            end = datetime.now().strftime("%Y-%m-%d")
+            start = (datetime.now() - timedelta(days=150)).strftime("%Y-%m-%d")
+            points = _sentiment_points_eodhd(ticker, start, end)
+            if not points:
+                return None
+            sent = sorted(points, key=lambda p: p["date"])
+            scores = [float(p["score"]) for p in sent]
+            if len(scores) < 20:
+                return None
+            # 7-day SMA + latest innovation (mirrors the series tool).
+            smas = []
+            acc, count = 0.0, 0
+            for i, s in enumerate(scores):
+                acc += s
+                count += 1
+                if i >= 7:
+                    acc -= scores[i - 7]
+                    count -= 1
+                smas.append(acc / count if count else None)
+            latest_sma = smas[-1]
+            latest_inn = None
+            if len(smas) >= 2 and smas[-2] is not None:
+                latest_inn = scores[-1] - smas[-2]
+            # Name-level 5-day rank IC: cross-correlate sentiment with the
+            # name's own forward returns (the strongest |spearman| lag).
+            if len(closes) < 40:
+                return None
+            closes_f = [float(c) for c in closes]
+            rets = [(closes_f[i] / closes_f[i - 1] - 1.0) for i in range(1, len(closes_f))]
+            n = min(len(scores), len(rets))
+            use_s = scores[-n:]
+            use_r = [rets[-i] if i <= len(rets) else None for i in range(1, n + 1)]
+            ll = _sr.sentiment_lead_lag(use_s, [r for r in use_r if r is not None], max_lags=5)
+            rank_ic = None
+            if ll:
+                best = max(ll, key=lambda r: abs(r["spearman_corr"]))
+                rank_ic = round(best["spearman_corr"], 4)
+            if rank_ic is None:
+                return None
+            return {
+                "rank_ic": rank_ic,
+                "innovation": round(latest_inn, 4) if latest_inn is not None else None,
+                "sma_7d": round(latest_sma, 4) if latest_sma is not None else None,
+                "source": "eodhd",
+            }
+        except Exception as sent_exc:  # noqa: BLE001 - fold degrades to neutral
+            logger.warning("sentiment factor read skipped: %s", sent_exc)
             return None
 
     def _compiled_decision_context(self, ticker: str, state: dict | None = None) -> str:

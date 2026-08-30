@@ -52,6 +52,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_AGREEMENT": "enable_agreement",
     "TRADINGAGENTS_ENABLE_COMPOSITE_RANK": "enable_composite_rank",
     "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
+    "TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR": "enable_sentiment_factor",
+    "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC": "sentiment_factor_min_ic",
+    "TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE": "sentiment_factor_max_scale",
+    "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE": "sentiment_factor_min_scale",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
@@ -329,6 +333,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # (primary, EOD plan entitled); AV NEWS_SENTIMENT (25 req/day tail);
             # GDELT native tone (keyless, flaky, ~3-month window) last.
             "news_sentiment": "eodhd,alpha_vantage,gdelt",
+            # News-sentiment factor overlay (opt-in, default OFF): the position
+            # scale multiplies by 1 +- max_scale only when the name's measured
+            # rank IC clears the floor; otherwise neutral 1.0 (never blocks).
+            "enable_sentiment_factor": False,
+            "sentiment_factor_min_ic": 0.02,
+            "sentiment_factor_max_scale": 0.2,
+            "sentiment_factor_min_scale": 0.5,
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)

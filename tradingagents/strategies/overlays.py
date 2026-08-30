@@ -98,6 +98,52 @@ def fold_flow_into_overlay(overlay: dict, flow: dict | None, threshold: float = 
     return updated
 
 
+def fold_sentiment_into_overlay(
+    overlay: dict,
+    sentiment_ctx: dict | None,
+    min_ic: float = 0.02,
+    max_scale: float = 0.2,
+    min_scale: float = 0.5,
+) -> dict:
+    """Fold the news-sentiment factor into a strategy overlay (opt-in).
+
+    ``sentiment_ctx`` = ``{"rank_ic": float|None, "innovation": float|None,
+    "sma_7d": float|None, "source": str}`` measured at run time. The
+    ``position_scale`` only moves when the name's measured predictive
+    direction clears ``min_ic``; otherwise the fold is a neutral 1.0 (never
+    blocks — matches the catalyst's neutral default). The read is attached to
+    the overlay for audit, with the source labeled.
+    """
+    updated = dict(overlay or {})
+    if not sentiment_ctx:
+        updated.setdefault("context", "")
+        return updated
+    from .sentiment_research import sentiment_factor_scale
+
+    scale = sentiment_factor_scale(
+        sentiment_ctx.get("rank_ic"),
+        sentiment_ctx.get("innovation"),
+        min_ic=min_ic,
+        max_scale=max_scale,
+        min_scale=min_scale,
+    )
+    base = float(updated.get("position_scale", 1.0))
+    updated["position_scale"] = round(base * scale, 3)
+    updated["news_sentiment"] = {
+        "scale": scale,
+        "rank_ic": sentiment_ctx.get("rank_ic"),
+        "innovation": sentiment_ctx.get("innovation"),
+        "sma_7d": sentiment_ctx.get("sma_7d"),
+        "source": sentiment_ctx.get("source", ""),
+    }
+    note = (
+        f"news-sentiment scale {scale}x "
+        f"(ic={sentiment_ctx.get('rank_ic')}, source {sentiment_ctx.get('source', '')})"
+    )
+    updated["context"] = (updated.get("context", "") + " | " + note).strip(" |")
+    return updated
+
+
 def apply_overlay_to_state(state: dict, overlay: dict | None) -> dict:
     """Attach overlay to graph state (copy, never mutate caller's object)."""
     if overlay is None:
@@ -127,6 +173,7 @@ def record_reflection_outcome(
 __all__ = [
     "build_strategy_overlays",
     "fold_flow_into_overlay",
+    "fold_sentiment_into_overlay",
     "apply_overlay_to_state",
     "record_reflection_outcome",
 ]
