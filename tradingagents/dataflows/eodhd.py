@@ -150,6 +150,92 @@ def get_stock_data_eodhd(symbol: str, start_date: str, end_date: str) -> str:
     return header + "\n".join(lines)
 
 
+def _sentiment_points_eodhd(
+    symbol: str, start_date: str, end_date: str
+) -> list[dict] | None:
+    """Daily aggregated sentiment series from EODHD ``/sentiments``.
+
+    Returns ``[{"date", "score", "n"}]`` with ``score`` centered to [-1, 1]
+    (EODHD ``normalized`` is 0..1), or None when the ticker has no rows.
+    """
+    data = _eodhd_get(
+        "sentiments",
+        {
+            "s": symbol,
+            "from": start_date,
+            "to": end_date,
+            "fmt": "json",
+        },
+    )
+    if not isinstance(data, dict) or not data:
+        raise NoMarketDataError(
+            symbol, "sentiments",
+            detail=f"no sentiment rows between {start_date} and {end_date}",
+        )
+    want = str(symbol).upper()
+    key = want if want in data else None
+    if key is None:
+        for k in data:
+            if str(k).upper().startswith(want) or want.startswith(str(k).upper().split(".")[0]):
+                key = k
+                break
+    if key is None:
+        raise NoMarketDataError(
+            symbol, "sentiments", detail=f"no rows for {symbol} in response"
+        )
+    rows = data[key] or []
+    out = []
+    for r in rows:
+        try:
+            score = (float(r.get("normalized")) - 0.5) * 2.0
+        except (TypeError, ValueError):
+            continue
+        if not -1.0 <= score <= 1.0:
+            continue
+        try:
+            n = int(r.get("count") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        out.append({"date": str(r.get("date")), "score": score, "n": n})
+    return sorted(out, key=lambda d: d["date"]) or None
+
+
+def get_news_sentiment_eodhd(symbol: str, start_date: str, end_date: str) -> str:
+    """Daily news-sentiment series for a ticker via EODHD ``/sentiments``.
+
+    Renders the daily mean (centered to [-1,1]) + 7-day SMA + latest
+    innovation + article count — the news-sentiment factor's computed series.
+    """
+    datetime.strptime(start_date, "%Y-%m-%d")
+    datetime.strptime(end_date, "%Y-%m-%d")
+    points = _sentiment_points_eodhd(symbol, start_date, end_date)
+    if not points:
+        return f"News sentiment unavailable for {symbol} (EODHD)"
+    from tradingagents.strategies.sentiment import daily_sentiment_sma
+
+    series = daily_sentiment_sma(points, window=7) or [
+        {"date": p["date"], "score": p["score"], "sma_7d": None, "innovation": None, "n": p["n"]}
+        for p in points
+    ]
+    lines = [f"## {symbol} Daily News Sentiment — EODHD (scale -1..1)", ""]
+    lines.append("| date | score | sma_7d | innovation | articles |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for r in series:
+        sc = f"{r['score']:+.2f}" if r["score"] is not None else "n/a"
+        sma = f"{r['sma_7d']:+.2f}" if r["sma_7d"] is not None else "n/a"
+        inn = f"{r['innovation']:+.2f}" if r["innovation"] is not None else "n/a"
+        lines.append(f"| {r['date']} | {sc} | {sma} | {inn} | {r['n']} |")
+    latest = series[-1]
+    tail = [
+        "",
+        f"- latest score {latest['score'] if latest['score'] is not None else 'n/a'}, "
+        f"7d SMA {latest['sma_7d'] if latest['sma_7d'] is not None else 'n/a'}",
+    ]
+    if latest.get("innovation") is not None:
+        tail.append(f"- latest sentiment innovation {latest['innovation']:+.2f}")
+    return "\n".join(lines + tail)
+
+
 def get_news_eodhd(symbol: str, start_date: str, end_date: str) -> str:
     """News for a ticker via EODHD's ``/news`` endpoint (works on the EOD plan).
 

@@ -39,6 +39,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_market_movers,
     get_mean_reversion_tech,
     get_momentum_detail,
+    get_news_sentiment_series,
     get_normality,
     get_opening_range,
     get_options_surface,
@@ -61,6 +62,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_scaleout_plan,
     get_sector_rank,
     get_sentiment_computed,
+    get_sentiment_lead_lag,
     get_session_discipline,
     get_sofr_curve,
     get_strategy_quality,
@@ -120,6 +122,7 @@ from tradingagents.agents.utils.news_data_tools import (
     get_insider_transactions,
     get_massive_news,
     get_news,
+    get_news_sentiment,
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
@@ -150,6 +153,7 @@ __all__ = [
     "get_news",
     "get_massive_news",
     "get_gdelt_sentiment",
+    "get_news_sentiment",
     "get_global_news",
     "get_insider_transactions",
     "get_macro_indicators",
@@ -195,6 +199,8 @@ __all__ = [
     "get_liquidation_days",
     "get_premarket_review",
     "get_sentiment_computed",
+    "get_news_sentiment_series",
+    "get_sentiment_lead_lag",
     "get_relative_strength",
     "get_earnings_event_read",
     "get_catalyst_scale",

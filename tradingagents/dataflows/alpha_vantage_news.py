@@ -1,4 +1,62 @@
 from .alpha_vantage_common import _make_api_request, format_datetime_for_api
+from .errors import NoMarketDataError
+
+
+def _sentiment_points_alpha_vantage(
+    ticker: str, start_date: str, end_date: str
+) -> list[dict] | None:
+    """Daily aggregated sentiment from the NEWS_SENTIMENT feed.
+
+    Parses ``ticker_sentiment[]`` into per-day mean scores (-1..1) with the
+    post-16:00 ET next-day bucket (lookahead guard). Returns
+    ``[{"date", "score", "n", "used_overall"}]`` or None.
+    """
+    from tradingagents.strategies.sentiment import aggregate_daily_sentiment
+
+    raw = get_news(ticker, start_date, end_date)
+    if isinstance(raw, str):
+        raise NoMarketDataError(ticker, "news_sentiment", detail="AV returned an error string")
+    articles = raw.get("feed") if isinstance(raw, dict) else None
+    if not articles:
+        raise NoMarketDataError(ticker, "news_sentiment", detail="empty feed")
+    days = aggregate_daily_sentiment(articles, ticker=ticker)
+    if not days:
+        raise NoMarketDataError(ticker, "news_sentiment", detail="no usable scores")
+    return [{"date": d["date"], "score": d["score"], "n": d["n"]} for d in days]
+
+
+def get_news_sentiment_alpha_vantage(ticker: str, start_date: str, end_date: str) -> str:
+    """Daily news-sentiment series (NEWS_SENTIMENT feed) - scale -1..1.
+
+    Renders the daily mean + 7-day SMA + latest innovation + article count.
+    Free tier is 25 req/day -> this sits last in the news_sentiment chain.
+    """
+    points = _sentiment_points_alpha_vantage(ticker, start_date, end_date)
+    if not points:
+        return f"News sentiment unavailable for {ticker} (Alpha Vantage)"
+    from tradingagents.strategies.sentiment import daily_sentiment_sma
+
+    series = daily_sentiment_sma(points, window=7) or [
+        {"date": p["date"], "score": p["score"], "sma_7d": None, "innovation": None, "n": p["n"]}
+        for p in points
+    ]
+    lines = [f"## {ticker} Daily News Sentiment — Alpha Vantage (scale -1..1)", ""]
+    lines.append("| date | score | sma_7d | innovation | articles |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for r in series:
+        sc = f"{r['score']:+.2f}" if r["score"] is not None else "n/a"
+        sma = f"{r['sma_7d']:+.2f}" if r["sma_7d"] is not None else "n/a"
+        inn = f"{r['innovation']:+.2f}" if r["innovation"] is not None else "n/a"
+        lines.append(f"| {r['date']} | {sc} | {sma} | {inn} | {r['n']} |")
+    latest = series[-1]
+    tail = [
+        "",
+        f"- latest score {latest['score'] if latest['score'] is not None else 'n/a'}, "
+        f"7d SMA {latest['sma_7d'] if latest['sma_7d'] is not None else 'n/a'}",
+    ]
+    if latest.get("innovation") is not None:
+        tail.append(f"- latest sentiment innovation {latest['innovation']:+.2f}")
+    return "\n".join(lines + tail)
 
 
 def get_news(ticker, start_date, end_date) -> dict[str, str] | str:

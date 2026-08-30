@@ -24,6 +24,22 @@ def get_news(
     return route_to_vendor("get_news", ticker, start_date, end_date)
 
 @tool
+def get_news_sentiment(
+    ticker: Annotated[str, "Ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> str:
+    """
+    Daily news-sentiment series for a ticker (scale -1..1 unless noted): per-day
+    mean score, 7-day SMA, latest innovation, article count. Uses the configured
+    news_sentiment chain (EODHD /sentiments -> Alpha Vantage NEWS_SENTIMENT ->
+    GDELT native tone). Cite before any "news sentiment is turning" claim; an
+    explicit unavailable string when no feed has coverage.
+    """
+    return route_to_vendor("get_news_sentiment", ticker, start_date, end_date)
+
+
+@tool
 def get_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
     look_back_days: Annotated[int | None, "Days to look back; omit to use the configured default"] = None,

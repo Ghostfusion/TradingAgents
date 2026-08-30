@@ -21,6 +21,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_snapshot,
     get_mean_reversion_tech,
     get_momentum_detail,
+    get_news_sentiment_series,
     get_opening_range,
     get_options_chain,
     get_order_imbalance,
@@ -35,6 +36,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_relative_strength,
     get_risk_gate,
     get_sector_rank,
+    get_sentiment_lead_lag,
     get_session_discipline,
     get_short_interest,
     get_short_volume,
@@ -97,6 +99,8 @@ def create_market_analyst(llm):
             get_orderflow_read,
             get_sector_rank,
             get_session_discipline,
+            get_news_sentiment_series,
+            get_sentiment_lead_lag,
             get_strategy_quality,
             get_tail_risk,
             get_credit_spread_read,
@@ -188,7 +192,11 @@ You also have decision-grounding tools:
 - get_candlestick_patterns(ticker) - a scan of the most recent candles for common patterns: doji (indecision), hammer / shooting star (reversal), bullish/bearish engulfing and morning/evening star. Use it before any 'doji / hammer / engulfing / morning star / shooting star' price-structure claim.
 - get_book_tail_risk(ticker, weights=...) - the book-level tail: portfolio CVaR from a weighted return mix, the correlated -10% stress loss (a macro event moves every position at once), and the drawdown gate (True = new risk blocked). Use it before any 'book tail / correlated stress / drawdown gate' claim; complements get_tail_risk (single-name).
 - get_liquidation_days(ticker, shares_to_liquidate=...) - days for the market to absorb a block at a 15% participation cap. Use it before any 'can the market absorb this block / unwind risk / days to liquidate' claim.
-- get_premarket_review(ticker, prior_close=..., open_price=..., prior_stop=..., entry_price=...) - the deterministic pre-market CONFIRM / REVISE / REJECT arbiter from measured deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use it before any 'gap risk / re-anchor / pre-market review' claim on a held plan.
+|- get_premarket_review(ticker, prior_close=..., open_price=..., prior_stop=..., entry_price=...) - the deterministic pre-market CONFIRM / REVISE / REJECT arbiter from measured deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use it before any 'gap risk / re-anchor / pre-market review' claim on a held plan.
+|
+|You also have news-sentiment computed tools:
+|- get_news_sentiment_series(ticker) - the daily news-sentiment series (score -1..1, 7d SMA, latest innovation, article count) from the EODHD / Alpha-Vantage / GDELT chain. Use its 7d SMA / latest innovation before any 'news sentiment is shifting / at extremes' claim.
+|- get_sentiment_lead_lag(ticker, max_lags, innovations) - the cross-correlation of daily news sentiment vs forward returns (Pearson/Spearman, positive lag = sentiment leads price). Use the strongest-corr lag before any 'sentiment leads/lags this move' claim.
 
 You also have value-dip computed tools (the Value Dip + Swing hybrid):
 - get_bollinger_pct_b(ticker) - the deterministic Bollinger %b: price position inside the 20-day 2-sigma band. %b <= 0 = at/piercing the lower band; <= 0.10 is the mean-reversion entry zone. Use it before any 'oversold / at the lower Bollinger / mean-reversion entry' claim.

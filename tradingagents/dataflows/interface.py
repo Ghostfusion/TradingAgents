@@ -11,6 +11,9 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .alpha_vantage_news import (
+    get_news_sentiment_alpha_vantage as get_news_sentiment_alpha_vantage,
+)
 from .benzinga import get_news_benzinga
 from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
@@ -18,6 +21,7 @@ from .eodhd import (
     get_corporate_actions_eodhd,
     get_exchange_symbols_text_eodhd,
     get_news_eodhd,
+    get_news_sentiment_eodhd,
     get_stock_data_eodhd,
 )
 from .errors import (
@@ -39,7 +43,7 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
-from .gdelt import get_news_gdelt
+from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
 from .massive import (
     get_corporate_actions_massive,
     get_fundamentals_massive,
@@ -143,6 +147,10 @@ TOOLS_CATEGORIES = {
             "get_global_news",
             "get_insider_transactions",
         ],
+    },
+    "news_sentiment": {
+        "description": "Daily news-sentiment series (-1..1) + 7d SMA for a ticker",
+        "tools": ["get_news_sentiment"],
     },
     "macro_data": {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
@@ -289,6 +297,7 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
+    "news_sentiment",
     # moomoo-only enrichment (Tier 1/2 + A-series): failures degrade to a sentinel.
     "capital_flow",
     "smart_money",
@@ -387,6 +396,12 @@ VENDOR_METHODS = {
         "finnhub": get_global_news_finnhub,
         "gdelt": get_news_gdelt,
         "newsapi": get_global_news_newsapi,
+    },
+    # news_sentiment (optional)
+    "get_news_sentiment": {
+        "eodhd": get_news_sentiment_eodhd,
+        "alpha_vantage": get_news_sentiment_alpha_vantage,
+        "gdelt": get_news_sentiment_gdelt,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,

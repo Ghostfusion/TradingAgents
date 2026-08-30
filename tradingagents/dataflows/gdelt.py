@@ -176,6 +176,69 @@ def _is_num(v) -> bool:
         return False
 
 
+def _sentiment_points_gdelt(ticker: str, start_date: str, end_date: str) -> list[dict] | None:
+    """Daily GDELT native-tone means -> ``[{date, score, n}]`` (tone is -100..100)."""
+    articles = _gdelt_get(
+        {
+            "query": _fmt_name(ticker),
+            "startdatetime": start_date + "000000",
+            "enddatetime": end_date + "235959",
+            "maxrecords": 50,
+        }
+    )
+    if not articles:
+        return None
+    from collections import defaultdict
+
+    per_day: dict[str, list] = defaultdict(list)
+    for a in articles:
+        tone = a.get("tone") if isinstance(a.get("tone"), str) else ""
+        parts = tone.split(",")
+        if parts and _is_num(parts[0]):
+            per_day[str(a.get("seendate") or "")[:8]].append(float(parts[0]))
+    if not per_day:
+        return None
+    return [
+        {"date": day, "score": round(sum(v) / len(v), 4), "n": len(v)}
+        for day, v in sorted(per_day.items())
+    ]
+
+
+def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str:
+    """Daily news-tone series (GDELT native tone, -100..100) + 7-day SMA."""
+    datetime.strptime(start_date, "%Y-%m-%d")
+    datetime.strptime(end_date, "%Y-%m-%d")
+    points = _sentiment_points_gdelt(ticker, start_date, end_date)
+    if not points:
+        return (
+            f"gdelt sentiment unavailable for {ticker}: no tone coverage "
+            f"between {start_date} and {end_date} (GDELT keeps ~3 months)"
+        )
+    from tradingagents.strategies.sentiment import daily_sentiment_sma
+
+    series = daily_sentiment_sma(points, window=7) or [
+        {"date": p["date"], "score": p["score"], "sma_7d": None, "innovation": None, "n": p["n"]}
+        for p in points
+    ]
+    lines = [f"## {ticker} Daily News Tone — GDELT (native tone -100..100)", ""]
+    lines.append("| date | tone | sma_7d | innovation | articles |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for r in series:
+        sc = f"{r['score']:+.2f}" if r["score"] is not None else "n/a"
+        sma = f"{r['sma_7d']:+.2f}" if r["sma_7d"] is not None else "n/a"
+        inn = f"{r['innovation']:+.2f}" if r["innovation"] is not None else "n/a"
+        lines.append(f"| {r['date']} | {sc} | {sma} | {inn} | {r['n']} |")
+    latest = series[-1]
+    tail = [
+        "",
+        f"- latest tone {latest['score'] if latest['score'] is not None else 'n/a'}, "
+        f"7d SMA {latest['sma_7d'] if latest['sma_7d'] is not None else 'n/a'}",
+    ]
+    if latest.get("innovation") is not None:
+        tail.append(f"- latest tone innovation {latest['innovation']:+.2f}")
+    return "\n".join(lines + tail)
+
+
 __all__ = [
     "get_news_gdelt",
     "get_gdelt_tone_series",

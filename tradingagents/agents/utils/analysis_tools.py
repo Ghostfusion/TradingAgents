@@ -2934,6 +2934,129 @@ def get_sentiment_computed(
 
 
 @tool
+def get_news_sentiment_series(
+    ticker: Annotated[str, "ticker symbol"],
+    look_back_days: Annotated[int, "Days of sentiment history to aggregate"] = 30,
+) -> str:
+    """Daily news-sentiment series: per-day score (-1..1), 7-day SMA, latest
+    innovation, article count — the computed series from the news_sentiment
+    chain (EODHD /sentiments -> Alpha Vantage NEWS_SENTIMENT -> GDELT tone).
+    Use before any 'news sentiment is shifting / at extremes' claim; it is a
+    computed number, not a vibe. Degrades to an explicit unavailable string.
+    """
+    try:
+        from datetime import datetime, timedelta
+
+        from tradingagents.dataflows.interface import route_to_vendor
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=int(look_back_days) + 1)).strftime("%Y-%m-%d")
+        return route_to_vendor("get_news_sentiment", ticker, start, end)
+    except Exception as exc:  # noqa: BLE001 - degrades, never crashes
+        return f"news sentiment series unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_sentiment_lead_lag(
+    ticker: Annotated[str, "ticker symbol"],
+    max_lags: Annotated[int, "Max lead/lag days to test"] = 10,
+    innovations: Annotated[bool, "Use raw daily sentiment innovations instead of levels"] = False,
+) -> str:
+    """Cross-correlation of the ticker's daily news sentiment vs its forward
+    returns (Pearson + Spearman, lags -max_lags..+max_lags). Positive lag =
+    sentiment leads price; the row with the strongest |correlation| shows the
+    observed lead relation. Grounds any 'sentiment leads/lags the move' claim.
+    """
+    try:
+        from datetime import datetime, timedelta
+
+        from tradingagents.strategies import sentiment_research as _sr
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=250)).strftime("%Y-%m-%d")
+        points = None
+        label = "EODHD"
+        try:
+            from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
+
+            points = _sentiment_points_eodhd(ticker, start, end)
+        except Exception:  # noqa: BLE001
+            points = None
+        if not points:
+            label = "Alpha Vantage"
+            try:
+                from tradingagents.dataflows.alpha_vantage_news import (
+                    _sentiment_points_alpha_vantage,
+                )
+
+                points = _sentiment_points_alpha_vantage(ticker, start, end)
+            except Exception:  # noqa: BLE001
+                points = None
+        if not points:
+            label = "GDELT"
+            try:
+                from tradingagents.dataflows.gdelt import _sentiment_points_gdelt
+
+                points = _sentiment_points_gdelt(ticker, start, end)
+            except Exception:  # noqa: BLE001
+                points = None
+        if not points:
+            return (
+                f"sentiment lead/lag unavailable for {ticker}: "
+                "no sentiment series from any feed"
+            )
+        ohlcv = _ohlcv(ticker, days=320)
+        closes = ohlcv["closes"]
+        dates = ohlcv["dates"]
+        if len(closes) < 30:
+            return (
+                f"sentiment lead/lag unavailable for {ticker}: "
+                "insufficient OHLCV history"
+            )
+        by_date = {p["date"]: p["score"] for p in points}
+        idx = [i for i, d in enumerate(dates) if d in by_date]
+        if len(idx) < 10:
+            return (
+                f"sentiment lead/lag unavailable for {ticker}: "
+                f"only {len(idx)} aligned sentiment days"
+            )
+        s = [by_date[dates[i]] for i in idx]
+        r = []
+        for i in idx:
+            if i > 0 and closes[i - 1]:
+                r.append(closes[i] / closes[i - 1] - 1.0)
+            else:
+                r.append(None)
+        rows = [(a, b) for a, b in zip(s, r, strict=False) if b is not None]
+        if len(rows) < 10:
+            return (
+                f"sentiment lead/lag unavailable for {ticker}: "
+                "insufficient aligned returns"
+            )
+        out = _sr.sentiment_lead_lag(
+            [x[0] for x in rows], [x[1] for x in rows],
+            max_lags=int(max_lags), innovations=bool(innovations),
+        )
+        if not out:
+            return f"sentiment lead/lag unavailable for {ticker}: degenerate series"
+        lines = [f"## Sentiment Lead/Lag — {ticker} (source {label})", ""]
+        lines.append("| lag | pearson | p | spearman | p | n |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for row in out:
+            lines.append(
+                f"| {row['lag_days']:+d} | {row['pearson_corr']:.3f} | "
+                f"{row['pearson_pval']:.3f} | {row['spearman_corr']:.3f} | "
+                f"{row['spearman_pval']:.3f} | {row['sample_size']} |"
+            )
+        if out:
+            best = max(abs(r2["spearman_corr"]) for r2 in out)
+            return "\n".join(lines) + f"\n- strongest |corr|: {best:.3f} ({label})"
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades, never crashes
+        return f"sentiment lead/lag unavailable for {ticker}: {exc}"
+
+
+@tool
 def get_normality(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
