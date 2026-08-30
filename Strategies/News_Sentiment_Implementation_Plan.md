@@ -31,7 +31,7 @@ Keep EODHD > Alpha Vantage > GDELT as the series chain.
 
 | # | Method | What it needs |
 | --- | --- | --- |
-| 1 | **Daily sentiment series** | AV `NEWS_SENTIMENT` feed → per-article `ticker_sentiment_score` (−1..1, `relevance_score` 0..1, fallback `overall_sentiment_score`) → daily mean → calendar-reindexed **7-day SMA**; pagination via `time_from`/`time_to`; timestamps bucketed so articles after 16:00 ET belong to the **next trading day** (lookahead guard) |
+| 1 | **Daily sentiment series** | EODHD `GET /sentiments` daily series (primary; AV `NEWS_SENTIMENT` / GDELT tone fallbacks) → per-day score + count → calendar-reindexed **7-day SMA**; per-article timestamps bucketed so articles after 16:00 ET belong to the **next trading day** (lookahead guard); EODHD `normalized` 0..1 centered to [-1,1] |
 | 2 | **Lead/lag cross-correlation** | sentiment vs forward returns, lags `k ∈ [-10, +10]`, Pearson + Spearman + p-values; also test **raw innovations** (`S_t − S_{t−1}`) because the SMA auto-correlates |
 | 3 | **Multi-horizon regression** | `R_{t→t+h} = α + β1·Sent_t + β2·R_{t−1} + β3·Δln(Vol_t) + ε`, h ∈ {1,3,5,10,20}, **Newey-West HAC** errors (maxlags ≥ h+1) for overlapping windows |
 | 4 | **Quintile long/short backtest** | weekly rebalance, long Q5 / short Q1, 10 bps one-way cost, OOS split, Sharpe/max-DD; monotonicity + turnover + survivorship checks |
@@ -249,7 +249,8 @@ P1 → P3 → P2 → P4 → P5 → P6 (P2 is independent of P3; build P1 first s
 consume it). Each phase: unit tests with `pytest-timeout`, `ruff check`, full
 suite green, commit + push, docs true. Live smoke at P4:
 `py -3.12 scripts/sentiment_factor_eval.py --universe eodhd-us --limit 20`
-prints IC term structure, half-life and LS Sharpe from real AV + GDELT.
+prints IC term structure, half-life and LS Sharpe from real EODHD (+ AV/GDELT
+fallbacks).
 
 Mapping: **News_Sentiment.md §1 → Phase 1**, §2–3 → Phase 2, §(feed) → Phase 3,
 §4–6 (backtest/neutralization/IC) → Phase 4, §7 (decay) → Phase 5 cadence input.
