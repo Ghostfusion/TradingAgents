@@ -472,9 +472,6 @@ def write_report_tree(
                 _finalize_section(_readable_section(debate["judge_decision"], role="Research Manager")),
                 encoding="utf-8",
             )
-            research_parts.append(
-                ("Research Manager", _finalize_section(_readable_section(debate["judge_decision"], role="Research Manager")))
-            )
         elif debate.get("history"):
             # The research debate ran but the Manager produced no plan
             # (degenerate structured/free-text output). Emit an explicit
@@ -493,6 +490,34 @@ def write_report_tree(
             )
             (research_dir / "manager.md").write_text(_unavailable_mgr, encoding="utf-8")
             research_parts.append(("Research Manager", _unavailable_mgr))
+        # Structured-debate evidence block (opt-in enable_debate): judge
+        # scores per anonymized candidate + the grounded claim ledger + the
+        # L1 severity verdict. Absent when the structured path did not run.
+        # scores per anonymized candidate + the grounded claim ledger + the
+        sd = final_state.get("debate_state") or {}
+        if sd.get("judge_scores") or sd.get("claim_ledger_md") or sd.get("l1"):
+            research_dir.mkdir(exist_ok=True)
+            sd_lines = ["## Structured debate evidence (deterministic)"]
+            l1 = sd.get("l1")
+            if l1:
+                sd_lines.append(
+                    f"- L1 verdict: {l1.get('severity_tier', '?')} / "
+                    f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')}, "
+                    f"penalty={l1.get('penalty_score', 0)})"
+                )
+            judge = sd.get("judge_scores") or {}
+            for alias, agg in judge.items():
+                sd_lines.append(
+                    f"- {alias}: mean {agg.get('mean', '-')} "
+                    f"(scores: {agg.get('scores', {})})"
+                )
+            if sd.get("claim_ledger_md"):
+                sd_lines.append(sd["claim_ledger_md"])
+            evidence = _finalize_section(
+                _readable_section("\n".join(sd_lines), role="Research Manager")
+            )
+            (research_dir / "structured_debate.md").write_text(evidence, encoding="utf-8")
+            research_parts.append(("Structured debate evidence", evidence))
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts

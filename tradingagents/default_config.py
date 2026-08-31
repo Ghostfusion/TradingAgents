@@ -15,6 +15,25 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_OUTPUT_LANGUAGE": "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS": "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS": "max_risk_discuss_rounds",
+    "TRADINGAGENTS_ENABLE_DEBATE": "enable_debate",
+    "TRADINGAGENTS_DEBATE_BULL_MODEL": "debate_bull_model",
+    "TRADINGAGENTS_DEBATE_BEAR_MODEL": "debate_bear_model",
+    "TRADINGAGENTS_DEBATE_JUDGE_MODEL": "debate_judge_model",
+    "TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE": "debate_judge_ensemble",
+    "TRADINGAGENTS_DEBATE_MAX_ROUNDS": "debate_max_rounds",
+    "TRADINGAGENTS_DEBATE_MIN_GAIN": "debate_min_gain",
+    "TRADINGAGENTS_DEBATE_STOP_CONSECUTIVE": "debate_stop_consecutive",
+    "TRADINGAGENTS_DEBATE_CONSENSUS_THRESH": "debate_consensus_thresh",
+    "TRADINGAGENTS_DEBATE_SCORING_WEIGHTS": "debate_scoring_weights",
+    "TRADINGAGENTS_DEBATE_ABSTAIN_ALLOWED": "debate_abstain_allowed",
+    "TRADINGAGENTS_DEBATE_FAST_ABORT": "debate_fast_abort",
+    "TRADINGAGENTS_DEBATE_REGEN_MAX": "debate_regen_max",
+    "TRADINGAGENTS_DEBATE_DIVERGENCE_CAP_ROUNDS": "debate_divergence_cap_rounds",
+    "TRADINGAGENTS_DEBATE_REWEIGHT_TO_BASELINE": "debate_reweight_to_baseline",
+    "TRADINGAGENTS_DEBATE_ENTRENCH_THRESH": "debate_entrench_thresh",
+    "TRADINGAGENTS_DEBATE_DIVERGENCE_MIN": "debate_divergence_min",
+    "TRADINGAGENTS_DEBATE_BASELINE_FALLBACK": "debate_baseline_fallback",
+    "TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX": "debate_require_capability_matrix",
     "TRADINGAGENTS_CHECKPOINT_ENABLED": "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER": "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE": "temperature",
@@ -297,7 +316,34 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Debate and discussion settings
         "max_debate_rounds": 1,
         "max_risk_discuss_rounds": 1,
-        "max_recur_limit": 100,
+        # Structured multi-agent debate (design docs/design_multi_agent_debate.md,
+        # research->implementation). All keys default OFF/empty so the current
+        # one-shot bull/bear/RM chain is bit-identical when unused. When
+        # ``enable_debate`` is on, the research debate runs as an FSM-ish
+        # subgraph: structured debater turns (DebaterTurnPayload) -> L1
+        # deterministic severity triage (classify_severity) -> blind
+        # order-rotated L2 judge (L2JudgeDimensionedRubric) -> termination by
+        # plateau/consensus/hard cap. Rejected/hard-breached turns fall back
+        # to the pre-debate independent stances (baseline risk view).
+        "enable_debate": False,
+        "debate_bull_model": "",   # "family:id" for bull; fallback quick
+        "debate_bear_model": "",   # "family:id" for bear; fallback quick
+        "debate_judge_model": "",  # "family:id" for judge; fallback deep; family should differ from both debaters
+        "debate_judge_ensemble": 1,
+        "debate_max_rounds": 5,    # matches DebaterTurnPayload.round_index (1..5)
+        "debate_min_gain": 0.05,
+        "debate_stop_consecutive": 2,
+        "debate_consensus_thresh": 0.85,
+        "debate_scoring_weights": {"evidence": 0.6, "novelty": 0.25, "constraint": 0.15},
+        "debate_abstain_allowed": True,
+        "debate_fast_abort": True,          # R1: hard-fail short-circuits / regenerates
+        "debate_regen_max": 1,              # R1': single-role regeneration budget
+        "debate_divergence_cap_rounds": 1,  # R2: artificial-consensus threshold (rounds)
+        "debate_reweight_to_baseline": 0.5, # R2': base alpha toward baseline on alert
+        "debate_entrench_thresh": 0.8,      # R2': I_entrench above -> entrenchment penalty
+        "debate_divergence_min": 0.15,      # R2': |bull-bear score| below -> artificial consensus
+        "debate_baseline_fallback": True,   # R1': HARD_BREACH/exhausted regen -> baseline (never nothing)
+        "debate_require_capability_matrix": False,  # R3: startup health-check gate
         # Analyst-team execution: 1 = sequential (default); >1 = concurrent
         # threads (opt-in — multiplies LLM/provider load and free-tier quota burn).
         "analyst_concurrency": 1,
@@ -645,11 +691,25 @@ def validate_config(config: dict) -> list[str]:
         "tranche_risk_pct",
         "correlation_threshold",
         "correlation_penalty_frac",
-        "volume_share_vol_limit",
-        "volume_share_price_impact",
+        "debate_min_gain",
+        "debate_consensus_thresh",
+        "debate_reweight_to_baseline",
+        "debate_entrench_thresh",
+        "debate_divergence_min",
     ):
         frac(key)
 
+    # debate_scoring_weights: three weights summing to ~1, each in [0,1].
+    dw = config.get("debate_scoring_weights")
+    if dw is not None:
+        if not isinstance(dw, dict):
+            violations.append(f"debate_scoring_weights is not a dict: {dw!r}")
+        else:
+            vals = [v for v in dw.values() if v is not None]
+            if vals and all(isinstance(v, (int, float)) for v in vals) and abs(sum(vals) - 1.0) > 1e-6:
+                    violations.append(
+                        f"debate_scoring_weights sum to {sum(vals):.4f}, expected ~1.0"
+                    )
     # Non-negative numeric knobs (0 allowed where it means "off").
     for key in (
         "catalyst_window_days",
@@ -663,11 +723,13 @@ def validate_config(config: dict) -> list[str]:
         "tranche_stop_mult",
         "atr_mult",
         "target_atr",
-        "max_debate_rounds",
-        "max_risk_discuss_rounds",
+        "debate_max_rounds",
+        "debate_judge_ensemble",
+        "debate_stop_consecutive",
+        "debate_regen_max",
+        "debate_divergence_cap_rounds",
     ):
         positive(key, allow_zero=True)
-
     # Monotonic HWM tiers: soft cannot exceed hard.
     soft = config.get("risk_hwm_soft_pct")
     hard = config.get("risk_hwm_hard_pct")

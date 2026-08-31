@@ -592,9 +592,158 @@ class ActionConditionVerdict(BaseModel):
     )
 
 
-def render_action_condition_verdict(verdict: ActionConditionVerdict) -> str:
-    """Render an ActionConditionVerdict to the compact line the report uses."""
-    parts = [f"**Verdict**: {verdict.verdict}"]
-    if verdict.reasons:
-        parts.append("**Reasons**: " + "; ".join(verdict.reasons))
-    return "\n".join(parts)
+# ---------------------------------------------------------------------------
+# Structured multi-agent debate — canonical wire schemas
+# (design docs/design_multi_agent_debate.md §4.7, rev v3; pydantic mirrors of
+#  the source doc Strategies/Multi_Agents_Debate.md's four JSON schemas)
+# ---------------------------------------------------------------------------
+
+
+class Stance(str, Enum):
+    BULL = "BULL"
+    BEAR = "BEAR"
+
+
+class RiskSeverity(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class QuantitativeClaim(BaseModel):
+    """One grounded quantitative claim (debater_turn.json quantitative_claims[])."""
+
+    metric_name: str = Field(description="Human-readable metric (e.g. trailing P/E)")
+    asserted_value: float = Field(description="The number the debater asserts")
+    ground_truth_key: str = Field(
+        description="Key of the computed state/tool value this claim maps to"
+    )
+    source: str = Field(
+        description="Tool/state call that actually produced the number this run"
+    )
+
+
+class RiskFactor(BaseModel):
+    """One risk factor (debater_turn.json risk_factors[])."""
+
+    risk_id: str
+    severity: RiskSeverity
+    mitigation_stated: bool
+
+
+class DebaterTurnPayload(BaseModel):
+    """Structured turn from one debater role (source schema debater_turn.json)."""
+
+    round_index: int = Field(ge=1, le=5)
+    stance: Stance
+    core_thesis: str = Field(max_length=1500)
+    quantitative_claims: list[QuantitativeClaim] = Field(min_length=1)
+    risk_factors: list[RiskFactor] = Field(default_factory=list)
+    recommended_allocation_pct: float = Field(ge=0.0, le=100.0)
+
+
+class MetricVerification(BaseModel):
+    """One L1 metric check (l1_eval_result.json metric_verification[])."""
+
+    metric_name: str
+    asserted_value: float
+    ground_truth_value: float | None = None
+    error_margin_pct: float | None = None
+    is_valid: bool = False
+
+
+class RiskGateEvaluation(BaseModel):
+    """L1 risk-gate evaluation (l1_eval_result.json risk_gate_evaluation)."""
+
+    max_drawdown_compliant: bool = False
+    allocation_bound_compliant: bool = False
+    calculated_var_95: float | None = None
+
+
+class L1Verdict(str, Enum):
+    PASS = "PASS"
+    FAIL_HARD_GATE = "FAIL_HARD_GATE"
+    FAIL_DATA_MISMATCH = "FAIL_DATA_MISMATCH"
+
+
+class L1DeterministicResult(BaseModel):
+    """L1 deterministic evaluation (source schema l1_eval_result.json)."""
+
+    evaluation_timestamp: str = ""
+    verdict: L1Verdict
+    hard_gate_passed: bool = False
+    metric_verification: list[MetricVerification] = Field(default_factory=list)
+    risk_gate_evaluation: RiskGateEvaluation = Field(default_factory=RiskGateEvaluation)
+    penalty_score: float = Field(ge=0.0, le=100.0, default=0.0)
+
+
+class JudgeDimension(str, Enum):
+    EMPIRICAL_GROUNDING = "empirical_grounding"
+    DOWNSIDE_TAIL_RISK_WEIGHT = "downside_tail_risk_weight"
+    CATALYST_CLARITY = "catalyst_clarity"
+    ASSUMPTION_SENSITIVITY = "assumption_sensitivity"
+
+
+class L2JudgeDimensionedRubric(BaseModel):
+    """Blind L2 judge output (source schema l2_judge_rubric.json)."""
+
+    judge_model_id: str = ""
+    round_evaluated: int = 0
+    evaluated_agent_alias: str = Field(
+        default="", description="Anonymized token (Candidate_X / Candidate_Y)"
+    )
+    dimension_scores: dict[JudgeDimension, float] = Field(
+        default_factory=dict, description="0..10 per orthogonal dimension"
+    )
+    entrenchment_detected: bool = False
+    rebuttal_effectiveness: float = Field(ge=0.0, le=10.0, default=0.0)
+    rationale: str = Field(default="", max_length=1000)
+
+
+class L1SeverityTier(str, Enum):
+    GREEN = "GREEN"
+    SOFT_WARNING = "SOFT_WARNING"
+    RETRYABLE_ERROR = "RETRYABLE_ERROR"
+    HARD_BREACH = "HARD_BREACH"
+
+
+class L1Action(str, Enum):
+    PROCEED = "PROCEED"
+    APPLY_PENALTY_AND_PROCEED = "APPLY_PENALTY_AND_PROCEED"
+    TRIGGER_REGEN = "TRIGGER_REGEN"
+    ABORT_TO_BASELINE = "ABORT_TO_BASELINE"
+
+
+class EntrenchmentMetrics(BaseModel):
+    entrenchment_index: float = Field(ge=0.0, le=1.0, default=0.0)
+    divergence_delta: float | None = None
+    artificial_consensus_flag: bool = False
+    reweight_alpha: float = Field(ge=0.0, le=1.0, default=0.0)
+
+class BaselineFallbackPayload(BaseModel):
+    base_allocation_pct: float = 0.0
+    var_95_limit: float = 0.0
+    unconditional_risk_rating: str = ""
+
+
+class L1ExecutionContext(BaseModel):
+    """Recovery-path record between FSM states (l1_execution_context.json)."""
+
+    round_index: int = Field(ge=1, default=1)
+    regen_count: int = Field(ge=0, default=0)
+    debate_regen_max: int = Field(default=1)
+    severity_tier: L1SeverityTier = L1SeverityTier.GREEN
+    l1_action: L1Action = L1Action.PROCEED
+    entrenchment_metrics: EntrenchmentMetrics = Field(default_factory=EntrenchmentMetrics)
+    baseline_fallback_payload: BaselineFallbackPayload = Field(
+        default_factory=BaselineFallbackPayload
+    )
+
+
+def render_l1_context(ctx: L1ExecutionContext) -> str:
+    """Render an L1ExecutionContext to a compact audit row."""
+    return (        f"**L1:** t{ctx.round_index} / {ctx.severity_tier.value} / "
+        f"regen {ctx.regen_count}/{ctx.debate_regen_max} / "
+        f"{ctx.l1_action.value}"
+    )

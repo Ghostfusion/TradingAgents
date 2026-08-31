@@ -84,15 +84,33 @@ class ConditionalLogic:
         return "Msg Clear Fundamentals"
 
     def should_continue_debate(self, state: AgentState) -> str:
-        """Determine if debate should continue."""
-
+        """Determine if debate should continue (legacy one-shot chain)."""
         if (
             state["investment_debate_state"]["count"] >= 2 * self.max_debate_rounds
-        ):  # 3 rounds of back-and-forth between 2 agents
+        ):  # rounds of back-and-forth between 2 agents
             return "Research Manager"
         if state["investment_debate_state"]["current_response"].startswith("Bull"):
             return "Bear Researcher"
         return "Bull Researcher"
+
+    def should_continue_structured_debate(self, state: AgentState) -> str:
+        """Router for the SD L1 node (opt-in structured debate).
+
+        Returns the next node from {SD Bull, SD Bear, SD Finalize}:
+        - terminated / baseline fallback  -> SD Finalize
+        - PENDING_REGEN (bounded)         -> the same role (SD Bull/SD Bear)
+        - last side was bull              -> SD Bear (next turn)
+        - last side was bear              -> SD Finalize (round complete)
+        """
+        ds = state.get("debate_state") or {}
+        if ds.get("terminated"):
+            return "SD Finalize"
+        pending = ds.get("pending_regen_role")
+        if pending:
+            return "SD Bull" if pending == "bull" else "SD Bear"
+        if ds.get("last_side") == "bull":
+            return "SD Bear"
+        return "SD Finalize"
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:
         """Determine if risk analysis should continue."""

@@ -24,6 +24,44 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Structured multi-agent debate implemented (opt-in)** (`docs/design_multi_agent_debate.md`
+  P1-P5 + graph wiring): the research debate now runs as a structured subgraph
+  when `enable_debate` is on (default OFF — the legacy one-shot chain stays
+  bit-identical):
+  - **P1 Grounding contract** — `strategies/debate_claim.py`: `ClaimRecord` /
+    `ClaimLedger` + `verify_claim` (valid / violated / abstain / unverified /
+    qualitative; deceptive-grounding source check against the run ledger).
+  - **P2 Scoring + termination + severity** — `strategies/debate_score.py`:
+    `debate_score` (evidence × novelty × constraint), `termination_check`
+    (plateau / consensus / hard cap), `classify_severity` (R1' severity
+    triage: HARD_BREACH → baseline, RETRYABLE → bounded scoped regen,
+    SOFT_WARNING → penalty + annotated L2), `entrenchment_index` +
+    `divergence_check` + `reweight_to_baseline` (R2' artificial-consensus
+    α-reweight toward the empirical base rate).
+  - **P3 Heterogeneous models + capability matrix** —
+    `strategies/debate_capability.py` (R3 role×model floor check, fail-closed
+    when required), `agents/utils/debate_roles.py` (`resolve_role_llm`
+    `family:id` per role with quick/deep fallback + per-role tool surfaces),
+    `debate_*` config keys + `TRADINGAGENTS_DEBATE_*` env overrides
+    (+ `.env.example`).
+  - **P4 Schemas + dual-mode adapter + judge** — `agents/schemas.py`:
+    `DebaterTurnPayload` / `L1DeterministicResult` / `L2JudgeDimensionedRubric`
+    / `L1ExecutionContext` (pydantic mirrors of the source doc's four JSON
+    schemas); `agents/utils/debate_structured.py` dual-mode adapter
+    (structured-output API + markdown-fence parse + bounded Pydantic repair,
+    fail closed); `agents/arbiters/debate_judge.py` blind order-rotated
+    dimensioned L2 judge.
+  - **P5 A/B harness** — `scripts/debate_ab_harness.py` (Brier score +
+    max-unforecasted drawdown), producers injected / `--demo`.
+  - **Graph wiring** — `graph/setup.py` SD subgraph (`SD Bull -> SD L1 ->
+    SD Bear -> SD L1 -> SD Finalize -> Research Manager`, O-condition
+    placeholder nodes registered so targets never raise), the
+    `should_continue_structured_debate` router, `debate_state` channel, and
+    reporting's `2_research/structured_debate.md` (judge scores + claim
+    ledger + L1 verdict, back-compat when absent).
+  Tests: `tests/test_debate_claim.py` (12), `test_debate_score.py` (17),
+  `test_debate_integration.py` (19), `test_debate_stream_hermetic.py` (2+
+  compile) — 56 hermetic. ruff clean.
 - **Multi-agent debate design revised for the §7 risk items**
   (`docs/design_multi_agent_debate.md`, revision v3, folding in the 2026-08-31
   update of `Strategies/Multi_Agents_Debate.md`): L1 severity triage

@@ -308,6 +308,20 @@ has changed before); never assume an endpoint works — the SDK's
   max unforecasted drawdown). All `debate_*` config keys OFF by default;
   phased rollout P0-P6 (grounding contract → scoring/termination → models/
   capability → judge → A/B harness). See CHANGELOG.
+- 2026-08-31 `(working tree)` - Structured multi-agent debate IMPLEMENTED
+  (opt-in `enable_debate`; design `docs/design_multi_agent_debate.md` P1-P5 +
+  graph wiring): `strategies/debate_claim.py` (claim ledger + L1 verifier),
+  `strategies/debate_score.py` (score / termination / severity triage /
+  entrenchment index / divergence-floor / α-reweight),
+  `strategies/debate_capability.py` (R3 role×model matrix),
+  `agents/utils/debate_roles.py` (`resolve_role_llm` per-role + tool
+  surfaces), `agents/utils/debate_structured.py` (dual-mode adapter),
+  `agents/arbiters/debate_judge.py` (blind order-rotated L2 judge),
+  `scripts/debate_ab_harness.py` (Brier + max-unforecasted-DD), the SD
+  subgraph in `graph/setup.py` + `should_continue_structured_debate` router,
+  `debate_state` channel, and reporting `2_research/structured_debate.md`.
+  New `TRADINGAGENTS_DEBATE_*` env keys (+ `.env.example`). Legacy chain is
+  bit-identical when OFF. Tests: 4 debate files, 56 hermetic. See CHANGELOG.
 - 2026-08-31 `(working tree)` - CLI deep-run defect fixes: `--depth` / the
   interactive research-depth selection now map to the RISK rounds only;
   the bull/bear researchers each run exactly ONCE per analysis (previously

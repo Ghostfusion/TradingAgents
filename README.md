@@ -30,6 +30,23 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Structured multi-agent debate implemented (opt-in)** -
+  the research debate design (`docs/design_multi_agent_debate.md`) is now
+  code: with `enable_debate` (+ `TRADINGAGENTS_ENABLE_DEBATE=true`) the
+  bull/bear debate runs as a structured subgraph — `DebaterTurnPayload`
+  turns via a dual-mode schema adapter (structured-output API with a
+  markdown-fence + Pydantic repair fallback), pure L1 claim verification +
+  severity triage (HARD_BREACH → baseline fallback, RETRYABLE → one scoped
+  regen, SOFT_WARNING → penalty + annotated L2), an entrenchment index +
+  divergence-floor artificial-consensus flag with α-reweight to the
+  empirical base rate, and a blind order-rotated dimensioned L2 judge
+  (`L2JudgeDimensionedRubric`); per-role heterogeneous models
+  (`debate_bull_model` / `_bear_model` / `_judge_model`, capability-matrix
+  checked at startup) and a matched-compute A/B harness
+  (`scripts/debate_ab_harness.py`, Brier + max-unforecasted drawdown).
+  Judge scores + claim ledger render into the 2_research section
+  (`structured_debate.md`). All `debate_*` config defaults OFF — the
+  legacy one-shot chain is bit-identical when unused. See CHANGELOG.
 - [2026-08-31] **Multi-agent debate architecture (design, research-only)** -
   `docs/design_multi_agent_debate.md` upgrades the bull/bear research debate
   onto a production two-layer judiciary: deterministic L1 gates (claim

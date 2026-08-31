@@ -119,6 +119,7 @@ def make_parallel_analyst_node(plan, subgraphs, concurrency: int):
     return run_analysts_parallel
 
 
+
 class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
 
@@ -129,13 +130,21 @@ class GraphSetup:
         tool_nodes: dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
         analyst_concurrency: int = 1,
+        config: dict | None = None,
     ):
         """Initialize with required components.
 
         ``analyst_concurrency``: >1 runs the analyst teams concurrently
         (each in its own thread with isolated messages); 1 keeps the
         sequential chain. Opt-in — concurrent runs multiply LLM/data load.
+
+        ``config``: run config. ``config["enable_debate"]`` switches the
+        bull/bear/RM research debate to the structured-debate subgraph
+        (DebaterTurnPayload -> L1 severity triage -> blind L2 judge);
+        default OFF = today's one-shot chain, bit-identical.
         """
+        config = config or {}
+        self.config = config
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
@@ -220,6 +229,47 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
+        # Structured-debate nodes (opt-in `enable_debate`): registered
+        # unconditionally so the conditional-edge targets always exist.
+        from tradingagents.agents.researchers.structured_debate import (
+            create_debate_finalize,
+            create_debate_l1,
+            create_debater_turn,
+            ground_truth_from_state,
+        )
+
+        self._structured_debate = self.config.get("enable_debate", False)
+        if self._structured_debate:
+            workflow.add_node(
+                "SD Bull",
+                create_debater_turn(
+                    "bull", self.quick_thinking_llm, ground_truth=ground_truth_from_state
+                ),
+            )
+            workflow.add_node(
+                "SD Bear",
+                create_debater_turn(
+                    "bear", self.quick_thinking_llm, ground_truth=ground_truth_from_state
+                ),
+            )
+            workflow.add_node(
+                "SD L1",
+                create_debate_l1(ground_truth_from_state, self.config),
+            )
+            workflow.add_node(
+                "SD Finalize",
+                create_debate_finalize(self.deep_thinking_llm, self.config),
+            )
+        else:
+            # Register no-op placeholders so the conditional-edge targets below
+            # always resolve (fall-through never raises, #1088 contract).
+            def _noop(state) -> dict:
+                return {}
+
+            workflow.add_node("SD Bull", _noop)
+            workflow.add_node("SD Bear", _noop)
+            workflow.add_node("SD L1", _noop)
+            workflow.add_node("SD Finalize", _noop)
         if self.analyst_concurrency > 1:
             workflow.add_edge(START, "Run Analysts")
             workflow.add_edge("Run Analysts", "Bull Researcher")
@@ -261,15 +311,30 @@ class GraphSetup:
                     workflow.add_edge(current_clear, "Independent Researcher Stances")
                     workflow.add_edge("Independent Researcher Stances", "Bull Researcher")
 
-        # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088):
-        # Bull/Bear -> (Bull | Bear | Research Manager). Without these the
-        # debate never advances to the Research Manager judge.
-        for debate_node in ("Bull Researcher", "Bear Researcher"):
+        if self._structured_debate:
+            # Structured mode: Bull -> L1 -> Bear -> L1 -> (Judge/Finalize).
+            # SD L1 routes: regen to the same role (bounded), term/base to
+            # Finalize, else pass to the next role / judge.
+            workflow.add_edge("SD Bull", "SD L1")
+            workflow.add_edge("SD Bear", "SD L1")
             workflow.add_conditional_edges(
-                debate_node,
-                self.conditional_logic.should_continue_debate,
-                DEBATE_PATH_MAP,
+                "SD L1",
+                self.conditional_logic.should_continue_structured_debate,
+                {
+                    "SD Bull": "SD Bull",
+                    "SD Bear": "SD Bear",
+                    "SD Finalize": "SD Finalize",
+                },
             )
+            workflow.add_edge("SD Finalize", "Research Manager")
+        else:
+            # Legacy one-shot chain (unchanged).
+            for debate_node in ("Bull Researcher", "Bear Researcher"):
+                workflow.add_conditional_edges(
+                    debate_node,
+                    self.conditional_logic.should_continue_debate,
+                    DEBATE_PATH_MAP,
+                )
         # Research Manager concludes the research debate; it must flow ONWARD to
         # the Trader. Without this edge the graph silently ends after the
         # Research Manager judge - no Trader, no risk debate, no Portfolio

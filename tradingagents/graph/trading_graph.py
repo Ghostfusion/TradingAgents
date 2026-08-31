@@ -290,6 +290,7 @@ class TradingAgentsGraph:
             self.tool_nodes,
             self.conditional_logic,
             analyst_concurrency=self.config.get("analyst_concurrency", 1),
+            config=self.config,
         )
 
         self.propagator = Propagator(

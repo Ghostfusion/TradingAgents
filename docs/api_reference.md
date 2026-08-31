@@ -27,6 +27,18 @@ in `batch.py`).
 | `TRADINGAGENTS_OUTPUT_LANGUAGE` | `output_language` |
 | `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `max_debate_rounds` |
 | `TRADINGAGENTS_MAX_RISK_ROUNDS` | `max_risk_discuss_rounds` |
+| `TRADINGAGENTS_ENABLE_DEBATE` | `enable_debate` | structured multi-agent debate on (default off — legacy one-shot chain unchanged) |
+| `TRADINGAGENTS_DEBATE_BULL_MODEL` / `_BEAR_MODEL` / `_JUDGE_MODEL` | `debate_bull_model` / `debate_bear_model` / `debate_judge_model` | per-role `family:id` models; empty = quick/deep fallback |
+| `TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE` | `debate_judge_ensemble` |
+| `TRADINGAGENTS_DEBATE_MAX_ROUNDS` | `debate_max_rounds` | 5 (DebaterTurnPayload round_index 1..5) |
+| `TRADINGAGENTS_DEBATE_MIN_GAIN` / `_STOP_CONSECUTIVE` / `_CONSENSUS_THRESH` | `debate_min_gain` / `debate_stop_consecutive` / `debate_consensus_thresh` | termination knobs |
+| `TRADINGAGENTS_DEBATE_REGEN_MAX` | `debate_regen_max` | R1' bounded single-role regeneration budget (1) |
+| `TRADINGAGENTS_DEBATE_DIVERGENCE_CAP_ROUNDS` | `debate_divergence_cap_rounds` |
+| `TRADINGAGENTS_DEBATE_REWEIGHT_TO_BASELINE` | `debate_reweight_to_baseline` | R2' base α toward baseline (0.5) |
+| `TRADINGAGENTS_DEBATE_ENTRENCH_THRESH` | `debate_entrench_thresh` | I_entrench above this -> penalty (0.8) |
+| `TRADINGAGENTS_DEBATE_DIVERGENCE_MIN` | `debate_divergence_min` | |bull−bear| below → artificial-consensus flag (0.15) |
+| `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | `debate_baseline_fallback` |
+| `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 fail-closed startup check (default false) |
 | `TRADINGAGENTS_CHECKPOINT_ENABLED` | `checkpoint_enabled` |
 | `TRADINGAGENTS_BENCHMARK_TICKER` | `benchmark_ticker` |
 | `TRADINGAGENTS_TEMPERATURE` | `temperature` |
