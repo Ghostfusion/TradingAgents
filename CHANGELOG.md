@@ -10,6 +10,23 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **`--value-dip-loose` (value-dip harvest mode) + eodhd-losers equity
+  filter** - relaxes the value-dip technical entry from `RSI<=35 AND %b<=0.10`
+  to **OR** (either oversold signal suffices) via a new `loose_technical`
+  param on `strategies.value_dip.value_dip_setup` (default False: the analyst
+  tools / strict AND are unchanged), and appends a ranked **near-miss table**
+  (up to 50, distance-to-entry ordered) naming exactly which gate each near
+  candidate missed (`value_floor` / `technical_entry` / `trade_risk` /
+  `balance_sheet` / `profitability`). The `eodhd-losers` universe now
+  **equity-filters** its seed against the EODHD exchange-symbol common-stock
+  list (one cached call; warrants/units/leveraged ETFs — which dominate the
+  intraday decliners — are dropped; degrades to the unfiltered list if the
+  reference call fails). Web Screener gains the Loose dip gate checkbox,
+  flags forward through `run_screener`. Tests:
+  `test_value_dip_loose_prefilter_or_semantics`,
+  `test_eodhd_losers_equity_filter_drops_non_common`,
+  `test_eodhd_losers_loose_near_miss_renders` + web
+  `--value-dip-loose` forwarding case.
 - **`--universe eodhd-losers` value-screener universe** - the EODHD bulk US
   real-time feed (one call, ~18k rows, OpenD-independent) seeds a
   **loss-ordered** scan: the biggest intraday decliners by change% are the

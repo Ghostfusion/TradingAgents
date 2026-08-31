@@ -54,7 +54,8 @@ eodhd-losers)
 `--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
 (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
-`--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
+`--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`
+`--alloc`.
 
 Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F,
 Beneish M, Altman Z, Net-Net + trend-pullback / breakout / momentum / swing /
@@ -67,7 +68,13 @@ the scan from the EODHD bulk US real-time feed (one call, ~18k rows,
 OpenD-independent) — the biggest intraday decliners by change%, so
 value-dip/momentum candidates are harvested loss-ordered instead of from an
 alphabetical slice (`-n` sets how many decliners; moomoo movers cap at 200,
-eodhd-losers accepts up to the whole feed). Every OHLCV-capable
+eodhd-losers accepts up to the whole feed). The bulk feed carries no
+name/type, so `eodhd-losers` equity-filters the seed against the EODHD
+exchange-symbol common-stock list (warrants/units/leveraged ETFs dropped;
+degrades to the unfiltered list if the reference call fails).
+`--value-dip-loose` relaxes the value-dip technical entry to RSI<=35 OR
+%b<=0.10 (harvest mode) and appends a ranked near-miss table naming the
+failed gate. Every OHLCV-capable
 scan (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) runs a
 **two-stage gate**: a cheap OHLCV-only pre-filter (Stage A, no provider call —
 `scan_signals` flags, momentum pillars minus float, `vcp_setup`, or the

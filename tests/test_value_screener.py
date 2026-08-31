@@ -501,10 +501,133 @@ def test_eodhd_losers_universe_seeds_scan(monkeypatch, capsys):
         {"symbol": "MSFT", "close": 95.2, "change_p": -3.10},
     ]
     monkeypatch.setattr(eodhd, "get_top_movers_symbols_eodhd", lambda **k: rows)
+    monkeypatch.setattr(
+        eodhd,
+        "get_exchange_symbols_eodhd",
+        lambda market: [
+            {"Code": "AAPL", "Type": "Common Stock"},
+            {"Code": "MSFT", "Type": "Common Stock"},
+        ],
+    )
     vs.main(["--universe", "eodhd-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0"])
     out = capsys.readouterr().out
     assert "AAPL" in out and "MSFT" in out
     assert "-4.21%" in out  # change_p -4.21 (percent) -> ratio -0.0421 -> -4.21%
+
+
+def test_eodhd_losers_equity_filter_drops_non_common(monkeypatch, capsys):
+    """eodhd-losers equity filter: the bulk feed carries no name/type, so a
+    cross-check against the exchange-symbol common-stock list must drop
+    warrants/units/ETFs from the seed (they dominate the intraday losers)."""
+    from tradingagents.dataflows import eodhd
+
+    rows = [
+        {"symbol": "AAPL", "close": 210.5, "change_p": -4.21},
+        {"symbol": "LITU", "close": 9.5, "change_p": -12.5},  # leveraged ETF
+        {"symbol": "ABCW", "close": 2.1, "change_p": -40.0},  # warrant
+    ]
+    monkeypatch.setattr(eodhd, "get_top_movers_symbols_eodhd", lambda **k: rows)
+    monkeypatch.setattr(
+        eodhd,
+        "get_exchange_symbols_eodhd",
+        lambda market: [{"Code": "AAPL", "Type": "Common Stock"}],
+    )
+    vs.main(["--universe", "eodhd-losers", "-n", "3", "-d", "2026-01-02", "--min-mcap", "0"])
+    out = capsys.readouterr().out
+    assert "AAPL" in out
+    assert "LITU" not in out and "ABCW" not in out  # non-common stocks dropped
+
+
+def test_value_dip_loose_prefilter_or_semantics():
+    """--value-dip-loose relaxes the technical entry to OR: a name with RSI
+    oversold but %b above the band passes loose and fails strict (and the
+    reverse). The stop <=2% trade-risk gate still applies to both."""
+    ohlcv = {"closes": [100.0] * 60, "highs": [102.0] * 60, "lows": [98.0] * 60, "volumes": [1_000_000] * 60}
+    from unittest import mock as _mock
+
+    with (
+        _mock.patch("tradingagents.strategies.swing.rsi", return_value=30.0),
+        _mock.patch(
+            "tradingagents.strategies.value_dip.bollinger_pct_b",
+            return_value={"pct_b": 0.30},
+        ),
+        _mock.patch("tradingagents.strategies.size.atr", return_value=1.0),
+    ):
+        assert vs._value_dip_technical_prefilter(ohlcv, loose=False) is False  # AND: %b too high
+        assert vs._value_dip_technical_prefilter(ohlcv, loose=True) is True  # OR: RSI <= 35
+
+    with (
+        _mock.patch("tradingagents.strategies.swing.rsi", return_value=60.0),
+        _mock.patch(
+            "tradingagents.strategies.value_dip.bollinger_pct_b",
+            return_value={"pct_b": 0.05},
+        ),
+        _mock.patch("tradingagents.strategies.size.atr", return_value=1.0),
+    ):
+        assert vs._value_dip_technical_prefilter(ohlcv, loose=False) is False  # AND: RSI too high
+        assert vs._value_dip_technical_prefilter(ohlcv, loose=True) is True  # OR: %b <= 0.10
+
+
+def test_eodhd_losers_loose_near_miss_renders(monkeypatch, capsys):
+    """--value-dip-loose on a loss-ordered universe: a name that passes the
+    relaxed technical entry (falls hard -> RSI <= 35) but misses the value
+    floor renders in the ranked near-miss table with the failed gate named —
+    the practical watchlist the loose gate exists for."""
+    import scripts.value_screener as _vs
+    from tradingagents.dataflows import eodhd, statement_parsing as _sp
+
+    rows = [{"symbol": "AAPL", "close": 100.0, "change_p": -8.0}]
+    monkeypatch.setattr(eodhd, "get_top_movers_symbols_eodhd", lambda **k: rows)
+    monkeypatch.setattr(
+        eodhd,
+        "get_exchange_symbols_eodhd",
+        lambda market: [{"Code": "AAPL", "Type": "Common Stock"}],
+    )
+
+    def _falling_closes_csv(ticker):
+        # Steady -0.5%/day decline: RSI < 35 (loose technical entry passes)
+        # while the 2-ATR stop stays <= 2% of price (trade_risk passes) -
+        # proportional high/low bands, so the synthetic ATR tracks price.
+        out_rows = ["Date,Open,High,Low,Close,Volume"]
+        price = 200.0
+        for i in range(60):
+            price *= 0.995
+            out_rows.append(
+                f"2026-01-{i % 28 + 1:02d},{price:.2f},{price * 1.004:.2f},{price * 0.996:.2f},{price:.2f},5000000"
+            )
+        return "\n".join(out_rows) + "\n"
+
+    # Capture the autouse fake_route bindings BEFORE replacing them, so the
+    # fundamentals/cashflow legs still go to the hermetic fake (get_stock_data
+    # alone uses the falling series; calling the patched name would recurse).
+    orig_route = vs.route_to_vendor
+    orig_sp_route = _sp.route_to_vendor
+
+    def local_route(method, *a, **k):
+        if method == "get_stock_data":
+            return _falling_closes_csv(a[0])
+        return orig_route(method, *a, **k)
+
+    def local_sp_route(method, *a, **k):
+        if method == "get_stock_data":
+            return _falling_closes_csv(a[0])
+        return orig_sp_route(method, *a, **k)
+
+    monkeypatch.setattr(_vs, "route_to_vendor", local_route)
+    monkeypatch.setattr(_sp, "route_to_vendor", local_sp_route)
+
+    vs.main(
+        [
+            "-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02",
+            "--scan", "value-dip", "--value-dip-loose", "--min-mcap", "0",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "Near misses" in out
+    assert "AAPL" in out
+    # Value floor is unavailable (cashflow n/a in the hermetic route), so the
+    # near-miss names it as the missing gate.
+    assert "value_floor" in out
 
 
 def test_get_top_movers_symbols_eodhd_sorts_strips_caps(monkeypatch):

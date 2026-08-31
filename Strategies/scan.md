@@ -56,8 +56,11 @@ queries a data provider just to reject a symbol:
   slice. `-n/--movers-count` sets how many decliners to take (moomoo movers cap
   at 200; eodhd-losers accepts up to the whole feed); `--price-min` gates on
   the feed's live close; mcap / PE / ATR gates still run per-symbol afterwards.
-  The feed rows carry price + change only (no name/mcap/type), so ETF/ETN rows
-  are not name-filtered at seed time — the per-symbol gates handle them.
+  The feed rows carry price + change only (no name/mcap/type), so the seed is
+  **equity-filtered** against the EODHD exchange-symbol common-stock list (one
+  cached call): warrants / units / leveraged ETFs — which dominate the
+  intraday losers — are dropped before the scan; if the reference call fails
+  the seed degrades to the unfiltered list (never aborts).
 
 Every universe runs the same two-stage gate above.
 
@@ -155,13 +158,16 @@ momentum divergence / support rows are computed and surfaced as separate
 tools (`get_vdu_entry_setup`, `get_macd_divergence`, `get_support_structure`,
 `get_balance_sheet_health`, `get_decline_driver_check`).
 
-Table columns: `VDip` (yes/no candidate), `FCFy` (FCF yield), `RSI` (RSI-14),
-`%b` (Bollinger %b) and `Stp%` (stop distance % of price). The deterministic
-calculators behind the matrix are also exposed as analyst tools
-(`get_bollinger_pct_b`, `get_tranche_plan`, `get_trade_expectancy` on the
-market node; `get_fcf_yield`, `get_valuation_z_score`, `get_value_dip_setup`
-on the fundamentals node) so the analyst LLMs reason over the same computed
-numbers.
+**`--value-dip-loose` (harvest mode).** Relaxes the technical entry from
+`RSI(14) <= 35 AND %b <= 0.10` to **OR** (either oversold signal suffices) so
+the scan catches names with only one oversold signal, and appends a ranked
+**near-miss table** (up to 50) naming exactly which gate each near candidate
+missed (`value_floor` / `technical_entry` / `trade_risk` / `balance_sheet` /
+`profitability`). Strict AND stays the default (`value_dip_setup` keeps
+`loose_technical=False` for the analyst tools / report definition). Combined
+with the `eodhd-losers` universe this is the practical daily watchlist: the
+equity-filtered decliners are harvested loss-ordered, near names are labelled
+with the missing gate, nothing invented.
 
 ## `all` (default)
 

@@ -893,6 +893,7 @@ def value_dip_setup(
     roic: float | None = None,
     require_trend: bool = False,
     strict_vdu: bool = False,
+    loose_technical: bool = False,
     min_closes_trend: int = 200,
     regime_gate: dict | None = None,
     catalyst_window: bool = False,
@@ -908,7 +909,10 @@ def value_dip_setup(
     Rows (all computed, never narrated):
 
     * **value_floor** - margin of safety >= 20% and/or FCF yield >= 6%
-    * **technical_entry** - RSI(14) <= 35 and %b <= 0.10
+    * **technical_entry** - RSI(14) <= 35 and %b <= 0.10; ``loose_technical``
+      relaxes the entry to **OR** (either RSI <= 35 or %b <= 0.10) so a screen
+      harvests names with only one oversold signal - the strict AND stays the
+      default for the analyst tools / report definition
     * **trade_risk** - atr-based stop distance <= 2 x ATR and the stop
       distance is <= 2% of price (<= 2% account risk proxy)
     * **exit_target** - R:R to the 2.5R target >= 2.5 (always true by
@@ -948,10 +952,17 @@ def value_dip_setup(
         (margin_of_safety is not None and margin_of_safety >= MOS_FLOOR)
         or (fcf_yield is not None and fcf_yield >= FCFY_FLOOR)
     )
-    technical_entry = bool(
-        (rsi_val is not None and rsi_val <= RSI_ENTRY)
-        and (pct_b is not None and pct_b <= PCTB_ENTRY)
-    )
+    if loose_technical:
+        # Relaxed entry: either oversold signal suffices (screen harvest mode).
+        technical_entry = bool(
+            (rsi_val is not None and rsi_val <= RSI_ENTRY)
+            or (pct_b is not None and pct_b <= PCTB_ENTRY)
+        )
+    else:
+        technical_entry = bool(
+            (rsi_val is not None and rsi_val <= RSI_ENTRY)
+            and (pct_b is not None and pct_b <= PCTB_ENTRY)
+        )
     trade_risk = bool(stop_pct is not None and stop_pct <= MAX_ACCOUNT_RISK)
     exit_target = True  # 2.5R target is definitionally >= 2.5 R:R
 

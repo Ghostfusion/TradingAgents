@@ -297,6 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - `--value-dip-loose` harvest mode + eodhd-losers
+  equity filter: the value-dip technical entry relaxes to `RSI<=35 OR %b<=0.10`
+  (new `loose_technical` param on `value_dip_setup`, default False) and the
+  screener appends a ranked near-miss table naming each near candidate's
+  failed gate; `eodhd-losers` now cross-checks the exchange-symbol
+  common-stock list (one cached call) so warrants/units/leveraged ETFs don't
+  dominate the decliner seed. Web Screener exposes the Loose dip gate
+  checkbox. Tests: `test_value_dip_loose_prefilter_or_semantics` +
+  `test_eodhd_losers_equity_filter_drops_non_common` +
+  `test_eodhd_losers_loose_near_miss_renders` + web forwarding case.
 - 2026-08-31 `(working tree)` - `--universe eodhd-losers` in the value
   screener: the EODHD bulk US real-time feed (one call, ~18k rows,
   OpenD-independent) seeds a **loss-ordered** scan — the biggest intraday

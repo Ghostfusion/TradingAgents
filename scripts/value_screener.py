@@ -477,6 +477,7 @@ def _compute_scan_row(
     fin: dict,
     current_date: str = "",
     enable_float: bool = False,
+    loose: bool = False,
 ) -> dict:
     """All scan intelligence for one symbol -> a flat dict of flags + metrics.
 
@@ -547,7 +548,7 @@ def _compute_scan_row(
         pass
     # Value-dip (needs the canonical financials).
     try:
-        vd = _value_dip_scan(symbol, ohlcv, fin, current_date)
+        vd = _value_dip_scan(symbol, ohlcv, fin, current_date, loose)
         if vd is not None:
             out["value_dip"] = vd
     except Exception:  # noqa: BLE001
@@ -596,16 +597,17 @@ def _vcp_scan(ohlcv: dict) -> dict | None:
         return None
 
 
-def _value_dip_technical_prefilter(ohlcv: dict) -> bool:
+def _value_dip_technical_prefilter(ohlcv: dict, loose: bool = False) -> bool:
     """Cheap OHLCV-only pre-filter for the value-dip gating pass.
 
     The value-dip candidate requires ``technical_entry`` (RSI(14) <= 35 and
-    %b <= 0.10) AND ``trade_risk`` (stop distance <= 2% of price) — both
-    computable from the OHLCV alone. Symbols failing these can never be
-    candidates, so the heavy fundamentals fetch (statements + cashflow, ~6
-    moomoo calls) is skipped for them: the gating pass drops from ~7 vendor
-    calls/symbol to 1. Returns True when the gates pass OR when the inputs
-    are insufficient (unknown -> let the full scan decide, never fabricate).
+    %b <= 0.10; OR when ``loose``) AND ``trade_risk`` (stop distance <= 2% of
+    price) — both computable from the OHLCV alone. Symbols failing these can
+    never be candidates, so the heavy fundamentals fetch (statements +
+    cashflow, ~6 moomoo calls) is skipped for them: the gating pass drops from
+    ~7 vendor calls/symbol to 1. Returns True when the gates pass OR when the
+    inputs are insufficient (unknown -> let the full scan decide, never
+    fabricate).
     """
     try:
         from tradingagents.strategies.size import atr as _atr
@@ -630,23 +632,32 @@ def _value_dip_technical_prefilter(ohlcv: dict) -> bool:
         a = _atr(highs, lows, closes, window=14)
         stop_dist = STOP_ATR_MULT * a if a and a > 0 else None
         stop_pct = stop_dist / price if (stop_dist is not None and price > 0) else None
-        technical_entry = bool(
-            (rsi_val is not None and rsi_val <= RSI_ENTRY)
-            and (pct_b is not None and pct_b <= PCTB_ENTRY)
-        )
+        if loose:
+            technical_entry = bool(
+                (rsi_val is not None and rsi_val <= RSI_ENTRY)
+                or (pct_b is not None and pct_b <= PCTB_ENTRY)
+            )
+        else:
+            technical_entry = bool(
+                (rsi_val is not None and rsi_val <= RSI_ENTRY)
+                and (pct_b is not None and pct_b <= PCTB_ENTRY)
+            )
         trade_risk = bool(stop_pct is not None and stop_pct <= MAX_ACCOUNT_RISK)
         return technical_entry and trade_risk
     except Exception:  # noqa: BLE001 - prefilter degrades to "fetch heavy"
         return True
 
 
-def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "") -> dict | None:
+def _value_dip_scan(
+    symbol: str, ohlcv: dict, fin: dict, current_date: str = "", loose: bool = False
+) -> dict | None:
     """Value Dip + Swing hybrid setup read for one symbol.
 
     Runs the value-dip allocation matrix (value floor + technical entry +
     trade risk + exit target) against the symbol's OHLCV and its canonical
-    financials (margin of safety, FCF yield, valuation Z). Returns None when
-    there is insufficient price history or the strategy import fails.
+    financials (margin of safety, FCF yield, valuation Z). ``loose`` relaxes
+    the technical entry to RSI<=35 OR %b<=0.10 (harvest mode). Returns None
+    when there is insufficient price history or the strategy import fails.
     """
     try:
         from tradingagents.strategies.size import atr as _atr
@@ -715,6 +726,7 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
             current_ratio=cr,
             roe=roe,
             fcf=fcf_raw,
+            loose_technical=loose,
         )
         if not setup.get("rows"):
             return None
@@ -722,20 +734,54 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
         te = rows.get("technical_entry") or {}
         tr = rows.get("trade_risk") or {}
         vf = rows.get("value_floor") or {}
+        # Which measured gates failed — feeds the near-miss table under loose.
+        gates = {
+            name: (rows.get(name) or {}).get("pass")
+            for name in ("value_floor", "technical_entry", "trade_risk", "balance_sheet", "profitability")
+        }
+        missing = [n for n, ok in gates.items() if ok is False]
         return {
             "candidate": bool(setup.get("candidate")),
             "fcf_yield": vf.get("fcf_yield"),
             "rsi": te.get("rsi"),
             "pct_b": te.get("pct_b"),
             "stop_pct": tr.get("stop_pct"),
+            "gates": gates,
+            "missing": missing,
             "reasons": setup.get("reasons") or [],
         }
     except Exception:  # noqa: BLE001 - a failed value-dip read must not abort a run
         return None
 
 
-def _cheap_gate(ohlcv: dict, scan: str) -> bool | None:
+def _vd_near_miss_row(vd: dict, symbol: str) -> dict:
+    """Compact near-miss row for a failed loose value-dip read.
+
+    ``dist`` is a distance-to-entry proxy: how far each oversold signal sits
+    from its threshold (0 when satisfied), used to rank the near-miss table.
+    """
+    rv = vd.get("rsi")
+    pb = vd.get("pct_b")
+    dist = 0.0
+    if rv is not None and rv > 35.0:
+        dist += rv - 35.0
+    if pb is not None and pb > 0.10:
+        dist += pb - 0.10
+    return {
+        "ticker": symbol,
+        "rsi": rv,
+        "pct_b": pb,
+        "stop_pct": vd.get("stop_pct"),
+        "fcf_yield": vd.get("fcf_yield"),
+        "missing": vd.get("missing") or [],
+        "dist": dist,
+    }
+
+
+def _cheap_gate(ohlcv: dict, scan: str, loose: bool = False) -> bool | None:
     """Two-stage gate, stage A: a PURE OHLCV-only pre-filter (no provider).
+
+    ``loose`` relaxes the value-dip technical entry to OR (harvest mode).
 
     Returns:
       - False  -> definitively NOT a candidate -> drop before any fundamentals
@@ -770,7 +816,7 @@ def _cheap_gate(ohlcv: dict, scan: str) -> bool | None:
         return bool(vc.get("candidate"))
     # value-dip: reuse the existing cheap technical prefilter (RSI/%b/stop).
     if scan == "value-dip":
-        return _value_dip_technical_prefilter(ohlcv)
+        return _value_dip_technical_prefilter(ohlcv, loose)
     # swing: trend stack is pure OHLCV (RS uses the shared cached benchmark).
     if scan == "swing":
         try:
@@ -1203,6 +1249,14 @@ def main(argv: list[str] | None = None) -> int:
         "(default: keep all, flag strategies)",
     )
     parser.add_argument(
+        "--value-dip-loose",
+        action="store_true",
+        help="value-dip: relax the technical entry to RSI<=35 OR %%b<=0.10 "
+        "(vs AND) so the harvest catches names with only one oversold signal; "
+        "also emits a ranked near-miss table (up to 50) showing which gate "
+        "each near candidate missed. Strict AND by default.",
+    )
+    parser.add_argument(
         "--out-dir",
         default="screener",
         help="folder for the saved watchlist markdown (finish timestamp)",
@@ -1238,6 +1292,7 @@ def main(argv: list[str] | None = None) -> int:
     mover_meta: dict = {}
     float_cache: dict = {}
     scan_meta: dict = {}
+    near_miss: list[dict] = []
     _RUN_OHLCV_CACHE.clear()
     _RUN_FLOAT_CACHE.clear()
     _BENCHMARK_CACHE.clear()
@@ -1428,13 +1483,18 @@ def main(argv: list[str] | None = None) -> int:
                         # fetch (statements + cashflow, ~6 moomoo calls) for
                         # them. This drops the gating pass from ~7 vendor
                         # calls/symbol to 1 for the non-candidates.
-                        if not _value_dip_technical_prefilter(ohlcv):
+                        if not _value_dip_technical_prefilter(ohlcv, loose=args.value_dip_loose):
                             continue
                         fin = _fetch_fin_cached(symbol, args.date)
-                        vd = _value_dip_scan(symbol, ohlcv, fin, args.date)
+                        vd = _value_dip_scan(symbol, ohlcv, fin, args.date, loose=args.value_dip_loose)
                         if vd is not None:
                             scan_meta[symbol]["value_dip"] = vd
                         if not (vd and vd.get("candidate")):
+                            # Only real evaluations (the matrix produced
+                            # gates) belong in the near-miss table; a no-data
+                            # read renders n/a, never a fabricated "miss".
+                            if args.value_dip_loose and vd and "gates" in vd:
+                                near_miss.append(_vd_near_miss_row(vd, symbol))
                             continue
                     if args.min_avg_vol:
                         vols = ohlcv["volumes"][-30:]
@@ -1481,6 +1541,7 @@ def main(argv: list[str] | None = None) -> int:
             from tradingagents.dataflows.eodhd import (
                 NoMarketDataError,
                 VendorRateLimitError,
+                get_exchange_symbols_eodhd,
                 get_top_movers_symbols_eodhd,
             )
 
@@ -1492,13 +1553,36 @@ def main(argv: list[str] | None = None) -> int:
             gated = [m for m in movers if m.get("symbol")]
             if not gated:
                 parser.error("no symbols after eodhd-losers feed gate")
+            # Equity filter: the bulk feed carries no name/type, so warrants,
+            # units and ETFs dominate the biggest-decliner list. Cross-check
+            # against the EODHD exchange-symbol common-stock set (one cached
+            # call) and keep only genuine common stocks; degrade to the
+            # unfiltered list if the reference call fails (never abort).
+            try:
+                common_set = {
+                    str(s.get("Code")).upper()
+                    for s in get_exchange_symbols_eodhd("US")
+                    if s.get("Type") == "Common Stock" and s.get("Code")
+                }
+            except Exception:  # noqa: BLE001 - reference unavailability degrades
+                common_set = set()
+            if common_set:
+                before = len(gated)
+                gated = [m for m in gated if m["symbol"] in common_set]
+                logger.info(
+                    "eodhd-losers equity filter: %d -> %d (common stocks)",
+                    before,
+                    len(gated),
+                )
+            if not gated:
+                parser.error("no common stocks after eodhd-losers equity filter")
             for m in gated:
                 tickers.append(m["symbol"])
                 if m.get("change_p") is not None:
                     # change_p is percent; DayChg renders as a ratio.
                     mover_meta[m["symbol"]] = {"day_change": m["change_p"] / 100.0}
             logger.info(
-                "eodhd-losers universe: %d symbols from EODHD real-time feed",
+                "eodhd-losers universe: %d common stocks from EODHD real-time feed",
                 len(tickers),
             )
         except (NoMarketDataError, VendorRateLimitError) as exc:
@@ -1537,7 +1621,7 @@ def main(argv: list[str] | None = None) -> int:
                 if ohlcv is None:
                     ohlcv = _fetch_ohlcv(ticker)
                     _RUN_OHLCV_CACHE[sym_up] = ohlcv
-                if not _cheap_gate(ohlcv, args.scan):
+                if not _cheap_gate(ohlcv, args.scan, loose=args.value_dip_loose):
                     logger.info("cheap gate: skip %s (%s)", ticker, args.scan)
                     continue
             # Free price floor from the (already fetched) OHLCV close applies
@@ -1614,7 +1698,7 @@ def main(argv: list[str] | None = None) -> int:
                     ohlcv = _fetch_ohlcv(ticker)
                     _RUN_OHLCV_CACHE[sym] = ohlcv
                 row_scan = _compute_scan_row(
-                    ticker, ohlcv, fin, args.date, args.enable_float
+                    ticker, ohlcv, fin, args.date, args.enable_float, loose=args.value_dip_loose
                 )
                 if args.scan == "trend-pullback" and not row_scan.get("a"):
                     continue
@@ -1628,8 +1712,13 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if args.scan == "vcp" and not (row_scan.get("vcp") or {}).get("candidate"):
                     continue
-                if args.scan == "value-dip" and not (row_scan.get("value_dip") or {}).get("candidate"):
-                    continue
+                if args.scan == "value-dip":
+                    vd_row = row_scan.get("value_dip") or {}
+                    if not vd_row.get("candidate"):
+                        # Only real evaluations belong in the near-miss table.
+                        if args.value_dip_loose and "gates" in vd_row:
+                            near_miss.append(_vd_near_miss_row(vd_row, ticker))
+                        continue
             if args.sector_rank:
                 from tradingagents.strategies.sector_rank import sector_standing
 
@@ -1899,6 +1988,41 @@ def main(argv: list[str] | None = None) -> int:
         if sector_table:
             markdown = markdown.rstrip() + "\n\n" + sector_table
             print(sector_table)
+    # Value-dip loose gate: ranked near-miss table (up to 50) — the names
+    # that passed the relaxed entry but missed another gate, honest about
+    # which gate each failed.
+    if args.value_dip_loose and near_miss:
+        near_miss.sort(key=lambda nm: (len(nm["missing"]), nm["dist"]))
+        near_miss = near_miss[:50]
+        nm_lines = [
+            "\n## Near misses (value-dip loose gate — missing gate)",
+            "",
+            "| Ticker | RSI | %b | Stp% | FCFy | Missing (gate) |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for nm_row in near_miss:
+            nm_lines.append(
+                "| {t} | {rsi} | {pb} | {stp} | {fy} | {miss} |".format(
+                    t=nm_row["ticker"],
+                    rsi=f"{nm_row['rsi']:.1f}" if nm_row["rsi"] is not None else "n/a",
+                    pb=f"{nm_row['pct_b']:.2f}" if nm_row["pct_b"] is not None else "n/a",
+                    stp=(
+                        f"{nm_row['stop_pct'] * 100.0:.1f}%"
+                        if nm_row["stop_pct"] is not None
+                        else "n/a"
+                    ),
+                    fy=(
+                        f"{nm_row['fcf_yield'] * 100.0:.1f}%"
+                        if nm_row["fcf_yield"] is not None
+                        else "n/a"
+                    ),
+                    miss=", ".join(nm_row["missing"]) or "n/a",
+                )
+            )
+        nm_block = "\n".join(nm_lines)
+        markdown = markdown.rstrip() + "\n\n" + nm_block + "\n"
+        print(nm_block)
+        print(f"[screener] {len(near_miss)} value-dip near misses (loose gate)")
     print_watchlist(ranked)
     if alloc_extra:
         print(alloc_extra)

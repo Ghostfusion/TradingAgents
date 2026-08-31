@@ -404,7 +404,10 @@ The EOD plan also unlocks `get_news_eodhd` (news), `get_corporate_actions_eodhd`
 (splits + dividends), `get_exchange_symbols_eodhd` (full US symbol list,
 ~18k common stocks) — the screener's default `--universe eodhd-us` source —
 replacement; `get_top_movers_symbols_eodhd` is the machine-readable symbol
-table behind it, consumed by the screener's `--universe eodhd-losers`).
+table behind it, consumed by the screener's `--universe eodhd-losers`
+(equity-filtered against the exchange-symbol common-stock list).
+`--value-dip-loose` relaxes the value-dip technical entry to RSI<=35 OR
+%b<=0.10 and appends a ranked near-miss table).
 These back the `get_market_snapshot` / `get_top_movers` tools
 when Massive 403s on the free plan.
 Fundamentals/technicals/intraday/options are **not** on the EOD plan (they
@@ -635,7 +638,8 @@ preserves `Risk Gate (computed)` blocks.
   `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision` `--inst-accum`
   `--intraday` `--enrich-sector` `--enrich-rev` `--enrich-inst` `--scan`
   (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
-  `--out-dir` `--rank` `--enable-float` `--journal` `--alloc`.
+  `--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`
+  `--alloc`.
 - action_report.py: `--basket` (SYM=W,SYM=W override; default config
   `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`
   `--llm` (judge UNKNOWN conditions) `--json` `--dry-run` `--out-dir`

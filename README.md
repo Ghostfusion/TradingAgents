@@ -30,15 +30,17 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-08-31] **`--universe eodhd-losers`** - the value screener can now seed
-  the scan from the EODHD bulk US real-time feed (one call, ~18k rows,
-  OpenD-independent): the biggest intraday decliners by change% are screened
-  first, so value-dip / momentum candidates (RSI/%b oversold, stop <= 2%) are
-  harvested from today's actual dips instead of an alphabetical `eodhd-us`
-  slice. `-n` sets the decliner count (moomoo movers cap at 200; eodhd-losers
-  accepts up to the whole feed); `--price-min` gates on the feed's live close;
-  mcap/PE/ATR gates still run per-symbol. Docs: `Strategies/scan.md` "Universe
-  sources".
+- [2026-08-31] **`--universe eodhd-losers` + `--value-dip-loose`** - the value
+  screener can now seed the scan from the EODHD bulk US real-time feed (one
+  call, ~18k rows, OpenD-independent): the biggest intraday decliners by
+  change% are screened first (equity-filtered against the exchange-symbol
+  common-stock list, so warrants/ETFs don't dominate the seed), harvesting
+  value-dip/momentum candidates from today's actual dips instead of an
+  alphabetical `eodhd-us` slice. `--value-dip-loose` relaxes the value-dip
+  entry to `RSI<=35 OR %b<=0.10` and appends a ranked near-miss table naming
+  the gate each near candidate missed. `-n` sets the decliner count; `--price-min`
+  gates on the feed's live close; mcap/PE/ATR gates still run per-symbol.
+  Docs: `Strategies/scan.md` "Universe sources" + "The value-dip".
 - [2026-08-30] **Two-stage screener gating** - every OHLCV-capable scan mode
   (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) now runs a
   **cheap OHLCV-only gate (Stage A)** on the single cached price series before
@@ -793,8 +795,13 @@ python scripts/value_screener.py -u eodhd-losers -n 500 --scan value-dip -d 2026
 US feed (`-n` up to the whole feed; moomoo movers cap at 200), applies
 `--price-min` on the feed's live close, and runs the same per-symbol
 mcap/PE/ATR gates + two-stage scan afterwards. The feed rows carry price +
-change only (no name/mcap/type), so ETF/ETN rows are not name-filtered at seed
-time — the per-symbol gates handle them.
+change only (no name/mcap/type), so the seed is **equity-filtered** against
+the EODHD exchange-symbol common-stock list (one cached call) — warrants /
+units / leveraged ETFs, which dominate the intraday losers, are dropped before
+the scan (degrades to the unfiltered list if the reference call fails).
+Adding `--value-dip-loose` relaxes the value-dip entry to `RSI<=35 OR %b<=0.10`
+(was AND) and appends a ranked **near-miss table** naming the gate each near
+candidate missed — the daily practical watchlist, honestly labelled.
 
 Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
 many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
