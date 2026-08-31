@@ -6,7 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
-## [Unreleased]
+### Added
+
+- **Risk calculations wired into the decision agents** (`docs/design_risk_calculations_agent_wiring.md`,
+  7-phase audit implementation): (1) the 18 quant-risk tools that were
+  registered in the market ToolNode but unreachable by the LLM are now bound
+  to the market analyst (horizon-VaR, downside, trailing exit, risk-parity,
+  normality, unit-root, CAPM, rotation, Clenow, omega, correlation,
+  scale-out, sentiment-computed, curve surfaces, movers, variance premium);
+  (2) 12 new `@tool`s wrap previously-untooled deterministic calculators:
+  `get_fixed_risk_size` (commission/tranche-aware sizer), `get_exit_overrides`
+  (two-pass drawdown/trail liquidations), `get_pre_trade_read` (notional +
+  rate gates), `get_ledger_risk_state` (memory win-rate + paper-reviewer
+  record), `get_trade_plan` (the plan card as a callable), `get_fixed_income_risk`
+  (preferred YTM/duration/DV01/convexity), `get_pair_risk` (cointegration +
+  Granger), `get_vif_read`, `get_vol_cones`, `get_trade_excursions`
+  (MAE/MFE/profit-factor), `get_alpha_scoring` (magnitude-scored alpha),
+  `get_regime_gate_read` (knife guard); (3) `get_risk_gate` now exposes the
+  FULL governor surface (book cap, daily-loss budget, high-water-mark tiers,
+  sector cap, tranche capital-at-risk, liquidity verdict, halt); (4) the
+  Trader / PM / 3 risk debators' `computed_decision_context` gained a risk
+  factsheet (limits registry, vol estimates, tranche peak-deployed +
+  capital-at-risk, fixed-risk size); (5) the 3 risk debators run an in-node
+  risk-tool loop (`agents/utils/risk_tool_loop.py`, 23 tools, capped at 8
+  rounds, degrades to plain invocation when the provider cannot bind tools);
+  (6) the Trader runs a 12-tool verification pass after its structured
+  proposal; (7) cross-binds: news analyst gets credit-stress + news-sentiment,
+  fundamentals gets fixed-income + alpha-scoring, Research Manager + Bull/Bear
+  researchers get the computed context. Web: value-tools surface gains
+  vol-cones / trade-plan / ledger-risk-state / regime-gate / fixed-income-risk.
+  Tests: `tests/test_risk_agent_wiring.py` (22 hermetic).
 
 ### Fixed
 

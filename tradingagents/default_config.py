@@ -334,17 +334,6 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # (primary, EOD plan entitled); AV NEWS_SENTIMENT (25 req/day tail);
             # GDELT native tone (keyless, flaky, ~3-month window) last.
             "news_sentiment": "eodhd,alpha_vantage,gdelt",
-            # News-sentiment factor overlay (opt-in, default OFF): the position
-            # scale multiplies by 1 +- max_scale only when the name's measured
-            # rank IC clears the floor; otherwise neutral 1.0 (never blocks).
-            "enable_sentiment_factor": False,
-            "sentiment_factor_min_ic": 0.02,
-            "sentiment_factor_max_scale": 0.2,
-            "sentiment_factor_min_scale": 0.5,
-            # Volatility estimator for the strategy-overlay sizing/regime path:
-            # close (default) | ewma | garch (close-series only). Parkinson /
-            # Garman-Klass need OHLC and are exposed as analyst tools instead.
-            "volatility_estimator": "close",
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
             "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
@@ -436,10 +425,17 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "catalyst_hard_block_days": 0,  # >0: REJECT new risk within N calendar
         #   days of a scheduled earnings print (framework Phase-4 hard rule)
         "enable_reflection": True,  # Phase 5: post-trade analyst critique
-        "enable_sentiment": True,  # Phase 6: sentiment velocity (computed score + surprise velocity injected into the sentiment report)
-        "enable_strategy_overlays": True,  # graph overlay wiring (regime/sizing/context)
-        "enable_orderflow": False,  # L1-L4: capital-flow signals + flow-scaled sizing
-        "orderflow_distribution_threshold": 0.7,
+        # News-sentiment factor overlay (News_Sentiment.md): position scale
+        # x 1 ± max_scale ONLY when the name's measured rank IC >= min_ic
+        # (else neutral 1.0, never blocks). Volatility estimator for the
+        # overlay sizing/regime path: close (default) | ewma | garch
+        # (close-series only); Parkinson / Garman-Klass need OHLC and are
+        # exposed as analyst tools instead.
+        "enable_sentiment_factor": False,
+        "sentiment_factor_min_ic": 0.02,
+        "sentiment_factor_max_scale": 0.2,
+        "sentiment_factor_min_scale": 0.5,
+        "volatility_estimator": "close",
         # Decision hardening (decision_hardening_spec.md): compute, don’t narrate.
         "enable_position_contract": False,  # G1: deterministic size/stop
         "risk_per_trade": 0.01,  # risk budget per trade (G1)

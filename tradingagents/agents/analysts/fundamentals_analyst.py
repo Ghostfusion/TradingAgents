@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_allocation,
+    get_alpha_scoring,
     get_analyst_ratings,
     get_analyst_verdict,
     get_balance_sheet,
@@ -18,6 +19,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_earnings_surprise,
     get_earnings_surprise_history,
     get_fcf_yield,
+    get_fixed_income_risk,
     get_form4_insider,
     get_fundamentals,
     get_income_statement,
@@ -75,6 +77,8 @@ def create_fundamentals_analyst(llm):
             get_decline_driver_check,
             get_ownership_concentration,
             get_value_floors,
+            get_fixed_income_risk,
+            get_alpha_scoring,
         ]
 
         system_message = (
@@ -91,6 +95,7 @@ def create_fundamentals_analyst(llm):
             + " You also have two Step-1 fundamental-dip gates: `get_balance_sheet_health(ticker, current_date)` returns the balance-sheet health (debt/equity < 1.0 OR current ratio > 1.5) - cite it before any 'low leverage / strong balance sheet' claim; `get_decline_driver_check(ticker, current_date)` returns the negative-force screen (clean / caution / structural) - if it says 'structural', the dip is company-specific (fraud/distress, deeply negative momentum, negative FCF/ROE, severe EPS decline) and the value-dip setup should be rejected, not bought."
             + " You also have a structural-value tool: `get_value_floors(ticker, current_date)` returns the Graham Number, NCAV (net-net) and Earnings Power Value (EPV) floors - cite it (or its explicit 'unavailable') before any 'cheap on assets / below book / earnings-power floor' claim; it is the asset/earnings-backed cheapness floor beyond DCF/MoS/FCF yield."
             + " You also have an ownership tool: `get_ownership_concentration(ticker, current_date)` returns the free-float factor (IWF = float / total shares; < 0.5 = structural passive under-allocation) and, when a per-holder breakdown is available, the Herfindahl-Hirschman index (HHI; > 2500 = highly concentrated governance risk) per Strategies/risk2.md - cite it (or its explicit 'unavailable') before any 'widely held / concentrated ownership / index-eligible' claim."
+            + " You also have income/outcome tools: `get_fixed_income_risk(ticker, years=...)` returns the indicated yield and - only when a call/redemption horizon is inferable - YTM, Macaulay/modified duration, DV01 and convexity for bond-like preferreds (a perpetual renders YTM n/a, never a fake yield) - cite it before any 'yield / duration / income risk' claim on a preferred; `get_alpha_scoring(direction, predicted_magnitude, period_days, actual_return, confidence)` scores a past insight's direction + magnitude accuracy ('I said +12%, realized +2%') for the journal/reflection - use it to audit past calls, not to invent a track record."
             + get_language_instruction() + get_output_budget("analyst"),
         )
 

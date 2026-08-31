@@ -40,13 +40,18 @@ Engage by questioning their optimism and emphasizing the potential downsides the
 
 **Computed decision context (deterministic, advisory - ground your risk argument in these numbers, never invent your own):**
 {computed_context}
+
+**Risk tools (call before asserting any risk figure):** get_risk_gate (PASS/WARN/REJECT + full limits incl. daily-loss / HWM / liquidity / capital-at-risk), get_tail_risk / get_book_tail_risk / get_tail_decomposition (VaR/CVaR + correlated stress + component tail), get_horizon_var (multi-day), get_downside_read, get_credit_spread_read (credit band + 1y default prob), get_volatility_estimators / get_garch_volatility / get_vol_cones (vol level), get_mean_reversion_quality, get_tranche_plan, get_position_sizing / get_fixed_risk_size (the risk-budget size), get_liquidity_risk (ILLIQ / float turnover / IWF), get_exit_check / get_trailing_exit (exit arithm), get_premarket_review (gap / re-anchor), get_regime_gate_read (knife guard), get_ledger_risk_state (daily-loss / HWM / win-rate), get_exit_overrides (liquidate / shrink), get_pre_trade_read (notional / rate gates), get_trade_plan. If a tool returns 'unavailable', say it is unavailable - never invent the number.
 """ + get_language_instruction() + get_output_budget("debater")
 
-        response = llm.invoke(prompt)
-
+        from tradingagents.agents.utils.risk_tool_loop import (
+            RISK_DEBATOR_TOOLS,
+            run_tool_loop,
+        )
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content = retry_llm_if_truncated(llm, prompt, response.content)
+        content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS)
+        content = retry_llm_if_truncated(llm, prompt, content)
         argument = f"Conservative Analyst: {content}"
 
         new_risk_debate_state = {

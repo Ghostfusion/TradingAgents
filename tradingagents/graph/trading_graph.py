@@ -40,6 +40,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_snapshot,
     get_massive_news,
     get_news,
+    get_news_sentiment,
     get_options_chain,
     get_prediction_markets,
     get_revenue_breakdown,
@@ -57,6 +58,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.analysis_tools import (
     get_allocation,
+    get_alpha_scoring,
     get_analyst_verdict,
     get_basic_financials,
     get_beat_miss_sizing,
@@ -79,6 +81,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_exit_check,
     get_exit_plan,
     get_extended_indicators,
+    get_fixed_income_risk,
     get_form4_insider,
     get_gap_type,
     get_garch_volatility,
@@ -125,6 +128,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_trailing_exit,
     get_treasury_curve,
     get_unit_root,
+    get_variance_premium,
     get_volatility_contraction,
     get_volatility_estimators,
     screen_equities,
@@ -436,6 +440,7 @@ class TradingAgentsGraph:
                     get_treasury_curve,
                     screen_equities,
                     get_market_movers,
+                    get_variance_premium,
                 ]
             ),
             "social": ToolNode(
@@ -451,6 +456,7 @@ class TradingAgentsGraph:
                     get_news,
                     get_massive_news,
                     get_gdelt_sentiment,
+                    get_news_sentiment,
                     get_news_sentiment_series,
                     get_global_news,
                     get_insider_transactions,
@@ -468,6 +474,7 @@ class TradingAgentsGraph:
                     get_catalyst_scale,
                     get_earnings_event_read,
                     get_beat_miss_sizing,
+                    get_credit_spread_read,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -508,6 +515,8 @@ class TradingAgentsGraph:
                     get_decline_driver_check,
                     get_value_floors,
                     get_ownership_concentration,
+                    get_fixed_income_risk,
+                    get_alpha_scoring,
                 ]
             ),
         }
@@ -1396,6 +1405,98 @@ class TradingAgentsGraph:
             if line.endswith(": "):
                 line += "no CVaR measured"
             out.append(line)
+        except Exception:  # noqa: BLE001
+            pass
+        # Risk factsheet (Phase-3 audit wiring): limits registry + vol
+        # estimates + tranche capital-at-risk + fixed-risk size. All pure /
+        # best-effort; every number is computed or explicit 'unavailable'.
+        try:
+            if self.config.get("enable_risk_governor"):
+                from tradingagents.strategies.risk_governor import default_limits
+
+                lim = default_limits(self.config)
+                out.append(
+                    "Computed limits registry (advisory): "
+                    f"max_position={lim['max_position_pct']:.0%} "
+                    f"book_cap={lim['max_book_position_pct']:.0%} "
+                    f"cvar_budget={lim['risk_daily_cvar_budget_pct']:.1%} "
+                    f"drawdown_limit={lim['risk_max_drawdown_pct']:.0%} "
+                    f"sector_cap={self.config.get('sector_cap_limit', 0.35):.0%}"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import math
+
+            if closes and len(closes) >= 60:
+                rets = []
+                for i in range(1, len(closes)):
+                    if closes[i - 1] > 0:
+                        rets.append(math.log(closes[i] / closes[i - 1]))
+                from tradingagents.strategies.volatility_models import (
+                    ewma_vol,
+                    garch11_fit,
+                )
+
+                mean = sum(rets) / len(rets)
+                var = sum((r - mean) ** 2 for r in rets) / max(1, len(rets) - 1)
+                close_vol = math.sqrt(var) * math.sqrt(252)
+                ew = ewma_vol(rets)
+                gc = garch11_fit(rets)
+                lr = gc.get("long_run_vol") if gc else None
+                line = f"Computed vol estimates (advisory): close_vol={close_vol:.1%}"
+                if ew is not None:
+                    line += f" ewma={ew:.1%}"
+                if lr is not None:
+                    line += f" garch_long_run={lr:.1%}"
+                out.append(line)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.config.get("enable_tranche_risk") and closes:
+                from tradingagents.strategies.value_dip import tranche_risk_read
+
+                tr = tranche_risk_read(
+                    closes,
+                    weights=tuple(self.config.get("tranche_weights") or (0.3, 0.3, 0.4)),
+                    stop_mult=float(self.config.get("tranche_stop_mult", 1.5)),
+                    risk_pct=float(self.config.get("tranche_risk_pct", 0.015)),
+                    account=float(self.config.get("tranche_account", 100000.0)),
+                    max_position_pct=float(self.config.get("max_position_pct", 0.30)),
+                    max_book_position_pct=self.config.get("risk_max_position_pct"),
+                )
+                if tr.get("valid"):
+                    out.append(
+                        "Computed tranche risk (worst-case scale-in, advisory): "
+                        f"peak_deployed={tr['peak_deployed_pct']:.1%} "
+                        f"capital_at_risk={tr['capital_at_risk_pct']:.2%} "
+                        f"avg_entry={tr.get('avg_entry')} stop={tr.get('stop')}"
+                    )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.config.get("enable_risk_governor") and closes and closes[-1] > 0:
+                from tradingagents.strategies.contract import _atr_or_proxy
+                from tradingagents.strategies.risk_sizing import risk_money
+
+                atr_v = _atr_or_proxy(closes, None, None, window=14)
+                if atr_v and atr_v > 0:
+                    entry = float(closes[-1])
+                    stop = entry - 2.0 * atr_v
+                    if stop > 0:
+                        shares = risk_money(
+                            entry,
+                            stop,
+                            float(self.config.get("tranche_account", 100000.0)),
+                            float(self.config.get("risk_per_trade", 0.01)),
+                            commission_rate=0.0,
+                        )
+                        out.append(
+                            "Computed fixed-risk size (advisory): "
+                            f"{shares:.0f} units at {entry:.2f} with a "
+                            f"2-ATR stop {stop:.2f} (risk {self.config.get('risk_per_trade', 0.01):.1%} "
+                            f"of {self.config.get('tranche_account', 100000.0):,.0f} account)"
+                        )
         except Exception:  # noqa: BLE001
             pass
         # D2 drift/alpha-decay monitor hint (cheap, from the strategy-quality

@@ -297,6 +297,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - Risk-calc to agent wiring (7-phase audit,
+  `docs/design_risk_calculations_agent_wiring.md`): 18 previously-unreachable
+  quant-risk tools bound to the market analyst; 12 new @tools (`get_fixed_risk_size`,
+  `get_exit_overrides`, `get_pre_trade_read`, `get_ledger_risk_state`,
+  `get_trade_plan`, `get_fixed_income_risk`, `get_pair_risk`, `get_vif_read`,
+  `get_vol_cones`, `get_trade_excursions`, `get_alpha_scoring`,
+  `get_regime_gate_read`); `get_risk_gate` now covers the full governor surface
+  (daily-loss/HWM/sector/liquidity/capital-at-risk/halt); the computed
+  decision context gained a risk factsheet (limits registry, vol estimates,
+  tranche peak-deployed + capital-at-risk, fixed-risk size); the 3 risk
+  debators run an in-node 23-tool risk loop and the Trader a 12-tool
+  verification pass (`agents/utils/risk_tool_loop.py`, capped at
+  MAX_TOOL_ROUNDS, plain-invocation fallback when the provider cannot bind
+  tools); news analyst gains credit-stress + news-sentiment, fundamentals
+  gains fixed-income + alpha-scoring, RM + bull/bear researchers get the
+  computed context. Web value-tools += 5 new ticker tools. Tests:
+  `tests/test_risk_agent_wiring.py` (22 hermetic).
 - 2026-08-31 `(working tree)` - Report-truncation fix: interactive runs (SKHY
   08-30/08-31) saved only analysts + bull/bear/research-manager — the graph
   **ended after the Research Manager judge** because `graph/setup.py` had lost

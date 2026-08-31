@@ -567,6 +567,37 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_support_structure(ticker)` | `strategies.value_dip.support_structure` | market | major weekly / multi-month base support + 200-day SMA proximity |
 | `get_decline_driver_check(ticker, date)` | `strategies.value_dip.decline_driver_check` | fundamentals | negative-force screen (clean/caution/structural): trap-HIGH, accruals>6%, negative 12-1m momentum, non-positive FCF/ROE, severe EPS decline |
 
+| `get_regime_gate_read(ticker, catalyst_window?)` | `strategies.regime.regime_gate_read` | market / risk debators | mean-reversion knife guard: vol_pct + fast-downtrend + pass/block verdict |
+| `get_fixed_risk_size(equity, risk_frac, entry, stop_loss, commission_rate?, units?)` | `strategies.risk_sizing` | market / risk debators / trader | commission-aware, tranche-aware fixed-risk share count (the governor-budget sizer) |
+| `get_exit_overrides(targets, state_by_name, max_drawdown_pct?, trail_pct?)` | `strategies.risk_manager.manage_risk` + `trailing_stop_targets` | risk debators | two-pass liquidate/shrink overrides (Lean L1) from persisted entry/peak/current state |
+| `get_pre_trade_read(symbol, notional, max_notional?, max_rate?, window_secs?)` | `strategies.risk_checks.pre_trade_check` + `RateLimiter` + `notional` | risk debators | notional-cap + rolling-rate submission gate (advisory) |
+| `get_ledger_risk_state(ticker)` | memory log + `strategies.pre_market.ledger_track_record` | risk debators | realized win-rate drift + paper-reviewer track record (daily-loss/HWM inputs) |
+| `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable |
+| `get_fixed_income_risk(ticker, years?)` | `strategies.fixed_income` | fundamentals | preferred yield + duration/DV01/convexity risk rows (perpetual YTM n/a) |
+| `get_pair_risk(x, y, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` | market | Engle-Granger cointegration + lag-wise Granger causality |
+| `get_vif_read(columns)` | `strategies.statistical.variance_inflation_factor` | market | per-column VIF (collinearity check; > 5 = HIGH) |
+| `get_vol_cones(ticker)` | `strategies.rotation.vol_cones` | market / risk debators | multi-horizon realized-vol percentiles (5/10/21/63/126d) |
+| `get_trade_excursions(trades)` | `strategies.journal.trade_excursions` | market | MAE / MFE / profit-factor / max intra-trade drawdown (exit quality) |
+| `get_alpha_scoring(direction, predicted_magnitude?, period_days?, actual_return?, confidence?)` | `strategies.alpha_eval.alpha_score` | fundamentals | direction + magnitude-scored alpha ("said +12%, realized +2%") |
+
+### 6.5b Decision-agent wiring (risk debators / Trader / PM / researchers)
+
+- The 3 risk debators (aggressive/conservative/neutral) now run an **in-node
+  risk-tool loop** (`agents/utils/risk_tool_loop.py`): the plain LLM is bound
+  to a 23-tool risk set (gate/tail/liquidity/vol/tranche/sizing/exits/credit/
+  pre-trade/ledger), capped at `MAX_TOOL_ROUNDS` (8), and degrades to a plain
+  invocation when the provider cannot bind tools.
+- The **Trader** runs a 12-tool verification pass after its structured
+  proposal (sizing / exit / tranche / expectancy / plan-card tools).
+- The **Research Manager** and **Bull/Bear researchers** receive the computed
+  decision context (regime gate, plan card, risk snapshot, factsheet).
+- `get_risk_gate` exposes the full governor surface: `book_total_pct`,
+  `daily_loss_pct` (daily-loss budget), `hwm_drawdown_pct` (soft/hard
+  high-water-mark tiers), `sector_pct` (sector cap), `capital_at_risk_pct` /
+  `risk_cap_pct` (tranche capital-at-risk), `liquidity_verdict`, `halted`.
+
+
+
 Every tool follows the no-fabrication contract: exact computed numbers or an
  explicit "unavailable" message (both recorded in the agent's tool history for
  auditability), never an invented value.

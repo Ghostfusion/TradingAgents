@@ -23,6 +23,7 @@ def create_research_manager(llm):
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
+        computed_context = state.get("computed_decision_context") or ""
         # Option-A hybrid: the bull/bear researchers' INDEPENDENT pre-debate
         # reads (sampled before any cross-talk) — an uncontaminated view of
         # how strong each side's case really is, before the adversarial loop
@@ -72,6 +73,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 **Debate History:**
 {history}
 {independent_block}
+
+**Computed decision context (deterministic, advisory - ground the plan's numbers in these, never invent your own):**
+{computed_context}
 
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction() + get_output_budget("research")
 

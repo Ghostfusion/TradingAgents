@@ -30,6 +30,30 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Risk calculations wired into the decision agents** (7-phase
+  audit, `docs/design_risk_calculations_agent_wiring.md`): the 18 quant-risk
+  tools that existed in the market ToolNode but were unreachable by the LLM
+  are now bound (horizon-VaR, downside, trailing exit, risk-parity, normality,
+  unit-root, CAPM, rotation, Clenow, omega, correlation, scale-out, sentiment-
+  computed, curve surfaces, movers, variance premium); 12 new `@tool`s wrap
+  previously-untooled calculators (`get_fixed_risk_size`, `get_exit_overrides`,
+  `get_pre_trade_read`, `get_ledger_risk_state`, `get_trade_plan`,
+  `get_fixed_income_risk`, `get_pair_risk`, `get_vif_read`, `get_vol_cones`,
+  `get_trade_excursions`, `get_alpha_scoring`, `get_regime_gate_read`);
+  `get_risk_gate` now checks the full governor surface (daily-loss budget,
+  high-water-mark tiers, sector cap, tranche capital-at-risk, liquidity
+  verdict); the 3 risk debators run an in-node 23-tool risk loop and the
+  Trader a 12-tool verification pass (`agents/utils/risk_tool_loop.py`, capped
+  at MAX_TOOL_ROUNDS, plain-invocation fallback when the provider cannot bind
+  tools); the computed decision context carries a risk factsheet (limits
+  registry, vol estimates, tranche peak-deployed + capital-at-risk, fixed-risk
+  size); news analyst gains credit-stress + news-sentiment, fundamentals gains
+  fixed-income + alpha-scoring, Research Manager + bull/bear researchers get
+  the computed context. Also moved 5 strategy keys that had been misplaced in
+  `data_vendors` back to top-level config (sentiment-factor overlay +
+  `volatility_estimator` were silently unreachable as defaults). Web
+  value-tools += 5 new ticker tools. Tests: `tests/test_risk_agent_wiring.py`
+  (22 hermetic). See CHANGELOG.
 - [2026-08-31] **Report truncated after Research Manager (missing Trader /
   risk / PM)** - interactive runs (e.g. SKHY 08-30/08-31) saved only the
   analysts + bull/bear/research-manager because the graph **ended after the

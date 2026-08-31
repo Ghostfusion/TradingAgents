@@ -506,23 +506,60 @@ def get_risk_gate(
     size_pct: Annotated[
         float, "proposed position size as a fraction of capital, 0..1 (e.g. 0.10 = 10%)"
     ],
+
     cvar_pct: Annotated[
         float | None, "portfolio-level CVaR (tail loss) as a fraction, if known"
     ] = None,
     drawdown_pct: Annotated[
         float | None, "current realized drawdown as a fraction, if known"
     ] = None,
+    book_total_pct: Annotated[
+        float | None, "current book exposure as a fraction, if known"
+    ] = None,
+    daily_loss_pct: Annotated[
+        float | None, "today's realized loss as a fraction of capital, if known"
+    ] = None,
+    hwm_drawdown_pct: Annotated[
+        float | None, "drawdown from the high-water mark as a fraction, if known"
+    ] = None,
+    capital_at_risk_pct: Annotated[
+        float | None, "worst-case capital-at-risk at the hard stop (tranche fold), if known"
+    ] = None,
+    risk_cap_pct: Annotated[
+        float | None, "capital-at-risk budget (e.g. tranche_risk_pct), if known"
+    ] = None,
+    liquidity_verdict: Annotated[
+        str | None, "composite liquidity verdict: LIQUID | CAUTION | ILLIQUID, if known"
+    ] = None,
+    sector_pct: Annotated[
+        float | None, "current sector exposure as a fraction, if known"
+    ] = None,
+    halted: Annotated[bool, "whether a risk halt is active"] = False,
 ) -> str:
     """House risk-gate verdict for a proposed position (deterministic).
 
     Applies the project's risk governor limits (max_position_pct, book cap,
-    CVaR budget, drawdown limit) to a proposed size and returns PASS / WARN /
-    REJECT with the numeric reasons. Use this when evaluating any proposed size (including the Trader's), instead of asserting a size is 'reasonable' in prose.
+    CVaR budget, drawdown, daily-loss budget, high-water-mark tiers, sector
+    cap, tranche capital-at-risk, liquidity verdict) to a proposed size and
+    returns PASS / WARN / REJECT with the numeric reasons. Use this when
+    evaluating any proposed size (including the Trader's), instead of
+    asserting a size is 'reasonable' in prose.
 
     Args:
         size_pct: the proposed position size (0..1).
         cvar_pct: portfolio tail-loss budget used (optional).
-        drawdown_pct: current drawdown (optional).
+        drawdown_pct: current realized drawdown (optional).
+        book_total_pct: current book exposure (optional; book cap check).
+        daily_loss_pct: session realized loss (optional; daily-loss budget).
+        hwm_drawdown_pct: drawdown from high-water mark (optional; soft/hard
+            de-risk tiers).
+        capital_at_risk_pct: worst-case capital at the hard stop under a
+            tranche scale-in plan (optional).
+        risk_cap_pct: the capital-at-risk budget that bounds it (optional).
+        liquidity_verdict: LIQUID / CAUTION / ILLIQUID (optional; ILLIQUID
+            REJECTs, CAUTION WARNs).
+        sector_pct: current sector exposure (optional; sector cap check).
+        halted: True when a risk halt is active (immediate REJECT).
 
     Returns:
         verdict + numbers snapshot.
@@ -535,23 +572,47 @@ def get_risk_gate(
     verdict = govern(
         size_pct,
         get_config(),
+        book_total_pct=book_total_pct,
         cvar_pct=cvar_pct,
         drawdown_pct=drawdown_pct,
+        daily_loss_pct=daily_loss_pct,
+        hwm_drawdown_pct=hwm_drawdown_pct,
+        sector_pct=sector_pct,
+        halted=halted,
+        capital_at_risk_pct=capital_at_risk_pct,
+        risk_cap_pct=risk_cap_pct,
+        liquidity_verdict=liquidity_verdict,
     )
     if verdict.get("verdict") == "PASS" and not verdict.get("reasons"):
         lines = [f"risk: PASS {size_pct:.1%}"]
     else:
         lines = [
-            build_risk_snapshot(verdict, size_pct, cvar_pct=cvar_pct, drawdown_pct=drawdown_pct)
+            build_risk_snapshot(
+                verdict,
+                size_pct,
+                cvar_pct=cvar_pct,
+                drawdown_pct=drawdown_pct,
+                capital_at_risk_pct=capital_at_risk_pct,
+            )
         ]
+    extra = []
+    if daily_loss_pct is not None:
+        extra.append(f"daily_loss={daily_loss_pct:.2%}")
+    if hwm_drawdown_pct is not None:
+        extra.append(f"hwm_drawdown={hwm_drawdown_pct:.2%}")
+    if book_total_pct is not None:
+        extra.append(f"book_total={book_total_pct:.1%}")
+    if sector_pct is not None:
+        extra.append(f"sector={sector_pct:.1%}")
+    if liquidity_verdict is not None:
+        extra.append(f"liquidity={str(liquidity_verdict).upper()}")
+    if extra:
+        lines.append("inputs: " + "; ".join(extra))
     if verdict.get("reasons"):
         lines.append("reasons: " + "; ".join(verdict["reasons"]))
     return chr(10).join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Regime / VCP / orderflow (market analyst)
-# ---------------------------------------------------------------------------
 
 
 @tool
@@ -3570,6 +3631,599 @@ def get_market_movers(
         return gate
     return route_to_vendor("get_market_movers", kind)
 
+
+
+
+# ---------------------------------------------------------------------------
+# Risk-decision tools (Phase-2 audit wiring): untooled deterministic
+# calculators exposed to the analyst / risk-debator / trader loops. All wrap
+# existing pure strategies functions; every number is computed or explicit
+# "unavailable" - never fabricated, advisory-only.
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_fixed_risk_size(
+    equity: Annotated[float, "account equity in the position currency"],
+    risk_frac: Annotated[float, "risk budget as a fraction of equity, e.g. 0.01"],
+    entry: Annotated[float, "planned entry price"],
+    stop_loss: Annotated[float, "hard stop price"],
+    commission_rate: Annotated[float, "one-way commission rate, default 0"] = 0.0,
+    units: Annotated[int, "tranche count to split into, default 1"] = 1,
+    hard_limit: Annotated[float | None, "max units bound, if any"] = None,
+) -> str:
+    """Commission-aware fixed-risk position size (NautilusTrader R1).
+
+    ``riskable_money = equity * risk_frac / (1 + commission)`` then
+    ``size = riskable_money / |entry - stop|``, optionally capped and split
+    across ``units`` tranches. The exact sizer the risk governor's budget
+    implies - cite its share count before proposing a position size.
+
+    Args:
+        equity: account equity in the position currency.
+        risk_frac: risk budget as a fraction of equity (0..1).
+        entry: planned entry price.
+        stop_loss: hard stop price.
+        commission_rate: one-way commission rate (0 for none).
+        units: tranche count to split the total across.
+        hard_limit: optional max-units bound.
+
+    Returns:
+        total units (and per-tranche) sizing line, or an explicit
+        "unavailable" when the risk distance / equity is unusable.
+    """
+    try:
+        from tradingagents.strategies.risk_sizing import (
+            risk_money,
+            riskable_money,
+        )
+    except Exception as exc:
+        return f"fixed risk size unavailable: {exc}"
+    try:
+        e = float(equity)
+        rf = float(risk_frac)
+        ent = float(entry)
+        st = float(stop_loss)
+    except (TypeError, ValueError):
+        return "fixed risk size unavailable: non-numeric inputs"
+    if e <= 0 or not (0.0 <= rf <= 1.0) or ent <= 0 or st <= 0:
+        return "fixed risk size unavailable: equity/risk/price must be positive"
+    budget = riskable_money(e, rf, commission_rate)
+    qty = risk_money(ent, st, e, rf, commission_rate=commission_rate, hard_limit=hard_limit)
+    n = max(1, int(units))
+    per = (qty / n) if qty and n else 0.0
+    return (
+        f"fixed risk size: total={qty:.0f} units ({n} tranche(s) x {per:.0f}) "
+        f"risk_budget=${budget:,.0f} risk_per_share={abs(ent - st):.2f} "
+        f"entry={ent:.2f} stop={st:.2f} commission={float(commission_rate):.4%}"
+    )
+
+
+@tool
+def get_exit_overrides(
+    targets: Annotated[
+        dict, "current target weight per symbol, e.g. {'AAPL': 0.1}"
+    ],
+    state_by_name: Annotated[
+        dict,
+        "per-symbol state {'entry','peak','current'}, e.g. {'AAPL': {'entry': 100, 'peak': 110, 'current': 103}}",
+    ],
+    max_drawdown_pct: Annotated[float, "drawdown-from-peak override trigger, default 0.05"] = 0.05,
+    trail_pct: Annotated[float, "trailing-stop override trigger, default 0.05"] = 0.05,
+) -> str:
+    """Two-pass position-exit overrides (Lean L1, advisory).
+
+    Evaluates each held name's drawdown-from-peak and peak-trail against the
+    given thresholds and reports which targets would be liquidated (weight 0)
+    by the risk-management pass. Pure read over persisted state - it never
+    touches a position.
+
+    Args:
+        targets: current desired weight per symbol.
+        state_by_name: per-symbol {'entry','peak','current'} state (from the
+            paper ledger).
+        max_drawdown_pct: drawdown-from-peak liquidation trigger.
+        trail_pct: trailing-stop liquidation trigger.
+
+    Returns:
+        override/liquidate lines, or an explicit "unavailable" when no
+        peak/current state exists for a name.
+    """
+    try:
+        from tradingagents.strategies.risk_manager import (
+            manage_risk,
+            trailing_stop_targets,
+        )
+    except Exception as exc:
+        return f"exit overrides unavailable: {exc}"
+    try:
+        targets = dict(targets or {})
+        state_by_name = dict(state_by_name or {})
+        dd = manage_risk(targets, state_by_name, max_drawdown_pct=float(max_drawdown_pct))
+        tr = trailing_stop_targets(targets, state_by_name, trail_pct=float(trail_pct))
+        lines = []
+        if isinstance(dd, str):
+            lines.append(f"drawdown overrides: {dd}")
+        else:
+            o = dd.get("overrides", {})
+            lines.append(
+                "drawdown overrides: " + ("; ".join(f"{k}=0" for k in o) if o else "none")
+            )
+        if isinstance(tr, str):
+            lines.append(f"trailing overrides: {tr}")
+        else:
+            o = tr.get("overrides", {})
+            lines.append(
+                "trailing overrides: " + ("; ".join(f"{k}=0" for k in o) if o else "none")
+            )
+        return chr(10).join(lines)
+    except Exception as exc:
+        return f"exit overrides unavailable: {exc}"
+
+
+@tool
+def get_pre_trade_read(
+    symbol: Annotated[str, "symbol to check"],
+    notional: Annotated[float, "order notional (price * quantity)"],
+    max_notional: Annotated[float | None, "per-symbol notional cap, if any"] = None,
+    max_rate: Annotated[int | None, "max submissions per window, if any"] = None,
+    window_secs: Annotated[float, "rolling window for the rate limit, default 60"] = 60.0,
+) -> str:
+    """Pre-trade submission gate (NautilusTrader R2, advisory).
+
+    Reports whether an order passes the per-symbol notional cap and a
+    rolling-window submission throttle. Pure read over the supplied inputs -
+    it never submits or records anything.
+
+    Args:
+        symbol: the order symbol.
+        notional: order notional (price * quantity).
+        max_notional: per-symbol notional cap (optional).
+        max_rate: max submissions allowed per rolling window (optional).
+        window_secs: the rolling window in seconds (default 60).
+
+    Returns:
+        PASS/REJECT line naming which gate blocked, or "unavailable" on a
+        non-numeric notional.
+    """
+    try:
+        from tradingagents.strategies.risk_checks import pre_trade_check
+    except Exception as exc:
+        return f"pre-trade read unavailable: {exc}"
+    try:
+        notional_v = float(notional)
+    except (TypeError, ValueError):
+        return "pre-trade read unavailable: non-numeric notional"
+    gates = []
+    if max_notional is not None and notional_v > float(max_notional):
+        gates.append(f"notional {notional_v:,.0f} > cap {float(max_notional):,.0f}")
+    limiter = None
+    if max_rate is not None:
+        try:
+            from tradingagents.strategies.risk_checks import RateLimiter
+
+            limiter = RateLimiter(max_count=int(max_rate), window_secs=float(window_secs))
+            if not limiter.allow(0.0):
+                gates.append(f"rate limit {int(max_rate)}/window")
+        except Exception as exc:
+            gates.append(f"rate limiter unavailable ({exc})")
+    ok = pre_trade_check(
+        str(symbol),
+        notional_v,
+        {},
+        max_notional=max_notional,
+        limiter=limiter,
+    )
+    if ok is False and not gates:
+        gates.append("pre-trade gate blocked")
+    verdict = "REJECT - " + "; ".join(gates) if gates else "PASS"
+    cap_txt = f" cap={float(max_notional):,.0f}" if max_notional is not None else ""
+    rate_txt = f" rate={int(max_rate)}/window" if max_rate is not None else ""
+    return f"pre-trade {symbol}: {verdict}; notional={notional_v:,.0f}{cap_txt}{rate_txt}"
+
+
+@tool
+def get_ledger_risk_state(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Daily-loss / HWM / win-rate risk state from the paper + memory ledgers.
+
+    Supplies the governor inputs the analyst LLMs could not see before:
+    realized-win-rate drift (from the memory log) and the paper-book reviewer
+    track record (from the pre-market ledger). Every number is measured or
+    explicit "unavailable".
+
+    Args:
+        ticker: ticker symbol.
+
+    Returns:
+        ledger risk-state lines (win rate, resolved count, paper record).
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+    except Exception as exc:
+        return f"ledger risk state unavailable: {exc}"
+    cfg = get_config()
+    lines = []
+    try:
+        from tradingagents.agents.utils.memory import TradingMemoryLog
+
+        mlog = TradingMemoryLog(cfg.get("memory_log_path") or "")
+        entries = mlog.load_entries()
+        resolved = [e for e in entries if not e.get("pending") and e.get("raw") is not None]
+        if len(resolved) >= 5:
+            wins = sum(1 for e in resolved if float(e["raw"]) > 0)
+            recent = resolved[-8:]
+            rec_wins = sum(1 for e in recent if float(e["raw"]) > 0)
+            lines.append(
+                f"memory ledger: resolved={len(resolved)} win_rate={wins / len(resolved):.0%} "
+                f"recent_win_rate={rec_wins / len(recent):.0%}"
+            )
+        else:
+            lines.append(f"memory ledger: resolved={len(resolved)} (need >= 5 for win-rate)")
+    except Exception as exc:
+        lines.append(f"memory ledger: unavailable ({exc})")
+    try:
+        import os
+
+        from tradingagents.strategies.pre_market import ledger_track_record
+
+        lp = cfg.get("pre_market_ledger_path") or os.path.join(
+            cfg.get("data_cache_dir") or "", "pre_market_ledger.jsonl"
+        )
+        rec = ledger_track_record(str(lp), direction=None)
+        if rec.get("resolved"):
+            lines.append(
+                f"paper reviewer: resolved={rec['resolved']} win_rate={rec['win_rate']:.0%} "
+                f"avg_realized={rec['avg_realized']:+.2%}"
+            )
+        else:
+            lines.append(f"paper reviewer: no resolved rows ({rec.get('count', 0)} total)")
+    except Exception as exc:
+        lines.append(f"paper reviewer: unavailable ({exc})")
+    return chr(10).join(lines) if lines else "ledger risk state: unavailable"
+
+
+@tool
+def get_trade_plan(
+    ticker: Annotated[str, "ticker symbol"],
+    price: Annotated[float | None, "current price if known"] = None,
+) -> str:
+    """The written pre-entry trade plan card (B2).
+
+    Emits the plan card (setup rows, tranche levels, composite stop, tier
+    targets, BE rule, trailing method, invalidation, adherence checklist) that
+    the Trader / PM / risk debators are supposed to argue over - now callable
+    instead of only an injected context string.
+
+    Args:
+        ticker: ticker symbol.
+        price: optional current price anchor.
+
+    Returns:
+        the markdown plan card.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.trade_plan import build_trade_plan
+    except Exception as exc:
+        return f"trade plan unavailable: {exc}"
+    try:
+        cfg = get_config()
+        if price is None:
+            closes = _ohlcv(ticker).get("closes") or []
+            price = closes[-1] if closes else None
+        return build_trade_plan(ticker=ticker, price=price, config=cfg)
+    except Exception as exc:
+        return f"trade plan unavailable: {exc}"
+
+
+@tool
+def get_fixed_income_risk(
+    ticker: Annotated[str, "ticker symbol"],
+    years: Annotated[float | None, "call/redemption horizon in years; omit for a perpetual (YTM=n/a)"] = None,
+) -> str:
+    """Preferred / fixed-income risk rows (quants.md §Fixed Income).
+
+    Indicated yield, and - only when a call/redemption horizon is inferable -
+    yield-to-maturity, Macaulay/modified duration, DV01 and convexity. A
+    perpetual with no horizon renders YTM/duration n/a (never a fake YTM).
+
+    Args:
+        ticker: ticker symbol.
+        years: optional call/redemption horizon in years.
+
+    Returns:
+        dividend-yield row + YTM/duration/DV01/convexity lines (or n/a).
+    """
+    try:
+        from tradingagents.strategies.fixed_income import (
+            bond_convexity,
+            dv01,
+            indicated_yield,
+            macaulay_duration,
+            modified_duration,
+            preferred_ytm,
+        )
+    except Exception as exc:
+        return f"fixed income risk unavailable: {exc}"
+    try:
+        import re as _re
+
+        from tradingagents.dataflows.interface import route_to_vendor
+
+        fund = route_to_vendor("get_fundamentals", ticker, "") or ""
+        div = None
+        price = None
+        m = _re.search(r"dividend[_ ]?rate[^:]*:[^\d]*([0-9.]+)", fund, _re.I)
+        if m:
+            div = float(m.group(1))
+        m2 = _re.search(r"(?:current|last)[_ ]?price[^:]*:[^\d]*([0-9.]+)", fund, _re.I)
+        if m2:
+            price = float(m2.group(1))
+        if div is None or price is None or price <= 0:
+            return f"fixed income risk {ticker}: dividend/price unavailable (n/a)"
+        iy = indicated_yield(div, price)
+        lines = [f"fixed income risk {ticker}: indicated_yield={iy:.2%} price={price:.2f}"]
+        if years is not None and float(years) > 0:
+            ytm = preferred_ytm(div, price, 100.0, float(years))
+            cashflows = [{"t": float(years), "amount": price * float(years)}]
+            mac = macaulay_duration(cashflows, iy / 100.0)
+            mod = modified_duration(mac, iy / 100.0) if mac else None
+            d01 = dv01(mod, price) if mod else None
+            cv = bond_convexity(cashflows, iy / 100.0)
+            lines.append(f"  ytm={ytm:.2%}" if ytm is not None else "  ytm=n/a")
+            lines.append(f"  macaulay={mac:.2f}y" if mac is not None else "  macaulay=n/a")
+            lines.append(f"  modified={mod:.2f}" if mod is not None else "  modified=n/a")
+            lines.append(f"  dv01={d01:.4f}" if d01 is not None else "  dv01=n/a")
+            lines.append(f"  convexity={cv:.2f}" if cv is not None else "  convexity=n/a")
+        else:
+            lines.append("  ytm=n/a (perpetual; pass a call/redemption horizon to compute)")
+        return chr(10).join(lines)
+    except Exception as exc:
+        return f"fixed income risk unavailable: {exc}"
+
+
+@tool
+def get_pair_risk(
+    x: Annotated[list, "first series (e.g. closes of the anchor)"],
+    y: Annotated[list, "second series (e.g. closes of the pair)"],
+    maxlag: Annotated[int, "max lag for the Granger test, default 3"] = 3,
+) -> str:
+    """Pair risk: cointegration + Granger causality (OpenBB Q5).
+
+    Engle-Granger cointegration (ADF on the residual) and lag-wise Granger
+    causality for the pair - the mean-reversion/lead-lag risk read the single
+    name tools cannot give.
+
+    Args:
+        x: first aligned series.
+        y: second aligned series.
+        maxlag: max Granger lag.
+
+    Returns:
+        cointegration + Granger lines, or "unavailable" below min observations.
+    """
+    try:
+        from tradingagents.strategies.statistical import (
+            cointegration_pair,
+            granger_causality,
+        )
+    except Exception as exc:
+        return f"pair risk unavailable: {exc}"
+    try:
+        xs = [float(v) for v in (x or [])]
+        ys = [float(v) for v in (y or [])]
+    except (TypeError, ValueError):
+        return "pair risk unavailable: non-numeric series"
+    if len(xs) < 20 or len(ys) < 20:
+        return f"pair risk unavailable: need >= 20 aligned obs (got {min(len(xs), len(ys))})"
+    c = cointegration_pair(xs, ys, maxlag=max(1, int(maxlag)))
+    g = granger_causality(xs, ys, maxlag=max(1, int(maxlag)))
+    lags = [(r.get("lag"), r.get("p_value")) for r in g.get("lags", [])]
+    reminder = "; ".join(f"lag{lag_row[0]}={lag_row[1]}" for lag_row in lags) if lags else "n/a"
+    return (
+        f"pair risk: cointegrated={c.get('cointegrated')} n={c.get('n')} "
+        f"beta={c.get('beta')} residual_adf={c.get('residual_adf_stat')}"
+        f" | granger(x->y): {g.get('x_causes_y')} [{reminder}]"
+    )
+
+
+@tool
+def get_vif_read(
+    columns: Annotated[dict, "name -> aligned series dict, e.g. {'mom': [...], 'rsi': [...]}"],
+) -> str:
+    """Multicollinearity check (OpenBB Q2): VIF per factor column.
+
+    Regresses each column on the others; VIF > 5 flags a collinear factor the
+    LLM should not stack with its peers. None for < 3 columns or a singular
+    fit.
+
+    Args:
+        columns: dict of factor name -> aligned series.
+
+    Returns:
+        per-column VIF + high flags, or "unavailable" below 3 columns.
+    """
+    try:
+        from tradingagents.strategies.statistical import variance_inflation_factor
+    except Exception as exc:
+        return f"vif read unavailable: {exc}"
+    try:
+        cols = {k: [float(v) for v in (s or [])] for k, s in (columns or {}).items()}
+    except (TypeError, ValueError):
+        return "vif read unavailable: non-numeric columns"
+    cols = {k: v for k, v in cols.items() if len(v) >= 10}
+    if len(cols) < 3:
+        return f"vif read unavailable: need >= 3 columns with >= 10 obs (got {len(cols)})"
+    v = variance_inflation_factor(cols)
+    rows = v.get("columns", {}) if isinstance(v, dict) else {}
+    if not rows:
+        return "vif read unavailable: singular fit / no result"
+    lines = []
+    for name, info in rows.items():
+        if isinstance(info, dict):
+            vif = info.get("vif")
+            high = bool(info.get("high", False))
+        else:
+            vif = info
+            high = bool(vif is not None and vif > 5)
+        if vif is not None:
+            lines.append(f"vif {name}: {vif:.1f} {'HIGH>5' if high else 'ok'}")
+        else:
+            lines.append(f"vif {name}: n/a")
+    return chr(10).join(lines) if lines else "vif read unavailable"
+
+
+@tool
+def get_vol_cones(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Realized-volatility cones: multi-horizon percentiles (OpenBB Q8).
+
+    Current realized vol vs its own p25/p50/p75 per horizon (5/10/21/63/126d,
+    annualized) - the "is today's vol cheap or expensive" read.
+
+    Args:
+        ticker: ticker symbol.
+
+    Returns:
+        per-window current/p25/p50/p75 vol lines.
+    """
+    try:
+        from tradingagents.strategies.rotation import vol_cones
+    except Exception as exc:
+        return f"vol cones unavailable: {exc}"
+    try:
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 140:
+            return f"vol cones unavailable for {ticker}: need >= 140 bars ({len(closes)})"
+        cones = vol_cones(closes)
+        lines = [f"vol cones {ticker} (annualized):"]
+        for win, band in sorted((cones or {}).items(), key=lambda kv: int(kv[0])):
+            lines.append(
+                f"  {win}d: current={band.get('current'):.1%} "
+                f"p25={band.get('p25'):.1%} p50={band.get('p50'):.1%} p75={band.get('p75'):.1%}"
+            )
+        return chr(10).join(lines)
+    except Exception as exc:
+        return f"vol cones unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_trade_excursions(
+    trades: Annotated[list, "trade rows: {'entry_price','exit_price','low','high'}"],
+) -> str:
+    """Exit-quality: MAE / MFE / profit-factor / max intra-trade drawdown (Lean L5).
+
+    Rows without an entry/exit/OHLC path contribute only the counts they can
+    support - no number is fabricated.
+
+    Args:
+        trades: list of trade dicts with entry_price/exit_price and ideally
+            low/high (the holding OHLC path).
+
+    Returns:
+        MAE/MFE/profit-factor/max-intra-drawdown lines.
+    """
+    try:
+        from tradingagents.strategies.journal import trade_excursions
+    except Exception as exc:
+        return f"trade excursions unavailable: {exc}"
+    try:
+        rows = [dict(r) for r in (trades or [])]
+    except (TypeError, ValueError):
+        return "trade excursions unavailable: trades must be a list of dicts"
+    if not rows:
+        return "trade excursions unavailable: no trades"
+    s = trade_excursions(rows)
+    return (
+        f"trade excursions: n={s.get('n')} "
+        f"avg_mae={s.get('avg_mae')} largest_mae={s.get('largest_mae')} "
+        f"avg_mfe={s.get('avg_mfe')} largest_mfe={s.get('largest_mfe')} "
+        f"profit_factor={s.get('profit_factor')} "
+        f"max_intra_trade_drawdown={s.get('max_intra_trade_drawdown')}"
+    )
+
+
+@tool
+def get_alpha_scoring(
+    direction: Annotated[str, "'up'/'long' or 'down'/'short'"],
+    predicted_magnitude: Annotated[float | None, "predicted return magnitude over the horizon"] = None,
+    period_days: Annotated[int | None, "horizon in days"] = None,
+    actual_return: Annotated[float | None, "realized return over the horizon"] = None,
+    confidence: Annotated[float | None, "decision confidence, if any"] = None,
+) -> str:
+    """Magnitude + horizon-scored alpha (Lean L7).
+
+    Scores one insight against its realized outcome: directional hit, magnitude
+    error ("I said +12%, realized +2%"), and a magnitude-scaled score. Pure
+    read; no ledger writes.
+
+    Args:
+        direction: 'up'/'long' or 'down'/'short'.
+        predicted_magnitude: predicted return magnitude over the horizon.
+        period_days: horizon in days.
+        actual_return: realized return over the horizon.
+        confidence: optional decision confidence.
+
+    Returns:
+        hit / magnitude-error / score / horizon-ok line.
+    """
+    try:
+        from tradingagents.strategies.alpha_eval import alpha_score
+    except Exception as exc:
+        return f"alpha scoring unavailable: {exc}"
+    if actual_return is None:
+        return "alpha scoring unavailable: actual_return required"
+    s = alpha_score(
+        direction,
+        predicted_magnitude if predicted_magnitude is not None else None,
+        period_days,
+        float(actual_return),
+        confidence=confidence,
+    )
+    return (
+        f"alpha scoring: hit={s.get('hit')} magnitude_err={s.get('magnitude_err')} "
+        f"score={s.get('score')} horizon_ok={s.get('horizon_ok')} n=1"
+    )
+
+
+@tool
+def get_regime_gate_read(
+    ticker: Annotated[str, "ticker symbol"],
+    catalyst_window: Annotated[bool, "treat an open catalyst window as blocking, default False"] = False,
+) -> str:
+    """Mean-reversion regime gate (A1): the knife-guard verdict.
+
+    Mirrors the context line the decision agents see: vol_pct, fast-downtrend
+    and the pass/block verdict for mean-reversion entries. Callable so the
+    risk debators can re-derive it with their own catalyst-window choice.
+
+    Args:
+        ticker: ticker symbol.
+        catalyst_window: when True, an open catalyst window blocks the entry.
+
+    Returns:
+        verdict + vol/downtrend reasons line.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.regime import regime_gate_read
+    except Exception as exc:
+        return f"regime gate read unavailable: {exc}"
+    try:
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 60:
+            return f"regime gate read unavailable for {ticker}: need >= 60 bars ({len(closes)})"
+        rg = regime_gate_read(closes, cfg=get_config(), catalyst_window=bool(catalyst_window)) or {}
+        return (
+            f"regime gate {ticker}: verdict={rg.get('verdict')} pass={rg.get('pass')} "
+            f"vol_pct={rg.get('vol_pct')} fast_downtrend={rg.get('fast_downtrend')} "
+            f"reasons={'; '.join(rg.get('reasons') or [])}"
+        )
+    except Exception as exc:
+        return f"regime gate read unavailable for {ticker}: {exc}"
 
 __all__ = [
     "get_sector_rank",

@@ -2,46 +2,61 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_bollinger_pct_b,
+    get_book_correlation,
     get_book_tail_risk,
     get_candlestick_patterns,
     get_capital_flow,
+    get_capm_risk,
+    get_clenow_momentum,
     get_credit_spread_read,
     get_crypto_prices,
     get_dip_technical,
+    get_downside_read,
     get_exit_check,
+    get_exit_plan,
     get_expected_move,
     get_extended_indicators,
     get_gap_type,
     get_garch_volatility,
+    get_horizon_var,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
     get_liquidation_days,
     get_liquidity_risk,
     get_macd_divergence,
+    get_market_movers,
     get_market_snapshot,
     get_mean_reversion_quality,
     get_mean_reversion_tech,
     get_momentum_detail,
     get_news_sentiment_series,
+    get_normality,
     get_opening_range,
     get_options_chain,
+    get_options_surface,
     get_order_imbalance,
     get_orderflow_read,
     get_output_budget,
+    get_payoff_asymmetry,
     get_position_sizing,
     get_post_close_confirmation,
     get_premarket_liquidity,
     get_premarket_review,
     get_regime_components,
     get_regime_read,
+    get_relative_rotation,
     get_relative_strength,
     get_risk_gate,
+    get_risk_parity_alloc,
+    get_scaleout_plan,
     get_sector_rank,
+    get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
     get_short_interest,
     get_short_volume,
+    get_sofr_curve,
     get_stock_data,
     get_strategy_quality,
     get_support_structure,
@@ -52,7 +67,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_technical_factors,
     get_top_movers,
     get_trade_expectancy,
+    get_trailing_exit,
     get_tranche_plan,
+    get_treasury_curve,
+    get_unit_root,
+    get_variance_premium,
     get_vdu_entry_setup,
     get_verified_market_snapshot,
     get_volatility_contraction,
@@ -127,6 +146,25 @@ def create_market_analyst(llm):
             get_expected_move,
             get_momentum_scan,
             get_market_snapshot_alpaca,
+            get_book_correlation,
+            get_capm_risk,
+            get_clenow_momentum,
+            get_downside_read,
+            get_exit_plan,
+            get_horizon_var,
+            get_market_movers,
+            get_normality,
+            get_options_surface,
+            get_payoff_asymmetry,
+            get_relative_rotation,
+            get_risk_parity_alloc,
+            get_scaleout_plan,
+            get_sentiment_computed,
+            get_sofr_curve,
+            get_trailing_exit,
+            get_treasury_curve,
+            get_unit_root,
+            get_variance_premium,
         ]
 
         system_message = (
@@ -213,6 +251,26 @@ You also have value-dip computed tools (the Value Dip + Swing hybrid):
 - get_macd_divergence(ticker) - the Daily RSI(14) / MACD-histogram momentum divergence read (bullish-divergence / higher-low / lower-low-confirmation). Use it before any 'bullish divergence / momentum turning / reversal support' claim.
 - get_vdu_entry_setup(ticker) - the Step-2 entry ladder: volume dry-up near support -> divergence/higher-low -> trigger candle (close above prior high, RVOL >= 1.3x). Use its candidate before proposing an active swing entry out of an oversold dip.
 - get_support_structure(ticker) - the major-support read (multi-month base low, 200-day SMA proximity, holding above base). Use it before any 'at major support / near the 200-day / multi-month base' claim.
+
+
+You also have quant-risk / distribution / book tools - use these numbers as ground truth, do not re-derive them:
+- get_horizon_var(ticker, horizon_days, alpha) - multi-day VaR/CVaR (sqrt-T scaling, gated on autocorrelation). Use before any 'over the next N days the risk is...' claim.
+- get_downside_read(ticker, target=...) - semi-deviation / downside deviation / shortfall probability / avg shortfall vs a target. Use before any 'downside risk' claim.
+- get_trailing_exit(ticker, entry, peak, current, trail_pct) - peak-trailing / give-back exit arithm (Lean L4). Use before any 'trail the stop / give back gains' claim.
+- get_exit_plan(entry, atr, current, peak=..., stop=..., giveback_pct=...) - the structure/R breakeven trigger + margin-giveback stop in one exit-management read. Use when managing an open position.
+- get_scaleout_plan(entry, stop, t1_fraction) - tiered partial-profit plan (sell T1 -> break-even -> trail). Use when proposing profit-taking.
+- get_risk_parity_alloc(ticker, returns_by_name) - risk-parity / min-variance weights + per-name risk contributions over a book. Use before any 'risk-parity / risk-budget allocation' claim.
+- get_payoff_asymmetry(ticker, returns=...) - the Omega ratio (gains/losses payoff asymmetry about a threshold).
+- get_book_correlation(returns_by_name, method=...) - full pairwise correlation matrix over a book (avg + max pair). Use before any 'diversification / correlation' claim.
+- get_capm_risk(ticker, benchmark=...) - CAPM decomposition: beta, systematic (R2) and idiosyncratic risk. Use before any 'beta / market risk / idiosyncratic' claim.
+- get_normality(ticker) - Jarque-Bera / Shapiro-Wilk / KS normality tests on returns. Use before any 'fat tails / normal regime' claim.
+- get_unit_root(ticker) - ADF/KPSS stationarity tests on the close series. Use before any 'mean-reverting vs trending price process' claim.
+- get_relative_rotation(ticker, benchmark=...) - RRG quadrant (leading/weakening/lagging/improving) vs a benchmark. Use before any 'rotation / sector leadership' claim.
+- get_clenow_momentum(ticker) - Clenow trend-quality momentum (log-slope x R2, penalizes noise). Use before any 'trend persistence' claim.
+- get_sentiment_computed(ticker) - the computed StockTwits score + surprise velocity (z vs baseline). Use it (not raw counts) before any 'social sentiment is shifting' claim.
+- get_sofr_curve(current_date) / get_treasury_curve(current_date) - risk-free term structures for any discounting / rate claim; DISABLED until the config flag is on.
+- get_market_movers(kind) - the day's gainers/losers/active list for breadth framing.
+- get_variance_premium(ticker) - the fair variance-swap strike vs current IV (the event-vol premium). Use before any 'vol is expensive/cheap into the event' claim.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

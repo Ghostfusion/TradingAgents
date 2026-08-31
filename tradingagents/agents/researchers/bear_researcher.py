@@ -17,6 +17,7 @@ def create_bear_researcher(llm):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
+        computed_context = state.get("computed_decision_context") or ""
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
         fundamentals_label = (
@@ -45,6 +46,9 @@ Latest world affairs news: {news_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.
+
+**Computed decision context (deterministic, advisory - ground every number you cite in these; never invent your own):**
+{computed_context}
 """ + get_language_instruction() + get_output_budget("debater")
 
         response = llm.invoke(prompt)
