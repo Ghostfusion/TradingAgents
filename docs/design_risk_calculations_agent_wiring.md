@@ -1,7 +1,13 @@
 # Risk Calculations → Virtual Agents: Audit + Implementation Plan
 
-**Status:** audit done against the current working tree (2026-08-31); plan
-only — no code changed.
+**Status:** audit done against the current working tree (2026-08-31) →
+**implemented** (all 7 phases shipped in commit `344fe59`: tool-binding
+repairs, 12 new tools, full-surface `get_risk_gate`, decision-context risk
+factsheet, in-node risk-debator + trader tool loops, cross-binds, web mirror
+`trading_web` `0ea0fe0`; tests `tests/test_risk_agent_wiring.py`, 22
+hermetic; full suite 1957 passed). Sections 4-8 below are the audit record +
+the implementation plan that landed; any open question in these sections was
+resolved during implementation per the plan's decisions.
 **Goal:** feed as many deterministic risk calculations as possible to the
 agents that make the risk decision (the 3 risk debators, the Trader, the
 Portfolio Manager), plus any other virtual agent that argues about risk
