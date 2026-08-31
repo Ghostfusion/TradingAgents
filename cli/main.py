@@ -56,6 +56,64 @@ from tradingagents.reporting import write_report_tree
 
 console = Console()
 
+# Nerd Font icons (nf-fa Private Use Area codepoints) for the TUI. On by
+# default; set TRADINGAGENTS_NERDFONT=0 when the terminal font lacks these
+# glyphs (they would render as boxes) — every surfaces falls back to the
+# plain word/name form then.
+_USE_NERD_FONT = os.environ.get("TRADINGAGENTS_NERDFONT", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
+_NERD_GLYPHS = {
+    "chart": "\uf080",  # nf-fa-bar_chart
+    "play": "\uf04b",  # nf-fa-play
+    "pending": "\uf111",  # nf-fa-circle_o
+    "done": "\uf00c",  # nf-fa-check
+    "error": "\uf00d",  # nf-fa-times
+    "users": "\uf0c0",  # nf-fa-users
+    "flask": "\uf0c3",  # nf-fa-flask
+    "line_chart": "\uf201",  # nf-fa-line_chart
+    "shield": "\uf132",  # nf-fa-shield
+    "briefcase": "\uf0b1",  # nf-fa-briefcase
+}
+
+_TEAM_GLYPHS = {
+    "Analyst Team": "users",
+    "Research Team": "flask",
+    "Trading Team": "line_chart",
+    "Risk Management": "shield",
+    "Portfolio Management": "briefcase",
+}
+
+_STATUS_GLYPHS = {
+    "pending": "pending",
+    "in_progress": "play",
+    "completed": "done",
+    "error": "error",
+}
+
+
+def _glyph(key: str) -> str:
+    """Nerd Font icon for ``key``; empty string when the toggle is off."""
+    return _NERD_GLYPHS[key] if _USE_NERD_FONT else ""
+
+
+def _status_label(status: str) -> str:
+    """Status word with a leading Nerd Font icon (plain word when off)."""
+    if not _USE_NERD_FONT:
+        return status
+    return f"{_glyph(_STATUS_GLYPHS.get(status, 'pending'))} {status}"
+
+
+def _team_label(team: str) -> str:
+    """Team name with a leading Nerd Font icon (plain name when off)."""
+    if not _USE_NERD_FONT:
+        return team
+    return f"{_glyph(_TEAM_GLYPHS.get(team, 'users'))} {team}"
+
 # prompt_toolkit's win32 output module is importable only on Windows (it asserts
 # the platform at import time), so gate on the platform rather than catching the
 # failure — that way a genuinely broken prompt_toolkit on Windows still surfaces
@@ -294,7 +352,11 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         Panel(
             "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
             "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
+            title=(
+                f"{_glyph('chart')} Welcome to TradingAgents"
+                if _USE_NERD_FONT
+                else "Welcome to TradingAgents"
+            ),
             border_style="green",
             padding=(1, 2),
             expand=True,
@@ -342,7 +404,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         status = message_buffer.agent_status.get(first_agent, "pending")
         if status == "in_progress":
             spinner = Spinner(
-                "dots", text="[blue]in_progress[/blue]", style="bold cyan"
+                "dots",
+                text=f"[blue]{_status_label('in_progress')}[/blue]",
+                style="bold cyan",
             )
             status_cell = spinner
         else:
@@ -351,8 +415,10 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
                 "completed": "green",
                 "error": "red",
             }.get(status, "white")
-            status_cell = f"[{status_color}]{status}[/{status_color}]"
-        progress_table.add_row(team, first_agent, status_cell)
+            status_cell = (
+                f"[{status_color}]{_status_label(status)}[/{status_color}]"
+            )
+        progress_table.add_row(_team_label(team), first_agent, status_cell)
 
         # Add remaining agents in team
         for agent in agents[1:]:
@@ -512,7 +578,18 @@ def get_user_selections(symbol: str | None = None):
     welcome_content = f"{welcome_ascii}\n"
     welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
     welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
+    if _USE_NERD_FONT:
+        workflow_steps = (
+            f"{_glyph('users')} I. Analyst Team → {_glyph('flask')} II. Research Team → "
+            f"{_glyph('line_chart')} III. Trader → {_glyph('shield')} IV. Risk Management → "
+            f"{_glyph('briefcase')} V. Portfolio Management"
+        )
+    else:
+        workflow_steps = (
+            "I. Analyst Team → II. Research Team → III. Trader → "
+            "IV. Risk Management → V. Portfolio Management"
+        )
+    welcome_content += workflow_steps + "\n\n"
     welcome_content += (
         "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
     )
@@ -522,7 +599,11 @@ def get_user_selections(symbol: str | None = None):
         welcome_content,
         border_style="green",
         padding=(1, 2),
-        title="Welcome to TradingAgents",
+        title=(
+            f"{_glyph('chart')} Welcome to TradingAgents"
+            if _USE_NERD_FONT
+            else "Welcome to TradingAgents"
+        ),
         subtitle="Multi-Agents LLM Financial Trading Framework",
     )
     console.print(Align.center(welcome_box))

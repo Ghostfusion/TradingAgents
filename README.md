@@ -541,7 +541,8 @@ Launch the interactive CLI:
 tradingagents          # installed command
 python -m cli.main     # alternative: run directly from source
 ```
-You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
+
+The TUI renders Nerd Font icons (status, team, header glyphs) when the terminal font supports them. Set `TRADINGAGENTS_NERDFONT=0` in `.env` to fall back to plain text/ASCII for terminals without a Nerd Font.
 
 ### Markets and tickers
 

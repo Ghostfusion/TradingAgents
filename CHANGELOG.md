@@ -9,6 +9,12 @@ Breaking changes within the 0.x line are called out explicitly.
 ## [Unreleased]
 
 ### Added
+
+- **CLI Nerd Font icons** - the interactive TUI's status cells, team column,
+  header/welcome titles and workflow-steps line render Nerd Font (nf-fa) glyphs
+  when the terminal font supports them (`TRADINGAGENTS_NERDFONT` defaults on;
+  set `0`/`false`/`off` for a plain-text fallback). Pure display change, no run
+  behavior. (`cli/main.py`, README CLI section.)
 - **News/sentiment providers (Phases A-C)** - three additive sources, per the
   free-tier research:
   - `dataflows/gdelt.py` - GDELT DOC 2.0 (keyless, free). `get_news_gdelt`
