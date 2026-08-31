@@ -10,7 +10,12 @@ deterministic verdict ties-breaks disagreements (design §4.5).
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
+from tradingagents.agents.researchers.structured_debate import (
+    SECTION_CHANNEL,
+    SECTION_ROLES,
+)
 from tradingagents.agents.schemas import L2JudgeDimensionedRubric
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
 from tradingagents.agents.utils.structured import bind_structured
@@ -37,7 +42,7 @@ def _build_judge_prompt(
     candidates: list[dict],
     claim_ledger_md: str,
 ) -> str:
-    """Anonymized, order-rotated judge prompt from two candidate dicts.
+    """Anonymized, order-rotated judge prompt from N candidate dicts.
 
     Each candidate dict: {alias, thesis, claims, risk_factors, allocation}.
     """
@@ -65,20 +70,26 @@ def _build_judge_prompt(
 
 
 def anonymize_and_rotate(
-    bull_turn: dict, bear_turn: dict, seed: int = 0
+    turn_by_role: dict[str, dict], roles: Sequence[str], seed: int = 0
 ) -> list[dict]:
-    """Strip identities + shuffle presentation order.
+    """Strip identities + shuffle presentation order for N roles.
+
+    Args:
+        turn_by_role: {role: DebaterTurnPayload dict} for the round.
+        roles: ordered role list (research: bull/bear; risk: aggressive/
+            conservative/neutral).
+        seed: rotation seed (odd = reverse presentation order).
 
     Returns ``[{alias, thesis, claims, risk_factors, allocation}, ...]`` with
-    stable aliases Candidate_X/Y; the rotation is seeded so tests are
-    deterministic.
+    stable aliases Candidate_X/Y/...; rotation deterministic for tests.
     """
-    flip = (seed % 2) == 1
-    order = ("bear", "bull") if flip else ("bull", "bear")
-    alias_map = {role: f"Candidate_{'X' if i == 0 else 'Y'}" for i, role in enumerate(order)}
+    order = list(roles)
+    if (seed % 2) == 1:
+        order.reverse()
+    alias_map = {role: f"Candidate_{chr(ord('X') + i)}" for i, role in enumerate(order)}
     out = []
     for role in order:
-        t = bull_turn if role == "bull" else bear_turn
+        t = turn_by_role.get(role) or {}
         out.append(
             {
                 "alias": alias_map[role],
@@ -107,26 +118,28 @@ def aggregate_scores(rubric, candidates: list[dict]) -> dict:
     return out
 
 
-def create_debate_judge(judge_llm):
+def create_debate_judge(judge_llm, section: str = "research"):
     """Graph node factory for the L2 judge.
 
     ``judge_llm`` is the resolved judge model (deep tier by default). The
     node reads the structured debate state, anonymizes+rotates the latest
-    round's paylods, invokes the dimensioned rubric via the dual-mode
-    adapter, and writes per-side aggregate scores + the rubric into
-    ``debate_state``.
+    round's N payloads, invokes the dimensioned rubric via the dual-mode
+    adapter, and writes per-side aggregate scores + the rubric into the
+    section's channel (``debate_state`` for research, ``structured_risk_state``
+    for risk).
     """
+    channel = SECTION_CHANNEL[section]
+    roles = SECTION_ROLES[section]
     structured_llm = bind_structured(judge_llm, L2JudgeDimensionedRubric, "Debate Judge")
 
     def judge_node(state) -> dict:
-        debate_state = state.get("debate_state") or {}
+        debate_state = state.get(channel) or {}
         round_records = debate_state.get("round_records") or []
         if not round_records:
-            return {"debate_state": {**debate_state, "judge_scores": {}, "judge_rubric": None}}
+            return {channel: {**debate_state, "judge_scores": {}, "judge_rubric": None}}
         latest = round_records[-1]
-        bull_turn = latest.get("bull") or {}
-        bear_turn = latest.get("bear") or {}
-        candidates = anonymize_and_rotate(bull_turn, bear_turn)
+        turn_by_role = {r: latest.get(r) or {} for r in roles}
+        candidates = anonymize_and_rotate(turn_by_role, roles)
         prompt = _build_judge_prompt(
             len(round_records),
             candidates,
@@ -159,7 +172,7 @@ def create_debate_judge(judge_llm):
             "judge_scores": side_scores,
             "judge_rubrics": rubrics,
         }
-        return {"debate_state": new_state}
+        return {channel: new_state}
 
     return judge_node
 

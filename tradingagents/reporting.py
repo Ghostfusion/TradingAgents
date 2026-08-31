@@ -571,6 +571,35 @@ def write_report_tree(
                         prepend_block(_finalize_section(readable)), encoding="utf-8"
                     )
                     risk_parts.append((name, _finalize_section(readable)))
+        # Structured risk-debate evidence (direction.md parity): judge scores
+        # per anonymized candidate + grounded claim ledger + L1 verdict from
+        # the structured_risk_state channel. Mirrors the research block.
+        sr = final_state.get("structured_risk_state") or {}
+        if sr.get("judge_scores") or sr.get("claim_ledger_md") or sr.get("l1"):
+            risk_dir.mkdir(exist_ok=True)
+            sd_lines = ["## Structured risk-debate evidence (deterministic)"]
+            l1 = sr.get("l1")
+            if l1:
+                sd_lines.append(
+                    f"- L1 verdict: {l1.get('severity_tier', '?')} / "
+                    f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')}, "
+                    f"penalty={l1.get('penalty_score', 0)})"
+                )
+            judge = sr.get("judge_scores") or {}
+            for alias, agg in judge.items():
+                sd_lines.append(
+                    f"- {alias}: mean {agg.get('mean', '-')} "
+                    f"(scores: {agg.get('scores', {})})"
+                )
+            if sr.get("claim_ledger_md"):
+                sd_lines.append(sr["claim_ledger_md"])
+            evidence = _finalize_section(
+                _readable_section("\n".join(sd_lines), role="Portfolio Manager")
+            )
+            (risk_dir / "structured_risk_debate.md").write_text(
+                evidence, encoding="utf-8"
+            )
+            risk_parts.append(("Structured risk-debate evidence", evidence))
         if risk_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts

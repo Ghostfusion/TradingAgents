@@ -53,7 +53,17 @@ def create_research_manager(llm):
                 "debate's conclusion is):\n" + "\n".join(rows)
             )
 
-        prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
+        # Structured-debate judge evidence (direction.md item 6): the L2 judge
+        # verdict + L1 deterministic triage feed the Research Manager alongside
+        # the bull/bear prose. Advisory — absent when the structured path did
+        # not run or produced no judge output.
+        from tradingagents.agents.researchers.structured_debate import (
+            render_judge_evidence,
+        )
+
+        judge_block = render_judge_evidence(state.get("debate_state") or {})
+
+        prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader., your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
 {instrument_context}
 
@@ -73,6 +83,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 **Debate History:**
 {history}
 {independent_block}
+{judge_block}
 
 **Computed decision context (deterministic, advisory - ground the plan's numbers in these, never invent your own):**
 {computed_context}

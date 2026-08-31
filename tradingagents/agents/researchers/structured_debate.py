@@ -9,9 +9,9 @@ rejected turns fall back to the pre-debate independent stances (baseline).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from tradingagents.agents.schemas import DebaterTurnPayload
+from tradingagents.agents.schemas import DebaterTurnPayload, RiskDebaterTurnPayload
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
 from tradingagents.agents.utils.structured import bind_structured
 from tradingagents.strategies.debate_claim import ClaimLedger, ClaimRecord, verify_claim
@@ -26,6 +26,24 @@ from tradingagents.strategies.debate_score import (
 logger = logging.getLogger(__name__)
 
 # debate_state channel keys
+# Section tables: research = legacy bull/bear chain; risk = the three
+# debators, generalized to the same structured machinery (direction.md).
+SECTION_ROLES = {
+    "research": ("bull", "bear"),
+    "risk": ("aggressive", "conservative", "neutral"),
+}
+SECTION_CHANNEL = {
+    "research": "debate_state",
+    "risk": "structured_risk_state",
+}
+# Prose channel mirrors the legacy keys the RM/PM/reporting consume: the
+# structured risk debaters append to risk_debate_state.history exactly like
+# the legacy prose debators did.
+SECTION_PROSE = {
+    "research": "investment_debate_state",
+    "risk": "risk_debate_state",
+}
+
 ROUND_RECORDS = "round_records"
 SCORE_SERIES = "score_series"
 CLAIM_LEDGER = "claim_ledger"
@@ -45,7 +63,14 @@ _EOL = "\n"
 def render_turn_prose(role: str, payload: DebaterTurnPayload) -> str:
     """Render a structured turn into the legacy debate prose the Research
     Manager / Trader already parse (heading + grounded-claim bullets)."""
-    label = "Bull Analyst" if role == "bull" else "Bear Analyst"
+    _LABELS = {
+        "bull": "Bull Analyst",
+        "bear": "Bear Analyst",
+        "aggressive": "Aggressive Analyst",
+        "conservative": "Conservative Analyst",
+        "neutral": "Neutral Analyst",
+    }
+    label = _LABELS.get(role, role.title())
     lines = [f"{label}: {payload.core_thesis}"]
     for c in payload.quantitative_claims:
         lines.append(
@@ -72,8 +97,9 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         if asset_type == "stock"
         else "Asset fundamentals report (may be unavailable for crypto)"
     )
-    ds = state.get("debate_state") or {}
-    inv = state.get("investment_debate_state") or {}
+    section = "risk" if role in SECTION_ROLES["risk"] else "research"
+    ds = state.get(SECTION_CHANNEL[section]) or {}
+    inv = state.get(SECTION_PROSE[section]) or {}
     ctx_or = state.get("instrument_context") or ""
     head = [
         f"You are the {stance} debater for the {target_label}. Your structured turn MUST be a reproducible argument:",
@@ -82,6 +108,9 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         "- risk_factors (LOW/MEDIUM/HIGH/CRITICAL) with mitigation_stated",
         "- recommended_allocation_pct (0..100)",
     ]
+    risk_ctx = ""
+    if role in SECTION_ROLES["risk"]:
+        risk_ctx = f"Trader's proposal: {state.get('trader_investment_plan', '')}"
     body = [
         f"Resources: {ctx_or}",
         f"Market: {state.get('market_report', '')}",
@@ -90,6 +119,7 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         f"{fund_label}: {state.get('fundamentals_report', '')}",
         f"Computed decision context (advisory): {state.get('computed_decision_context') or ''}",
         f"Debate history: {inv.get('history', '')}",
+        risk_ctx,
         f"Claim ledger: {ds.get(CLAIM_LEDGER_MD, '')}",
     ]
     return _EOL.join(head + body)
@@ -151,20 +181,36 @@ def ground_truth_from_state(state: dict) -> dict[str, float]:
                 break
     return gt
 
-def create_debater_turn(role: str, llm, *, ground_truth: Callable) -> Callable:
-    """Node factory: one structured debater turn (dual-mode adapter)."""
-    structured_llm = bind_structured(llm, DebaterTurnPayload, f"{role.title()} Debater")
+def _section_for_role(role: str) -> str:
+    """Which section (research/risk) owns a debater role."""
+    return "risk" if role in SECTION_ROLES["risk"] else "research"
+
+
+def create_debater_turn(
+    role: str, llm, *, ground_truth: Callable, section: str | None = None
+) -> Callable:
+    """Node factory: one structured debater turn (dual-mode adapter).
+
+    ``section`` selects the state channels: "research" keeps the legacy
+    ``debate_state`` + ``investment_debate_state``; "risk" uses the new
+    ``structured_risk_state`` + ``risk_debate_state`` so the risk debate
+    mirrors the research one without touching the legacy risk prose keys
+    (reporting/PM keep consuming ``risk_debate_state.history``).
+    """
+    section = section or _section_for_role(role)
+    channel = SECTION_CHANNEL[section]
+    prose_channel = SECTION_PROSE[section]
+    schema = RiskDebaterTurnPayload if section == "risk" else DebaterTurnPayload
+    structured_llm = bind_structured(llm, schema, f"{role.title()} Debater")
 
     def turn_node(state: dict) -> dict:
-        ds = dict(state.get("debate_state") or {})
+        ds = dict(state.get(channel) or {})
         round_records = list(ds.get(ROUND_RECORDS) or [])
-        inv = dict(state.get("investment_debate_state") or {})
+        inv = dict(state.get(prose_channel) or {})
         prompt = build_turn_prompt(state, role, role.upper())
-        payload, err = invoke_structured_turn(
-            structured_llm, llm, prompt, DebaterTurnPayload
-        )
+        payload, err = invoke_structured_turn(structured_llm, llm, prompt, schema)
         if payload is None:
-            payload = DebaterTurnPayload(
+            payload = schema(
                 round_index=len(round_records) + 1,
                 stance=role.upper(),
                 core_thesis="No structured turn produced: " + str(err),
@@ -185,24 +231,50 @@ def create_debater_turn(role: str, llm, *, ground_truth: Callable) -> Callable:
         new_inv["current_response"] = prose
         new_inv[role + "_history"] = (inv.get(role + "_history", "") + _EOL + prose)
         new_inv["count"] = int(inv.get("count", 0)) + 1
-        return {"debate_state": ds, "investment_debate_state": new_inv}
+        if section == "risk":
+            # The risk prose TypedDict consumers (PM, reporting) index the
+            # per-role keys DIRECTLY; an early L1 termination (consensus /
+            # plateau / regen-abort) can skip roles, so prime every legacy
+            # key with a default and keep latest_speaker current.
+            for _k in (
+                "aggressive_history",
+                "conservative_history",
+                "neutral_history",
+                "current_aggressive_response",
+                "current_conservative_response",
+                "current_neutral_response",
+            ):
+                new_inv.setdefault(_k, "")
+            new_inv["latest_speaker"] = role.title()
+        out = {channel: ds, prose_channel: new_inv}
+        return out
 
     return turn_node
 
 
-def create_debate_l1(ground_truth: Callable, cfg: dict | None = None) -> Callable:
-    """Node factory: pure L1 claim verification + severity triage + termination."""
+def create_debate_l1(
+    ground_truth: Callable, cfg: dict | None = None, section: str = "research"
+) -> Callable:
+    """Node factory: pure L1 claim verification + severity triage + termination.
+
+    ``section`` picks the channel (debate_state / structured_risk_state) and
+    the round-complete role (bear for research, neutral for risk).
+    """
     cfg = cfg or {}
+    roles = SECTION_ROLES[section]
+    channel = SECTION_CHANNEL[section]
+    final_role = roles[-1]
 
     def l1_node(state: dict) -> dict:
-        ds = dict(state.get("debate_state") or {})
+        ds = dict(state.get(channel) or {})
         round_records = list(ds.get(ROUND_RECORDS) or [])
         if not round_records:
-            return {"debate_state": {**ds, TERMINATED: True, REASON: "no turns"}}
-        role = ds.get(LAST_SIDE, "bull")
+            return {channel: {**ds, TERMINATED: True, REASON: "no turns"}}
+        role = ds.get(LAST_SIDE, roles[0])
         latest = round_records[-1].get(role) or {}
+        schema = RiskDebaterTurnPayload if section == "risk" else DebaterTurnPayload
         try:
-            payload = DebaterTurnPayload.model_validate(latest)
+            payload = schema.model_validate(latest)
         except Exception as exc:  # noqa: BLE001 - schema fail = hard breach
             new_ds = dict(ds)
             new_ds[L1_KEY] = {
@@ -214,7 +286,7 @@ def create_debate_l1(ground_truth: Callable, cfg: dict | None = None) -> Callabl
             }
             new_ds[TERMINATED] = True
             new_ds[REASON] = "schema hard breach; baseline fallback"
-            return {"debate_state": new_ds}
+            return {channel: new_ds}
 
         claims = claim_records_from_turn(payload, role, len(round_records))
         ledger = ClaimLedger.from_dict(ds.get(CLAIM_LEDGER) or [])
@@ -239,28 +311,36 @@ def create_debate_l1(ground_truth: Callable, cfg: dict | None = None) -> Callabl
         if severity.get("l1_action") == TRIGGER_REGEN:
             new_ds[PENDING_REGEN] = role
             new_ds[REGEN_COUNT] = int(ds.get(REGEN_COUNT, 0)) + 1
-            return {"debate_state": new_ds}
+            return {channel: new_ds}
         if severity.get("l1_action") == ABORT_TO_BASELINE:
             new_ds[TERMINATED] = True
             new_ds[REASON] = "L1 hard breach; baseline fallback"
-            return {"debate_state": new_ds}
+            return {channel: new_ds}
 
         # Full round (both sides) verified: score + termination check.
-        if role == "bear" and round_records:
-            _complete_round(new_ds, ledger, cfg)
-        return {"debate_state": new_ds}
+        if role == final_role and round_records:
+            _complete_round(new_ds, ledger, cfg, roles)
+        return {channel: new_ds}
 
     return l1_node
 
 
-def _complete_round(ds: dict, ledger: ClaimLedger, cfg: dict) -> None:
-    """Score the completed round and decide continuation (design §4.3/4.4)."""
+def _complete_round(
+    ds: dict, ledger: ClaimLedger, cfg: dict, roles: Sequence[str]
+) -> None:
+    """Score the completed round and decide continuation (design §4.3/4.4).
+
+    Generalized to N roles: research (bull, bear) and risk
+    (aggressive, conservative, neutral) share the identical scoring math.
+    """
     round_no = len(ds.get(ROUND_RECORDS) or [])
     prior = ds.get(SCORE_SERIES) or []
-    prior_claims = ledger.previous_claims("bull", round_no)
-    bull_q = [c for c in ledger.by_role("bull") if c.kind == "quantitative"]
-    bear_q = [c for c in ledger.by_role("bear") if c.kind == "quantitative"]
-    all_q = bull_q + bear_q
+    prior_claims = ledger.previous_claims(roles[0], round_no)
+    all_q = [
+        c
+        for c in ledger.rows
+        if c.kind == "quantitative" and c.role in roles
+    ]
     verifs = [
         {"is_valid": c.claim_id not in _violated_ids(ds)}
         for c in all_q
@@ -304,20 +384,61 @@ def _violated_ids(ds: dict) -> set:
     return out
 
 
+def render_judge_evidence(ds: dict) -> str:
+    """Render the structured-debate judge evidence block for the section's
+    consumer (Research Manager / Portfolio Manager).
+
+    Advisory, deterministic: the L1 severity verdict (side known) plus the
+    blind L2 judge candidate scores and rationales. Empty string when the
+    section has no judge output yet.
+    """
+    if not ds:
+        return ""
+    lines = []
+    l1 = ds.get(L1_KEY) or {}
+    if l1:
+        lines.append(
+            f"- L1 verdict: {l1.get('severity_tier', '?')} / "
+            f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')})"
+        )
+    judge = ds.get(JUDGE_SCORES) or {}
+    for alias, agg in judge.items():
+        lines.append(
+            f"- {alias}: mean {agg.get('mean', '-')} "
+            f"(scores: {agg.get('scores', {})})"
+        )
+    for rubric in ds.get(JUDGE_RUBRICS) or []:
+        ra = getattr(rubric, "rationale", "") or ""
+        if ra:
+            lines.append(f"- rationale: {ra}")
+    if not lines:
+        return ""
+    return (
+        "\n\n**Structured debate judge evidence (deterministic):**\n"
+        + "\n".join(lines)
+    )
+
+
 def create_debate_finalize(
-    judge_llm, cfg: dict | None = None
+    judge_llm, cfg: dict | None = None, section: str = "research"
 ) -> Callable:
-    """Node factory: L2 judge call + verdict + baseline reweight."""
+    """Node factory: L2 judge call + verdict + baseline reweight.
+
+    ``section`` routes the judge read/write to the section's channel
+    (debate_state for research, structured_risk_state for risk).
+    """
     cfg = cfg or {}
     from tradingagents.agents.arbiters.debate_judge import create_debate_judge
 
-    judge_node = create_debate_judge(judge_llm)
+    channel = SECTION_CHANNEL[section]
+    judge_node = create_debate_judge(judge_llm, section=section)
 
     def finalize_node(state: dict) -> dict:
-        ds = dict(state.get("debate_state") or {})
+        ds = dict(state.get(channel) or {})
         if not ds.get(TERMINATED):
             out = judge_node(state)
-            ds = dict(out.get("debate_state") or ds)
+            merged = out.get(channel) or out.get("debate_state") or ds
+            ds = dict(merged)
         ds[TERMINATED] = True
         ds[REASON] = ds.get(REASON) or "debate finalized"
         # Baseline reweight toward the pre-debate independent allocation when
@@ -325,12 +446,15 @@ def create_debate_finalize(
         alpha = float(cfg.get("debate_reweight_to_baseline", 0.0))
         if alpha > 0:
             ds["reweight_alpha"] = alpha
-        return {"debate_state": ds}
+        return {channel: ds}
 
     return finalize_node
 
 
 __all__ = [
+    "SECTION_ROLES",
+    "SECTION_CHANNEL",
+    "SECTION_PROSE",
     "ROUND_RECORDS",
     "SCORE_SERIES",
     "CLAIM_LEDGER",

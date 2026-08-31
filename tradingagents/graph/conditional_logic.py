@@ -1,5 +1,9 @@
 # TradingAgents/graph/conditional_logic.py
 
+from tradingagents.agents.researchers.structured_debate import (
+    SECTION_CHANNEL,
+    SECTION_ROLES,
+)
 from tradingagents.agents.utils.agent_states import AgentState
 
 # Per-analyst tool-round cap: how many tool rounds (LLM turns that emitted
@@ -93,24 +97,53 @@ class ConditionalLogic:
             return "Bear Researcher"
         return "Bull Researcher"
 
-    def should_continue_structured_debate(self, state: AgentState) -> str:
+    def should_continue_structured_debate(
+        self, state: AgentState, section: str = "research"
+    ) -> str:
         """Router for the SD L1 node (opt-in structured debate).
 
-        Returns the next node from {SD Bull, SD Bear, SD Finalize}:
-        - terminated / baseline fallback  -> SD Finalize
-        - PENDING_REGEN (bounded)         -> the same role (SD Bull/SD Bear)
-        - last side was bull              -> SD Bear (next turn)
-        - last side was bear              -> SD Finalize (round complete)
+        Section-aware: ``section="research"`` routes {SD Bull, SD Bear,
+        SD L1, SD Finalize}; ``section="risk"`` routes {SD Risk Aggressive,
+        SD Risk Conservative, SD Risk Neutral, SD Risk L1, SD Risk Finalize}.
+
+        Returns the next node:
+        - terminated / baseline fallback  -> the section's Finalize node
+        - PENDING_REGEN (bounded)         -> the same role's node
+        - else the next role in the section's order (round continues); when
+          the round is complete and the round cap (``max_debate_rounds``)
+          is not reached, the first role starts the next round — the depth
+          knob drives BOTH sections (direction.md).
         """
-        ds = state.get("debate_state") or {}
+        channel = SECTION_CHANNEL[section]
+        roles = SECTION_ROLES[section]
+
+        def rn(role: str) -> str:
+            return (
+                f"SD Risk {role.title()}"
+                if section == "risk"
+                else f"SD {role.title()}"
+            )
+
+        end = "SD Risk Finalize" if section == "risk" else "SD Finalize"
+        ds = state.get(channel) or {}
         if ds.get("terminated"):
-            return "SD Finalize"
+            return end
         pending = ds.get("pending_regen_role")
-        if pending:
-            return "SD Bull" if pending == "bull" else "SD Bear"
-        if ds.get("last_side") == "bull":
-            return "SD Bear"
-        return "SD Finalize"
+        if pending and pending in roles:
+            return rn(pending)
+        last = ds.get("last_side") or roles[0]
+        if last in roles:
+            idx = roles.index(last)
+            if idx < len(roles) - 1:
+                return rn(roles[idx + 1])
+            # Round complete. Continue to the next round until the cap
+            # (depth knob) is reached; default 1 round keeps the legacy
+            # one-shot behavior.
+            rounds_done = len(ds.get("score_series") or [])
+            max_rounds = int(self.max_debate_rounds or 1)
+            if rounds_done < max_rounds:
+                return rn(roles[0])
+        return end
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:
         """Determine if risk analysis should continue."""

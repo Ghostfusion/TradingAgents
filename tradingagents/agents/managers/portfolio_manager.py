@@ -125,6 +125,18 @@ def create_portfolio_manager(llm):
         except Exception:  # noqa: BLE001 - degrade to no line
             liq_line = ""
 
+        # Structured risk-debate judge evidence (direction.md item 5): the L2
+        # judge verdict over the three risk candidates + L1 triage feed the PM
+        # exactly as the research judge feeds the RM. Advisory — absent when
+        # the structured risk path did not run.
+        from tradingagents.agents.researchers.structured_debate import (
+            render_judge_evidence,
+        )
+
+        risk_judge_block = render_judge_evidence(
+            state.get("structured_risk_state") or {}
+        )
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -144,6 +156,7 @@ def create_portfolio_manager(llm):
 {lessons_line}
 **Risk Analysts Debate History:**
 {history}
+{risk_judge_block}
 
 {cvar_line}{liq_line}{consensus_line}
 **Computed decision context (deterministic, advisory - ground your final

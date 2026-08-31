@@ -26,9 +26,10 @@ in `batch.py`).
 | `TRADINGAGENTS_LLM_BACKEND_URL` | `backend_url` |
 | `TRADINGAGENTS_OUTPUT_LANGUAGE` | `output_language` |
 | `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `max_debate_rounds` |
-| `TRADINGAGENTS_MAX_RISK_ROUNDS` | `max_risk_discuss_rounds` |
+| `TRADINGAGENTS_RESEARCH_DEPTH` | `research_depth` | ONE depth knob (1/3/5): drives BOTH research and risk debate rounds to the same level |
+| `TRADINGAGENTS_MAX_RISK_ROUNDS` | `max_risk_discuss_rounds` | per-round override; wins over RESEARCH_DEPTH |
 | `TRADINGAGENTS_ENABLE_DEBATE` | `enable_debate` | structured multi-agent debate on (default off — legacy one-shot chain unchanged) |
-| `TRADINGAGENTS_DEBATE_BULL_MODEL` / `_BEAR_MODEL` / `_JUDGE_MODEL` | `debate_bull_model` / `debate_bear_model` / `debate_judge_model` | per-role `family:id` models; empty = quick/deep fallback |
+| `TRADINGAGENTS_DEBATE_BULL_MODEL` / `_BEAR_MODEL` / `_JUDGE_MODEL` | `debate_bull_model` / `debate_bear_model` / `debate_judge_model` | per-role `family:id` models; empty = quick/deep fallback. BULL drives bull (research) + aggressive (risk); BEAR drives bear + conservative; JUDGE drives both blind judges; neutral = quick |
 | `TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE` | `debate_judge_ensemble` |
 | `TRADINGAGENTS_DEBATE_MAX_ROUNDS` | `debate_max_rounds` | 5 (DebaterTurnPayload round_index 1..5) |
 | `TRADINGAGENTS_DEBATE_MIN_GAIN` / `_STOP_CONSECUTIVE` / `_CONSENSUS_THRESH` | `debate_min_gain` / `debate_stop_consecutive` / `debate_consensus_thresh` | termination knobs |

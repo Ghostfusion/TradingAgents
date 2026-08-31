@@ -16,7 +16,18 @@ from typing import Any
 
 from tradingagents.llm_clients.factory import create_llm_client
 
-DEFAULT_TIER = {"bull": "quick", "bear": "quick", "judge": "deep"}
+# Per-role default LLM tier. The risk debators (direction.md parity) reuse
+# the research debate keys: aggressive -> TRADINGAGENTS_DEBATE_BULL_MODEL,
+# conservative -> TRADINGAGENTS_DEBATE_BEAR_MODEL, neutral -> the fallback
+# (quick) tier — no dedicated key, per the user's model-mapping decision.
+DEFAULT_TIER = {
+    "bull": "quick",
+    "bear": "quick",
+    "judge": "deep",
+    "aggressive": "quick",
+    "conservative": "quick",
+    "neutral": "quick",
+}
 
 
 def _split_spec(spec: str) -> tuple[str, str] | None:
@@ -39,7 +50,17 @@ def role_fallback_models(config: dict, role: str) -> tuple[str, str]:
 
 def role_model_spec(config: dict, role: str) -> tuple[str, str] | None:
     """The configured per-role (provider, model); None when unset."""
-    key = {"bull": "debate_bull_model", "bear": "debate_bear_model", "judge": "debate_judge_model"}.get(role)
+    # direction.md: bull/aggressive share the BULL_MODEL key, bear/conservative
+    # share the BEAR_MODEL key, judge (both sections) shares JUDGE_MODEL key.
+    # neutral has no key -> None -> falls back to the quick tier.
+    key = {
+        "bull": "debate_bull_model",
+        "bear": "debate_bear_model",
+        "judge": "debate_judge_model",
+        "aggressive": "debate_bull_model",
+        "conservative": "debate_bear_model",
+        "neutral": None,
+    }.get(role)
     spec = config.get(key) if key else None
     return _split_spec(str(spec)) if spec else None
 

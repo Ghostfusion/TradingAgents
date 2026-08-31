@@ -186,14 +186,31 @@ class TestJudgeAnonymization:
     def test_rotate_flips_aliases(self):
         bull = {"core_thesis": "b", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 1.0}
         bear = {"core_thesis": "r", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 2.0}
-        c0 = anonymize_and_rotate(bull, bear, seed=0)
-        c1 = anonymize_and_rotate(bull, bear, seed=1)
+        c0 = anonymize_and_rotate({"bull": bull, "bear": bear}, ("bull", "bear"), seed=0)
+        c1 = anonymize_and_rotate({"bull": bull, "bear": bear}, ("bull", "bear"), seed=1)
         # Aliases always label the presentation slots; the ORDER of the
         # underlying theses is what rotates so the judge can't map an alias
         # back to bull/bear across runs.
         assert [c["alias"] for c in c0] == [c["alias"] for c in c1]
         assert [c["thesis"] for c in c0] == ["b", "r"]
         assert [c["thesis"] for c in c1] == ["r", "b"]
+
+    def test_rotate_three_risk_roles(self):
+        """Risk section has THREE candidates; aliases must cover all of them
+        and the rotation must still hide which role is which."""
+        turns = {
+            "aggressive": {"core_thesis": "a", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 10.0},
+            "conservative": {"core_thesis": "c", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 20.0},
+            "neutral": {"core_thesis": "n", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 30.0},
+        }
+        roles = ("aggressive", "conservative", "neutral")
+        c0 = anonymize_and_rotate(turns, roles, seed=0)
+        c1 = anonymize_and_rotate(turns, roles, seed=1)
+        assert [c["alias"] for c in c0] == ["Candidate_X", "Candidate_Y", "Candidate_Z"]
+        assert sorted(t["thesis"] for t in c0) == ["a", "c", "n"]
+        # rotation reverses the presentation order under seed=1
+        assert [t["thesis"] for t in c0] == ["a", "c", "n"]
+        assert [t["thesis"] for t in c1] == ["n", "c", "a"]
 
     def test_aggregate_scores_means_dims(self):
         r = L2JudgeDimensionedRubric(

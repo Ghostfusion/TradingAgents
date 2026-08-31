@@ -275,13 +275,16 @@ class TradingAgentsGraph:
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
 
-        # Per-role structured-debate LLMs (opt-in enable_debate): bull/bear/
-        # judge resolve from the debate_*_model config keys ("family:id")
-        # through resolve_role_llm; empty keys fall back to quick (bull/bear)
-        # / deep (judge). Resolved only when the structured path is on.
+        # Per-role structured-debate LLMs (opt-in enable_debate): research
+        # (bull/bear/judge) and risk (aggressive/conservative) resolve from
+        # the debate_*_model config keys ("family:id") through
+        # resolve_role_llm — direction.md maps aggressive->BULL_MODEL and
+        # conservative->BEAR_MODEL, so both sections share the SAME debate
+        # models. Neutral risk analyst has no key and falls back to the quick
+        # tier in setup. Empty keys fall back to quick/deep.
         self.debate_llms = {}
         if self.config.get("enable_debate"):
-            for _role in ("bull", "bear", "judge"):
+            for _role in ("bull", "bear", "judge", "aggressive", "conservative"):
                 self.debate_llms[_role] = resolve_role_llm(
                     self.config, _role, factory=create_llm_client
                 )

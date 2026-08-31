@@ -26,13 +26,14 @@ SELECTIONS = {
 
 
 def test_research_depth_sets_risk_rounds_only_without_env(monkeypatch):
-    """Depth now scales the RISK rounds; the bull/bear researchers each run
-    once (max_debate_rounds pinned to 1) so a deep run does not multiply the
-    research-debate turns (SKHY 08-31 deep-run defect)."""
+    """Depth (research_depth=5) drives BOTH round counts to the same level on
+    the structured path (direction.md parity). The legacy SKHY defect only
+    applies when enable_debate is off — here the real env has it on."""
     for var in ("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "TRADINGAGENTS_MAX_RISK_ROUNDS"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("TRADINGAGENTS_RESEARCH_DEPTH", raising=False)
     cfg = m._build_run_config(SELECTIONS, checkpoint=None)
-    assert cfg["max_debate_rounds"] == 1
+    assert cfg["max_debate_rounds"] == 5
     assert cfg["max_risk_discuss_rounds"] == 5
 
 

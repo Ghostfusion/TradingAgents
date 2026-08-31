@@ -15,6 +15,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_OUTPUT_LANGUAGE": "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS": "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS": "max_risk_discuss_rounds",
+    "TRADINGAGENTS_RESEARCH_DEPTH": "research_depth",
     "TRADINGAGENTS_ENABLE_DEBATE": "enable_debate",
     "TRADINGAGENTS_DEBATE_BULL_MODEL": "debate_bull_model",
     "TRADINGAGENTS_DEBATE_BEAR_MODEL": "debate_bear_model",
@@ -314,6 +315,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Internal agent debate stays in English for reasoning quality
         "output_language": "English",
         # Debate and discussion settings
+        # ``research_depth`` is the single depth knob (direction.md item 1):
+        # the CLI selection OR TRADINGAGENTS_RESEARCH_DEPTH drives BOTH the
+        # research (max_debate_rounds, structured path) and the risk
+        # (max_risk_discuss_rounds) round counts to the SAME level.
+        "research_depth": 1,
         "max_debate_rounds": 1,
         "max_risk_discuss_rounds": 1,
         # Structured multi-agent debate (design docs/design_multi_agent_debate.md,

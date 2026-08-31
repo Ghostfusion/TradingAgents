@@ -168,10 +168,12 @@ def select_research_depth() -> int:
     """Select research depth using an interactive selection."""
 
     # Define research depth options with their corresponding values
+    # One depth knob drives BOTH the research and the risk debate rounds to
+    # the same count (direction.md item 1).
     DEPTH_OPTIONS = [
-        ("Shallow - Few risk-discussion rounds (bull/bear researchers run once)", 1),
-        ("Medium - Moderate risk-discussion rounds (bull/bear researchers run once)", 3),
-        ("Deep - Deep risk-discussion rounds (bull/bear researchers run once)", 5),
+        ("Shallow - 1 debate round each for research and risk", 1),
+        ("Medium - 3 debate rounds each for research and risk", 3),
+        ("Deep - 5 debate rounds each for research and risk", 5),
     ]
 
     choice = questionary.select(

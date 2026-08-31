@@ -249,6 +249,12 @@ class GraphSetup:
         bull_llm = self.debate_llms.get("bull") or self.quick_thinking_llm
         bear_llm = self.debate_llms.get("bear") or self.quick_thinking_llm
         judge_llm = self.debate_llms.get("judge") or self.deep_thinking_llm
+        # Risk debators share the research debate models (direction.md):
+        # aggressive -> BULL_MODEL, conservative -> BEAR_MODEL, neutral ->
+        # quick tier (no dedicated key).
+        risk_aggr_llm = self.debate_llms.get("aggressive") or self.quick_thinking_llm
+        risk_conserv_llm = self.debate_llms.get("conservative") or self.quick_thinking_llm
+        neutral_llm = self.quick_thinking_llm
         if self._structured_debate:
             workflow.add_node(
                 "SD Bull",
@@ -270,17 +276,64 @@ class GraphSetup:
                 "SD Finalize",
                 create_debate_finalize(judge_llm, self.config),
             )
+            # Structured RISK debate (direction.md parity): the three debators
+            # emit grounded RiskDebaterTurnPayload turns, L1 verifies, and the
+            # SAME blind judge (judge_llm) scores all three candidates before
+            # the Portfolio Manager. Runs on structured_risk_state.
+            workflow.add_node(
+                "SD Risk Aggressive",
+                create_debater_turn(
+                    "aggressive", risk_aggr_llm,
+                    ground_truth=ground_truth_from_state, section="risk",
+                ),
+            )
+            workflow.add_node(
+                "SD Risk Conservative",
+                create_debater_turn(
+                    "conservative", risk_conserv_llm,
+                    ground_truth=ground_truth_from_state, section="risk",
+                ),
+            )
+            workflow.add_node(
+                "SD Risk Neutral",
+                create_debater_turn(
+                    "neutral", neutral_llm,
+                    ground_truth=ground_truth_from_state, section="risk",
+                ),
+            )
+            workflow.add_node(
+                "SD Risk L1",
+                create_debate_l1(
+                    ground_truth_from_state, self.config, section="risk"
+                ),
+            )
+            workflow.add_node(
+                "SD Risk Finalize",
+                create_debate_finalize(judge_llm, self.config, section="risk"),
+            )
         else:
             # Register no-op placeholders so the conditional-edge targets below
             # always resolve (fall-through never raises, #1088 contract).
             def _noop(state) -> dict:
                 return {}
 
-            workflow.add_node("SD Bull", _noop)
-            workflow.add_node("SD Bear", _noop)
-            workflow.add_node("SD L1", _noop)
-            workflow.add_node("SD Finalize", _noop)
+            for _n in (
+                "SD Bull",
+                "SD Bear",
+                "SD L1",
+                "SD Finalize",
+                "SD Risk Aggressive",
+                "SD Risk Conservative",
+                "SD Risk Neutral",
+                "SD Risk L1",
+                "SD Risk Finalize",
+            ):
+                workflow.add_node(_n, _noop)
         debate_entry = "SD Bull" if self._structured_debate else "Bull Researcher"
+        risk_debate_entry = (
+            "SD Risk Aggressive" if self._structured_debate else "Aggressive Analyst"
+        )
+
         if self.analyst_concurrency > 1:
             workflow.add_edge(START, "Run Analysts")
             workflow.add_edge("Run Analysts", "Independent Researcher Stances")
@@ -354,14 +407,44 @@ class GraphSetup:
         # 08-31; the 08-28 report still had the complete chain).
         workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Independent Risk Stances")
-        workflow.add_edge("Independent Risk Stances", "Aggressive Analyst")
-        # All three risk edges share the complete RISK_ANALYSIS_PATH_MAP (#1088).
-        for risk_node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+        if self._structured_debate:
+            # Structured risk debate: Aggressive -> L1 -> Conservative -> L1 ->
+            # Neutral -> L1 -> (rounds) -> Finalize (blind judge) -> PM. The
+            # same section-aware router drives the role order and round cap.
+            from functools import partial
+
+            workflow.add_edge("Independent Risk Stances", risk_debate_entry)
+            for _rn in (
+                "SD Risk Aggressive",
+                "SD Risk Conservative",
+                "SD Risk Neutral",
+            ):
+                workflow.add_edge(_rn, "SD Risk L1")
             workflow.add_conditional_edges(
-                risk_node,
-                self.conditional_logic.should_continue_risk_analysis,
-                RISK_ANALYSIS_PATH_MAP,
+                "SD Risk L1",
+                partial(
+                    self.conditional_logic.should_continue_structured_debate,
+                    section="risk",
+                ),
+                {
+                    "SD Risk Aggressive": "SD Risk Aggressive",
+                    "SD Risk Conservative": "SD Risk Conservative",
+                    "SD Risk Neutral": "SD Risk Neutral",
+                    "SD Risk Finalize": "SD Risk Finalize",
+                },
             )
+            workflow.add_edge("SD Risk Finalize", "Portfolio Manager")
+        else:
+            # Legacy one-shot risk chain (unchanged): 3 prose debators loop by
+            # round count, then the Portfolio Manager.
+            workflow.add_edge("Independent Risk Stances", risk_debate_entry)
+            # All three risk edges share the complete RISK_ANALYSIS_PATH_MAP (#1088).
+            for risk_node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+                workflow.add_conditional_edges(
+                    risk_node,
+                    self.conditional_logic.should_continue_risk_analysis,
+                    RISK_ANALYSIS_PATH_MAP,
+                )
 
         workflow.add_edge("Portfolio Manager", END)
 

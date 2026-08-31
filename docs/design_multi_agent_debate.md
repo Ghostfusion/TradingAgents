@@ -667,3 +667,76 @@ docs/README/CHANGELOG true, `py -3.12` everywhere.
 6. R4 A/B harness: debate vs N=5 self-consistency under matched tokens —
    report Brier score, max unforecasted drawdown, tokens/calls/latency, and
    the audit-trail counter-thesis count (the differentiator).
+---
+
+## 9. Risk-section parity (direction.md, v4)
+
+The risk debate mirrors the research debate with the SAME structured
+machinery. Direction: both sections run the same debater+judge pattern at
+the same research depth, sharing the same model keys.
+
+### 9.1 Scope of parity (implemented)
+
+| Aspect | Research | Risk |
+| --- | --- | --- |
+| Structured turns | `DebaterTurnPayload` (bull/bear) | `RiskDebaterTurnPayload` (aggressive/conservative/neutral), same claim/risk/allocation contract |
+| L1 verification | `create_debate_l1` (section="research") | same, section="risk" (final role = neutral) |
+| Blind judge | `create_debate_judge` (2 candidates) | same node, 3 candidates (Candidate_X/Y/Z) |
+| State channel | `debate_state` | `structured_risk_state` |
+| Prose channel | `investment_debate_state.history` | `risk_debate_state.history` (reporting/PM consume unchanged) |
+| Router | `should_continue_structured_debate(state)` | same, `section="risk"` |
+| Depth knob | `max_debate_rounds` | `max_risk_discuss_rounds` — driven by ONE `TRADINGAGENTS_RESEARCH_DEPTH` |
+| Models | `debate_bull_model` / `debate_bear_model` / `debate_judge_model` | aggressive→BULL key, conservative→BEAR key, neutral→quick fallback, judge→JUDGE key |
+
+### 9.2 Model mapping (direction items 3-5)
+
+- `TRADINGAGENTS_DEBATE_BULL_MODEL` → SD Bull (research) AND SD Risk
+  Aggressive (risk)
+- `TRADINGAGENTS_DEBATE_BEAR_MODEL` → SD Bear (research) AND SD Risk
+  Conservative (risk)
+- `TRADINGAGENTS_DEBATE_JUDGE_MODEL` → the L2 judge in BOTH sections
+  (anonymized, order-rotated; Candidate_X/Y for research, X/Y/Z for risk)
+- Neutral risk analyst has NO dedicated key → quick tier (user decision;
+  it is the balancing role, stays on the run's fast model)
+
+### 9.3 Depth parity (direction item 1)
+
+One knob — `TRADINGAGENTS_RESEARCH_DEPTH` (1/3/5) or the CLI research-depth
+selection — drives BOTH round counts to the same level:
+
+- `max_debate_rounds` (research) and `max_risk_discuss_rounds` (risk) both
+  = the selected depth on the structured path.
+- Legacy path (`enable_debate` off): the research leg stays one-shot
+  (bull/bear run once — 5 legacy turns degenerated and poisoned the RM,
+  SKHY 08-31); the risk leg keeps its round-count loop.
+- Explicit per-round env overrides (`TRADINGAGENTS_MAX_DEBATE_ROUNDS` /
+  `_MAX_RISK_ROUNDS`) still win over the depth knob (#977 back-compat).
+
+### 9.4 Router: round-cycling (fix applied)
+
+`should_continue_structured_debate` previously hard-stopped after ANY bear
+turn (`last_side != bull -> SD Finalize`) — with depth>1 the structured
+research debate could never run a second round. The router now:
+
+1. terminated / baseline fallback → Finalize
+2. `pending_regen_role` (bounded) → the same role's node
+3. else next role in the section order; when the round is complete and
+   `rounds_done < max_rounds` → the first role starts the next round;
+   otherwise Finalize.
+
+This makes the depth knob actually take effect on the structured path.
+
+### 9.5 Reporting
+
+`4_risk/structured_risk_debate.md` mirrors `2_research/structured_debate.md`:
+L1 verdict + judge scores per anonymized candidate + grounded claim ledger,
+written from `structured_risk_state`.
+
+### 9.6 Acceptance
+
+- Risk graph with `enable_debate` on: Stances → SD Risk Aggressive → L1 →
+  Conservative → L1 → Neutral → L1 → (rounds) → SD Risk Finalize → PM.
+- `enable_debate` off: legacy risk chain bit-identical (Stances →
+  Aggressive Analyst loop → PM); SD Risk nodes are no-op placeholders.
+- All 5 debate test files green (claims, score, integration, stream
+  hermetic, risk parity), ruff clean, full suite green.

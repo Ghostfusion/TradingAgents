@@ -308,6 +308,18 @@ has changed before); never assume an endpoint works — the SDK's
   max unforecasted drawdown). All `debate_*` config keys OFF by default;
   phased rollout P0-P6 (grounding contract → scoring/termination → models/
   capability → judge → A/B harness). See CHANGELOG.
+- 2026-08-31 `(working tree)` - Risk-section structured-debate parity
+  (direction.md): the risk debate mirrors the research one — risk debators
+  emit `RiskDebaterTurnPayload` grounded turns into `structured_risk_state`,
+  the SAME blind L2 judge generalizes to 3 candidates (Candidate_X/Y/Z),
+  model keys are shared (BULL → bull+aggressive, BEAR → bear+conservative,
+  JUDGE → both judges; neutral = quick), ONE `TRADINGAGENTS_RESEARCH_DEPTH`
+  knob drives BOTH round counts, the research router cycles rounds within
+  the cap instead of hard-stopping after one, RM + PM get the judge
+  evidence block, and `4_risk/structured_risk_debate.md` mirrors the
+  research evidence block. Off-mode legacy chain bit-identical. Tests:
+  `tests/test_debate_risk_parity.py` (18 hermetic) + 5 debate files total
+  78. See CHANGELOG / design doc §9.
 - 2026-08-31 `(working tree)` - Structured multi-agent debate IMPLEMENTED
   (opt-in `enable_debate`; design `docs/design_multi_agent_debate.md` P1-P5 +
   graph wiring): `strategies/debate_claim.py` (claim ledger + L1 verifier),

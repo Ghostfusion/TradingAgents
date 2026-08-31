@@ -30,6 +30,22 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Risk-section structured debate parity (direction.md)** -
+  the structured multi-agent debate now covers BOTH sections: the risk
+  debate (aggressive/conservative/neutral) runs the same machinery as the
+  research debate — `RiskDebaterTurnPayload` grounded turns, L1 claim
+  verification + severity triage, and the SAME blind order-rotated judge
+  (3 candidates) before the Portfolio Manager. Model keys are shared:
+  `TRADINGAGENTS_DEBATE_BULL_MODEL` → bull + aggressive,
+  `_BEAR_MODEL` → bear + conservative, `_JUDGE_MODEL` → both judges;
+  neutral stays on the quick tier. ONE depth knob
+  (`TRADINGAGENTS_RESEARCH_DEPTH` or the CLI selection) now drives BOTH
+  round counts to the same level (research + risk), and the research router
+  no longer hard-stops after one round — it cycles to the next round within
+  the cap. Research Manager + Portfolio Manager prompts now include the L2
+  judge verdict evidence block. `4_risk/structured_risk_debate.md` mirrors
+  the research evidence block. All remains opt-in via `enable_debate`;
+  off-mode legacy chain bit-identical. See CHANGELOG.
 - [2026-08-31] **Structured multi-agent debate implemented (opt-in)** -
   the research debate design (`docs/design_multi_agent_debate.md`) is now
   code: with `enable_debate` (+ `TRADINGAGENTS_ENABLE_DEBATE=true`) the

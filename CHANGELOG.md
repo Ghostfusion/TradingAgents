@@ -24,6 +24,35 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Risk-section structured-debate parity** (direction.md) — the structured
+  multi-agent debate now mirrors the research section:
+  - Risk debators (aggressive/conservative/neutral) emit `RiskDebaterTurnPayload`
+    grounded turns into the new `structured_risk_state` channel; legacy
+    `risk_debate_state.history` prose keys are still written so reporting and
+    the Portfolio Manager consume the same shape.
+  - The SAME blind L2 judge is generalized to N candidates
+    (`anonymize_and_rotate(turn_by_role, roles)`, Candidate_X/Y/Z) and runs
+    over the three risk candidates before the Portfolio Manager when
+    `enable_debate` is on.
+  - Model keys are shared across sections (direction items 3-5):
+    `debate_bull_model` → bull + aggressive, `debate_bear_model` → bear +
+    conservative, `debate_judge_model` → both judges; neutral risk analyst
+    stays on the quick tier (no dedicated key).
+  - **Depth parity** — ONE knob (`TRADINGAGENTS_RESEARCH_DEPTH` env or the
+    CLI research-depth selection) drives BOTH the research and risk round
+    counts to the same level; explicit per-round env overrides still win.
+  - Router fix: `should_continue_structured_debate` no longer hard-stops
+    after one round — it cycles to the next round within `max_debate_rounds`
+    (the depth knob now actually takes effect on the structured path).
+  - RM + PM prompts include the L2 judge verdict evidence block
+    (`render_judge_evidence`); `4_risk/structured_risk_debate.md` mirrors the
+    research evidence block.
+  - All still opt-in via `enable_debate`; with the flag off the legacy risk
+    chain is bit-identical (SD Risk nodes are no-op placeholders).
+  - Tests: `tests/test_debate_risk_parity.py` (18 cases: model mapping,
+    section router + round-cycling, risk turn channels, judge evidence block,
+    risk graph edges on/off, depth parity).
+
 - **Structured multi-agent debate implemented (opt-in)** (`docs/design_multi_agent_debate.md`
   P1-P5 + graph wiring): the research debate now runs as a structured subgraph
   when `enable_debate` is on (default OFF — the legacy one-shot chain stays

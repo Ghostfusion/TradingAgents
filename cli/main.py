@@ -716,23 +716,34 @@ def get_user_selections(symbol: str | None = None):
             f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
         )
 
-    # Step 5: Research depth (skipped when both round counts are set via env).
-    # Research depth maps to the debate + risk round counts; when both are
-    # supplied through TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS we keep
-    # the run non-interactive and honor the env values (#977).
+    # Step 5: Research depth (skipped when set via env).
+    # Research depth is ONE knob (direction.md item 1): the CLI selection OR
+    # TRADINGAGENTS_RESEARCH_DEPTH drives BOTH the research and the risk round
+    # counts to the same level. Explicit per-round env overrides
+    # (TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS) still win (#977).
     # Research depth is always 'deep' (5) in symbol mode; otherwise env or prompt.
-    depth_from_env = bool(os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS")) and bool(
-        os.environ.get("TRADINGAGENTS_MAX_RISK_ROUNDS")
+    depth_from_env = bool(os.environ.get("TRADINGAGENTS_RESEARCH_DEPTH")) or (
+        bool(os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS"))
+        and bool(os.environ.get("TRADINGAGENTS_MAX_RISK_ROUNDS"))
     )
     if symbol is not None:
         selected_research_depth = 5
-        console.print("[green]✓ Research depth:[/green] deep (1 debate round / 5 risk rounds)")
+        console.print(
+            "[green]✓ Research depth:[/green] deep "
+            "(5 research debate rounds / 5 risk debate rounds)"
+        )
     elif depth_from_env:
-        selected_research_depth = DEFAULT_CONFIG["max_debate_rounds"]
+        # RESEARCH_DEPTH wins; when ONLY the two per-round env vars are set,
+        # fall back to the env-applied debate rounds as the depth proxy
+        # (back-compat #977: both round envs present -> run uses them).
+        if os.environ.get("TRADINGAGENTS_RESEARCH_DEPTH") is not None:
+            selected_research_depth = DEFAULT_CONFIG["research_depth"]
+        else:
+            selected_research_depth = DEFAULT_CONFIG["max_debate_rounds"]
         console.print(
             f"[green]✓ Research depth from environment:[/green] "
-            f"{DEFAULT_CONFIG['max_debate_rounds']} debate / "
-            f"{DEFAULT_CONFIG['max_risk_discuss_rounds']} risk rounds"
+            f"{selected_research_depth} research / "
+            f"{selected_research_depth} risk rounds"
         )
     else:
         console.print(
@@ -1108,16 +1119,24 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     value on DEFAULT_CONFIG is preserved unless the user overrode it on the CLI.
     """
     config = DEFAULT_CONFIG.copy()
-    # Research depth controls ONLY the risk-debate rounds: the bull/bear
-    # researchers each run exactly ONCE per analysis (a single back-and-forth,
-    # not a loop). Running 5 debate turns on 'deep' multiplied runtime and let
-    # later turns degenerate into rambling/empty arguments that poisoned the
-    # Research Manager (SKHY 08-31). An explicit env override for the debate
-    # rounds still wins (#977).
+    # Research depth drives BOTH sections to the SAME level (direction.md
+    # item 1). On the legacy path (enable_debate off) the bull/bear chain is
+    # kept one-shot: running 5 legacy debate turns multiplied runtime and
+    # degenerated into rambling/empty arguments that poisoned the Research
+    # Manager (SKHY 08-31). On the structured path the L1/termination FSM
+    # bounds the extra rounds, so the depth knob applies there. An explicit
+    # per-round env override still wins (#977).
+    depth_env = os.environ.get("TRADINGAGENTS_RESEARCH_DEPTH")
+    depth = int(depth_env) if depth_env is not None else None
+    enable_debate = bool(config.get("enable_debate", False))
     if not os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS"):
-        config["max_debate_rounds"] = 1
+        config["max_debate_rounds"] = (
+            depth if depth is not None else selections["research_depth"]
+        ) if enable_debate else 1
     if not os.environ.get("TRADINGAGENTS_MAX_RISK_ROUNDS"):
-        config["max_risk_discuss_rounds"] = selections["research_depth"]
+        config["max_risk_discuss_rounds"] = (
+            depth if depth is not None else selections["research_depth"]
+        )
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]

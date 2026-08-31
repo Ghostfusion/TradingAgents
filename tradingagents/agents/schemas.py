@@ -604,6 +604,20 @@ class Stance(str, Enum):
     BEAR = "BEAR"
 
 
+class RiskStance(str, Enum):
+    """Risk-debater role for the structured risk debate (direction.md parity).
+
+    The risk section mirrors the research debate but with three roles
+    (aggressive / conservative / neutral) instead of two (bull / bear). The
+    payload schema is identical to ``DebaterTurnPayload`` except the stance
+    enum — the L1 verification and blind judge machinery are shared.
+    """
+
+    AGGRESSIVE = "AGGRESSIVE"
+    CONSERVATIVE = "CONSERVATIVE"
+    NEUTRAL = "NEUTRAL"
+
+
 class RiskSeverity(str, Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
@@ -641,6 +655,19 @@ class DebaterTurnPayload(BaseModel):
     quantitative_claims: list[QuantitativeClaim] = Field(min_length=1)
     risk_factors: list[RiskFactor] = Field(default_factory=list)
     recommended_allocation_pct: float = Field(ge=0.0, le=100.0)
+
+
+class RiskDebaterTurnPayload(DebaterTurnPayload):
+    """Structured turn from a RISK debater role (aggressive/conservative/neutral).
+
+    Identical contract to ``DebaterTurnPayload`` (grounded quantitative
+    claims, risk factors, allocation) but the stance enum is the risk role —
+    this is what lets the research section's L1/judge machinery run the risk
+    debate unchanged (direction.md: both sections share the debater+judge
+    pattern).
+    """
+
+    stance: RiskStance
 
 
 class MetricVerification(BaseModel):
