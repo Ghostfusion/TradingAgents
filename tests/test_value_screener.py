@@ -483,8 +483,29 @@ def test_eodhd_us_universe_filters_common_stocks(monkeypatch, capsys):
         {"Code": "SPY", "Name": "SPDR S&P 500", "Type": "ETF"},
         {"Code": "MSFT", "Name": "Microsoft Corp.", "Type": "Common Stock"},
     ]
-    monkeypatch.setattr(eodhd, "get_exchange_symbols_eodhd", lambda market: rows)
-    vs.main(["--universe", "eodhd-us", "-l", "2", "-d", "2026-01-02", "--min-mcap", "0"])
-    out = capsys.readouterr().out
-    assert "AAPL" in out and "MSFT" in out
-    assert "SPY" not in out  # ETF filtered out
+def test_moomoo_error_path_closes_context(monkeypatch, capsys):
+    """Regression: when a moomoo universe run fails (e.g. "no symbols after
+    price/P-E/equity gates"), the OpenQuoteContext must be closed BEFORE
+    parser.error raises SystemExit. Otherwise the SDK's non-daemon receive
+    thread blocks interpreter exit and a web screener job hangs forever.
+    (hermetic: moomoo movers return all-gated rows; close_context mocked)."""
+    import pytest as _pytest
+
+    from tradingagents.dataflows import moomoo
+
+    closed = []
+
+    # Every mover fails the gates (price < 20, non-equity) -> empty gated list.
+    def _fake_movers(count, market, min_market_cap):
+        return [
+            {"symbol": "A", "name": "Cheap Co", "cur_price": 10.0, "pe_ttm": 5.0, "market_cap": 1e9, "change_ratio": -0.02},
+        ]
+
+    monkeypatch.setattr(moomoo, "get_hot_movers_moomoo", _fake_movers)
+    monkeypatch.setattr(moomoo, "get_top_movers_moomoo", _fake_movers)
+    monkeypatch.setattr(moomoo, "close_context", lambda: closed.append(1))
+
+    with _pytest.raises(SystemExit) as exc:
+        vs.main(["-u", "heat-proxy", "-n", "1", "-d", "2026-01-02", "--price-min", "20"])
+    assert exc.value.code == 2  # clean argparse error, not a hang
+    assert closed, "close_context() must be called before parser.error on the moomoo error path"

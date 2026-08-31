@@ -27,6 +27,7 @@ screen "n/a" rather than a guessed number.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sys
 from datetime import datetime
@@ -1172,13 +1173,24 @@ def main(argv: list[str] | None = None) -> int:
                 )
         except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
             parser.error(f"eodhd-us universe failed: {exc}")
+
     elif args.universe in ("top-losers", "heat-proxy"):
         try:
             from tradingagents.dataflows.moomoo import (
                 MoomooNotConfiguredError,
+                close_context,
                 get_hot_movers_moomoo,
                 get_top_movers_moomoo,
             )
+
+            # parser.error raises SystemExit; the moomoo OpenQuoteContext spawns
+            # a non-daemon receive thread that would otherwise block interpreter
+            # exit (the process hangs after the error). Tear the context down
+            # first so the error path exits cleanly (matches the main() teardown).
+            def _err(msg: str):
+                with contextlib.suppress(Exception):
+                    close_context()
+                parser.error(msg)
 
             if args.universe == "heat-proxy":
                 # Heat-list stand-in: the official hot master (gainers+losers,
@@ -1339,7 +1351,7 @@ def main(argv: list[str] | None = None) -> int:
                 gated.append(m)
             movers = gated[: args.movers_count]
             if not movers:
-                parser.error("no symbols after price/P-E/equity gates")
+                _err("no symbols after price/P-E/equity gates")
             for m in movers:
                 symbol = (m.get("symbol") or "").upper()
                 if not symbol:
@@ -1353,9 +1365,9 @@ def main(argv: list[str] | None = None) -> int:
                     }
             logger.info("top-losers universe: %d symbols from moomoo", len(tickers))
         except MoomooNotConfiguredError as exc:
-            parser.error(f"moomoo top-losers unavailable: {exc}")
+            _err(f"moomoo top-losers unavailable: {exc}")
         except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
-            parser.error(f"moomoo top-losers failed: {exc}")
+            _err(f"moomoo top-losers failed: {exc}")
     elif args.file:
         with open(args.file, encoding="utf-8") as fh:
             tickers += [ln.strip().upper() for ln in fh if ln.strip()]

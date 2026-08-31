@@ -74,6 +74,15 @@ Breaking changes within the 0.x line are called out explicitly.
     (10), `tests/test_new_provider_wiring.py` (5). ruff clean.
 
 ### Fixed
+- **Value-screener exit hang on moomoo universes** - when a `top-losers` /
+  `heat-proxy` run failed (e.g. "no symbols after price/P-E/equity gates"),
+  `parser.error` raised `SystemExit` but the moomoo `OpenQuoteContext` had
+  already spawned a non-daemon receive thread, so the process hung at
+  interpreter exit (a 15-min+ web job) instead of terminating. The moomoo
+  error paths now `close_context()` before `parser.error`, so the error exits
+  cleanly (verified: clean exit in ~2s vs. the previous hang). Also pinned
+  `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT=5.0` in `.env` so a degraded OpenD
+  self-kills each call instead of stalling.
 - **Analyst tool-loop edge regression** - the sequential graph lost its
   `ToolNode -> analyst` edge (introduced in the Option-A wiring pass), so a
   run TERMINATED right after the market analyst's first tool round: empty
