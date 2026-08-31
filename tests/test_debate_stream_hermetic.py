@@ -58,6 +58,29 @@ def test_structured_debate_graph_compiles_with_stub_llms(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_structured_mode_routes_stances_to_sd_bull(tmp_path, monkeypatch):
+    """enable_debate=True must route the pre-debate stances into the SD
+    subgraph (SD Bull -> SD L1 -> ...), NOT the legacy Bull Researcher —
+    regression: the analyst-clear/stance edges stayed on the legacy node, so
+    the SD nodes were unreachable and the bull/bear debate models never ran."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    monkeypatch.setattr(
+        "tradingagents.graph.trading_graph.create_llm_client",
+        lambda *a, **k: type(
+            "C", (), {"get_llm": lambda self: _stub_llm_factory()}
+        )(),
+    )
+    cfg = dict(DEFAULT_CONFIG)
+    cfg["enable_debate"] = True
+    ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+    edges = {(getattr(e, "source", None), getattr(e, "target", None)) for e in ta.graph.get_graph().edges}
+    assert ("Independent Researcher Stances", "SD Bull") in edges, f"stances must enter SD Bull, got {sorted(edges) & {('Independent Researcher Stances', t) for _, t in edges if _ == 'Independent Researcher Stances'}}"
+    assert ("SD Bull", "SD L1") in edges, "SD Bull -> SD L1 missing"
+    assert ("SD Finalize", "Research Manager") in edges, "SD Finalize -> RM missing"
+
+
 def test_legacy_path_unchanged_with_flag_off(tmp_path, monkeypatch):
     """enable_debate=False keeps the one-shot bull/bear/RM chain + the SD
     placeholders registered so the router targets always exist."""

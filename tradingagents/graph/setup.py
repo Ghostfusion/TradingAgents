@@ -280,11 +280,11 @@ class GraphSetup:
             workflow.add_node("SD Bear", _noop)
             workflow.add_node("SD L1", _noop)
             workflow.add_node("SD Finalize", _noop)
+        debate_entry = "SD Bull" if self._structured_debate else "Bull Researcher"
         if self.analyst_concurrency > 1:
             workflow.add_edge(START, "Run Analysts")
-            workflow.add_edge("Run Analysts", "Bull Researcher")
             workflow.add_edge("Run Analysts", "Independent Researcher Stances")
-            workflow.add_edge("Independent Researcher Stances", "Bull Researcher")
+            workflow.add_edge("Independent Researcher Stances", debate_entry)
         else:
             # Start with the first analyst
             workflow.add_edge(START, plan.specs[0].agent_node)
@@ -319,7 +319,7 @@ class GraphSetup:
                     # Independent researcher stances sampled BEFORE the debate;
                     # then the fixed Bull/Bear debate chain runs as before.
                     workflow.add_edge(current_clear, "Independent Researcher Stances")
-                    workflow.add_edge("Independent Researcher Stances", "Bull Researcher")
+                    workflow.add_edge("Independent Researcher Stances", debate_entry)
 
         if self._structured_debate:
             # Structured mode: Bull -> L1 -> Bear -> L1 -> (Judge/Finalize).
