@@ -297,6 +297,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - Tool-round cap `KeyError '<Analyst>'` fix: a
+  run whose market/news/fundamentals analyst hit the 8-tool-round cap crashed
+  with `KeyError: 'Market Analyst'` (LangGraph "During task with name ..."
+  wrapper) because the cap routers return the analyst node name but
+  `graph/setup.py` only registered `[tools, clear]` (sequential) /
+  `{tools, clear}` (parallel subgraphs) as conditional-edge targets. The
+  analyst node is now a registered self-loop target in both modes, and the
+  three analyst nodes short-circuit the cap turn (strip dangling tool_calls
+  via `structured.finalize_messages`, one terminal prose turn) so the loop
+  always terminates and reports are never empty. Hermetic SKHY end-to-end
+  repro in both concurrency modes; regression tests
+  `test_production_setup_registers_analyst_cap_self_loop` +
+  `test_parallel_subgraph_registers_analyst_cap_self_loop`.
 - 2026-08-31 `(working tree)` - `--value-dip-loose` harvest mode + eodhd-losers
   equity filter: the value-dip technical entry relaxes to `RSI<=35 OR %b<=0.10`
   (new `loose_technical` param on `value_dip_setup`, default False) and the

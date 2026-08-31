@@ -119,6 +119,23 @@ def create_fundamentals_analyst(llm):
 
         chain = prompt | llm.bind_tools(tools)
 
+        # Tool-round cap turn: the router sent us back because the last
+        # message still carries tool_calls after MAX_TOOL_ROUNDS. Do not
+        # re-invoke the model for more tools - strip the dangling tool_calls
+        # and run one terminal prose turn so the report is never empty and
+        # the loop always terminates (no pathological self-loop).
+        from langchain_core.messages import AIMessage as _CapAIMessage
+
+        from tradingagents.agents.utils.structured import finalize_messages
+
+        _cap_msg = state["messages"][-1]
+        if getattr(_cap_msg, "tool_calls", None):
+            _report = finalize_messages(chain, state["messages"], _cap_msg)
+            return {
+                "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
+                "fundamentals_report": _report,
+            }
+
         result = chain.invoke(state["messages"])
 
         report = ""

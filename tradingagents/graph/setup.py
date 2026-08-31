@@ -64,7 +64,11 @@ def _build_analyst_subgraph(spec, analyst_factory, tool_node, conditional_logic)
     sub.add_conditional_edges(
         spec.agent_node,
         router,
-        {f"tools_{spec.key}": spec.tool_node, spec.clear_node: END},
+        # The router returns the ANALYST node on the tool-round cap (the
+        # analyst strips the dangling tool_calls and writes its final report);
+        # it must be a registered target, or LangGraph raises
+        # KeyError '<Analyst>' on the cap turn.
+        {spec.agent_node: spec.agent_node, f"tools_{spec.key}": spec.tool_node, spec.clear_node: END},
     )
     sub.add_edge(spec.tool_node, spec.agent_node)
     return sub.compile()
@@ -235,7 +239,11 @@ class GraphSetup:
                 workflow.add_conditional_edges(
                     current_analyst,
                     getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                    [current_tools, current_clear],
+                    # The tool-round-cap routers return the ANALYST node (the
+                    # analyst finalizes its report with dangling tool_calls
+                    # stripped); it must be a registered target or LangGraph
+                    # raises KeyError '<Analyst>' on the cap turn.
+                    [current_analyst, current_tools, current_clear],
                 )
                 # Analyst tool loop: ToolNode feeds back into the analyst node
                 # (re-run with the tool results). Without this edge the

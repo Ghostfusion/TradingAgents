@@ -8,6 +8,25 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tool-round cap `KeyError '<Analyst>'` on the interactive CLI** - a run
+  whose market/news/fundamentals analyst hit the `MAX_TOOL_ROUNDS` (8) tool
+  cap crashed with `KeyError: 'Market Analyst'` wrapped in LangGraph's
+  "During task with name ..." note (live symptom: SKHY interactive run). The
+  cap routers return the analyst node name, but `setup.py` registered the
+  conditional-edge targets as only `[tools, clear]` (sequential) /
+  `{tools, clear}` (parallel subgraphs), so LangGraph raised on the cap path.
+  Now the analyst node itself is a registered target in both modes (a
+  self-loop), and the three analyst nodes short-circuit the cap turn: the
+  dangling `tool_calls` on the last message are stripped via
+  `structured.finalize_messages` and ONE terminal prose turn writes the
+  report — no re-invoke-then-ping-pong, reports are never left empty, the
+  loop always terminates. Hermetic end-to-end repro (`SKHY`, stub LLM)
+  completes the full graph in both modes. Regression tests:
+  `test_production_setup_registers_analyst_cap_self_loop` +
+  `test_parallel_subgraph_registers_analyst_cap_self_loop`.
+
 ### Added
 
 - **`--value-dip-loose` (value-dip harvest mode) + eodhd-losers equity

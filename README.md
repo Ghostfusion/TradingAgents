@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Tool-round cap `KeyError '<Analyst>'` fix** - a run whose
+  market/news/fundamentals analyst hit the 8-tool-round cap crashed with
+  `KeyError: 'Market Analyst'` (LangGraph "During task ..." note) because the
+  cap routers return the analyst node name but the graph only registered
+  `tools`/`clear` as conditional-edge targets. The analyst node is now a
+  registered self-loop target in both sequential and parallel modes, and the
+  analyst nodes short-circuit the cap turn (strip dangling tool_calls, one
+  terminal prose turn) so the loop always terminates and reports are never
+  empty. Regression tests added. See CHANGELOG.
 - [2026-08-31] **`--universe eodhd-losers` + `--value-dip-loose`** - the value
   screener can now seed the scan from the EODHD bulk US real-time feed (one
   call, ~18k rows, OpenD-independent): the biggest intraday decliners by

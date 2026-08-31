@@ -247,3 +247,69 @@ def test_compiled_graph_analyst_loop_terminates_after_cap():
     tool_ais = [m for m in final["messages"] if getattr(m, "tool_calls", None)]
     assert len(tool_ais) == MAX_TOOL_ROUNDS
     assert final["messages"][-1].content == "cleared"
+
+
+def _edge_targets(graph, source: str) -> set:
+    edges = getattr(graph, "edges", None)
+    if edges is None:
+        return set()
+    return {e.target for e in edges if getattr(e, "source", None) == source}
+
+
+def test_production_setup_registers_analyst_cap_self_loop():
+    """Production GraphSetup must register the ANALYST node itself as a
+    conditional-edge target for the tool-round-cap routers (the router returns
+    'Market Analyst' / 'News Analyst' / 'Fundamentals Analyst' on the cap).
+    Without it LangGraph raises ``KeyError 'Market Analyst'`` inside the
+    analyst task on the cap turn (regression: SKHY interactive run)."""
+    from unittest import mock
+
+    from langchain_core.tools import tool as _tool
+    from langgraph.prebuilt import ToolNode
+
+    from tradingagents.graph.conditional_logic import ConditionalLogic
+    from tradingagents.graph.setup import GraphSetup
+
+    @_tool
+    def _dummy(_: str) -> str:
+        """Dummy tool for edge-map inspection (never invoked)."""
+        return "x"
+
+    llm = mock.MagicMock()
+    tool_nodes = {
+        "market": ToolNode([_dummy]),
+        "news": ToolNode([_dummy]),
+        "fundamentals": ToolNode([_dummy]),
+    }
+    setup = GraphSetup(llm, llm, tool_nodes, ConditionalLogic(), analyst_concurrency=1)
+    workflow = setup.setup_graph(("market", "news", "fundamentals"))
+    graph = workflow.compile().get_graph()
+    for node in ("Market Analyst", "News Analyst", "Fundamentals Analyst"):
+        assert node in _edge_targets(graph, node), f"{node} missing self-loop cap target"
+
+
+def test_parallel_subgraph_registers_analyst_cap_self_loop():
+    """Same guard for the parallel subgraphs (each analyst subgraph must route
+    the cap back to its own analyst node without a KeyError)."""
+    from unittest import mock
+
+    from langchain_core.tools import tool as _tool
+    from langgraph.prebuilt import ToolNode
+
+    from tradingagents.graph.analyst_execution import build_analyst_execution_plan
+    from tradingagents.graph.conditional_logic import ConditionalLogic
+    from tradingagents.graph.setup import _build_analyst_subgraph
+
+    @_tool
+    def _dummy(_: str) -> str:
+        """Dummy tool for subgraph edge-map inspection (never invoked)."""
+        return "x"
+
+    llm = mock.MagicMock()
+    plan = build_analyst_execution_plan(("market", "news", "fundamentals"))
+    tool_node = ToolNode([_dummy])
+    logic = ConditionalLogic()
+    for spec in plan.specs:
+        sub = _build_analyst_subgraph(spec, lambda: llm, tool_node, logic)
+        edges = {e.source: e.target for e in sub.get_graph().edges}
+        assert spec.agent_node in edges, f"{spec.agent_node} missing subgraph self-loop cap target"
