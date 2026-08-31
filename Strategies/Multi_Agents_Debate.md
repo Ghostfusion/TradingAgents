@@ -360,3 +360,133 @@ The payload emitted by each blind LLM judge reviewing the anonymized, rotated ro
 }
 
 ```
+
+These additions address the boundary edges where multi-agent orchestrators typically break down in production: **brittle fast-aborts** and **consensus decay**.
+
+By introducing structured severity tiers, regeneration budgets, safe baseline fallbacks, and mathematical divergence bounds, the system guarantees liveness while preserving deterministic authority.
+
+---
+
+### 1. Robust L1 Triaging: Severity Tiers & Safe Fallbacks
+
+A binary Pass/Fail gate causes false-positive aborts when debaters use slightly mismatched terminology or non-critical formatting anomalies. Dividing L1 into explicit severity tiers preserves compute without risking pipeline liveness.
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │          Debater Output Payload         │
+                    └────────────────────┬────────────────────┘
+                                         │
+                                         ▼
+                    ┌─────────────────────────────────────────┐
+                    │             L1 Verification             │
+                    └──────┬─────────────┬─────────────┬──────┘
+                           │             │             │
+                    [Soft Warning]  [Retryable]   [Hard Breach]
+                           │             │             │
+                           ▼             │             ▼
+                 ┌──────────────────┐    │    ┌──────────────────┐
+                 │ Apply Penalty &  │    │    │ Fallback to Base │
+                 │ Proceed to L2    │    │    │ Risk Distribution│
+                 └──────────────────┘    │    └──────────────────┘
+                                         ▼
+                                ┌──────────────────┐
+                                │ Regen Count <    │
+                                │ debate_regen_max?│
+                                └────┬────────┬────┘
+                                 Yes │        │ No
+                                     ▼        ▼
+                              [Regenerate]  [Fallback to Base]
+
+```
+
+* **Hard Breaches (Zero-Tolerance):** Out-of-bounds portfolio leverage, math contradictions against verified financial feeds (e.g., asserting negative enterprise value on a profitable firm), or unparseable corrupted schemas. Immediately short-circuits to the **pre-computed baseline risk view**.
+* **Soft Violations (Deterministic Penalty):** Minor timestamp drift, ungrounded qualitative assertions without explicit data bindings, or secondary metric rounding errors. Deducts points via `penalty_score` and passes to L2 with an annotated verification flag.
+* **Bounded Regeneration (`debate_regen_max`):** If a recoverable failure occurs (e.g., metric key mismatch), allow exactly $N=1$ scoped repair pass targeting only the malformed field. If the retry fails, abort directly to the baseline prior.
+
+---
+
+### 2. Entrenchment Guard & Artificial-Consensus Reweighting
+
+Adversarial agents often either polarize into unyielding dogmatism (entrenchment) or rapidly converge onto a shared hallucinated middle ground (false consensus).
+
+* **Entrenchment Index ($I_{\text{entrench}}$):** Measured via semantic and metric overlap between round $R$ and round $R-1$ for the same persona:
+
+$$I_{\text{entrench}} = \text{CosineSim}(\mathbf{v}_{R}, \mathbf{v}_{R-1}) \cdot \left(1 - \frac{\vert{}\Delta \text{Allocation}\vert{}}{\text{Allocation}_{R-1}}\right)$$
+
+
+
+If $I_{\text{entrench}} > \tau_{\text{entrench}}$ and the agent fails to address the opponent's validated counter-points, the agent receives an entrenchment penalty.
+* **The "Agreement Is NOT a Score" Rule:** Lowering divergence between Bull and Bear does **not** increase confidence. If $\vert{}\text{Score}_{\text{Bull}} - \text{Score}_{\text{Bear}}\vert{} < \delta_{\text{divergence\_min}}$ without new L1-verified evidence, trigger an **Artificial-Consensus Flag**.
+* **Baseline Reweighting Function:** When artificial consensus or unresolvable entrenchment is flagged, the final decision shifts weight back toward the empirical base rate:
+
+$$\mathbf{W}_{\text{final}} = (1 - \alpha)\mathbf{W}_{\text{debate}} + \alpha \mathbf{W}_{\text{baseline}}$$
+
+
+
+Where $\alpha \in [0.0, 1.0]$ scales dynamically with the detected consensus/entrenchment risk score.
+
+---
+
+### 3. Updated State Transitions & Recovery Schema
+
+#### Updated State Transition Table
+
+| Current State | Event | Guard Condition | Next State | Action / Fallback |
+| --- | --- | --- | --- | --- |
+| `RUN_L1_CHECKS` | `L1_HARD_BREACH` | None | `EMIT_BASELINE_FALLBACK` | Route directly to pre-computed baseline risk distribution |
+| `RUN_L1_CHECKS` | `L1_RETRYABLE_ERROR` | `regen_count < debate_regen_max` | `REGEN_PROMPT_DISPATCH` | Increment `regen_count`; request targeted repair |
+| `RUN_L1_CHECKS` | `L1_RETRYABLE_ERROR` | `regen_count >= debate_regen_max` | `EMIT_BASELINE_FALLBACK` | Exhausted retries; fall back safely to baseline |
+| `RUN_L1_CHECKS` | `L1_SOFT_WARNING` | None | `CHECK_ENTRENCHMENT` | Apply deterministic penalty score; forward to L2 |
+| `CHECK_ENTRENCHMENT` | `ARTIFICIAL_CONSENSUS` | Divergence $<$ Min Threshold | `REWEIGHT_TO_BASELINE` | Set $\alpha > 0$; adjust output distribution |
+| `CHECK_ENTRENCHMENT` | `VALID_DIVERGENCE` | Min $\le$ Divergence $\le$ Max | `ANONYMIZE_ROTATE` | Proceed to blind, order-rotated L2 jury run |
+
+#### L1 Severity & Execution Context Schema (`l1_execution_context.json`)
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "L1ExecutionContext",
+  "type": "object",
+  "required": [
+    "round_index",
+    "regen_count",
+    "debate_regen_max",
+    "severity_tier",
+    "l1_action",
+    "baseline_fallback_payload"
+  ],
+  "properties": {
+    "round_index": { "type": "integer", "minimum": 1 },
+    "regen_count": { "type": "integer", "minimum": 0 },
+    "debate_regen_max": { "type": "integer", "default": 1 },
+    "severity_tier": {
+      "type": "string",
+      "enum": ["GREEN", "SOFT_WARNING", "RETRYABLE_ERROR", "HARD_BREACH"]
+    },
+    "l1_action": {
+      "type": "string",
+      "enum": ["PROCEED", "APPLY_PENALTY_AND_PROCEED", "TRIGGER_REGEN", "ABORT_TO_BASELINE"]
+    },
+    "entrenchment_metrics": {
+      "type": "object",
+      "required": ["entrenchment_index", "divergence_delta", "artificial_consensus_flag"],
+      "properties": {
+        "entrenchment_index": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "divergence_delta": { "type": "number", "minimum": 0.0 },
+        "artificial_consensus_flag": { "type": "boolean" },
+        "reweight_alpha": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    },
+    "baseline_fallback_payload": {
+      "type": "object",
+      "required": ["base_allocation_pct", "var_95_limit", "unconditional_risk_rating"],
+      "properties": {
+        "base_allocation_pct": { "type": "number" },
+        "var_95_limit": { "type": "number" },
+        "unconditional_risk_rating": { "type": "string" }
+      }
+    }
+  }
+}
+
+```

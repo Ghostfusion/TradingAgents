@@ -24,6 +24,19 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Multi-agent debate design revised for the §7 risk items**
+  (`docs/design_multi_agent_debate.md`, revision v3, folding in the 2026-08-31
+  update of `Strategies/Multi_Agents_Debate.md`): L1 severity triage
+  (HARD_BREACH → baseline fallback, RETRYABLE → one scoped regen, SOFT_WARNING
+  → penalty + annotated L2) replaces the binary gate (R1'); an entrenchment
+  index `I_entrench` + divergence-floor rule raise an Artificial-Consensus
+  Flag that α-reweights `W_final = (1−α)·W_debate + α·W_baseline` toward the
+  empirical base rate (R2'); a fourth canonical wire schema
+  `l1_execution_context.json` → `L1ExecutionContext` makes the recovery path
+  explicit (R5'); FSM transition table + LangGraph mapping updated, new
+  `debate_*` config keys (`debate_entrench_thresh`, `debate_divergence_min`,
+  `debate_baseline_fallback`), literature + risks + acceptance criteria
+  extended. Research/design only — no code changed.
 - **Multi-agent debate architecture (research-only design)** (`docs/design_multi_agent_debate.md`) -
   research + design (no code) folding the source doc
   `Strategies/Multi_Agents_Debate.md` onto the existing bull/bear research

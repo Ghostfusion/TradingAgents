@@ -36,12 +36,40 @@ overlays). Companion to `docs/design_risk_calculations_agent_wiring.md`
   unforecasted drawdown**, not raw $P(\text{Up}) > 0.5$ accuracy.
 - **(R5) State-machine orchestration + canonical wire schemas** — the
   source doc's FSM (PARSE_TURN -> RUN_L1 -> CHECK_EARLY -> ANONYMIZE_ROT ->
-  RUN_L2 -> AGGREGATE_L2 -> FINAL_SYNTH, with HALT_REJECT short-circuits)
+  RUN_L2 -> AGGREGATE_L2 -> FINAL_SYNTH, with severity-triage
+  short-circuits — see v3 below)
   and its three JSON contracts (`debater_turn`, `l1_eval_result`,
   `l2_judge_rubric`) are the orchestrator's transition table and the
   debaters'/judges' pydantic payloads (§4.9): **L2 never runs unless L1
-  fully passes**, schema faults and L1 hard-fails halt-and-reject, and the
-  loop continues only when `Round < Max` and `DeltaScore >= eps`.
+  fully passes**, schema faults and L1 hard-breaches fall back to the
+  baseline risk view (v3), and the loop continues only when `Round < Max`
+  and `DeltaScore >= eps`.
+**Revision v3 — folded in from the source doc's hardening appendices
+(`Strategies/Multi_Agents_Debate.md`, 2026-08-31 update):** the source doc
+answered the §7 risk items with executable mechanics, now folded in here:
+
+- **(R1') L1 severity triage instead of a binary gate** —
+  `HARD_BREACH` (zero-tolerance: out-of-bounds leverage/constraint,
+  math contradiction vs a verified feed, unparseable schema) short-circuits
+  to the pre-computed baseline risk view; `RETRYABLE` (metric-key mismatch,
+  scoped schema field fault) triggers exactly **one** single-field repair
+  pass (`debate_regen_max`), then baseline on a second failure;
+  `SOFT_WARNING` (timestamp drift, ungrounded qualitative claim, secondary
+  rounding) applies `penalty_score` and proceeds to L2 **annotated**.
+- **(R2') Entrenchment index + divergence-floor rule** —
+  `I_entrench = CosineSim(v_R, v_{R−1}) · (1 − |ΔAlloc|/Alloc_{R−1})` gates
+  an entrenchment penalty when a persona repeats itself past τ_entrench
+  without addressing validated counter-points; `|Score_Bull − Score_Bear| <
+  δ_divergence_min` with no new L1-verified evidence raises the
+  **Artificial-Consensus Flag** and reweights
+  `W_final = (1−α)·W_debate + α·W_baseline` toward the empirical base rate,
+  α scaling dynamically with the consensus/entrenchment risk.
+- **(R5') Fourth canonical wire schema** — `l1_execution_context.json` →
+  `L1ExecutionContext` (severity_tier, l1_action, regen bookkeeping,
+  entrenchment_metrics, baseline_fallback_payload) makes the recovery path
+  explicit and replayable, and the FSM gains `EMIT_BASELINE_FALLBACK`,
+  `REGEN_PROMPT_DISPATCH`, `CHECK_ENTRENCHMENT`, `REWEIGHT_TO_BASELINE`
+  rows (§4.7).
 
 ---
 
@@ -158,9 +186,10 @@ factsheet injected into the decision agents), the run-level OHLCV cache,
         v
    ADJUDICATOR (two layers):
      L1 deterministic: governor/contract/consensus/claim-verifier (abstain
-                     when unsupported) -> PASS/WARN/REJECT
-                      |-- [HARD FAIL] -> FAST-ABORT / single-role regen
-                      |-- [FAILED CLAIM] -> per-claim penalty, no jury
+                     when unsupported) -> severity tier
+                      |-- [HARD_BREACH] -> baseline fallback (no jury)
+                      |-- [RETRYABLE]   -> one scoped regen, then baseline
+                      |-- [SOFT_WARNING]-> penalty_score, proceed annotated
                       |-- [ARTIFICIAL CONSENSUS] -> reweight toward baseline
      L2 LLM arbiter (3rd family, anonymized, dimensioned rubric:
                      correctness, evidence, calc, novelty, constraint)
@@ -333,7 +362,9 @@ The source doc (`Strategies/Multi_Agents_Debate.md`) carries the concrete
 **transition graph + state table** that turns the two-tiered design into an
 enforceable FSM. The invariants: **L2 LLM judges are never invoked unless L1
 deterministic validation fully passes**; a syntax/schema failure and an L1
-hard failure both **halt and reject**; anonymization+rotation happens between
+hard breach short-circuit to the **pre-computed baseline risk view** (never to
+nothing), while retryable faults get exactly one bounded regeneration;
+anonymization+rotation happens between
 L1 and L2; continuation only when `Round < Max` **and** `DeltaScore >= eps`.
 This is exactly the "LLM as a state-local worker, controller owns the loop"
 pattern the 2025 literature recommends for auditability and bounded execution.
@@ -347,8 +378,8 @@ pattern the 2025 literature recommends for auditability and bounded execution.
  +-------+-------+                                              |
          | Valid Schema                                         v
          v                                            +----------------+
- +---------------+     L1 Hard Failure               |  HALT_REJECT   |
- |   RUN_L1      |---> (e.g., Risk / Math) --------> +----------------+
+ +---------------+     HARD_BREACH                    |  EMIT_BASELINE |
+ |   RUN_L1      |---> (leverage / math / schema) --> +----------------+
  +-------+-------+                                              ^
          | L1 Pass                                             |
          v                                                     |
@@ -382,11 +413,14 @@ pattern the 2025 literature recommends for auditability and bounded execution.
 | `IDLE` | `START_SIMULATION` | Config valid | `ROUND_DISPATCH` | Initialize turn context, reset state |
 | `ROUND_DISPATCH` | `AGENTS_RESPONDED` | Both Bull & Bear output received | `PARSE_TURN` | Collect debater payloads |
 | `PARSE_TURN` | `SCHEMA_VALIDATED` | JSON parse success | `RUN_L1_CHECKS` | Load verified data bounds |
-| `PARSE_TURN` | `PARSE_ERROR` | Schema malformed / unrecoverable | `HALT_REJECT` | Emit schema validation fault code |
-| `RUN_L1_CHECKS` | `L1_PASS` | Hard bounds and math checks green | `CHECK_EARLY_HALT` | Cache L1 metric penalties/scores |
-| `RUN_L1_CHECKS` | `L1_FAIL` | Hard bound breach (VaR, bounds) | `HALT_REJECT` | Short-circuit round; bypass L2 calls |
-| `CHECK_EARLY_HALT` | `ENTRENCHMENT_HIT` | Entrenchment index > threshold | `FINAL_SYNTHESIS` | Flag artificial consensus; freeze debate |
-| `CHECK_EARLY_HALT` | `PROCEED` | Divergence within bounds | `ANONYMIZE_ROTATE` | Strip agent IDs; shuffle payload order |
+| `PARSE_TURN` | `PARSE_ERROR` | Schema malformed / unrecoverable | `EMIT_BASELINE_FALLBACK` | Emit schema fault code; baseline fallback (no jury) |
+| `RUN_L1_CHECKS` | `L1_HARD_BREACH` | Zero-tolerance (leverage/constraint, math contradiction, unparseable schema) | `EMIT_BASELINE_FALLBACK` | Route to pre-computed baseline risk distribution; no L2 |
+| `RUN_L1_CHECKS` | `L1_RETRYABLE_ERROR` | `regen_count < debate_regen_max` | `REGEN_PROMPT_DISPATCH` | Increment `regen_count`; scoped single-field repair pass |
+| `RUN_L1_CHECKS` | `L1_RETRYABLE_ERROR` | `regen_count >= debate_regen_max` | `EMIT_BASELINE_FALLBACK` | Budget exhausted; fall back safely to baseline |
+| `RUN_L1_CHECKS` | `L1_SOFT_WARNING` | Non-critical (timestamp drift, ungrounded qualitative, rounding) | `CHECK_ENTRENCHMENT` | Apply `penalty_score`; forward annotated to L2 |
+| `RUN_L1_CHECKS` | `L1_PASS` | Hard bounds and math checks green | `CHECK_ENTRENCHMENT` | Cache L1 metric penalties/scores |
+| `CHECK_ENTRENCHMENT` | `ARTIFICIAL_CONSENSUS` | Divergence < `δ_divergence_min` (or entrenchment index > τ) | `REWEIGHT_TO_BASELINE` | Set α > 0; adjust output toward baseline |
+| `CHECK_ENTRENCHMENT` | `VALID_DIVERGENCE` | Min ≤ divergence ≤ max; no entrenchment | `ANONYMIZE_ROTATE` | Proceed to blind, order-rotated L2 jury run |
 | `ANONYMIZE_ROTATE` | `PAYLOAD_PREPARED` | Blind payloads generated | `RUN_L2_JURY` | Broadcast to heterogeneous LLM judges |
 | `RUN_L2_JURY` | `JURY_RESPONDED` | All jury responses received | `AGGREGATE_L2` | Compute trimmed mean / L2 rubric |
 | `AGGREGATE_L2` | `CONTINUE_DEBATE` | Round < Max & DeltaScore >= eps | `ROUND_DISPATCH` | Inject counter-arguments for round R+1 |
@@ -395,16 +429,21 @@ pattern the 2025 literature recommends for auditability and bounded execution.
 **Mapping onto this repo (LangGraph)**: the FSM states are LangGraph nodes —
 `PARSE_TURN` = the dual-mode schema adapter (R3) validating `ArgumentRecord` /
 `DebaterTurnPayload`; `RUN_L1` = the pure `claim_verifier` + `govern` +
-`divergence_check`; `CHECK_EARLY` = `termination_check` (entrenchment index,
-consensus exit); `ANONYMIZE_ROT` = an identity-strip + order-shuffle node;
-`RUN_L2` = the dimensioned judges; `AGGREGATE_L2` = trimmed-mean scorer;
-`FINAL_SYNTH` = the arbiter's `DebateVerdict` synthesis. The router in
-`conditional_logic.py` consumes the transition table's guards so a fall-
-through can never raise (existing `DEBATE_PATH_MAP` contract). The
-`HALT_REJECT` path falls back to the baseline risk view (pre-debate stances)
-and writes an explicit audit row.
+`divergence_check` + `classify_severity` (R1'); `REGEN_PROMPT_DISPATCH` = the
+scoped single-field repair pass (R1'); `EMIT_BASELINE_FALLBACK` = the baseline
+risk-view fallback (pre-debate stances); `CHECK_ENTRENCHMENT` =
+`termination_check` (entrenchment index, artificial-consensus divergence
+floor); `REWEIGHT_TO_BASELINE` = the α reweight (R2'); `ANONYMIZE_ROT` = an
+identity-strip + order-shuffle node; `RUN_L2` = the dimensioned judges;
+`AGGREGATE_L2` = trimmed-mean scorer; `FINAL_SYNTH` = the arbiter's
+`DebateVerdict` synthesis. The router in `conditional_logic.py` consumes the
+transition table's guards so a fall-through can never raise (existing
+`DEBATE_PATH_MAP` contract). The `EMIT_BASELINE_FALLBACK` path lands on the
+baseline risk view (pre-debate stances) and writes an explicit audit row;
+`REGEN_PROMPT_DISPATCH` increments `regen_count` and re-enters `PARSE_TURN`.
 
-The source doc's **three JSON schemas** are the canonical wire contracts and
+The source doc's **four JSON schemas** (the original three + the 2026-08-31
+`l1_execution_context.json`) are the canonical wire contracts and
 **replace/extend** this doc's earlier claim-ledger sketches (4.2, 4.3). They
 bind to pydantic models:
 
@@ -424,8 +463,17 @@ bind to pydantic models:
   `dimension_scores` (empirical_grounding, downside_tail_risk_weight,
   catalyst_clarity, assumption_sensitivity; 0..10 each), `entrenchment_detected`,
   `rebuttal_effectiveness` (0..10), `rationale` (<=1000 chars).
+- **`l1_execution_context.json` to `L1ExecutionContext`** — `round_index`,
+  `regen_count` / `debate_regen_max` (regen bookkeeping), `severity_tier`
+  (GREEN / SOFT_WARNING / RETRYABLE_ERROR / HARD_BREACH), `l1_action`
+  (PROCEED / APPLY_PENALTY_AND_PROCEED / TRIGGER_REGEN / ABORT_TO_BASELINE),
+  `entrenchment_metrics` (`entrenchment_index`, `divergence_delta`,
+  `artificial_consensus_flag`, `reweight_alpha`), `baseline_fallback_payload`
+  (`base_allocation_pct`, `var_95_limit`, `unconditional_risk_rating`) — the
+  recovery-path record the FSM carries between states, so every
+  fallback/regen decision is explicit and replayable.
 
-All three validate with pydantic (the dual-mode adapter's structured path uses
+All four validate with pydantic (the dual-mode adapter's structured path uses
 these models directly; the markdown-fence fallback parses then validates the
 same pydantic models), and every field feeds the pure L1 scorers / L2
 aggregation with no fabrication.
@@ -449,7 +497,10 @@ debate_abstain_allowed: true
 debate_fast_abort: true            # R1: hard-fail short-circuits / regenerates
 debate_regen_max: 1                # R1: single-role regeneration budget
 debate_divergence_cap_rounds: 1    # R2: artificial-consensus threshold (rounds)
-debate_reweight_to_baseline: 0.5   # R2: weight shift toward baseline on alert
+debate_reweight_to_baseline: 0.5   # R2: base α: weight shift toward baseline on alert (α scales dynamically with risk)
+debate_entrench_thresh: 0.8        # R2': I_entrench above this -> entrenchment penalty
+debate_divergence_min: 0.15        # R2': |bull-bear score| below this -> artificial-consensus flag
+debate_baseline_fallback: true     # R1': HARD_BREACH / exhausted-regen -> baseline risk view (never nothing)
 debate_require_capability_matrix: false  # R3: startup health-check gate
 ```
 
@@ -460,14 +511,15 @@ debate_require_capability_matrix: false  # R3: startup health-check gate
 | Debater factories (model per role, tool surface, prompt contract) | `agents/researchers/bull_researcher.py` + `bear_researcher.py` (extend) |
 | Arbiter | `agents/managers/research_manager.py` (or new `agents/arbiters/debate_judge.py`) + `agents/schemas.py` (`ArgumentRecord`, `DebateVerdict`) |
 | FSM orchestrator / transition table | `graph/setup.py` (states as nodes) + `graph/conditional_logic.py` (router on the table's guards) |
-| Canonical wire schemas | `agents/schemas.py`: `DebaterTurnPayload`, `L1DeterministicResult`, `L2JudgeDimensionedRubric` (pydantic mirrors of the source doc's three JSON schemas) |
+| Canonical wire schemas | `agents/schemas.py`: `DebaterTurnPayload`, `L1DeterministicResult`, `L2JudgeDimensionedRubric`, `L1ExecutionContext` (pydantic mirrors of the source doc's four JSON schemas) |
 | Claim ledger + scorer + termination | `strategies/debate_claim.py`, `strategies/debate_score.py` (pure) |
 | L1 deterministic verifier | `reporting.audit_decision_numbers` pattern + `strategies/consensus.py` + `risk_governor` |
 | Orchestration | `graph/setup.py` (subgraph + edges), `graph/conditional_logic.py` (router) |
 | Pre-debate stances | `agents/utils/independent_vote.py` (reuse; feeds consensus-exit) |
 | Evidence / tool ledger | run-level `_ohlcv` cache + a `tool_call_ledger` (new small state dict) |
 | Capability matrix / dual-mode adapter | `strategies/debate_capability.py` (pure) + `agents/utils/structured.py` (extend) |
-| Divergence / artificial-consensus | `strategies/debate_score.py::divergence_check` (pure) |
+| Severity triage + regen budget | `strategies/debate_score.py::classify_severity` (pure) + `agents/utils/structured.py` (scoped repair pass) |
+| Divergence / entrenchment / artificial-consensus | `strategies/debate_score.py::divergence_check` + `entrenchment_index` + `reweight_to_baseline` (pure) |
 | A/B harness (R4) | `scripts/debate_ab_harness.py` (Brier + max-unforecasted-dd) |
 | Report | `reporting.py` (2_research section gains `judge_scores` + `evidence_ledger` block, back-compat) |
 
@@ -505,6 +557,14 @@ debate_require_capability_matrix: false  # R3: startup health-check gate
   auditability, bounded execution and replayable stop conditions; simple
   gates own completion/failure/policy while LLM transitions are reserved for
   genuinely ambiguous decisions.
+- Consensus illusion / entrenchment (2025-2026): debate can *reduce*
+  accuracy when agents are homogeneous or pushed too many rounds — agreement
+  can be illusory (consistency illusion, consensus collapse, sycophantic
+  conformity; plurality voting can discard an already-correct answer; harmful
+  correct→incorrect "answer flips"). Detect pathology from round-to-round
+  stability / belief-update metrics (this design's `I_entrench`), never from
+  final agreement; a no-debate baseline (majority vote over the same agents'
+  FIRST answers) is the anchor any reweighting homes toward.
 
 ---
 
@@ -556,12 +616,18 @@ docs/README/CHANGELOG true, `py -3.12` everywhere.
   parse + Pydantic repair loop) and the **config-time capability matrix**
   (R3) re-route roles before the graph compiles; fail closed, never coerce.
 - **Entrenched wrong consensus**: adversarial rounds can entrench; hence
-  entrenchment guard, divergence cap, **artificial-consensus reweight to
-  baseline (R2)**, and the rule "agreement is NOT a score".
-- **L1 short-circuit over-trigger (R1)**: a too-aggressive fast-abort could
-  kill a valid debate turn early; mitigation — `severity` tiers (hard vs
-  soft), single regeneration budget (`debate_regen_max`), and the debate
-  only aborts to the already-computed baseline risk view, never to nothing.
+  the **entrenchment index** `I_entrench` (round-over-round semantic/metric
+  overlap with no new counter-evidence addressed), the divergence-floor rule
+  (R2'): |bull−bear score| below `debate_divergence_min` without new
+  L1-verified evidence raises the Artificial-Consensus Flag, and the
+  **α-reweight** `W_final = (1−α)·W_debate + α·W_baseline` toward the
+  empirical base rate — agreement is never a score.
+- **L1 short-circuit over-trigger (R1/R1')**: a binary fast-abort could kill
+  a valid debate turn early; mitigation — **severity triage** replaces the
+  binary gate (`SOFT_WARNING` penalizes and proceeds annotated,
+  `RETRYABLE` gets exactly one scoped single-field regeneration, only
+  `HARD_BREACH` aborts), bounded by `debate_regen_max`, and the debate only
+  aborts to the already-computed baseline risk view, never to nothing.
 - **Determinism vs. LLM scoring**: claims/scoring/termination are pure
   functions with unit tests; only the dimensioned judge scores are LLM,
   and they cannot overrule L1.
@@ -591,6 +657,12 @@ docs/README/CHANGELOG true, `py -3.12` everywhere.
 4b. R1/R2: a round-1 hard fail aborts or triggers exactly one regeneration
    and never runs the jury; an artificial-consensus (identical targets, no
    new data) reweights the output toward the baseline risk distribution.
+4c. R1'/R2': severity triage routes a synthetic `HARD_BREACH` to the baseline
+   payload, a `RETRYABLE` metric-key mismatch to exactly one regen then
+   baseline, a `SOFT_WARNING` to penalty + annotated L2 (`L1ExecutionContext`
+   round-trips through pydantic); `I_entrench` on a repeated-persona series
+   crosses τ and the divergence floor raises the flag with α>0, shifting
+   `W_final` toward `W_baseline`.
 5. Full suite hermetic (mocked LLMs per model), timers, ruff clean.
 6. R4 A/B harness: debate vs N=5 self-consistency under matched tokens —
    report Brier score, max unforecasted drawdown, tokens/calls/latency, and
