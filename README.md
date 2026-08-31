@@ -30,6 +30,18 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Multi-agent debate architecture (design, research-only)** -
+  `docs/design_multi_agent_debate.md` upgrades the bull/bear research debate
+  onto a production two-layer judiciary: deterministic L1 gates (claim
+  verifier, risk governor, divergence check) always precede an L2 blind,
+  dimensioned, ensembled LLM judge; heterogeneous per-role models; an FSM
+  orchestrator with the canonical wire schemas from
+  `Strategies/Multi_Agents_Debate.md` (DebaterTurnPayload /
+  L1DeterministicResult / L2JudgeDimensionedRubric); R1 fast-abort +
+  single-role regen, R2 artificial-consensus reweight, R3 dual-mode schema
+  adapter + config-time capability matrix, R4 matched-compute A/B (Brier +
+  max unforecasted drawdown), R5 state machine. Research only — no code
+  changed; the proposed `debate_*` config defaults OFF. See CHANGELOG.
 - [2026-08-31] **CLI deep-run runtime/depth defect fixed** - 'deep' research
   depth mapped to 5 bull + 5 bear debate turns, which multiplied runtime
   (SKHY 08-31 >1h vs 30-40m) and let later debate turns degenerate into

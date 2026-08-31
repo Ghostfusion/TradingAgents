@@ -699,6 +699,13 @@ preserves `Risk Gate (computed)` blocks.
 - `docs/developer/12-data-providers.md` - the 13 data providers/sources and
   per-category vendor chains
 - `Strategies/*` - strategy plans and specs (index: `Strategies/index.md`)
+- `docs/design_multi_agent_debate.md` - research + design (no code) for the
+  bull/bear research debate: two-layer judiciary (deterministic L1 gates
+  before a blind dimensioned L2 LLM judge), heterogeneous per-role models +
+  capability matrix, FSM orchestrator + canonical wire schemas
+  (`DebaterTurnPayload` / `L1DeterministicResult` / `L2JudgeDimensionedRubric`)
+  from `Strategies/Multi_Agents_Debate.md`, phased P0-P6 all `enable_*`-flagged
+  OFF.
 - `docs/design_quantlib_lean_enhancements.md` - research-to-design: deep study
   of QuantLib (pricing/measurement rigor) + Lean (framework/operational rigor)
   mapped to concrete deterministic `strategies/*` enhancements, phased

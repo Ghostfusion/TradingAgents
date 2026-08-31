@@ -24,6 +24,22 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Multi-agent debate architecture (research-only design)** (`docs/design_multi_agent_debate.md`) -
+  research + design (no code) folding the source doc
+  `Strategies/Multi_Agents_Debate.md` onto the existing bull/bear research
+  debate: a two-layer judiciary (deterministic L1 gates — claim verifier,
+  risk governor, consensus — always precede an L2 blind, order-rotated,
+  dimensioned, ensembled LLM judge), heterogeneous per-role models with a
+  config-time capability matrix (R3), the FSM transition table + canonical
+  wire schemas mapped to pydantic (`DebaterTurnPayload`,
+  `L1DeterministicResult`, `L2JudgeDimensionedRubric`), L1 fast-abort /
+  single-role regeneration (R1), divergence caps + artificial-consensus
+  reweight to baseline (R2), and a matched-compute A/B harness scored with
+  Brier + max unforecasted drawdown (R4) before any gate ships. All proposed
+  `debate_*` config keys default OFF (bit-identical current behavior);
+  phased rollout P0-P6 maps onto existing seams (`independent_vote`,
+  `risk_tool_loop`, `conditional_logic`). Companion to
+  `docs/design_risk_calculations_agent_wiring.md`.
 - **Risk calculations wired into the decision agents** (`docs/design_risk_calculations_agent_wiring.md`,
   7-phase audit implementation): (1) the 18 quant-risk tools that were
   registered in the market ToolNode but unreachable by the LLM are now bound

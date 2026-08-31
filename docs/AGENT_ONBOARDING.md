@@ -297,6 +297,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - Multi-agent debate architecture design
+  (research-only, no code): `docs/design_multi_agent_debate.md` + the source
+  `Strategies/Multi_Agents_Debate.md` — two-layer judiciary (deterministic L1
+  gates first, then a blind dimensioned L2 LLM judge), heterogeneous models +
+  config-time capability matrix, FSM orchestrator + 3 canonical wire schemas
+  mapped to pydantic (`DebaterTurnPayload` / `L1DeterministicResult` /
+  `L2JudgeDimensionedRubric`), R1 fast-abort / single-role regen, R2
+  artificial-consensus reweight to baseline, R4 matched-compute A/B (Brier +
+  max unforecasted drawdown). All `debate_*` config keys OFF by default;
+  phased rollout P0-P6 (grounding contract → scoring/termination → models/
+  capability → judge → A/B harness). See CHANGELOG.
 - 2026-08-31 `(working tree)` - CLI deep-run defect fixes: `--depth` / the
   interactive research-depth selection now map to the RISK rounds only;
   the bull/bear researchers each run exactly ONCE per analysis (previously
