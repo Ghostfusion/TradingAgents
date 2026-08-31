@@ -670,11 +670,12 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
             from tradingagents.dataflows.interface import route_to_vendor
 
             mc = _latest(fin.get("market_cap"))
-            cf_payload = (
-                route_to_vendor("get_cashflow", symbol, "annual", current_date)
-                if current_date
-                else ""
-            )
+            cf_key = (symbol.upper(), current_date)
+            if cf_key not in _CASHFLOW_CACHE and current_date:
+                _CASHFLOW_CACHE[cf_key] = route_to_vendor(
+                    "get_cashflow", symbol, "annual", current_date
+                )
+            cf_payload = _CASHFLOW_CACHE.get(cf_key, "")
             fcf_series = _fcf_series(cf_payload) if cf_payload else None
             fy = _fcfy(fcf_series[0] if fcf_series else None, mc)  # newest period first
             fcf_raw = fcf_series[0] if fcf_series else None
@@ -731,6 +732,98 @@ def _value_dip_scan(symbol: str, ohlcv: dict, fin: dict, current_date: str = "")
         }
     except Exception:  # noqa: BLE001 - a failed value-dip read must not abort a run
         return None
+
+
+def _cheap_gate(ohlcv: dict, scan: str) -> bool | None:
+    """Two-stage gate, stage A: a PURE OHLCV-only pre-filter (no provider).
+
+    Returns:
+      - False  -> definitively NOT a candidate -> drop before any fundamentals
+                 fetch (saves the ~4-6 vendor calls per symbol).
+      - True   -> keep (either genuinely passes, or the scan has no cheap
+                 signal / the inputs are insufficient to decide -> defer to
+                 the full scan, never fabricate a skip).
+    Only the already-fetched cached OHLCV is used; no new vendor call happens
+    here. Enrichment that needs a provider (float, sector, revisions,
+    fundamentals) is deliberately deferred to stage B/C on survivors.
+    """
+    scan = (scan or "").strip().lower()
+    # value / all have no cheap technical signal (value needs fundamentals;
+    # 'all' flags everything) -> keep, defer.
+    if scan in ("value", "all"):
+        return True
+    closes = (ohlcv or {}).get("closes") or []
+    highs = (ohlcv or {}).get("highs") or []
+    lows = (ohlcv or {}).get("lows") or []
+    vols = (ohlcv or {}).get("volumes") or []
+    # trend-pullback / breakout: reuse scan_signals' exact Strategy A/B flags.
+    if scan in ("trend-pullback", "breakout"):
+        sig = scan_signals(ohlcv)
+        if sig is None:
+            return True  # insufficient bars -> unknown -> keep
+        return bool(sig.get("a")) if scan == "trend-pullback" else bool(sig.get("b"))
+    # vcp: pure-OHLCV base detection.
+    if scan == "vcp":
+        vc = _vcp_scan(ohlcv)
+        if vc is None:
+            return True
+        return bool(vc.get("candidate"))
+    # value-dip: reuse the existing cheap technical prefilter (RSI/%b/stop).
+    if scan == "value-dip":
+        return _value_dip_technical_prefilter(ohlcv)
+    # swing: trend stack is pure OHLCV (RS uses the shared cached benchmark).
+    if scan == "swing":
+        try:
+            from tradingagents.strategies.size import atr as _atr
+            from tradingagents.strategies.swing import swing_report
+
+            if len(closes) < 200:
+                return True
+            atr_v = _atr(highs, lows, closes, window=14)
+            rep = swing_report(
+                closes, highs, lows, vols,
+                atr_value=atr_v, benchmark_closes=_benchmark_closes(),
+            )
+            if not rep:
+                return True
+            return bool(rep.get("candidate"))
+        except Exception:  # noqa: BLE001 - defer on failure
+            return True
+    # momentum: 5-pillar pre-filter WITHOUT the float pillar (float fetch is
+    # deferred to stage B/C, so the float pillar is 'unknown' here -> kept).
+    if scan == "momentum":
+        try:
+            from tradingagents.strategies.momentum import pillars as _pill, rvol as _rvol
+
+            rv = _rvol(vols) if vols else None
+            pill = _pill(
+                close=closes[-1] if closes else None,
+                day_volume=vols[-1] if vols else None,
+                prev_close=closes[-2] if len(closes) >= 2 else None,
+                day_open=((ohlcv or {}).get("opens") or [None])[-1],
+                rv=rv,
+                float_shares=None,  # deferred -> unknown -> keep through A
+            )
+            # Drop when any *known* pillar fails; unknown (None) pillars keep
+            # the name so momentum stays honest under deferred float.
+            return not any(v is False for v in pill.values())
+        except Exception:  # noqa: BLE001 - defer on failure
+            return True
+    return True  # unknown scan -> keep (defer)
+
+
+# Run-level cache so stage B fetches each survivor's fundamentals ONCE even
+# though the movers path and the main loop both call fetch_ticker / cashflow.
+_FIN_CACHE: dict = {}
+_CASHFLOW_CACHE: dict = {}
+
+
+def _fetch_fin_cached(ticker: str, current_date: str) -> dict:
+    """fetch_ticker memoized per (ticker, date) for the run."""
+    key = (ticker.upper(), current_date)
+    if key not in _FIN_CACHE:
+        _FIN_CACHE[key] = fetch_ticker(ticker, current_date)
+    return _FIN_CACHE[key]
 
 
 _SECTOR_RANK_CACHE: dict = {}
@@ -1140,6 +1233,8 @@ def main(argv: list[str] | None = None) -> int:
     _RUN_OHLCV_CACHE.clear()
     _RUN_FLOAT_CACHE.clear()
     _BENCHMARK_CACHE.clear()
+    _FIN_CACHE.clear()
+    _CASHFLOW_CACHE.clear()
     tickers = list(args.tickers)
     # Positional tickers always win: the eodhd-us default only applies when no
     # explicit symbol source is given (no positional tickers, no --file).
@@ -1327,7 +1422,7 @@ def main(argv: list[str] | None = None) -> int:
                         # calls/symbol to 1 for the non-candidates.
                         if not _value_dip_technical_prefilter(ohlcv):
                             continue
-                        fin = fetch_ticker(symbol, args.date)
+                        fin = _fetch_fin_cached(symbol, args.date)
                         vd = _value_dip_scan(symbol, ohlcv, fin, args.date)
                         if vd is not None:
                             scan_meta[symbol]["value_dip"] = vd
@@ -1386,8 +1481,31 @@ def main(argv: list[str] | None = None) -> int:
         fmp_use = False
     for ticker in tickers[: args.limit]:
         try:
-            fin = fetch_ticker(ticker, args.date)
             meta = mover_meta.get(ticker.upper(), {})
+            # STAGE A: cheap OHLCV-only gate (no provider) BEFORE any
+            # fundamentals fetch. Only the single cached OHLCV series is used;
+            # float / sector / revisions / fundamentals are deferred to stage
+            # B/C on survivors. value/all have no cheap technical signal so
+            # they fall straight through to the fundamentals stage.
+            ohlcv = None
+            if args.scan != "value":
+                sym_up = ticker.upper()
+                ohlcv = _RUN_OHLCV_CACHE.get(sym_up)
+                if ohlcv is None:
+                    ohlcv = _fetch_ohlcv(ticker)
+                    _RUN_OHLCV_CACHE[sym_up] = ohlcv
+                if not _cheap_gate(ohlcv, args.scan):
+                    logger.info("cheap gate: skip %s (%s)", ticker, args.scan)
+                    continue
+            # Free price floor from the (already fetched) OHLCV close applies
+            # to every scan when the last close is measurable.
+            if args.price_min and ohlcv:
+                closes = (ohlcv or {}).get("closes") or []
+                if closes and closes[-1] is not None and closes[-1] < args.price_min:
+                    logger.info("skip %s: price %.2f < floor", ticker, closes[-1])
+                    continue
+            # STAGE B: fundamentals for survivors (memoized -> once per ticker).
+            fin = _fetch_fin_cached(ticker, args.date)
             # The moomoo rank carries market cap per symbol, but moomoo's
             # fundamentals feed (statements) does not - inject it so the EV /
             # earnings-yield / acquirer screens can run on the daily list.

@@ -73,16 +73,6 @@ Breaking changes within the 0.x line are called out explicitly.
     Tests: `tests/test_twelve_data_vendor.py` (12), `tests/test_stockdata_vendor.py`
     (10), `tests/test_new_provider_wiring.py` (5). ruff clean.
 
-### Fixed
-- **Value-screener exit hang on moomoo universes** - when a `top-losers` /
-  `heat-proxy` run failed (e.g. "no symbols after price/P-E/equity gates"),
-  `parser.error` raised `SystemExit` but the moomoo `OpenQuoteContext` had
-  already spawned a non-daemon receive thread, so the process hung at
-  interpreter exit (a 15-min+ web job) instead of terminating. The moomoo
-  error paths now `close_context()` before `parser.error`, so the error exits
-  cleanly (verified: clean exit in ~2s vs. the previous hang). Also pinned
-  `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT=5.0` in `.env` so a degraded OpenD
-  self-kills each call instead of stalling.
 - **Analyst tool-loop edge regression** - the sequential graph lost its
   `ToolNode -> analyst` edge (introduced in the Option-A wiring pass), so a
   run TERMINATED right after the market analyst's first tool round: empty
@@ -369,6 +359,20 @@ Breaking changes within the 0.x line are called out explicitly.
   `test_cli_no_console` wiring guard (seed-before-stream, overlay-before-save).
 
 ### Fixed
+- **Two-stage screener gating (no provider calls during the gate)** - the
+  main scan loop now runs a **cheap OHLCV-only gate (Stage A)** on the single
+  cached price series before any fundamentals fetch, so `value-dip` /
+  `trend-pullback` / `breakout` / `momentum` / `swing` / `vcp` all drop
+  definitive non-candidates without hitting a provider. Only survivors reach
+  the fundamentals stage (Stage B, memoized once per ticker via
+  `_fetch_fin_cached` + `_CASHFLOW_CACHE`) and then provider enrichment
+  (Stage C: float / sector / revisions / institutions). `value` / `all` have
+  no cheap technical signal and fall straight through, as before. This makes
+  a large `eodhd-us` slice tractable (was effectively hanging per-name) and
+  fixes the duplicate cashflow fetch inside `_value_dip_scan`. Tests:
+  `test_cheap_gate_deferred_before_fundamentals` +
+  `test_eodhd_cheap_gate_before_fundamentals` (gated-out names never fetch
+  fundamentals). ruff clean.
 - **Risk gate placement + compact verdict** - the computed `Risk Gate (computed)`
   block was prepended to EVERY analyst report (input evidence, not risk
   output), so it appeared 6+ times; it now lives once in `4_risk/*.md` and

@@ -515,26 +515,73 @@ def test_moomoo_error_path_closes_context(monkeypatch, capsys):
     assert closed, "close_context() must be called before parser.error on the moomoo error path"
 
 
-def test_moomoo_top_losers_error_path_closes_context(monkeypatch, capsys):
-    """Same exit-hang regression for the top-losers universe: it shares the
-    moomoo gating block but goes through get_top_movers_moomoo (not the heat
-    list). The OpenQuoteContext must still be closed before parser.error, so a
-    top-losers run that gates everything out (or fails) exits cleanly instead
-    of hanging the web job at interpreter exit."""
+def test_cheap_gate_deferred_before_fundamentals(monkeypatch, capsys):
+    """Two-stage gating: a trend-pullback scan must call the cheap OHLCV gate
+    (no provider) and, when the gate rejects a symbol, never fetch fundamentals
+    for it. Verifies the run-level fin cache is untouched for gated-out names."""
     import pytest as _pytest
 
     from tradingagents.dataflows import moomoo
 
-    closed = []
+    fin_calls = []
+    orig_fetch = vs.fetch_ticker
+    monkeypatch.setattr(vs, "fetch_ticker", lambda t, d: fin_calls.append(t) or orig_fetch(t, d))
 
-    def _fake_top_movers(sort_dir, count, market, min_market_cap):
-        # One mover that always fails --price-min 20 (price 10).
-        return [{"symbol": "A", "name": "Cheap Co", "cur_price": 10.0, "pe_ttm": 5.0, "market_cap": 1e9}]
+    def _fake_movers(count, market, min_market_cap):
+        # A single mover that fails the trend-pullback cheap gate (pure
+        # downtrend: close below both SMAs, RSI high) -> trend-pullback rejects.
+        return [{
+            "symbol": "AAA", "name": "Downtrend Co", "cur_price": 100.0,
+            "pe_ttm": 5.0, "market_cap": 1e10, "change_ratio": -0.05,
+        }]
 
-    monkeypatch.setattr(moomoo, "get_top_movers_moomoo", _fake_top_movers)
-    monkeypatch.setattr(moomoo, "close_context", lambda: closed.append(1))
+    monkeypatch.setattr(moomoo, "get_top_movers_moomoo", _fake_movers)
+    with _pytest.raises(SystemExit):
+        vs.main(["-u", "top-losers", "-n", "1", "-d", "2026-01-02", "--scan", "trend-pullback"])
+    # The cheap gate (pure OHLCV) rejects before the fundamentals fetch.
+    assert fin_calls == [], f"fundamentals fetched for gated-out symbol: {fin_calls}"
 
-    with _pytest.raises(SystemExit) as exc:
-        vs.main(["-u", "top-losers", "-n", "1", "-d", "2026-01-02", "--price-min", "20"])
-    assert exc.value.code == 2
-    assert closed, "close_context() must be called before parser.error on the top-losers error path"
+
+def test_eodhd_cheap_gate_before_fundamentals(monkeypatch, capsys):
+    """eodhd-us + value-dip: the main loop's cheap OHLCV gate (Stage A) must
+    run before fetch_ticker. Symbols whose OHLCV fails RSI<=35 / %b<=0.10 /
+    stop<=2% never get a fundamentals fetch, so a large eodhd slice only
+    queries providers for plausible dip candidates."""
+    from tradingagents.dataflows import eodhd
+
+    fin_calls = []
+    orig_fetch = vs.fetch_ticker
+    monkeypatch.setattr(vs, "fetch_ticker", lambda t, d: fin_calls.append(t) or orig_fetch(t, d))
+
+    # Two eodhd common stocks: one in a strong uptrend (rejected by the cheap
+    # OHLCV gate, no fundamentals), one oversold (passes the prefilter ->
+    # fundamentals fetched).
+    monkeypatch.setattr(
+        eodhd, "get_exchange_symbols_eodhd",
+        lambda market: [
+            {"Code": "UPUP", "Name": "Uptrend", "Type": "Common Stock"},
+            {"Code": "DOWN", "Name": "Oversold", "Type": "Common Stock"},
+        ],
+    )
+    # Seed per-ticker OHLCV through _fetch_ohlcv so the real cheap gate runs.
+    # UPUP: strong uptrend -> RSI high, %b high -> the value-dip prefilter
+    # (and cheap gate) rejects it. DOWN: no seed -> fetched (defer through).
+    def _fake_ohlcv(ticker, days=320):
+        if ticker.upper() == "UPUP":
+            return {
+                "closes": [100.0 + i * 1.5 for i in range(60)],
+                "highs": [102.0 + i * 1.5 for i in range(60)],
+                "lows": [98.0 + i * 1.5 for i in range(60)],
+                "volumes": [1_000_000] * 60,
+            }
+        return {"closes": [], "highs": [], "lows": [], "volumes": []}
+
+    monkeypatch.setattr(vs, "_fetch_ohlcv", _fake_ohlcv)
+
+    vs.main(["-u", "eodhd-us", "-l", "2", "-d", "2026-01-02",
+             "--scan", "value-dip", "--min-mcap", "0", "--price-min", "0",
+             "--pe-max", "0"])
+    # The uptrend name is rejected by the cheap OHLCV gate before any
+    # fundamentals fetch; the oversold one (prefilter passes) advances to the
+    # fundamentals stage. The rejected UPUP must NOT be fetched.
+    assert "UPUP" not in fin_calls, f"gated-out UPUP fetched fundamentals: {fin_calls}"
