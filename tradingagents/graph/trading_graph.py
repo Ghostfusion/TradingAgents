@@ -133,6 +133,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_volatility_estimators,
     screen_equities,
 )
+from tradingagents.agents.utils.debate_roles import resolve_role_llm
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.agents.utils.value_dip_tools import (
@@ -274,6 +275,17 @@ class TradingAgentsGraph:
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
 
+        # Per-role structured-debate LLMs (opt-in enable_debate): bull/bear/
+        # judge resolve from the debate_*_model config keys ("family:id")
+        # through resolve_role_llm; empty keys fall back to quick (bull/bear)
+        # / deep (judge). Resolved only when the structured path is on.
+        self.debate_llms = {}
+        if self.config.get("enable_debate"):
+            for _role in ("bull", "bear", "judge"):
+                self.debate_llms[_role] = resolve_role_llm(
+                    self.config, _role, factory=create_llm_client
+                )
+
         self.memory_log = TradingMemoryLog(self.config)
 
         # Create tool nodes
@@ -291,6 +303,7 @@ class TradingAgentsGraph:
             self.conditional_logic,
             analyst_concurrency=self.config.get("analyst_concurrency", 1),
             config=self.config,
+            debate_llms=self.debate_llms,
         )
 
         self.propagator = Propagator(

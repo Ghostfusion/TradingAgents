@@ -131,6 +131,7 @@ class GraphSetup:
         conditional_logic: ConditionalLogic,
         analyst_concurrency: int = 1,
         config: dict | None = None,
+        debate_llms: dict | None = None,
     ):
         """Initialize with required components.
 
@@ -142,9 +143,15 @@ class GraphSetup:
         bull/bear/RM research debate to the structured-debate subgraph
         (DebaterTurnPayload -> L1 severity triage -> blind L2 judge);
         default OFF = today's one-shot chain, bit-identical.
+
+        ``debate_llms``: resolved per-role LLMs (bull/bear/judge) from
+        ``resolve_role_llm`` when ``enable_debate``; the structured debate
+        nodes use them so ``debate_*_model`` config keys take effect. Empty /
+        absent falls back to quick (bull/bear) / deep (judge).
         """
         config = config or {}
         self.config = config
+        self.debate_llms = debate_llms or {}
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
@@ -239,17 +246,20 @@ class GraphSetup:
         )
 
         self._structured_debate = self.config.get("enable_debate", False)
+        bull_llm = self.debate_llms.get("bull") or self.quick_thinking_llm
+        bear_llm = self.debate_llms.get("bear") or self.quick_thinking_llm
+        judge_llm = self.debate_llms.get("judge") or self.deep_thinking_llm
         if self._structured_debate:
             workflow.add_node(
                 "SD Bull",
                 create_debater_turn(
-                    "bull", self.quick_thinking_llm, ground_truth=ground_truth_from_state
+                    "bull", bull_llm, ground_truth=ground_truth_from_state
                 ),
             )
             workflow.add_node(
                 "SD Bear",
                 create_debater_turn(
-                    "bear", self.quick_thinking_llm, ground_truth=ground_truth_from_state
+                    "bear", bear_llm, ground_truth=ground_truth_from_state
                 ),
             )
             workflow.add_node(
@@ -258,7 +268,7 @@ class GraphSetup:
             )
             workflow.add_node(
                 "SD Finalize",
-                create_debate_finalize(self.deep_thinking_llm, self.config),
+                create_debate_finalize(judge_llm, self.config),
             )
         else:
             # Register no-op placeholders so the conditional-edge targets below

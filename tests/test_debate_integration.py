@@ -238,6 +238,62 @@ class TestABHarness:
         assert out["n"] == 2
 
 
+class TestRoleLlmWiring:
+    def test_trading_graph_resolves_debate_llms_and_passes_to_setup(self, tmp_path, monkeypatch):
+        """The debate_*_model config keys MUST drive the graph's SD nodes via
+        resolve_role_llm — not the quick/deep defaults (regression: SD nodes
+        were previously hardwired to quick_thinking_llm / deep_thinking_llm,
+        making the keys no-ops)."""
+        from tradingagents.default_config import DEFAULT_CONFIG
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        seen = {}
+
+        class _C:
+            def __init__(self, provider, model, base_url=None, **kw):
+                seen[f"{provider}:{model}"] = kw
+
+            def get_llm(self):
+                return type("L", (), {"invoke": lambda s, p: type("R", (), {"content": "x", "tool_calls": []})()})()
+
+        monkeypatch.setattr(
+            "tradingagents.graph.trading_graph.create_llm_client", _C
+        )
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["enable_debate"] = True
+        cfg["debate_bull_model"] = "openrouter:openai/gpt-5.6-luna"
+        cfg["debate_bear_model"] = "openrouter:z-ai/glm-5.3-flash"
+        cfg["debate_judge_model"] = "openrouter:deepseek/deepseek-v4-flash-0731"
+        ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+        assert seen, "resolve_role_llm never created per-role clients"
+        assert "openrouter:openai/gpt-5.6-luna" in seen, f"bull key not used: {seen}"
+        assert "openrouter:z-ai/glm-5.3-flash" in seen, f"bear key not used: {seen}"
+        assert "openrouter:deepseek/deepseek-v4-flash-0731" in seen, f"judge key not used: {seen}"
+        # The GraphSetup must receive them (SD nodes consume the role LLMs).
+        assert ta.graph_setup.debate_llms.get("bull") is not None
+
+    def test_debate_llms_not_resolved_when_disabled(self, tmp_path, monkeypatch):
+        from tradingagents.default_config import DEFAULT_CONFIG
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        seen = {}
+
+        class _C:
+            def __init__(self, provider, model, **kw):
+                seen[f"{provider}:{model}"] = True
+
+            def get_llm(self):
+                return type("L", (), {"invoke": lambda s, p: "x"})()
+
+        monkeypatch.setattr("tradingagents.graph.trading_graph.create_llm_client", _C)
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["enable_debate"] = False
+        ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+        # Only the 2 base clients (quick/deep) are created; no role clients.
+        assert len(seen) <= 2, f"role clients created while disabled: {seen}"
+        assert ta.graph_setup.debate_llms == {}
+
+
 class TestGraphWiring:
     def test_structured_router_targets_complete(self):
         from tradingagents.graph.conditional_logic import ConditionalLogic
