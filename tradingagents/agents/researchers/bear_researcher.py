@@ -56,6 +56,22 @@ Use this information to deliver a compelling bear argument, refute the bull's cl
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
         content = retry_llm_if_truncated(llm, prompt, response.content)
+        if not (content or "").strip():
+            try:
+                retry = llm.invoke(
+                    "Your previous response contained no argument. Produce a "
+                    "brief bear case for this position now, citing only the "
+                    "reports and computed context above. If you genuinely "
+                    "cannot, state 'no argument available'."
+                )
+                content = retry.content if hasattr(retry, "content") else str(retry)
+            except Exception:  # noqa: BLE001 - degrade to the note
+                content = ""
+        if not (content or "").strip():
+            content = (
+                "No argument produced this turn; rely on the analyst reports "
+                "and the computed decision context."
+            )
         argument = f"Bear Analyst: {content}"
 
         new_investment_debate_state = {

@@ -566,9 +566,10 @@ def get_user_selections(symbol: str | None = None):
 
     When ``symbol`` is passed (CLI ``--symbol``), the workflow is non-interactive:
     the given ticker is used, the date defaults to today, all four analysts run,
-    research depth is always 'deep' (5 debate/risk rounds), and the LLM provider
-    / thinking models come from TRADINGAGENTS_LLM_PROVIDER /
-    TRADINGAGENTS_DEEP_THINK_LLM / TRADINGAGENTS_QUICK_THINK_LLM in .env.
+    research depth is always 'deep' (5 RISK rounds; the bull/bear researchers
+    each run once), and the LLM provider / thinking models come from
+    TRADINGAGENTS_LLM_PROVIDER / TRADINGAGENTS_DEEP_THINK_LLM /
+    TRADINGAGENTS_QUICK_THINK_LLM in .env.
     """
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", encoding="utf-8") as f:
@@ -725,7 +726,7 @@ def get_user_selections(symbol: str | None = None):
     )
     if symbol is not None:
         selected_research_depth = 5
-        console.print("[green]✓ Research depth:[/green] deep (5 debate / 5 risk rounds)")
+        console.print("[green]✓ Research depth:[/green] deep (1 debate round / 5 risk rounds)")
     elif depth_from_env:
         selected_research_depth = DEFAULT_CONFIG["max_debate_rounds"]
         console.print(
@@ -1107,11 +1108,14 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     value on DEFAULT_CONFIG is preserved unless the user overrode it on the CLI.
     """
     config = DEFAULT_CONFIG.copy()
-    # Research depth sets both round counts, but an explicit env override
-    # (TRADINGAGENTS_MAX_DEBATE_ROUNDS / _MAX_RISK_ROUNDS) wins over the
-    # interactive selection — leave the env-applied value in place (#977).
+    # Research depth controls ONLY the risk-debate rounds: the bull/bear
+    # researchers each run exactly ONCE per analysis (a single back-and-forth,
+    # not a loop). Running 5 debate turns on 'deep' multiplied runtime and let
+    # later turns degenerate into rambling/empty arguments that poisoned the
+    # Research Manager (SKHY 08-31). An explicit env override for the debate
+    # rounds still wins (#977).
     if not os.environ.get("TRADINGAGENTS_MAX_DEBATE_ROUNDS"):
-        config["max_debate_rounds"] = selections["research_depth"]
+        config["max_debate_rounds"] = 1
     if not os.environ.get("TRADINGAGENTS_MAX_RISK_ROUNDS"):
         config["max_risk_discuss_rounds"] = selections["research_depth"]
     config["quick_think_llm"] = selections["shallow_thinker"]

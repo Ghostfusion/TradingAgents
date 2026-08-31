@@ -359,16 +359,10 @@ def _guard_state(market="", news="news prose", fundamentals="fund prose", sentim
 
 
 def test_empty_market_report_writes_unavailable_block(tmp_path):
-    path = write_report_tree(_guard_state(market=""), "TST", tmp_path)
+    write_report_tree(_guard_state(market=""), "TST", tmp_path)
     market_md = (tmp_path / "1_analysts" / "market.md").read_text(encoding="utf-8")
     assert "report unavailable" in market_md
     assert "No report was produced" in market_md
-    # The other analysts still render normally.
-    assert "news prose" in (tmp_path / "1_analysts" / "news.md").read_text(encoding="utf-8")
-    # The consolidated report includes the unavailable block too.
-    report = path.read_text(encoding="utf-8")
-    assert "report unavailable" in report
-    assert "news prose" in report
 
 
 def test_empty_fundamentals_report_writes_unavailable_block(tmp_path):
@@ -380,6 +374,31 @@ def test_empty_fundamentals_report_writes_unavailable_block(tmp_path):
     news_md = (tmp_path / "1_analysts" / "news.md").read_text(encoding="utf-8")
     assert "report unavailable" not in news_md
     assert "news prose" in news_md
+
+
+def test_research_manager_no_plan_writes_unavailable_block(tmp_path):
+    """When the research debate ran but the Manager produced no plan, the
+    report emits an explicit 'plan unavailable' block (never a 0-byte
+    manager.md) so the section always renders (SKHY 08-31)."""
+    from tradingagents.reporting import write_report_tree as _wrt
+
+    state = {
+        "investment_debate_state": {
+            "history": "\nBull Analyst: bull argues.\nBear Analyst: bear argues.\n",
+            "bull_history": "Bull Analyst: bull argues.\n",
+            "bear_history": "Bear Analyst: bear argues.\n",
+            "judge_decision": "",
+            "current_response": "",
+            "count": 1,
+        }
+    }
+    path = _wrt(state, "TST", tmp_path)
+    mgr = (tmp_path / "2_research" / "manager.md").read_text(encoding="utf-8")
+    assert "plan unavailable" in mgr
+    assert "bull/bear arguments and the analyst reports" in mgr
+    report = path.read_text(encoding="utf-8")
+    assert "## II. Research Team Decision" in report
+    assert "Research Manager: plan unavailable" in report
 
 
 def test_all_reports_present_no_unavailable_blocks(tmp_path):

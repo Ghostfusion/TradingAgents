@@ -50,7 +50,7 @@ Engage by questioning their optimism and emphasizing the potential downsides the
         )
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS)
+        content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS, max_rounds=2)  # bound runtime: 2 tool rounds per debate turn
         content = retry_llm_if_truncated(llm, prompt, content)
         argument = f"Conservative Analyst: {content}"
 

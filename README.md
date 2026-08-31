@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **CLI deep-run runtime/depth defect fixed** - 'deep' research
+  depth mapped to 5 bull + 5 bear debate turns, which multiplied runtime
+  (SKHY 08-31 >1h vs 30-40m) and let later debate turns degenerate into
+  rambling/empty arguments that left a 0-byte `2_research/manager.md`. Depth
+  now scales the RISK rounds only; the bull/bear researchers each run once.
+  Also: empty-argument retry + honest-note guards in both researchers, an
+  explicit "plan unavailable" block when the Research Manager produces no
+  plan, and a 2-tool-round cap on the risk-debator / Trader in-node tool
+  loops. See CHANGELOG.
 - [2026-08-31] **Risk calculations wired into the decision agents** (7-phase
   audit, `docs/design_risk_calculations_agent_wiring.md`): the 18 quant-risk
   tools that existed in the market ToolNode but were unreachable by the LLM

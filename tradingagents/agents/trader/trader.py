@@ -103,6 +103,7 @@ def create_trader(llm):
                     "You are a trade-risk verifier. Only the deterministic "
                     "tools may produce numbers; never invent a price or size."
                 ),
+                max_rounds=2,  # bound runtime: 2 tool rounds per verification
             )
         except Exception as exc:  # noqa: BLE001 - verification is advisory
             verification = f"verification unavailable: {exc}"

@@ -475,6 +475,24 @@ def write_report_tree(
             research_parts.append(
                 ("Research Manager", _finalize_section(_readable_section(debate["judge_decision"], role="Research Manager")))
             )
+        elif debate.get("history"):
+            # The research debate ran but the Manager produced no plan
+            # (degenerate structured/free-text output). Emit an explicit
+            # "unavailable" block instead of a 0-byte manager.md, so the
+            # report always renders the section and no one reads absence as
+            # a bug in the pipeline itself (SKHY 08-31: manager.md was empty
+            # after a garbage-heavy bear history).
+            research_dir.mkdir(exist_ok=True)
+            _unavailable_mgr = (
+                "## Research Manager: plan unavailable\n\n"
+                "The research debate produced no usable manager plan this run "
+                "(the manager's structured/free-text output was empty or "
+                "degenerate). The bull/bear arguments and the analyst reports "
+                "above stand; the Trader / risk team and Portfolio Manager "
+                "continue on that evidence."
+            )
+            (research_dir / "manager.md").write_text(_unavailable_mgr, encoding="utf-8")
+            research_parts.append(("Research Manager", _unavailable_mgr))
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts

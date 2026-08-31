@@ -297,6 +297,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - CLI deep-run defect fixes: `--depth` / the
+  interactive research-depth selection now map to the RISK rounds only;
+  the bull/bear researchers each run exactly ONCE per analysis (previously
+  'deep' = 5 bull + 5 bear turns, which multiplied runtime, and the later
+  debate turns degenerated into rambling/empty arguments that poisoned the
+  Research Manager — SKHY 20260831_130816 had a 300-line garbage bear turn
+  + 3 empty bear turns and a 0-byte `2_research/manager.md`). Added an
+  empty-argument retry + honest-note guard to both researchers and an
+  explicit "plan unavailable" block in `reporting.py` when the Manager
+  produces no plan (never a 0-byte file). Risk-debator and Trader in-node
+  tool loops are capped at 2 tool rounds per turn to bound runtime.
+  Docs/CHANGELOG updated. Tests: `test_reporting` available-block guards.
 - 2026-08-31 `(working tree)` - Risk-calc to agent wiring (7-phase audit,
   `docs/design_risk_calculations_agent_wiring.md`): 18 previously-unreachable
   quant-risk tools bound to the market analyst; 12 new @tools (`get_fixed_risk_size`,

@@ -232,9 +232,14 @@ def analyze(
     if vendor in VENDOR_PRESETS:
         config["data_vendors"].update(VENDOR_PRESETS[vendor])
     config["memory_log_path"] = _per_symbol_memory_path(symbol)
-    # Research depth controls both the bull/bear debate rounds and the
-    # risk-debate rounds, exactly as the interactive CLI maps them.
-    config["max_debate_rounds"] = depth
+    # Research depth controls ONLY the risk-debate rounds. The bull/bear
+    # researchers each run exactly ONCE per analysis (the research debate is a
+    # single back-and-forth, not a loop): running 5 bull + 5 bear turns on
+    # 'deep' multiplied runtime and let later debate turns degenerate into
+    # rambling/empty arguments that poisoned the Research Manager's synthesis.
+    # 'deep' still means 5 risk rounds for the aggressive/conservative/neutral
+    # team.
+    config["max_debate_rounds"] = 1
     config["max_risk_discuss_rounds"] = depth
 
     # Crypto has no fundamentals and no earnings, so sell-side ratings and the

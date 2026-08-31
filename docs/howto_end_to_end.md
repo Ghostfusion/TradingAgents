@@ -41,7 +41,8 @@ tradingagents
 ```
 
 **One-input mode (recommended):** pass `--symbol` and the CLI asks nothing else —
-all 4 analysts run, research is always deep (5 debate/5 risk rounds), and the
+all 4 analysts run, research is always deep (5 risk rounds; the bull/bear
+researchers each run once), and the
 LLM provider + thinking models come from `TRADINGAGENTS_LLM_PROVIDER` /
 `TRADINGAGENTS_DEEP_THINK_LLM` / `TRADINGAGENTS_QUICK_THINK_LLM` in `.env`. The
 report auto-saves to `reports/<TICKER>_<ts>/`.

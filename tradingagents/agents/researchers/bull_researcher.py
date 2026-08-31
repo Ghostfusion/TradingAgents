@@ -54,6 +54,26 @@ Use this information to deliver a compelling bull argument, refute the bear's co
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
         content = retry_llm_if_truncated(llm, prompt, response.content)
+        if not (content or "").strip():
+            # A degenerate empty response would render as a bare "Bull
+            # Analyst:" marker and starve the debate. Retry once with a
+            # completion directive; if still empty, emit an honest note so
+            # the Research Manager still has a real (if thin) argument.
+            try:
+                retry = llm.invoke(
+                    "Your previous response contained no argument. Produce a "
+                    "brief bull case for this position now, citing only the "
+                    "reports and computed context above. If you genuinely "
+                    "cannot, state 'no argument available'."
+                )
+                content = retry.content if hasattr(retry, "content") else str(retry)
+            except Exception:  # noqa: BLE001 - degrade to the note
+                content = ""
+        if not (content or "").strip():
+            content = (
+                "No argument produced this turn; rely on the analyst reports "
+                "and the computed decision context."
+            )
         argument = f"Bull Analyst: {content}"
 
         new_investment_debate_state = {

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Fixed
+
+- **CLI deep-run defect (`--depth` / interactive research depth)** - 'deep'
+  mapped to 5 bull + 5 bear debate turns, so a deep run multiplied runtime
+  (SKHY 08-31 took >1h vs 30-40m typical) and the later research-debate
+  turns degenerated into rambling/empty arguments that poisoned the Research
+  Manager (a 300-line garbage bear turn + 3 empty bear turns, then a 0-byte
+  `2_research/manager.md`). Now the depth selection maps to the RISK rounds
+  only and the bull/bear researchers each run exactly ONCE per analysis; the
+  risk debators' aggressive/conservative/neutral rounds still scale with the
+  depth selection as before. Also added: an empty-argument retry + honest
+  note in both researchers, an explicit "plan unavailable" block in
+  `reporting.py` when the Manager produces no usable plan (never a 0-byte
+  file), and a 2-tool-round cap on the risk-debator + Trader in-node tool
+  loops to bound runtime. Docs/README synced.
+
 ### Added
 
 - **Risk calculations wired into the decision agents** (`docs/design_risk_calculations_agent_wiring.md`,
