@@ -30,6 +30,16 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **Report truncated after Research Manager (missing Trader /
+  risk / PM)** - interactive runs (e.g. SKHY 08-30/08-31) saved only the
+  analysts + bull/bear/research-manager because the graph **ended after the
+  Research Manager judge** — `graph/setup.py` had lost the
+  `Research Manager -> Trader` edge (and the Bull/Bear debate conditionals in
+  the same block), so LangGraph had no path onward and the Trader / risk /
+  Portfolio-Manager sections never rendered. Restored the full chain
+  (Research Manager -> Trader -> risk debate -> Portfolio Manager -> END);
+  hermetic full-stream verification + a regression test guard it. See
+  CHANGELOG.
 - [2026-08-31] **Tool-round cap `KeyError '<Analyst>'` fix** - a run whose
   market/news/fundamentals analyst hit the 8-tool-round cap crashed with
   `KeyError: 'Market Analyst'` (LangGraph "During task ..." note) because the

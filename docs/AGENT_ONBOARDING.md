@@ -297,6 +297,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - Report-truncation fix: interactive runs (SKHY
+  08-30/08-31) saved only analysts + bull/bear/research-manager — the graph
+  **ended after the Research Manager judge** because `graph/setup.py` had lost
+  the `Research Manager -> Trader` edge (and the Bull/Bear debate conditional
+  edges in the same block), so LangGraph had no path onward and
+  `write_report_tree` skipped the absent Trader/risk/PM sections
+  (`3_trading/ 4_risk/ 5_portfolio/`). Restored the Bull/Bear ->
+  (Bull|Bear|Research Manager) conditionals and the full
+  Research Manager -> Trader -> ... -> Portfolio Manager -> END chain;
+  hermetic full-stream verification emits all decision keys;
+  `test_production_setup_research_risk_chain_edges_are_wired` guards it.
 - 2026-08-31 `(working tree)` - Tool-round cap `KeyError '<Analyst>'` fix: a
   run whose market/news/fundamentals analyst hit the 8-tool-round cap crashed
   with `KeyError: 'Market Analyst'` (LangGraph "During task with name ..."

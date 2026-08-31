@@ -261,13 +261,23 @@ class GraphSetup:
                     workflow.add_edge(current_clear, "Independent Researcher Stances")
                     workflow.add_edge("Independent Researcher Stances", "Bull Researcher")
 
-        # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088).
+        # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088):
+        # Bull/Bear -> (Bull | Bear | Research Manager). Without these the
+        # debate never advances to the Research Manager judge.
         for debate_node in ("Bull Researcher", "Bear Researcher"):
             workflow.add_conditional_edges(
                 debate_node,
                 self.conditional_logic.should_continue_debate,
                 DEBATE_PATH_MAP,
             )
+        # Research Manager concludes the research debate; it must flow ONWARD to
+        # the Trader. Without this edge the graph silently ends after the
+        # Research Manager judge - no Trader, no risk debate, no Portfolio
+        # Manager, so the saved report is missing 3_trading/ 4_risk/
+        # 5_portfolio/ (regression: SKHY interactive reports stopped at
+        # "## II. Research Team Decision / Research Manager" on 08-30 and
+        # 08-31; the 08-28 report still had the complete chain).
+        workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Independent Risk Stances")
         workflow.add_edge("Independent Risk Stances", "Aggressive Analyst")
         # All three risk edges share the complete RISK_ANALYSIS_PATH_MAP (#1088).

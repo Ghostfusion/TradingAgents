@@ -313,3 +313,49 @@ def test_parallel_subgraph_registers_analyst_cap_self_loop():
         sub = _build_analyst_subgraph(spec, lambda: llm, tool_node, logic)
         edges = {e.source: e.target for e in sub.get_graph().edges}
         assert spec.agent_node in edges, f"{spec.agent_node} missing subgraph self-loop cap target"
+
+
+def test_production_setup_research_risk_chain_edges_are_wired():
+    """The graph must NOT silently end after the Research Manager. Full chain:
+    Bull/Bear debate (conditional -> Research Manager) -> Research Manager ->
+    Trader -> Independent Risk Stances -> Aggressive/Conservative/Neutral ->
+    Portfolio Manager -> END. A missing edge truncates the saved report at
+    '## II. Research Team Decision / Research Manager' with no 3_trading/
+    4_risk/ 5_portfolio (regression: SKHY interactive reports 08-30/08-31)."""
+    from unittest import mock
+
+    from langchain_core.tools import tool as _tool
+    from langgraph.prebuilt import ToolNode
+
+    from tradingagents.graph.conditional_logic import ConditionalLogic
+    from tradingagents.graph.setup import GraphSetup
+
+    @_tool
+    def _dummy(_: str) -> str:
+        """Dummy tool for edge-map inspection (never invoked)."""
+        return "x"
+
+    llm = mock.MagicMock()
+    tool_nodes = {
+        "market": ToolNode([_dummy]),
+        "news": ToolNode([_dummy]),
+        "fundamentals": ToolNode([_dummy]),
+    }
+    setup = GraphSetup(llm, llm, tool_nodes, ConditionalLogic(), analyst_concurrency=1)
+    graph = setup.setup_graph(("market", "news", "fundamentals")).compile().get_graph()
+
+    def targets(source):
+        return {e.target for e in graph.edges if e.source == source}
+
+    # Debate advances to the Research Manager judge.
+    assert "Research Manager" in targets("Bull Researcher")
+    assert "Research Manager" in targets("Bear Researcher")
+    # Research Manager flows ONWARD to the Trader (this is the missing-edge
+    # regression).
+    assert targets("Research Manager") == {"Trader"}
+    assert targets("Trader") == {"Independent Risk Stances"}
+    assert targets("Independent Risk Stances") == {"Aggressive Analyst"}
+    # Risk debate reaches the Portfolio Manager; PM ends the graph.
+    for risk in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+        assert "Portfolio Manager" in targets(risk), f"{risk} missing PM target"
+    assert targets("Portfolio Manager") == {"__end__"}

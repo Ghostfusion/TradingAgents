@@ -10,6 +10,22 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Report truncated after Research Manager (missing Trader / risk / PM)** -
+  interactive runs (e.g. SKHY 08-30/08-31) saved only the analysts +
+  Bull/Bear/Research Manager and silently dropped `3_trading/trader.md`,
+  `4_risk/*`, `5_portfolio/decision.md` — the graph **ended after the
+  Research Manager judge**. Root cause: `graph/setup.py` had lost the
+  `Research Manager -> Trader` edge (and the Bull/Bear debate conditional
+  edges were dropped in the same block), so LangGraph had no path onward
+  after the research debate; `write_report_tree` then skipped the sections
+  whose state keys were absent. Restored the Bull/Bear -> (Bull | Bear |
+  Research Manager) conditional edges AND added the `Research Manager ->
+  Trader -> Independent Risk Stances -> Aggressive/Conservative/Neutral ->
+  Portfolio Manager -> END` chain. Hermetic full-stream verification (SKHY,
+  stub LLM) now emits `trader_investment_plan`, `risk_debate_state` and a PM
+  `judge_decision`. Regression test:
+  `test_production_setup_research_risk_chain_edges_are_wired` (asserts the
+  complete chain is present in the compiled graph).
 - **Tool-round cap `KeyError '<Analyst>'` on the interactive CLI** - a run
   whose market/news/fundamentals analyst hit the `MAX_TOOL_ROUNDS` (8) tool
   cap crashed with `KeyError: 'Market Analyst'` wrapped in LangGraph's
