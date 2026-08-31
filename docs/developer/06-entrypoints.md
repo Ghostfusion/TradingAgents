@@ -47,8 +47,8 @@ py -3.12 scripts/value_screener.py --universe top-losers --scan all --alloc
 py -3.12 scripts/value_screener.py --file universe.txt --limit 10 --rank composite
 ```
 
-Flags: `tickers` `-f/--file` `-d/--date` `-l/--limit`
-`-u/--universe` (eodhd-us default | tickers | top-losers | heat-proxy)
+`-u/--universe` (eodhd-us default | tickers | top-losers | heat-proxy |
+eodhd-losers)
 `--market` `-n/--movers-count` `--min-mcap` `--price-min`
 `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap`
 `--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision`
@@ -62,7 +62,12 @@ vcp / value-dip scans.
 
 **Universe**: `eodhd-us` (the default) pulls the EODHD full US symbol list
 (~18k common stocks, no moomoo quota); `top-losers` / `heat-proxy` use the
-moomoo intraday movers rank (optional, quota-limited). Every OHLCV-capable
+moomoo intraday movers rank (optional, quota-limited); `eodhd-losers` seeds
+the scan from the EODHD bulk US real-time feed (one call, ~18k rows,
+OpenD-independent) — the biggest intraday decliners by change%, so
+value-dip/momentum candidates are harvested loss-ordered instead of from an
+alphabetical slice (`-n` sets how many decliners; moomoo movers cap at 200,
+eodhd-losers accepts up to the whole feed). Every OHLCV-capable
 scan (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) runs a
 **two-stage gate**: a cheap OHLCV-only pre-filter (Stage A, no provider call —
 `scan_signals` flags, momentum pillars minus float, `vcp_setup`, or the

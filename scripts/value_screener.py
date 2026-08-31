@@ -1062,19 +1062,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-u",
         "--universe",
-        choices=("tickers", "eodhd-us", "top-losers", "heat-proxy"),
+        choices=("tickers", "eodhd-us", "top-losers", "heat-proxy", "eodhd-losers"),
         default="eodhd-us",
         help="symbol source: 'eodhd-us' (EODHD full US symbol list, default), "
         "'tickers' (positional/file), "
-        "'top-losers' (moomoo intraday decliners; refreshes daily) "
-        "or 'heat-proxy' (same as top-losers, US-only - the official "
-        "trade-rank proxy for the proprietary in-app Heat List)",
+        "'top-losers' (moomoo intraday decliners; refreshes daily), "
+        "'heat-proxy' (same as top-losers, US-only - the official "
+        "trade-rank proxy for the proprietary in-app Heat List), "
+        "or 'eodhd-losers' (EODHD bulk US real-time feed, one call; the "
+        "biggest intraday decliners seed a loss-ordered scan for "
+        "value-dip/momentum candidates - OpenD-independent, no moomoo quota)",
     )
     parser.add_argument(
         "--market", default="US", help="market key for --universe top-losers/heat-proxy (US/HK)"
     )
     parser.add_argument(
-        "-n", "--movers-count", type=int, default=50, help="how many decliners to pull (max 200)"
+        "-n",
+        "--movers-count",
+        type=int,
+        default=50,
+        help="how many decliners to pull (moomoo movers max 200; "
+        "eodhd-losers accepts up to ~18k)",
     )
     parser.add_argument(
         "--min-mcap",
@@ -1461,14 +1469,49 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("top-losers universe: %d symbols from moomoo", len(tickers))
         except MoomooNotConfiguredError as exc:
             _err(f"moomoo top-losers unavailable: {exc}")
+    elif args.universe == "eodhd-losers":
+        # EODHD bulk US real-time feed (one call, ~18k rows, OpenD-independent):
+        # the biggest intraday decliners seed a loss-ordered scan so
+        # value-dip/momentum candidates (RSI/%b oversold, stop<=2%) are
+        # harvested from the movers list instead of an alphabetical eodhd-us
+        # slice. Rows carry close + change only (no name/mcap/PE on the bulk
+        # feed), so the price gate applies here; the mcap/PE gates run later
+        # in the results loop. Same Stage A/B/C two-stage gating afterwards.
+        try:
+            from tradingagents.dataflows.eodhd import (
+                NoMarketDataError,
+                VendorRateLimitError,
+                get_top_movers_symbols_eodhd,
+            )
+
+            movers = get_top_movers_symbols_eodhd(
+                direction="losers",
+                count=args.movers_count,
+                min_price=args.price_min,
+            )
+            gated = [m for m in movers if m.get("symbol")]
+            if not gated:
+                parser.error("no symbols after eodhd-losers feed gate")
+            for m in gated:
+                tickers.append(m["symbol"])
+                if m.get("change_p") is not None:
+                    # change_p is percent; DayChg renders as a ratio.
+                    mover_meta[m["symbol"]] = {"day_change": m["change_p"] / 100.0}
+            logger.info(
+                "eodhd-losers universe: %d symbols from EODHD real-time feed",
+                len(tickers),
+            )
+        except (NoMarketDataError, VendorRateLimitError) as exc:
+            parser.error(f"eodhd-losers universe unavailable: {exc}")
         except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
-            _err(f"moomoo top-losers failed: {exc}")
+            parser.error(f"eodhd-losers universe failed: {exc}")
     elif args.file:
         with open(args.file, encoding="utf-8") as fh:
             tickers += [ln.strip().upper() for ln in fh if ln.strip()]
     if not tickers:
         parser.error(
-            "no tickers provided (positional args, --file, or --universe eodhd-us/top-losers)"
+            "no tickers provided (positional args, --file, or --universe "
+            "eodhd-us/top-losers/eodhd-losers)"
         )
 
     results = []

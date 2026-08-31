@@ -490,6 +490,44 @@ def test_eodhd_us_universe_filters_common_stocks(monkeypatch, capsys):
     assert "SPY" not in out  # ETF filtered out
 
 
+def test_eodhd_losers_universe_seeds_scan(monkeypatch, capsys):
+    """eodhd-losers universe: the loss-ordered EODHD feed seeds the scan, and
+    the percent change_ratio is converted to a ratio so DayChg renders
+    correctly (EODHD reports change_p in %, the table shows a % of price)."""
+    from tradingagents.dataflows import eodhd
+
+    rows = [
+        {"symbol": "AAPL", "close": 210.5, "change_p": -4.21},
+        {"symbol": "MSFT", "close": 95.2, "change_p": -3.10},
+    ]
+    monkeypatch.setattr(eodhd, "get_top_movers_symbols_eodhd", lambda **k: rows)
+    vs.main(["--universe", "eodhd-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0"])
+    out = capsys.readouterr().out
+    assert "AAPL" in out and "MSFT" in out
+    assert "-4.21%" in out  # change_p -4.21 (percent) -> ratio -0.0421 -> -4.21%
+
+
+def test_get_top_movers_symbols_eodhd_sorts_strips_caps(monkeypatch):
+    """The new helper consumes the bulk real-time feed: losers sorted ascending
+    by change_p, the .US suffix stripped, min_price applied, and capped."""
+    from tradingagents.dataflows import eodhd
+
+    feed = [
+        {"code": "C.US", "close": 5.0, "change_p": -2.0},
+        {"code": "A.US", "close": 10.0, "change_p": -5.0},
+        {"code": "LOW.US", "close": 2.0, "change_p": -1.0},
+        {"code": "B.US", "close": 8.0, "change_p": None},  # no change -> skipped
+    ]
+    monkeypatch.setattr(eodhd, "_eodhd_get", lambda *a, **k: feed)
+    rows = eodhd.get_top_movers_symbols_eodhd("losers", count=2)
+    assert rows == [
+        {"symbol": "A", "close": 10.0, "change_p": -5.0},
+        {"symbol": "C", "close": 5.0, "change_p": -2.0},
+    ]
+    rows = eodhd.get_top_movers_symbols_eodhd("losers", count=10, min_price=5.0)
+    assert [r["symbol"] for r in rows] == ["A", "C"]
+
+
 def test_moomoo_error_path_closes_context(monkeypatch, capsys):
     """Regression (heat-proxy): when a moomoo universe run fails (e.g. "no
     symbols after price/P-E/equity gates"), the OpenQuoteContext must be
@@ -527,7 +565,7 @@ def test_cheap_gate_deferred_before_fundamentals(monkeypatch, capsys):
     orig_fetch = vs.fetch_ticker
     monkeypatch.setattr(vs, "fetch_ticker", lambda t, d: fin_calls.append(t) or orig_fetch(t, d))
 
-    def _fake_movers(count, market, min_market_cap):
+    def _fake_movers(sort_dir="losers", count=1, market="US", min_market_cap=0.0):
         # A single mover that fails the trend-pullback cheap gate (pure
         # downtrend: close below both SMAs, RSI high) -> trend-pullback rejects.
         return [{

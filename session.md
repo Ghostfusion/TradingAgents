@@ -1,112 +1,85 @@
-# Session Handoff — TradingAgents (D:/Users/vince/PycharmProjects/TradingNew/TradingAgents)
+# Session Handoff — TradingAgents + TradingNew/trading_web
 
-Session date: 2026-08-30. Working tree CLEAN except `session.md` (untracked, handoff). Branch `main`, remote `origin` = https://github.com/Ghostfusion/TradingAgents.git. Latest commit: `52811d5`. Full test suite: **1855 passed, 2 skipped, 0 failed** (~5 min). `ruff clean` across `tradingagents/ scripts/ tests/ cli/`.
+Session date: 2026-08-30. Repos (both branch `main`, both pushed):
+- Core: `D:/Users/vince/PycharmProjects/TradingNew/TradingAgents` — origin `git@github.com:Ghostfusion/TradingAgents.git`
+- Web: `D:/Users/vince/PycharmProjects/TradingNew/trading_web` (sibling under `TradingNew`) — origin `github.com/Ghostfusion/TradingNew.git`
+- Repo root for `session.md` = `TradingNew` (contains both `TradingAgents/` and `trading_web/`).
 
 ---
 
 ## 1. Task Objective & Scope
-- **Goal:** Harden the TradingAgents fork — correct deterministics, wire every computed signal to the LLM agents, keep reports readable, and extend free-tier data/indicator coverage — per the repo's no-fabrication, deterministic-first contract.
-- **Sub-task in progress:** None. All requested work this session is complete and committed. The `todo` tracker shows stale in-progress items from the news-provider batch; those are ALL DONE (commit `52811d5`). Ignore.
 
-### This session's 6 completed initiatives (all committed + pushed)
-1. **Independent pre-debate stances (Option-A hybrid)** — `b23bac6`
-2. **Fix analyst tool-loop regression + short-closes overlay guard** — `2443e95` (fixes a bug introduced by #1)
-3. **Twelve Data + StockData.org vendors** — `a3e7bbb`
-4. **Extended technical indicators + candlestick patterns (Phases 1-3)** — `f49911b`
-5. **News/sentiment providers A-C (GDELT, NewsAPI, Benzinga)** — `52811d5` (HEAD)
+- **Goal:** Harden the TradingAgents fork + its web mirror by (a) parallelizing web `run_batch` with a worker cap, (b) fixing value-screener hangs + introducing two-stage gating (cheap OHLCV gate before any provider query), and (c) keeping every docs/help/web surface consistent with those changes.
+- **Sub-task in progress:** NONE — all requested work is complete, tested, committed and pushed in BOTH repos this session.
+
+### Commits this session (all pushed)
+- Core `TradingAgents`: `8b39564` (Nerd Font CLI), `ff81092` (screener exit-hang fix), `3a151d2` (top-losers context-close test), `e02d493` (two-stage screener gating code+tests), `2d6e634` (docs: scan.md/entrypoints/onboarding/README).
+- Web `trading_web`: `8ccdc71` (parallelize run_batch, worker cap), `d02967c` (web audit: /nightly + /history routes, screener --sentiment, capital_income --fi, pipeline/action-report/scripts param gaps, help text fixes), `619c9d0` (docs: two-stage gating in SPA help + manual + README).
 
 ---
 
 ## 2. File Manifest & Modifications
 
-### Committed this session (5 commits: `b23bac6`, `2443e95`, `a3e7bbb`, `f49911b`, `52811d5`)
+### Core `TradingAgents/`
+- `scripts/value_screener.py` — (1) exit-hang fix: moomoo error paths (`_err()` helper) call `close_context()` before `parser.error` so a failed top-losers/heat-proxy run exits cleanly instead of blocking on the SDK's non-daemon receive thread; (2) **two-stage gating**: new `_cheap_gate(ohlcv, scan)` (pure OHLCV-only pre-filter — no provider call), `_fetch_fin_cached` (memoized `fetch_ticker` per ticker/date, `_FIN_CACHE`), `_CASHFLOW_CACHE` (fixed double cashflow fetch in `_value_dip_scan`), `_SECTOR_RANK_CACHE` restored. Main scan loop now: Stage A cheap gate (definitive non-candidates dropped, no fundamentals) → Stage B `_fetch_fin_cached` for survivors → Stage C provider enrichment (float/sector/revisions/inst/sentiment) on finalists. `value`/`all` have no cheap technical signal and fall straight through. Scan thresholds unchanged.
+- `tests/test_value_screener.py` — restored clobbered bodies; added `test_moomoo_error_path_closes_context`, `test_moomoo_top_losers_error_path_closes_context`, `test_cheap_gate_deferred_before_fundamentals`, `test_eodhd_cheap_gate_before_fundamentals` (gated-out names never call `fetch_ticker`).
+- `CHANGELOG.md` — exit-hang + two-stage gating entries under `### Fixed`.
+- `cli/main.py` — Nerd Font TUI icons (`_USE_NERD_FONT`, `_glyph`/`_status_label`/`_team_label`, `TRADINGAGENTS_NERDFONT` env toggle), committed `8b39564`.
+- Docs mirrored (commit `2d6e634`): `Strategies/scan.md` (new "Two-stage gating" section), `docs/developer/06-entrypoints.md`, `docs/AGENT_ONBOARDING.md` (changelog), `README.md` (News bullet + Nerd Font note committed earlier).
 
-**`tradingagents/agents/utils/`**
-- `independent_vote.py` (NEW) — `IndependentStance` pre-debate sampling: `build_stance_prompt`, `create_independent_stance_node`, `independent_agreement`, `build_independent_vote_summary`. Gated by `enable_independent_vote` (default False; machine `.env` = true).
-- `agent_utils.py` — re-exports added: `get_extended_indicators`, `get_candlestick_patterns`, `get_gdelt_sentiment` (imports + `__all__`).
-- `analysis_tools.py` — NEW tools `get_extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) + `get_candlestick_patterns` (doji/hammer/shooting-star/engulfing/stars), share `_RUN_OHLCV_CACHE` via `_ohlcv`.
-- `news_data_tools.py` — restored `get_massive_news`; NEW `get_gdelt_sentiment` tool.
+### `TradingNew/.env` (gitignored, local)
+- Added `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT=5.0` (next to `TRADINGAGENTS_MAX_WORKERS=4` / `TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS=20`). Belt-and-suspenders; code default is already 5.0.
 
-**`tradingagents/strategies/`**
-- `extended_indicators.py` (NEW) — pure offline: `golden_death_cross`, `ichimoku` (fixed variable-shadowing bug), `cci`, `roc`, `momentum_oscillator`, `trix`, `force_index`, `accumulation_distribution`, `vpt`, `chaikin_money_flow`, `anchored_vwap` (anchor-bar inclusive), `scan_candlesticks`. Style: no semicolons, no `l` ambiguous vars, `float|None` no-fabrication.
+### Web `trading_web/`
+- `backend/capabilities.py` — `run_batch` rewritten: parallel via `ThreadPoolExecutor` (one symbol per worker), cap from `TRADINGAGENTS_MAX_WORKERS` (default 4, `_batch_max_workers()`), rejects `len(symbols) > cap` up front; added `_run_one_symbol`. `run_screener` gained `sentiment` param (`--sentiment`). `run_capital_income` gained `fi`/`fi_horizon` (`--fi`/`--fi-horizon`). Restored `intraday`/`enable_float`/`alloc` params.
+- `backend/main.py` — added `POST /api/history` route (History screen was 404ing); kept `GET /api/history/ohlcv` (chart). `HistoryIn` model existed.
+- `frontend/src/App.jsx` — registered `/nightly` route; Screener gained `sentiment` checkbox + accurate numeric-gate help (blank=script default, 0=off, value=filter) + two-stage gating help line; Scripts gained config-gate `--returns` + capital_income `--fi`/`--fi-horizon`; Pipeline gained movers-direction/limit/min-mcap/price-min/pe-max; Action report gained `--json` + `--llm-max`; ValueTools + RunBatch help corrected (36 tools, first 4 on by default; max 4 workers). Several edit-tool mangling/duplication defects were repaired during the session.
+- `frontend/src/HelpGuide.jsx` — Screener card explains the fast price-only gate; tool-count text fixed.
+- `tests/test_backend.py` — added `test_post_history_route`, `test_run_batch_rejects_more_symbols_than_worker_cap`, `test_run_batch_parallel_one_symbol_per_worker`, `test_run_screener` `--sentiment` forwarding assertion.
+- `README.md` — sync-table rows (run_batch workers, screener --sentiment, action-report --json/--llm-max, two-stage gating).
 
-**`tradingagents/dataflows/`**
-- `twelve_data.py` (NEW) — `get_stock_data_twelve_data` (`/time_series` 1day CSV), `get_market_snapshot_twelve_data` (`/quote`), `get_crypto_prices_twelve_data` (`BTC/USD`). Free 800 credits/day; `TWELVEDATA_API_KEY`.
-- `stockdata.py` (NEW) — `get_stock_data_stockdata` (`/v1/data/eod`, newest->oldest CSV), `get_market_snapshot_stockdata`, `get_news_stockdata`. Free 100 req/day; `STOCKDATA_API_KEY`.
-- `gdelt.py` (NEW) — `get_news_gdelt` (DOC 2.0, native tone), `get_gdelt_tone_series`. Keyless. **Short 8s timeout, `_MAX_RETRIES=1`** (endpoint network-flaky). Registered but NOT in default chain.
-- `newsapi.py` (NEW) — `get_global_news_newsapi` (macro headlines), `get_news_newsapi` (ticker). `NEWSAPI_API_KEY`, free 100 req/day. In default `news_data` chain (tail).
-- `benzinga.py` (NEW) — `get_news_benzinga` (`/v2/news`, headline+teaser+link). `BENZINGA_API_KEY`. Registered but NOT in default chain (needs real key).
-- `interface.py` — `VENDOR_LIST` += `twelve_data, stockdata, gdelt, benzinga, newsapi`; `VENDOR_METHODS` for `get_stock_data` (+twelve_data,stockdata), `get_news` (+newsapi,gdelt,benzinga), `get_global_news` (+gdelt,newsapi); imports for all new modules.
-
-**`tradingagents/graph/`**
-- `setup.py` — RESTORED `workflow.add_edge(current_tools, current_analyst)` (analyst tool-loop edge; was dropped causing stub-only reports). Added `Independent Researcher Stances` / `Independent Risk Stances` nodes (pre-debate).
-- `trading_graph.py` — `_agreement_from_state` prefers `independent_agreement` from `risk_independent_stances` (falls back to parse-from-history); overlay `None`-guard (short-closes no-op); market ToolNode += `get_extended_indicators`, `get_candlestick_patterns`; news ToolNode += `get_gdelt_sentiment`.
-
-**`tradingagents/agents/`**
-- `schemas.py` — NEW `IndependentStance` + `render_stance`.
-- `managers/portfolio_manager.py` — PM prompt uses `computed_independent_vote` when present (else legacy consensus line).
-- `managers/research_manager.py` — RM prompt gets independent researcher reads (`researcher_independent_stances`).
-- `analysts/market_analyst.py` — tool list + prompt += `get_extended_indicators`, `get_candlestick_patterns`.
-- `analysts/news_analyst.py` — tool list += `get_gdelt_sentiment`.
-- `utils/agent_states.py` — 3 new channels: `risk_independent_stances`, `researcher_independent_stances`, `computed_independent_vote`.
-
-**`tradingagents/default_config.py`** — env map += `TWELVEDATA_API_KEY`, `STOCKDATA_API_KEY`, `NEWSAPI_API_KEY`, `BENZINGA_API_KEY`, `TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE`; keys `twelve_data_api_key`, `stockdata_api_key`, `newsapi_api_key`, `benzinga_api_key`, `enable_independent_vote`; chains: `core_stock_apis = eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata`, `news_data = eodhd,moomoo,yfinance,alpha_vantage,stockdata,newsapi` (gdelt/benzinga opt-in).
-
-**Tests (all hermetic, `pytest.mark.timeout`):**
-- `tests/test_independent_vote.py` (12) + `test_structured_agent_prompts.py` (+3)
-- `tests/test_graph_tool_loop.py` (3) — analyst tool-loop + short-closes guard
-- `tests/test_twelve_data_vendor.py` (12), `test_stockdata_vendor.py` (10), `test_new_provider_wiring.py` (5)
-- `tests/test_extended_indicators.py` (22) + `test_analysis_tools.py` (+6)
-- `tests/test_news_sentiment_vendors.py` (15) + `test_massive_vendor.py` (updated `test_get_market_snapshot_degrades` to mock Twelve Data tail)
-
-**Docs kept true:** `docs/api_reference.md` (§1.1 env table, §6.1/6.2 vendor maps, §6.4 tool table), `docs/developer/04-strategies.md`, `docs/developer/12-data-providers.md`, `docs/AGENT_ONBOARDING.md` changelog, `docs/howto_end_to_end.md`, `README.md` News, `CHANGELOG.md` [Unreleased], `.env.example`.
-
-**Untouched but read/audited:** `strategies/sentiment.py`, `strategies/technical_factors.py`, `agents/utils/market_position_tools.py` (snapshot + crypto fallbacks extended), the whole debate/risk wiring.
+### Untouched Dependencies (read/audited, not changed this session)
+- `tradingagents/dataflows/moomoo.py` (`close_context`, `_sdk_call`, `moomoo_call_timeout`, movers fns) — consumed, not edited.
+- `tradingagents/strategies/*`, `dataflows/{eodhd,statement_parsing,interface}.py`, `docs/*` and `Strategies/*` fully read for the audit.
+- `trading_web/backend/{config,jobs,security,db}.py`.
 
 ---
 
 ## 3. Current State & Validation
 
-### Working / Verified (live-probed this session)
-- **Full suite: 1855 passed, 2 skipped, 0 failed** (skips = bedrock extra, live DeepSeek). ruff clean.
-- Independent stances: graph streams through analysts → debate → risk stances → PM (reproduced live SKHY after tool-loop fix).
-- Twelve Data: live OK (AAPL OHLCV 20 rows, realtime quote, BTC).
-- StockData.org: live OK (AAPL EOD 123 rows, quote, news).
-- NewsAPI: live OK (global macro headlines with `NEWSAPI_API_KEY` in `.env`).
-- Extended indicators: live OK on AAPL (ichimoku below cloud, CCI −153, ROC −8.7%, A-D rising).
-- Market-snapshot fallback chain: Massive → EODHD → Tiingo → Twelve Data (live, Massive forced down → EODHD served).
+### Working/Passing
+- Core `tests/test_value_screener.py`: **25 passed** (incl. 4 new two-stage/context-close tests). Ruff clean on `scripts/value_screener.py` + test file.
+- Web `tests/test_backend.py`: **60 passed** (incl. run_batch cap/parallel, history route, sentiment forwarding). Full-suite bash-wrapper "timeout at exit" is the known benign moomoo-daemon teardown — tests themselves finish in ~20s, NOT a failure.
+- Live smoke (this session): `--universe eodhd-us --scan value-dip --limit 15` completes in **~12s** (was effectively hanging per-name before); `--scan value AAPL MSFT` ~10s clean exit with `on_disconnect: reason=CallClose`; `--universe heat-proxy --scan value-dip -n 30` exits cleanly code=2 (~2s) on "no symbols after price/P-E/equity gates".
+- Frontend: `npm run build` clean; served dist bundle `index-VhNsdR9I.js` verified (server reads dist from disk per request). Browser-verified (throwaway admin, removed after): `/screener` help shows "Two-stage gating", `/guide` Screener card shows "price-only gate", `/nightly` route loads, `/scripts` config-gate Returns + capital-income fi fields, `/pipeline` 5 new fields, `/history` returns real decision rows.
+- Web app running via hub name `web` on http://127.0.0.1:8000 (persistent; admin login from `.env`: user `admin`, pass `8802667`).
 
-### Failing / Incomplete (deliberate, documented)
-- **GDELT (`api.gdeltproject.org`) is network-unreachable from this machine** (DNS resolves 104.197.47.124, but HTTPS connect times out). Registered vendor, **NOT in default chain**, 8s fail-fast timeout. Do not enable in `news_data` until connectivity confirmed.
-- **Benzinga is opt-in** — no real key registered yet (`BENZINGA_API_KEY` is an empty placeholder in `.env`). Get free AWS Marketplace token, set it, add `benzinga` to chain.
-- `roc/trix/force_index/accumulation_distribution` were previously listed as "not implemented" in `strategies/value_dip_swing_prepost_research_plan.md` — DOCS NOW OUT OF DATE: they ARE implemented in `extended_indicators.py`. Update that doc.
+### Failing/Incomplete (deliberate/documented)
+- GDELT network-unreachable on this machine (ConnectTimeout) — stays out of default `news_data` chain (only `news_sentiment` chain tail). Benzinga opt-in, no real key.
+- Value-dip over eodhd/heat-proxy yields few/no candidates (inherently rare gate: value floor + bal-sheet + profitability + RSI≤35 + %b≤0.10 + stop≤2%). The first-15 alphabetical eodhd names all cheap-gated out. Not a bug; eodhd slices alphabetically, so harvest needs a large `--limit` or movers universe (now tractable post-fix).
+- Pre-existing tiingo vendor warning `time data 'annual' does not match format '%Y-%m-%d'` in screener logs — noisy but degrades to moomoo fallback; NOT fixed this session (out of scope, no correctness impact).
 
 ### Active Errors / Stack Traces
-- None blocking. GDELT `ConnectTimeoutError` (expected, fail-fast handled). Earlier fixed during session: analyst tool-loop edge regression (stub-only reports), ichimoku `'float' object cannot be interpreted as an integer` shadowing bug, three `'NoneType' object has no attribute 'get'` overlay skips on <60-bar series.
+- None blocking. Known benign: bash-wrapper "timed out at process exit" on moomoo daemon threads (tests pass); `[open_context_base.py] Disconnected: reason=CallClose` = clean context close (expected).
 
 ---
 
 ## 4. Technical Constraints & Decisions
 
-- **`py -3.12` only** — bare `python` is the hermes agent venv (no pytest). Never deviate.
-- **No-fabrication contract** — every tool/strategy returns exact numbers or explicit `unavailable`/`DATA_*`; never invent. Bloody non-negotiable.
-- **`TRADINGAGENTS_*` env overrides `.env`**, and both override code defaults; `load_dotenv(override=False)`. Check `printenv` before assuming `.env` wins.
-- **CRLF line endings** — use `write`/`edit` or Python, never bash heredocs for file content (they mangle escapes/arrows/unicode).
-- **`edit` tool quirks on this box**: `＋`/`»` marker lines can leak literal `+`/`-`; block edits sometimes drop anchor lines (e.g. function return/except). Always re-read the edited region and verify imports with `py -3.12 -c "import ..."`.
-- **Ruff style**: repo forbids semicolons (`E702`), ambiguous `l`/`O`/`I` (`E741`), unused vars (`F841`), SIM117 nested `with`. Auto-fix (`ruff check --fix`) can silently drop "unused" imports that ARE used via lazily-imported names — verify after.
-- **Decision: independent pre-debate stances (Option-A)** — research (FREE-MAD, adversarial-persuasion studies) shows sequential same-model debate converges on wrong answers under conformity; G3/G1 consensus now uses INDEPENDENT pre-debate stances when `enable_independent_vote` is on. The debate stays as risk-surfacing layer.
-- **Decision: local calc over vendor pull** — the extended indicators are computed locally (refuses redundant Twelve Data `/technicals` pull; every indicator available off any OHLCV source at zero quota).
-- **Defaults**: `enable_independent_vote=True` (machine `.env`), `enable_agreement=True` (machine `.env`); new providers key-gated, gdelt/benzinga opt-in chains; NewsAPI in default chain tail.
-- Run command (Windows, py3.12):
-  `py -3.12 -m pytest tests/<file> -q --no-header -p no:cacheprovider`
-  `py -3.12 -m ruff check tradingagents/ scripts/ tests/ cli/`
-  Full suite (~5 min): `py -3.12 -m pytest tests/ -q --no-header -p no:cacheprovider`
+- **`py -3.12` only** — bare `python` is the hermes agent venv (no pytest). Never deviate (see `docs/AGENT_ONBOARDING.md`).
+- **Windows bash tool mangling** — never use heredocs for file content; use `write`/`edit`. The `edit` tool repeatedly dropped/duplicated lines/cache-declarations and doubled README rows this session — always re-read the edited region and verify imports with `py -3.12 -m py_compile` + `ruff`.
+- **No-fabrication contract** — every tool returns exact numbers or explicit `unavailable`; value-dip/perpetual/var-degradations never invented.
+- **Two-stage gating decision (user-directed):** keep the scan gates as tight as each scan's own definition, but move the cheap OHLCV-only check before ANY provider call; fetch fundamentals only for survivors (memoized once); run provider enrichment (float/sector/revisions/inst/sentiment) only on finalists. `value`/`all` bypass Stage A (no cheap technical signal) and go straight to fundamentals. User's two choices honored: (1) YES — also gate movers on the free price/PE/mcap rank columns; (2) YES — list ALL survivors ranked, do NOT silently cap at 50.
+- **Web `run_batch`** — user required: max workers from `TRADINGAGENTS_MAX_WORKERS` (default 4, repo `.env` sets 4), ONE symbol per worker, and reject (> workers) with a clear UI error instead of throttling/serializing.
+- **`TRADINGAGENTS_*` env overrides** win over `.env`; both override code defaults; `.env` gitignored. `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT=5.0` pinned locally.
+- **CRLF** — use `write`/`edit`; `edit` bare `»` markers mangle indentation. Web README was rewritten with `\n` newlines (git will CRLF-normalize).
+- **Docs true on every change** — scan.md, developer entrypoints, AGENT_ONBOARDING changelog, README News, CHANGELOG, web App.jsx help + HelpGuide + web README all mirrored the two-stage gating and audit changes before committing.
 
 ---
 
-## 5. Next Actions (for fresh session)
-1. **Update `strategies/value_dip_swing_prepost_research_plan.md`** — the "Not doing: ROC/TRIX/Force/A-D" note is stale; they're now implemented in `extended_indicators.py`. Also update `docs/api_reference.md` §6.1 tool list if it still omits `get_extended_indicators`/`get_candlestick_patterns` (I added them to the 6.4 table but verify 6.1).
-2. **Verify GDELT connectivity** before enabling in `news_data` chain; then add `,"gdelt"` to the chain.
-3. **Register Benzinga free tier** (AWS Marketplace "Basic Financial News API"), set `BENZINGA_API_KEY` in `.env`, add `benzinga` to chain, live-probe.
-4. **Verify web app** (`../TradingNew/trading_web`, service `web` on port 8000 via hub) reflects the new tools capabilities surface if the user wants the new market/news tools reachable from the SPA (backend/capabilities.py + App.jsx) — per the working-agreement "every TradingAgents change reflects in trading_web".
-5. Optional open threads carried forward (unchanged): verify batch/web runs honor `risk_compact_report`; live Alpha Vantage OVERVIEW entitlement.
+## 5. Next Actions (for fresh session) — mostly optional/exploratory
+1. If you want real value-dip candidates, run a **large** `--limit` eodhd slice (now fast) or `--universe top-losers/heat-proxy --scan value-dip`, and expect few names (rare gate). The two-stage gating makes thousands-name scans tractable.
+2. `get_variance_premium` live machine-chain integration remains the one deferred follow-up from the quant plan (needs a structured option-chain feed; tool degrades honestly today).
+3. GDELT unreachable — re-probe before ever adding to `news_data`; optionally add `benzinga` to `news_data` once a real key is registered.
+4. Optional: scale `sentiment_factor_eval.py` (larger universe, longer look-back) to see if rank IC firms (~0.016 live, not yet trusted) before enabling `enable_sentiment_factor`.
+5. Run the full core suite periodically: `py -3.12 -m pytest tests/ -q --no-header -p no:cacheprovider` (~5 min, network-flaky yfinance-sector tests may fail hyper-offline).

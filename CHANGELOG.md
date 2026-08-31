@@ -10,6 +10,23 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **`--universe eodhd-losers` value-screener universe** - the EODHD bulk US
+  real-time feed (one call, ~18k rows, OpenD-independent) seeds a
+  **loss-ordered** scan: the biggest intraday decliners by change% are the
+  symbols screened, so value-dip / momentum candidates (RSI/%b oversold,
+  stop <= 2%) are harvested from today's actual dips instead of an alphabetical
+  `eodhd-us` slice. New `tradingagents/dataflows/eodhd.py::get_top_movers_symbols_eodhd`
+  (machine-readable symbol table behind `get_top_movers_eodhd`; `.US` suffix
+  stripped, `change_p` kept as percent, optional `min_price` floor).
+  `-n/--movers-count` sets the decliner count (moomoo movers cap at 200;
+  eodhd-losers accepts up to the whole feed); `--price-min` gates on the
+  feed's live close; mcap / PE / ATR gates still run per-symbol afterwards.
+  The feed rows carry price + change only (no name/mcap/type), so ETF/ETN rows
+  are not name-filtered at seed time - the per-symbol gates handle them.
+  Tests: `test_eodhd_losers_universe_seeds_scan` +
+  `test_get_top_movers_symbols_eodhd_sorts_strips_caps` (hermetic, mocked
+  feed). Docs: `Strategies/scan.md` "Universe sources",
+  `docs/developer/06-entrypoints.md` §6.4, `docs/api_reference.md` §6.2/§9.
 - **CLI Nerd Font icons** - the interactive TUI's status cells, team column,
   header/welcome titles and workflow-steps line render Nerd Font (nf-fa) glyphs
   when the terminal font supports them (`TRADINGAGENTS_NERDFONT` defaults on;

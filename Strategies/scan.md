@@ -41,10 +41,25 @@ queries a data provider just to reject a symbol:
   analyst revisions and institutional accumulation are fetched/queried only
   for names that reached this stage.
 
-`value` (classic) and `all` have no cheap technical signal and go straight to
-Stage B, as before. Net effect: on a large `eodhd-us` slice or a movers
-universe, non-candidates cost ~1 vendor call (OHLCV) instead of ~6-7
-(statements + cashflow), which is what keeps a big scan tractable.
+## Universe sources
+
+- `eodhd-us` (default) — the EODHD full US symbol list (~18k common stocks, no
+  moomoo quota); the slice is alphabetical, so a large `--limit` is needed to
+  reach past the early-alphabet names.
+- `tickers` — positional symbols or `--file`.
+- `top-losers` / `heat-proxy` — moomoo intraday movers rank (losers of the
+  moment; optional, quota-limited, OpenD required).
+- `eodhd-losers` — EODHD's bulk US real-time feed (**one call**, ~18k rows,
+  OpenD-independent): the biggest intraday decliners by change% seed a
+  **loss-ordered** scan, so value-dip / momentum candidates (RSI/%b oversold,
+  stop <= 2%) are harvested from today's actual dips instead of an alphabetical
+  slice. `-n/--movers-count` sets how many decliners to take (moomoo movers cap
+  at 200; eodhd-losers accepts up to the whole feed); `--price-min` gates on
+  the feed's live close; mcap / PE / ATR gates still run per-symbol afterwards.
+  The feed rows carry price + change only (no name/mcap/type), so ETF/ETN rows
+  are not name-filtered at seed time — the per-symbol gates handle them.
+
+Every universe runs the same two-stage gate above.
 
 ## `value` (classic)
 

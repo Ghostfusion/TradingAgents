@@ -297,6 +297,20 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-08-31 `(working tree)` - `--universe eodhd-losers` in the value
+  screener: the EODHD bulk US real-time feed (one call, ~18k rows,
+  OpenD-independent) seeds a **loss-ordered** scan — the biggest intraday
+  decliners by change% — so value-dip/momentum candidates (RSI/%b oversold,
+  stop <= 2%) are harvested from today's actual dips instead of an alphabetical
+  `eodhd-us` slice. New `get_top_movers_symbols_eodhd` (machine-readable
+  symbol table behind `get_top_movers_eodhd`; `.US` suffix stripped, change_p
+  kept as percent). `-n/--movers-count` sets the decliner count (moomoo movers
+  cap at 200; eodhd-losers accepts up to the whole feed); `--price-min` gates
+  on the feed's live close; mcap/PE/ATR gates still run per-symbol. The feed
+  rows carry price + change only (no name/mcap/type), so ETF/ETN rows are not
+  name-filtered at seed time. Tests:
+  `test_eodhd_losers_universe_seeds_scan` +
+  `test_get_top_movers_symbols_eodhd_sorts_strips_caps`. See CHANGELOG.
 - 2026-08-30 `(working tree)` - Two-stage screener gating: every OHLCV-capable
   scan mode (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`)
   now runs a cheap OHLCV-only gate (Stage A, `_cheap_gate` — no provider call)

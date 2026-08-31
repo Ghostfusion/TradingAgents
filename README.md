@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-08-31] **`--universe eodhd-losers`** - the value screener can now seed
+  the scan from the EODHD bulk US real-time feed (one call, ~18k rows,
+  OpenD-independent): the biggest intraday decliners by change% are screened
+  first, so value-dip / momentum candidates (RSI/%b oversold, stop <= 2%) are
+  harvested from today's actual dips instead of an alphabetical `eodhd-us`
+  slice. `-n` sets the decliner count (moomoo movers cap at 200; eodhd-losers
+  accepts up to the whole feed); `--price-min` gates on the feed's live close;
+  mcap/PE/ATR gates still run per-symbol. Docs: `Strategies/scan.md` "Universe
+  sources".
 - [2026-08-30] **Two-stage screener gating** - every OHLCV-capable scan mode
   (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) now runs a
   **cheap OHLCV-only gate (Stage A)** on the single cached price series before
@@ -258,7 +267,10 @@
   moomoo/yfinance fallback); `news_data` and `corporate_actions` also lead
   with EODHD. New EODHD endpoints: news, splits/dividends, and the full US
   symbol list (~18k common stocks) — the screener's default `--universe
-  eodhd-us` (no moomoo quota). moomoo movers (`top-losers`/`heat-proxy`)
+  eodhd-us` (no moomoo quota). The bulk US real-time feed (one call, ~18k
+  rows) backs the screener's `--universe eodhd-losers` (biggest intraday
+  decliners first — a loss-ordered value-dip/momentum harvest) and the
+  `get_top_movers` tool fallback. moomoo movers (`top-losers`/`heat-proxy`)
   stay as the optional intraday source. Fundamentals/technicals/intraday/
   options are not on the EOD plan, so those chains keep moomoo/yfinance.
 
@@ -769,6 +781,20 @@ the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_18041
 same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).
 Requires OpenD running +
 logged in (same as every moomoo feature), and fails loudly if unavailable.
+
+The same loss-ordered idea works without moomoo/OpenD via the EODHD bulk
+real-time feed — one call, no quota, no gateway:
+
+```
+python scripts/value_screener.py -u eodhd-losers -n 500 --scan value-dip -d 2026-08-31
+```
+
+`eodhd-losers` takes the biggest intraday decliners by change% from the ~18k-row
+US feed (`-n` up to the whole feed; moomoo movers cap at 200), applies
+`--price-min` on the feed's live close, and runs the same per-symbol
+mcap/PE/ATR gates + two-stage scan afterwards. The feed rows carry price +
+change only (no name/mcap/type), so ETF/ETN rows are not name-filtered at seed
+time — the per-symbol gates handle them.
 
 Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
 many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net

@@ -387,3 +387,44 @@ def get_top_movers_eodhd(direction: str = "gainers", count: int = 10) -> str:
         sym = (row.get("code") or "?").split(".")[0]
         lines.append(f"- {sym}: {row.get('close')} ({row.get('change_p')}%)")
     return "\n".join(lines)
+
+
+
+def get_top_movers_symbols_eodhd(
+    direction: str = "losers", count: int = 50, min_price: float | None = None
+) -> list[dict]:
+    """Symbol table behind ``get_top_movers_eodhd`` for machine consumers.
+
+    One ``/api/real-time/US.US`` call returns the whole ~18k-row US feed
+    (verified live: no name/type field on rows, so equity-filtering by name is
+    impossible here - the caller's own gates must handle ETF/ETN rows). Rows
+    are sorted by ``change_p`` in the requested direction and capped at
+    ``count``. Each row: ``{symbol, close, change_p}`` with the ``.US`` suffix
+    stripped and the per-cent change kept as-is (percent, not ratio) - the
+    value screener divides by 100 when it renders ``DayChg``.
+    """
+    direction = str(direction).strip().lower()
+    if direction not in ("gainers", "losers"):
+        raise ValueError(
+            f"invalid direction '{direction}'; use 'gainers' or 'losers'."
+        )
+    data = _eodhd_get("real-time/US.US", {"ex": "US", "fmt": "json"})
+    if not isinstance(data, list) or not data:
+        raise NoMarketDataError("US", "US", detail="no real-time bulk data")
+    rows = []
+    for r in data:
+        cp = r.get("change_p")
+        close = r.get("close")
+        if cp is None or close is None:
+            continue
+        if min_price is not None and close < min_price:
+            continue
+        rows.append(
+            {
+                "symbol": (str(r.get("code") or "")).split(".")[0].upper(),
+                "close": close,
+                "change_p": float(cp),
+            }
+        )
+    rows.sort(key=lambda r: r["change_p"], reverse=(direction == "gainers"))
+    return rows[:count]
