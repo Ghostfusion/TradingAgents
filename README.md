@@ -30,11 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-<table>
-<tr><td style="border-left: 6px solid #8250df; padding-left: 1em;">
-
-<sub><b>Fork changelog</b> - additions since the upstream [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) release list below.</sub>
-
+- [2026-08-30] **Two-stage screener gating** - every OHLCV-capable scan mode
+  (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) now runs a
+  **cheap OHLCV-only gate (Stage A)** on the single cached price series before
+  any fundamentals fetch — non-candidates are dropped without querying a data
+  provider. Only survivors get memoized fundamentals (Stage B) and then
+  provider enrichment (Stage C: float/sector/revisions/institutions).
+  `value`/`all` fall straight through. This makes a large `eodhd-us` slice or a
+  movers universe tractable (non-candidates cost ~1 vendor call instead of
+  ~6-7). Docs: `Strategies/scan.md` "Two-stage gating".
 - [2026-08-30] **News/sentiment providers (A-C)** - GDELT (keyless native
   news-tone + daily sentiment, `get_gdelt_sentiment` tool, opt-in chain),
   NewsAPI.org (free 100 req/day global macro headlines, `NEWSAPI_API_KEY`),

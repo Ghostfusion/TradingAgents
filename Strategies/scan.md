@@ -21,8 +21,30 @@ watchlist is tradeable-by-construction. The framework phase-1 gates below are
 | `--revision` | positive net analyst upgrades (60d) | yfinance upgrades/downgrades proxy |
 | `--inst-accum` | institutional %-of-float rising (2 quarters) | moomoo shareholders |
 
-A gate is applied **only when the metric is measured** - a symbol with missing
-data keeps the row and renders `n/a` (never a fabricated pass or fail).
+## Two-stage gating (no provider calls during the gate)
+
+Every OHLCV-capable scan (`trend-pullback`, `breakout`, `momentum`, `swing`,
+`vcp`, `value-dip`) runs on a **two-stage pipeline** so the screener never
+queries a data provider just to reject a symbol:
+
+- **Stage A — cheap OHLCV-only gate.** Uses only the single cached price
+  series (`_RUN_OHLCV_CACHE`) and the scan's own pure technical thresholds
+  (`scan_signals` A/B flags, the 5 momentum pillars minus the deferred float
+  pillar, `vcp_setup`, `_value_dip_technical_prefilter` RSI<=35 / %b<=0.10 /
+  stop<=2%). A symbol that definitively fails is dropped here — **zero
+  fundamentals, float, sector, or revision calls**.
+- **Stage B — survivors get fundamentals.** Only Stage-A survivors run
+  `fetch_ticker` (memoized once per ticker via `_fetch_fin_cached`, and the
+  cashflow fetch inside `_value_dip_scan` is cached too), then the full
+  `screen_ticker` gates.
+- **Stage C — provider enrichment on finalists.** Float, sector ranking,
+  analyst revisions and institutional accumulation are fetched/queried only
+  for names that reached this stage.
+
+`value` (classic) and `all` have no cheap technical signal and go straight to
+Stage B, as before. Net effect: on a large `eodhd-us` slice or a movers
+universe, non-candidates cost ~1 vendor call (OHLCV) instead of ~6-7
+(statements + cashflow), which is what keeps a big scan tractable.
 
 ## `value` (classic)
 

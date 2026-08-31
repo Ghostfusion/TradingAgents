@@ -297,7 +297,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-## Changelog of this fork (most recent first)
+- 2026-08-30 `(working tree)` - Two-stage screener gating: every OHLCV-capable
+  scan mode (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`)
+  now runs a cheap OHLCV-only gate (Stage A, `_cheap_gate` — no provider call)
+  before any fundamentals fetch, then memoized fundamentals for survivors
+  (Stage B, `_fetch_fin_cached` + `_CASHFLOW_CACHE`), then provider enrichment
+  only on finalists (Stage C). Non-candidates cost ~1 vendor call (OHLCV)
+  instead of ~6-7 (statements + cashflow); a large `eodhd-us` slice is now
+  tractable. `value`/`all` fall straight through. Tests:
+  `test_cheap_gate_deferred_before_fundamentals` +
+  `test_eodhd_cheap_gate_before_fundamentals`. See CHANGELOG.
 - 2026-08-30 `(working tree)` - News/sentiment providers A-C: GDELT
   (`dataflows/gdelt.py`, keyless native tone + daily sentiment, new
   `get_gdelt_sentiment` news tool), NewsAPI.org (`dataflows/newsapi.py`,

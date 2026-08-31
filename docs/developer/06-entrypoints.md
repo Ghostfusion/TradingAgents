@@ -62,11 +62,15 @@ vcp / value-dip scans.
 
 **Universe**: `eodhd-us` (the default) pulls the EODHD full US symbol list
 (~18k common stocks, no moomoo quota); `top-losers` / `heat-proxy` use the
-moomoo intraday movers rank (optional, quota-limited). On a movers universe,
-the value-dip gating pass runs a cheap OHLCV-only pre-filter
-(`_value_dip_technical_prefilter`: RSI <= 35, %b <= 0.10, stop <= 2%) before
-the heavy fundamentals fetch, so non-candidates cost ~1 vendor call instead
-of ~7 (statements + cashflow).
+moomoo intraday movers rank (optional, quota-limited). Every OHLCV-capable
+scan (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) runs a
+**two-stage gate**: a cheap OHLCV-only pre-filter (Stage A, no provider call —
+`scan_signals` flags, momentum pillars minus float, `vcp_setup`, or the
+value-dip prefilter RSI <= 35 / %b <= 0.10 / stop <= 2%) before any
+fundamentals fetch, then memoized fundamentals (Stage B) and provider
+enrichment only on finalists (Stage C). Non-candidates cost ~1 vendor call
+(OHLCV) instead of ~7 (statements + cashflow), which keeps a large `eodhd-us`
+slice or movers universe tractable.
 
 ## 6.5 `scripts/*` utilities
 
