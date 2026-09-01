@@ -32,7 +32,12 @@ _JUDGE_SYSTEM = (
     "(how directly the argument invalidated the opponent's specific premises) "
     "and set entrenchment_detected when a candidate merely repeated itself "
     "without new counter-evidence. Give every score a one-line rationale. "
-    "Never guess numbers; a claim you cannot verify is scored low."
+    "Never guess numbers; a claim you cannot verify is scored low. "
+    "Output the scores in this EXACT flat JSON shape: "
+    "scores: [ {\"dimension\": \"empirical_grounding\", \"score\": 7}, ... ] — "
+    "one entry per dimension (empirical_grounding, downside_tail_risk_weight, "
+    "catalyst_clarity, assumption_sensitivity). Your reply is a single JSON "
+    "object with the scores array; never omit it."
 )
 
 
