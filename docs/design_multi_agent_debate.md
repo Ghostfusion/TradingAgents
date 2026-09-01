@@ -806,3 +806,33 @@ research + risk sections via the SECTION_* tables.
 - RM/PM prompts: contain the matrix, not the transcript.
 - Full suite + ruff clean; live QCOM: deepseek bull/conservative complete
   (no degraded turns), judge scores non-zero, RM/PM real plans.
+
+### 10.6 Live-run validation (QCOM 145916, DELL 153305) + late fixes
+
+The bounded architecture was exercised on live runs with real heterogeneous
+models (all-`openai/gpt-5.6-luna` roles + judge). Findings and the fixes
+they produced:
+
+- **json_object 400 root cause**: the judge prompt lacked the literal token
+  "json"; OpenRouter's json_object route (OpenAI/Azure backends) rejects such
+  requests. The judge prompt now says "single JSON object" - the flat
+  `scores[]` shape cue rides the same line. Without this token every judge
+  call 400ed, the adapter fell back to a non-json_mode call, and the model
+  returned empty dimensions. With it, real blind scores appear in both
+  evidence files (verified on a fresh symbol).
+- **#1A flattened rubric**: `L2JudgeDimensionedRubric.dimension_scores`
+  (enum-keyed dict) -> `scores: [{dimension, score}]` array; legacy dict
+  auto-normalizes; `_rubric_dimension_dict` keeps consumers unchanged.
+- **Tolerant rubric coercion** + **empty-dim fallback** (directed retry ->
+  prose-score parse -> rebuttal proxy -> honest UNAVAILABLE, never 0.0).
+- **Claim-key resolution**: debaters humanize Key-Index labels; L1 kept
+  marking them unverified -> `(unused)`. `resolve_ground_truth_key` now
+  normalizes -> exact alias -> confidence-gated fuzzy (difflib, >=0.72,
+  >=0.08 margin, token-overlap bonus) -> honest unverified. Tested against
+  the real run labels.
+- **Neutral model key**: `TRADINGAGENTS_DEBATE_NEUTRAL_MODEL` resolves the
+  neutral risk debater independently (was pinned to quick tier).
+- Verdicts: no degraded turns, judge scores non-null, RM/PM decisions
+  grounded in L1 + judge + independent reads. `(unused)` is now near-zero
+  with the router; an empty result means L1 honestly cannot verify.
+

@@ -50,6 +50,15 @@ a fresh agent must follow them without being reminded:
    `timeout 900 py -3.12 -m pytest tests/ -q`).
 6. No personal info or secrets in commits (see §8 below); offline tests stay
    hermetic (mock vendor calls); `py -3.12` everywhere (below).
+7. **All decision making should always do a deep web search first** - for any
+   task that changes behaviour, picks between approaches, or grounds a
+   recommendation (feature choice, model/provider selection, architecture,
+   libraries, market/financial data claims), run a `web_search` BEFORE
+   deciding and cite what it found. Decisions must be evidence-first, not
+   remembered-from-training; if the search contradicts or doesn't cover the
+   assumption, say so explicitly. (Applied this repo-wide: model choice for
+   the debate roles, JSON-mode enforcement, key-normalization strategy, etc.
+   were all verified against current web guidance before landing.)
 
 ---
 
@@ -308,6 +317,14 @@ has changed before); never assume an endpoint works — the SDK's
   max unforecasted drawdown). All `debate_*` config keys OFF by default;
   phased rollout P0-P6 (grounding contract → scoring/termination → models/
   capability → judge → A/B harness). See CHANGELOG.
+- 2026-09-01 `(working tree)` - Structured-debate robustness: json_object
+  route fix ("json" token in the judge prompt + flat `scores[]` rubric +
+  tolerant coercion + deterministic prose-score fallback), claim-key
+  resolution (normalize -> alias -> gated fuzzy), context-bounded debater
+  prompts, 4000-token cap, section-aware 1-shot, risk-stance coercion,
+  `TRADINGAGENTS_DEBATE_NEUTRAL_MODEL`, CLI deterministic exit. Verified on
+  live QCOM + DELL: no degraded turns, real judge scores, sound RM/PM. See
+  CHANGELOG / design doc §10.6.
 - 2026-08-31 `(working tree)` - Risk-section structured-debate parity
   (direction.md): the risk debate mirrors the research one — risk debators
   emit `RiskDebaterTurnPayload` grounded turns into `structured_risk_state`,

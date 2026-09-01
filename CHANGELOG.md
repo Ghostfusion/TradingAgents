@@ -8,6 +8,43 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
 
+- **Structured-debate robustness series (QCOM/DELL live runs)** - a
+  session-long hardening of the opt-in `enable_debate` pipeline, each
+  verified against live runs:
+  - Judge json_object 400 root cause: the judge prompt lacked the literal
+    "json" token, so OpenRouter's OpenAI/Azure backends rejected
+    `response_format=json_object` -> the adapter fell back to a non-json
+    call -> the model returned empty/ragged dimensions. The judge prompt
+    now says "single JSON object" (also carries the flattened `scores[]`
+    shape cue). Verified: real blind scores now appear in both
+    `structured_debate.md` files (e.g. research Candidate_Y 6.75, risk
+    Candidate_Z 5.75 on DELL).
+  - Flattened `L2JudgeDimensionedRubric.dimension_scores` (enum-keyed dict)
+    to `scores: [{dimension, score}]` (array of objects is far more
+    reliably emitted under json_object); legacy dict shape auto-normalized;
+    `_rubric_dimension_dict` back-compat.
+  - Tolerant rubric coercion: `entrenchment_detected`/`rebuttal_effectiveness`
+    string/object values coerce to bool/float (clamped 0-10) instead of
+    failing the whole rubric.
+  - Judge empty-dimension fallback: directed retry naming the exact four
+    dimensions, then a deterministic prose-score parse (rationale numbers
+    per dimension), then `rebuttal_effectiveness` proxy, then honest
+    UNAVAILABLE - never a silent 0.0.
+  - Registry-key mismatch: debaters humanize the Ground-Truth Key Index
+    labels, so L1 marked every claim unverified -> `(unused)` in the
+    ledger. `resolve_ground_truth_key` now routes normalize -> extended
+    KEY_ALIASES (semantic variants) -> confidence-gated fuzzy (difflib,
+    >=0.72 ratio, >=0.08 margin, token-overlap bonus) -> honest unverified
+    (never fabricated). Tested against the real run labels.
+  - Context-bounded debater prompts (static registry + last-turn delta +
+    active disputes instead of full transcripts/reports), 4000-token cap,
+    section-aware 1-shot example, risk-stance coercion (BULL/BEAR ->
+    AGGRESSIVE/CONSERVATIVE), judge scores last non-degraded round.
+  - `TRADINGAGENTS_DEBATE_NEUTRAL_MODEL` key so the neutral risk debater
+    resolves its own model (luna), like the other roles.
+  - CLI deterministic exit + hard-exit guards behind `_CLI_ENTRY` (moomoo
+    shutdown-block can no longer hang or kill pytest).
+
 - **CLI deep-run defect (`--depth` / interactive research depth)** - 'deep'
   mapped to 5 bull + 5 bear debate turns, so a deep run multiplied runtime
   (SKHY 08-31 took >1h vs 30-40m typical) and the later research-debate

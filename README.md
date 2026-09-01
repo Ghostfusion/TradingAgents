@@ -30,6 +30,17 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-01] **Structured-debate robustness + json_mode route fix** - the
+  opt-in debate pipeline is now fully working end-to-end on live runs (QCOM,
+  DELL). Root cause of the always-empty judge: OpenRouter's `json_object`
+  route requires the literal token "json" in the prompt, which the judge
+  lacked - every call 400ed and fell back to ragged output. Fixed: "single
+  JSON object" prompt cue + flattened `scores: [{dimension, score}]` rubric
+  + tolerant coercion + a deterministic prose-score fallback. Claim-key
+  resolution upgraded (normalize -> alias -> confidence-gated fuzzy) so
+  humanized labels (`Free cash flow yield`, `Altman Z-score`) verify as
+  `valid` instead of `(unused)`. New `TRADINGAGENTS_DEBATE_NEUTRAL_MODEL`
+  key lets the neutral risk debater use its own model. See CHANGELOG.
 - [2026-08-31] **Risk-section structured debate parity (direction.md)** -
   the structured multi-agent debate now covers BOTH sections: the risk
   debate (aggressive/conservative/neutral) runs the same machinery as the
