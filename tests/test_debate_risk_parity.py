@@ -332,6 +332,102 @@ class TestBoundedContextPhases:
         assert "8.2" in m and "6.5" in m
         assert "| 8.0% |" in m and "| 2.0% |" in m
 
+    def test_risk_stance_coerced_from_research_labels(self):
+        """The shared 1-shot can leak BULL/BEAR into a risk payload; the
+        schema now maps them to their risk analog instead of failing the turn
+        (regression: aggressive degraded with 'stance: Input should be
+        AGGRESSIVE/CONSERVATIVE/NEUTRAL')."""
+        from tradingagents.agents.schemas import RiskDebaterTurnPayload
+
+        p = RiskDebaterTurnPayload.model_validate({
+            "round_index": 1,
+            "stance": "BULL",
+            "core_thesis": "upside",
+            "quantitative_claims": [{"metric_name": "pe", "asserted_value": 18.7,
+                                     "ground_truth_key": "pe_ttm", "source": "x"}],
+            "recommended_allocation_pct": 30,
+        })
+        assert p.stance.value == "AGGRESSIVE", p.stance
+
+        p2 = RiskDebaterTurnPayload.model_validate({
+            "round_index": 1,
+            "stance": "bear",
+            "core_thesis": "down",
+            "quantitative_claims": [{"metric_name": "pe", "asserted_value": 18.7,
+                                     "ground_truth_key": "pe_ttm", "source": "x"}],
+            "recommended_allocation_pct": 10,
+        })
+        assert p2.stance.value == "CONSERVATIVE", p2.stance
+
+    def test_oneshot_stance_is_section_aware(self):
+        """The 1-shot example must use the CURRENT role's stance so it never
+        leaks the research labels into a risk payload (regression: aggressive
+        mirrored 'BEAR' from the research example)."""
+        import re
+
+        from tradingagents.agents.researchers.structured_debate import build_turn_prompt
+
+        # risk conservative
+        p = build_turn_prompt({
+            "asset_type": "stock", "instrument_context": "Q",
+            "computed_decision_context": "fcf_yield=7.41",
+            "trader_investment_plan": "HOLD",
+            "risk_debate_state": {"history": ""},
+            "structured_risk_state": {"round_records": []},
+        }, "conservative", "CONSERVATIVE")
+        m = re.search(r'"stance": "([A-Z]+)"', p[p.index("Example output"):])
+        assert m and m.group(1) == "CONSERVATIVE", m
+        # research bear
+        p2 = build_turn_prompt({
+            "asset_type": "stock", "instrument_context": "Q",
+            "computed_decision_context": "fcf_yield=7.41",
+            "investment_debate_state": {"history": ""},
+            "debate_state": {"round_records": []},
+        }, "bear", "BEAR")
+        m2 = re.search(r'"stance": "([A-Z]+)"', p2[p2.index("Example output"):])
+        assert m2 and m2.group(1) == "BEAR", m2
+
+    def test_judge_empty_dims_directed_retry_then_unavailable(self):
+        """Empty dimension_scores is treated like a None rubric: directed
+        retry; if still empty -> honest UNAVAILABLE, not misleading 0.0."""
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+        from tradingagents.agents.arbiters.debate_judge import create_debate_judge
+
+        class _RubricEmpty:
+            dimension_scores = {}
+            judge_model_id = ""
+            round_evaluated = 1
+            evaluated_agent_alias = "Candidate_X"
+            rationale = ""
+
+        calls = {"n": 0}
+
+        def _invoke(structured_llm, plain_llm, prompt, schema):
+            calls["n"] += 1
+            # always returns an empty-dims rubric (deepseek shape miss)
+            return _RubricEmpty(), None
+
+        class _L:
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _invoke)
+        try:
+            node = create_debate_judge(_L(), section="research", cfg={})
+            out = node({"debate_state": {
+                "round_records": [{"bull": {"stance": "BULL", "core_thesis": "t", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 10}}],
+            }})
+        finally:
+            monkeypatch.undo()
+
+        # directed retry + 1 retry = 3 attempts, then unavailable (not 0.0)
+        assert calls["n"] >= 2, calls
+        scores = out["debate_state"]["judge_scores"]
+        for alias, agg in scores.items():
+            assert agg.get("mean") is None, (alias, agg)
+            assert agg.get("unavailable") is True, (alias, agg)
+
     def test_judge_unavailable_is_null_not_zero(self):
         """A judge that fails is NOT score 0.0: it writes mean=None with
         unavailable=True so the RM/PM and report know the judge did not run

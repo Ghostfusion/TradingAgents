@@ -234,6 +234,30 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 structured_llm, judge_llm, judge_text,
                 L2JudgeDimensionedRubric,
             )
+            if rubric is not None and not rubric.dimension_scores:
+                # Empty dimension_scores (115549 regression): deepseek json_mode
+                # returned a VALID object that omitted the dimension keys, which
+                # Pydantic accepts via default_factory={} -> silent mean 0.0.
+                # Treat like a failed invoke: directed retry naming the exact
+                # four dimensions, else honest UNAVAILABLE (never misleading 0.0).
+                logger.warning(
+                    "debate judge empty dimension_scores for %s; directed retry",
+                    cand["alias"],
+                )
+                directed = judge_text + (
+                    "\n\nScore ONLY on these EXACT four dimensions (each 0..10): "
+                    "empirical_grounding, downside_tail_risk_weight, "
+                    "catalyst_clarity, assumption_sensitivity."
+                )
+                rubric2, err2 = invoke_structured_turn(
+                    structured_llm, judge_llm, directed,
+                    L2JudgeDimensionedRubric,
+                )
+                if rubric2 is not None and rubric2.dimension_scores:
+                    rubric = rubric2
+                else:
+                    rubric = None
+                    err = err2 or f"empty dimension_scores ({err})"
             if rubric is None:
                 # Retry ONCE (deepseek lands valid JSON on a 2nd attempt; a
                 # one-shot failure must not zero a side).
@@ -255,9 +279,23 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                     "reason": f"judge unavailable: {err}",
                 }
                 continue
-            rubrics.append(rubric)
             dims = rubric.dimension_scores
             vals = [v for v in dims.values() if isinstance(v, (int, float))]
+            if not vals:
+                # Final gate: a rubric that "returned" but has no scorable
+                # dimensions (deepseek emits the object without the keys) is
+                # UNAVAILABLE, not a 0.0 — never let an empty dims slip to
+                # the mean fallback after all retries.
+                logger.warning(
+                    "debate judge returned empty dimension_scores for %s (after retries); marking unavailable",
+                    cand["alias"],
+                )
+                side_scores[cand["alias"]] = {
+                    "mean": None, "unavailable": True, "scores": {},
+                    "reason": "empty dimension_scores after directed retry",
+                }
+                continue
+            rubrics.append(rubric)
             side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
                 "mean": round(sum(vals) / len(vals), 4) if vals else 0.0,
                 "scores": {k.value if hasattr(k, "value") else str(k): v for k, v in dims.items()},

@@ -760,6 +760,23 @@ class RiskDebaterTurnPayload(DebaterTurnPayload):
 
     stance: RiskStance
 
+    @field_validator("stance", mode="before")
+    @classmethod
+    def _coerce_risk_stance(cls, v):
+        """Risk-stance fallback (tolerate ragged input): the shared 1-shot can
+        leak the RESEARCH labels (BULL/BEAR) into a risk payload. Map them to
+        their risk analog instead of hard-validation-failing a contract slip —
+        a model slip is not a turn-killer. Unknown values still fall through
+        to honest validation failure."""
+        if isinstance(v, str):
+            s = v.strip().upper()
+            mapping = {
+                "BULL": "AGGRESSIVE",
+                "BEAR": "CONSERVATIVE",
+            }
+            return mapping.get(s, s)
+        return v
+
 
 class MetricVerification(BaseModel):
     """One L1 metric check (l1_eval_result.json metric_verification[])."""
