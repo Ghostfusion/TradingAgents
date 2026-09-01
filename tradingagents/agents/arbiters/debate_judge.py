@@ -153,13 +153,40 @@ def create_debate_judge(judge_llm, section: str = "research"):
         round_records = debate_state.get("round_records") or []
         if not round_records:
             return {channel: {**debate_state, "judge_scores": {}, "judge_rubric": None}}
-        latest = round_records[-1]
-        turn_by_role = {r: latest.get(r) or {} for r in roles}
-        candidates = anonymize_and_rotate(turn_by_role, roles)
-        # Per-role L1 scorecard from the persisted claim ledger (P0).
         from tradingagents.strategies.debate_claim import ClaimLedger
 
         ledger = ClaimLedger.from_dict(debate_state.get("claim_ledger") or [])
+        # Pick each role's LAST NON-DEGRADED payload (regression: the O(1)
+        # judge read only round_records[-1]; if the final round's turn
+        # degraded ("No structured turn produced"), the judge scored 0.0
+        # despite substantive earlier rounds. Skip degraded shells when
+        # choosing what to judge.)
+        def _degraded(p):
+            thesis = str((p or {}).get("core_thesis", "")) or ""
+            return thesis.startswith("No structured turn produced") or not p
+
+        def _last_good_payload(role):
+            for rec in reversed(round_records):
+                p = rec.get(role)
+                if isinstance(p, dict) and not _degraded(p):
+                    return p
+            return {}
+
+        turn_by_role = {r: _last_good_payload(r) for r in roles}
+        candidates = anonymize_and_rotate(turn_by_role, roles)
+        # Flag if any candidate is an empty shell (all its turns degraded).
+        for cand in candidates:
+            if not cand.get("thesis"):
+                cand["degraded"] = True
+        # Per-role L1 scorecard (P0). A claim is counted only when it came
+        # from a round <= the role's latest non-degraded round, so the judge
+        # sees the scorecard of the evidence it is actually scoring.
+        latest_round_by_role = {
+            r: rec.get("round_no", idx + 1)
+            for r in roles
+            for idx, rec in enumerate(round_records)
+            if isinstance(rec.get(r), dict) and not _degraded(rec.get(r))
+        }
         sc_lines = []
         for r in roles:
             rows = [c for c in ledger.rows if c.role == r]
@@ -177,16 +204,19 @@ def create_debate_judge(judge_llm, section: str = "research"):
         side_scores = {}
         rubrics = []
         for i, cand in enumerate(candidates):
-            # Preceding opponent = the role BEFORE this candidate in the
-            # section order (within the same round); first role has none.
+            # Preceding opponent = the role BEFORE this candidate (last
+            # non-degraded payload); round-1 candidate has none.
             prev_role = roles[i - 1] if i > 0 else None
-            opponent = (
-                anonymize_and_rotate({prev_role: turn_by_role.get(prev_role) or {}}, [prev_role])[0]
-                if prev_role and turn_by_role.get(prev_role)
-                else None
-            )
+            opponent = None
+            if prev_role:
+                for rec in reversed(round_records):
+                    p = rec.get(prev_role)
+                    if isinstance(p, dict) and not _degraded(p):
+                        opponent = anonymize_and_rotate({prev_role: p}, [prev_role])[0]
+                        break
+            judge_round = latest_round_by_role.get(roles[i], len(round_records))
             prompt = _build_judge_candidate_prompt(
-                len(round_records),
+                judge_round,
                 cand,
                 opponent,
                 l1_scorecard,

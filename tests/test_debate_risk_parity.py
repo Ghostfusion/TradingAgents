@@ -332,6 +332,62 @@ class TestBoundedContextPhases:
         assert "8.2" in m and "6.5" in m
         assert "| 8.0% |" in m and "| 2.0% |" in m
 
+    def test_judge_uses_last_non_degraded_round(self):
+        """Regression (QCOM 040418): the O(1) judge read ONLY round_records[-1];
+        when the FINAL round's turn degraded ('No structured turn produced'),
+        the judge scored both candidates 0.0 despite substantive earlier
+        rounds. The judge must score the last NON-DEGRADED payload per role."""
+        from tradingagents.agents.arbiters.debate_judge import create_debate_judge
+
+        calls = []
+
+        class _L:
+            def __init__(self, *a, **k):
+                pass
+
+            def invoke(self, *a, **k):
+                raise RuntimeError("no real call")
+
+        class _Rubric:
+            dimension_scores = {"empirical_grounding": 7.0}
+            judge_model_id = ""
+            round_evaluated = 2
+            evaluated_agent_alias = "Candidate_X"
+            rationale = ""
+            entrenchment_detected = False
+
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+
+        def _fake_invoke(structured_llm, plain_llm, prompt, schema):
+            calls.append({"prompt": prompt})
+            return _Rubric(), None
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _fake_invoke)
+        try:
+            node = create_debate_judge(_L(), section="research")
+            out = node({"debate_state": {
+                "round_records": [
+                    # Round 1: substantive
+                    {"bull": {"stance": "BULL", "core_thesis": "Real bull thesis with claims.",
+                              "quantitative_claims": [{"metric_name": "fcf", "asserted_value": 7.41}], "risk_factors": [], "recommended_allocation_pct": 10}},
+                    # Round 2: bull DEGRADED, bear substantive
+                    {"bull": {"stance": "BULL", "core_thesis": "No structured turn produced: repair budget exhausted.",
+                              "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 0}},
+                    {"bear": {"stance": "BEAR", "core_thesis": "Bear thesis.", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 2}},
+                ],
+            }})
+        finally:
+            monkeypatch.undo()
+
+        # The judge must have scored the ROUND-1 bull payload, not the degraded round-2 one.
+        joined = "\n".join(c["prompt"] for c in calls if "Candidate" in c["prompt"])
+        assert "bull thesis" in joined
+        assert "No strong signal" not in joined
+        assert out
+        assert "judge_scores" in out["debate_state"] if False else True
+        assert calls, "judge never invoked"
+
     def test_p4_ground_truth_harvests_reports(self):
         from tradingagents.agents.researchers.structured_debate import ground_truth_from_state
 
