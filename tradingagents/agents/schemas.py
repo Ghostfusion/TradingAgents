@@ -821,7 +821,14 @@ class JudgeDimension(str, Enum):
 
 
 class L2JudgeDimensionedRubric(BaseModel):
-    """Blind L2 judge output (source schema l2_judge_rubric.json)."""
+    """Blind L2 judge output (source schema l2_judge_rubric.json).
+
+    Provider-tolerant (luna emits ragged string/object values for the bool/
+    number fields on this OpenRouter route): coerce instead of failing the
+    whole rubric — same discipline as the debater sanitizers. A malformed
+    boolean/number is defaulted; dimension keys are validated by the
+    judge's scoring loop (unknown keys dropped), never a rubric killer.
+    """
 
     judge_model_id: str = ""
     round_evaluated: int = 0
@@ -834,6 +841,36 @@ class L2JudgeDimensionedRubric(BaseModel):
     entrenchment_detected: bool = False
     rebuttal_effectiveness: float = Field(ge=0.0, le=10.0, default=0.0)
     rationale: str = Field(default="", max_length=1000)
+
+    @field_validator("entrenchment_detected", mode="before")
+    @classmethod
+    def _coerce_entrenchment(cls, v):
+        """'true'/'false'/'True'/'1'/'yes' -> bool; anything else -> False."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("true", "1", "yes", "y"):
+                return True
+            if s in ("false", "0", "no", "n", ""):
+                return False
+        return False
+
+    @field_validator("rebuttal_effectiveness", mode="before")
+    @classmethod
+    def _coerce_rebuttal(cls, v):
+        """Number-or-numeric-string; clamp 0..10; anything else -> 0.0."""
+        if isinstance(v, (int, float)):
+            return max(0.0, min(float(v), 10.0))
+        if isinstance(v, str):
+            try:
+                f = float(v.strip())
+                return max(0.0, min(f, 10.0))
+            except (TypeError, ValueError):
+                pass
+        return 0.0
 
 
 class L1SeverityTier(str, Enum):

@@ -387,6 +387,28 @@ class TestBoundedContextPhases:
         m2 = re.search(r'"stance": "([A-Z]+)"', p2[p2.index("Example output"):])
         assert m2 and m2.group(1) == "BEAR", m2
 
+    def test_judge_rubric_coerces_ragged_luna_fields(self):
+        """Regression (QCOM 130518): luna emits entrenchment_detected /
+        rebuttal_effectiveness as strings/objects; the rubric previously
+        FAILED validation -> judge unavailable. Now coerces (bool/float)."""
+        from tradingagents.agents.schemas import L2JudgeDimensionedRubric
+
+        r = L2JudgeDimensionedRubric(
+            entrenchment_detected="no", rebuttal_effectiveness="7.5",
+        )
+        assert r.entrenchment_detected is False
+        assert r.rebuttal_effectiveness == 7.5
+
+        r2 = L2JudgeDimensionedRubric(
+            entrenchment_detected="True", rebuttal_effectiveness="oops",
+        )
+        assert r2.entrenchment_detected is True
+        assert r2.rebuttal_effectiveness == 0.0
+
+        r3 = L2JudgeDimensionedRubric(entrenchment_detected=1, rebuttal_effectiveness=12.0)
+        assert r3.entrenchment_detected is True
+        assert r3.rebuttal_effectiveness == 10.0  # clamped 0..10
+
     def test_humanized_keys_resolve_via_alias_map(self):
         """Registry-key mismatch fix: debaters humanize the Key Index labels
         ('QCOM price', 'Free-cash-flow yield', 'Forward P/E'), so L1 marked
