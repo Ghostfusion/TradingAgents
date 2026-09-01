@@ -185,6 +185,83 @@ class TestRiskTurnChannels:
         assert prose["count"] == 1
 
 
+class TestRaggedProviderJsonTolerant:
+    """DeepSeek's free-text JSON is RAGGED: lowercase stances, str numbers,
+    claims missing source, junk/incomplete risk factors. A single bad array
+    entry previously failed the WHOLE payload -> repair loop -> degraded
+    turn. The sanitizers must parse ragged input or drop only the unusable
+    entries, never fail the turn."""
+
+    def test_ragged_research_payload_parses(self):
+        from tradingagents.agents.schemas import DebaterTurnPayload
+
+        ragged = {
+            "round_index": 1,
+            "stance": "bear",
+            "core_thesis": "downturn thesis",
+            "quantitative_claims": [
+                {"metric_name": "P/E", "asserted_value": "18.5"},
+                {"asserted_value": None},
+                "garbage",
+                {"metric_name": "yield", "asserted_value": 7.41,
+                 "source": "get_fcf_yield", "ground_truth_key": "fcf_yield_pct"},
+            ],
+            "risk_factors": [
+                {"severity": "high"},
+                {"risk_id": 123, "mitigation_stated": "no"},
+                None,
+                {"risk_id": "qct_concentration", "severity": "critical",
+                 "mitigation_stated": True},
+            ],
+            "recommended_allocation_pct": 15,
+        }
+        p = DebaterTurnPayload.model_validate(ragged)
+        assert p.stance == "BEAR"
+        assert len(p.quantitative_claims) == 2
+        assert p.quantitative_claims[0].asserted_value == 18.5
+        assert p.quantitative_claims[0].source == ""  # missing source -> L1 unverified
+        assert len(p.risk_factors) == 2
+        assert p.risk_factors[0].risk_id == "123"
+        assert p.risk_factors[0].severity.value == "LOW"
+
+    def test_ragged_risk_payload_parses(self):
+        from tradingagents.agents.schemas import RiskDebaterTurnPayload
+
+        ragged = {
+            "round_index": 1,
+            "stance": "neutral",
+            "core_thesis": "balanced",
+            "quantitative_claims": [{"metric_name": "px", "asserted_value": 159.35}],
+            "risk_factors": [{"risk_id": None}, {"risk_id": "vol_spike", "severity": "medium"}],
+            "recommended_allocation_pct": 10,
+        }
+        p = RiskDebaterTurnPayload.model_validate(ragged)
+        assert p.stance == "NEUTRAL"
+        assert len(p.risk_factors) == 1
+        assert p.risk_factors[0].risk_id == "vol_spike"
+        assert p.risk_factors[0].severity.value == "MEDIUM"
+
+    def test_raggeed_payload_survives_l1_model_validate(self):
+        """L1's model_validate on the stored ragged dict must NOT hard-breach."""
+        from tradingagents.agents.researchers.structured_debate import create_debate_l1
+        from tradingagents.agents.schemas import DebaterTurnPayload
+
+        payload = DebaterTurnPayload.model_validate({
+            "round_index": 1,
+            "stance": "BULL",
+            "core_thesis": "t",
+            "quantitative_claims": [{"metric_name": "pe", "asserted_value": 14.4}],
+            "risk_factors": [{"severity": "high"}],  # incomplete entry
+            "recommended_allocation_pct": 20,
+        })
+        node = create_debate_l1(lambda s: {}, {})
+        out = node({"debate_state": {
+            "round_records": [{"bull": payload.model_dump()}],
+            "last_side": "bull",
+        }})
+        ds = out["debate_state"]
+        assert not ds.get("terminated"), f"L1 hard-breached ragged payload: {ds.get('reason')}"
+
 class TestDegradedTurnNeverCrashes:
     """Regression: the LLM returning NO structured payload must degrade to an
     honest empty turn, never raise. The pre-fix fallback constructed

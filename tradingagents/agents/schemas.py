@@ -626,24 +626,54 @@ class RiskSeverity(str, Enum):
 
 
 class QuantitativeClaim(BaseModel):
-    """One grounded quantitative claim (debater_turn.json quantitative_claims[])."""
+    """One grounded quantitative claim (debater_turn.json quantitative_claims[]).
 
-    metric_name: str = Field(description="Human-readable metric (e.g. trailing P/E)")
+    Provider-tolerant (deepseek sends ragged free-text JSON): only
+    ``asserted_value`` is required for a claim to be verifiable; a claim
+    missing ``ground_truth_key``/``source`` still PARSES and L1 scores it
+    ``unverified`` (soft penalty) instead of failing the whole turn.
+    """
+
+    metric_name: str = Field(
+        default="", description="Human-readable metric (e.g. trailing P/E)"
+    )
     asserted_value: float = Field(description="The number the debater asserts")
     ground_truth_key: str = Field(
-        description="Key of the computed state/tool value this claim maps to"
+        default="", description="Key of the computed state/tool value this claim maps to"
     )
     source: str = Field(
-        description="Tool/state call that actually produced the number this run"
+        default="", description="Tool/state call that actually produced the number this run"
     )
 
 
 class RiskFactor(BaseModel):
-    """One risk factor (debater_turn.json risk_factors[])."""
+    """One risk factor (debater_turn.json risk_factors[]).
 
-    risk_id: str
-    severity: RiskSeverity
-    mitigation_stated: bool
+    Provider-tolerant: deepseek's free-text JSON often omits fields or sends
+    lowercase severity. All fields default; a ragged entry (missing risk_id)
+    is DROPPED at the payload level by DebaterTurnPayload.sanitize_lists,
+    never failing the whole turn.
+    """
+
+    risk_id: str = ""
+    severity: RiskSeverity = RiskSeverity.LOW
+    mitigation_stated: bool = False
+
+    @field_validator("risk_id", mode="before")
+    @classmethod
+    def _coerce_risk_id(cls, v):
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _norm_severity(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
 
 class DebaterTurnPayload(BaseModel):
@@ -667,6 +697,55 @@ class DebaterTurnPayload(BaseModel):
     )
     risk_factors: list[RiskFactor] = Field(default_factory=list, max_length=25)
     recommended_allocation_pct: float = Field(ge=0.0, le=100.0)
+
+    @field_validator("stance", mode="before")
+    @classmethod
+    def _norm_stance(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
+    @field_validator("quantitative_claims", mode="before")
+    @classmethod
+    def _sanitize_claims(cls, v):
+        """Drop entries that can never be verified instead of failing the
+        turn: non-dicts and entries without a parseable asserted_value."""
+        if not isinstance(v, list):
+            return []
+        out = []
+        for item in v:
+            if isinstance(item, BaseModel):
+                # already-valid model instances pass through (a before
+                # validator runs BEFORE nested coercion)
+                out.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            try:
+                float(item.get("asserted_value"))
+            except (TypeError, ValueError):
+                continue
+            out.append(item)
+        return out
+
+    @field_validator("risk_factors", mode="before")
+    @classmethod
+    def _sanitize_risk_factors(cls, v):
+        """Drop ragged risk entries (missing risk_id) — deepseek emits them
+        often; a risk factor with no id is meaningless, not a turn killer."""
+        if not isinstance(v, list):
+            return []
+        out = []
+        for item in v:
+            if isinstance(item, BaseModel):
+                out.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            if not str(item.get("risk_id") or "").strip():
+                continue
+            out.append(item)
+        return out
 
 
 class RiskDebaterTurnPayload(DebaterTurnPayload):
