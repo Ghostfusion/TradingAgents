@@ -57,6 +57,25 @@ def vwap(closes: list, volumes: list) -> float | None:
     return value / volume if volume else None
 
 
+def twap(closes: list) -> float | None:
+    """Time-Weighted Average Price: simple arithmetic mean of prices over the
+    window (no volume weighting). Complements ``vwap``; used for execution
+    benchmarks where volume data is unavailable or the schedule is fixed.
+    """
+    vals = []
+    for v in closes:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(f):
+            continue
+        vals.append(f)
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 4)
+
+
 def pillars(close=None, day_volume=None, prev_close=None, day_open=None,
             rv: float | None = None, price_lo: float = 2.0,
             price_hi: float = 20.0, float_shares: float | None = None) -> dict:
@@ -258,4 +277,5 @@ def intraday_pullback(bars: list, window: int = 6) -> dict:
 
 
 __all__ = ["rvol", "ema9", "vwap", "pillars", "first_pullback", "session_flags",
-           "past_optimal_window", "psych_level", "intraday_pullback"]
+           "past_optimal_window", "psych_level", "intraday_pullback", "twap"
+]

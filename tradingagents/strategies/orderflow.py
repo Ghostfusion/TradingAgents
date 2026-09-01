@@ -9,6 +9,9 @@ signals the agents and the sizing overlay can consume:
   divergence          - price move vs net institutional flow
   exhaustion          - selling dried up relative to prior weeks
   alignment           - all tiers pulling the same way (=conviction)
+- vpin                - volume-synchronized probability of toxicity
+                        (order-flow imbalance in equal-volume buckets, 0..1;
+                        higher = more toxic/informed flow)
 
 Pure functions at top; ``fetch_flow`` pulls live moomoo data (guarded).
 """
@@ -167,6 +170,64 @@ def fetch_flow(ticker: str) -> dict | None:
         return None
 
 
+def vpin(trades: list[dict], bucket_volume: float = 1_000_000.0,
+        buckets: int = 50) -> dict:
+    """Volume-Synchronized Probability of Toxicity (quants.md §1).
+
+    VPIN = mean(|V_buy - V_sell| / V) over the last ``buckets`` equal-volume
+    buckets (each ~``bucket_volume`` shares). Requires per-trade/per-bar
+    ``{'volume': float, 'side': 'B'|'S'|'buy'|'sell'}`` items; classifies flow
+    as toxic/informed when VPIN is persistently high.
+
+    Returns ``{"vpin", "n_buckets", "unclassified_volume_share"}`` or
+    ``{"vpin": None, ...}`` when insufficient/ambiguous data. Stdlib only.
+    """
+    buys, sells, unknown = 0.0, 0.0, 0.0
+    for t in (trades or []):
+        if not isinstance(t, dict):
+            continue
+        vol = _num(t.get("volume"), 0.0)
+        side = str(t.get("side", "")).strip().upper()
+        if vol <= 0:
+            continue
+        if side in ("B", "BUY"):
+            buys += vol
+        elif side in ("S", "SELL"):
+            sells += vol
+        else:
+            unknown += vol
+    total = buys + sells
+    if total <= 0:
+        return {"vpin": None, "n_buckets": 0, "unclassified_volume_share": 1.0}
+    n = int(buckets)
+    imbalance = 0.0
+    i = 0
+    if total >= bucket_volume:
+        per_buy = buys * bucket_volume / total
+        per_sell = sells * bucket_volume / total
+        for _ in range(n):
+            v = per_buy + per_sell
+            if v <= 0:
+                continue
+            imbalance += abs(per_buy - per_sell) / v
+            i += 1
+    else:
+        per_buy = buys / n
+        per_sell = sells / n
+        for _ in range(n):
+            v = per_buy + per_sell
+            if v <= 0:
+                continue
+            imbalance += abs(per_buy - per_sell) / v
+            i += 1
+    vpin_val = imbalance / i if i else 0.0
+    return {
+        "vpin": round(vpin_val, 4),
+        "n_buckets": i,
+        "unclassified_volume_share": round(unknown / (total + unknown), 4) if (total + unknown) > 0 else 0.0,
+    }
+
+
 __all__ = [
     "tier_nets",
     "institutional_net",
@@ -178,4 +239,5 @@ __all__ = [
     "alignment",
     "summarize",
     "fetch_flow",
+    "vpin",
 ]
