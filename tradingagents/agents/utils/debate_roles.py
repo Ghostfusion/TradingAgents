@@ -59,7 +59,7 @@ def role_model_spec(config: dict, role: str) -> tuple[str, str] | None:
         "judge": "debate_judge_model",
         "aggressive": "debate_bull_model",
         "conservative": "debate_bear_model",
-        "neutral": None,
+        "neutral": "debate_neutral_model",
     }.get(role)
     spec = config.get(key) if key else None
     return _split_spec(str(spec)) if spec else None

@@ -254,7 +254,7 @@ class GraphSetup:
         # quick tier (no dedicated key).
         risk_aggr_llm = self.debate_llms.get("aggressive") or self.quick_thinking_llm
         risk_conserv_llm = self.debate_llms.get("conservative") or self.quick_thinking_llm
-        neutral_llm = self.quick_thinking_llm
+        neutral_llm = self.debate_llms.get("neutral") or self.quick_thinking_llm
         if self._structured_debate:
             workflow.add_node(
                 "SD Bull",

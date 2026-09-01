@@ -284,7 +284,7 @@ class TradingAgentsGraph:
         # tier in setup. Empty keys fall back to quick/deep.
         self.debate_llms = {}
         if self.config.get("enable_debate"):
-            for _role in ("bull", "bear", "judge", "aggressive", "conservative"):
+            for _role in ("bull", "bear", "judge", "aggressive", "conservative", "neutral"):
                 self.debate_llms[_role] = resolve_role_llm(
                     self.config, _role, factory=create_llm_client
                 )

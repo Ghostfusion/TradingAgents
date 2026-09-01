@@ -20,6 +20,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_DEBATE_BULL_MODEL": "debate_bull_model",
     "TRADINGAGENTS_DEBATE_BEAR_MODEL": "debate_bear_model",
     "TRADINGAGENTS_DEBATE_JUDGE_MODEL": "debate_judge_model",
+    "TRADINGAGENTS_DEBATE_NEUTRAL_MODEL": "debate_neutral_model",
     "TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE": "debate_judge_ensemble",
     "TRADINGAGENTS_DEBATE_MAX_ROUNDS": "debate_max_rounds",
     "TRADINGAGENTS_DEBATE_MAX_OUTPUT_TOKENS": "debate_max_output_tokens",
@@ -338,6 +339,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "debate_bull_model": "",   # "family:id" for bull; fallback quick
         "debate_bear_model": "",   # "family:id" for bear; fallback quick
         "debate_judge_model": "",  # "family:id" for judge; fallback deep; family should differ from both debaters
+        "debate_neutral_model": "",  # "family:id" for the neutral RISK debater; fallback quick
         "debate_judge_ensemble": 1,
         "debate_max_rounds": 5,    # matches DebaterTurnPayload.round_index (1..5)
         # Output budget for debate roles. A payload needs ~500-1500 visible
