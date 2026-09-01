@@ -349,7 +349,9 @@ def create_debater_turn(
     channel = SECTION_CHANNEL[section]
     prose_channel = SECTION_PROSE[section]
     schema = RiskDebaterTurnPayload if section == "risk" else DebaterTurnPayload
-    structured_llm = bind_structured(llm, schema, f"{role.title()} Debater")
+    structured_llm = bind_debate_structured(
+        llm, schema, f"{role.title()} Debater", cfg
+    )
 
     def turn_node(state: dict) -> dict:
         ds = dict(state.get(channel) or {})
@@ -357,6 +359,22 @@ def create_debater_turn(
         inv = dict(state.get(prose_channel) or {})
         prompt = build_turn_prompt(state, role, role.upper())
         payload, err = invoke_structured_turn(structured_llm, llm, prompt, schema)
+        if payload is None and err and "json" in str(err).lower() and structured_llm is not None:
+            # JSON-mode 400 guard: if the provider REJECTED response_format
+            # json_object (OpenRouter historically drops it), retry ONCE with
+            # a plain structural bind before degrading the turn. json_mode is
+            # a fallback, not a hard gate.
+            logger.warning(
+                "%s debater: json-mode invoke failed (%s); retrying with plain bind",
+                role, err,
+            )
+            plain = bind_structured(llm, schema, f"{role.title()} Debater")
+            if plain is not None:
+                payload2, err2 = invoke_structured_turn(plain, llm, prompt, schema)
+                if payload2 is not None:
+                    payload, err = payload2, None
+                else:
+                    err = err2 or err
         if payload is None:
             # Degraded turn: the role's provider produced no structured
             # payload. Build the HONEST empty payload (schema allows empty
@@ -652,10 +670,16 @@ def render_judge_evidence(ds: dict) -> str:
         )
     judge = ds.get(JUDGE_SCORES) or {}
     for alias, agg in judge.items():
-        lines.append(
-            f"- {alias}: mean {agg.get('mean', '-')} "
-            f"(scores: {agg.get('scores', {})})"
-        )
+        if agg.get("unavailable"):
+            lines.append(
+                f"- {alias}: mean UNAVAILABLE (judge did not run) "
+                f"{agg.get('reason', '')}".rstrip()
+            )
+        else:
+            lines.append(
+                f"- {alias}: mean {agg.get('mean', '-')} "
+                f"(scores: {agg.get('scores', {})})"
+            )
     for rubric in ds.get(JUDGE_RUBRICS) or []:
         ra = getattr(rubric, "rationale", "") or ""
         if ra:

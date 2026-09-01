@@ -507,10 +507,16 @@ def write_report_tree(
                 )
             judge = sd.get("judge_scores") or {}
             for alias, agg in judge.items():
-                sd_lines.append(
-                    f"- {alias}: mean {agg.get('mean', '-')} "
-                    f"(scores: {agg.get('scores', {})})"
-                )
+                if agg.get("unavailable"):
+                    sd_lines.append(
+                        f"- {alias}: mean UNAVAILABLE (judge did not run) "
+                        f"{agg.get('reason', '')}".rstrip()
+                    )
+                else:
+                    sd_lines.append(
+                        f"- {alias}: mean {agg.get('mean', '-')} "
+                        f"(scores: {agg.get('scores', {})})"
+                    )
             if sd.get("claim_ledger_md"):
                 sd_lines.append(sd["claim_ledger_md"])
             evidence = _finalize_section(
@@ -587,10 +593,16 @@ def write_report_tree(
                 )
             judge = sr.get("judge_scores") or {}
             for alias, agg in judge.items():
-                sd_lines.append(
-                    f"- {alias}: mean {agg.get('mean', '-')} "
-                    f"(scores: {agg.get('scores', {})})"
-                )
+                if agg.get("unavailable"):
+                    sd_lines.append(
+                        f"- {alias}: mean UNAVAILABLE (judge did not run) "
+                        f"{agg.get('reason', '')}".rstrip()
+                    )
+                else:
+                    sd_lines.append(
+                        f"- {alias}: mean {agg.get('mean', '-')} "
+                        f"(scores: {agg.get('scores', {})})"
+                    )
             if sr.get("claim_ledger_md"):
                 sd_lines.append(sr["claim_ledger_md"])
             evidence = _finalize_section(

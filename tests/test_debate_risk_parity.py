@@ -332,6 +332,44 @@ class TestBoundedContextPhases:
         assert "8.2" in m and "6.5" in m
         assert "| 8.0% |" in m and "| 2.0% |" in m
 
+    def test_judge_unavailable_is_null_not_zero(self):
+        """A judge that fails is NOT score 0.0: it writes mean=None with
+        unavailable=True so the RM/PM and report know the judge did not run
+        (regression: 112705 conflatged a failed judge with a 0.0 score)."""
+        from tradingagents.agents.arbiters.debate_judge import create_debate_judge
+
+        class _L:
+            model_name = "deepseek/deepseek-v4-flash-0731"
+
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+            def invoke(self, *a, **k):
+                raise RuntimeError("unused")
+
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+
+        def _fail_structured(structured_llm, plain_llm, prompt, schema):
+            return None, "validation error: round_index"
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _fail_structured)
+        try:
+            # cfg empty -> debate_json_mode defaults True
+            node = create_debate_judge(_L(), section="research", cfg={})
+            out = node({"debate_state": {
+                "round_records": [{"bull": {"stance": "BULL", "core_thesis": "Real thesis", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 10}}],
+            }})
+        finally:
+            monkeypatch.undo()
+
+        scores = out["debate_state"]["judge_scores"]
+        assert scores, "judge_scores missing"
+        for alias, agg in scores.items():
+            assert agg.get("mean") is None, (alias, agg)
+            assert agg.get("unavailable") is True, (alias, agg)
+        assert "judge unavailable" in (list(scores.values())[0].get("reason") or "")
+
     def test_judge_uses_last_non_degraded_round(self):
         """Regression (QCOM 040418): the O(1) judge read ONLY round_records[-1];
         when the FINAL round's turn degraded ('No structured turn produced'),

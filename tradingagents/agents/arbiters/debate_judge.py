@@ -229,18 +229,32 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 opponent,
                 l1_scorecard,
             )
+            judge_text = prompt + f"\n\nScore ONLY {cand['alias']}."
             rubric, err = invoke_structured_turn(
-                structured_llm, judge_llm, prompt + f"\n\nScore ONLY {cand['alias']}.",
+                structured_llm, judge_llm, judge_text,
                 L2JudgeDimensionedRubric,
             )
             if rubric is None:
-                logger.warning("debate judge unavailable for %s: %s", cand["alias"], err)
-                rubric = L2JudgeDimensionedRubric(
-                    judge_model_id="",
-                    round_evaluated=len(round_records),
-                    evaluated_agent_alias=cand["alias"],
-                    rationale=f"judge unavailable: {err}",
+                # Retry ONCE (deepseek lands valid JSON on a 2nd attempt; a
+                # one-shot failure must not zero a side).
+                logger.warning(
+                    "debate judge 1st attempt failed for %s: %s; retrying", cand["alias"], err
                 )
+                rubric, err2 = invoke_structured_turn(
+                    structured_llm, judge_llm, judge_text,
+                    L2JudgeDimensionedRubric,
+                )
+                if rubric is None:
+                    err = err2 or err
+            if rubric is None:
+                logger.warning("debate judge unavailable for %s: %s", cand["alias"], err)
+                # A vs B: judge-unavailable is NOT score 0.0 — write null so
+                # the RM/PM (and report) know the judge did not run.
+                side_scores[cand["alias"]] = {
+                    "mean": None, "unavailable": True, "scores": {},
+                    "reason": f"judge unavailable: {err}",
+                }
+                continue
             rubrics.append(rubric)
             dims = rubric.dimension_scores
             vals = [v for v in dims.values() if isinstance(v, (int, float))]
