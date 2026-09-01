@@ -210,13 +210,33 @@ def create_debater_turn(
         prompt = build_turn_prompt(state, role, role.upper())
         payload, err = invoke_structured_turn(structured_llm, llm, prompt, schema)
         if payload is None:
-            payload = schema(
-                round_index=len(round_records) + 1,
-                stance=role.upper(),
-                core_thesis="No structured turn produced: " + str(err),
-                quantitative_claims=[],
-                recommended_allocation_pct=0.0,
-            )
+            # Degraded turn: the role's provider produced no structured
+            # payload. Build the HONEST empty payload (schema allows empty
+            # claims now); round_index is capped inside 1..5. Last-resort
+            # model_construct (skips validation) guarantees a failed
+            # provider can NEVER crash the graph — one ValidationError here
+            # previously killed the whole run and, via moomoo's non-daemon
+            # threads, left the process hanging in interpreter shutdown
+            # (flat CPU + all sockets CLOSE_WAIT).
+            try:
+                payload = schema(
+                    round_index=min(len(round_records) + 1, 5),
+                    stance=role.upper(),
+                    core_thesis="No structured turn produced: " + str(err),
+                    quantitative_claims=[],
+                    recommended_allocation_pct=0.0,
+                )
+            except Exception as exc:  # noqa: BLE001 - degraded turn must never kill the graph
+                logger.error(
+                    "fallback payload construction failed for %s: %s", role, exc
+                )
+                payload = schema.model_construct(
+                    round_index=min(len(round_records) + 1, 5),
+                    stance=role.upper(),
+                    core_thesis="No structured turn produced: " + str(err),
+                    quantitative_claims=[],
+                    recommended_allocation_pct=0.0,
+                )
         prose = render_turn_prose(role, payload)
         pending = ds.get(PENDING_REGEN)
         if pending == role and round_records:

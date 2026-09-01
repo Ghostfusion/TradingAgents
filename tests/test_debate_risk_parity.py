@@ -177,6 +177,91 @@ class TestRiskTurnChannels:
         assert "upside case" in prose["aggressive_history"]
         assert prose["count"] == 1
 
+
+class TestDegradedTurnNeverCrashes:
+    """Regression: the LLM returning NO structured payload must degrade to an
+    honest empty turn, never raise. The pre-fix fallback constructed
+    DebaterTurnPayload(quantitative_claims=[]) which violated min_length=1,
+    raised ValidationError inside the node, and the unhandled exception
+    wedged the whole run (moomoo non-daemon threads block interpreter
+    shutdown -> flat CPU + CLOSE_WAIT hang)."""
+
+    def test_research_bear_none_payload_survives(self):
+        class _L:
+            def __init__(self, *a, **k):
+                pass
+
+        import tradingagents.agents.researchers.structured_debate as sd_mod
+
+        node = create_debater_turn(
+            "bear", _L(), ground_truth=lambda s: {}, section="research"
+        )
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "provider boom"))
+        try:
+            out = node({
+                "debate_state": {"round_records": [{"bull": {"core_thesis": "b"}}]},
+                "investment_debate_state": {"history": "bull prose", "count": 1},
+            })
+        finally:
+            monkeypatch.undo()
+
+        ds = out["debate_state"]
+        last = ds["round_records"][-1]["bear"]
+        assert "No structured turn produced" in last.core_thesis
+        assert last.quantitative_claims == []
+        inv = out["investment_debate_state"]
+        assert "No structured turn produced" in inv["history"]
+        assert inv["count"] == 2
+
+    def test_risk_neutral_none_payload_survives(self):
+        class _L:
+            def __init__(self, *a, **k):
+                pass
+
+        import tradingagents.agents.researchers.structured_debate as sd_mod
+
+        node = create_debater_turn(
+            "neutral", _L(), ground_truth=lambda s: {}, section="risk"
+        )
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "bad json"))
+        try:
+            out = node({
+                "structured_risk_state": {},
+                "risk_debate_state": {"history": "", "count": 0},
+            })
+        finally:
+            monkeypatch.undo()
+
+        assert out["structured_risk_state"]["round_records"][0]["neutral"].quantitative_claims == []
+        assert "No structured turn produced" in out["risk_debate_state"]["history"]
+
+    def test_round_index_capped_at_five(self):
+        """The degraded fallback caps round_index at the schema's le=5."""
+        class _L:
+            def __init__(self, *a, **k):
+                pass
+
+        import tradingagents.agents.researchers.structured_debate as sd_mod
+
+        node = create_debater_turn(
+            "bull", _L(), ground_truth=lambda s: {}, section="research"
+        )
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "x"))
+        try:
+            out = node({
+                "debate_state": {
+                    "round_records": [{"bull": {}}, {"bear": {}}, {"bull": {}}, {"bear": {}}, {"bull": {}}],
+                },
+                "investment_debate_state": {"history": "", "count": 4},
+            })
+        finally:
+            monkeypatch.undo()
+
+        assert out["debate_state"]["round_records"][-1]["bull"].round_index == 5
+
     def test_l1_risk_round_complete_triggers_scoring(self):
         from tradingagents.agents.schemas import (
             RiskDebaterTurnPayload,

@@ -1529,6 +1529,20 @@ def analyze(
             err=True,
         )
         raise typer.Exit(code=1) from None
+    except Exception as _run_exc:  # noqa: BLE001 - hard failure: hard-exit
+        # The moomoo SDK leaves non-daemon callback/network threads behind; a
+        # normal unwind then blocks forever in threading._shutdown, so ANY
+        # uncaught run error presents as a silent hang (flat CPU, all external
+        # sockets CLOSE_WAIT) instead of a failure. Print the traceback,
+        # flush, and hard-exit so the error surfaces immediately.
+        import traceback as _tb
+
+        try:
+            console.print_exception(show_locals=False)
+        except Exception:  # noqa: BLE001 - rich may be unavailable mid-unwind
+            _tb.print_exc()
+        sys.stdout.flush()
+        os._exit(1)
 
 
 if __name__ == "__main__":

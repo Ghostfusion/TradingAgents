@@ -647,12 +647,19 @@ class RiskFactor(BaseModel):
 
 
 class DebaterTurnPayload(BaseModel):
-    """Structured turn from one debater role (source schema debater_turn.json)."""
+    """Structured turn from one debater role (source schema debater_turn.json).
+
+    ``quantitative_claims`` may be EMPTY: that is the honest degraded turn
+    (``create_debater_turn`` builds it when the LLM produced no structured
+    payload). L1 scores it as zero evidence (GREEN/PROCEED, no verifications)
+    and the report renders the "no structured turn produced" prose — an empty
+    turn must never raise, or one failed provider kills the whole run.
+    """
 
     round_index: int = Field(ge=1, le=5)
     stance: Stance
     core_thesis: str = Field(max_length=1500)
-    quantitative_claims: list[QuantitativeClaim] = Field(min_length=1)
+    quantitative_claims: list[QuantitativeClaim] = Field(default_factory=list)
     risk_factors: list[RiskFactor] = Field(default_factory=list)
     recommended_allocation_pct: float = Field(ge=0.0, le=100.0)
 
