@@ -659,8 +659,13 @@ class DebaterTurnPayload(BaseModel):
     round_index: int = Field(ge=1, le=5)
     stance: Stance
     core_thesis: str = Field(max_length=1500)
-    quantitative_claims: list[QuantitativeClaim] = Field(default_factory=list)
-    risk_factors: list[RiskFactor] = Field(default_factory=list)
+    # Bounded lists: an unbounded payload lets a verbose model emit hundreds
+    # of claims and truncate at the output cap (glm-5.3-flash -> 8000 tokens
+    # every turn). 25 grounded claims is far beyond any grounded run's data.
+    quantitative_claims: list[QuantitativeClaim] = Field(
+        default_factory=list, max_length=25
+    )
+    risk_factors: list[RiskFactor] = Field(default_factory=list, max_length=25)
     recommended_allocation_pct: float = Field(ge=0.0, le=100.0)
 
 

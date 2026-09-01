@@ -77,7 +77,13 @@ def build_role_llm_kwargs(
     cfg = config or {}
     kwargs: dict[str, Any] = {}
     tier = DEFAULT_TIER.get(role, "quick")
-    cap = cfg.get("max_output_tokens_deep" if tier == "deep" else "max_output_tokens_quick")
+    # Debate roles get their own output budget: the structured payload needs
+    # ~500-1500 tokens max, and the quick tier's 8000 let a verbose reasoning
+    # model (glm-5.3-flash) write to truncation every call (repair-loop
+    # churn + 1-2min turns). Capped at debate_max_output_tokens (2500).
+    cap = cfg.get("debate_max_output_tokens") or cfg.get(
+        "max_output_tokens_deep" if tier == "deep" else "max_output_tokens_quick"
+    )
     cap = cap or cfg.get("max_output_tokens")
     if cap:
         kwargs["max_tokens"] = int(cap)

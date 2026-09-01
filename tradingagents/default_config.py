@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_DEBATE_JUDGE_MODEL": "debate_judge_model",
     "TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE": "debate_judge_ensemble",
     "TRADINGAGENTS_DEBATE_MAX_ROUNDS": "debate_max_rounds",
+    "TRADINGAGENTS_DEBATE_MAX_OUTPUT_TOKENS": "debate_max_output_tokens",
     "TRADINGAGENTS_DEBATE_MIN_GAIN": "debate_min_gain",
     "TRADINGAGENTS_DEBATE_STOP_CONSECUTIVE": "debate_stop_consecutive",
     "TRADINGAGENTS_DEBATE_CONSENSUS_THRESH": "debate_consensus_thresh",
@@ -337,6 +338,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "debate_judge_model": "",  # "family:id" for judge; fallback deep; family should differ from both debaters
         "debate_judge_ensemble": 1,
         "debate_max_rounds": 5,    # matches DebaterTurnPayload.round_index (1..5)
+        "debate_max_output_tokens": 2500,  # output budget for debate roles (a DebatersTurnPayload needs ~500-1500; 8000 let glm-5.3-flash ramble to truncation)
         "debate_min_gain": 0.05,
         "debate_stop_consecutive": 2,
         "debate_consensus_thresh": 0.85,
