@@ -86,10 +86,27 @@ def render_turn_prose(role: str, payload: DebaterTurnPayload) -> str:
     return _EOL.join(lines)
 
 
+def _bounded(text, max_chars: int = 8000) -> str:
+    """Tail-truncate a growing context block (history / ledger / report).
+
+    The debate history and claim ledger GROW every round; a debater only
+    needs the recent turns to rebut, and a thinking model's reasoning cost
+    scales with input size — shipping 10 rounds of prose + every claim on
+    each turn burns the output budget in hidden reasoning and degrades to
+    truncated JSON. Keep the TAIL (most recent) and say what was cut.
+    """
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    return "[earlier context truncated...]\n" + text[-max_chars:]
+
+
 def build_turn_prompt(state: dict, role: str, stance: str) -> str:
     """Prompt a debater to produce a DebaterTurnPayload with the grounding
     contract: every number cited must map to a computed ground_truth_key and
-    a real tool/state source; never invent."""
+    a real tool/state source; never invent. Bounded context: history,
+    ledger, and per-report injections are tail-truncated so the input does
+    not grow unboundedly across rounds (context-size regression)."""
     asset_type = state.get("asset_type", "stock")
     target_label = "stock" if asset_type == "stock" else "asset"
     fund_label = (
@@ -111,16 +128,18 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
     risk_ctx = ""
     if role in SECTION_ROLES["risk"]:
         risk_ctx = f"Trader's proposal: {state.get('trader_investment_plan', '')}"
+    # Context bounds (per block, chars): analyst reports are grounding, bound
+    # them loosely; the growing blocks (history / claim ledger) tighter.
     body = [
         f"Resources: {ctx_or}",
-        f"Market: {state.get('market_report', '')}",
-        f"Sentiment: {state.get('sentiment_report', '')}",
-        f"News: {state.get('news_report', '')}",
-        f"{fund_label}: {state.get('fundamentals_report', '')}",
-        f"Computed decision context (advisory): {state.get('computed_decision_context') or ''}",
-        f"Debate history: {inv.get('history', '')}",
+        f"Market: {_bounded(state.get('market_report', ''), 6000)}",
+        f"Sentiment: {_bounded(state.get('sentiment_report', ''), 6000)}",
+        f"News: {_bounded(state.get('news_report', ''), 6000)}",
+        f"{fund_label}: {_bounded(state.get('fundamentals_report', ''), 6000)}",
+        f"Computed decision context (advisory): {_bounded(state.get('computed_decision_context') or '', 4000)}",
+        f"Debate history: {_bounded(inv.get('history', ''), 8000)}",
         risk_ctx,
-        f"Claim ledger: {ds.get(CLAIM_LEDGER_MD, '')}",
+        f"Claim ledger: {_bounded(ds.get(CLAIM_LEDGER_MD, ''), 5000)}",
     ]
     return _EOL.join(head + body)
 
