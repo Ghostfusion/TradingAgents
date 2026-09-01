@@ -20,7 +20,6 @@ def create_research_manager(llm):
 
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
-        history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
         computed_context = state.get("computed_decision_context") or ""
@@ -58,10 +57,20 @@ def create_research_manager(llm):
         # the bull/bear prose. Advisory — absent when the structured path did
         # not run or produced no judge output.
         from tradingagents.agents.researchers.structured_debate import (
+            SECTION_ROLES,
+            render_consumer_debate_matrix,
             render_judge_evidence,
         )
 
         judge_block = render_judge_evidence(state.get("debate_state") or {})
+        # P3: replace the raw bull/bear prose with the tabulated Debate
+        # Matrix (direction.md). Reporting still writes the full transcripts.
+        ds = state.get("debate_state") or {}
+        matrix_block = "\n\n**Debate Matrix (deterministic):**\n" + (
+            render_consumer_debate_matrix(ds, SECTION_ROLES["research"])
+            if ds.get("round_records")
+            else "  (no structured debate rounds)"
+        )
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader., your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -80,8 +89,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 
 ---
 
-**Debate History:**
-{history}
+**Debate Matrix:**
+{matrix_block}
+
 {independent_block}
 {judge_block}
 

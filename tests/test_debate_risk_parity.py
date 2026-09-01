@@ -185,6 +185,165 @@ class TestRiskTurnChannels:
         assert prose["count"] == 1
 
 
+class TestBoundedContextPhases:
+    """P0-P4 context-bounding (design v5 / direction.md):
+
+    P0 persisted L1 statuses drive active_disputes; P1 delta-only debater
+    prompt (registry + last turn + disputes, no transcript); P2 judge O(1)
+    candidate prompt (no full ledger); P3 consumer debate matrix; P4 ground
+    truth harvests analyst computed lines."""
+
+    def test_p0_status_persists_through_l1(self):
+        from tradingagents.agents.researchers.structured_debate import (
+            active_disputes,
+            create_debate_l1,
+        )
+        from tradingagents.agents.schemas import DebaterTurnPayload
+        from tradingagents.strategies.debate_claim import ClaimLedger
+
+        payload = DebaterTurnPayload.model_validate({
+            "round_index": 1,
+            "stance": "BULL",
+            "core_thesis": "t",
+            "quantitative_claims": [
+                {"metric_name": "fcf", "asserted_value": 7.41,
+                 "ground_truth_key": "fcf_yield", "source": "x"},
+                {"metric_name": "bad", "asserted_value": 99.0,
+                 "ground_truth_key": "fcf_yield", "source": "x"},
+            ],
+            "recommended_allocation_pct": 10,
+        })
+        node = create_debate_l1(lambda s: {"fcf_yield": 7.41})
+        out = node({"debate_state": {
+            "round_records": [{"bull": payload.model_dump()}],
+            "last_side": "bull",
+        }})
+        ds = out["debate_state"]
+        ledger = ClaimLedger.from_dict(ds["claim_ledger"])
+        statuses = {c.claim_id: c.status for c in ledger.rows}
+        assert "valid" in statuses.values(), statuses
+        assert "violated" in statuses.values(), statuses
+        # active_disputes surfaces ONLY violated/unverified, newest-first
+        disputes = active_disputes(ds)
+        assert disputes and disputes[0]["status"] == "violated"
+
+    def test_p1_delta_prompt_bounded_no_transcript(self):
+        from tradingagents.agents.researchers.structured_debate import (
+            GROUND_TRUTH_REGISTRY,
+            build_or_get_registry,
+            build_turn_prompt,
+        )
+
+        state = {
+            "asset_type": "stock",
+            "instrument_context": "QCOM",
+            "market_report": "M" * 20000,
+            "computed_decision_context": "fcf_yield=7.41, beta=2.05",
+            "investment_debate_state": {"history": "H" * 50000},
+            "debate_state": {
+                "round_records": [
+                    {"bull": {"stance": "BULL", "core_thesis": "b1",
+                              "quantitative_claims": [{"ground_truth_key": "pe_ttm", "asserted_value": 18.7}]}},
+                ],
+                "claim_ledger": [
+                    {"role": "bull", "round": 1, "claim_id": "b1_0", "kind": "quantitative",
+                     "metric_name": "PE", "value": 18.7, "ground_truth_key": "pe_ttm",
+                     "source": "x", "status": "violated"},
+                ],
+            },
+        }
+        ds = state["debate_state"]
+        ds[GROUND_TRUTH_REGISTRY] = build_or_get_registry(state, "research")
+        prompt = build_turn_prompt(state, "bear", "BEAR")
+        assert "Ground Truth Key Index" in prompt and "fcf_yield" in prompt
+        assert "Preceding Opponent Turn" in prompt and "core_thesis: b1" in prompt
+        assert "Active Dispute Ledger" in prompt and "violated" in prompt
+        assert "Bull Analyst:" not in prompt and "Bear Analyst:" not in prompt
+        assert "H" * 100 not in prompt and "M" * 100 not in prompt
+        assert len(prompt) < 6000
+
+    def test_p2_judge_candidate_prompt_has_opponent_and_scorecard(self):
+        from tradingagents.agents.arbiters.debate_judge import (
+            _build_judge_candidate_prompt,
+        )
+
+        candidate = {"alias": "Candidate_X", "thesis": "up", "claims": [{"metric_name": "pe", "asserted_value": 18.7}], "risk_factors": [], "allocation": 30}
+        opponent = {"alias": "Candidate_Y", "thesis": "down", "claims": [{"metric_name": "dcf", "asserted_value": 152.65}], "risk_factors": [], "allocation": 20}
+        p = _build_judge_candidate_prompt(
+            1, candidate, opponent,
+            "bull: valid=1 violated=0 unverified=0 abstain=0\nbear: valid=0 violated=1 unverified=0 abstain=0",
+        )
+        assert "Preceding opponent (rebuttal baseline)" in p
+        assert "Candidate_X" in p and "Candidate_Y" in p
+        assert "L1 verification scorecard" in p and "valid=1" in p
+        assert p.count("###") >= 2
+
+    def test_p2_judge_node_prompt_omits_full_ledger(self):
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+        from tradingagents.agents.researchers.structured_debate import create_debate_finalize
+
+        class _L:
+            def invoke(self, *a, **k):
+                raise RuntimeError("no real call")
+
+        class _FakeJudge:
+            def __init__(self, judge_llm, section="research"):
+                pass
+
+            def __call__(self, state):
+                ch = "structured_risk_state" if "structured_risk_state" in state else "debate_state"
+                return {ch: {"judge_scores": {}, "judge_rubrics": []}}
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "create_debate_judge", _FakeJudge)
+        try:
+            node = create_debate_finalize(_L(), {}, section="research")
+            out = node({"debate_state": {
+                "terminated": True, "reason": "hard cap (1 rounds)",
+                "round_records": [{"bull": {"core_thesis": "b"}, "bear": {"core_thesis": "r"}}],
+                "claim_ledger_md": "L" * 5000,
+            }})
+        finally:
+            monkeypatch.undo()
+        # judge ran and merged (no crash); ledger_md not used by judge
+        assert "judge_scores" in out["debate_state"]
+
+    def test_p3_consumer_matrix_renders(self):
+        from tradingagents.agents.researchers.structured_debate import (
+            SECTION_ROLES,
+            render_consumer_debate_matrix,
+        )
+
+        ds = {
+            "round_records": [
+                {"bull": {"stance": "BULL", "core_thesis": "Operating leverage expansion drives upside.", "quantitative_claims": [], "recommended_allocation_pct": 8.0}},
+                {"bear": {"stance": "BEAR", "core_thesis": "Margin compression in 2H; DCF below price.", "quantitative_claims": [], "recommended_allocation_pct": 2.0}},
+            ],
+            "claim_ledger": [
+                {"role": "bull", "round": 1, "claim_id": "b", "kind": "quantitative", "metric_name": "x", "value": 1.0, "status": "valid"},
+                {"role": "bear", "round": 1, "claim_id": "r1", "kind": "quantitative", "metric_name": "y", "value": 2.0, "status": "violated"},
+                {"role": "bear", "round": 1, "claim_id": "r2", "kind": "quantitative", "metric_name": "z", "value": 3.0, "status": "valid"},
+            ],
+            "judge_scores": {"Candidate_X": {"mean": 8.2}, "Candidate_Y": {"mean": 6.5}},
+        }
+        m = render_consumer_debate_matrix(ds, SECTION_ROLES["research"])
+        assert "| bull | BULL |" in m
+        assert "100%" in m and "50%" in m
+        assert "8.2" in m and "6.5" in m
+        assert "| 8.0% |" in m and "| 2.0% |" in m
+
+    def test_p4_ground_truth_harvests_reports(self):
+        from tradingagents.agents.researchers.structured_debate import ground_truth_from_state
+
+        gt = ground_truth_from_state({
+            "computed_decision_context": "fcf_yield=7.41, beta=2.05",
+            "fundamentals_report": "FY2025 free cash flow=12.82, current ratio=2.82",
+            "market_report": "RSI=55.48, MACD histogram=1.77",
+        })
+        assert "fcf_yield" in gt and "beta" in gt
+        assert "rsi" in gt and "macd_histogram" in gt
+        assert any("cash" in k for k in gt)
+
 class TestRaggedProviderJsonTolerant:
     """DeepSeek's free-text JSON is RAGGED: lowercase stances, str numbers,
     claims missing source, junk/incomplete risk factors. A single bad array

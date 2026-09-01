@@ -51,6 +51,10 @@ class ClaimRecord:
     source: str = ""  # tool/state key that produced the number
     source_label: str = ""
     confidence: float | None = None
+    # L1 verification verdict persisted back onto the claim (P0): one of
+    # valid / violated / abstain / unverified / qualitative ("" until L1
+    # runs). Drives the active-disputes ledger surfaced in prompts.
+    status: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +68,7 @@ class ClaimRecord:
             "source": self.source,
             "source_label": self.source_label,
             "confidence": self.confidence,
+            "status": self.status,
         }
 
     @classmethod
@@ -79,6 +84,7 @@ class ClaimRecord:
             source=str(d.get("source", "")),
             source_label=str(d.get("source_label", "")),
             confidence=d.get("confidence"),
+            status=str(d.get("status", "") or ""),
         )
 
 

@@ -29,7 +29,6 @@ def create_portfolio_manager(llm):
     def portfolio_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
 
-        history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
 
         # Computed risk consensus — the PM must cite it, not reinvent alignment
@@ -130,11 +129,21 @@ def create_portfolio_manager(llm):
         # exactly as the research judge feeds the RM. Advisory — absent when
         # the structured risk path did not run.
         from tradingagents.agents.researchers.structured_debate import (
+            SECTION_ROLES,
+            render_consumer_debate_matrix,
             render_judge_evidence,
         )
 
         risk_judge_block = render_judge_evidence(
             state.get("structured_risk_state") or {}
+        )
+        # P3: replace the raw 3-transcript prose with the tabulated Debate
+        # Matrix (direction.md). Reporting keeps the full transcripts.
+        rds = state.get("structured_risk_state") or {}
+        risk_matrix_block = "\n\n**Risk Debate Matrix (deterministic):**\n" + (
+            render_consumer_debate_matrix(rds, SECTION_ROLES["risk"])
+            if rds.get("round_records")
+            else "  (no structured risk debate rounds)"
         )
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
@@ -154,8 +163,9 @@ def create_portfolio_manager(llm):
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
-**Risk Analysts Debate History:**
-{history}
+**Risk Analysts Debate Matrix:**
+{risk_matrix_block}
+
 {risk_judge_block}
 
 {cvar_line}{liq_line}{consensus_line}

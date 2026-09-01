@@ -37,35 +37,49 @@ _JUDGE_SYSTEM = (
 )
 
 
-def _build_judge_prompt(
-    round_no: int,
-    candidates: list[dict],
-    claim_ledger_md: str,
-) -> str:
-    """Anonymized, order-rotated judge prompt from N candidate dicts.
+def _candidate_block(cand: dict) -> str:
+    rows = [f"### {cand['alias']}"]
+    rows.append(f"Core thesis: {cand.get('thesis', '')[:1500]}")
+    for claim in cand.get("claims", []):
+        rows.append(
+            f"- claim: {claim.get('metric_name', '')}="
+            f"{claim.get('asserted_value')} (source={claim.get('source', '-')})"
+        )
+    for rf in cand.get("risk_factors", []):
+        rows.append(
+            f"- risk {rf.get('risk_id', '')} severity={rf.get('severity', '')} "
+            f"mitigation_stated={bool(rf.get('mitigation_stated'))}"
+        )
+    rows.append(f"Recommended allocation: {cand.get('allocation', '-')}%")
+    return "\n".join(rows)
 
-    Each candidate dict: {alias, thesis, claims, risk_factors, allocation}.
+
+def _build_judge_candidate_prompt(
+    round_no: int,
+    candidate: dict,
+    opponent: dict | None,
+    l1_scorecard: str,
+) -> str:
+    """O(1) judge context (P2/direction.md): candidate's latest payload +
+    the IMMEDIATELY PRECEDING opponent payload (rebuttal baseline) + the L1
+    verification scorecard. The multi-round transcript and full claim ledger
+    are NOT sent — the judge scores the round, not the history.
+
+    Args:
+        candidate: {alias, thesis, claims, risk_factors, allocation}.
+        opponent: preceding speaker's {alias, thesis, claims} or None
+            (opening round).
+        l1_scorecard: deterministic per-role valid/violated/unverified/abstain
+            counts (rendered by the caller).
     """
-    blocks = []
-    for cand in candidates:
-        rows = [f"### {cand['alias']}"]
-        rows.append(f"Core thesis: {cand.get('thesis', '')[:1500]}")
-        for claim in cand.get("claims", []):
-            rows.append(
-                f"- claim: {claim.get('metric_name', '')}="
-                f"{claim.get('asserted_value')} (source={claim.get('source', '-')})"
-            )
-        for rf in cand.get("risk_factors", []):
-            rows.append(
-                f"- risk {rf.get('risk_id', '')} severity={rf.get('severity', '')} "
-                f"mitigation_stated={bool(rf.get('mitigation_stated'))}"
-            )
-        rows.append(f"Recommended allocation: {cand.get('allocation', '-')}%")
-        blocks.append("\n".join(rows))
+    opp_block = _candidate_block(opponent) if opponent else (
+        "Opening round - evaluate thesis clarity."
+    )
     return (
         f"{_JUDGE_SYSTEM}\n\n--- Round {round_no} (anonymized) ---\n\n"
-        + "\n\n".join(blocks)
-        + f"\n\n{claim_ledger_md}"
+        + _candidate_block(candidate)
+        + f"\n\n### Preceding opponent (rebuttal baseline)\n{opp_block}"
+        + f"\n\n**L1 verification scorecard (deterministic):**\n{l1_scorecard}"
     )
 
 
@@ -142,14 +156,41 @@ def create_debate_judge(judge_llm, section: str = "research"):
         latest = round_records[-1]
         turn_by_role = {r: latest.get(r) or {} for r in roles}
         candidates = anonymize_and_rotate(turn_by_role, roles)
-        prompt = _build_judge_prompt(
-            len(round_records),
-            candidates,
-            debate_state.get("claim_ledger_md", ""),
-        )
+        # Per-role L1 scorecard from the persisted claim ledger (P0).
+        from tradingagents.strategies.debate_claim import ClaimLedger
+
+        ledger = ClaimLedger.from_dict(debate_state.get("claim_ledger") or [])
+        sc_lines = []
+        for r in roles:
+            rows = [c for c in ledger.rows if c.role == r]
+            if not rows:
+                sc_lines.append(f"- {r}: no claims")
+                continue
+            counts = {"valid": 0, "violated": 0, "unverified": 0, "abstain": 0}
+            for c in rows:
+                counts[c.status] = counts.get(c.status, 0) + 1
+            sc_lines.append(
+                f"- {r}: valid={counts['valid']} violated={counts['violated']} "
+                f"unverified={counts['unverified']} abstain={counts['abstain']}"
+            )
+        l1_scorecard = "\n".join(sc_lines) or "(no claims verified)"
         side_scores = {}
         rubrics = []
-        for cand in candidates:
+        for i, cand in enumerate(candidates):
+            # Preceding opponent = the role BEFORE this candidate in the
+            # section order (within the same round); first role has none.
+            prev_role = roles[i - 1] if i > 0 else None
+            opponent = (
+                anonymize_and_rotate({prev_role: turn_by_role.get(prev_role) or {}}, [prev_role])[0]
+                if prev_role and turn_by_role.get(prev_role)
+                else None
+            )
+            prompt = _build_judge_candidate_prompt(
+                len(round_records),
+                cand,
+                opponent,
+                l1_scorecard,
+            )
             rubric, err = invoke_structured_turn(
                 structured_llm, judge_llm, prompt + f"\n\nScore ONLY {cand['alias']}.",
                 L2JudgeDimensionedRubric,
@@ -183,5 +224,5 @@ __all__ = [
     "anonymize_and_rotate",
     "aggregate_scores",
     "create_debate_judge",
-    "_build_judge_prompt",
+    "_build_judge_candidate_prompt",
 ]

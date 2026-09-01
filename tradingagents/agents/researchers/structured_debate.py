@@ -56,6 +56,11 @@ REASON = "reason"
 REGEN_COUNT = "regen_count"
 LAST_SIDE = "last_side"
 PENDING_REGEN = "pending_regen_role"
+# P0 context-bounding: static registry (key->value + proposal summary) built
+# once per run; active-disputes list (unresolved/breached claims surfaced in
+# prompts).
+GROUND_TRUTH_REGISTRY = "ground_truth_registry"
+ACTIVE_DISPUTES = "active_disputes"
 
 _EOL = "\n"
 
@@ -101,45 +106,109 @@ def _bounded(text, max_chars: int = 8000) -> str:
     return "[earlier context truncated...]\n" + text[-max_chars:]
 
 
+def _registry_index(reg: dict) -> str:
+    """Render the static Ground-Truth Key Index (direction.md): the authorized
+    key->value map the debater may cite. Constant size; built once per run."""
+    keys = (reg or {}).get("keys") or {}
+    if not keys:
+        return "  (registry unavailable)"
+    bits = []
+    for k, v in list(keys.items())[:40]:
+        bits.append(f"  {k}={v}")
+    return _EOL.join(bits)
+
+
+def _last_turn_context(ds: dict, role: str) -> str:
+    """Immediately preceding speaker's payload (the direct rebuttal target).
+
+    ``round_records[-1]`` holds the prior turn dict ``{other_role: payload}``;
+    if the last record is the CURRENT role (round restart / regen), walk back
+    to the previous record so the debater always rebuts an opponent who just
+    spoke, never themselves.
+    """
+    records = ds.get(ROUND_RECORDS) or []
+    for rec in reversed(records):
+        for r, payload in rec.items():
+            if r != role and isinstance(payload, dict):
+                claims = payload.get("quantitative_claims") or []
+                claim_lines = [
+                    f"    - {c.get('ground_truth_key', '?')}={c.get('asserted_value')}"
+                    for c in claims[:10]
+                ]
+                lines = [
+                    f"  stance: {payload.get('stance', r)}",
+                    f"  core_thesis: {str(payload.get('core_thesis', ''))[:600]}",
+                ]
+                if claim_lines:
+                    lines.append("  claims:")
+                    lines.extend(claim_lines)
+                return _EOL.join(lines)
+    return "  (opening round — no preceding opponent turn)"
+
+
 def build_turn_prompt(state: dict, role: str, stance: str) -> str:
-    """Prompt a debater to produce a DebaterTurnPayload with the grounding
-    contract: every number cited must map to a computed ground_truth_key and
-    a real tool/state source; never invent. Bounded context: history,
-    ledger, and per-report injections are tail-truncated so the input does
-    not grow unboundedly across rounds (context-size regression)."""
+    """Debater prompt, context-bounded (P1/direction.md).
+
+    STATIC (constant size): Ground-Truth Key Index (registry key->value) +
+    Proposal Summary. DYNAMIC (bounded): Preceding Opponent Turn (last round
+    only) + Active Dispute Ledger (<=5 unresolved/breached claims). The full
+    analyst reports, full debate history, and full claim ledger are NOT
+    injected — the registry IS the grounding, L1 still verifies every cited
+    key against the real computed value.
+    """
     asset_type = state.get("asset_type", "stock")
     target_label = "stock" if asset_type == "stock" else "asset"
-    fund_label = (
-        "Company fundamentals report"
-        if asset_type == "stock"
-        else "Asset fundamentals report (may be unavailable for crypto)"
-    )
     section = "risk" if role in SECTION_ROLES["risk"] else "research"
     ds = state.get(SECTION_CHANNEL[section]) or {}
-    inv = state.get(SECTION_PROSE[section]) or {}
+    reg = ds.get(GROUND_TRUTH_REGISTRY) or build_or_get_registry(state, section)
     ctx_or = state.get("instrument_context") or ""
+
     head = [
         f"You are the {stance} debater for the {target_label}. Your structured turn MUST be a reproducible argument:",
         "- core_thesis: your position (<=1500 chars)",
-        "- quantitative_claims: at least one number; every number must be groundable (metric_name, asserted_value, ground_truth_key, source = the exact tool/state key that produced it this run). Never invent a number; if you cannot ground it, omit the claim.",
+        "- quantitative_claims: at least one number; every number must be groundable (metric_name, asserted_value, ground_truth_key, source). Never invent a number; if you cannot ground it, omit the claim.",
         "- risk_factors (LOW/MEDIUM/HIGH/CRITICAL) with mitigation_stated",
         "- recommended_allocation_pct (0..100)",
+        "",
+        "You are an expert financial debater operating within a structured, deterministic evaluation graph. Your mandate is to defend your designated role and stance using rigorous, empirically grounded arguments.",
+        "",
+        "**Operational Invariants:**",
+        "1. **Zero Hallucination / Strict Key Binding**: Every numerical figure you introduce MUST be mapped to an exact `ground_truth_key` from the provided Ground Truth Key Index. Do not invent metrics or extrapolate keys.",
+        "2. **Deterministic L1 Audit**: Any assertion that contradicts the computed value for a key triggers a deterministic HARD BREACH and disqualifies the turn. Missing/invalid keys trigger soft score penalties.",
+        "3. **Direct Rebuttal**: Address the opponent's immediately preceding thesis and active disputes rather than generating isolated talking points.",
+        "4. **Structured Output Only**: Respond strictly with the valid JSON schema. Do not wrap JSON in conversational commentary.",
+        "",
+        "---",
+        "### Input Context Provided Per Turn",
     ]
-    risk_ctx = ""
-    if role in SECTION_ROLES["risk"]:
-        risk_ctx = f"Trader's proposal: {state.get('trader_investment_plan', '')}"
-    # Context bounds (per block, chars): analyst reports are grounding, bound
-    # them loosely; the growing blocks (history / claim ledger) tighter.
+
+    disputes = active_disputes(ds)
+    dispute_lines = ["  (no unresolved disputes)"] if not disputes else [
+        f"  - {d.get('ground_truth_key')}: {d.get('role')} asserted "
+        f"{d.get('asserted_value')} -> {d.get('status')}"
+        for d in disputes
+    ]
+
     body = [
         f"Resources: {ctx_or}",
-        f"Market: {_bounded(state.get('market_report', ''), 6000)}",
-        f"Sentiment: {_bounded(state.get('sentiment_report', ''), 6000)}",
-        f"News: {_bounded(state.get('news_report', ''), 6000)}",
-        f"{fund_label}: {_bounded(state.get('fundamentals_report', ''), 6000)}",
-        f"Computed decision context (advisory): {_bounded(state.get('computed_decision_context') or '', 4000)}",
-        f"Debate history: {_bounded(inv.get('history', ''), 8000)}",
-        risk_ctx,
-        f"Claim ledger: {_bounded(ds.get(CLAIM_LEDGER_MD, ''), 5000)}",
+        f"**Proposal Summary** (the trade under review): {_bounded(str((reg or {}).get('proposal_summary') or ''), 1500)}",
+        "",
+        "**Ground Truth Key Index** (authorized keys you may cite):",
+        _registry_index(reg),
+        "",
+        "**Preceding Opponent Turn** (immediate prior speaker):",
+        _last_turn_context(ds, role),
+        "",
+        "**Active Dispute Ledger** (unresolved/breached, up to 5):",
+        _EOL.join(dispute_lines),
+        "",
+        "**Computed decision context (deterministic, advisory - ground your argument in these numbers, never invent your own):**",
+        f"{_bounded(state.get('computed_decision_context') or '', 3000)}",
+        "",
+        "**Execution Directives:**",
+        "- If challenging an opponent's claim: reference the specific metric from the Preceding Opponent Turn or Active Dispute Ledger and cite the corresponding ground_truth_key demonstrating why their thesis fails.",
+        "- If opening round (N=1): ground your baseline position directly on the Proposal Summary and initial metrics from the Ground Truth Key Index.",
+        "- Sizing Discipline: your recommended_allocation_pct must directly reflect the balance between your quantitative_claims and risk_factors. Avoid arbitrary allocations unsupported by your cited metrics.",
     ]
     return _EOL.join(head + body)
 
@@ -176,28 +245,47 @@ def claim_records_from_turn(
     return out
 
 
-def ground_truth_from_state(state: dict) -> dict[str, float]:
-    """Deterministic ground truth for claim verification.
+# Capture ``key = -12.34`` / ``key: 55.48`` / ``key=7.41`` anywhere in a
+# line (computed context + analyst computed rows). Key is a short,
+# lowercase-ish token; the value is the first number after the separator.
+_KEY_VALUE_RE = __import__("re").compile(
+    r"(?i)([a-z_][a-z0-9 _-]{2,39}?)[\s:=](?:\s|=|:)*?(-?\d+(?:\.\d+)?)"
+)
 
-    Parses the computed decision context for ``key=value`` numeric pairs that
-    the turn prompt told the debater to cite."""
+
+def _parse_key_value_lines(text: str) -> dict[str, float]:
+    """Extract ``key=value`` numeric pairs from a text block (computed
+    context or analyst-report computed lines). Deterministic; the same
+    values L1 verifies against."""
+    out: dict[str, float] = {}
+    for line in str(text or "").splitlines():
+        # finditer: one line may carry a comma-list (computed context)
+        for m in _KEY_VALUE_RE.finditer(line):
+            k = m.group(1).strip().lower().replace(" ", "_").replace("-", "_")
+            if not k or len(k) > 40:
+                continue
+            try:
+                out[k] = float(m.group(2))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def ground_truth_from_state(state: dict) -> dict[str, float]:
+    """Deterministic ground truth for claim verification (P4 registry).
+
+    Parses the computed decision context AND the analyst reports' computed
+    lines for ``key=value`` numeric pairs — the full set of values a debater
+    may legitimately cite (the same set L1 verifies against). Computed
+    context wins on key collision; report-harvested keys are the coverage
+    guard so a citeable number from the analysts is registry-verifiable,
+    never an unavoidable 'unverified'.
+    """
     gt: dict[str, float] = {}
     ctx = state.get("computed_decision_context") or ""
-    for line in str(ctx).splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        for marker in ("=", ":"):
-            if marker in s:
-                k, _, v = s.partition(marker)
-                k = k.strip().lower().replace(" ", "_")
-                if not k:
-                    continue
-                try:
-                    gt[k] = float(str(v).strip().replace("%", ""))
-                except (TypeError, ValueError):
-                    continue
-                break
+    gt.update(_parse_key_value_lines(ctx))
+    for key in ("market_report", "fundamentals_report", "sentiment_report", "news_report"):
+        gt.update(_parse_key_value_lines(state.get(key) or ""))
     return gt
 
 def _section_for_role(role: str) -> str:
@@ -256,6 +344,11 @@ def create_debater_turn(
                     quantitative_claims=[],
                     recommended_allocation_pct=0.0,
                 )
+        # P0: build the static registry on the FIRST turn of the section
+        # (cache-friendly; reused by every later turn + P1 prompt).
+        reg = build_or_get_registry(state, section)
+        ds.setdefault(GROUND_TRUTH_REGISTRY, reg)
+        ds.setdefault(ACTIVE_DISPUTES, [])
         prose = render_turn_prose(role, payload)
         pending = ds.get(PENDING_REGEN)
         # Store the payload as a plain dict: the judge (anonymize_and_rotate)
@@ -343,6 +436,11 @@ def create_debate_l1(
             for c in claims
             if c.kind == "quantitative"
         ]
+        # P0: persist each verdict back onto its ledger row so the
+        # active-disputes extractor (and round scoring) can read status.
+        _vmap = {v.get("claim_id"): v.get("status") for v in verifs}
+        for c in claims:
+            c.status = _vmap.get(c.claim_id, "qualitative")
         severity = classify_severity(
             verifs,
             regen_count=int(ds.get(REGEN_COUNT, 0)),
@@ -419,14 +517,79 @@ def _complete_round(
 
 
 def _violated_ids(ds: dict) -> set:
-    """Claim ids flagged violated in the stored L1 per-side severity results."""
-    out = set()
-    l1 = ds.get(L1_KEY)
-    if l1 and l1.get("side"):
-        # The node stores a single L1 for the last side; for round scoring we
-        # conservatively treat any non-PROCEED as a penalty on that side only.
-        pass
+    """Claim ids with a persisted non-valid L1 status (P0).
+
+    Replaces the stub: the claim ledger rows now carry ``status`` set by L1.
+    Any violated / unverified / abstain claim counts against its side in the
+    round score (conservative: non-valid = penalty, never a silent pass).
+    """
+    ledger = ClaimLedger.from_dict(ds.get(CLAIM_LEDGER) or [])
+    return {
+        c.claim_id
+        for c in ledger.rows
+        if c.status in ("violated", "unverified", "abstain")
+    }
+
+
+def active_disputes(ds: dict, n: int = 5) -> list[dict]:
+    """Most recent unresolved/breached claims (P0/direction.md).
+
+    Returns up to ``n`` dicts ``{claim_id, role, round, metric_name,
+    asserted_value, ground_truth_key, status}`` newest-first — the bounded
+    dispute ledger debaters must challenge/defend.
+    """
+    ledger = ClaimLedger.from_dict(ds.get(CLAIM_LEDGER) or [])
+    bad = [
+        c
+        for c in ledger.rows
+        if c.status in ("violated", "unverified")
+    ]
+    out = []
+    for c in reversed(bad[-n:]):
+        out.append(
+            {
+                "claim_id": c.claim_id,
+                "role": c.role,
+                "round": c.round,
+                "metric_name": c.metric_name or c.ground_truth_key,
+                "asserted_value": c.value,
+                "ground_truth_key": c.ground_truth_key,
+                "status": c.status,
+            }
+        )
     return out
+
+
+def build_or_get_registry(state: dict, section: str) -> dict:
+    """Static ground-truth registry, built ONCE per channel (P0/direction.md).
+
+    ``{keys: {authorized_key: value}, proposal_summary: ...}`` from the
+    deterministic computed context + analyst computed lines. The debater
+    prompt only ever cites keys present here; a cited key missing from it
+    is L1 ``unverified`` (never a silent pass).
+    """
+    channel = SECTION_CHANNEL[section]
+    ds = dict(state.get(channel) or {})
+    reg = ds.get(GROUND_TRUTH_REGISTRY)
+    if reg:
+        return reg
+    gt = ground_truth_from_state(state)  # parsed computed decision context
+    keys = {}
+    for k, v in gt.items():
+        try:
+            keys[k] = round(float(v), 4)
+        except (TypeError, ValueError):
+            continue
+    # Proposal summary: risk debaters judge the trader's plan; research has
+    # no trader yet -> a compact plan-card excerpt from the computed context.
+    proposal = ""
+    if section == "risk":
+        proposal = (state.get("trader_investment_plan") or "")[:2000]
+    else:
+        cc = (state.get("computed_decision_context") or "")[:3000]
+        proposal = cc
+    reg = {"keys": keys, "proposal_summary": proposal}
+    return reg
 
 
 def render_judge_evidence(ds: dict) -> str:
@@ -462,6 +625,51 @@ def render_judge_evidence(ds: dict) -> str:
         "\n\n**Structured debate judge evidence (deterministic):**\n"
         + "\n".join(lines)
     )
+
+
+def render_consumer_debate_matrix(ds: dict, roles: Sequence[str]) -> str:
+    """Tabulated Debate Matrix for RM/PM (P3/direction.md).
+
+    Straight from round_records + judge_scores + persisted L1 statuses:
+    | Role | Stance | Core Thesis | L1 Valid % | Judge Score | Rec Alloc |
+    Replaces raw prose transcripts in the consumer prompts (reporting keeps
+    the full transcripts). Judge aliases are the deterministic seed-0
+    rotation (roles order -> Candidate_X/Y/...).
+    """
+    from tradingagents.strategies.debate_claim import ClaimLedger
+
+    def _last_role_payload(role):
+        for rec in reversed(ds.get(ROUND_RECORDS) or []):
+            p = rec.get(role)
+            if isinstance(p, dict):
+                return p
+        return None
+
+    ledger = ClaimLedger.from_dict(ds.get(CLAIM_LEDGER) or [])
+    judge = ds.get(JUDGE_SCORES) or {}
+    rows = []
+    for i, role in enumerate(roles):
+        payload = _last_role_payload(role)
+        stance = (payload or {}).get("stance", role)
+        thesis = str((payload or {}).get("core_thesis", ""))[:80]
+        alloc = (payload or {}).get("recommended_allocation_pct", "-")
+        # L1 valid % across this role's claims (statuses persisted, P0)
+        role_claims = [c for c in ledger.rows if c.role == role]
+        n = len(role_claims)
+        valid = sum(1 for c in role_claims if c.status == "valid")
+        l1_pct = f"{100 * valid / n:.0f}%" if n else "-"
+        # judge alias deterministic seed-0 rotation: roles[i] -> Candidate_X+i
+        alias = f"Candidate_{chr(ord('X') + i)}"
+        j = judge.get(alias) or {}
+        j_mean = j.get("mean", "-")
+        rows.append(
+            f"| {role} | {stance} | {thesis} | {l1_pct} | {j_mean} | {alloc}% |"
+        )
+    table = (
+        "| Role | Stance | Core Thesis | L1 Valid % | Judge Score (0-10) | "
+        "Rec Alloc |\n|---|---|---|---|---|---|\n" + "\n".join(rows)
+    )
+    return table
 
 
 def _baseline_fallback_reason(reason: str) -> bool:
@@ -531,6 +739,11 @@ __all__ = [
     "REGEN_COUNT",
     "LAST_SIDE",
     "PENDING_REGEN",
+    "GROUND_TRUTH_REGISTRY",
+    "ACTIVE_DISPUTES",
+    "active_disputes",
+    "build_or_get_registry",
+    "render_consumer_debate_matrix",
     "render_turn_prose",
     "build_turn_prompt",
     "claim_records_from_turn",

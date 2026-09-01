@@ -1470,9 +1470,12 @@ def run_analysis(
     # normal interpreter shutdown then blocks forever in
     # threading._shutdown (the report is already saved/displayed above).
     # Deterministic hard-exit so a COMPLETED run actually terminates
-    # instead of hanging minutes after "Analysis Complete!".
-    sys.stdout.flush()
-    os._exit(0)
+    # instead of hanging minutes after "Analysis Complete!". ONLY when the
+    # CLI is the real process entry — tests calling run_analysis in-process
+    # must return normally (regression: os._exit(0) killed pytest).
+    if _CLI_ENTRY:
+        sys.stdout.flush()
+        os._exit(0)
 
 
 @app.command()
@@ -1542,16 +1545,27 @@ def analyze(
         # normal unwind then blocks forever in threading._shutdown, so ANY
         # uncaught run error presents as a silent hang (flat CPU, all external
         # sockets CLOSE_WAIT) instead of a failure. Print the traceback,
-        # flush, and hard-exit so the error surfaces immediately.
-        import traceback as _tb
+        # flush, and hard-exit so the error surfaces immediately. ONLY when
+        # the CLI is the real process entry — tests exercising analyze()
+        # expect exceptions to propagate (regression: os._exit(1) killed
+        # pytest at test_cli_no_console).
+        if _CLI_ENTRY:
+            import traceback as _tb
 
-        try:
-            console.print_exception(show_locals=False)
-        except Exception:  # noqa: BLE001 - rich may be unavailable mid-unwind
-            _tb.print_exc()
-        sys.stdout.flush()
-        os._exit(1)
+            try:
+                console.print_exception(show_locals=False)
+            except Exception:  # noqa: BLE001 - rich may be unavailable mid-unwind
+                _tb.print_exc()
+            sys.stdout.flush()
+            os._exit(1)
+        raise
 
+
+# True only when this module is the real process entry point (not imported
+# by tests or another runner). Guards the hard-exit paths (moomoo shutdown
+# block) so in-process callers return/raise normally.
+_CLI_ENTRY = False
 
 if __name__ == "__main__":
+    _CLI_ENTRY = True
     app()
