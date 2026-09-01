@@ -409,6 +409,48 @@ class TestBoundedContextPhases:
         assert r3.entrenchment_detected is True
         assert r3.rebuttal_effectiveness == 10.0  # clamped 0..10
 
+    def test_judge_prose_score_fallback(self):
+        """Empty dimension_scores falls back to a DETERMINISTIC prose-score:
+        parse per-dimension numbers from the rationale, else use
+        rebuttal_effectiveness as the proxy. Never silent 0.0/UNAVAILABLE
+        when the model narrated scores (133244: neither deepseek nor luna
+        emits the dim map on this route)."""
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+
+        def _invoke(structured_llm, plain_llm, prompt, schema):
+            class _R:
+                dimension_scores = {}
+                judge_model_id = ""
+                round_evaluated = 1
+                evaluated_agent_alias = "Candidate_X"
+                entrenchment_detected = False
+                rebuttal_effectiveness = 9.0
+                rationale = ("empirical_grounding: 8, downside_tail_risk_weight: 6, "
+                             "catalyst_clarity: 7, assumption_sensitivity: 5")
+            return _R(), None
+
+        class _L:
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _invoke)
+        try:
+            node = dj_mod.create_debate_judge(_L(), section="research", cfg={})
+            out = node({"debate_state": {"round_records": [
+                {"bull": {"stance": "BULL", "core_thesis": "t", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 10}},
+                {"bear": {"stance": "BEAR", "core_thesis": "r", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 2}},
+            ]}})
+        finally:
+            monkeypatch.undo()
+
+        x = out["debate_state"]["judge_scores"]["Candidate_X"]
+        assert x["mean"] == 6.5, x          # (8+6+7+5)/4
+        assert x.get("fallback") is True
+        assert x["scores"]["empirical_grounding"] == 8.0
+
     def test_humanized_keys_resolve_via_alias_map(self):
         """Registry-key mismatch fix: debaters humanize the Key Index labels
         ('QCOM price', 'Free-cash-flow yield', 'Forward P/E'), so L1 marked

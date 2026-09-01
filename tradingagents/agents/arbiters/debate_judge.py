@@ -282,10 +282,49 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
             dims = rubric.dimension_scores
             vals = [v for v in dims.values() if isinstance(v, (int, float))]
             if not vals:
-                # Final gate: a rubric that "returned" but has no scorable
-                # dimensions (deepseek emits the object without the keys) is
-                # UNAVAILABLE, not a 0.0 — never let an empty dims slip to
-                # the mean fallback after all retries.
+                # Fallback (prose-scores heuristic): neither deepseek nor luna
+                # emits the enum-keyed dimension map reliably on this
+                # OpenRouter route (both came back empty after directed
+                # retry). Degrade DETERMINISTICALLY instead of UNAVAILABLE:
+                # 1) parse per-dimension numbers from the judge's rationale
+                # (the model still narrates scores when json_object drops the
+                # map), 2) else use rebuttal_effectiveness (0..10) as the
+                # single coherent proxy.
+                from tradingagents.agents.schemas import JudgeDimension
+
+                rationale = str(getattr(rubric, "rationale", "") or "")
+                fallback_vals = []
+                fallback_dims = {}
+                for dim in JudgeDimension:
+                    label = dim.value
+                    import re as _re
+                    m = _re.search(rf"{label}[^0-9]*([0-9]+(?:\.[0-9]+)?)", rationale, _re.IGNORECASE)
+                    if m:
+                        try:
+                            fallback_vals.append(float(m.group(1)))
+                            fallback_dims[dim.value] = float(m.group(1))
+                        except (TypeError, ValueError):
+                            continue
+                if not fallback_vals:
+                    reff = getattr(rubric, "rebuttal_effectiveness", 0.0)
+                    if isinstance(reff, (int, float)) and reff > 0:
+                        fallback_vals = [float(reff)]
+                        fallback_dims = {
+                            "rebuttal_effectiveness_proxy": float(reff)
+                        }
+                if fallback_vals:
+                    logger.warning(
+                        "debate judge empty dimension_scores for %s; used prose-score fallback (%s)",
+                        cand["alias"], fallback_dims,
+                    )
+                    side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
+                        "mean": round(sum(fallback_vals) / len(fallback_vals), 4),
+                        "scores": fallback_dims,
+                        "fallback": True,
+                    }
+                    continue
+                # Final gate: no dimensions AND no prose/rebuttal signal ->
+                # honest UNAVAILABLE, never silent 0.0.
                 logger.warning(
                     "debate judge returned empty dimension_scores for %s (after retries); marking unavailable",
                     cand["alias"],
