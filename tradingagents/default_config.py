@@ -23,6 +23,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE": "debate_judge_ensemble",
     "TRADINGAGENTS_DEBATE_MAX_ROUNDS": "debate_max_rounds",
     "TRADINGAGENTS_DEBATE_MAX_OUTPUT_TOKENS": "debate_max_output_tokens",
+    "TRADINGAGENTS_DEBATE_TEMPERATURE": "debate_temperature",
+    "TRADINGAGENTS_DEBATE_JSON_MODE": "debate_json_mode",
     "TRADINGAGENTS_DEBATE_MIN_GAIN": "debate_min_gain",
     "TRADINGAGENTS_DEBATE_STOP_CONSECUTIVE": "debate_stop_consecutive",
     "TRADINGAGENTS_DEBATE_CONSENSUS_THRESH": "debate_consensus_thresh",
@@ -345,6 +347,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # truncated mid-JSON -> degraded turns. 4000 leaves reasoning headroom
         # while the list bounds still cap the payload.
         "debate_max_output_tokens": 4000,
+        # Sampling temperature for debate roles (low = less formatting drift;
+        # 0.1 recommended, None = provider default). See direction.md /
+        # deepseek JSON-enforcement notes.
+        "debate_temperature": 0.1,
+        # DeepSeek native JSON mode on the DEBATE path only (response_format
+        # json_object): server-side valid-JSON constraint. Schema conformance
+        # still Pydantic-checked. Only applies when the provider supports
+        # json_mode (deepseek/openai-compatible); no-op routing wars.
+        "debate_json_mode": True,
         "debate_min_gain": 0.05,
         "debate_stop_consecutive": 2,
         "debate_consensus_thresh": 0.85,

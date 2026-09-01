@@ -287,7 +287,7 @@ class TestBoundedContextPhases:
                 raise RuntimeError("no real call")
 
         class _FakeJudge:
-            def __init__(self, judge_llm, section="research"):
+            def __init__(self, judge_llm, section="research", cfg=None):
                 pass
 
             def __call__(self, state):
@@ -575,7 +575,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research"):
+            def __init__(self, llm, section="research", cfg=None):
                 pass
 
             def __call__(self, state):
@@ -611,7 +611,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research"):
+            def __init__(self, llm, section="research", cfg=None):
                 pass
 
             def __call__(self, state):
@@ -645,7 +645,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research"):
+            def __init__(self, llm, section="research", cfg=None):
                 pass
 
             def __call__(self, state):

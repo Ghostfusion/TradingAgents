@@ -259,13 +259,13 @@ class GraphSetup:
             workflow.add_node(
                 "SD Bull",
                 create_debater_turn(
-                    "bull", bull_llm, ground_truth=ground_truth_from_state
+                    "bull", bull_llm, ground_truth=ground_truth_from_state, cfg=self.config
                 ),
             )
             workflow.add_node(
                 "SD Bear",
                 create_debater_turn(
-                    "bear", bear_llm, ground_truth=ground_truth_from_state
+                    "bear", bear_llm, ground_truth=ground_truth_from_state, cfg=self.config
                 ),
             )
             workflow.add_node(
@@ -284,21 +284,21 @@ class GraphSetup:
                 "SD Risk Aggressive",
                 create_debater_turn(
                     "aggressive", risk_aggr_llm,
-                    ground_truth=ground_truth_from_state, section="risk",
+                    ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
                 ),
             )
             workflow.add_node(
                 "SD Risk Conservative",
                 create_debater_turn(
                     "conservative", risk_conserv_llm,
-                    ground_truth=ground_truth_from_state, section="risk",
+                    ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
                 ),
             )
             workflow.add_node(
                 "SD Risk Neutral",
                 create_debater_turn(
                     "neutral", neutral_llm,
-                    ground_truth=ground_truth_from_state, section="risk",
+                    ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
                 ),
             )
             workflow.add_node(

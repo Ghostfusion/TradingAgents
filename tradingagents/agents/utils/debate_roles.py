@@ -87,6 +87,12 @@ def build_role_llm_kwargs(
     cap = cap or cfg.get("max_output_tokens")
     if cap:
         kwargs["max_tokens"] = int(cap)
+    # Low sampling temperature for deterministic structured output: high
+    # temps invite conversational/free-text drift inside the JSON (deepseek
+    # JSON-enforcement note #2). 0.0-0.2 recommended; None = provider default.
+    temp = cfg.get("debate_temperature")
+    if temp is not None:
+        kwargs["temperature"] = float(temp)
     provider_l = (provider or "").lower()
     if provider_l == "google" and cfg.get("google_thinking_level"):
         kwargs["thinking_level"] = cfg["google_thinking_level"]

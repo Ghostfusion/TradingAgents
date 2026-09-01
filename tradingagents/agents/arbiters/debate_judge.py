@@ -18,7 +18,6 @@ from tradingagents.agents.researchers.structured_debate import (
 )
 from tradingagents.agents.schemas import L2JudgeDimensionedRubric
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
-from tradingagents.agents.utils.structured import bind_structured
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +133,7 @@ def aggregate_scores(rubric, candidates: list[dict]) -> dict:
     return out
 
 
-def create_debate_judge(judge_llm, section: str = "research"):
+def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None = None):
     """Graph node factory for the L2 judge.
 
     ``judge_llm`` is the resolved judge model (deep tier by default). The
@@ -146,7 +145,16 @@ def create_debate_judge(judge_llm, section: str = "research"):
     """
     channel = SECTION_CHANNEL[section]
     roles = SECTION_ROLES[section]
-    structured_llm = bind_structured(judge_llm, L2JudgeDimensionedRubric, "Debate Judge")
+    # Prefer DeepSeek native JSON mode for the judge too (deepseek
+    # JSON-enforcement): server-side valid-JSON constraint when the runtime
+    # model supports json_mode + config debate_json_mode; else provider default.
+    from tradingagents.agents.researchers.structured_debate import (
+        bind_debate_structured,
+    )
+
+    structured_llm = bind_debate_structured(
+        judge_llm, L2JudgeDimensionedRubric, "Debate Judge", cfg
+    )
 
     def judge_node(state) -> dict:
         debate_state = state.get(channel) or {}

@@ -178,6 +178,9 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         "3. **Direct Rebuttal**: Address the opponent's immediately preceding thesis and active disputes rather than generating isolated talking points.",
         "4. **Structured Output Only**: Respond strictly with the valid JSON schema as a SINGLE raw JSON object — NO markdown fences, NO ```json``` blocks, NO prose before or after. The full response must BE the JSON object.",
         "",
+        "**Example output (shape only, values illustrative):**",
+        '{ "round_index": 1, "stance": "BEAR", "core_thesis": "Margin compression in 2H; DCF below price.", "quantitative_claims": [ { "metric_name": "Forward P/E", "asserted_value": 18.7, "ground_truth_key": "pe_ttm", "source": "analyst_report" } ], "risk_factors": [ { "risk_id": "margin_compression", "severity": "high", "mitigation_stated": true } ], "recommended_allocation_pct": 2.0 }',
+        "",
         "",
         "---",
         "### Input Context Provided Per Turn",
@@ -294,8 +297,45 @@ def _section_for_role(role: str) -> str:
     return "risk" if role in SECTION_ROLES["risk"] else "research"
 
 
+def bind_debate_structured(llm, schema, agent_name: str, cfg: dict | None = None):
+    """Bind a debate role to structured output, preferring DeepSeek native
+    JSON mode (deepseek JSON-enforcement).
+
+    ``method="json_mode"`` (response_format={"type":"json_object"}) makes the
+    provider constrain output to a valid JSON OBJECT server-side. Only used
+    when (a) the runtime model's capability table says supports_json_mode and
+    (b) config ``debate_json_mode`` is on. Otherwise the provider default
+    binds (function_calling for most) - transport-safe no-op.
+    """
+    from tradingagents.llm_clients.capabilities import get_capabilities
+
+    caps = None
+    try:
+        caps = get_capabilities(getattr(llm, "model_name", "") or "")
+    except Exception:  # noqa: BLE001 - capability lookup must never break the debate
+        caps = None
+    if (
+        caps is not None
+        and bool((cfg or {}).get("debate_json_mode", True))
+        and caps.supports_json_mode
+    ):
+        try:
+            return llm.with_structured_output(schema, method="json_mode")
+        except (NotImplementedError, AttributeError) as exc:
+            logger.warning(
+                "%s: json_mode unsupported (%s); falling back to default bind",
+                agent_name, exc,
+            )
+    return bind_structured(llm, schema, agent_name)
+
+
 def create_debater_turn(
-    role: str, llm, *, ground_truth: Callable, section: str | None = None
+    role: str,
+    llm,
+    *,
+    ground_truth: Callable,
+    section: str | None = None,
+    cfg: dict | None = None,
 ) -> Callable:
     """Node factory: one structured debater turn (dual-mode adapter).
 
@@ -704,7 +744,7 @@ def create_debate_finalize(
     from tradingagents.agents.arbiters.debate_judge import create_debate_judge
 
     channel = SECTION_CHANNEL[section]
-    judge_node = create_debate_judge(judge_llm, section=section)
+    judge_node = create_debate_judge(judge_llm, section=section, cfg=cfg)
 
     def finalize_node(state: dict) -> dict:
         ds = dict(state.get(channel) or {})
