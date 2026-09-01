@@ -8,6 +8,28 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Parent-repo ports — look-ahead window + debate opening** (ports from
+  `TauricResearch/TradingAgents`, no merge):
+  - `dataflows/date_window.py` (new): shared half-open UTC window
+    `[start, end + 1 day)` for dated content; undated items kept only when the
+    window reaches the present. yfinance news migrated to it (same semantics as
+    the old private helper).
+  - StockTwits (`fetch_stocktwits_messages(..., start_date, end_date)`) and
+    Reddit (`fetch_reddit_posts(..., start_date, end_date)`) now trim to the
+    run's as-of window via `_within_window` — a historical/backtest run can no
+    longer leak post-date chatter (#1220). No window = unchanged live behavior.
+  - `agent_utils.opponent_argument_or_opening(text, opponent)`: the opening
+    speaker in each of the 5 legacy debates (bull/bear researchers + the 3 risk
+    debators) gets the explicit "(The {opponent} has not spoken yet — open the
+    debate with your own case.)" marker when the opponent's response is empty,
+    instead of interpolating an empty string that made models fabricate the
+    other side's position (#1176). Real opponent arguments pass through
+    unchanged.
+  Tests: `tests/test_parent_ports.py` (12 hermetic, timed); existing
+  `test_news_lookahead.py` migrated to the shared module.
+
+### Added
+
 - **Cookbook quant-strategy gap implementation** (`Strategies/cookbook.md`,
   recipes 1-5 + common framework) - the missing portfolio-construction /
   evaluation / options math is now code and bound to the decision agents:

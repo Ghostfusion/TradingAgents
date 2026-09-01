@@ -27,11 +27,12 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .date_window import in_window as _in_window
 from .symbol_utils import crypto_base
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,31 @@ def _search_qs(ticker: str, limit: int) -> str:
         "t": "week",  # last 7 days
         "limit": limit,
     })
+
+
+def _within_window(posts: list, start_date: str | None, end_date: str | None) -> list:
+    """Keep only posts published in ``[start_date, end_date]`` (look-ahead safe).
+
+    No window (both None) leaves the list untouched for live callers. A post
+    with no ``created_utc`` epoch is dropped in a historical window, since we
+    can't prove it isn't from after the as-of date (#1220).
+    """
+    if not (start_date and end_date):
+        return posts
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    kept = []
+    for p in posts:
+        ts = p.get("created_utc")
+        created = None
+        if ts:
+            try:
+                created = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+            except (TypeError, ValueError, OSError):
+                created = None
+        if _in_window(created, start_dt, end_dt):
+            kept.append(p)
+    return kept
 
 
 def _iso_to_timestamp(iso_str: str | None) -> float | None:
@@ -231,6 +257,8 @@ def fetch_reddit_posts(
     limit_per_sub: int = 5,
     timeout: float = 10.0,
     inter_request_delay: float = 1.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> str:
     """Fetch recent Reddit posts mentioning ``ticker`` across finance
     subreddits and return them as a formatted plaintext block.
@@ -238,6 +266,10 @@ def fetch_reddit_posts(
     ``inter_request_delay`` paces the (now RSS-only) per-subreddit requests to
     stay under Reddit's public per-IP rate limit; combined with the RSS-first
     path it makes 429s rare even when several analyses run back-to-back.
+
+    When ``start_date``/``end_date`` (yyyy-mm-dd) are given, posts are trimmed
+    to that window so a historical run does not leak current discussion into a
+    backtest (#1220).
     """
     if _reddit_disabled():
         return "<reddit disabled via TRADINGAGENTS_DISABLE_REDDIT>"
@@ -253,7 +285,11 @@ def fetch_reddit_posts(
         # Serialize + space requests across the whole process so concurrent
         # workers share a single Reddit request budget instead of bursting.
         _pace_reddit_request()
-        posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        posts = _within_window(
+            _fetch_subreddit(ticker, sub, limit_per_sub, timeout),
+            start_date,
+            end_date,
+        )
         total_posts += len(posts)
         if not posts:
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")

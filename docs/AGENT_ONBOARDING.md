@@ -317,6 +317,13 @@ has changed before); never assume an endpoint works — the SDK's
   max unforecasted drawdown). All `debate_*` config keys OFF by default;
   phased rollout P0-P6 (grounding contract → scoring/termination → models/
   capability → judge → A/B harness). See CHANGELOG.
+- 2026-09-01 `(working tree)` - Parent-repo ports (#1/#2, no merge):
+  `dataflows/date_window.py` centralizes the half-open UTC content window;
+  StockTwits + Reddit trim to the run as-of window (look-ahead safe, #1220);
+  the 5 legacy debators use `opponent_argument_or_opening` so round-1 openers
+  get an explicit "has not spoken yet" marker instead of fabricating the
+  opponent's position (#1176). Tests `tests/test_parent_ports.py` (12);
+  `test_news_lookahead.py` migrated to the shared module. See CHANGELOG.
 - 2026-09-01 `(working tree)` - Cookbook quant-strategy gap implementation
   (`Strategies/cookbook.md`): MOP-style `ts_momentum_weights`; new
   `strategies/cross_section.py` (winsorize / centered-rank / quantile-split /

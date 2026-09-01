@@ -14,11 +14,14 @@ network call succeeded.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import logging
+from datetime import datetime
 from urllib.request import Request, urlopen
 
+from .date_window import in_window as _in_window
 from .symbol_utils import crypto_base
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,29 @@ def _stocktwits_symbol(ticker: str) -> str:
     """
     base = crypto_base(ticker)
     return f"{base}.X" if base else ticker.strip().upper()
+
+
+def _within_window(messages: list, start_date: str | None, end_date: str | None) -> list:
+    """Keep only messages published in ``[start_date, end_date]`` (look-ahead safe).
+
+    No window (both None) leaves the list untouched for live callers. A message
+    whose ``created_at`` (ISO 8601) is unparseable is dropped in a historical
+    window, since we can't prove it isn't from after the as-of date (#1220).
+    """
+    if not (start_date and end_date):
+        return messages
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    kept = []
+    for m in messages:
+        created = None
+        raw = m.get("created_at")
+        if raw:
+            with contextlib.suppress(ValueError, TypeError):
+                created = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if _in_window(created, start_dt, end_dt):
+            kept.append(m)
+    return kept
 
 
 def _count_sentiment(messages: list, limit: int = 30):
@@ -72,9 +98,20 @@ def stocktwits_counts(ticker: str, limit: int = 30, timeout: float = 10.0):
     return int(m.group(1)), int(b.group(1)), int(u.group(1)),         int(m.group(1)) + int(b.group(1)) + int(u.group(1))
 
 
-def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.0) -> str:
+def fetch_stocktwits_messages(
+    ticker: str,
+    limit: int = 30,
+    timeout: float = 10.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
     """Fetch recent StockTwits messages for ``ticker`` and return them as a
     formatted plaintext block ready for prompt injection.
+
+    When ``start_date``/``end_date`` (yyyy-mm-dd) are given, messages are
+    trimmed to that window so a historical run does not leak today's chatter
+    into a backtest (#1220). The public stream only serves recent messages, so
+    a historical window usually empties it → an explicit placeholder.
 
     Returns a placeholder string when the endpoint is unreachable, the
     symbol has no messages, or the response shape is unexpected — the
@@ -92,7 +129,13 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         return f"<stocktwits unavailable: {type(exc).__name__}>"
 
     messages = data.get("messages", []) if isinstance(data, dict) else []
+    messages = _within_window(messages, start_date, end_date)
     if not messages:
+        if start_date and end_date:
+            return (
+                f"<no StockTwits messages for ${ticker.upper()} within "
+                f"{start_date}..{end_date} (public stream serves only recent messages)>"
+            )
         return f"<no StockTwits messages found for ${ticker.upper()}>"
 
     lines = []

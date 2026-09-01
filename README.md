@@ -30,6 +30,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-01] **Parent-repo ports: look-ahead safety + debate opening** (#1/#2) -
+  `dataflows/date_window.py` now centralizes the half-open UTC content window;
+  StockTwits and Reddit trim to the run's as-of window so a historical/backtest
+  run can never leak post-date chatter (yfinance news already had the rule).
+  The five legacy debators (bull/bear + 3 risk) interpolate an explicit
+  "opponent has not spoken yet — open the debate with your own case" marker on
+  round 1 instead of fabricating the other side's position. See CHANGELOG.
 - [2026-09-01] **Cookbook quant-strategy gap implementation** - the five
   `Strategies/cookbook.md` recipes (time-series momentum, cross-sectional mean
   reversion, cointegration pairs, multifactor portfolios, options vol) are now

@@ -68,9 +68,15 @@ def create_sentiment_analyst(llm):
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
+        # The StockTwits / Reddit fetchers take the as-of window so a
+        # historical run can't leak post-date chatter into a backtest (#1220).
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        stocktwits_block = fetch_stocktwits_messages(
+            ticker, limit=30, start_date=start_date, end_date=end_date
+        )
+        reddit_block = fetch_reddit_posts(
+            ticker, start_date=start_date, end_date=end_date
+        )
 
         system_message = _build_system_message(
             ticker=ticker,
