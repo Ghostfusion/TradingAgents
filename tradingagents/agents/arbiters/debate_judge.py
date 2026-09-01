@@ -90,6 +90,8 @@ def anonymize_and_rotate(
     out = []
     for role in order:
         t = turn_by_role.get(role) or {}
+        if hasattr(t, "model_dump"):
+            t = t.model_dump()
         out.append(
             {
                 "alias": alias_map[role],

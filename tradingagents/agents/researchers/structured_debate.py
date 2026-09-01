@@ -239,10 +239,16 @@ def create_debater_turn(
                 )
         prose = render_turn_prose(role, payload)
         pending = ds.get(PENDING_REGEN)
+        # Store the payload as a plain dict: the judge (anonymize_and_rotate)
+        # and reporting read round_records with dict APIs (.get). Storing the
+        # pydantic OBJECT raised AttributeError 'DebaterTurnPayload' object
+        # has no attribute 'get' the first time the L2 judge ran on a live
+        # round (regression: judge never ran before the judge-skip fix).
+        payload_dict = payload.model_dump()
         if pending == role and round_records:
-            round_records[-1][role] = payload
+            round_records[-1][role] = payload_dict
         else:
-            round_records.append({role: payload})
+            round_records.append({role: payload_dict})
         ds[ROUND_RECORDS] = round_records
         ds[LAST_SIDE] = role
         ds.pop(PENDING_REGEN, None)

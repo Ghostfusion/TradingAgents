@@ -152,6 +152,13 @@ class TestRiskTurnChannels:
             risk_factors = []
             recommended_allocation_pct = 30.0
 
+            def model_dump(self):
+                return {k: getattr(self, k) for k in (
+                    "round_index", "stance", "core_thesis",
+                    "quantitative_claims", "risk_factors",
+                    "recommended_allocation_pct",
+                )}
+
         import tradingagents.agents.researchers.structured_debate as sd_mod
 
         def _fake_invoke(structured_llm, plain_llm, prompt, schema):
@@ -171,7 +178,7 @@ class TestRiskTurnChannels:
 
         ds = out["structured_risk_state"]
         assert ds["last_side"] == "aggressive"
-        assert ds["round_records"][0]["aggressive"].core_thesis == "upside case"
+        assert ds["round_records"][0]["aggressive"]["core_thesis"] == "upside case"
         prose = out["risk_debate_state"]
         assert "upside case" in prose["history"]
         assert "upside case" in prose["aggressive_history"]
@@ -208,8 +215,8 @@ class TestDegradedTurnNeverCrashes:
 
         ds = out["debate_state"]
         last = ds["round_records"][-1]["bear"]
-        assert "No structured turn produced" in last.core_thesis
-        assert last.quantitative_claims == []
+        assert "No structured turn produced" in last["core_thesis"]
+        assert last["quantitative_claims"] == []
         inv = out["investment_debate_state"]
         assert "No structured turn produced" in inv["history"]
         assert inv["count"] == 2
@@ -234,8 +241,35 @@ class TestDegradedTurnNeverCrashes:
         finally:
             monkeypatch.undo()
 
-        assert out["structured_risk_state"]["round_records"][0]["neutral"].quantitative_claims == []
+        assert out["structured_risk_state"]["round_records"][0]["neutral"]["quantitative_claims"] == []
         assert "No structured turn produced" in out["risk_debate_state"]["history"]
+
+    def test_judge_node_over_stored_dict_round_survives(self):
+        """Regression: turn_node stores payloads as DICTS; the L2 judge reads
+        them with dict APIs. Storing the pydantic OBJECT crashed the judge
+        with 'DebaterTurnPayload' object has no attribute 'get' the first
+        time it ran on a live round."""
+        from tradingagents.agents.arbiters.debate_judge import create_debate_judge
+
+        class _L:
+            def __init__(self, *a, **k):
+                pass
+
+            def invoke(self, *a, **k):
+                raise RuntimeError("no real call in test")
+
+        # A stored round in the production shape: payload dicts.
+        node = create_debate_judge(_L(), section="research")
+        out = node({"debate_state": {
+            "round_records": [{
+                "bull": {"core_thesis": "b", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 1.0},
+                "bear": {"core_thesis": "r", "quantitative_claims": [], "risk_factors": [], "recommended_allocation_pct": 2.0},
+            }],
+        }})
+        ds = out["debate_state"]
+        assert "judge_scores" in ds  # judge ran, no AttributeError
+        # judge unavailable fallback still produces the state keys
+        assert "judge_rubrics" in ds
 
     def test_finalize_runs_judge_on_normal_termination(self):
         """A normally-terminated debate (round cap / plateau / consensus)
@@ -370,7 +404,7 @@ class TestDegradedTurnNeverCrashes:
         finally:
             monkeypatch.undo()
 
-        assert out["debate_state"]["round_records"][-1]["bull"].round_index == 5
+        assert out["debate_state"]["round_records"][-1]["bull"]["round_index"] == 5
 
     def test_l1_risk_round_complete_triggers_scoring(self):
         from tradingagents.agents.schemas import (
