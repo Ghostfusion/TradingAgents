@@ -214,6 +214,92 @@ def risk_contribution(weights_by_name: dict[str, float],
     return {names[i]: rc[i] / total for i in range(n)}
 
 
+def black_litterman_weights(
+    returns_by_name: dict,
+    market_caps: dict[str, float],
+    views_p: list[list[float]] | None = None,
+    views_q: list[float] | None = None,
+    view_uncertainty_omega: list[float] | None = None,
+    risk_aversion: float = 2.5,
+    tau_scale: float = 0.05,
+) -> dict:
+    """Black-Litterman posterior weights (quants.md §Portfolio).
+
+    Combines the market-implied equilibrium excess returns
+    (Pi = lambda * cov * w_mkt) with investor views (P Q / Omega) into the
+    posterior expected returns, then maximizes Sharpe on them (closed form):
+
+        mu_post = [ (tau*Cov)^-1 + P' Om^-1 P ]^-1
+                  [ (tau*Cov)^-1 * Pi + P' Om^-1 Q ]
+
+    ``market_caps``: name -> market cap for the market-cap weights (fell to
+    ``_normalize``). ``views_p``: k x n pick matrix (row = a view's exposure
+    to each name; None = no views -> pure equilibrium). ``views_q``: k-vector
+    of view expected excess returns. ``view_uncertainty_omega``: k-vector of
+    per-view variances (diagonal Omega). Degrades to equal-weight when
+    covariance is unavailable.
+
+    Returns ``{"weights", "posterior_excess_returns", "note"}``.
+    """
+    m = _covariance_matrix(returns_by_name)
+    if m is None:
+        w, note = _degrade_equal(list(returns_by_name or {}))
+        return {"weights": w, "posterior_excess_returns": None, "note": note}
+    names = m["names"]
+    cov = m["cov"]
+    n = len(names)
+    caps = [float(market_caps.get(nm, 0.0)) for nm in names]
+    if sum(caps) <= 0:
+        w, note = _degrade_equal(names)
+        return {"weights": w, "posterior_excess_returns": None,
+                "note": "equal-weight (no market caps)"}
+    w_mkt = [c / sum(caps) for c in caps]
+    try:
+        inv_cov = _invert(cov)
+    except Exception:  # noqa: BLE001 - singular
+        w, note = _degrade_equal(names)
+        return {"weights": w, "posterior_excess_returns": None, "note": note}
+    # implied equilibrium excess returns Pi = lambda * cov * w_mkt
+    pi = [risk_aversion * sum(cov[i][j] * w_mkt[j] for j in range(n)) for i in range(n)]
+    # posterior precision/mean: (tau*Cov)^-1 + P' Om^-1 P etc.
+    tau_inv = [[inv_cov[i][j] / tau_scale for j in range(n)] for i in range(n)]
+    if not views_p or not views_q or len(views_p) != len(views_q) or len(views_q) == 0:
+        # no views -> posterior = equilibrium
+        post_inv = tau_inv
+        post = pi
+    else:
+        k = len(views_q)
+        omeg = view_uncertainty_omega or [1.0] * k
+        p = views_p
+        # build P' Om^-1 P and P' Om^-1 Q
+        pt_om_p = [[0.0] * n for _ in range(n)]
+        pt_om_q = [0.0] * n
+        for r in range(k):
+            wv = 1.0 / (omeg[r] if omeg[r] > 0 else 1e-9)
+            for a in range(n):
+                pt_om_q[a] += p[r][a] * wv * views_q[r]
+                for b in range(n):
+                    pt_om_p[a][b] += p[r][a] * wv * p[r][b]
+        post_inv = [[tau_inv[i][j] + pt_om_p[i][j] for j in range(n)] for i in range(n)]
+        rhs = [sum(tau_inv[i][j] * pi[j] for j in range(n)) + pt_om_q[i] for i in range(n)]
+        try:
+            post = _invert(post_inv)
+            post = [sum(post[i][j] * rhs[j] for j in range(n)) for i in range(n)]
+        except Exception:  # noqa: BLE001 - singular posterior
+            post = pi
+    # max-Sharpe closed form on posterior: w = (Cov^-1 mu) / (1' Cov^-1 mu)
+    obs = [sum(inv_cov[i][j] * post[j] for j in range(n)) for i in range(n)]
+    denom = sum(obs)
+    if denom <= 0:
+        w, note = _degrade_equal(names)
+        return {"weights": w, "posterior_excess_returns": [round(x, 6) for x in post],
+                "note": "degraded: posterior not investable"}
+    w = [x / denom for x in obs]
+    return {"weights": {names[i]: round(w[i], 6) for i in range(n)},
+            "posterior_excess_returns": [round(x, 6) for x in post],
+            "note": "black-litterman"}
+
+
 __all__ = ["risk_parity_weights", "min_variance_weights",
            "confidence_weights", "enforce_sector_exposure",
-           "risk_contribution"]
+           "risk_contribution", "black_litterman_weights"]

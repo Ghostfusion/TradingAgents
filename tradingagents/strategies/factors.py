@@ -9,9 +9,14 @@ value screens (scripts/value_screener.py) into one composite rank:
 
 Composite rank uses percentile ranks so factors are comparable across
 different magnitude scales; missing factors are skipped (never fabricated).
+
+Also exposes a Fama-French 5-factor time-series regression (alpha + factor
+loadings) for style decomposition of an excess return series.
 """
 
 from __future__ import annotations
+
+import math
 
 
 def momentum(closes: list[float], lookback: int = 252, skip: int = 21) -> float | None:
@@ -137,6 +142,98 @@ def composite_score(factors_by_ticker: dict, weights: dict = None) -> dict:
     return scores
 
 
+# Fama-French 5-factor factor names (order of columns in the regression).
+FF5_FACTORS = ("mkt_rf", "smb", "hml", "rmw", "cma")
+
+
+def _ols5(excess: list[float], factors: dict[str, list[float]]) -> dict:
+    """OLS of ``excess ~ intercept + 5 factors`` on aligned, finite rows.
+
+    Returns ``{"alpha", "loadings": {factor: beta}, "r2", "n", "ok": bool}``.
+    Uses normal-equation multiply (small matrices); None-safe: any row with a
+    non-finite value is dropped, and fewer than 7 aligned rows degrades
+    ``ok=False`` (never fabricated).
+    """
+    n = len(excess)
+    X = []
+    y = []
+    names = list(FF5_FACTORS)
+    for i in range(n):
+        row = [1.0] + [factors[f][i] if i < len(factors[f]) else float("nan") for f in names]
+        yi = excess[i]
+        if all(math.isfinite(v) for v in row) and math.isfinite(yi):
+            X.append(row)
+            y.append(yi)
+    m = len(X)
+    if m < 7:
+        return {"alpha": None, "loadings": dict.fromkeys(names, None),
+                "r2": None, "n": m, "ok": False}
+    # normal equations: (X'X) beta = X'y  -> use Gaussian elimination
+    k = 6
+    xtx = [[0.0] * k for _ in range(k)]
+    xty = [0.0] * k
+    for row, yi in zip(X, y, strict=True):
+        for a in range(k):
+            xty[a] += row[a] * yi
+            for b in range(k):
+                xtx[a][b] += row[a] * row[b]
+    try:
+        beta = _solve(xtx, xty)
+    except ValueError:
+        return {"alpha": None, "loadings": dict.fromkeys(names, None),
+                "r2": None, "n": m, "ok": False}
+    pred = [sum(beta[j] * row[j] for j in range(k)) for row in X]
+    ss_res = sum((y[i] - pred[i]) ** 2 for i in range(m))
+    ybar = sum(y) / m
+    ss_tot = sum((v - ybar) ** 2 for v in y)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else None
+    return {
+        "alpha": round(beta[0], 4),
+        "loadings": {names[i]: round(beta[i + 1], 4) for i in range(5)},
+        "r2": round(r2, 4) if r2 is not None else None,
+        "n": m,
+        "ok": True,
+    }
+
+
+def _solve(a: list[list[float]], b: list[float]) -> list[float]:
+    """Gaussian elimination solve of Ax=b (small, dense). Raises on singular."""
+    n = len(b)
+    aug = [a[i][:] + [b[i]] for i in range(n)]
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda r: abs(aug[r][col]))
+        if abs(aug[pivot][col]) < 1e-12:
+            raise ValueError("singular")
+        aug[col], aug[pivot] = aug[pivot], aug[col]
+        pv = aug[col][col]
+        aug[col] = [v / pv for v in aug[col]]
+        for r in range(n):
+            if r == col:
+                continue
+            f = aug[r][col]
+            if f != 0.0:
+                aug[r] = [vr - f * vc for vr, vc in zip(aug[r], aug[col], strict=True)]
+    return [aug[i][-1] for i in range(n)]
+
+
+def fama_french_5_factor(
+    excess_returns: list[float],
+    factors: dict[str, list[float]],
+    label: str = "",
+) -> dict:
+    """Fama-French 5-factor time-series regression (quants.md §Multi-Factor).
+
+    ``excess_returns``: ticker/portfolio return minus risk-free per period.
+    ``factors``: dict keyed by FF5_FACTORS (``mkt_rf/smb/hml/rmw/cma``) of
+    equal-length series. Returns ``{alpha, loadings, r2, n, ok}``; ``ok``
+    False (loadings None) when the aligned sample is too small/singular —
+    never fabricated coefficients.
+    """
+    if not factors or not excess_returns:
+        return {"alpha": None, "loadings": None, "r2": None, "n": 0, "ok": False}
+    return _ols5(list(excess_returns), factors)
+
+
 __all__ = [
     "momentum",
     "high_distance",
@@ -145,4 +242,6 @@ __all__ = [
     "z_score",
     "value_momentum_score",
     "composite_score",
+    "fama_french_5_factor",
+    "FF5_FACTORS",
 ]

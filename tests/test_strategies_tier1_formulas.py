@@ -93,3 +93,76 @@ def test_vpin_empty_returns_vpin_none():
     out = vpin([])
     assert out["vpin"] is None
     assert out["unclassified_volume_share"] == 1.0
+
+
+# --- Tier 2: Fama-French 5-factor regression ---------------------------------
+
+def test_ff5_recovers_known_coefficients():
+    import random
+
+    from tradingagents.strategies.factors import fama_french_5_factor
+
+    random.seed(5)
+    n = 120
+    mkt = [random.gauss(0.01, 0.02) for _ in range(n)]
+    smb = [random.gauss(0.0, 0.01) for _ in range(n)]
+    hml = [random.gauss(0.0, 0.015) for _ in range(n)]
+    rmw = [random.gauss(0.0, 0.01) for _ in range(n)]
+    cma = [random.gauss(0.0, 0.008) for _ in range(n)]
+    rets = [0.001 + 1.2*mkt[i] - 0.5*smb[i] + 0.3*hml[i] + 0.2*rmw[i]
+            - 0.1*cma[i] + random.gauss(0, 0.005) for i in range(n)]
+    res = fama_french_5_factor(rets, {"mkt_rf": mkt, "smb": smb, "hml": hml,
+                                      "rmw": rmw, "cma": cma})
+    assert res["ok"], res
+    assert abs(res["alpha"] - 0.001) < 0.01, res
+    assert abs(res["loadings"]["mkt_rf"] - 1.2) < 0.15, res
+    assert abs(res["loadings"]["smb"] + 0.5) < 0.15, res
+    assert res["r2"] and res["r2"] > 0.9
+
+
+def test_ff5_short_series_no_fabrication():
+    from tradingagents.strategies.factors import fama_french_5_factor
+
+    res = fama_french_5_factor(
+        [0.01] * 4,
+        {"mkt_rf": [0.01]*4, "smb": [0]*4, "hml": [0]*4, "rmw": [0]*4, "cma": [0]*4},
+    )
+    assert res["ok"] is False
+
+
+def test_ff5_none_when_factor_shape_missing():
+    from tradingagents.strategies.factors import fama_french_5_factor
+
+    assert fama_french_5_factor([], {})["ok"] is False
+
+
+# --- Tier 2: Black-Litterman ------------------------------------------------
+
+def test_bl_no_views_equals_market_caps():
+    from tradingagents.strategies.portfolio_optimizer import black_litterman_weights
+
+    ret_by = {"A": [0.01, -0.005, 0.02, 0.0, 0.008],
+              "B": [0.005, 0.01, -0.01, 0.02, 0.0],
+              "C": [-0.02, 0.01, 0.005, -0.01, 0.02]}
+    caps = {"A": 100.0, "B": 50.0, "C": 20.0}
+    out = black_litterman_weights(ret_by, caps)
+    assert out["weights"]["A"] > out["weights"]["B"] > out["weights"]["C"]
+    assert abs(sum(out["weights"].values()) - 1.0) < 1e-6
+    # implied-equilibrium with no views should reproduce market-cap proportions
+    assert abs(out["weights"]["A"] - 100.0 / 170.0) < 0.02, out
+
+
+def test_bl_strong_view_shifts_weights():
+    from tradingagents.strategies.portfolio_optimizer import black_litterman_weights
+
+    ret_by = {"A": [0.01, -0.005, 0.02, 0.0, 0.008],
+              "B": [0.005, 0.01, -0.01, 0.02, 0.0],
+              "C": [-0.02, 0.01, 0.005, -0.01, 0.02]}
+    caps = {"A": 100.0, "B": 50.0, "C": 20.0}
+    base = black_litterman_weights(ret_by, caps)["weights"]
+    view = black_litterman_weights(
+        ret_by, caps,
+        views_p=[[1.0, 0.0, 0.0]], views_q=[0.05], view_uncertainty_omega=[0.0001],
+    )["weights"]
+    assert view["A"] > base["A"] + 0.01, (view, base)
+
