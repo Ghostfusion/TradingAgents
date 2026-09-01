@@ -338,7 +338,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "debate_judge_model": "",  # "family:id" for judge; fallback deep; family should differ from both debaters
         "debate_judge_ensemble": 1,
         "debate_max_rounds": 5,    # matches DebaterTurnPayload.round_index (1..5)
-        "debate_max_output_tokens": 2500,  # output budget for debate roles (a DebatersTurnPayload needs ~500-1500; 8000 let glm-5.3-flash ramble to truncation)
+        # Output budget for debate roles. A payload needs ~500-1500 visible
+        # tokens; the schema now bounds the claim/risk lists (max_length=25),
+        # so rambling to 8000 is structurally impossible. A THINKING model
+        # (deepseek-v4) counts its hidden reasoning inside this budget — 2500
+        # truncated mid-JSON -> degraded turns. 4000 leaves reasoning headroom
+        # while the list bounds still cap the payload.
+        "debate_max_output_tokens": 4000,
         "debate_min_gain": 0.05,
         "debate_stop_consecutive": 2,
         "debate_consensus_thresh": 0.85,
