@@ -3569,7 +3569,6 @@ def _feature_gate(flag_key: str, env_var: str) -> str | None:
     )
 
 
-@tool
 def _machine_chain_vrp(ticker: str) -> dict | None:
     """Model-free variance risk premium from a machine options chain (yfinance).
 
