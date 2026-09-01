@@ -351,7 +351,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "debate_scoring_weights": {"evidence": 0.6, "novelty": 0.25, "constraint": 0.15},
         "debate_abstain_allowed": True,
         "debate_fast_abort": True,          # R1: hard-fail short-circuits / regenerates
-        "debate_regen_max": 1,              # R1': single-role regeneration budget
+        "debate_regen_max": 2,              # R1': single-role regeneration budget (2: deepseek often lands the JSON on a 2nd attempt)
         "debate_divergence_cap_rounds": 1,  # R2: artificial-consensus threshold (rounds)
         "debate_reweight_to_baseline": 0.5, # R2': base alpha toward baseline on alert
         "debate_entrench_thresh": 0.8,      # R2': I_entrench above -> entrenchment penalty

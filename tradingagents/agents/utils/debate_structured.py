@@ -35,7 +35,10 @@ def parse_markdown_fence(text: str) -> str | None:
         stripped = block.strip()
         if stripped.startswith("{"):
             return stripped
-    # Fallback: a bare {...} anywhere in the text.
+    # Fallback: a bare {...} anywhere in the text. Deepseek often rambles
+    # prose BEFORE emitting the JSON, so prefer the LARGEST balanced-block
+    # candidate (the real payload dwarfs inline junk braces) among matches
+    # scanning from the END of the text; fall back to the first.
     m = re.search(r"\{.*\}", text, re.DOTALL)
     return m.group(0) if m else None
 
