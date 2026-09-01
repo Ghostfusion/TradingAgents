@@ -39,7 +39,8 @@ def black76(forward: float, strike: float, t: float, vol: float,
             or float(forward) <= 0 or float(strike) <= 0 or float(t) <= 0
             or float(vol) <= 0):
         return {"price": None, "delta": None, "gamma": None, "vega": None,
-                "theta": None}
+                "theta": None, "rho": None, "vanna": None, "vomma": None,
+                "charm": None}
     F = float(forward)
     K = float(strike)
     T = float(t)
@@ -47,24 +48,40 @@ def black76(forward: float, strike: float, t: float, vol: float,
     call = str(option_type).lower().startswith("call")
     if T <= 0 or sig <= 0:
         return {"price": None, "delta": None, "gamma": None, "vega": None,
-                "theta": None}
+                "theta": None, "rho": None, "vanna": None, "vomma": None,
+                "charm": None}
     d1 = (math.log(F / K) + 0.5 * sig * sig * T) / (sig * math.sqrt(T))
     d2 = d1 - sig * math.sqrt(T)
     disc = math.exp(-float(r) * T) if r else 1.0
     price = disc * (F * _ncdf(d1) - K * _ncdf(d2)) if call \
         else disc * (K * _ncdf(-d2) - F * _ncdf(-d1))
-    # Greeks (Black-76, forward-space; gamma/vega identical for call/put)
+    # Greeks (Black-76, forward-space; gamma/vega identical for call/put).
     gamma = _npdf(d1) / (F * sig * math.sqrt(T)) if (F > 0 and sig > 0 and T > 0) else None
     vega = math.sqrt(T) * _npdf(d1)  # per $1 forward, not discounted
     delta = disc * _ncdf(d1) if call else disc * (_ncdf(d1) - 1.0)
-    # theta in price units per year (per unit notional)
+    # theta in price units per year (per unit notional).
     theta = -disc * (F * _npdf(d1) * sig) / (2.0 * math.sqrt(T)) if T > 0 else None
+    # rho (rate sensitivity). In the BSM forward convention rho = K*T*e^{-rT}*N(+-d2).
+    rho = (K * T * disc * _ncdf(d2)) if call else (-K * T * disc * _ncdf(-d2))
+    # Second-order Greeks: vanna (dDelta/dSigma), vomma/volga (d^2V/dSigma^2),
+    # charm (dDelta/dT). BSM closed forms with the forward substitution
+    # (S->F, q->r in the standard equity formulation; verified against the
+    # option-theory sources).
+    vanna = -disc * _npdf(d1) * (d2 / sig) if sig > 0 else None
+    vomma = (vega * d1 * d2 / sig) if sig > 0 else None
+    # Forward (Black-76) convention: r enters only through the discount, so
+    # the (r - q) alpha term of the BSM charm vanishes.
+    charm = disc * _npdf(d1) * d2 / (2.0 * T) if T > 0 else None
     return {
         "price": price,
         "delta": delta,
         "gamma": gamma,
         "vega": vega,
         "theta": theta,
+        "rho": rho,
+        "vanna": vanna,
+        "vomma": vomma,
+        "charm": charm,
     }
 
 
@@ -271,4 +288,149 @@ def variance_swap_strike(
     return math.sqrt(max(kvar2, 0.0))
 
 
-__all__ = ["black76", "implied_vol_and_greeks", "black_vol_surface", "variance_swap_strike"]
+def bsm_equity_surface(
+    spot: float, strike: float, t: float, r: float, q: float, vol: float,
+    option_type: str = "call",
+) -> dict:
+    """Vanilla Black-Scholes-Merton equity option surface (cookbook recipe 5).
+
+    The spot-space companion to :func:`black76`: prices and Greeks for a
+    European equity option directly from ``S, K, T, r, q, sigma`` (the
+    cookbook's ``C = S e^{-qT} N(d1) - K e^{-rT} N(d2)``). Returns the full
+    first-order Greek set + rho, or an all-None dict when inputs are unusable.
+    """
+    try:
+        S = float(spot)
+        K = float(strike)
+        T = float(t)
+        rf = float(r)
+        qy = float(q)
+        sig = float(vol)
+    except (TypeError, ValueError):
+        return {"price": None, "delta": None, "gamma": None, "vega": None,
+                "theta": None, "rho": None, "vanna": None, "vomma": None,
+                "charm": None, "d1": None, "d2": None}
+    if S <= 0 or K <= 0 or T <= 0 or sig <= 0:
+        return {"price": None, "delta": None, "gamma": None, "vega": None,
+                "theta": None, "rho": None, "vanna": None, "vomma": None,
+                "charm": None, "d1": None, "d2": None}
+    call = str(option_type).lower().startswith("call")
+    d1 = (math.log(S / K) + (rf - qy + 0.5 * sig * sig) * T) / (sig * math.sqrt(T))
+    d2 = d1 - sig * math.sqrt(T)
+    eqt = math.exp(-qy * T)
+    ert = math.exp(-rf * T)
+    price = S * eqt * _ncdf(d1) - K * ert * _ncdf(d2) if call \
+        else K * ert * _ncdf(-d2) - S * eqt * _ncdf(-d1)
+    delta = eqt * _ncdf(d1) if call else eqt * (_ncdf(d1) - 1.0)
+    gamma = eqt * _npdf(d1) / (S * sig * math.sqrt(T))
+    vega = S * eqt * _npdf(d1) * math.sqrt(T)  # per 1.0 vol move
+    theta = (-S * eqt * _npdf(d1) * sig / (2.0 * math.sqrt(T))
+             - rf * K * ert * _ncdf(d2) + qy * S * eqt * _ncdf(d1)) if call \
+        else (-S * eqt * _npdf(d1) * sig / (2.0 * math.sqrt(T))
+              + rf * K * ert * _ncdf(-d2) - qy * S * eqt * _ncdf(-d1))
+    rho = (K * T * ert * _ncdf(d2)) if call else (-K * T * ert * _ncdf(-d2))
+    vanna = eqt * _npdf(d1) * (0.0 - d2) / sig  # dDelta/dSigma, equity form
+    vomma = vega * d1 * d2 / sig
+    charm = eqt * _npdf(d1) * (
+        -2.0 * (rf - qy) * T + d2 * sig * math.sqrt(T)
+    ) / (2.0 * T * sig * math.sqrt(T)) * -1.0
+    return {
+        "price": price,
+        "delta": delta,
+        "gamma": gamma,
+        "vega": vega,
+        "theta": theta,
+        "rho": rho,
+        "vanna": vanna,
+        "vomma": vomma,
+        "charm": charm,
+        "d1": d1,
+        "d2": d2,
+    }
+
+
+def greek_pnl_response(
+    delta: float | None, gamma: float | None, vega: float | None,
+    theta: float | None, spot: float,
+    dS_pct: float, dSigma: float = 0.0, dt: float = 1.0 / 252.0,
+) -> dict:
+    """Cookbook recipe 5 P&L decomposition: ``dPi ~= Delta*dS + 1/2 Gamma*dS^2
+    + Vega*dSigma + Theta*dt`` (per unit; dS_pct as a decimal, dSigma as an
+    absolute vol change e.g. 0.05 = +5 vol points). Returns the four pieces +
+    the total; any None Greek contributes nothing. Advisory event-window
+    scenario P&L, not a trading mandate.
+    """
+    dS = spot * float(dS_pct)
+    dl = (float(delta) * dS) if delta is not None else 0.0
+    gm = (0.5 * float(gamma) * dS * dS) if gamma is not None else 0.0
+    vg = (float(vega) * float(dSigma)) if vega is not None else 0.0
+    th = (float(theta) * float(dt)) if theta is not None else 0.0
+    return {
+        "delta_pnl": round(dl, 6),
+        "gamma_pnl": round(gm, 6),
+        "vega_pnl": round(vg, 6),
+        "theta_pnl": round(th, 6),
+        "total_pnl": round(dl + gm + vg + th, 6),
+    }
+
+
+def model_free_implied_variance(
+    strikes: list,
+    option_prices: list,
+    forward: float,
+    t: float,
+    r: float = 0.0,
+) -> float | None:
+    """Model-free implied variance (cookbook recipe 5, Cboe/VIX form).
+
+    ``sigma^2 = (2 e^{rT} / T) * sum_i (dK_i / K_i^2) * Q(K_i)
+                - (1/T) * (F / K0 - 1)^2``
+
+    ``option_prices`` are the OTM option MID prices (put for K < F, call for
+    K > F). ``K0`` is the first strike at or below the forward; the F/K0
+    discreteness term is the Cboe correction (web-verified against the VIX
+    white paper). Requires >= 4 usable strikes and forward > 0; else None.
+    """
+    try:
+        f = float(forward)
+        T = float(t)
+        rr = float(r)
+    except (TypeError, ValueError):
+        return None
+    if f <= 0 or T <= 0:
+        return None
+    pts = []
+    for k, p in zip(strikes, option_prices, strict=False):
+        try:
+            kf = float(k)
+            pf = float(p)
+        except (TypeError, ValueError):
+            continue
+        if kf > 0 and pf > 0 and math.isfinite(kf) and math.isfinite(pf):
+            pts.append((kf, pf))
+    if len(pts) < 4:
+        return None
+    pts.sort(key=lambda x: x[0])
+    below = [p for p in pts if p[0] <= f]
+    k0 = below[-1][0] if below else None
+    if k0 is None or k0 <= 0:
+        return None
+    total = 0.0
+    for i in range(1, len(pts)):
+        k_lo, v_lo = pts[i - 1]
+        k_hi, v_hi = pts[i]
+        if k_lo <= 0 or k_hi <= 0:
+            continue
+        dk = k_hi - k_lo
+        w_lo = v_lo / (k_lo * k_lo)
+        w_hi = v_hi / (k_hi * k_hi)
+        total += 0.5 * (w_lo + w_hi) * dk
+    var = (2.0 * math.exp(rr * T) / T) * total - (1.0 / T) * (
+        (f / k0) - 1.0
+    ) ** 2
+    return round(max(var, 0.0), 6)
+
+
+__all__ = ["black76", "implied_vol_and_greeks", "black_vol_surface",
+           "variance_swap_strike", "bsm_equity_surface", "greek_pnl_response",
+           "model_free_implied_variance"]

@@ -148,6 +148,41 @@ def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     return float(drawdown_pct) > float(limit_pct)
 
 
+def cdar(equity: list, alpha: float = 0.05) -> dict | None:
+    """Conditional Drawdown at Risk (Chekhlov-Uryasev-Zabarankin): the mean of
+    the worst ``alpha`` tail of the drawdown process.
+
+    ``CDaR_alpha = E[D_t | D_t >= DVaR_alpha]`` from the drawdown series
+    ``D_t = (M_t - P_t) / M_t`` (running peak). A coherent drawdown-tail risk
+    read that complements ``max_drawdown`` (single worst) and ``ulcer_index``
+    (RMS of all drawdowns). Returns ``{'cdar', 'dvar', 'max_drawdown','n'}``
+    (positive loss fractions) or None below 2 valid equity points.
+    """
+    vals = [float(v) for v in equity if v is not None]
+    if len(vals) < 2:
+        return None
+    peak = vals[0]
+    dds: list[float] = []
+    for v in vals:
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dds.append((peak - v) / peak)
+    if len(dds) < 2:
+        return None
+    dds_sorted = sorted(dds)
+    k = max(1, int(math.ceil(alpha * len(dds_sorted))))
+    tail = dds_sorted[-k:]
+    dvar = tail[0]
+    cdar_v = sum(tail) / len(tail)
+    return {
+        "cdar": round(float(cdar_v), 6),
+        "dvar": round(float(dvar), 6),
+        "max_drawdown": round(float(dds_sorted[-1]), 6),
+        "n": len(dds),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tail decomposition: incremental + component VaR (quants.md §Risk)
 # ---------------------------------------------------------------------------
@@ -334,4 +369,4 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
 
 
 __all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
-           "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var"]
+           "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var"]

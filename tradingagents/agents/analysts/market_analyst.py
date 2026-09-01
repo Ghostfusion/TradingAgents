@@ -3,6 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     get_bollinger_pct_b,
     get_book_correlation,
+    get_book_depth_read,
     get_book_tail_risk,
     get_candlestick_patterns,
     get_capital_flow,
@@ -12,6 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_crypto_prices,
     get_dip_technical,
     get_downside_read,
+    get_event_pnl_response,
     get_exit_check,
     get_exit_plan,
     get_expected_move,
@@ -29,6 +31,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_snapshot,
     get_mean_reversion_quality,
     get_mean_reversion_tech,
+    get_merton_distance,
     get_momentum_detail,
     get_news_sentiment_series,
     get_normality,
@@ -38,6 +41,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_order_imbalance,
     get_orderflow_read,
     get_output_budget,
+    get_pair_trade_signal,
     get_payoff_asymmetry,
     get_position_sizing,
     get_post_close_confirmation,
@@ -70,6 +74,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_trailing_exit,
     get_tranche_plan,
     get_treasury_curve,
+    get_ts_momentum_weights,
     get_unit_root,
     get_variance_premium,
     get_vdu_entry_setup,
@@ -165,6 +170,11 @@ def create_market_analyst(llm):
             get_treasury_curve,
             get_unit_root,
             get_variance_premium,
+            get_event_pnl_response,
+            get_book_depth_read,
+            get_ts_momentum_weights,
+            get_pair_trade_signal,
+            get_merton_distance,
         ]
 
         system_message = (
@@ -271,6 +281,10 @@ You also have quant-risk / distribution / book tools - use these numbers as grou
 - get_sofr_curve(current_date) / get_treasury_curve(current_date) - risk-free term structures for any discounting / rate claim; DISABLED until the config flag is on.
 - get_market_movers(kind) - the day's gainers/losers/active list for breadth framing.
 - get_variance_premium(ticker) - the fair variance-swap strike vs current IV (the event-vol premium). Use before any 'vol is expensive/cheap into the event' claim.
+- get_event_pnl_response(spot, delta, gamma, vega, theta, dS_pct, dSigma) - the delta-gamma-vega-theta P&L a catalyst move implies per option unit (cookbook recipe 5). Use with the surface greeks + expected move before claiming 'the move would be worth X'.
+- get_book_depth_read(bid, ask, bid_size, ask_size) - microprice + order-book imbalance (size-weighted fair value + signed depth asymmetry). Use for any thin-book / quote-depth / short-horizon price-pressure claim.
+- get_ts_momentum_weights(closes_by_name) - MOP-style vol-scaled time-series momentum portfolio weights (sign of trailing log return / EWMA vol, target-vol normalized, gross-capped). Use before any 'this asset is trending, size more' claim.
+- get_pair_trade_signal(x, y) - pairs-trading spread z-score signal (entry |z|>=2, exit <=0.5, stop >=3) with cointegration + half-life. Use before any 'these two mean-revert, trade the spread' claim.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

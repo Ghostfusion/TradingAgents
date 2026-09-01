@@ -101,6 +101,87 @@ def hazard_from_spread(spread: float | None, recovery_rate: float = 0.40) -> flo
     return s / (1.0 - rr)
 
 
+def merton_distance_to_default(
+    equity: float | None,
+    debt: float | None,
+    equity_vol: float | None,
+    r: float = 0.03,
+    t: float = 1.0,
+    max_iter: int = 100,
+    tol: float = 1e-8,
+) -> dict | None:
+    """Merton structural distance-to-default (quants.md §Credit).
+
+    Treats equity as a call on firm assets and calibrates the unobservable
+    asset value V and asset vol sigma_V by iterating the system (web-verified
+    scheme; Merton 1974 / KMV practice):
+
+        E = V N(d1) - D e^{-rT} N(d2),  d1 = [ln(V/D) + (r + 1/2 sV^2) T] /
+        (sV sqrt(T)),  d2 = d1 - sV sqrt(T),  E sE = V sV N(d1).
+
+    Starts from V0 = E + D, sV0 = E/(E+D) * sE and fixed-point updates V and
+    sV. Returns ``{'distance_to_default', 'asset_value', 'asset_volatility',
+    'd1', 'd2', 'risk_neutral_pd', 'converged', 'n_iter'}`` (DtD = d2, the
+    standard Merton distance; PD = N(-d2)) or None when any input is missing /
+    non-positive / fails to converge. Structural credit read alongside the
+    spread-based hazard - not a substitute for it.
+    """
+    import math
+
+    try:
+        E = float(equity)
+        D = float(debt)
+        sE = float(equity_vol)
+        rf = float(r)
+        T = float(t)
+    except (TypeError, ValueError):
+        return None
+    if E <= 0 or D <= 0 or sE <= 0 or T <= 0:
+        return None
+
+    def _ncdf(x: float) -> float:
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    V = E + D
+    sV = (E / V) * sE
+    converged = False
+    n_iter = 0
+    for _ in range(max_iter):
+        if sV <= 0:
+            break
+        d1 = (math.log(V / D) + (rf + 0.5 * sV * sV) * T) / (sV * math.sqrt(T))
+        if math.isnan(d1) or math.isinf(d1):
+            break
+        d2 = d1 - sV * math.sqrt(T)
+        E_model = V * _ncdf(d1) - D * math.exp(-rf * T) * _ncdf(d2)
+        if E_model <= 0:
+            break
+        sE_model = (V / E_model) * sV * _ncdf(d1)
+        V_new = V * (E / E_model)
+        sV_new = sV * (sE / sE_model) if sE_model > 0 else sV
+        if abs(V_new - V) < tol and abs(sV_new - sV) < tol:
+            V, sV = V_new, sV_new
+            converged = True
+            n_iter += 1
+            break
+        V, sV = V_new, sV_new
+        n_iter += 1
+    if V <= 0 or sV <= 0:
+        return None
+    d1 = (math.log(V / D) + (rf + 0.5 * sV * sV) * T) / (sV * math.sqrt(T))
+    d2 = d1 - sV * math.sqrt(T)
+    return {
+        "distance_to_default": round(float(d2), 4),
+        "asset_value": round(float(V), 2),
+        "asset_volatility": round(float(sV), 6),
+        "d1": round(float(d1), 4),
+        "d2": round(float(d2), 4),
+        "risk_neutral_pd": round(float(_ncdf(-d2)), 6),
+        "converged": bool(converged),
+        "n_iter": n_iter,
+    }
+
+
 def default_probability(
     spread: float | None,
     years: float = 1.0,
@@ -127,4 +208,4 @@ def default_probability(
     return 1.0 - math.exp(-lam * t)
 
 
-__all__ = ["credit_stress_level", "CCC_LOW", "CCC_MID", "CCC_HIGH", "HY_LOW", "HY_MID", "HY_HIGH", "hazard_from_spread", "default_probability"]
+__all__ = ["credit_stress_level", "CCC_LOW", "CCC_MID", "CCC_HIGH", "HY_LOW", "HY_MID", "HY_HIGH", "hazard_from_spread", "default_probability", "merton_distance_to_default"]

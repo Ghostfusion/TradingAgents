@@ -30,6 +30,21 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-01] **Cookbook quant-strategy gap implementation** - the five
+  `Strategies/cookbook.md` recipes (time-series momentum, cross-sectional mean
+  reversion, cointegration pairs, multifactor portfolios, options vol) are now
+  code: MOP-style `ts_momentum_weights` (sign x inverse-EWMA-vol, target-vol
+  capped), a cross-sectional toolkit (`cross_section.py`: winsorize /
+  centered-rank / quantile-split / market-residualize / dollar+beta+sector-
+  neutral book / no-trade band), pairs `spread_zscore` / `pair_signal` /
+  `pair_quantities` / `ecm_loading`, z-composite alpha + multi-horizon
+  momentum, portfolio stats (turnover / turnover-cost / exposure /
+  rolling-Sharpe / regime-split), Black-76 rho/vanna/vomma/charm + vanilla-BSM
+  surface + delta-gamma-vega-theta scenario P&L + Cboe/VIX-style model-free
+  implied variance (fixing the always-degrading `get_variance_premium`), CDaR,
+  max-diversification weights, Merton distance-to-default, forward rate, and a
+  microprice/OBI depth read. All bound to the market analyst + risk debators as
+  advisory tools. See CHANGELOG.
 - [2026-09-01] **Structured-debate robustness + json_mode route fix** - the
   opt-in debate pipeline is now fully working end-to-end on live runs (QCOM,
   DELL). Root cause of the always-empty judge: OpenRouter's `json_object`

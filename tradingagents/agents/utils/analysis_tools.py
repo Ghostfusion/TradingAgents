@@ -1997,6 +1997,7 @@ def get_risk_parity_alloc(
     """
     try:
         from tradingagents.strategies.portfolio_optimizer import (
+            max_diversification_weights,
             min_variance_weights,
             risk_contribution,
             risk_parity_weights,
@@ -2005,14 +2006,17 @@ def get_risk_parity_alloc(
         return f"risk-parity alloc unavailable: {exc}"
     rp = risk_parity_weights(returns_by_name)
     mv = min_variance_weights(returns_by_name)
+    md = max_diversification_weights(returns_by_name)
     rc = risk_contribution(rp["weights"], returns_by_name)
     if not rp["weights"]:
         return "risk-parity alloc unavailable: covariance not computable."
     rp_s = ", ".join(f"{k}={v:.1%}" for k, v in rp["weights"].items())
     rc_s = ", ".join(f"{k}={v:.1%}" for k, v in rc.items()) if rc else "n/a"
+    md_s = ", ".join(f"{k}={v:.1%}" for k, v in md["weights"].items()) if md.get("weights") else "n/a"
     return (
         f"risk_parity_alloc {ticker}: {rp_s} [{rp['note']}]; "
-        f"min_var={mv['note']}; risk_contribution={{ {rc_s} }}"
+        f"min_var={mv['note']}; max_div={md_s} [{md['note']}]; "
+        f"risk_contribution={{ {rc_s} }}"
     )
 
 
@@ -2147,9 +2151,18 @@ def get_tail_risk(
         var = simple_var(returns, alpha=alpha)
     except Exception:
         var = None
+    cdar_line = ""
+    try:
+        from tradingagents.strategies.book_risk import cdar
+
+        cd = cdar(closes, alpha=alpha)  # close series as the equity proxy
+        if cd is not None:
+            cdar_line = f" cdar={cd['cdar']:.2%} dvar={cd['dvar']:.2%}"
+    except Exception:
+        pass
     return (
-        f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'} "
-        f"stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+        f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'}"
+        f"{cdar_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
     )
 
 
@@ -2250,6 +2263,38 @@ def get_credit_spread_read(
                 f"(hazard {lam:.3f})"
             )
     return "\n".join(lines)
+
+
+@tool
+def get_merton_distance(
+    equity: Annotated[float, "market equity value (dollars)"],
+    debt: Annotated[float, "total debt / liabilities (dollars)"],
+    equity_vol: Annotated[float, "annualized equity vol (e.g. 0.30)"],
+    r: Annotated[float, "risk-free rate, default 0.03"] = 0.03,
+    t: Annotated[float, "horizon years, default 1.0"] = 1.0,
+) -> str:
+    """Merton structural distance-to-default (quants.md §Credit).
+
+    Calibrates asset value + asset vol from equity-as-a-call and reports
+    distance-to-default (d2), asset vol and the risk-neutral default
+    probability. A structural credit read complementing the spread-based band
+    in get_credit_spread_read. Advisory; state your equity/debt/vol inputs.
+    """
+    try:
+        from tradingagents.strategies.credit_spread import merton_distance_to_default
+    except Exception as exc:  # noqa: BLE001
+        return f"merton distance unavailable: {exc}"
+    try:
+        m = merton_distance_to_default(equity, debt, equity_vol, float(r), float(t))
+    except (TypeError, ValueError):
+        return "merton distance unavailable: invalid inputs"
+    if m is None:
+        return "merton distance unavailable: non-positive / non-convergent inputs"
+    return (
+        f"merton distance-to-default: dtd={m['distance_to_default']:.2f} "
+        f"asset_vol={m['asset_volatility']:.1%} pd_1y={m['risk_neutral_pd']:.2%} "
+        f"converged={m['converged']} (E={equity} D={debt} sE={equity_vol})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3525,31 +3570,139 @@ def _feature_gate(flag_key: str, env_var: str) -> str | None:
 
 
 @tool
+def _machine_chain_vrp(ticker: str) -> dict | None:
+    """Model-free variance risk premium from a machine options chain (yfinance).
+
+    Uses the chain's OTM mids across strikes with the cookbook/Cboe model-free
+    variance formula (forward-discreteness term included), minus the annualized
+    realized variance of the trailing 20-day log returns. ``r`` assumed 3.0%
+    and ``q = 0`` (stated, not claimed precision). Returns ``{implied_var,
+    realized_var, vrp, n, forward}`` or None when the chain is unavailable /
+    unusable (honest no-fabrication).
+    """
+    import datetime as _dt
+    import math as _math
+
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 30:
+        return None
+    spot = float(closes[-1])
+    rets = []
+    for i in range(1, len(closes)):
+        if closes[i - 1] > 0:
+            rets.append(_math.log(float(closes[i]) / float(closes[i - 1])))
+    rv = 0.0
+    if len(rets) >= 20:
+        tail = rets[-20:]
+        m = sum(tail) / len(tail)
+        var = sum((x - m) ** 2 for x in tail) / (len(tail) - 1)
+        rv = max(var * 252.0, 0.0)
+    try:
+        import yfinance as _yf
+
+        tk = _yf.Ticker(str(ticker).upper())
+        expiries = list(tk.options or [])
+        if not expiries:
+            return None
+        expiry = expiries[min(2, len(expiries) - 1)]
+        chain = tk.option_chain(expiry)
+        calls = chain.calls
+        puts = chain.puts
+        if calls is None or puts is None or calls.empty or puts.empty:
+            return None
+        # Days to expiry from the contract symbol (or default 30d).
+        import re as _re
+
+        m = _re.search(r"(\d{6})", expiry)
+        T = 30.0 / 365.0
+        if m:
+            try:
+                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
+                now = _dt.datetime.now()
+                T = max((exp_d - now).days, 1) / 365.0
+            except ValueError:
+                T = 30.0 / 365.0
+        fwd = spot  # q=0 approximation: F = S (no dividend model) - stated
+        rows = []
+        for _, row in calls.iterrows():
+            try:
+                k = float(row.get("strike"))
+                bid = row.get("bid")
+                ask = row.get("ask")
+                last = row.get("lastPrice")
+                mid = (float(bid) + float(ask)) / 2.0 if bid is not None and ask is not None else None
+                if mid is None or mid != mid:
+                    mid = float(last) if last is not None else None
+                if k > fwd and mid is not None and mid == mid and mid > 0:
+                    rows.append((k, float(mid)))
+            except (TypeError, ValueError):
+                continue
+        for _, row in puts.iterrows():
+            try:
+                k = float(row.get("strike"))
+                bid = row.get("bid")
+                ask = row.get("ask")
+                last = row.get("lastPrice")
+                mid = (float(bid) + float(ask)) / 2.0 if bid is not None and ask is not None else None
+                if mid is None or mid != mid:
+                    mid = float(last) if last is not None else None
+                if k < fwd and mid is not None and mid == mid and mid > 0:
+                    rows.append((k, float(mid)))
+            except (TypeError, ValueError):
+                continue
+        if len(rows) < 6:
+            return None
+        from tradingagents.strategies.options_math import model_free_implied_variance
+
+        iv2 = model_free_implied_variance(
+            [r[0] for r in rows], [r[1] for r in rows], fwd, T, 0.03
+        )
+        if iv2 is None:
+            return None
+        return {
+            "implied_var": float(iv2),
+            "realized_var": float(rv),
+            "vrp": float(iv2) - float(rv),
+            "n": len(rows),
+            "forward": round(float(fwd), 2),
+        }
+    except Exception:  # noqa: BLE001 - no fabrication
+        return None
+
+
+@tool
 def get_variance_premium(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
-    """Variance-premium cross-check. The ``variance_swap_strike`` calculator
-    (options_math) prices the fair variance-swap strike from OTM calls/puts;
-    the cboe surface is delivered as rendered text, so this tool points the
-    analyst at the live IV snapshot (`get_options_surface`) and reports the
-    single-strike convenience. Advisory - compare IV vs realized for any
-    'implied vol rich/cheap' claim.
-    """
-    try:
-        from tradingagents.strategies.options_math import variance_swap_strike
+    """Variance risk premium (cookbook recipe 5): implied variance from the
+    OTM options strip minus trailing realized variance.
 
-        # Structural units are covered by tests with synthetic chains; the
-        # live cboe surface is text, so the tool degrades to the IV snapshot.
-        _ = variance_swap_strike  # (wired; live variant needs a machine chain)
+    Uses the model-free (Cboe/VIX-style) implied-variance formula on the
+    machine options chain (yfinance), with the forward-discreteness term, and
+    the annualized realized variance of the trailing 20-day log returns. A
+    positive premium = the market prices more future vol than has realized -
+    useful before any 'vol is rich / cheap into the event' claim. Degrades to
+    the live IV snapshot (get_options_surface) when the machine chain is
+    unavailable - never fabricates. r=3%, q=0 assumptions are stated.
+    """
+    v = _machine_chain_vrp(ticker)
+    if v is not None:
+        return (
+            f"variance premium {ticker}: implied_var={v['implied_var']:.4f} "
+            f"realized_var={v['realized_var']:.4f} vrp={v['vrp']:+.4f} "
+            f"(model-free, n={v['n']} OTM strikes, fwd~={v['forward']}, "
+            f"r=3% q=0; positive = rich IV)"
+        )
+    try:
         from tradingagents.agents.utils.analysis_tools import get_options_surface
 
         surf = get_options_surface.invoke({"ticker": ticker})
         head = (surf or "").splitlines()[:8]
         lines = [
-            f"variance premium (variance_swap_strike) unavailable for {ticker}: "
-            "the cboe surface is rendered text, not machine strikes.",
+            f"variance premium unavailable for {ticker}: machine options chain "
+            "unavailable (no strikes/mids).",
             "",
-            "Live IV surface (get_options_surface) — first rows:",
+            "Live IV surface (get_options_surface) - first rows:",
         ]
         lines.extend(head or ["(no rows)"])
         return "\n".join(lines)
@@ -4026,6 +4179,174 @@ def get_pair_risk(
         f"pair risk: cointegrated={c.get('cointegrated')} n={c.get('n')} "
         f"beta={c.get('beta')} residual_adf={c.get('residual_adf_stat')}"
         f" | granger(x->y): {g.get('x_causes_y')} [{reminder}]"
+    )
+
+
+@tool
+def get_pair_trade_signal(
+    x: Annotated[list, "first series (e.g. closes of the anchor)"],
+    y: Annotated[list, "second series (e.g. closes of the pair)"],
+    entry: Annotated[float, "spread-z entry band, default 2.0"] = 2.0,
+    exit_thresh: Annotated[float, "spread-z exit band, default 0.5"] = 0.5,
+    stop: Annotated[float, "spread-z risk stop, default 3.0"] = 3.0,
+) -> str:
+    """Pairs-trading trade signal (cookbook recipe 3): spread z-score bands.
+
+    Entry at |z| >= entry (short when +, long when -), exit when |z| <=
+    exit_thresh, risk stop at |z| >= stop, with the cointegration + half-life
+    cross-check. Advisory signal - never an order recommendation.
+
+    Args:
+        x: first aligned price series.
+        y: second aligned price series.
+        entry: z entry threshold (default 2.0).
+        exit_thresh: z exit band (default 0.5).
+        stop: z stop band (default 3.0).
+
+    Returns:
+        signal + spread/z/beta/half-life lines, or "unavailable" below the
+        min-observation floor.
+    """
+    try:
+        from tradingagents.strategies.statistical import pair_signal
+    except Exception as exc:
+        return f"pair trade signal unavailable: {exc}"
+    try:
+        xs = [float(v) for v in (x or [])]
+        ys = [float(v) for v in (y or [])]
+    except (TypeError, ValueError):
+        return "pair trade signal unavailable: non-numeric series"
+    if len(xs) < 70 or len(ys) < 70:
+        return f"pair trade signal unavailable: need >= 70 aligned obs (got {min(len(xs), len(ys))})"
+    s = pair_signal(xs, ys, entry=entry, exit_thresh=exit_thresh, stop=stop)
+    if s.get("z") is None:
+        return "pair trade signal unavailable: no measurable spread"
+    return (
+        f"pair trade signal: {s.get('signal')} z={s.get('z')} "
+        f"spread={s.get('spread')} beta={s.get('beta')} "
+        f"half_life={s.get('half_life')} cointegrated={s.get('cointegrated')} n={s.get('n')}"
+    )
+
+
+@tool
+def get_event_pnl_response(
+    spot: Annotated[float, "current underlying price"],
+    delta: Annotated[float, "option delta (e.g. from get_options_surface)"],
+    gamma: Annotated[float, "option gamma"],
+    vega: Annotated[float, "option vega (per 1.0 vol move)"],
+    theta: Annotated[float, "option theta (price units per year)"],
+    dS_pct: Annotated[float, "expected underlying move as decimal (e.g. 0.02 = 2%)"],
+    dSigma: Annotated[float, "expected vol change as absolute (e.g. 0.05 = +5 vol pts)"] = 0.0,
+) -> str:
+    """Event-window P&L response (cookbook recipe 5): delta-gamma-vega-theta.
+
+    ``dPi ~= Delta*dS + 1/2*Gamma*dS^2 + Vega*dSigma + Theta*dt`` (dt = 1 day)
+    - the scenario P&L a catalyst/earnings move implies for one option unit.
+    Use the surface's greeks plus the expected move (get_expected_move) before
+    any 'the move would be worth X' claim. Purely advisory; not a trade size.
+    """
+    try:
+        from tradingagents.strategies.options_math import greek_pnl_response
+    except Exception as exc:
+        return f"event pnl response unavailable: {exc}"
+    try:
+        p = greek_pnl_response(
+            None if delta is None else float(delta),
+            None if gamma is None else float(gamma),
+            None if vega is None else float(vega),
+            None if theta is None else float(theta),
+            float(spot), float(dS_pct), float(dSigma),
+        )
+    except (TypeError, ValueError):
+        return "event pnl response unavailable: invalid inputs"
+    return (
+        f"event pnl response: dS={dS_pct:.1%} dSigma={dSigma:+.2f} "
+        f"delta_pnl={p['delta_pnl']} gamma_pnl={p['gamma_pnl']} "
+        f"vega_pnl={p['vega_pnl']} theta_pnl={p['theta_pnl']} "
+        f"total_pnl={p['total_pnl']} (per option unit, 1-day)"
+    )
+
+
+@tool
+def get_ts_momentum_weights(
+    closes_by_name: Annotated[
+        dict, "dict of name -> daily close series, e.g. {'SPY': [...], 'TLT': [...]}"
+    ],
+    horizon: Annotated[int, "momentum lookback in trading days, default 252"] = 252,
+    target_vol: Annotated[float, "portfolio target annualized vol, default 0.10"] = 0.10,
+    max_leverage: Annotated[float, "max gross leverage, default 2.0"] = 2.0,
+) -> str:
+    """Time-series momentum portfolio weights (cookbook recipe 1, MOP-style).
+
+    Each name gets ``sign(trailing log return) / EWMA vol``, normalized to the
+    portfolio ``target_vol`` and hard-capped at ``max_leverage`` gross. Gives
+    the vol-scaled trend book before any 'this asset is trending, size more'
+    claim - a deterministic, cost-aware diversification input.
+
+    Args:
+        closes_by_name: name -> aligned daily closes.
+        horizon: momentum lookback (default 252).
+        target_vol: portfolio annualized vol target (default 0.10).
+        max_leverage: gross leverage cap (default 2.0).
+
+    Returns:
+        per-name weights + meta (target_vol / gross / n_names), or
+        "unavailable" when no name has a measurable signal.
+    """
+    try:
+        from tradingagents.strategies.momentum import ts_momentum_weights
+    except Exception as exc:
+        return f"ts momentum weights unavailable: {exc}"
+    try:
+        cleaned = {
+            k: [float(v) for v in (s or [])]
+            for k, s in (closes_by_name or {}).items()
+        }
+    except (TypeError, ValueError):
+        return "ts momentum weights unavailable: non-numeric series"
+    cleaned = {k: v for k, v in cleaned.items() if len(v) >= horizon + 2}
+    if not cleaned:
+        return f"ts momentum weights unavailable: need >= {horizon + 2} closes per name"
+    w = ts_momentum_weights(cleaned, horizon=horizon, target_vol=target_vol,
+                            max_leverage=max_leverage)
+    if w is None:
+        return "ts momentum weights unavailable: no measurable signal"
+    meta = w.pop("_meta", {})
+    lines = [f"ts momentum weights (target_vol={meta.get('target_vol')} "
+             f"gross={meta.get('gross')} n_names={meta.get('n_names')}):"]
+    for name, weight in w.items():
+        lines.append(f"  {name}={weight:+.4f}")
+    return "\n".join(lines)
+
+
+@tool
+def get_book_depth_read(
+    bid: Annotated[float, "bid price"],
+    ask: Annotated[float, "ask price"],
+    bid_size: Annotated[float, "bid-side depth (shares)"],
+    ask_size: Annotated[float, "ask-side depth (shares)"],
+) -> str:
+    """Microprice + order-book imbalance (cookbook recipe 2 execution).
+
+    Microprice = (bid*ask_size + ask*bid_size) / (bid_size + ask_size) - the
+    size-weighted fair value that shifts toward the thinner side; OBI =
+    (bid_size - ask_size) / (bid_size + ask_size). Short-horizon price-pressure
+    read for the pre-market / thin-book path. Honest 'unavailable' without
+    both sizes (never fabricates a depth).
+    """
+    try:
+        from tradingagents.strategies.market_session import book_depth_read
+    except Exception as exc:
+        return f"book depth read unavailable: {exc}"
+    try:
+        r = book_depth_read(bid, ask, bid_size, ask_size)
+    except (TypeError, ValueError):
+        return "book depth read unavailable: invalid inputs"
+    if r.get("microprice") is None:
+        return "book depth read unavailable: missing bid/ask sizes"
+    return (
+        f"book depth read: microprice={r['microprice']} obi={r['obi']} "
+        f"verdict={r['verdict']}"
     )
 
 

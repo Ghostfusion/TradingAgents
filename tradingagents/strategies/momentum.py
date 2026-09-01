@@ -76,6 +76,79 @@ def twap(closes: list) -> float | None:
     return round(sum(vals) / len(vals), 4)
 
 
+def _log_returns(closes: list) -> list[float]:
+    """Log returns of a close series (skips None / non-positive)."""
+    out: list[float] = []
+    prev: float | None = None
+    for c in closes:
+        try:
+            f = float(c)
+        except (TypeError, ValueError):
+            prev = None
+            continue
+        if not math.isfinite(f) or f <= 0:
+            prev = None
+            continue
+        if prev is not None:
+            out.append(math.log(f / prev))
+        prev = f
+    return out
+
+
+def ts_momentum_weights(
+    closes_by_name: dict,
+    horizon: int = 252,
+    vol_window: int = 60,
+    target_vol: float = 0.10,
+    max_leverage: float = 2.0,
+) -> dict | None:
+    """Cookbook recipe 1 time-series momentum weights (MOP-style).
+
+    Per name: ``w_i ~= sign(log(P_t/P_{t-h})) / sigma_i`` - the sign of the
+    trailing-horizon log return scaled inverse to recent EWMA volatility
+    (volatility targeting). Raw weights are normalized to the portfolio
+    ``target_vol`` and hard-capped at ``max_leverage`` gross. Names without
+    enough history / zero vol contribute nothing (honest partial book).
+
+    Returns ``{name: weight, ...}`` with ``_meta`` = ``{target_vol,
+    gross, n_names}`` or None when no name has a measurable signal.
+    """
+    from .volatility_models import ewma_vol
+
+    out: dict = {}
+    for name, closes in (closes_by_name or {}).items():
+        logs = _log_returns(closes)
+        if len(logs) <= horizon:
+            continue
+        mom = math.log(float(closes[-1]) / float(closes[-(horizon + 1)]))
+        if not math.isfinite(mom):
+            continue
+        sig = ewma_vol(logs, lam=0.94, min_obs=20)
+        if sig is None or sig <= 0:
+            continue
+        w = (1.0 if mom > 0 else (-1.0 if mom < 0 else 0.0)) / sig
+        out[name] = w
+    if not out:
+        return None
+    # Normalize ex-ante vol to the target: scale = target_vol / mean(sigma_i).
+    sigmas = [1.0 / abs(w) for w in out.values() if w != 0.0]
+    scale = 1.0
+    if sigmas:
+        scale = target_vol / (sum(sigmas) / len(sigmas))
+    raw = {n: w * scale for n, w in out.items()}
+    gross = sum(abs(v) for v in raw.values())
+    if gross > max_leverage:
+        k = max_leverage / gross
+        raw = {n: v * k for n, v in raw.items()}
+        gross = max_leverage
+    raw["_meta"] = {
+        "target_vol": round(float(target_vol), 4),
+        "gross": round(float(gross), 4),
+        "n_names": sum(1 for n in raw if n != "_meta"),
+    }
+    return raw
+
+
 def pillars(close=None, day_volume=None, prev_close=None, day_open=None,
             rv: float | None = None, price_lo: float = 2.0,
             price_hi: float = 20.0, float_shares: float | None = None) -> dict:
@@ -277,5 +350,5 @@ def intraday_pullback(bars: list, window: int = 6) -> dict:
 
 
 __all__ = ["rvol", "ema9", "vwap", "pillars", "first_pullback", "session_flags",
-           "past_optimal_window", "psych_level", "intraday_pullback", "twap"
-]
+           "past_optimal_window", "psych_level", "intraday_pullback", "twap",
+           "ts_momentum_weights"]

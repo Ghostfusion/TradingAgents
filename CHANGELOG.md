@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Added
+
+- **Cookbook quant-strategy gap implementation** (`Strategies/cookbook.md`,
+  recipes 1-5 + common framework) - the missing portfolio-construction /
+  evaluation / options math is now code and bound to the decision agents:
+  - **Time-series momentum** (recipe 1): `strategies/momentum.py::ts_momentum_weights`
+    - MOP-style `sign(trailing log return) / EWMA vol`, target-vol normalized,
+      gross-leverage capped; `factors.momentum_multihorizon` (1/3/6/12m ensemble).
+  - **Cross-sectional mean reversion** (recipe 2): new
+    `strategies/cross_section.py` - `winsorize`, `cross_sectional_z`,
+    `centered_rank` (2.RankPct-1), `quantile_split`, `residualize_returns`
+    (market beta residual), `neutralize_book` (dollar + beta + sector-neutral
+    via a row-space projection, gross renormalized), `no_trade_band`.
+  - **Cointegration pairs** (recipe 3): `statistical.py` - `spread_zscore`
+    (rolling beta hedge), `pair_signal` (entry |z|>=2 / exit <=0.5 / stop >=3,
+    cointegration + half-life cross-check), `pair_quantities` (dollar-neutral
+    G/2 leg split), `ecm_loading` (VECM speed-of-adjustment gamma).
+  - **Multifactor portfolios** (recipe 4): `factors.z_composite_alpha`
+    (weighted linear z-composite alpha).
+  - **Options volatility** (recipe 5): `options_math.py` - `black76` gains
+    rho / vanna / vomma / charm (second-order Greeks), new
+    `bsm_equity_surface` (vanilla BSM + full Greek set - closes the previously
+    skipped vanilla-BSM item), `greek_pnl_response` (delta-gamma-vega-theta
+    scenario P&L), `model_free_implied_variance` (Cboe/VIX-style discrete
+    formula with the forward-discreteness term). `get_variance_premium` is
+    repaired: it now computes a real model-free VRP from the machine options
+    chain (strikes/mids to implied variance minus realized), with the IV-
+    snapshot degrade when the chain is unavailable.
+  - **Common framework**: `evaluate.py` - `turnover` (1/2 sum |dw|),
+    `turnover_cost` (sum |dw|*c), `gross_exposure` / `net_exposure`,
+    `rolling_sharpe`, `regime_split_performance`.
+  - **Risk leaves**: `book_risk.cdar` (Chekhlov drawdown-at-risk tail),
+    `portfolio_optimizer.max_diversification_weights` (Choueifaty Sigma^-1 sigma),
+    `credit_spread.merton_distance_to_default` (equity-as-a-call fixed-point,
+    DtD = d2 + risk-neutral PD), `rate_utils.forward_rate`,
+    `market_session.book_depth_read` (microprice + OBI).
+- **Agent binding (compute-as-tools)**: new market-analyst tools
+  `get_ts_momentum_weights`, `get_pair_trade_signal`, `get_event_pnl_response`,
+  `get_book_depth_read`, `get_merton_distance` (bound to the market analyst
+  tool list + prompt + the graph market ToolNode + `agent_utils.__all__`),
+  Merton also bound to the 3 risk debators' in-node risk loop; `get_tail_risk`
+  now reports CDaR/DVaR, `get_risk_parity_alloc` reports max-diversification
+  weights, plus a dedicated `get_merton_distance` Merton tool. trading_web
+  Value Tools += `variance_premium` + `ts_momentum_weights`.
+  Tests: `tests/test_cookbook_gaps.py` (27 hermetic, timed); affected suites
+  349 passed.
+
 ### Fixed
 
 - **Structured-debate robustness series (QCOM/DELL live runs)** - a

@@ -90,6 +90,21 @@ involved. This is the "compute, don't narrate" core.
 - `mean_reversion.py` — demeaned AR(1)/OU half-life with an OLS t-test gate
   + `mean_reversion_verdict`.
 - `fixed_income.py` — preferred YTM / duration / DV01 / convexity.
+- `cross_section.py` — cookbook cross-sectional toolkit: `winsorize`,
+  `cross_sectional_z`, `centered_rank` (2.RankPct-1), `quantile_split`,
+  `residualize_returns` (market beta residual), `neutralize_book`
+  (dollar + beta + sector-neutral via a row-space projection, gross
+  renormalized), `no_trade_band`.
+- `momentum.py` — MOP-style `ts_momentum_weights` (sign x inverse-EWMA-vol,
+  target-vol normalized, gross-leverage capped).
+- `options_math.py` — Black-76 with rho/vanna/vomma/charm + vanilla
+  `bsm_equity_surface` + `greek_pnl_response` (delta-gamma-vega-theta P&L) +
+  Cboe/VIX-style `model_free_implied_variance`.
+- `book_risk.py` — `cdar` (Chekhlov drawdown-at-risk).
+- `portfolio_optimizer.py` — `max_diversification_weights` (Choueifaty).
+- `credit_spread.py` — `merton_distance_to_default` (equity-as-a-call).
+- `rate_utils.py` — `forward_rate` between discount factors.
+- `market_session.py` — `book_depth_read` (microprice + OBI).
 
 ## 4.3 Evaluation
 

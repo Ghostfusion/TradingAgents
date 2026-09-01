@@ -562,10 +562,10 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_scaleout_plan(entry, stop, t1_fraction?)` | `strategies.swing.scaleout_plan` | market | tiered partial-profit plan (sell T1 fraction -> break-even -> trail) |
 | `get_payoff_asymmetry(ticker, returns?, threshold?)` | `strategies.statistical.omega` | market | Omega ratio (gains/losses payoff asymmetry) about a threshold |
 | `get_book_correlation(returns_by_name, method?)` | `strategies.statistical.correlation_matrix` | market | full pairwise correlation (avg + max pair) over a book |
-| `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + risk_contribution) | market | risk-parity weights, min-variance weights and per-name risk contributions from a real covariance matrix |
+| `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + **max_diversification** + risk_contribution) | market | risk-parity weights, min-variance weights, max-diversification weights (Choueifaty `Σ⁻¹σ`) and per-name risk contributions from a real covariance matrix |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
-| `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` | market | historical VaR / CVaR tail budget + -10% uniform stress loss |
+| `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` + **`cdar`** | market | historical VaR / CVaR tail budget + CDaR/DVaR drawdown-tail + -10% uniform stress loss |
 | `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
 | `get_session_discipline(ticker, peak_pnl?, current_pnl?)` | `strategies.momentum.session_flags` + `psych_level` + `past_optimal_window` | market | intraday walk-away rules (giveback, max-daily-loss, past 10:00 ET optimal) + nearest psych levels |
 | `get_earnings_quality(ticker, date)` | `strategies.normalized.accruals_ratio` + `trap_verdict` | fundamentals | Sloan accruals ratio + the forensic trap verdict incl. the accrual evidence trigger |
@@ -589,6 +589,11 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable |
 | `get_fixed_income_risk(ticker, years?)` | `strategies.fixed_income` | fundamentals | preferred yield + duration/DV01/convexity risk rows (perpetual YTM n/a) |
 | `get_pair_risk(x, y, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` | market | Engle-Granger cointegration + lag-wise Granger causality |
+| `get_pair_trade_signal(x, y, entry?, exit_thresh?, stop?)` | `strategies.statistical.pair_signal` (`spread_zscore` + cointegration + half-life) | market | cookbook recipe-3 pairs signal: entry \|z\|≥2 / exit ≤0.5 / stop ≥3, dollar-neutral `pair_quantities` + VECM `ecm_loading` advisory |
+| `get_ts_momentum_weights(closes_by_name, horizon?, target_vol?, max_leverage?)` | `strategies.momentum.ts_momentum_weights` | market | MOP-style time-series momentum weights: `sign(12m log return) / EWMA vol`, target-vol normalized, gross-leverage capped |
+| `get_event_pnl_response(spot, delta, gamma, vega, theta, dS_pct, dSigma?)` | `strategies.options_math.greek_pnl_response` | market | cookbook recipe-5 scenario P&L: `Δ·dS + ½Γ·dS² + ν·dσ + Θ·dt` per option unit |
+| `get_merton_distance(equity, debt, equity_vol, r?, t?)` | `strategies.credit_spread.merton_distance_to_default` | market / risk debators | structural distance-to-default (equity-as-a-call fixed-point; DtD = d2 + risk-neutral PD) |
+| `get_book_depth_read(bid, ask, bid_size, ask_size)` | `strategies.market_session.book_depth_read` | market | microprice `(bid·ask_sz + ask·bid_sz)/(bid_sz+ask_sz)` + order-book imbalance + thin-side verdict |
 | `get_vif_read(columns)` | `strategies.statistical.variance_inflation_factor` | market | per-column VIF (collinearity check; > 5 = HIGH) |
 | `get_vol_cones(ticker)` | `strategies.rotation.vol_cones` | market / risk debators | multi-horizon realized-vol percentiles (5/10/21/63/126d) |
 | `get_trade_excursions(trades)` | `strategies.journal.trade_excursions` | market | MAE / MFE / profit-factor / max intra-trade drawdown (exit quality) |

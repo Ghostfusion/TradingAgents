@@ -43,6 +43,28 @@ def compound_factor(rate: float, t: float, comp: str = "continuous") -> float | 
     return None if df is None or df <= 0 else 1.0 / df
 
 
+def forward_rate(
+    discount_1: float | None, discount_2: float | None,
+    t1: float, t2: float,
+) -> float | None:
+    """Continuously-compounded forward rate between two discount factors.
+
+    ``f(0; t1, t2) = (ln D(0,t1) - ln D(0,t2)) / (t2 - t1)`` (quants.md
+    §Fixed Income). Returns None when either discount factor is non-positive,
+    the times are out of order, or the interval is zero.
+    """
+    try:
+        d1 = float(discount_1)
+        d2 = float(discount_2)
+        a = float(t1)
+        b = float(t2)
+    except (TypeError, ValueError):
+        return None
+    if d1 <= 0 or d2 <= 0 or b <= a:
+        return None
+    return (math.log(d1) - math.log(d2)) / (b - a)
+
+
 def equivalent_rate(rate: float, comp: str, target_comp: str, t: float) -> float | None:
     """Convert a rate between conventions so the same discount factor results.
 
@@ -158,4 +180,4 @@ def downside_measures(returns: list, target: float = 0.0) -> dict:
 
 
 __all__ = ["discount_factor", "compound_factor", "equivalent_rate",
-           "monotone_fill", "downside_measures"]
+           "forward_rate", "monotone_fill", "downside_measures"]

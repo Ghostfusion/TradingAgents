@@ -191,6 +191,53 @@ def enforce_sector_exposure(weights_by_name: dict[str, float], sector_of: dict,
     return {k: v / total for k, v in out.items()}
 
 
+def _std(vals: list) -> float:
+    n = len(vals)
+    if n < 2:
+        return 0.0
+    m = sum(vals) / n
+    return math.sqrt(sum((v - m) ** 2 for v in vals) / (n - 1))
+
+
+def max_diversification_weights(returns_by_name: dict) -> dict:
+    """Maximum-diversification portfolio (Choueifaty): ``w ~= Sigma^-1 * sigma``.
+
+    Maximizes the diversification ratio ``DR(w) = w' * sigma / sqrt(w' Sigma w)``;
+    the unconstrained optimizer is proportional to ``Sigma^-1 sigma``
+    (web-verified closed form), then non-negative clipped + renomalized
+    (approximate constrained MDP, labelled). Degrades to equal-weight when the
+    covariance is singular/unavailable (never a fabricated precision).
+    """
+    names = [n for n in (returns_by_name or {}) if returns_by_name.get(n)]
+    if len(names) < 2:
+        return {"weights": dict.fromkeys(names, 0.0) if names else {},
+                "note": "insufficient names"}
+    cov = _covariance_matrix(returns_by_name)
+    if cov is None:
+        w = 1.0 / len(names)
+        return {"weights": dict.fromkeys(names, w),
+                "note": "equal-weight (covariance unavailable)"}
+    sig = []
+    for n in names:
+        vals = [float(v) for v in returns_by_name[n] if v is not None]
+        sig.append(max(_std(vals), 1e-12))
+    try:
+        inv = _invert(cov["cov"])
+        raw = [sum(inv[i][j] * sig[j] for j in range(len(names))) for i in range(len(names))]
+        raw = [max(0.0, x) for x in raw]  # long-only clip
+        norm = _normalize(raw)
+        if norm is None:
+            raise ValueError("degenerate")
+        return {
+            "weights": {names[i]: round(float(norm[i]), 6) for i in range(len(names))},
+            "note": "max-diversification (Sigma^-1 sigma, long-only approx)",
+        }
+    except Exception:  # noqa: BLE001 - no fabrication
+        w = 1.0 / len(names)
+        return {"weights": dict.fromkeys(names, w),
+                "note": "equal-weight (covariance unavailable)"}
+
+
 def risk_contribution(weights_by_name: dict[str, float],
                       returns_by_name: dict) -> dict:
     """Per-name marginal risk contribution = w_i * (Cov·w)_i / total var.
@@ -302,4 +349,5 @@ def black_litterman_weights(
 
 __all__ = ["risk_parity_weights", "min_variance_weights",
            "confidence_weights", "enforce_sector_exposure",
-           "risk_contribution", "black_litterman_weights"]
+           "risk_contribution", "black_litterman_weights",
+           "max_diversification_weights"]

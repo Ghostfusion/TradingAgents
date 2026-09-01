@@ -337,9 +337,29 @@ def main(argv: list[str] | None = None) -> int:
             _avg = sum(_vols[-30:]) / 30
             _liq = premarket_liquidity(_latest, _avg)
             if _liq.get("verdict") in ("thin", "illiquid"):
+                # Cookbook recipe 2 execution read: a one-sided depth confirms
+                # the thin-book directive (best-effort; never blocks).
+                _depth_line = ""
+                try:
+                    from tradingagents.strategies.market_session import book_depth_read
+
+                    _bid = deltas.get("preopen_bid")
+                    _ask = deltas.get("preopen_ask")
+                    _bs = deltas.get("preopen_bid_size")
+                    _as = deltas.get("preopen_ask_size")
+                    if _bid is not None and _ask is not None and _bs is not None and _as is not None:
+                        _bd = book_depth_read(_bid, _ask, _bs, _as)
+                        if _bd.get("microprice") is not None:
+                            _depth_line = (
+                                f" depth: microprice={_bd['microprice']} "
+                                f"obi={_bd['obi']:+.2f} ({_bd['verdict']})"
+                            )
+                except Exception:  # noqa: BLE001 - advisory only
+                    pass
                 verdict["reasons"].append(
-                    f"pre-market liquidity {_liq['verdict']} (ratio {_liq['ratio']:.2f}) "
-                    ": prefer limit orders and reduce size at the open (wide spreads)"
+                    f"pre-market liquidity {_liq['verdict']} (ratio {_liq['ratio']:.2f})"
+                    f"{_depth_line}: prefer limit orders and reduce size at the "
+                    "open (wide spreads)"
                 )
     except Exception:  # noqa: BLE001 - the directive is best-effort, never blocks
         pass

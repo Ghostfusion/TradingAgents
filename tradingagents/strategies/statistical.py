@@ -390,6 +390,183 @@ def ols_factors(y: list, factors: dict) -> dict:
         return {"rsquared": None, "params": None, "n": 0}
 
 
+def spread_zscore(x: list, y: list, window: int = 60) -> dict | None:
+    """Rolling spread + z-score for a cointegrated pair (cookbook recipe 3).
+
+    Estimates the rolling hedge ratio ``beta = Cov(x,y) / Var(x)`` and
+    intercept over the trailing ``window``, forms the spread
+    ``s = y - alpha - beta * x``, then z-scores it against its own rolling
+    mean/std. Returns ``{'spread', 'z', 'beta', 'alpha'}`` (series aligned to
+    the tail) or None below ``window + 10`` aligned obs / zero variance.
+    """
+    xs = _clean(x)
+    ys = _clean(y)
+    n = min(len(xs), len(ys))
+    if n < window + 10:
+        return None
+    xs = xs[:n]
+    ys = ys[:n]
+    out = {"spread": [], "z": [], "beta": None, "alpha": None}
+    spreads: list[float] = []
+    betas: list[float] = []
+    for end in range(window, n + 1):
+        xw = xs[end - window:end]
+        yw = ys[end - window:end]
+        mx = sum(xw) / window
+        my = sum(yw) / window
+        vx = sum((a - mx) ** 2 for a in xw) / (window - 1)
+        if vx <= 0:
+            betas.append(0.0)
+            continue
+        cov = sum((xw[i] - mx) * (yw[i] - my) for i in range(window)) / (window - 1)
+        beta = cov / vx
+        alpha = my - beta * mx
+        betas.append(beta)
+        spreads.append(yw[-1] - alpha - beta * xw[-1])
+    if len(spreads) < 20:
+        return None
+    # Rolling z over the same window on the spread series.
+    spread_copy = list(spreads)
+    zs: list[float] = []
+    for i in range(len(spread_copy)):
+        lo = max(0, i - window + 1)
+        seg = spread_copy[lo:i + 1]
+        if len(seg) < 20:
+            zs.append(None)
+            continue
+        m = sum(seg) / len(seg)
+        var = sum((v - m) ** 2 for v in seg) / (len(seg) - 1)
+        sd = math.sqrt(var) if var > 0 else 0.0
+        zs.append((spread_copy[i] - m) / sd if sd > 0 else 0.0)
+    out["spread"] = [round(v, 6) for v in spread_copy]
+    out["z"] = [round(v, 6) if v is not None else None for v in zs]
+    out["beta"] = round(sum(betas) / len(betas), 6) if betas else None
+    if betas:
+        # last-window alpha from the mean spread equation
+        x_last = xs[-1]
+        y_last = ys[-1]
+        out["alpha"] = round(y_last - out["beta"] * x_last, 6)
+    return out
+
+
+def pair_signal(
+    x: list,
+    y: list,
+    entry: float = 2.0,
+    exit_thresh: float = 0.5,
+    stop: float = 3.0,
+    max_hold: int | None = None,
+) -> dict:
+    """Cookbook recipe 3 pairs-trading signal from the spread z-score.
+
+    ``entry``/``exit_thresh``/``stop`` are the conventional +/-2 / 0.5 / 3-4
+    bands (web-verified standard starting points): z >= +entry -> short the
+    spread, z <= -entry -> long, |z| <= exit -> exit, |z| >= stop -> risk
+    stop. ``max_hold`` caps the holding period (bars) when provided. Returns
+    ``{'signal', 'z', 'spread', 'beta', 'half_life', 'cointegrated', 'n'}``
+    or an all-None dict when the pair has no measurable spread.
+    """
+    out = {"signal": None, "z": None, "spread": None, "beta": None,
+           "half_life": None, "cointegrated": None, "n": 0}
+    zr = spread_zscore(x, y)
+    if zr is None or not zr["z"]:
+        return out
+    zs = [v for v in zr["z"] if v is not None]
+    z_now = zs[-1] if zs else None
+    c = cointegration_pair(x, y)
+    hl = None
+    if c.get("cointegrated") and zr.get("spread"):
+        try:
+            from .mean_reversion import ar1_half_life
+            hl = ar1_half_life(zr["spread"])
+        except Exception:  # noqa: BLE001
+            hl = None
+    signal = None
+    if z_now is not None:
+        if z_now >= float(entry):
+            signal = "SHORT_SPREAD"
+        elif z_now <= -float(entry):
+            signal = "LONG_SPREAD"
+        elif abs(z_now) <= float(exit_thresh) or abs(z_now) >= float(stop):
+            signal = "FLAT" if abs(z_now) <= float(exit_thresh) else "STOP"
+    out.update({
+        "signal": signal,
+        "z": round(z_now, 4) if z_now is not None else None,
+        "spread": zr["spread"][-1] if zr.get("spread") else None,
+        "beta": zr.get("beta"),
+        "half_life": round(float(hl), 2) if hl is not None else None,
+        "cointegrated": c.get("cointegrated"),
+        "n": c.get("n", 0),
+    })
+    return out
+
+
+def pair_quantities(
+    gross: float, price_y: float, price_x: float, beta: float
+) -> dict | None:
+    """Dollar-neutral pair quantities (cookbook recipe 3): q_Y = (G/2)/P_Y,
+    q_X = beta*G/2/P_X. None when any input is non-positive or missing.
+    """
+    try:
+        g = float(gross)
+        py = float(price_y)
+        px = float(price_x)
+        b = float(beta)
+    except (TypeError, ValueError):
+        return None
+    if g <= 0 or py <= 0 or px <= 0 or not math.isfinite(g) or not math.isfinite(b):
+        return None
+    qy = (g / 2.0) / py
+    qx = (b * g / 2.0) / px
+    return {"q_y": round(qy, 4), "q_x": round(qx, 4), "beta": round(b, 6)}
+
+
+def ecm_loading(x: list, y: list, min_obs: int = 30) -> dict | None:
+    """Error-correction speed of adjustment (cookbook recipe 3): the loading
+    gamma on the prior equilibrium error in ``dY_t = a + gamma*(Y_{t-1} -
+    beta*X_{t-1}) + delta*dX_t + e_t``. A negative, meaningful gamma supports
+    mean reversion toward the cointegrating relation. Returns ``{gamma, beta,
+    delta, alpha, n}`` or None below ``min_obs`` aligned obs.
+    """
+    xs = _clean(x)
+    ys = _clean(y)
+    n = min(len(xs), len(ys))
+    if n < min_obs:
+        return None
+    xs = xs[:n]
+    ys = ys[:n]
+    # OLS y on x for the cointegrating beta.
+    try:
+        X0 = _np.column_stack([_np.ones(n), _np.array(xs)])
+        beta0, *_ = _np.linalg.lstsq(X0, _np.array(ys), rcond=None)
+        beta = float(beta0[1])
+    except Exception:  # noqa: BLE001
+        return None
+    eq = [ys[i] - beta * xs[i] for i in range(n)]
+    rows = n - 1
+    if rows < 10:
+        return None
+    dy = [ys[i] - ys[i - 1] for i in range(1, n)]
+    dx = [xs[i] - xs[i - 1] for i in range(1, n)]
+    # dY ~ a + gamma*eq_{t-1} + delta*dX
+    X = _np.column_stack([
+        _np.ones(rows),
+        _np.array(eq[:-1]),
+        _np.array(dx),
+    ])
+    try:
+        beta_e, *_ = _np.linalg.lstsq(X, _np.array(dy), rcond=None)
+        return {
+            "gamma": round(float(beta_e[1]), 6),
+            "delta": round(float(beta_e[2]), 6),
+            "alpha": round(float(beta_e[0]), 6),
+            "beta": round(beta, 6),
+            "n": rows,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def variance_inflation_factor(columns: dict) -> dict:
     """VIF for each column (regress column on the others; VIF = 1/(1-R²)).
     ``{col: {vif, high}}`` where high = VIF > 5. None for < 3 columns or a
@@ -425,4 +602,5 @@ __all__ = [
     "normality", "unit_root", "omega", "correlation_matrix",
     "cointegration_pair", "granger_causality", "capm_decomposition",
     "ols_factors", "variance_inflation_factor",
+    "spread_zscore", "pair_signal", "pair_quantities", "ecm_loading",
 ]

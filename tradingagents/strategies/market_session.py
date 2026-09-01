@@ -16,12 +16,51 @@ no-fabrication rule). No network, no state.
 
 from __future__ import annotations
 
+
+def book_depth_read(
+    bid: float | None,
+    ask: float | None,
+    bid_size: float | None,
+    ask_size: float | None,
+) -> dict:
+    """Microprice + order-book imbalance (cookbook recipe 2 execution).
+
+    microprice = (bid*ask_size + ask*bid_size) / (bid_size + ask_size) — the
+    size-weighted fair value that shifts toward the thinner side of the book;
+    OBI = (bid_size - ask_size) / (bid_size + ask_size) — signed depth
+    asymmetry (+1 = heavy bid, -1 = heavy ask). Short-horizon price-pressure
+    signal for the pre-market / thin-book path. None when any input is missing
+    or the sizes don't sum positive (never fabricates a depth).
+    """
+    if bid is None or ask is None or bid_size is None or ask_size is None:
+        return {"microprice": None, "obi": None, "verdict": None}
+    try:
+        b = float(bid)
+        a = float(ask)
+        bs = float(bid_size)
+        as_ = float(ask_size)
+    except (TypeError, ValueError):
+        return {"microprice": None, "obi": None, "verdict": None}
+    if b <= 0 or a <= 0 or bs < 0 or as_ < 0 or (bs + as_) <= 0:
+        return {"microprice": None, "obi": None, "verdict": None}
+    micro = (b * as_ + a * bs) / (bs + as_)
+    obi = (bs - as_) / (bs + as_)
+    if obi > 0.2:
+        verdict = "bid-heavy"
+    elif obi < -0.2:
+        verdict = "ask-heavy"
+    else:
+        verdict = "balanced"
+    return {"microprice": round(micro, 4), "obi": round(obi, 4), "verdict": verdict}
+
+
 __all__ = [
     "opening_range",
     "gap_type",
     "order_imbalance",
     "premarket_liquidity",
     "post_close_confirmation",
+    "book_depth_read",
 ]
 
 

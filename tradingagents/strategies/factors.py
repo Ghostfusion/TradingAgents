@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 
+from .cross_section import cross_sectional_z
+
 
 def momentum(closes: list[float], lookback: int = 252, skip: int = 21) -> float | None:
     """Cross-sectional momentum (12-1m by default): return over [lookback, skip]."""
@@ -140,6 +142,69 @@ def composite_score(factors_by_ticker: dict, weights: dict = None) -> dict:
             used += 1
         scores[ticker] = acc / used if used else 0.5
     return scores
+
+
+def z_composite_alpha(factors_by_ticker: dict, weights: dict | None = None) -> dict:
+    """Cookbook recipe 4 composite alpha: ``A_i = sum_k a_k * z_ik``.
+
+    Standardizes each factor cross-sectionally (``z = (x - mu)/sigma``) and
+    sums the weighted z-scores per ticker (``a_V z_value + a_Q z_quality +
+    ...``; equal weights by default). Handles negative factor signs via
+    negative weights (e.g. ``{'ev_ebit': -1.0}``). A factor with fewer than 2
+    finite observations or zero std contributes nothing (honest partial
+    score). Returns ``{ticker: score}``.
+    """
+    factors_by_ticker = factors_by_ticker or {}
+    names: set = set()
+    for f in factors_by_ticker.values():
+        names.update(k for k, v in f.items() if v is not None)
+    names = sorted(names)
+    if weights is None:
+        weights = dict.fromkeys(names, 1.0)
+    zs: dict[str, dict] = {}
+    for name in names:
+        joined = cross_sectional_z([f.get(name) for f in factors_by_ticker.values()])
+        if joined is None:
+            continue
+        zs[name] = joined["z"]
+    scores: dict = {}
+    for i, ticker in enumerate(factors_by_ticker):
+        acc = 0.0
+        used = 0
+        for name in names:
+            zlist = zs.get(name)
+            if zlist is None or not ticker or zlist[i] is None:
+                continue
+            acc += weights.get(name, 1.0) * zlist[i]
+            used += 1
+        scores[ticker] = round(acc / used, 6) if used else None
+    return scores
+
+
+def momentum_multihorizon(
+    closes: list[float],
+    horizons: tuple = (21, 63, 126, 252),
+) -> dict:
+    """Cookbook recipe 1 multi-horizon momentum ensemble (1/3/6/12 months).
+
+    Returns per-horizon simple momentum ``P_t / P_{t-h} - 1`` (None when the
+    series is too short) plus ``ensemble`` = the mean of the measurable
+    horizons - a single-number trend read that is not hostage to one lookback.
+    """
+    closes = [c for c in (closes or []) if isinstance(c, (int, float))]
+    out: dict = {"horizons": {}, "ensemble": None}
+    if not closes:
+        return out
+    vals: list[float] = []
+    for h in horizons:
+        h = int(h)
+        if len(closes) > h and closes[-(h + 1)] != 0:
+            mom = float(closes[-1]) / float(closes[-(h + 1)]) - 1.0
+            out["horizons"][str(h)] = round(mom, 6)
+            vals.append(mom)
+    if vals:
+        out["ensemble"] = round(sum(vals) / len(vals), 6)
+    return out
 
 
 # Fama-French 5-factor factor names (order of columns in the regression).

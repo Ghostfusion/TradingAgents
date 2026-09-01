@@ -317,6 +317,23 @@ has changed before); never assume an endpoint works — the SDK's
   max unforecasted drawdown). All `debate_*` config keys OFF by default;
   phased rollout P0-P6 (grounding contract → scoring/termination → models/
   capability → judge → A/B harness). See CHANGELOG.
+- 2026-09-01 `(working tree)` - Cookbook quant-strategy gap implementation
+  (`Strategies/cookbook.md`): MOP-style `ts_momentum_weights`; new
+  `strategies/cross_section.py` (winsorize / centered-rank / quantile-split /
+  market-residualize / dollar+beta+sector-neutral book / no-trade band);
+  pairs `spread_zscore` / `pair_signal` / `pair_quantities` / `ecm_loading`;
+  `z_composite_alpha` + multi-horizon momentum; portfolio stats (turnover /
+  turnover-cost / exposure / rolling-Sharpe / regime-split); Black-76
+  rho/vanna/vomma/charm + `bsm_equity_surface` + `greek_pnl_response` +
+  Cboe/VIX-style `model_free_implied_variance` (repairs the always-degrading
+  `get_variance_premium`); CDaR; max-diversification weights; Merton
+  distance-to-default; `forward_rate`; microprice/OBI `book_depth_read`.
+  Agent tools `get_ts_momentum_weights` / `get_pair_trade_signal` /
+  `get_event_pnl_response` / `get_book_depth_read` / `get_merton_distance`
+  bound to the market analyst + graph ToolNode; Merton in the risk-debator
+  loop; `get_tail_risk`/`get_risk_parity_alloc` extended. Tests:
+  `tests/test_cookbook_gaps.py` (27 hermetic), affected suites 349 passed.
+  See CHANGELOG.
 - 2026-09-01 `(working tree)` - Structured-debate robustness: json_object
   route fix ("json" token in the judge prompt + flat `scores[]` rubric +
   tolerant coercion + deterministic prose-score fallback), claim-key

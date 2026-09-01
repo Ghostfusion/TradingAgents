@@ -457,6 +457,156 @@ def expectancy_stats(wins: list[float], losses: list[float]) -> dict | None:
     }
 
 
+def turnover(new_weights: dict, prev_weights: dict | None = None) -> float | None:
+    """One-period portfolio turnover: ``1/2 * sum_i |w_i,t - w_i,t-1|``.
+
+    Cookbook common-framework turnover. With ``prev_weights`` None the
+    previous period is assumed zero (fresh book), so turnover is simply
+    ``1/2 * gross``. None for an empty target book.
+    """
+    if not new_weights:
+        return None
+    names = set(new_weights) | set(prev_weights or {})
+    acc = 0.0
+    for n in names:
+        t = new_weights.get(n, 0.0)
+        p = (prev_weights or {}).get(n, 0.0)
+        try:
+            tf = float(t)
+            pf = float(p)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(tf) and math.isfinite(pf):
+            acc += abs(tf - pf)
+    return 0.5 * acc
+
+
+def turnover_cost(
+    new_weights: dict, prev_weights: dict, cost_by_name: dict | None = None,
+    base_cost: float = 0.001,
+) -> float | None:
+    """Cookbook cost approximation: ``sum_i |w_i,t - w_i,t-1| * c_i``.
+
+    ``cost_by_name`` is a per-name one-way cost fraction (spread + commission
+    + slippage); names without an entry use ``base_cost``. None when the
+    target book is empty.
+    """
+    if not new_weights:
+        return None
+    names = set(new_weights) | set(prev_weights)
+    acc = 0.0
+    for n in names:
+        t = new_weights.get(n, 0.0)
+        p = prev_weights.get(n, 0.0)
+        try:
+            tf = float(t)
+            pf = float(p)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(tf) or not math.isfinite(pf):
+            continue
+        c = cost_by_name.get(n, base_cost) if cost_by_name else base_cost
+        acc += abs(tf - pf) * float(c)
+    return acc
+
+
+def gross_exposure(weights: dict) -> float | None:
+    """Gross exposure ``sum_i |w_i|`` (leverage); None for an empty book."""
+    if not weights:
+        return None
+    acc = 0.0
+    for v in weights.values():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            acc += abs(f)
+    return acc
+
+
+def net_exposure(weights: dict) -> float | None:
+    """Net exposure ``sum_i w_i`` (dollar neutrality check); None for empty."""
+    if not weights:
+        return None
+    acc = 0.0
+    for v in weights.values():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            acc += f
+    return acc
+
+
+def rolling_sharpe(returns: list, window: int = 252,
+                   risk_free: float = 0.0, periods_per_year: float = 252.0) -> list:
+    """Rolling-window annualized Sharpe (cookbook reporting checklist).
+
+    One value per completed window, oldest first; the cookbook's
+    rolling-12m-sharpe style trajectory for trend-stability checks. Empty
+    when fewer than ``window`` observations.
+    """
+    vals = _clean(returns)
+    out: list[float | None] = []
+    for end in range(window, len(vals) + 1):
+        out.append(sharpe(vals[end - window:end], risk_free, periods_per_year))
+    return out
+
+
+def regime_split_performance(
+    returns: list,
+    vol_percentile: list | None = None,
+    trend: list | None = None,
+    high_vol_at: float = 0.7,
+    risk_free: float = 0.0,
+) -> dict:
+    """Performance by regime (cookbook reporting checklist).
+
+    Splits the return series into low/high-volatility (``vol_percentile``
+    series aligned to ``returns``) and bull/bear trend (``trend`` sign, or
+    ``None`` = skipped) buckets and reports n / CAGR / Sharpe / max-drawdown
+    per bucket. Pure, no fabrication: a missing regime input just skips that
+    split.
+    """
+    vals = _clean(returns)
+    out: dict = {}
+    if len(vals) < 2:
+        return out
+    if vol_percentile:
+        vols = [v for v in vol_percentile if v is not None]
+        if len(vols) >= 2:
+            lobes = {"low_vol": [], "high_vol": []}
+            for r, v in zip(vals, vol_percentile, strict=False):
+                if v is None:
+                    continue
+                lobes["high_vol" if float(v) >= high_vol_at else "low_vol"].append(r)
+            for k, series in lobes.items():
+                out[k] = _perf_block(series, risk_free)
+    if trend:
+        tvals = [t for t in trend if t is not None]
+        if len(tvals) >= 2:
+            lobes = {"bull": [], "bear": []}
+            for r, t in zip(vals, trend, strict=False):
+                if t is None:
+                    continue
+                lobes["bull" if float(t) >= 0 else "bear"].append(r)
+            for k, series in lobes.items():
+                out[k] = _perf_block(series, risk_free)
+    return out
+
+
+def _perf_block(returns: list, risk_free: float) -> dict:
+    eq = equity_curve(returns)
+    return {
+        "n": len(returns),
+        "cagr": round(cagr(returns), 6),
+        "sharpe": round(sharpe(returns, risk_free), 4),
+        "max_drawdown": round(max_drawdown(eq), 6),
+    }
+
+
 def implementation_shortfall(
     decision_price: float | None,
     arrival_price: float | None,
@@ -515,4 +665,6 @@ __all__ = [
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",
     "calmar_ratio", "ulcer_index", "capture_ratio", "tail_ratio",
     "expectancy_stats", "implementation_shortfall",
+    "turnover", "turnover_cost", "gross_exposure", "net_exposure",
+    "rolling_sharpe", "regime_split_performance",
 ]
