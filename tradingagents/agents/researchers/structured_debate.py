@@ -439,13 +439,32 @@ def render_judge_evidence(ds: dict) -> str:
     )
 
 
+def _baseline_fallback_reason(reason: str) -> bool:
+    """True when the debate ended as an L1 baseline fallback — the only case
+    where the L2 jury must NOT run (the design never asks the judge to score
+    a mathematically invalid / aborted debate). Normal terminations (hard
+    cap, plateau, consensus) MUST still be judged."""
+    r = (reason or "").lower()
+    return (
+        "baseline" in r
+        or "hard breach" in r
+        or "no turns" in r
+        or "schema" in r
+    )
+
+
 def create_debate_finalize(
     judge_llm, cfg: dict | None = None, section: str = "research"
 ) -> Callable:
     """Node factory: L2 judge call + verdict + baseline reweight.
 
     ``section`` routes the judge read/write to the section's channel
-    (debate_state for research, structured_risk_state for risk).
+    (debate_state for research, structured_risk_state for risk). The L2
+    judge ALWAYS runs except on an L1 baseline-fallback termination — a
+    debate that ended normally (round cap, plateau, consensus) still needs
+    its verdict. Regression: the previous ``if not TERMINATED`` guard also
+    skipped the judge for NORMAL terminations, so a live 5-round debate
+    finished unjudged.
     """
     cfg = cfg or {}
     from tradingagents.agents.arbiters.debate_judge import create_debate_judge
@@ -455,7 +474,7 @@ def create_debate_finalize(
 
     def finalize_node(state: dict) -> dict:
         ds = dict(state.get(channel) or {})
-        if not ds.get(TERMINATED):
+        if not _baseline_fallback_reason(ds.get(REASON, "")) or not ds.get(TERMINATED):
             out = judge_node(state)
             merged = out.get(channel) or out.get("debate_state") or ds
             ds = dict(merged)

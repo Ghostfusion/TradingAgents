@@ -1466,6 +1466,14 @@ def run_analysis(
     if display_report:
         display_complete_report(final_state)
 
+    # The moomoo SDK leaves non-daemon callback/network threads behind; a
+    # normal interpreter shutdown then blocks forever in
+    # threading._shutdown (the report is already saved/displayed above).
+    # Deterministic hard-exit so a COMPLETED run actually terminates
+    # instead of hanging minutes after "Analysis Complete!".
+    sys.stdout.flush()
+    os._exit(0)
+
 
 @app.command()
 def analyze(

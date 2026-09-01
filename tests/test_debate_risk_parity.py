@@ -237,6 +237,116 @@ class TestDegradedTurnNeverCrashes:
         assert out["structured_risk_state"]["round_records"][0]["neutral"].quantitative_claims == []
         assert "No structured turn produced" in out["risk_debate_state"]["history"]
 
+    def test_finalize_runs_judge_on_normal_termination(self):
+        """A normally-terminated debate (round cap / plateau / consensus)
+        MUST still be judged - regression: the old ``if not TERMINATED``
+        guard skipped the judge for exactly those terminations, so a live
+        5-round debate finished with EMPTY judge_scores."""
+        from tradingagents.agents.researchers.structured_debate import (
+            create_debate_finalize,
+        )
+
+        called = {"n": 0}
+
+        class _Judge:
+            def __init__(self, llm, section="research"):
+                pass
+
+            def __call__(self, state):
+                called["n"] += 1
+                return {"debate_state": {"judge_scores": {"Candidate_X": {"mean": 6.5}}}}
+
+        monkeypatch = pytest.MonkeyPatch()
+        # create_debate_finalize imports create_debate_judge from the
+        # arbiters module INSIDE the factory, so patch that module.
+        monkeypatch.setattr(
+            "tradingagents.agents.arbiters.debate_judge.create_debate_judge",
+            _Judge,
+        )
+        try:
+            node = create_debate_finalize(object(), {}, section="research")
+            out = node({"debate_state": {
+                "terminated": True,
+                "reason": "hard cap (2 rounds)",
+                "round_records": [{"bull": {"core_thesis": "b"}}],
+            }})
+        finally:
+            monkeypatch.undo()
+
+        assert called["n"] == 1
+        assert out["debate_state"]["judge_scores"]["Candidate_X"]["mean"] == 6.5
+
+    def test_finalize_skips_judge_on_baseline_fallback(self):
+        """L1 baseline-fallback terminations must NOT run the L2 jury."""
+        from tradingagents.agents.researchers.structured_debate import (
+            create_debate_finalize,
+        )
+
+        called = {"n": 0}
+
+        class _Judge:
+            def __init__(self, llm, section="research"):
+                pass
+
+            def __call__(self, state):
+                called["n"] += 1
+                return {}
+
+        monkeypatch = pytest.MonkeyPatch()
+        # create_debate_finalize imports create_debate_judge from the
+        # arbiters module INSIDE the factory, so patch that module.
+        monkeypatch.setattr(
+            "tradingagents.agents.arbiters.debate_judge.create_debate_judge",
+            _Judge,
+        )
+        try:
+            node = create_debate_finalize(object(), {}, section="research")
+            out = node({"debate_state": {
+                "terminated": True,
+                "reason": "L1 hard breach; baseline fallback",
+            }})
+        finally:
+            monkeypatch.undo()
+
+        assert called["n"] == 0
+        assert out["debate_state"]["terminated"] is True
+
+    def test_finalize_runs_judge_for_risk_section(self):
+        from tradingagents.agents.researchers.structured_debate import (
+            create_debate_finalize,
+        )
+
+        called = {"n": 0}
+
+        class _Judge:
+            def __init__(self, llm, section="research"):
+                pass
+
+            def __call__(self, state):
+                called["n"] += 1
+                return {"structured_risk_state": {
+                    "judge_scores": {"Candidate_Z": {"mean": 7.0}}
+                }}
+
+        monkeypatch = pytest.MonkeyPatch()
+        # create_debate_finalize imports create_debate_judge from the
+        # arbiters module INSIDE the factory, so patch that module.
+        monkeypatch.setattr(
+            "tradingagents.agents.arbiters.debate_judge.create_debate_judge",
+            _Judge,
+        )
+        try:
+            node = create_debate_finalize(None, {}, section="risk")
+            out = node({"structured_risk_state": {
+                "terminated": True,
+                "reason": "plateau (0.05 for 2 rounds)",
+            }})
+        finally:
+            monkeypatch.undo()
+
+        assert called["n"] == 1
+        assert out["structured_risk_state"]["judge_scores"]["Candidate_Z"]["mean"] == 7.0
+
     def test_round_index_capped_at_five(self):
         """The degraded fallback caps round_index at the schema's le=5."""
         class _L:
