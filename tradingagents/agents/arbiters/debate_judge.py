@@ -124,13 +124,30 @@ def aggregate_scores(rubric, candidates: list[dict]) -> dict:
     """
     out = {}
     for cand in candidates:
-        dims = rubric.dimension_scores
-        vals = [v for v in dims.values() if isinstance(v, (int, float))]
+        dims = _rubric_dimension_dict(rubric)
+        vals = list(dims.values())
         out[cand["alias"]] = {
             "mean": round(sum(vals) / len(vals), 4) if vals else 0.0,
-            "scores": {k.value if hasattr(k, "value") else str(k): v for k, v in dims.items()},
+            "scores": dims,
         }
     return out
+
+
+def _rubric_dimension_dict(rubric) -> dict:
+    """Flatten the rubric's ``scores`` array [{dimension, score}] into
+    {dimension: score}. Defensively falls back to an old dict attribute."""
+    scores = getattr(rubric, "scores", None)
+    if isinstance(scores, list):
+        out = {}
+        for item in scores:
+            if isinstance(item, dict):
+                d = str(item.get("dimension", ""))
+                s = item.get("score")
+                if d and isinstance(s, (int, float)):
+                    out[d] = float(s)
+        return out
+    legacy = getattr(rubric, "dimension_scores", None)
+    return legacy if isinstance(legacy, dict) else {}
 
 
 def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None = None):
@@ -234,7 +251,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 structured_llm, judge_llm, judge_text,
                 L2JudgeDimensionedRubric,
             )
-            if rubric is not None and not rubric.dimension_scores:
+            if rubric is not None and not _rubric_dimension_dict(rubric):
                 # Empty dimension_scores (115549 regression): deepseek json_mode
                 # returned a VALID object that omitted the dimension keys, which
                 # Pydantic accepts via default_factory={} -> silent mean 0.0.
@@ -253,7 +270,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                     structured_llm, judge_llm, directed,
                     L2JudgeDimensionedRubric,
                 )
-                if rubric2 is not None and rubric2.dimension_scores:
+                if rubric2 is not None and _rubric_dimension_dict(rubric2):
                     rubric = rubric2
                 else:
                     rubric = None
@@ -279,8 +296,8 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                     "reason": f"judge unavailable: {err}",
                 }
                 continue
-            dims = rubric.dimension_scores
-            vals = [v for v in dims.values() if isinstance(v, (int, float))]
+            dims = _rubric_dimension_dict(rubric)
+            vals = list(dims.values())
             if not vals:
                 # Fallback (prose-scores heuristic): neither deepseek nor luna
                 # emits the enum-keyed dimension map reliably on this

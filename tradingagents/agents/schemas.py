@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
 # numeric field instead of omitting it. Coerce those to None so the structured
@@ -835,12 +835,64 @@ class L2JudgeDimensionedRubric(BaseModel):
     evaluated_agent_alias: str = Field(
         default="", description="Anonymized token (Candidate_X / Candidate_Y)"
     )
-    dimension_scores: dict[JudgeDimension, float] = Field(
-        default_factory=dict, description="0..10 per orthogonal dimension"
+    # #1A flattened dimension scores: array of {dimension, score} — the
+    # enum-keyed dict was the first structural element models dropped under
+    # json_object (empty {} on both deepseek and luna). Arrays of small
+    # objects are far easier to emit. ``dimension_scores`` remains as an
+    # ALIAS input (legacy dict shape auto-merges into ``scores``) and the
+    # scoring loop reads ``scores``.
+    scores: list[dict] = Field(
+        default_factory=list,
+        description="Array of {dimension: <JudgmentDimension>, score: 0..10} "
+                    "per orthogonal dimension",
+    )
+    dimension_scores: dict | None = Field(
+        default=None, exclude=True,
+        description="Legacy alias: {dim: score} dict merged into scores",
     )
     entrenchment_detected: bool = False
     rebuttal_effectiveness: float = Field(ge=0.0, le=10.0, default=0.0)
     rationale: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_dimension_scores(cls, data):
+        """Merge the legacy ``dimension_scores`` dict into the flattened
+        ``scores`` array when both/signature-any present."""
+        if not isinstance(data, dict):
+            return data
+        scores = data.get("scores") or []
+        legacy = data.get("dimension_scores")
+        if isinstance(legacy, dict):
+            merged = list(scores) if isinstance(scores, list) else []
+            for k, val in legacy.items():
+                if isinstance(val, (int, float)):
+                    merged.append({"dimension": str(k), "score": float(val)})
+            data = dict(data)
+            data["scores"] = merged
+        return data
+
+    @field_validator("scores", mode="before")
+    @classmethod
+    def _normalize_scores(cls, v):
+        """Accept array-of-objects (dimension/name + score/value) or dict; any
+        ragged entry is dropped, never a rubric killer."""
+        if isinstance(v, dict):
+            out = []
+            for k, val in v.items():
+                if isinstance(val, (int, float)):
+                    out.append({"dimension": str(k), "score": float(val)})
+            return out
+        if isinstance(v, list):
+            out = []
+            for item in v:
+                if isinstance(item, dict):
+                    dim = item.get("dimension") or item.get("name") or ""
+                    score = item.get("score") if item.get("score") is not None else item.get("value")
+                    if dim and isinstance(score, (int, float)):
+                        out.append({"dimension": str(dim), "score": float(score)})
+            return out
+        return []
 
     @field_validator("entrenchment_detected", mode="before")
     @classmethod
