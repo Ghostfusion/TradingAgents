@@ -740,3 +740,69 @@ written from `structured_risk_state`.
   Aggressive Analyst loop → PM); SD Risk nodes are no-op placeholders.
 - All 5 debate test files green (claims, score, integration, stream
   hermetic, risk parity), ruff clean, full suite green.
+
+---
+
+## 10. Context-bounded debate FSMs (direction.md, v5)
+
+Context breaks occur because full analyst reports, growing transcripts, and
+expanding claim ledgers are repeatedly concatenated across multi-role,
+multi-round loops (up to 15 risk debater turns at depth=5) and fed to the L2
+judge and RM/PM. This section fixes it with bounded O(1) token overhead at
+every node, without losing factual grounding or determinism.
+
+### 10.1 Invariant & mitigation matrix (direction.md)
+
+| Failure mode | Mitigation | Invariant preserved |
+| --- | --- | --- |
+| Hallucination / untethered claims | Ground-Truth Key-Value Registry + L1 deterministic gate | Factual grounding (debaters cite strict keys; L1 validates against computed values) |
+| Superficial / disconnected judge rebuttals | Preceding-turn payload passed to L2 judge | Rubric parity (evaluates direct counterarguments w/o prior-round noise) |
+| Decision degradation at RM/PM | Tabulated Debate Matrix + final-round theses + unresolved L1 disputes | Actionability (summary of verified numbers, not prose logs) |
+
+### 10.2 State schema (mapped onto existing dict channels)
+
+Direction.md's `CompactFSMState` pydantic classes are ADAPTED to the existing
+`debate_state` / `structured_risk_state` dicts (no new AgentState channels):
+
+- `ground_truth_registry`: `{keys: {k: v}, proposal_summary: ...}` — built ONCE
+  per run from `ground_truth_from_state(state)` (parsed computed context) plus
+  deterministic extractions from analyst computed lines (P4 coverage). Static
+  and cache-friendly across all turns.
+- `round_records`: full history kept IN MEMORY for reporting, but only a
+  bounded slice surfaces in prompts.
+- `active_disputes`: last ≤5 claims with L1 status `violated`/`unverified`
+  (persisted via `ClaimRecord.status`, P0).
+- `last_turn_payload`: `round_records[-1]` (the immediate prior speaker).
+- `score_series` / `judge_scores`: unchanged.
+
+### 10.3 Node changes
+
+1. **create_debater_turn (P1)**: per-turn prompt = static Ground-Truth Key
+   Index + Proposal Summary; dynamic = Preceding Opponent Turn (last round) +
+   Active Dispute Ledger (≤5). Full analyst reports, full history, full claim
+   ledger REMOVED from the prompt. Combined prompt: existing stance/schema
+   contract + direction.md Operational Invariants (key binding, L1 audit,
+   direct rebuttal, structured-only) + execution directives. `source` accepts
+   `analyst_report | trade_proposal | macro_context | <tool/state key>`.
+2. **create_debate_judge (P2)**: per-candidate call = candidate latest payload
+   + preceding opponent payload + L1 verification vector. Full transcript and
+   claim ledger dropped. Judge costs O(1).
+3. **RM/PM (P3)**: `render_consumer_debate_matrix(channel)` table
+   `| Role | Stance | Core Thesis | L1 Valid % | Judge Score | Rec Alloc |`
+   replaces raw prose `{history}` in the consumer prompts. Reporting still
+   writes the full prose transcripts.
+
+### 10.4 Execution order
+
+P0 (persist L1 statuses + registry) > P1 (delta debater prompt) > P2 (judge
+O(1)) > P3 (matrix handoff) > P4 (registry coverage guard). All shared across
+research + risk sections via the SECTION_* tables.
+
+### 10.5 Acceptance
+
+- Prompt-size bound: `build_turn_prompt` with 5-round history stays ≤ fixed
+  budget; contains previous-turn payload + disputes + registry only.
+- Judge prompt: candidate + opponent + scorecard only.
+- RM/PM prompts: contain the matrix, not the transcript.
+- Full suite + ruff clean; live QCOM: deepseek bull/conservative complete
+  (no degraded turns), judge scores non-zero, RM/PM real plans.
