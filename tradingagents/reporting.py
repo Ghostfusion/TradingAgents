@@ -522,8 +522,10 @@ def write_report_tree(
             evidence = _finalize_section(
                 _readable_section("\n".join(sd_lines), role="Research Manager")
             )
+            # Evidence file stays on disk (structured_debate.md) but is NOT
+            # appended to complete_report.md — it is a debug artifact, kept
+            # out of the user-facing report (2026-09-01).
             (research_dir / "structured_debate.md").write_text(evidence, encoding="utf-8")
-            research_parts.append(("Structured debate evidence", evidence))
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts
@@ -608,10 +610,12 @@ def write_report_tree(
             evidence = _finalize_section(
                 _readable_section("\n".join(sd_lines), role="Portfolio Manager")
             )
+            # Evidence file stays on disk (structured_risk_debate.md) but is
+            # NOT appended to complete_report.md (debug artifact; kept out of
+            # the user-facing report).
             (risk_dir / "structured_risk_debate.md").write_text(
                 evidence, encoding="utf-8"
             )
-            risk_parts.append(("Structured risk-debate evidence", evidence))
         if risk_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in risk_parts

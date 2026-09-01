@@ -387,6 +387,37 @@ class TestBoundedContextPhases:
         m2 = re.search(r'"stance": "([A-Z]+)"', p2[p2.index("Example output"):])
         assert m2 and m2.group(1) == "BEAR", m2
 
+    def test_humanized_keys_resolve_via_alias_map(self):
+        """Registry-key mismatch fix: debaters humanize the Key Index labels
+        ('QCOM price', 'Free-cash-flow yield', 'Forward P/E'), so L1 marked
+        them unverified -> (unused). The alias map resolves the common
+        variants back to the canonical computed key -> valid."""
+        from tradingagents.strategies.debate_claim import ClaimRecord, verify_claim
+
+        gt = {"last_price": 162.0, "vwap": 164.63, "roe": 37.3, "fcf_yield": 7.4,
+              "current_ratio": 2.82, "dcf_fair_value": 152.65, "pe_ttm": 18.7,
+              "beta": 1.68, "rsi": 36.0, "dividend_yield": 2.2, "macd_histogram": -1.68,
+              "band_low": 158.85, "band_high": 171.5, "rsi2": 14.93, "stochrsi": 0.0}
+        srcs = set(gt) | {"Ground Truth Key Index"}
+        for k, v in [
+            ("QCOM price", 162.0), ("Intraday VWAP", 164.63), ("Trailing ROE", 37.3),
+            ("Free-cash-flow yield", 7.4), ("Reference terminal value", 152.65),
+            ("Forward P/E", 18.7), ("Beta", 1.68), ("RSI", 36.0),
+            ("Current ratio", 2.82), ("MACD histogram", -1.68), ("Dividend yield", 2.2),
+            ("RSI(2)", 14.93), ("Stochastic RSI", 0.0),
+        ]:
+            c = ClaimRecord(role="bull", round=1, claim_id="x", kind="quantitative",
+                            value=v, metric_name=k, ground_truth_key=k,
+                            source="Ground Truth Key Index")
+            r = verify_claim(c, gt, srcs)
+            assert r["status"] == "valid", (k, r)
+
+        # unknown label stays honest unverified (never fabricated)
+        c2 = ClaimRecord(role="bull", round=1, claim_id="y", kind="quantitative",
+                         value=9.9, metric_name="made up", ground_truth_key="made_up",
+                         source="Ground Truth Key Index")
+        assert verify_claim(c2, gt, srcs)["status"] == "unverified"
+
     def test_judge_empty_dims_directed_retry_then_unavailable(self):
         """Empty dimension_scores is treated like a None rubric: directed
         retry; if still empty -> honest UNAVAILABLE, not misleading 0.0."""

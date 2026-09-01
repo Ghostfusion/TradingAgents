@@ -32,6 +32,72 @@ QUALITATIVE = "qualitative"
 
 _DEFAULT_TOLERANCE_PCT = 5.0
 
+# Bounded key-alias map (registry-key mismatch fix): debaters humanize the
+# Ground-Truth Key Index labels ("QCOM price", "Free-cash-flow yield") instead
+# of copying the canonical key verbatim, so L1 marks them unverified->(unused).
+# Normalize the common variants back to their canonical computed key before
+# the ground-truth lookup. Deterministic; unknown labels stay unverified.
+KEY_ALIASES = {
+    "qcom_price": "last_price",
+    "qcom_last_price": "last_price",
+    "intraday_vwap": "vwap",
+    "vwap_intraday": "vwap",
+    "trailing_roe": "roe",
+    "roe_trailing": "roe",
+    "free_cash_flow_yield": "fcf_yield",
+    "free_cash_flow_yield_pct": "fcf_yield",
+    "fcf_yield_pct": "fcf_yield",
+    "current_ratio_liquidity": "current_ratio",
+    "reference_terminal_value": "dcf_fair_value",
+    "terminal_value_per_share": "dcf_fair_value",
+    "dcf_value_per_share": "dcf_fair_value",
+    "fair_value_per_share": "dcf_fair_value",
+    "forward_pe": "pe_ttm",
+    "trailing_pe": "pe_ttm",
+    "forward_p_e": "pe_ttm",
+    "trailing_p_e": "pe_ttm",
+    "p_e_ratio": "pe_ttm",
+    "dividend_yield_pct": "dividend_yield",
+    "beta_capm": "beta",
+    "macd_histogram_value": "macd_histogram",
+    "macd_hist": "macd_histogram",
+    "rsi_14": "rsi",
+    "rsi14": "rsi",
+    "rsi_2": "rsi2",
+    "stochastic_rsi": "stochrsi",
+    "price_velocity_5d": "price_velocity",
+    "impact_5d": "impact",
+    "trend_strength_idx": "trend_strength",
+    "down_from_overhead_pct": "down_from_overhead",
+    "downside_overhead_pct": "down_from_overhead",
+    "price_lows": "band_low",
+    "price_highs": "band_high",
+    "band_upper": "band_high",
+}
+
+
+def resolve_ground_truth_key(key: str, ground_truth: dict) -> str | None:
+    """Canonical key for a claim's ground_truth_key, or None if unresolvable.
+
+    Returns the key itself when it is already in the ground-truth map; else
+    the aliased canonical key (lowercased, spaces->underscores); else None
+    (stays unverified — never fabricate a match).
+    """
+    if not key:
+        return None
+    k = str(key).strip().lower()
+    for ch in (" ", "-", "/", "(", ")", ":", "%", "$"):
+        k = k.replace(ch, "_")
+    while "__" in k:
+        k = k.replace("__", "_")
+    k = k.strip("_")
+    if k in ground_truth:
+        return k
+    canon = KEY_ALIASES.get(k)
+    if canon and canon in ground_truth:
+        return canon
+    return None
+
 
 @dataclass
 class ClaimRecord:
@@ -200,7 +266,8 @@ def verify_claim(
         base["reason"] = "deceptive grounding: source not in run ledger"
         return base
 
-    truth = ground_truth.get(claim.ground_truth_key) if claim.ground_truth_key else None
+    resolved_key = resolve_ground_truth_key(claim.ground_truth_key, ground_truth)
+    truth = ground_truth.get(resolved_key) if resolved_key else None
     if truth is None:
         if not claim.source:
             base["status"] = ABSTAIN
