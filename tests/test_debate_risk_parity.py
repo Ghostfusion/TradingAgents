@@ -482,6 +482,39 @@ class TestBoundedContextPhases:
                          source="Ground Truth Key Index")
         assert verify_claim(c2, gt, srcs)["status"] == "unverified"
 
+    def test_real_run_labels_resolve_via_router(self):
+        """The 145916 live-route labels resolve through the
+        normalize->alias->fuzzy router; ambiguous/generic labels stay
+        unverified (never fabricated)."""
+        from tradingagents.strategies.debate_claim import resolve_ground_truth_key
+
+        gt = {"last_price":162, "vwap":164.63, "roe":37.3, "fcf_yield":7.4,
+              "current_ratio":2.82, "dcf_fair_value":152.65, "pe_ttm":18.7,
+              "beta":1.68, "rsi":36.0, "dividend_yield":2.2, "macd_histogram":-1.68,
+              "band_low":158.85, "band_high":171.5, "rsi2":14.93, "stochrsi":0.0,
+              "altman_z":5.45, "hhi":42338, "qtl_share":12.8, "atr_stop_pct":10.7,
+              "price_velocity":-0.29, "trend_strength":0.027,
+              "down_from_overhead":4.27, "impact":5.0,
+              "insider_net_musd":-43.2, "cvar_5d_pct":-19.45}
+        hits = {
+            "Free cash flow yield": "fcf_yield",
+            "Free-cash-flow yield": "fcf_yield",
+            "FCF yield": "fcf_yield",
+            "Altman Z-score": "altman_z",
+            "QTL licensing contribution": "qtl_share",
+            "HHI concentration metric": "hhi",
+            "Current P/E": "pe_ttm",
+            "Ten-quarter mean P/E": "pe_ttm",
+            "ATR stop percentage": "atr_stop_pct",
+            "Relative-strength index": "rsi",
+            "Reference terminal value": "dcf_fair_value",
+        }
+        for label, canon in hits.items():
+            assert resolve_ground_truth_key(label, gt) == canon, (label, canon)
+        for label in ("made_up nonsense", "P/E or current valuation multiple",
+                      "arbitrary future gaussian"):
+            assert resolve_ground_truth_key(label, gt) is None, label
+
     def test_judge_empty_dims_directed_retry_then_unavailable(self):
         """Empty dimension_scores is treated like a None rubric: directed
         retry; if still empty -> honest UNAVAILABLE, not misleading 0.0."""

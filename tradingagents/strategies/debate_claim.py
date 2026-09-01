@@ -73,29 +73,112 @@ KEY_ALIASES = {
     "price_lows": "band_low",
     "price_highs": "band_high",
     "band_upper": "band_high",
+    # semantic variants observed on the live route (145916)
+    "altman_z_score": "altman_z",
+    "altman_z": "altman_z",
+    "concentration_indicator": "hhi",
+    "concentration_measure": "hhi",
+    "hhi_concentration_metric": "hhi",
+    "licensing_contribution": "qtl_share",
+    "licensing_exposure_metric": "qtl_share",
+    "licensing_metric": "qtl_share",
+    "qtl_licensing_contribution": "qtl_share",
+    "qtl_licensing_metric": "qtl_share",
+    "relative_strength_index": "rsi",
+    "relative_strength_momentum_indicator": "rsi",
+    "current_pe": "pe_ttm",
+    "current_p_e": "pe_ttm",
+    "ten_quarter_mean_pe": "pe_ttm",
+    "ten_quarter_mean_p_e": "pe_ttm",
+    "valuation_multiple": "pe_ttm",
+    "current_ratio": "current_ratio",
+    "fcf_yield": "fcf_yield",
 }
+
+
+# Fuzzy-match floor for the fallback resolution. Calibrated from the live
+# route's drift: exact/alias covers the common labels; fuzzy with a
+# confidence gate recovers true-positives that alias missed, without
+# fabricating matches (web best-practice: canonicalize-first, fuzz-second,
+# threshold-gated; never blind auto-merge).
+_FUZZY_THRESHOLD = 0.72
+_FUZZY_MARGIN = 0.08  # best candidate must beat 2nd by this much
+
+
+def _normalize_key(key: str, strip_fillers: bool = False) -> str:
+    """Deterministic key normalization: lowercase, separators -> _, collapse
+    repeats. ``strip_fillers`` (used ONLY for fuzzy candidate comparison)
+    also drops trailing metric/measure/value fillers so 'hhi concentration
+    metric' compares like 'hhi'; the EXACT/alias path keeps full keys so
+    aliases like 'reference_terminal_value' still match.
+    """
+    k = str(key).strip().lower()
+    for ch in (" ", "-", "/", "(", ")", ":", "%", "$", ",", "'"):
+        k = k.replace(ch, "_")
+    while "__" in k:
+        k = k.replace("__", "_")
+    k = k.strip("_")
+    if strip_fillers:
+        for filler in ("_usd", "_pct", "_value", "_score", "_metric", "_measure"):
+            if k.endswith(filler):
+                k = k[: -len(filler)]
+    return k
+
+
+def _token_overlap(a: str, b: str) -> bool:
+    """True when one's token-set is a subset of the other's (containment
+    bonus: 'altman z-score' ~= 'altman_z'; 'free cash flow yield' ~= fcf
+    handled by alias instead)."""
+    ta = {t for t in a.split("_") if t}
+    tb = {t for t in b.split("_") if t}
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
+
+
+def _fuzzy_best_ratio(key: str, candidates: list[str]) -> tuple[str | None, float, float]:
+    """Best fuzzy candidate (difflib, stdlib) + its ratio + 2nd-best ratio.
+
+    Returns (candidate or None, best_ratio, second_ratio). A containment
+    bonus (+0.08) rewards token-subset matches.
+    """
+    from difflib import SequenceMatcher
+
+    best, best_r, second_r = None, 0.0, 0.0
+    for cand in candidates:
+        r = SequenceMatcher(None, key, cand).ratio()
+        if _token_overlap(key, cand):
+            r = min(1.0, r + 0.08)
+        if r > best_r:
+            second_r = best_r
+            best_r, best = r, cand
+        elif r > second_r:
+            second_r = r
+    return best, best_r, second_r
 
 
 def resolve_ground_truth_key(key: str, ground_truth: dict) -> str | None:
     """Canonical key for a claim's ground_truth_key, or None if unresolvable.
 
-    Returns the key itself when it is already in the ground-truth map; else
-    the aliased canonical key (lowercased, spaces->underscores); else None
-    (stays unverified — never fabricate a match).
+    Resolution order (canonicalize-first, fuzz-second, confidence-gated):
+    1. normalized exact match in the ground-truth map;
+    2. exact alias key (KEY_ALIASES);
+    3. fuzzy best candidate >= threshold AND with a clear margin over the
+       2nd (unambiguous) — else None -> honest unverified, never fabricated.
     """
     if not key:
         return None
-    k = str(key).strip().lower()
-    for ch in (" ", "-", "/", "(", ")", ":", "%", "$"):
-        k = k.replace(ch, "_")
-    while "__" in k:
-        k = k.replace("__", "_")
-    k = k.strip("_")
+    k = _normalize_key(key)
     if k in ground_truth:
         return k
     canon = KEY_ALIASES.get(k)
     if canon and canon in ground_truth:
         return canon
+    cand, best_r, second_r = _fuzzy_best_ratio(
+        _normalize_key(key, strip_fillers=True), list(ground_truth)
+    )
+    if cand is not None and best_r >= _FUZZY_THRESHOLD and (best_r - second_r) >= _FUZZY_MARGIN:
+        return cand
     return None
 
 
