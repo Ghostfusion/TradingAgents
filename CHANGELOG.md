@@ -8,6 +8,26 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Qlib Phase-1 pure calculators** (`docs/design_qlib_integration.md` Phase 1,
+  all advisory + default-off): `strategies/factor_expressions.py` (Alpha158-style
+  operators, expression-string cache, learn/infer fit-apply split with
+  train-only moments), `strategies/signal_analysis.py` (rank IC/ICIR,
+  quantile long-short, IC-decay half-life, pred-autocorrelation,
+  with/without-cost report table), `strategies/portfolio_strategy.py` (Qlib
+  Topk-Drop + convex enhanced-index with turnover cap / benchmark-deviation /
+  force-hold-sell masks / two-stage fallback; scipy SLSQP + pure-python
+  fallback, cvxpy optional), `strategies/market_tradability.py` (limit-up/down
+  gates, suspension, volume participation caps, deal-price selector). New
+  tools `get_factor_profile` (gated `enable_factor_profile`),
+  `get_topk_drop_plan`, `get_enhanced_index_tilt` bound to the market/PM
+  ToolNodes + agent_utils + trading_web value tools; `portfolio.allocation_block`
+  gains Topk-Drop / enhanced-index strategy options behind
+  `enable_topk_drop` / `enable_enhanced_index`; `scripts/backtest_strategy.py`
+  fills honour tradability (`--limit-threshold` / `--participation` /
+  `--deal-price` + `fill_model` report block); `strategy_quality_report`
+  emits the with/without-cost table. Tests: `tests/test_qlib_phase1.py` +
+  `tests/test_qlib_wiring.py` (43 pass; §8-1/2/3/6/7/8/9 acceptance).
+
 - **Nightly-review driver `--mode recent`** - `scripts/nightly_review.py
   --mode recent` reviews each symbol's MOST RECENT
   `reports/<TICKER>_<YYYYMMDD>_<HHMMSS>` folder instead of the newest

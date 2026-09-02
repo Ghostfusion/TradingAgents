@@ -19,6 +19,17 @@ involved. This is the "compute, don't narrate" core.
 - `sector_rank.py` — `--sector-rank` logic (SPDR top-3 by momentum).
 - `size.py` — Kelly / vol-target / position sizing (position_sizing).
 - `portfolio.py` — `value_ratio_weights`, cap adjustments (watchlist alloc).
+- `portfolio_strategy.py` — Qlib Topk-Drop (`topk_drop_weights`) + convex
+  enhanced-index (`enhanced_index_weights`: long-only, Σw=1, turnover cap,
+  benchmark/factor-deviation, masks, two-stage fallback; scipy SLSQP +
+  pure-python fallback, cvxpy optional) - pure, advisory.
+- `factor_expressions.py` — Alpha158-style operator set (`ref/delta/mean/std/
+  zscore/rsi/bias/mom/corr/avg_vol/high_low_range`), cross-sectional rank,
+  learn/infer fit-apply split (train-only moments), expression-string cache.
+- `signal_analysis.py` — rank IC/ICIR, quantile long-short, IC-decay
+  half-life, prediction autocorrelation, with/without-cost report table.
+- `market_tradability.py` — limit-up/down gates, suspension, volume
+  participation caps, deal-price selector (Qlib exchange model, advisory).
 - `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile.
 - `value_dip.py` — Value Dip + Swing hybrid (`Strategies/Value_Dip_swing*.md`):  Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
   expectancy, 3-tranche scale-in plan (P1/P2/P3, weighted avg entry, composite

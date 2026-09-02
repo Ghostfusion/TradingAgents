@@ -312,6 +312,11 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Exits | `enable_exits` (F) | `strategies/exits.py` | stops/BE/targets |
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |
 | Composite rank | `enable_composite_rank` (F) | `strategies/factors.py` | EY + momentum + 52w composite |
+| Factor profile | `enable_factor_profile` (F) | `strategies/factor_expressions.py` | `get_factor_profile` — Alpha158-style 16-factor subset (momentum/reversal/volatility/value) off the OHLCV cache with expression-string cache + learn/infer fit-apply split (moments fit on train only); advisory, gated |
+| Topk-Drop alloc | `enable_topk_drop` (F) | `strategies/portfolio_strategy.py` | screener alloc block + `get_topk_drop_plan` — hold top-k by score, sell worst-held, equal-weight (turnover = 2·drop/topk) |
+| Enhanced-index alloc | `enable_enhanced_index` (F) | `strategies/portfolio_strategy.py` | screener alloc block + `get_enhanced_index_tilt` — convex program (long-only, Σw=1, turnover cap, b_dev, force-hold/sell masks, two-stage fallback); scipy SLSQP + pure-python fallback, cvxpy optional |
+| Signal analysis | — (always-on pure calc) | `strategies/signal_analysis.py` | rank IC/ICIR, quantile long-short, IC-decay half-life, pred-autocorrelation; `strategy_quality_report` gains the with/without-cost excess-return table |
+| Backtest tradability | `backtest_limit_threshold` / `backtest_volume_participation` / `backtest_deal_price` | `strategies/market_tradability.py` | limit-up/down gates, suspended days (NaN close), participation caps, deal-price selector; wired into `scripts/backtest_strategy.py` fills (flags `--limit-threshold` etc.) + `fill_model` honesty block |
 
 Off by default: `enable_regime`, `enable_factors`,
 `enable_threshold_gate`. `enable_sentiment` is now **on** (computed sentiment

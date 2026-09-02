@@ -306,6 +306,15 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-02 `(working tree)` - Qlib Phase-1 pure calculators (advisory,
+  default off): `strategies/factor_expressions.py` (Alpha158-style profile +
+  expression cache + learn/infer train-only moments), `signal_analysis.py`
+  (rank IC/ICIR, quantile L-S, IC decay, pred-autocorr, with/without-cost
+  table), `portfolio_strategy.py` (Topk-Drop + convex enhanced-index),
+  `market_tradability.py` (limit/suspension/participation/deal-price in
+  `backtest_strategy.py` fills); tools `get_factor_profile` /
+  `get_topk_drop_plan` / `get_enhanced_index_tilt`; alloc-block strategy
+  options; see `docs/design_qlib_integration.md`.
 - 2026-09-02 `(working tree)` - Batch + structured-output robustness: `batch.py`
   gains the `_CLI_ENTRY` flush + `os._exit()` hard-exit (moomoo shutdown block
   no longer hangs a finished batch at interpreter exit; the entry block moved
@@ -625,8 +634,6 @@ has changed before); never assume an endpoint works — the SDK's
   downside measures), `portfolio_optimizer` (risk-parity / min-variance /
   confidence-weighted alloc from a real covariance matrix), `risk_manager`
   (two-pass exit override, advisory, off by default, not wired into runtime),
-  `alpha_eval`, `config_robustness`; `evaluate.py` gained sortino /
-  probabilistic_sharpe / rolling_beta / underwater_drawdowns and friends;
   `exits.py` trailing_stop_exit + max_giveback_exit, `book_risk.py`
   var_cvar_horizon, `journal.py` trade_excursions (MAE/MFE), `liquidity_risk.py`
   volume-share / market-impact slippage; 4 new market analyst tools

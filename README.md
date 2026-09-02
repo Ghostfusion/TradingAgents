@@ -1114,8 +1114,20 @@ only after validating in the evaluation harness:
   `risk_halt`, and a `risk_audit.jsonl` trail (`scripts/risk_report.py`).
   Plan: `Strategies/risk_management_plan.md`.
   (`--rank composite` / `enable_composite_rank`), alloc block via
-  `--alloc`, contract exits via `enable_exits`.
+  `--alloc` (+ Qlib Topk-Drop / enhanced-index behind `enable_topk_drop` /
+  `enable_enhanced_index`), contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.
+- **Qlib Phase 1 (advisory, default off)** - `strategies/factor_expressions.py`
+  (Alpha158-style 16-factor profile via `get_factor_profile`, expression-string
+  cache, learn/infer train-only moments), `strategies/signal_analysis.py` (rank
+  IC/ICIR, quantile long-short, IC-decay, pred-autocorrelation; the report's
+  with/without-cost table), `strategies/portfolio_strategy.py` (Qlib Topk-Drop +
+  convex enhanced-index behind `enable_topk_drop` / `enable_enhanced_index`,
+  feeding the screener alloc block + PM tools `get_topk_drop_plan` /
+  `get_enhanced_index_tilt`), `strategies/market_tradability.py` (limit-up/down,
+  suspension, participation caps, deal-price: `backtest_limit_threshold` /
+  `backtest_volume_participation` / `backtest_deal_price`, wired into
+  `scripts/backtest_strategy.py`). Plan: `docs/design_qlib_integration.md`.
 - **P7 order flow (L1-L4)** - `tradingagents/strategies/orderflow.py` turns moomoo
   capital-flow buckets (XL/L/M/S, in/out) into deterministic signals:
   `distribution_score`, divergence (distribution-into-strength / silent-accumulation),
