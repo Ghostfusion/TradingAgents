@@ -51,6 +51,14 @@ Breaking changes within the 0.x line are called out explicitly.
   Tests:
   `test_invoke_structured_or_freetext_retries_truncated_structured_render` +
   `test_invoke_structured_or_freetext_no_retry_when_structured_render_complete`.
+- **`positions_to_basket` treats Fidelity "Pending activity" as cash** - a
+  settlement row (Symbol="Pending activity", no Quantity, empty Description,
+  e.g. $8,993 on the Sep-02 Account1 export) was parsed as a position and
+  emitted a phantom `PENDING_ACTIVITY` weight into the .env basket. The
+  blank-Quantity cash branch now also matches settlement/sweep markers in the
+  Symbol column (`pending`), same class as the documented blank-symbol / sweep
+  rules; the pending dollars fold into the cash sleeve (denominator +41.5% ->
+  +43.5%). Test: `test_pending_activity_is_cash`.
 - **Analyst report-stub guard (status-turn → full report)** - a model can
   answer a tool loop with a bare *status turn* ("Good progress. Now let me
   gather...") that emits no tool_calls; the analyst router takes that as the

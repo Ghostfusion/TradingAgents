@@ -28,7 +28,11 @@ from dataclasses import dataclass
 
 # Fidelity marks money-market / sweep funds with a trailing ``**`` (SPAXX**).
 _CASH_SUFFIX = "**"
+# Blank-Quantity rows whose Symbol / Description marks them as settlement or
+# sweep lines are cash: sweep descriptions ("HELD IN MONEY MARKET") and
+# Fidelity's unsettled-settlement label ("Pending activity").
 _CASH_DESC_KEYWORDS = ("money market", "sweep", "cash", "spaxx", "fdrxx", "fdic")
+_CASH_SYMBOL_KEYWORDS = ("pending",)
 
 
 def _to_float(v) -> float | None:
@@ -62,6 +66,8 @@ def is_cash_row(row: dict) -> bool:
     if symbol and _to_float(row.get("Quantity")) is None:
         desc = str(row.get("Description") or "").lower()
         if any(kw in desc for kw in _CASH_DESC_KEYWORDS):
+            return True
+        if any(kw in symbol.lower() for kw in _CASH_SYMBOL_KEYWORDS):
             return True
     return False
 

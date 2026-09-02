@@ -316,6 +316,10 @@ has changed before); never assume an endpoint works — the SDK's
   Config guidance (gitignored `.env`): deep tier
   `deepseek/deepseek-v4-pro-0813`, `MAX_OUTPUT_TOKENS_DEEP=4000`,
   `LLM_MAX_RETRIES=3`. See CHANGELOG.
+- 2026-09-02 `(working tree)` - `positions_to_basket` cash detection: Fidelity
+  "Pending activity" settlement rows (blank quantity, symbol marker) now count
+  as cash, not a phantom ticker (Sep-02 Account1 export had $8,993 pending
+  that was being emitted as `PENDING_ACTIVITY` in the basket). See CHANGELOG.
 - 2026-09-02 `(working tree)` - Analyst report-stub guard: market / news /
   fundamentals analysts now run `retry_chain_if_stub` when their final turn is
   a status/progress note instead of the report (217-byte NVDA fundamentals

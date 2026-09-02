@@ -56,6 +56,12 @@ class TestCashDetection:
         # unsettled / accrual rows: no symbol, has value
         assert bp.is_cash_row(_row("", 12.34, None))
 
+    def test_pending_activity_is_cash(self):
+        # Fidelity settlement row: Symbol = "Pending activity", no quantity,
+        # empty Description - unsettled cash, never a ticker.
+        assert bp.is_cash_row(_row("Pending activity", 8993.41, None))
+        assert bp.is_cash_row(_row("PENDING ACTIVITY", 8993.41, None, desc=""))
+
     def test_equity_not_cash_despite_type_column(self):
         # Fidelity's Type column says "Cash" for equities too - must NOT use it
         assert not bp.is_cash_row(_row("AVGO", 2680.0, 30, typ="Cash"))
