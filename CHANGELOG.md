@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **DSA reporting (phase D)** - `strategies/report_disclosure.py`: computed driver attribution (sum-to-100, never narrated), consensus support/oppose readout, `watch_conditions`/`next_check_time` (fast-path cadence), `invalidation_conditions` (>= 1 per decision: price_stop_loss / price_take_profit_status / data_quality / manual:thesis_reassessment fallback), `disclosure_footers` (sources-used-vs-empty + models). `reporting.write_report_tree` appends the advisory disclosure block to `5_portfolio/decision.md`.
+
 - **DSA polish (phase C)** - `strategies/skills.py` + `strategies/skills/*.yaml` (declarative strategy-skill DSL with regime-from-opinion routing, bounded advisory score adjustments, `enable_skill_overlays` default off); `strategies/news_relevance.py` (deterministic relevance scoring, official-source boost, spam admission, degrade triple); `dataflows/news_cache.py` (owner-wait coalescing TTL cache). Tests: test_skill_overlays + test_news_relevance (25 pass).
 
 - **DSA robustness (phase B)** - `dataflows/market_router.py` (market-for-symbol classifier + per-market `market_source_priority` chains, opt-in, default bit-identical), `dataflows/vendor_breaker.py` (3-fail/300s circuit breaker + half-open probe + negative capability cache, thread-safe), `VendorResult` honesty fields (`fallback_from`/`is_stale`/`stale_seconds`/`data_quality`/`missing_fields` + `to_dict`), `dataflows/effective_date.py` (effective-trading-date rules + all-closed skip, fail-open). Tests: test_market_router + test_effective_date + test_phase_b_wiring (20 pass).

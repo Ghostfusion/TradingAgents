@@ -28,6 +28,7 @@ involved. This is the "compute, don't narrate" core.
   learn/infer fit-apply split (train-only moments), expression-string cache.
 - `signal_analysis.py` — rank IC/ICIR, quantile long-short, IC-decay
   half-life, prediction autocorrelation, with/without-cost report table.
+- `report_disclosure.py` — attribution/consensus/watch/invalidation/disclosure footers (DSA research §3.7).
 - `skills.py` — declarative YAML strategy-skill overlays (bounded advisory adjustments), regime-from-opinion, router.
 - `news_relevance.py` — news relevance scoring + official-source boost + spam admission + degrade triple.
 - `market_router.py` / `vendor_breaker.py` / `effective_date.py` (dataflows) — market-classified vendor priority + breaker/half-open + effective-trading-date (DSA research §3.4/§3.6).
