@@ -51,6 +51,19 @@ Breaking changes within the 0.x line are called out explicitly.
   Tests:
   `test_invoke_structured_or_freetext_retries_truncated_structured_render` +
   `test_invoke_structured_or_freetext_no_retry_when_structured_render_complete`.
+- **Analyst report-stub guard (status-turn → full report)** - a model can
+  answer a tool loop with a bare *status turn* ("Good progress. Now let me
+  gather...") that emits no tool_calls; the analyst router takes that as the
+  final turn and the stub landed verbatim in `*_report` (observed: a 217-byte
+  NVDA fundamentals report, CLI 2026-09-02 — `_looks_stub` only catches bare
+  headers, not short self-interrupting progress notes). New
+  `retry_chain_if_stub` (mirrors `_retry_if_stub` for the tool-calling chain)
+  + `_looks_report_stub` (degenerate-stub OR short status-announcement
+  detection) are wired into the market / news / fundamentals analyst normal
+  path: a stubbed report is re-asked once to write the full report from the
+  gathered evidence, else an explicit `**Report unavailable**` notice - never
+  an empty or one-line report rendered as truth. Tests:
+  `tests/test_analyst_report_stub.py` (7 hermetic).
 - **Run-config guidance (gitignored `.env`, not committed)** - deep tier
   model separated from quick: `TRADINGAGENTS_DEEP_THINK_LLM=deepseek/
   deepseek-v4-pro-0813` (RM + PM get reliable structured output; quick stays

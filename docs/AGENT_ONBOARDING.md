@@ -316,6 +316,11 @@ has changed before); never assume an endpoint works — the SDK's
   Config guidance (gitignored `.env`): deep tier
   `deepseek/deepseek-v4-pro-0813`, `MAX_OUTPUT_TOKENS_DEEP=4000`,
   `LLM_MAX_RETRIES=3`. See CHANGELOG.
+- 2026-09-02 `(working tree)` - Analyst report-stub guard: market / news /
+  fundamentals analysts now run `retry_chain_if_stub` when their final turn is
+  a status/progress note instead of the report (217-byte NVDA fundamentals
+  stub 2026-09-02); the analyst is re-asked once to write the full report,
+  else an explicit unavailable notice. See CHANGELOG.
 - 2026-09-02 `(working tree)` - Nightly-review driver `--mode recent`:
   `scripts/nightly_review.py` gains a `--mode recent` option that reviews each
   symbol's MOST RECENT `reports/<TICKER>_<ts>/` folder (keyed on the

@@ -119,9 +119,16 @@ def create_news_analyst(llm):
 
         if len(result.tool_calls) == 0:
             report = result.content
-            from tradingagents.agents.utils.structured import retry_chain_if_truncated
+            from tradingagents.agents.utils.structured import (
+                retry_chain_if_stub,
+                retry_chain_if_truncated,
+            )
 
             report = retry_chain_if_truncated(chain, state["messages"], report)
+            # A model can answer a tool loop with a bare status turn instead of
+            # the report (no tool_calls -> the router takes it as final). Ask it
+            # once to deliver the report from the gathered evidence.
+            report = retry_chain_if_stub(chain, state["messages"], report, "News Analyst")
         else:
             # Tool-round cap hit: the router forced this turn; the model must
             # write the final report now (dangling tool_calls stripped, one

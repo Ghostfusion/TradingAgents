@@ -192,6 +192,82 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
     return text
 
 
+_ANALYST_STATUS_TURN_RE = _re.compile(
+    r"\b(progress|let me (now )?(continue|gather|fetch|pull|collect|check|dig))\b",
+    _re.IGNORECASE,
+)
+
+# Directive for the analyst-stub retry: write the COMPLETE report from the
+# tool evidence already gathered (the messages carry every tool result the
+# model asked for), never another status turn.
+_STUB_CHAIN_COMPLETION_PROMPT = (
+    "Your previous response was only a status/progress note, not the report. "
+    "Re-read the tool evidence you have gathered and write the COMPLETE "
+    "analysis report now: verdict, signal-by-signal evidence with exact "
+    "computed numbers, risks, and a clear stance. Cite only values you "
+    "actually retrieved; state 'unavailable' where none exist. Do not "
+    "announce further tool calls - deliver the report."
+)
+
+
+def _looks_report_stub(text: str) -> bool:
+    """Is an analyst report a degenerate stub (no report substance)?
+
+    Like ``_looks_stub`` for decisions, but catches the analyst-chain
+    pathology: a model that answers a tool loop with a bare *status turn*
+    ("Good progress. Now let me gather the remaining signals ...") instead of
+    the report. Such a turn emits no tool_calls, so the router treats it as
+    final and it would land in ``*_report`` verbatim (observed: a 217-byte
+    fundamentals report). Detection: any degenerate stub OR a short
+    status-announcement sentence. Real analyst reports are long by design
+    ("comprehensive report ... as much detail as possible"); a one-line
+    progress note is not one.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _looks_stub(t):
+        return True
+    return len(t) < 400 and bool(_ANALYST_STATUS_TURN_RE.search(t))
+
+
+def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_name: str) -> str:
+    """Re-invoke a tool-calling chain when its final report is a degenerate stub.
+
+    Mirrors ``_retry_if_stub`` for the analyst chain path: a model that ran a
+    tool loop and then returned only a status turn or a bare header must be
+    asked ONCE to write the complete report from the evidence already in
+    ``messages`` (it may call more tools if it needs data). If the retry is
+    still degenerate, return an explicit unavailable notice - never an empty
+    or one-line report that downstream would render as truth.
+    """
+    text = response_text or ""
+    for _ in range(_MAX_TRUNCATION_RETRIES):
+        if not _looks_report_stub(text):
+            return text
+        try:
+            from langchain_core.messages import HumanMessage
+
+            cont = chain.invoke([*messages, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
+            text = cont.content if hasattr(cont, "content") else str(cont)
+        except Exception as exc:  # noqa: BLE001 - failed retry degrades
+            logger.warning("%s: chain stub-completion retry failed: %s", agent_name, exc)
+            break
+        if not text or not text.strip():
+            break
+    if _looks_report_stub(text):
+        logger.warning(
+            "%s: analyst returned a status-turn stub; emitting unavailable report",
+            agent_name,
+        )
+        return (
+            "**Report unavailable** — the analyst returned a degenerate status "
+            f"stub ({(text[:80]).strip() or 'empty'}). The prior tool evidence "
+            "stands; re-run to regenerate the full report."
+        )
+    return text
+
+
 def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str) -> str:
     """Re-invoke a tool-calling chain when its final content was cut.
 
