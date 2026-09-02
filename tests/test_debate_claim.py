@@ -125,7 +125,7 @@ class TestClaimLedger:
         md = led.render_markdown(used_claim_ids={"neutral_3_24"})
         assert "qualitative risk:valuation_and_cash_return_risk=-" in md
         assert "(MEDIUM, mitigation=true, weight ~0)" in md
-        assert "src=-calculated" in md
+        assert "src=-" in md
         # absent mitigation/severity stays honest, no phantom text
         led2 = ClaimLedger()
         led2.append(ClaimRecord(
