@@ -223,6 +223,18 @@ class TestBoundedContextPhases:
         statuses = {c.claim_id: c.status for c in ledger.rows}
         assert "valid" in statuses.values(), statuses
         assert "violated" in statuses.values(), statuses
+        # The stored CLAIM_LEDGER_MD must reflect the L1 statuses: a claim
+        # verified valid renders WITHOUT "(unused)"; unverified/violated rows
+        # keep the marker. Regression: previously the render passed no
+        # used_claim_ids, so EVERY row printed "(unused)" - even claims the
+        # L1 verdict had just verified valid (live INTU report: risk debate
+        # GREEN/penalty 0.0 yet every claim line "(unused)").
+        md = ds["claim_ledger_md"]
+        valid_id = next(c.claim_id for c in ledger.rows if c.status == "valid")
+        violated_id = next(c.claim_id for c in ledger.rows if c.status == "violated")
+        assert f"`{valid_id}`" in md and f"`{valid_id}`" + " " in md
+        assert f"`{valid_id}`" in md and "(unused)" not in md.split(f"`{valid_id}`", 1)[1].split("`", 1)[0]
+        assert f"`{violated_id}`" in md and "(unused)" in md.split(f"`{violated_id}`", 1)[1].split("`", 1)[0]
         # active_disputes surfaces ONLY violated/unverified, newest-first
         disputes = active_disputes(ds)
         assert disputes and disputes[0]["status"] == "violated"

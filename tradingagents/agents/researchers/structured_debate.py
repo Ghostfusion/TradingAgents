@@ -14,7 +14,13 @@ from collections.abc import Callable, Sequence
 from tradingagents.agents.schemas import DebaterTurnPayload, RiskDebaterTurnPayload
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
 from tradingagents.agents.utils.structured import bind_structured
-from tradingagents.strategies.debate_claim import ClaimLedger, ClaimRecord, verify_claim
+from tradingagents.strategies.debate_claim import (
+    QUALITATIVE,
+    VALID,
+    ClaimLedger,
+    ClaimRecord,
+    verify_claim,
+)
 from tradingagents.strategies.debate_score import (
     ABORT_TO_BASELINE,
     TRIGGER_REGEN,
@@ -507,7 +513,17 @@ def create_debate_l1(
         )
         new_ds = dict(ds)
         new_ds[CLAIM_LEDGER] = ledger.to_dict()
-        new_ds[CLAIM_LEDGER_MD] = ledger.render_markdown()
+        # Render with the L1 used-set: claims L1 verified VALID (or the
+        # qualitative risk-factor rows, weight ~0 by design) count as used;
+        # unverified / violated / abstain rows keep the honest "(unused)"
+        # marker ("L1 could not verify"). Without a used set every claim - even
+        # one just verified valid - renders "(unused)", which the live INTU
+        # report showed (risk debate: L1 GREEN/penalty 0.0 yet every claim
+        # line printed "(unused)").
+        used_claim_ids = {
+            c.claim_id for c in ledger.rows if c.status in (VALID, QUALITATIVE)
+        }
+        new_ds[CLAIM_LEDGER_MD] = ledger.render_markdown(used_claim_ids=used_claim_ids)
         new_ds[L1_KEY] = {"side": role, **severity}
 
         if severity.get("l1_action") == TRIGGER_REGEN:

@@ -280,7 +280,17 @@ class ClaimLedger:
         return ledger
 
     def render_markdown(self, used_claim_ids: set[str] | None = None) -> str:
-        """Compact claim ledger block for reports / judge context."""
+        """Compact claim ledger block for reports / judge context.
+
+        ``used_claim_ids`` is the set of claims L1 verified usable (status
+        VALID, plus QUALITATIVE rows by design): those render without a
+        marker. A claim NOT in the set renders " (unused)" - the honest
+        signal that L1 could not verify it (unverified / violated / abstain),
+        never a claim-status assertion. Callers SHOULD pass the L1 used-set;
+        with ``None`` every row renders "(unused)" (the report-driven
+        consumer of this is ``structured_debate.create_debate_l1``), which is
+        correct only before L1 has run.
+        """
         if not self._rows:
             return ""
         lines = ["**Claim ledger (grounded):**"]
