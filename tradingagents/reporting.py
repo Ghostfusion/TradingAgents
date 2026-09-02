@@ -648,31 +648,33 @@ def write_report_tree(
                         pm_decision = pm_decision.rstrip() + audit_note
                 except Exception:  # noqa: BLE001 - audit is advisory, never blocks
                     pass
-            # DSA phase D disclosure + invalidation advisory block.
-            try:
-                from tradingagents.strategies.report_disclosure import (
-                    disclosure_footers,
-                    invalidation_conditions,
-                    signal_attribution,
-                    watch_conditions,
-                )
+            # DSA phase D disclosure + invalidation advisory block (default off,
+            # matches enable_report_attribution; computed only, never gates).
+            if cfg.get("enable_report_attribution", False):
+                try:
+                    from tradingagents.strategies.report_disclosure import (
+                        disclosure_footers,
+                        invalidation_conditions,
+                        signal_attribution,
+                        watch_conditions,
+                    )
 
-                dq = "unknown"
-                invalids = invalidation_conditions(data_quality=dq)
-                attr = signal_attribution()
-                wc = watch_conditions([], None)
-                disc = disclosure_footers([], [], models_used=None)
-                block = [
-                    "### Decision disclosure (computed, advisory)",
-                    "",
-                    f"- invalidation conditions: {'; '.join(invalids)}",
-                    f"- attribution weights: {attr['weights'] or 'n/a'} (missing: {', '.join(attr['missing'])})",
-                    f"- watch conditions: {wc['watch_conditions'] or 'none'} · next check: {wc['next_check_time'] or 'n/a'}",
-                    f"- data sources used: {', '.join(disc['sources_used']) or 'none'} · empty: {', '.join(disc['sources_empty']) or 'none'} · models: {', '.join(disc['models_used']) or 'n/a'}",
-                ]
-                pm_decision = pm_decision.rstrip() + "\n\n" + "\n".join(block)
-            except Exception:  # noqa: BLE001 - disclosure advisory, never blocks
-                pass
+                    dq = "unknown"
+                    invalids = invalidation_conditions(data_quality=dq)
+                    attr = signal_attribution()
+                    wc = watch_conditions([], None)
+                    disc = disclosure_footers([], [], models_used=None)
+                    block = [
+                        "### Decision disclosure (computed, advisory)",
+                        "",
+                        f"- invalidation conditions: {'; '.join(invalids)}",
+                        f"- attribution weights: {attr['weights'] or 'n/a'} (missing: {', '.join(attr['missing'])})",
+                        f"- watch conditions: {wc['watch_conditions'] or 'none'} · next check: {wc['next_check_time'] or 'n/a'}",
+                        f"- data sources used: {', '.join(disc['sources_used']) or 'none'} · empty: {', '.join(disc['sources_empty']) or 'none'} · models: {', '.join(disc['models_used']) or 'n/a'}",
+                    ]
+                    pm_decision = pm_decision.rstrip() + "\n\n" + "\n".join(block)
+                except Exception:  # noqa: BLE001 - disclosure advisory, never blocks
+                    pass
             wrapped = prepend_block(_finalize_section(pm_decision))
             (portfolio_dir / "decision.md").write_text(wrapped, encoding="utf-8")
             sections.append(

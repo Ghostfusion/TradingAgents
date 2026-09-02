@@ -1118,6 +1118,21 @@ only after validating in the evaluation harness:
   `enable_enhanced_index`), contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.
 - **DSA decision quality (advisory, default off)** - `strategies/decision_guardrail.py` (post-PM downgrade-only stabilizer, risk-cap at Hold, score<->rating consistency, confidence cap on stale data; `enable_decision_guardrail`). Research: `docs/design_daily_stock_analysis_research.md`.
+- **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
+  vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
+  (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`
+  (effective-trading-date calendar: weekend/holiday -> previous session, pre-close -> prior Friday), `dataflows/schema.py`
+  `VendorResult` honesty fields (`fallback_from`/`is_stale`/`data_quality`/`missing_fields`).
+- **DSA polish (advisory, default off)** - `strategies/skills.py` + `strategies/skills/*.yaml` (declarative strategy-skill
+  DSL: instructions/tools/market regimes/priority + bounded +-20 score adjustments, regime-from-opinion thresholds
+  >=70/<=30/35-65, router precedence user->regime->priority; `enable_skill_overlays`/`skill_dir`),
+  `strategies/news_relevance.py` (deterministic relevance scoring, official-source boost, spam admission, degrade
+  triple - 'no news' never means 'search failed'; `enable_news_relevance`), `dataflows/news_cache.py` (owner-wait
+  coalescing TTL cache, one fetch per key under concurrency).
+- **DSA reporting (advisory, default off)** - `strategies/report_disclosure.py` (computed driver attribution sum-to-100,
+  consensus support/oppose readout, `watch_conditions`/`next_check_time` fast-path rows, >=1 `invalidation_conditions`
+  per decision with manual fallback, sources-used-vs-empty + models disclosure footers; `enable_report_attribution`),
+  appended to `5_portfolio/decision.md` by `reporting.write_report_tree`.
 - **Qlib Phase 1 (advisory, default off)** - `strategies/factor_expressions.py`
   (Alpha158-style 16-factor profile via `get_factor_profile`, expression-string
   cache, learn/infer train-only moments), `strategies/signal_analysis.py` (rank
