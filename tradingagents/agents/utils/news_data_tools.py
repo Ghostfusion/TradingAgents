@@ -2,7 +2,75 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.news_cache import CoalescingCache
+from tradingagents.strategies import news_relevance
+
+# Owner-wait coalescing TTL cache for identical news fetches (DSA pillar 9).
+# Only engaged while enable_news_relevance is on: default path is untouched.
+_NEWS_CACHE = CoalescingCache()
+
+
+def _news_relevance_enabled() -> bool:
+    try:
+        return bool(get_config().get("enable_news_relevance", False))
+    except Exception:  # noqa: BLE001 - advisory, degrade to off
+        return False
+
+
+def _cached_news(key: tuple, fn, *args) -> str:
+    """Deduplicate identical concurrent fetches (one vendor call per key)."""
+    if not _news_relevance_enabled():
+        return fn(*args)
+    return _NEWS_CACHE.fetch(key, fn, *args)[0]
+
+
+def _degrade_note(result: str) -> str:
+    """Honesty fold (DSA degrade triple): 'no news' never means 'search failed'. """
+    if not _news_relevance_enabled():
+        return result
+    low = (result or "").strip().lower()
+    if not low:
+        return result + "\n\n(relevance: empty - no articles retrieved; neutral, not a signal)"
+    if any(m in low for m in ("no news found", "no global news", "no articles", "unavailable", "failed", "error")):
+        label = news_relevance.degrade_triple(
+            all_failed=any(m in low for m in ("failed", "error")),
+            empty="no news" in low or "no articles" in low or "no global news" in low,
+        )
+        return result + f"\n\n(relevance: {label} - degrade triple; treat as neutral, not a directional signal)"
+    return result
+
+
+@tool
+def get_news_relevance_read(
+    title: Annotated[str, "Article title to classify"],
+    ticker: Annotated[str, "Ticker symbol to score relevance against"],
+    source_url: Annotated[str, "Source URL; the host is checked for official sources"] = "",
+    snippet: Annotated[str, "Article snippet or abstract"] = "",
+    company_name: Annotated[str, "Company name (e.g. 'Microsoft') to match in title/snippet"] = "",
+) -> str:
+    """
+    Deterministic news-relevance read (DSA advisory): a 0-100 relevance score
+    of one news item vs a ticker (code-in-title +55 / snippet +34 / URL +18,
+    company-name +45 or +26 ambiguous / snippet +28 / +16, official-source +8,
+    macro-term -12, clamped) with the admission verdict (official sources pass;
+    spam/app-download signals drop) and official-source classification. The
+    score is computed, never guessed - use it to rank a news batch for the
+    highest-signal items before writing the report.
+    """
+    r = news_relevance.score_news_article(
+        title=title, url=source_url, snippet=snippet,
+        ticker=ticker, company_name=company_name,
+    )
+    admitted = news_relevance.admit_article(title, url=source_url)
+    official = news_relevance.is_official(source_url)
+    return "\n".join([
+        f"Relevance score: {r['score']:.1f}/100",
+        f"Admitted: {'yes' if admitted else 'no (spam/app-download signal)'}",
+        f"Official source: {'yes' if official else 'no'}",
+        f"Reasons: {', '.join(r['reasons']) or 'none'}",
+    ])
 
 
 @tool
@@ -21,7 +89,11 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
-    return route_to_vendor("get_news", ticker, start_date, end_date)
+    result = _cached_news(
+        ("get_news", ticker, start_date, end_date),
+        route_to_vendor, "get_news", ticker, start_date, end_date,
+    )
+    return _degrade_note(result)
 
 @tool
 def get_news_sentiment(
@@ -59,7 +131,11 @@ def get_global_news(
     Returns:
         str: A formatted string containing global news data
     """
-    return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+    result = _cached_news(
+        ("get_global_news", curr_date, look_back_days, limit),
+        route_to_vendor, "get_global_news", curr_date, look_back_days, limit,
+    )
+    return _degrade_note(result)
 
 @tool
 def get_insider_transactions(
@@ -100,7 +176,7 @@ def get_massive_news(
     from tradingagents.dataflows.massive import get_news_massive
 
     try:
-        return get_news_massive(ticker, start_date, end_date)
+        return _degrade_note(get_news_massive(ticker, start_date, end_date))
     except Exception as exc:  # noqa: BLE001
         return f"massive news unavailable for {ticker}: {exc}"
 

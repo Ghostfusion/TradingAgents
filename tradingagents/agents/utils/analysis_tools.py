@@ -4759,4 +4759,61 @@ __all__ = [
     "get_factor_profile",
     "get_topk_drop_plan",
     "get_enhanced_index_tilt",
+    "get_skill_read",
 ]
+
+
+@tool
+def get_skill_read(
+    ma_alignment: Annotated[str, "MA alignment from the technical read: bullish / bearish / neutral / mixed"],
+    trend_score: Annotated[float | None, "Trend score 0-100 from the technical read"] = None,
+    requested: Annotated[str | None, "Comma-separated skill names to force-select (bypasses the regime router)"] = None,
+    baseline_score: Annotated[float | None, "Optional 0-100 investment score to fold the bounded +-20 advisory adjustments onto"] = None,
+) -> str:
+    """
+    Regime-from-opinion strategy-skill read (DSA advisory, enable_skill_overlays):
+    derives the market regime from the EARLIER structured technical opinion
+    (bullish & trend>=70 -> trending_up; bearish & <=30 -> trending_down;
+    35..65 -> sideways; unmeasurable -> none/fail-open), selects the matching
+    strategy-skills from the skill YAMLs (priority: user-requested -> regime ->
+    default priority, max 3; custom skill_dir overrides builtin by name), and
+    optionally folds the bounded +/-20 score adjustments onto a baseline score.
+    Everything it returns is computed from the YAMLs + the opinion - advisory
+    only, never gates.
+    """
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.strategies.skills import (
+        _DEFAULT_SKILL_DIR,
+        load_skills,
+        regime_from_opinion,
+        select_skills,
+    )
+
+    regime = regime_from_opinion({"ma_alignment": ma_alignment, "trend_score": trend_score})
+    skill_dir = get_config().get("skill_dir") or _DEFAULT_SKILL_DIR
+    skills = load_skills(skill_dir)
+    req = [x.strip() for x in (requested or "").split(",") if x.strip()] or None
+    picked = select_skills(skills, regime, requested=req)
+    lines = [f"Regime (from opinion): {regime or 'n/a (fail-open)'}"]
+    if not picked:
+        lines.append("Skills: none - skill_dir has no matching YAMLs")
+    for name in picked:
+        sk = skills.get(name)
+        if sk is None:
+            lines.append(f"- {name} (requested but not found in {skill_dir})")
+            continue
+        adj = sk.bounded_adjustments
+        adj_s = ", ".join(f"{k}={v:+.1f}" for k, v in adj.items()) or "none"
+        lines.append(f"- {sk.name} [{sk.category}] priority={sk.default_priority} adjustments({adj_s})")
+        if sk.instructions:
+            lines.append(f"  {sk.instructions[:280]}")
+    if baseline_score is not None and picked:
+        delta = sum(
+            v for n in picked if n in skills
+            for v in skills[n].bounded_adjustments.values()
+        )
+        folded = max(0.0, min(100.0, float(baseline_score) + delta))
+        lines.append(f"Folded score (advisory): {float(baseline_score):g} + {delta:+.2f} = {folded:.1f}/100")
+    elif baseline_score is not None:
+        lines.append("Folded score (advisory): none - no skills selected")
+    return "\n".join(lines)

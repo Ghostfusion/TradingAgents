@@ -80,6 +80,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
+    get_skill_read,
     get_sofr_curve,
     get_strategy_quality,
     get_swing_exits,
@@ -147,6 +148,7 @@ from tradingagents.agents.utils.news_data_tools import (
     get_insider_transactions,
     get_massive_news,
     get_news,
+    get_news_relevance_read,
     get_news_sentiment,
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
@@ -178,6 +180,7 @@ __all__ = [
     "get_news",
     "get_massive_news",
     "get_gdelt_sentiment",
+    "get_news_relevance_read",
     "get_news_sentiment",
     "get_global_news",
     "get_insider_transactions",
@@ -263,6 +266,7 @@ __all__ = [
     "get_dcf_valuation",
     "get_sector_rank",
     "get_session_discipline",
+    "get_skill_read",
     "get_strategy_quality",
     "get_normality",
     "get_unit_root",

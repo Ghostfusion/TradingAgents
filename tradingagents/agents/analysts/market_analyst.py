@@ -60,6 +60,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_session_discipline,
     get_short_interest,
     get_short_volume,
+    get_skill_read,
     get_sofr_curve,
     get_stock_data,
     get_strategy_quality,
@@ -108,6 +109,7 @@ def create_market_analyst(llm):
             get_liquidity_risk,
             get_capital_flow,
             get_swing_set,
+            get_skill_read,
             get_swing_exits,
             get_dip_technical,
             get_mean_reversion_tech,
@@ -231,6 +233,7 @@ You also have computed-analysis tools - use these numbers as ground truth, do no
 
 You also have three environment-flow tools - ground regime and order-lifecycle claims in them:
 - get_regime_read(ticker) - the deterministic regime label (vol percentile + trend), volatility-target position scale, 60d momentum and 52w distance. Use it before any 'the regime is risk-on/off' or 'trade the trend' claim.
+- get_skill_read(ma_alignment, trend_score, requested, baseline_score) - the regime-from-opinion skill read (DSA advisory): it derives the regime from YOUR OWN computed technical opinion (bullish & >=70 -> trending_up, bearish & <=30 -> trending_down, 35..65 -> sideways) and selects the matching strategy-skills with their bounded +-20 score adjustments. Use it before any 'which playbook applies' claim or to fold advisory adjustments onto a score; everything is computed, nothing is guessed.
 - get_volatility_contraction(ticker) - the VCP base state (15%->8%->3% contraction, volume fade, near-breakout). Use it when assessing whether a tight base precedes a breakout.
 - get_orderflow_read(ticker) - the live institutional-vs-retail net, distribution score, divergence and alignment. Use it (instead of raw get_capital_flow) before any 'institutions are accumulating/distributing' claim - it is the computed summary.
 

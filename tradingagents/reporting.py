@@ -642,16 +642,22 @@ def write_report_tree(
             # Finalize the LLM body first, then append the computed blocks.
             decision_llm = risk["judge_decision"]
             pm_body = _finalize_section(decision_llm)
+            # Computed reference levels from the position contract (shared by
+            # the audit + disclosure blocks; parsed once, never fabricated).
+            import re as _re
+
+            ref_stop = None
+            ref_target = None
+            contract = final_state.get("position_contract")
+            if isinstance(contract, str):
+                m = _re.search(r"\bstop\s+([0-9.]+)", contract, _re.IGNORECASE)
+                if m:
+                    ref_stop = float(m.group(1))
+                m2 = _re.search(r"\btarget\s+([0-9.]+)", contract, _re.IGNORECASE)
+                if m2:
+                    ref_target = float(m2.group(1))
             if cfg.get("enable_decision_audit"):
                 try:
-                    import re as _re
-
-                    ref_stop = None
-                    contract = final_state.get("position_contract")
-                    if isinstance(contract, str):
-                        m = _re.search(r"\bstop\s+([0-9.]+)", contract, _re.IGNORECASE)
-                        if m:
-                            ref_stop = float(m.group(1))
                     audit_note = audit_decision_numbers(decision_llm, {"stop": ref_stop})
                     if audit_note:
                         pm_body = pm_body.rstrip() + audit_note
@@ -668,10 +674,44 @@ def write_report_tree(
                         watch_conditions,
                     )
 
+                    # data_quality: the PM decision's own declared field when
+                    # present (mirrors PortfolioDecision.data_quality), else
+                    # honest "unknown" - never assumed fresh.
                     dq = "unknown"
-                    invalids = invalidation_conditions(data_quality=dq)
+                    m3 = _re.search(
+                        r"data\s*quality[^0-9a-z]{0,6}(fresh|stale|partial|unknown)",
+                        decision_llm, _re.IGNORECASE,
+                    )
+                    if m3:
+                        dq = m3.group(1).lower()
+                    invalids = invalidation_conditions(
+                        stop_loss=ref_stop, take_profit=ref_target, data_quality=dq,
+                    )
+                    # Watch rows come from the computed risk gate (verdict +
+                    # reasons + halt) - never narrated.
+                    gate = final_state.get("risk_gate") or {}
+                    watch = list(gate.get("reasons") or [])
+                    verdict = str(gate.get("verdict") or "PASS")
+                    if verdict != "PASS":
+                        watch.insert(0, f"risk gate {verdict} active")
+                    if final_state.get("risk_halt"):
+                        watch.append("risk halt active - escalation required")
+                    next_check = None
+                    try:
+                        from datetime import timedelta, timezone
+
+                        from tradingagents.dataflows.effective_date import (
+                            effective_trading_date,
+                        )
+
+                        nxt = effective_trading_date(
+                            ref_utc=datetime.now(timezone.utc) + timedelta(days=1)
+                        )
+                        next_check = f"{nxt or 'today'} (next check, effective-date calendar)"
+                    except Exception:  # noqa: BLE001 - computed calendar degrades
+                        next_check = None
+                    wc = watch_conditions(watch, next_check)
                     attr = signal_attribution()
-                    wc = watch_conditions([], None)
                     disc = disclosure_footers([], [], models_used=None)
                     block = [
                         "### Decision disclosure (computed, advisory)",

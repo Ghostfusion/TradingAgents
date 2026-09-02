@@ -19,6 +19,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_market_breadth,
     get_massive_news,
     get_news,
+    get_news_relevance_read,
     get_news_sentiment,
     get_news_sentiment_series,
     get_output_budget,
@@ -37,6 +38,7 @@ def create_news_analyst(llm):
         tools = [
             get_news,
             get_massive_news,
+            get_news_relevance_read,
             get_gdelt_sentiment,
             get_news_sentiment_series,
             get_global_news,
@@ -66,6 +68,7 @@ def create_news_analyst(llm):
             + "get_earnings_event_read(ticker, curr_date) - the last reported EPS surprise % + side (beat/miss) and the post-earnings drift setup (print-day move, volume vs 2.5x average, consolidation break). Use it before any beat/miss, drift or gap-up claim; it is the computed number. "
             + "get_beat_miss_sizing(side, catalyst) - the deterministic position multiplier implied by a beat/miss side (with the catalyst scale). Use its multiplier when the market will size an event-window position, not a guess. "
             + "You also have macro-risk-off tools: get_credit_spread_read(current_date) returns the FRED ICE BofA HY/CCC/BB OAS credit-cycle band (low/moderate/high/severe) + 0..1 de-risk scale + implied 1y default probability - cite it (or its explicit 'unavailable') before any 'credit stress / risk-off / debt market' claim; get_news_sentiment(ticker, start_date, end_date) returns the daily news-sentiment series from the news_sentiment chain. "
+            + "You also have get_news_relevance_read(title, ticker, source_url, snippet) - the deterministic 0-100 relevance score + admission verdict for any news item; use it to rank the highest-signal articles instead of judging by headline alone. "
             + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + get_language_instruction() + get_output_budget("analyst")
