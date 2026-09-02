@@ -265,7 +265,7 @@ never an opaque LLM decision.
 | Governor gate | `strategies/risk_governor.py::govern(... capital_at_risk_pct=..., risk_cap_pct=...)` |
 | Overnight news/filings/ratings | news chain + `get_massive_news`, `get_sec_filings`, `get_analyst_ratings` (headline context via `_headline_delta`, feature 5) |
 | Real-time pre-market price | Alpaca `get_intraday` (when enabled) else yfinance `fast_info.last_price` else daily close (`_realtime_price`) |
-| Pre-open batch driver | `scripts/nightly_review.py` (reads `reports/batch_summary_*.jsonl`; feature 2) |
+| Pre-open batch driver | `scripts/nightly_review.py` (reads `reports/batch_summary_*.jsonl`; feature 2; `--mode recent` = each symbol's newest report folder, so interactive CLI / `propagate()` runs are reviewed too) |
 | Paper-book ledger | `strategies/pre_market.py::record_review/resolve_ledger` → `data_cache_dir/pre_market_ledger.jsonl` (feature 3) |
 | Decision history series | `scripts/decision_history.py` (reads per-ticker `full_states_log_*.json`; feature 4) |
 | Macro stress | `get_credit_spread_read` (FRED) |
@@ -328,7 +328,9 @@ review. Wire it with a scheduler:
 **Windows Task Scheduler**
 - Task 1: `py -3.12 batch.py --symbols ... --depth deep` at 17:35 weekday.
 - Task 2: `py -3.12 scripts/nightly_review.py` at 07:35 weekday (uses the
-  latest `reports/batch_summary_*.jsonl`, so it needs no args).
+  latest `reports/batch_summary_*.jsonl`, so it needs no args; switch to
+  `py -3.12 scripts/nightly_review.py --mode recent` to review each symbol's
+  newest report folder when the batch is not re-run daily).
 
 **Registered on this machine (2026-08-27)** — wrappers in
 `C:\Users\vince\tradingagents_tasks\` (outside the git repos), each `cd`s to
@@ -343,7 +345,8 @@ Re-register anytime with `register_tasks.cmd` (idempotent `/f`).
 Notes
 - Skip review on weekends/holidays via the *weekday* (`1-5`) schedule; the
   script itself also degrades to CONFIRM when there is no quote.
-- `nightly_review.py` reads the latest batch summary; run it **before the
-  open** so the gap read reflects the pre-market price (see §10).
+- `nightly_review.py` reads the latest batch summary (or, with `--mode
+  recent`, each symbol's newest report folder); run it **before the open** so
+  the gap read reflects the pre-market price (see §10).
 - All runs are `py -3.12` (the environment with pytest/deps; bare `python` is
   the wrong venv on this machine — `docs/AGENT_ONBOARDING.md` §1).

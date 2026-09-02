@@ -717,7 +717,9 @@ preserves `Risk Gate (computed)` blocks.
   measured deltas (gap, catalyst window, re-anchored tranche/contract, governor)
   — `strategies/pre_market.py` (deterministic arbiter + paper-book ledger) +
   `scripts/pre_market_review.py` (standalone pre-open; real pre-market quote,
-  planned-level re-anchor), `scripts/nightly_review.py` (batch-summary driver),
+  planned-level re-anchor), `scripts/nightly_review.py` (batch-summary driver;
+  `--mode recent` reviews each symbol's newest report folder instead, covering
+  CLI/API runs that never write a batch summary),
   `scripts/decision_history.py` (decision series), and the opt-in `batch.py`
   same-night step (`enable_pre_market_review`).
 - `docs/developer/11-agent-decision-tools.md` - the six decision-grounding tools

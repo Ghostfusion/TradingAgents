@@ -231,6 +231,69 @@ def test_nightly_review_drives_from_summary(tmp_path, monkeypatch):
     assert "--ticker" in called[0] and "EIX" in called[0]
 
 
+def test_nightly_review_recent_mode_newest_per_symbol(tmp_path, monkeypatch, capsys):
+    """--mode recent reviews each symbol's newest report folder (CLI/API runs
+    that never wrote a batch summary), keyed on the folder-name timestamp, and
+    skips folders with no prior decision."""
+    import scripts.nightly_review as nr
+
+    # Two generations of AAPL (newer must win) + a CLI-only INTU run.
+    for name in ("AAPL_20260820_153136", "AAPL_20260828_113630", "INTU_20260901_190729"):
+        (tmp_path / name / "5_portfolio").mkdir(parents=True)
+        (tmp_path / name / "5_portfolio" / "decision.md").write_text(
+            "**Rating**: Buy\n", encoding="utf-8"
+        )
+    # Decoys: pipeline dir + batch-summary file must be ignored.
+    (tmp_path / "pipeline_T1.md").mkdir()
+    (tmp_path / "batch_summary_20260828_231618.jsonl").write_text("{}", encoding="utf-8")
+    # A report folder with no decision.md / full_states_log must be skipped.
+    (tmp_path / "NVDA_20260902_021854" / "1_analysts").mkdir(parents=True)
+    (tmp_path / "NVDA_20260902_021854" / "1_analysts" / "market.md").write_text(
+        "x", encoding="utf-8"
+    )
+
+    monkeypatch.setattr("tradingagents.dataflows.utils.resolve_output_path", lambda which: tmp_path)
+    called = []
+
+    def fake_main(argv):
+        called.append(argv)
+        return 0
+
+    fake_mod = types.ModuleType("pre_market_review_mod")
+    fake_mod.main = fake_main
+    monkeypatch.setattr(nr, "_load_pre_market_script", lambda: fake_mod)
+
+    rc = nr.main(["--mode", "recent", "--skip-llm", "--dry-run"])
+    assert rc == 0
+    assert len(called) == 2
+    tickers = [a[a.index("--ticker") + 1] for a in called]
+    assert tickers == ["AAPL", "INTU"]  # sorted; NVDA folder had nothing to review
+    dirs = [a[a.index("--report-dir") + 1] for a in called]
+    assert any(d.endswith("AAPL_20260828_113630") for d in dirs)
+    assert not any(d.endswith("AAPL_20260820_153136") for d in dirs)
+    assert "skipping NVDA_20260902_021854: no prior decision" in capsys.readouterr().out
+
+
+def test_nightly_review_recent_mode_empty(tmp_path, monkeypatch):
+    """--mode recent with nothing reviewable returns 3 and invokes no reviews."""
+    import scripts.nightly_review as nr
+
+    monkeypatch.setattr("tradingagents.dataflows.utils.resolve_output_path", lambda which: tmp_path)
+    called = []
+
+    def fake_main(argv):
+        called.append(argv)
+        return 0
+
+    fake_mod = types.ModuleType("pre_market_review_mod")
+    fake_mod.main = fake_main
+    monkeypatch.setattr(nr, "_load_pre_market_script", lambda: fake_mod)
+
+    rc = nr.main(["--mode", "recent"])
+    assert rc == 3
+    assert called == []
+
+
 def test_decision_history_report_folder_fallback(tmp_path):
     """Batch reports carry only markdown (no full_states_log json); the history
     must fall back to 5_portfolio/decision.md per report folder."""

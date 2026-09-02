@@ -306,6 +306,14 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-02 `(working tree)` - Nightly-review driver `--mode recent`:
+  `scripts/nightly_review.py` gains a `--mode recent` option that reviews each
+  symbol's MOST RECENT `reports/<TICKER>_<ts>/` folder (keyed on the
+  folder-name timestamp; only folders with a prior decision; batch mode
+  unchanged) - interactive CLI / `propagate()` / `pipeline.py` runs that never
+  write a `batch_summary_*.jsonl` are now covered by the scheduled 07:35
+  review. Tests `test_nightly_review_recent_mode_*` (2, hermetic); web
+  `run_nightly` forwards `--mode`. See CHANGELOG.
 - 2026-08-31 `(working tree)` - Multi-agent debate architecture design
   (research-only, no code): `docs/design_multi_agent_debate.md` + the source
   `Strategies/Multi_Agents_Debate.md` — two-layer judiciary (deterministic L1
