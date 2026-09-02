@@ -110,7 +110,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prior-date", default=None, help="prior trade date YYYY-MM-DD")
     parser.add_argument("--skip-llm", action="store_true", help="deterministic verdict only")
     parser.add_argument("--dry-run", action="store_true", help="print, write nothing")
+    parser.add_argument("--force-run", action="store_true",
+                        help="run even when the configured market regions are all closed "
+                             "(bypasses should_skip_all_closed; the documented escape hatch)")
+    parser.add_argument("--regions", default=None,
+                        help="comma list of market regions for the all-closed skip "
+                             "(default: config nightly_market_regions or US)")
     args = parser.parse_args(argv)
+
+    # DSA effective-date keying (should_skip_all_closed + next-session binding):
+    # when every configured region is closed (weekend/holiday/pre-close) the
+    # nightly skips with an explicit log unless --force-run - fail-open when
+    # the calendar helper cannot measure anything.
+    try:
+        from datetime import datetime, timezone
+
+        from tradingagents.dataflows.effective_date import (
+            effective_trading_date,
+            should_skip_all_closed,
+        )
+
+        regions = [r.strip().upper() for r in
+                   (args.regions or "").split(",") if r.strip()] or []
+        if not regions:
+            from tradingagents.dataflows.config import get_config
+
+            regions = list(get_config().get("nightly_market_regions") or ["US"])
+        if should_skip_all_closed(regions) and not args.force_run:
+            print(
+                f"[nightly] all configured market regions {regions} are closed; "
+                "skipping (use --force-run to override, e.g. a long weekend).",
+                file=sys.stderr,
+            )
+            return 0
+        if args.prior_date is None:
+            args.prior_date = effective_trading_date(
+                ref_utc=datetime.now(timezone.utc)
+            )
+            print(f"[nightly] effective prior trade date: {args.prior_date}")
+    except Exception as exc:  # noqa: BLE001 - skip guard is advisory, fail-open
+        print(f"[nightly] (calendar check degraded, continuing: {exc})", file=sys.stderr)
 
     if args.mode == "recent":
         if args.summary is not None:

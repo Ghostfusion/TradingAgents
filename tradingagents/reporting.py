@@ -668,6 +668,7 @@ def write_report_tree(
             if cfg.get("enable_report_attribution", False):
                 try:
                     from tradingagents.strategies.report_disclosure import (
+                        consensus_readout,
                         disclosure_footers,
                         invalidation_conditions,
                         signal_attribution,
@@ -710,6 +711,22 @@ def write_report_tree(
                         next_check = f"{nxt or 'today'} (next check, effective-date calendar)"
                     except Exception:  # noqa: BLE001 - computed calendar degrades
                         next_check = None
+                    # Consensus (supporting/opposing) from the structured risk
+                    # debate's L1 verdict side: the winning side supports the
+                    # decision, the loser opposes (advisory, derived - not
+                    # narrated by the LLM).
+                    _supporting: list[str] = []
+                    _opposing: list[str] = []
+                    try:
+                        _l1 = (final_state.get("structured_risk_state") or {}).get("l1") or {}
+                        _side = str(_l1.get("side") or "").lower()
+                        if _side in ("bull", "buy", "long"):
+                            _supporting, _opposing = ["bull"], ["bear"]
+                        elif _side in ("bear", "sell", "short"):
+                            _supporting, _opposing = ["bear"], ["bull"]
+                    except Exception:  # noqa: BLE001 - derived consensus degrades
+                        pass
+                    cons = consensus_readout(_supporting, _opposing)
                     wc = watch_conditions(watch, next_check)
                     attr = signal_attribution()
                     disc = disclosure_footers([], [], models_used=None)
@@ -717,6 +734,7 @@ def write_report_tree(
                         "### Decision disclosure (computed, advisory)",
                         "",
                         f"- invalidation conditions: {'; '.join(invalids)}",
+                        f"- consensus: supporting={', '.join(cons['supporting']) or 'n/a'} · opposing={', '.join(cons['opposing']) or 'none'}",
                         f"- attribution weights: {attr['weights'] or 'n/a'} (missing: {', '.join(attr['missing'])})",
                         f"- watch conditions: {wc['watch_conditions'] or 'none'} · next check: {wc['next_check_time'] or 'n/a'}",
                         f"- data sources used: {', '.join(disc['sources_used']) or 'none'} · empty: {', '.join(disc['sources_empty']) or 'none'} · models: {', '.join(disc['models_used']) or 'n/a'}",

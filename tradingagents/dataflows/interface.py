@@ -44,7 +44,14 @@ from .finnhub import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
-from .market_router import market_for_symbol, price_caliber_for, volume_unit_for
+from .market_router import (
+    caliber_consistency,
+    gap_fill,
+    market_for_symbol,
+    price_caliber_for,
+    resolve_market_priority,
+    volume_unit_for,
+)
 from .massive import (
     get_corporate_actions_massive,
     get_fundamentals_massive,
@@ -102,6 +109,11 @@ from .tiingo import (
 )
 from .twelve_data import (
     get_stock_data_twelve_data,
+)
+from .vendor_breaker import (
+    allow_call as _breaker_allow,
+    record_failure as _breaker_fail,
+    record_success as _breaker_ok,
 )
 from .vendor_cache import vendor_cache
 from .y_finance import (
@@ -517,6 +529,13 @@ def get_category_for_method(method: str) -> str:
     raise ValueError(f"Method '{method}' not found in any category")
 
 
+def _market_routing_enabled() -> bool:
+    try:
+        return bool(get_config().get("enable_market_routing", False))
+    except Exception:  # noqa: BLE001 - advisory
+        return False
+
+
 def get_vendor(category: str, method: str = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
     Tool-level configuration takes precedence over category-level.
@@ -574,24 +593,66 @@ def route_to_vendor(method: str, *args, **kwargs):
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
 
+    # DSA research §3.4 market routing + vendor breaker (enable_market_routing,
+    # default off): reorder the chain per-market and skip open (tripped)
+    # vendors. Off by default -> the vendor chain is untouched (bit-identical).
+    routed_market = None
+    if _market_routing_enabled() and args and isinstance(args[0], str) and len(args[0]) <= 12:
+        try:
+            routed_market = market_for_symbol(args[0])
+            prio = get_config().get("market_source_priority") or {}
+            vendor_chain = resolve_market_priority(routed_market, prio, vendor_chain)
+        except Exception:  # noqa: BLE001 - routing is advisory
+            routed_market = None
+
     # Serve a fresh TTL-cache hit without touching any vendor (quota savings).
     cached = vendor_cache.get(method, category, args, kwargs)
     if cached is not None:
         logger.info("Vendor cache hit for %s (%s); skipping network fetch.", method, category)
         return cached
 
+    # When market routing is on and vendors return dict results, fill missing
+    # supplement fields across the chain + surface a mixed-caliber warning.
+    dict_results: list[dict] = []
+
+    def _maybe_mixed_caliber(out: dict) -> dict:
+        try:
+            mix = caliber_consistency(
+                [{"_vendor": r.get("_vendor"), "_market": routed_market}
+                 for r in dict_results if isinstance(r, dict)]
+            )
+            if mix and not mix.get("consistent"):
+                out["_caliber_warning"] = mix["warning"]
+        except Exception:  # noqa: BLE001 - advisory
+            pass
+        return out
+
     for vendor in vendor_chain:
+        if routed_market and not _breaker_allow(routed_market, vendor):
+            logger.info("Vendor %r open (breaker) for %s/%s; skipping.", vendor, routed_market, method)
+            continue
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
             result = impl_func(*args, **kwargs)
+            if routed_market:
+                _breaker_ok(routed_market, vendor)
             # Log which vendor actually served the call so free-tier quota burn
             # is visible in the logs, then cache successful results.
             logger.info("Vendor %r served %s (%s)", vendor, method, category)
+            if routed_market and isinstance(result, dict):
+                # gap-fill across the chain for missing supplement fields.
+                result = dict(result)
+                result["_vendor"] = vendor
+                result["_market"] = routed_market
+                dict_results.append(result)
+                continue
             vendor_cache.set(method, category, args, kwargs, result)
             return result
         except VendorRateLimitError as e:
+            if routed_market:
+                _breaker_fail(routed_market, vendor)
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             # A rate limit is a real failure (the vendor could not serve), not
             # "no data": record it so an all-throttled chain surfaces a typed
@@ -601,14 +662,20 @@ def route_to_vendor(method: str, *args, **kwargs):
                 first_error = e
             continue
         except VendorNotConfiguredError as e:
+            if routed_market:
+                _breaker_fail(routed_market, vendor)
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
                 first_error = e  # Surface it if no other vendor can serve the call.
             continue
         except NoMarketDataError as e:
+            if routed_market:
+                _breaker_fail(routed_market, vendor)
             last_no_data = e  # No data here; another configured vendor may have it
             continue
         except Exception as e:
+            if routed_market:
+                _breaker_fail(routed_market, vendor)
             # Don't let one vendor's failure crash the call when another can
             # serve it, but never swallow silently: a broken primary must be
             # visible in the logs (#989), not hidden behind a fallback's verdict.
@@ -616,6 +683,13 @@ def route_to_vendor(method: str, *args, **kwargs):
             if first_error is None:
                 first_error = e
             continue
+
+    # Dict results collected under market routing: gap-fill + caliber check.
+    if dict_results:
+        filled = gap_fill(dict_results[0], dict_results[1:])
+        filled = _maybe_mixed_caliber(filled)
+        vendor_cache.set(method, category, args, kwargs, filled)
+        return filled
 
     # If any vendor reported "no data", the symbol is genuinely unavailable.
     # Return one explicit, instructive sentinel rather than a vendor-specific
