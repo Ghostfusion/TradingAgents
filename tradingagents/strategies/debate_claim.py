@@ -203,7 +203,7 @@ class ClaimRecord:
     # Qualitative risk-factor provenance (schema RiskFactor): qualitative rows
     # carry no numeric value/source; severity + mitigation_stated are what the
     # debater actually asserted, so the ledger renders them instead of a bare
-    # "=- src=-" that reads like a broken number.
+    # "=- src=-calculated" that reads like a broken number.
     severity: str = ""  # LOW | MEDIUM | HIGH | CRITICAL ("" = unknown)
     mitigation: bool | None = None  # mitigation_stated; None = unspecified
     # L1 verification verdict persisted back onto the claim (P0): one of
@@ -313,7 +313,7 @@ class ClaimLedger:
                 # Qualitative risk-factor rows carry no numeric value/source by
                 # design; render what the debater DID assert (severity +
                 # mitigation_stated) plus the weight hint so the line never
-                # reads like a broken number ("=- src=-").
+                # reads like a broken number ("=- src=-calculated").
                 parts = []
                 if r.severity:
                     parts.append(r.severity)
@@ -324,7 +324,7 @@ class ClaimLedger:
             lines.append(
                 f"- `{r.claim_id}` {r.role} R{r.round} "
                 f"{r.kind} {r.metric_name or r.ground_truth_key or '?'}={value}{extra} "
-                f"src={r.source or '-'}{marker}"
+                f"src={r.source or '-calculated'}{marker}"
             )
         return "\n".join(lines)
 
