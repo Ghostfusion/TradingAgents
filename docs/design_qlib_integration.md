@@ -72,7 +72,7 @@ alpha vs regional benchmark, `_RUN_OHLCV_CACHE` is a panel cache, and
 | --- | --- | --- | --- |
 | **1. Data layer + expression engine** | `.bin` panel store; PIT integrity; `Ref/Mean/Std/Delta/…` operators; Alpha158/Alpha360 factor libraries | Vendor cache is TTL strings; OHLCV cache is in-run only; no factor-expression DSL; no PIT fundamentals snapshots | A **pure factor-expression layer** over the OHLCV/panel cache (operators as numpy calculators) + a **point-in-time registry** for fundamentals/decisions (the repo already has the look-ahead guard in `dataflows/date_window.py`; make it a first-class as-of snapshot store) |
 | **2. Workflow + recorder** | `qrun` YAML declarative config → init-by-config; experiment/artifact recording (mlflow-style) | Runs are flag-driven (`batch.py/pipeline.py` flags); results tracked in `batch_summary_*.jsonl` + report trees + `risk_audit.jsonl` | A **declarative run YAML** (universe/analysts/depth/models/tools) expanded to the existing flags, plus an **experiment ledger** (config hash, metrics, artifacts) so every run is reproducible and diffable |
-| **3. Strategy zoo** | `TopkDropoutStrategy`, `EnhancedIndexingStrategy`, `WeightStrategyBase` | `portfolio.py` has cap-respecting value weights + correlation penalty; no turnover-managed daily portfolio strategy | **Adopt Topk-Drop + enhanced-indexing as pure portfolio strategies** over a `pred_score` series (from composite rank or an advisory factor score) — feed `pipeline.py --alloc` and the PM's allocation tool; reuse `evaluate.backtest` turnover math |
+| **3. Strategy zoo** | `TopkDropoutStrategy`, `EnhancedIndexingStrategy`, `WeightStrategyBase` | `portfolio.py` has cap-respecting value weights + correlation penalty; no turnover-managed daily portfolio strategy | **Adopt Topk-Drop + enhanced-indexing as pure portfolio strategies** over a `pred_score` series (from composite rank or an advisory factor score) — feed `scripts/value_screener.py --alloc` (via `portfolio.allocation_block`) and the PM's allocation tool; reuse `evaluate.backtest` turnover math |
 | **4. Backtest / evaluation** | `backtest_daily`, `risk_analysis` (annualized return, IR, max DD), `SigAnaRecord` (IC/ICIR), cost/limit-threshold exchange | `evaluate_config_gate` (walk-forward+PBO), `backtest_strategy.py`, `strategy_quality_report.py` exist; **signal-level IC/ICIR/quantile analysis missing** (only `sentiment_research` has IC machinery) | **Signal analysis module** (rank IC, ICIR, quantile monotonicity, IC decay) generalized from `sentiment_research` to any factor/score series; wire into `strategy_quality_report` + the PM advisory context |
 | **5. Model zoo** | LightGBM/Transformer/TabNet/… supervised factor models + RL | Fork is explicitly deterministic-first (`quants.md` non-goal: "no ML runtime") | **Advisory, gated, optional**: a supervised factor model (LightGBM) trained on Alpha158-style features → `pred_score` fed to the LLM as one more computed input — **only after walk-forward + PBO evidence** (repo `enable_threshold_gate` policy). Not a gate; never the executor (web search §6) |
 | **6. RL framework** | Continuous decision/portfolio optimization via RL | No execution layer; decisions are advisory | **Non-goal** (see §5) — note only: the repo's reweight-to-baseline / consensus machinery is its analog for "policy under constraints" |
@@ -175,7 +175,9 @@ alpha vs regional benchmark, `_RUN_OHLCV_CACHE` is a panel cache, and
 - Tools: `get_topk_drop_plan(scores_by_name, topk, n_drop)`,
   `get_enhanced_index_tilt(scores, benchmark_weights, w0?, turnover_cap?)` →
   bound to the PM toolset (decision-agent advisory) + consumed by
-  `pipeline.py --alloc` and `portfolio_contract` (FinRL doc §6.3).
+  `scripts/value_screener.py --alloc` (via `portfolio.allocation_block` —
+  the screener flag the docs previously called `pipeline.py --alloc`) and
+  `portfolio_contract` (FinRL doc §6.3).
 - **Tests:** topk-drop holds top-k by score and drops worst-held; turnover
   formula; enhanced-index caps tracking error AND total turnover, honours
   force-hold/force-sell masks, falls back to `w0` when the problem is
@@ -278,7 +280,7 @@ alpha vs regional benchmark, `_RUN_OHLCV_CACHE` is a panel cache, and
 | --- | --- | --- | --- |
 | `factor_expressions` | market analyst tool `get_factor_profile` | `enable_factor_profile` (False) | Value Tools |
 | `signal_analysis` | `strategy_quality_report.py` + PM advisory | — (always-on pure calc) | Scripts screen row |
-| `portfolio_strategy` | PM tools + `pipeline.py --alloc` + `action_report` | `enable_topk_drop` / `enable_enhanced_index` (False) | Pipeline alloc strategy |
+| `portfolio_strategy` | PM tools + `scripts/value_screener.py --alloc` (→ `portfolio.allocation_block`) + `action_report` | `enable_topk_drop` / `enable_enhanced_index` (False) | Pipeline alloc strategy |
 | `runfile.py` + ledger | `batch.py`/`pipeline.py` flags front-end; §3.9 recorder rows + status | `--runfile <yaml>` | Jobs screen preset + experiments read view |
 | `pit_registry` | `pre_market_review`, fast path, backtests; §3.1 fitted norm moments + label convention | `enable_pit_registry` (True) | Reports as-of labels |
 | `factor_model_train` | advisory rank only | `enable_factor_model` (False) | none (research) |
