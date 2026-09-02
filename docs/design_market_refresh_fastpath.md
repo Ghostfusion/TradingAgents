@@ -189,3 +189,28 @@ deltas; HOLD/CONFIRM by default**.
 `pre_market_review`'s delta verdict, the market-only analyst selection, the
 deterministic overlay pipeline, and LangGraph checkpoint resume. The fast path
 is orchestration, not new algorithm code.
+
+
+---
+
+## Qlib OnlineManager / DelayTrainer alignment (design_qlib_integration.md §1a-16)
+
+The fast path is the fork's analog of Qlib's `OnlineManager.routine()` model
+rolling. The alignment is exact:
+
+| Fast-path tier | Qlib OnlineManager analog | Seam |
+| --- | --- | --- |
+| T2 nightly full run | the **delayed training batch** — `DelayTrainer` records every window's model tasks, then trains them ALL at the end (parallel via the existing `batch.py` worker pool). T2 IS the delay-train: models/reports are (re)built for the whole history in one pass, then `prepare_signals`-style ensembling (the candidate-zoo selection from FinRL §6.6) picks the online models for the next period | `scripts/runfile.py` (phase-2 declarative runs) + `factor_model_train.py` (phase-4, gated) |
+| T1 market-only refresh | `OnlineManager.routine()` — reuse the day's ALREADY-TRAINED models to refresh predictions from new data (no retrain). T1 reuses the prior analyst reports as cached as-of state (via `pit_registry`) and re-runs only market analyst → trader → 1-round risk → PM | `dataflows/pit_registry.py` (as-of snapshot reads) + `signal_analysis` (IC/decay advisory) |
+| T0 deterministic gate | the **decision policy**: `routine()` decides HOLD/UPDATE/ESCALATE from deltas (regime/ATR/catalyst/risk recompute vs the stored snapshot with hysteresis) — the fast path's decision policy is the same shape | `strategies/factor_expressions.py` (`get_factor_profile` diff vs the stored snapshot) + the existing overlays |
+
+Constraints that carry over (design_qlib non-goals):
+- T1 NEVER retrains — retraining is T2's delayed batch (the DelayTrainer
+  split means a T1 refresh in the morning never waits on a full retrain).
+- `history` (which models were online per day) is the ledger's job: the
+  recorder-style `experiments` rows (phase 2) record `{config_hash, metrics,
+  status}` so the online/offline attribution is reproducible.
+- Still advisory: the refresh updates the decision context, never the hard
+  gates (regime → catalyst → contract → governor stay the authority).
+- `fast_path_*` config keys formalize the cadence; nothing ships until the
+  fast-path implementation phase (design_market_refresh_fastpath Phase 2+).

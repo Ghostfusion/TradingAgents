@@ -1,6 +1,6 @@
 # Design: Incorporating Qlib into TradingAgents
 
-**Status:** design only — no code changed.
+**Status:** Phases 1-4 IMPLEMENTED (2026-09-02): §3.1 factor_expressions, §3.2 signal_analysis, §3.3 portfolio_strategy, §3.8 market_tradability, §3.4 runfile+ledger (+§3.9 ledger), §3.5 pit_registry, §3.6 factor_model_train, §3.7 factor_proposal_loop, §3.10 tuner — all advisory/default-off, commits 43c0ce6, 38142a8, 93ef6ad, 8cbac61; Phase 5 (fast-path alignment) doc-only.
 **Date:** 2026-09-02 (initial mirror study), **revised 2026-09-02 (direct
 repo deep-research)**.
 **Source study:** first pass read a vanilla mirror (`Ghostfusion/qlib`). This
