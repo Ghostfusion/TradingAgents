@@ -1396,6 +1396,14 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001
             closes = []
         try:
+            from tradingagents.strategies.book_positions import render_holdings_block
+
+            book_line = render_holdings_block(self.config)
+            if book_line:
+                out.append(book_line)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             from tradingagents.strategies.regime import regime_gate_read
 
             rg = regime_gate_read(closes, cfg=self.config, catalyst_window=False) or {}

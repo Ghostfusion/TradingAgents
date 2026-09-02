@@ -127,6 +127,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
     "TRADINGAGENTS_RISK_BASKET_WEIGHTS": "risk_basket_weights",
+    "TRADINGAGENTS_HOLDINGS_TICKERS": "holdings_tickers",
+    "TRADINGAGENTS_HOLDINGS_WEIGHTS": "holdings_weights",
     "TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS": "moomoo_max_connections",
     "TRADINGAGENTS_MOOMOO_CALL_TIMEOUT": "moomoo_call_timeout",
     "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
@@ -582,6 +584,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # single-name series when the basket cannot be resolved.
         "risk_basket_tickers": [],  # e.g. ["SPY", "QQQ", "AAPL"]
         "risk_basket_weights": {},  # e.g. {"SPY": 0.4, "QQQ": 0.6}
+        # Option-B holdings read (PM advisory block). When set, these describe
+        # the ACTUAL book for the decision agents ("you hold NVDA 10.4%, cash
+        # remainder"); when empty the risk basket is used (Option A - the
+        # basket IS the book). weights are fractions of the whole book incl.
+        # cash; the < 1.0 remainder is the cash sleeve (never a ticker).
+        "holdings_tickers": [],  # Option-B: actual-book tickers (else basket used)
+        "holdings_weights": {},  # Option-B: actual-book weights (else basket used)
         "risk_audit_enabled": True,  # R4: risk_audit.jsonl
         # Moomoo connection guard (parallel batch): cap open gateway contexts
         "moomoo_max_connections": 25,  # far below OpenD's 128-connection limit

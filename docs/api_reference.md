@@ -97,6 +97,8 @@ in `batch.py`).
 | `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` |
 | `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` |
 | `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` |
+| `TRADINGAGENTS_HOLDINGS_TICKERS` | `holdings_tickers` | Option B: actual-book tickers for the PM holdings read; empty = the risk basket is used (Option A) |
+| `TRADINGAGENTS_HOLDINGS_WEIGHTS` | `holdings_weights` | Option B: actual-book weights (fractions of the whole book incl. cash; <1.0 remainder = cash sleeve). See `scripts/positions_to_basket.py` to derive them from position CSVs |
 | `TRADINGAGENTS_RISK_COMPACT_REPORT` | `risk_compact_report` |
 | `TRADINGAGENTS_GOOGLE_THINKING_LEVEL` | `google_thinking_level` |
 | `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` |
@@ -668,6 +670,7 @@ preserves `Risk Gate (computed)` blocks.
 | `python pipeline.py --universe top-losers --top 5` | screener + composite rank + batch (B2) |
 | `python scripts/value_screener.py ...` | value screens / scans / composite |
 | `python scripts/action_report.py ...` | conditional action report (basket vs report verdicts vs live market) |
+| `python scripts/positions_to_basket.py ...` | combine broker position CSVs -> TRADINGAGENTS_RISK_BASKET_* weights (cash in the denominator; `--apply` rewrites .env) |
 | `python scripts/rebuild_complete_report.py reports/<dir>` | re-render TOC reports |
 | `python scripts/smoke_structured_output.py` | smoke structured output |
 | `python main.py` | minimal Python API demo |
@@ -694,6 +697,10 @@ preserves `Risk Gate (computed)` blocks.
   `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`
   `--llm` (judge UNKNOWN conditions) `--json` `--dry-run` `--out-dir`
   (default `action_reports/`, keep-only-newest).
+- positions_to_basket.py: `--positions DIR` (default repo `positions/`) +
+  explicit CSV files; `--apply` (backup `.env.bak`, rewrite the two basket
+  lines); `--min-value` / `--exclude SYM` (repeatable); `--write-book-json`
+  (dollar book to `positions/book_value.json`, gitignored); `--json`.
 
 ## 10. Docs index
 

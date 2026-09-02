@@ -226,4 +226,5 @@ action_reports/
 preferred_income/
 
 # Personal portfolio exports (Fidelity etc.) — contains positions/weights
+positions/
 profolio/
