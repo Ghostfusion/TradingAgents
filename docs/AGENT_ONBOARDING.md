@@ -306,6 +306,7 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-02 `(working tree)` - DSA phase B robustness: `dataflows/market_router.py` (market-classified vendor priority), `vendor_breaker.py` (3-fail/300s breaker + half-open + negative cache), `VendorResult` honesty fields, `dataflows/effective_date.py` (effective-trading-date + all-closed skip, fail-open). All opt-in (`market_source_priority`), default bit-identical.
 - 2026-09-02 `(working tree)` - DSA phase A decision quality: `strategies/decision_guardrail.py` (downgrade-only stabilizer + risk-cap-at-Hold + versioned score<->rating validator + confidence cap on degraded data), PM schema `data_quality`/`guardrail_reason`/`risk_cap`, per-field integrity retry (`structured.retry_structured_missing_fields`); advisory, default-off `enable_decision_guardrail`.
 - 2026-09-02 `(working tree)` - Qlib Phase-1 pure calculators (advisory,
   default off): `strategies/factor_expressions.py` (Alpha158-style profile +

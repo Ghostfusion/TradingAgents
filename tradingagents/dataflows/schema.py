@@ -22,7 +22,6 @@ class VendorWarning:
     kind: str
     message: str
 
-
 @dataclass
 class VendorResult:
     """Typed envelope: results + provider + warnings + metadata + converters.
@@ -41,6 +40,12 @@ class VendorResult:
     warnings: list[VendorWarning] = field(default_factory=list)
     extra: dict = field(default_factory=dict)
     error_kind: str | None = None
+    # DSA research §3.4 honesty fields (advisory; None until populated)
+    fallback_from: str | None = None
+    is_stale: bool = False
+    stale_seconds: float | None = None
+    data_quality: str | None = None  # fresh | stale | partial | unknown
+    missing_fields: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -55,6 +60,11 @@ class VendorResult:
             "extra": self.extra,
             "error_kind": self.error_kind,
             "ok": self.ok,
+            "fallback_from": self.fallback_from,
+            "is_stale": self.is_stale,
+            "stale_seconds": self.stale_seconds,
+            "data_quality": self.data_quality,
+            "missing_fields": self.missing_fields,
         }
 
     def to_llm(self) -> str:
@@ -94,6 +104,5 @@ class VendorResult:
 
     def __str__(self) -> str:
         return self.to_llm()
-
 
 __all__ = ["VendorWarning", "VendorResult"]

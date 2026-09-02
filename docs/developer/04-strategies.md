@@ -28,6 +28,7 @@ involved. This is the "compute, don't narrate" core.
   learn/infer fit-apply split (train-only moments), expression-string cache.
 - `signal_analysis.py` — rank IC/ICIR, quantile long-short, IC-decay
   half-life, prediction autocorrelation, with/without-cost report table.
+- `market_router.py` / `vendor_breaker.py` / `effective_date.py` (dataflows) — market-classified vendor priority + breaker/half-open + effective-trading-date (DSA research §3.4/§3.6).
 - `decision_guardrail.py` — post-PM downgrade-only stabilizer + versioned score<->rating validator + confidence cap on degraded data quality (advisory, DSA research §3.1).
 - `market_tradability.py` — limit-up/down gates, suspension, volume
   participation caps, deal-price selector (Qlib exchange model, advisory).
