@@ -313,7 +313,10 @@ has changed before); never assume an endpoint works — the SDK's
   unchanged) - interactive CLI / `propagate()` / `pipeline.py` runs that never
   write a `batch_summary_*.jsonl` are now covered by the scheduled 07:35
   review. Tests `test_nightly_review_recent_mode_*` (2, hermetic); web
-  `run_nightly` forwards `--mode`. See CHANGELOG.
+  `run_nightly` forwards `--mode`. Also: the driver hard-exits (`os._exit`,
+  `_CLI_ENTRY` pattern) after a completed run so the moomoo shutdown-block can
+  no longer hang the scheduled task, and the scheduled wrapper runs
+  `--mode recent --max-symbols 25`. See CHANGELOG.
 - 2026-08-31 `(working tree)` - Multi-agent debate architecture design
   (research-only, no code): `docs/design_multi_agent_debate.md` + the source
   `Strategies/Multi_Agents_Debate.md` — two-layer judiciary (deterministic L1

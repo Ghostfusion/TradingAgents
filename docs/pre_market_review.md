@@ -328,9 +328,11 @@ review. Wire it with a scheduler:
 **Windows Task Scheduler**
 - Task 1: `py -3.12 batch.py --symbols ... --depth deep` at 17:35 weekday.
 - Task 2: `py -3.12 scripts/nightly_review.py` at 07:35 weekday (uses the
-  latest `reports/batch_summary_*.jsonl`, so it needs no args; switch to
-  `py -3.12 scripts/nightly_review.py --mode recent` to review each symbol's
-  newest report folder when the batch is not re-run daily).
+  latest `reports/batch_summary_*.jsonl`, so it needs no args; the registered
+  wrapper runs `--mode recent --max-symbols 25` instead — each symbol's
+  newest report folder, capped so the run finishes before the open).
+  The driver hard-exits after completion (moomoo shutdown-block guard) so the
+  task never hangs at exit.
 
 **Registered on this machine (2026-08-27)** — wrappers in
 `C:\Users\vince\tradingagents_tasks\` (outside the git repos), each `cd`s to

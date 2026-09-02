@@ -175,5 +175,33 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if not rejects and not failed else (2 if rejects else 4)
 
 
+# True only when this module is the real process entry point (not imported by
+# tests or another runner). Guards the moomoo shutdown-block hard-exit so
+# in-process callers return/raise normally (regression: an unconditional
+# os._exit killed pytest).
+_CLI_ENTRY = False
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _CLI_ENTRY = True
+    try:
+        code = main()
+    except SystemExit as _se:  # argparse --help / parse errors
+        code = _se.code if isinstance(_se.code, int) else 0
+    except BaseException:  # noqa: BLE001 - hard failure: hard-exit
+        # The moomoo SDK leaves non-daemon callback/network threads behind; a
+        # normal interpreter shutdown then blocks forever in
+        # threading._shutdown (reports/ledgers are already written). Print the
+        # traceback, flush, and hard-exit so the scheduled task terminates
+        # instead of hanging at exit (a hung task skips the next day's run).
+        import traceback as _tb
+
+        _tb.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+    # Completed (or cleanly degraded) run: flush the redirected log and
+    # hard-exit so the moomoo thread leak never hangs the scheduled task.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
