@@ -82,6 +82,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_BACKTEST_VOLUME_PARTICIPATION": "backtest_volume_participation",
     "TRADINGAGENTS_BACKTEST_DEAL_PRICE": "backtest_deal_price",
     "TRADINGAGENTS_ENABLE_PIT_REGISTRY": "enable_pit_registry",
+    "TRADINGAGENTS_ENABLE_FACTOR_MODEL": "enable_factor_model",
+    "TRADINGAGENTS_ENABLE_FACTOR_PROPOSAL_LOOP": "enable_factor_proposal_loop",
+    "TRADINGAGENTS_ENABLE_TUNER": "enable_tuner",
     "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
     "TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR": "enable_sentiment_factor",
     "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC": "sentiment_factor_min_ic",
@@ -578,6 +581,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "backtest_volume_participation": 0.0,  # Q13: cap order % of day volume (0 = off; 0.2 recommended)
         "backtest_deal_price": "close",  # Q13: close | open | vwap, or "buy,sell" pair
         "enable_pit_registry": True,  # Q1b: as-of snapshot store (learn/infer moments + decisions)
+        "enable_factor_model": False,  # Q5: advisory factor-model score (gated research artifact)
+        "enable_factor_proposal_loop": False,  # Q11: LLM-proposed candidates, math decides (gated)
+        "enable_tuner": False,  # Q19: hyperparam grid search front-end (gate decides)
         "breakeven_atr": 1.0,  # V4: stop-to-breakeven cushion (ATRs)
         "target_atr": 4.0,  # V4: profit target multiple
         "sector_cap_limit": 0.35,  # V3: max single-sector weight
