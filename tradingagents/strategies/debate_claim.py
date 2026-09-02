@@ -200,6 +200,12 @@ class ClaimRecord:
     source: str = ""  # tool/state key that produced the number
     source_label: str = ""
     confidence: float | None = None
+    # Qualitative risk-factor provenance (schema RiskFactor): qualitative rows
+    # carry no numeric value/source; severity + mitigation_stated are what the
+    # debater actually asserted, so the ledger renders them instead of a bare
+    # "=- src=-" that reads like a broken number.
+    severity: str = ""  # LOW | MEDIUM | HIGH | CRITICAL ("" = unknown)
+    mitigation: bool | None = None  # mitigation_stated; None = unspecified
     # L1 verification verdict persisted back onto the claim (P0): one of
     # valid / violated / abstain / unverified / qualitative ("" until L1
     # runs). Drives the active-disputes ledger surfaced in prompts.
@@ -218,6 +224,8 @@ class ClaimRecord:
             "source_label": self.source_label,
             "confidence": self.confidence,
             "status": self.status,
+            "severity": self.severity,
+            "mitigation": self.mitigation,
         }
 
     @classmethod
@@ -234,6 +242,8 @@ class ClaimRecord:
             source_label=str(d.get("source_label", "")),
             confidence=d.get("confidence"),
             status=str(d.get("status", "") or ""),
+            severity=str(d.get("severity", "") or ""),
+            mitigation=d.get("mitigation"),
         )
 
 
@@ -298,9 +308,22 @@ class ClaimLedger:
         for r in self._rows:
             marker = "" if r.claim_id in used else " (unused)"
             value = "-" if r.value is None else f"{r.value:g}"
+            extra = ""
+            if r.kind == "qualitative":
+                # Qualitative risk-factor rows carry no numeric value/source by
+                # design; render what the debater DID assert (severity +
+                # mitigation_stated) plus the weight hint so the line never
+                # reads like a broken number ("=- src=-").
+                parts = []
+                if r.severity:
+                    parts.append(r.severity)
+                if r.mitigation is not None:
+                    parts.append(f"mitigation={str(r.mitigation).lower()}")
+                parts.append("weight ~0")
+                extra = f" ({', '.join(parts)})"
             lines.append(
                 f"- `{r.claim_id}` {r.role} R{r.round} "
-                f"{r.kind} {r.metric_name or r.ground_truth_key or '?'}={value} "
+                f"{r.kind} {r.metric_name or r.ground_truth_key or '?'}={value}{extra} "
                 f"src={r.source or '-'}{marker}"
             )
         return "\n".join(lines)

@@ -250,6 +250,20 @@ def claim_records_from_turn(
                 kind="qualitative",
                 metric_name=f"risk:{rf.risk_id}",
                 source_label="",
+                # Carry the schema's severity + mitigation_stated so the
+                # ledger renders what the debater actually asserted for each
+                # qualitative risk factor (they carry no numeric value/source
+                # by design - the render shows the provenance, not "- -").
+                severity=(
+                    str(getattr(rf.severity, "value", rf.severity) or "")
+                    if getattr(rf, "severity", None) is not None
+                    else ""
+                ),
+                mitigation=(
+                    bool(getattr(rf, "mitigation_stated", False))
+                    if getattr(rf, "mitigation_stated", None) is not None
+                    else None
+                ),
             )
         )
     return out

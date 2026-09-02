@@ -104,6 +104,37 @@ class TestClaimLedger:
         assert "(unused)" in md
         assert "get_ratios" in md
 
+    def test_render_qualitative_risk_shows_provenance(self):
+        # Qualitative risk-factor rows carry no value/source by design; the
+        # render must show severity + mitigation + weight hint instead of a
+        # bare "-=- src=-" that reads like a broken number.
+        from tradingagents.strategies.debate_claim import QUALITATIVE
+
+        led = ClaimLedger()
+        led.append(ClaimRecord(
+            role="neutral",
+            round=3,
+            claim_id="neutral_3_24",
+            kind="qualitative",
+            metric_name="risk:valuation_and_cash_return_risk",
+            source_label="",
+            status=QUALITATIVE,
+            severity="MEDIUM",
+            mitigation=True,
+        ))
+        md = led.render_markdown(used_claim_ids={"neutral_3_24"})
+        assert "qualitative risk:valuation_and_cash_return_risk=-" in md
+        assert "(MEDIUM, mitigation=true, weight ~0)" in md
+        assert "src=-" in md
+        # absent mitigation/severity stays honest, no phantom text
+        led2 = ClaimLedger()
+        led2.append(ClaimRecord(
+            role="neutral", round=3, claim_id="x", kind="qualitative",
+            metric_name="risk:opaque", source_label="", status=QUALITATIVE,
+        ))
+        md2 = led2.render_markdown(used_claim_ids={"x"})
+        assert "(weight ~0)" in md2 and "mitigation=" not in md2
+
 
 def test_roundtrip_json_stable():
     import json
