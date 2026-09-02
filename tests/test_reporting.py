@@ -415,3 +415,42 @@ def test_all_reports_present_no_unavailable_blocks(tmp_path):
     for f in ("market", "news", "fundamentals", "sentiment"):
         text = (tmp_path / "1_analysts" / f"{f}.md").read_text(encoding="utf-8")
         assert "report unavailable" not in text
+def test_disclosure_block_does_not_false_mark_truncation(tmp_path):
+    """Phase D regression: the computed disclosure footer ends in lowercase
+    ("models: n/a") - it must NOT trigger the LLM-cap truncation marker when
+    the decision text itself is complete (see MSFT 20260902 decision.md)."""
+    judge = (
+        "**Rating**: Underweight\n**Executive Summary**: The bear case won on "
+        "empirical grounding and catalyst clarity, while the franchise remains "
+        "durable and the verified close conflicts with the adverse tape, which "
+        "further argues against a full Sell."
+    )
+    state = {
+        "risk_debate_state": {"judge_decision": judge},
+        "risk_gate": {"verdict": "PASS", "reasons": []},
+        "risk_snapshot": "verdict=PASS",
+    }
+    assert write_report_tree(state, "TST", tmp_path, config={"enable_report_attribution": True}).exists()
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "### Decision disclosure (computed, advisory)" in decision
+    assert "Section truncated at the LLM output cap" not in decision
+    assert decision.rstrip().endswith("models: n/a")
+
+
+def test_genuine_truncation_marked_before_disclosure(tmp_path):
+    """A real mid-sentence LLM cut is still marked, and the marker sits after
+    the cut text but before the computed disclosure block."""
+    judge = (
+        "**Rating**: Underweight\n**Executive Summary**: The bear case won the "
+        "debate and the momentum has clearly broken, so the position should "
+        "be reduced toward the lower bound of the normal weight range wh"
+    )  # ends mid-word (lowercase), >120 chars
+    state = {
+        "risk_debate_state": {"judge_decision": judge},
+        "risk_gate": {"verdict": "PASS", "reasons": []},
+        "risk_snapshot": "verdict=PASS",
+    }
+    assert write_report_tree(state, "TST", tmp_path, config={"enable_report_attribution": True}).exists()
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Section truncated at the LLM output cap" in decision
+    assert decision.index("Section truncated") < decision.index("### Decision disclosure")

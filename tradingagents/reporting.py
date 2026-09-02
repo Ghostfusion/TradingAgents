@@ -113,10 +113,13 @@ def _looks_truncated(text: str) -> bool:
         return False
     if last in "|*`#)]}>\"'":
         return False
-    # A bold-label ending (``**Label**: value``) is a structured, complete
-    # line — the PM/risk verdicts end this way and are not cuts.
-    last_line = t.rsplit("\n", 1)[-1]
-    if "**:" in last_line:
+    # A short bold-verdict ending (``**Action**: Buy``, ``**Consensus**: High``)
+    # is a structured, complete line — PM/risk verdicts end this way and are
+    # not cuts. A LONG prose line that merely STARTS with a bold label (e.g.
+    # ``**Executive Summary**: The bear case ... ``) is NOT exempt: a max_tokens
+    # cut there still ends mid-word in lowercase.
+    last_line = t.rsplit("\n", 1)[-1].strip()
+    if last_line.startswith("**") and "**:" in last_line and len(last_line) <= 60:
         return False
     # Real cuts end mid-word in lowercase (or a digit); an uppercase bare
     # ending is usually a deliberate verdict word, not a cut.
@@ -632,7 +635,13 @@ def write_report_tree(
         if risk.get("judge_decision"):
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
-            pm_decision = risk["judge_decision"]
+            # Truncation detection must see ONLY the LLM-produced decision text:
+            # the audit note and disclosure block are computed appendages whose
+            # lowercase tails (e.g. "models: n/a") would false-positive
+            # _looks_truncated ("mid-sentence" marker on a complete decision).
+            # Finalize the LLM body first, then append the computed blocks.
+            decision_llm = risk["judge_decision"]
+            pm_body = _finalize_section(decision_llm)
             if cfg.get("enable_decision_audit"):
                 try:
                     import re as _re
@@ -643,9 +652,9 @@ def write_report_tree(
                         m = _re.search(r"\bstop\s+([0-9.]+)", contract, _re.IGNORECASE)
                         if m:
                             ref_stop = float(m.group(1))
-                    audit_note = audit_decision_numbers(pm_decision, {"stop": ref_stop})
+                    audit_note = audit_decision_numbers(decision_llm, {"stop": ref_stop})
                     if audit_note:
-                        pm_decision = pm_decision.rstrip() + audit_note
+                        pm_body = pm_body.rstrip() + audit_note
                 except Exception:  # noqa: BLE001 - audit is advisory, never blocks
                     pass
             # DSA phase D disclosure + invalidation advisory block (default off,
@@ -672,13 +681,13 @@ def write_report_tree(
                         f"- watch conditions: {wc['watch_conditions'] or 'none'} · next check: {wc['next_check_time'] or 'n/a'}",
                         f"- data sources used: {', '.join(disc['sources_used']) or 'none'} · empty: {', '.join(disc['sources_empty']) or 'none'} · models: {', '.join(disc['models_used']) or 'n/a'}",
                     ]
-                    pm_decision = pm_decision.rstrip() + "\n\n" + "\n".join(block)
+                    pm_body = pm_body.rstrip() + "\n\n" + "\n".join(block)
                 except Exception:  # noqa: BLE001 - disclosure advisory, never blocks
                     pass
-            wrapped = prepend_block(_finalize_section(pm_decision))
+            wrapped = prepend_block(pm_body)
             (portfolio_dir / "decision.md").write_text(wrapped, encoding="utf-8")
             sections.append(
-                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(_finalize_section(pm_decision)))}"
+                f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n\n{_shift_down(prepend_block(pm_body))}"
             )
 
     # Write consolidated report (auto Table of Contents above the teams)

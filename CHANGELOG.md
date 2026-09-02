@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Fix: false 'Section truncated at the LLM output cap' marker in PM decision** - `reporting.write_report_tree` ran the truncation detector on the decision AFTER appending the computed disclosure block (which ends in lowercase, e.g. `models: n/a`), so a complete decision was flagged as an LLM cut whenever the Phase-D disclosure block was rendered. Truncation detection now runs on the raw LLM text only; audit/disclosure append after. Also tightened `_looks_truncated`'s bold-label exemption to short verdict lines (`**Action**: Buy`) - a long `**Executive Summary**: ...` prose line cut mid-word is now correctly flagged.
+
 - **DSA reporting (phase D)** - `strategies/report_disclosure.py`: computed driver attribution (sum-to-100, never narrated), consensus support/oppose readout, `watch_conditions`/`next_check_time` (fast-path cadence), `invalidation_conditions` (>= 1 per decision: price_stop_loss / price_take_profit_status / data_quality / manual:thesis_reassessment fallback), `disclosure_footers` (sources-used-vs-empty + models). `reporting.write_report_tree` appends the advisory disclosure block to `5_portfolio/decision.md`.
 
 - **DSA polish (phase C)** - `strategies/skills.py` + `strategies/skills/*.yaml` (declarative strategy-skill DSL with regime-from-opinion routing, bounded advisory score adjustments, `enable_skill_overlays` default off); `strategies/news_relevance.py` (deterministic relevance scoring, official-source boost, spam admission, degrade triple); `dataflows/news_cache.py` (owner-wait coalescing TTL cache). Tests: test_skill_overlays + test_news_relevance (25 pass).
