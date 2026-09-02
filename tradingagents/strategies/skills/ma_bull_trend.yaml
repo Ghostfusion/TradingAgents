@@ -1,0 +1,21 @@
+name: ma_bull_trend
+display_name: MA Bull Trend
+description: Multi-MA bullish alignment continuation (trend-following).
+category: trend
+core_rules: [2, 3, 6]
+required_tools:
+  - get_indicators
+  - get_technical_factors
+  - get_news
+market_regimes: [trending_up]
+default_router: true
+default_priority: 10
+score_adjustments:
+  entry: 8.0
+  sector_resonance: 4.0
+instructions: |
+  **MA Bull Trend**
+  - MA5 > MA10 > MA20 bullish stacking.
+  - Volume confirms the trend (volume_ratio > 1.2).
+  - Re-buy on MA5/MA10 pullback within the stack.
+  - Stop below MA20. Never chase a gap above two ATRs.

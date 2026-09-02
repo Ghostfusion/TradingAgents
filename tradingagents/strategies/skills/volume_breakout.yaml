@@ -1,0 +1,20 @@
+name: volume_breakout
+display_name: Volume Breakout
+description: Volatility-contraction breakout on volume expansion.
+category: pattern
+core_rules: [3, 6]
+required_tools:
+  - get_daily_history
+  - get_technical_factors
+  - get_news
+market_regimes: [trending_up, sideways]
+default_priority: 30
+score_adjustments:
+  breakout: 12.0
+  sector_resonance: 5.0
+instructions: |
+  **Volume Breakout**
+  - Tight 10-20d consolidation (20d ATR percentile low).
+  - Breakout above resistance on volume_ratio > 2.0.
+  - Entry on first pullback holding the breakout level.
+  - Stop below the breakout level.

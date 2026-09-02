@@ -1,0 +1,20 @@
+name: shrink_pullback
+display_name: Shrink Pullback
+description: Volume-shrinking pullback to MA support in an uptrend.
+category: trend
+core_rules: [1, 2, 4, 6]
+required_tools:
+  - get_daily_history
+  - get_indicators
+  - get_realtime_quote
+  - get_news
+market_regimes: [trending_down, sideways]
+default_priority: 40
+score_adjustments:
+  pullback: 10.0
+instructions: |
+  **Shrink Pullback**
+  - Uptrend (MA5 > MA10 > MA20) intact.
+  - Price pulls to MA5/MA10 on volume < 70% of the 5d average.
+  - Hold the MA support; enter near MA5 with bias < 2%.
+  - Stop below MA20. No entry on negative news.

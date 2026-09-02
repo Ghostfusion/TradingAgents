@@ -84,6 +84,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_PIT_REGISTRY": "enable_pit_registry",
     "TRADINGAGENTS_ENABLE_FACTOR_MODEL": "enable_factor_model",
     "TRADINGAGENTS_ENABLE_DECISION_GUARDRAIL": "enable_decision_guardrail",
+    "TRADINGAGENTS_ENABLE_SKILL_OVERLAYS": "enable_skill_overlays",
+    "TRADINGAGENTS_SKILL_DIR": "skill_dir",
+    "TRADINGAGENTS_ENABLE_NEWS_RELEVANCE": "enable_news_relevance",
     "TRADINGAGENTS_ENABLE_FACTOR_PROPOSAL_LOOP": "enable_factor_proposal_loop",
     "TRADINGAGENTS_ENABLE_TUNER": "enable_tuner",
     "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
@@ -586,6 +589,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
 
         "enable_factor_model": False,  # Q5: advisory factor-model score (gated research artifact)
         "enable_decision_guardrail": False,  # DSA-1: post-decision downgrade-only stabilizer (advisory)
+        "enable_skill_overlays": False,  # DSA-3: YAML strategy skills + regime-from-opinion (advisory folds)
+        "skill_dir": "",  # DSA-3: custom skill dir (overrides builtin by name)
+        "enable_news_relevance": False,  # DSA-3: news relevance scoring + official boost (advisory)
         "enable_factor_proposal_loop": False,  # Q11: LLM-proposed candidates, math decides (gated)
         "enable_tuner": False,  # Q19: hyperparam grid search front-end (gate decides)
         "breakeven_atr": 1.0,  # V4: stop-to-breakeven cushion (ATRs)
