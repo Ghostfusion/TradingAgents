@@ -4572,6 +4572,15 @@ def get_factor_profile(
                     f"{len(closes)} closes < 25 (min-observation)")
         dates = ohlcv.get("dates") or []
         as_of = dates[-1] if dates else None
+        if get_config().get("enable_pit_registry"):
+            from tradingagents.dataflows import pit_registry
+            pit_registry.store_snapshot(ticker, as_of or "unknown", {"kind": "ohlcv_profile", "closes": closes[-5:]})
+            moments = pit_registry.get_moments(ticker)
+            if moments is None:
+                from tradingagents.strategies.factor_expressions import fit_zscore
+                m = fit_zscore(closes[-60:])  # train segment only
+                if m:
+                    pit_registry.put_moments(ticker, as_of or "unknown", {"mean": m[0], "std": m[1]})
         alpha = cached_expression("alpha158", ticker, 320, as_of, ohlcv)
         lines = [f"## Factor profile {ticker} (as-of {as_of})", ""]
         labels = {
