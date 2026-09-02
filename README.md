@@ -1118,6 +1118,15 @@ only after validating in the evaluation harness:
   `enable_enhanced_index`), contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.
 - **DSA decision quality (advisory, default off)** - `strategies/decision_guardrail.py` (post-PM downgrade-only stabilizer, risk-cap at Hold, score<->rating consistency, confidence cap on stale data; `enable_decision_guardrail`). Research: `docs/design_daily_stock_analysis_research.md`.
+- **Vibe-Trading transfer (advisory, default off)** - `dataflows/market_router.py` now carries price-caliber +
+  volume-unit provenance (`price_caliber`/`volume_unit` on `VendorResult`; `caliber_consistency` warns on mixed
+  adjusted/raw across vendors - the dividend-gap / board-lot class of bug), `backtest_engine` next-bar fill
+  semantics + lookahead sentinel (`fill_on_next_bar`; signals fill at T+1 close), fills-vs-targets reporting
+  (`position_target`/`position_filled`), persistent `invalidation_ledger` + `--invalidate` CLI (decision
+  history + action-report auto-breach), `run_card.json` per report tree (config hash/commit/LLM/verdict),
+  versioned cache keys + no-forming-bar staleness guard (`vendor_cache` v2, news cache v1), hash-chained
+  tamper-evident `risk_audit` ledger (`--verify-chain`), and `strategies/alpha_zoo.py` (AST purity gate +
+  bounded evaluator + `scripts/factor_bench.py` rank-IC bench). Design: `docs/design_shadow_account.md`.
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

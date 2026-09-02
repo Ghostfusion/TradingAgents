@@ -54,6 +54,7 @@ class Order:
     filled_qty: float = 0.0
     avg_fill_price: float = 0.0
     reject_reason: str | None = None
+    extra: dict = field(default_factory=dict)  # engine-internal state (fill_pending)
 
     def is_open(self) -> bool:
         return self.status in (OrderStatus.SUBMITTED, OrderStatus.ACCEPTED,
@@ -140,8 +141,16 @@ class MatchingEngine:
             return 0.0
         return self.cost_fn(fill.notional, fill.side)
 
-    def run(self, bars: list[Bar]) -> BacktestResult:
+    def run(self, bars: list[Bar], fill_on_next_bar: bool = False) -> BacktestResult:
         """Replay ``bars`` chronologically, filling resting orders each bar.
+
+        ``fill_on_next_bar`` (Vibe-Trading next-bar semantics): a submitted
+        MARKET order is priced at the CLOSE OF THE NEXT bar, not the bar it
+        was submitted on. A signal computed from bar T's close must never fill
+        at bar T's own close (that is same-bar lookahead - the phantom edge
+        Vibe-Trading #1299 removed from every options backtest). Limits/stops
+        still trigger on the bar's traded range when active; the flag only
+        moves the MARKET (close-price) fill boundary.
 
         Returns fills, end-of-run order states, a cumulative net-cash curve
         (buys subtract, sells add, costs subtracted) and rejected orders.
@@ -156,7 +165,15 @@ class MatchingEngine:
                     continue
                 fill_px: float | None = None
                 if order.ord_type == OrdType.MARKET:
-                    fill_px = bar.close
+                    if fill_on_next_bar:
+                        if not order.extra.get("fill_pending"):
+                            # submitted before this bar: skip it, fill NEXT
+                            # bar's close (pending latches once)
+                            order.extra["fill_pending"] = True
+                            continue
+                        fill_px = bar.close
+                    else:
+                        fill_px = bar.close
                 elif order.ord_type == OrdType.LIMIT:
                     buy_hit = (order.side == OrderSide.BUY and order.price is not None
                                and bar.low <= order.price)

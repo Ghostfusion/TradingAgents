@@ -79,6 +79,68 @@ def resolve_market_priority(market: str, config: dict | None,
     return names
 
 
+# Verified price-caliber table (vendor, market) -> caliber. Grounded in the
+# loader source, not assumed: alpha_vantage uses TIME_SERIES_DAILY_ADJUSTED
+# (split+dividend adjusted); tiingo's OHLCV builds close from the split-
+# adjusted ``close`` column (adjClose unused -> split_adjusted); y_finance
+# history() defaults auto_adjust=True (adjusted). Anything not listed is
+# "unknown" - never guessed. "*" = any market.
+_VENDOR_PRICE_CALIBER: dict[tuple[str, str], str] = {
+    ("alpha_vantage", "*"): "adjusted",
+    ("tiingo", "*"): "split_adjusted",
+    ("y_finance", "*"): "adjusted",
+}
+
+# Volume-unit convention per market (the unit the venue reports, not what the
+# chart shows): A-share venues report board lots; everything else shares.
+_MARKET_VOLUME_UNIT = {
+    "US": "shares", "CA": "shares", "EU": "shares", "GB": "shares",
+    "JP": "shares", "KR": "shares", "TW": "shares", "HK": "shares",
+    "SG": "shares", "CN": "board_lots",
+}
+
+
+def price_caliber_for(vendor: str | None, market: str = "US") -> str:
+    """The price adjustment caliber a vendor serves for a market (verified
+    table; unknown when unlisted)."""
+    v = str(vendor or "").lower()
+    m = str(market or "").upper()
+    if not v:
+        return "unknown"
+    return _VENDOR_PRICE_CALIBER.get(
+        (v, m), _VENDOR_PRICE_CALIBER.get((v, "*"), "unknown")
+    )
+
+
+def volume_unit_for(market: str | None) -> str:
+    """The volume-unit convention of a market (unknown when unlisted)."""
+    return _MARKET_VOLUME_UNIT.get(str(market or "").upper(), "unknown")
+
+
+def caliber_consistency(vendor_results: list[dict]) -> dict:
+    """Cross-vendor calibration check over per-symbol result dicts (each with
+    ``_vendor`` + optional ``_market``): do the sources that actually served
+    agree on price caliber? mixed -> warning (a fallback mid-history silently
+    rescaled volume or re-dated dividends exactly like Vibe-Trading's board-
+    lot / dividend-gap bugs). Empty or all-unknown -> consistent (no claim).
+    """
+    calibers: dict[str, str] = {}
+    for r in vendor_results or []:
+        v = str(r.get("_vendor") or "").strip()
+        if not v:
+            continue
+        m = str(r.get("_market") or "US")
+        calibers[v] = price_caliber_for(v, m)
+    known = {k: c for k, c in calibers.items() if c != "unknown"}
+    distinct = set(known.values())
+    consistent = len(distinct) <= 1
+    warning = ""
+    if not consistent:
+        warning = ("mixed price caliber across vendors: "
+                   + "; ".join(f"{k}={c}" for k, c in sorted(calibers.items())))
+    return {"consistent": consistent, "calibers": calibers, "warning": warning}
+
+
 def gap_fill(primary: dict | None, secondary: list[dict],
              supplement_fields: tuple[str, ...] = _SUPPLEMENT_FIELDS) -> dict:
     """Merge missing supplement fields from secondary results (no override).
@@ -112,6 +174,11 @@ def gap_fill(primary: dict | None, secondary: list[dict],
 __all__ = [
     "market_for_symbol",
     "resolve_market_priority",
+    "price_caliber_for",
+    "volume_unit_for",
+    "caliber_consistency",
     "gap_fill",
     "_SUPPLEMENT_FIELDS",
+    "_VENDOR_PRICE_CALIBER",
+    "_MARKET_VOLUME_UNIT",
 ]

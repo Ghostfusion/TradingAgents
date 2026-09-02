@@ -159,7 +159,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--max-days", type=int, default=0, help="0 = all")
     parser.add_argument("--results-dir", default=None, help="override results_dir")
+    parser.add_argument("--ledger", action="store_true",
+                        help="show the persistent invalidation ledger (ticker-filtered)")
+    parser.add_argument("--invalidate", nargs=2, metavar=("TICKER", "DATE"),
+                        help="mark open invalidations for TICKER on DATE as rejected")
+    parser.add_argument("--note", default="", help="note for --invalidate (preserved notes accumulate)")
     args = parser.parse_args(argv)
+
+    from tradingagents.strategies.invalidation_ledger import invalidate, rows as ledger_rows
+
+    if args.invalidate:
+        updated = invalidate(args.invalidate[0], args.invalidate[1], note=args.note,
+                             results_dir=args.results_dir)
+        print(f"invalidated {len(updated)} open row(s) for {args.invalidate[0]}/{args.invalidate[1]}")
+        for r in updated[:5]:
+            print(f"  - {r.get('date')} {r.get('status')} note={r.get('note') or ''!r}")
+        return 0
 
     base = args.results_dir or _results_dir()
     if args.all:
@@ -197,6 +212,17 @@ def main(argv: list[str] | None = None) -> int:
         print()
     if args.json:
         print(json.dumps(out_all, indent=2))
+    if args.ledger:
+        lrows = ledger_rows(None if args.all else (tickers[0] if len(tickers) == 1 else None),
+                            results_dir=args.results_dir)
+        if not lrows:
+            print("invalidation ledger: empty", file=sys.stderr)
+        else:
+            print("== invalidation ledger ==")
+            for r in lrows:
+                conds = "; ".join(r.get("conditions") or []) or "-"
+                print(f"{r.get('ticker')} {r.get('date')} [{r.get('status')}] "
+                      f"{r.get('source')}: {conds} note={r.get('note') or ''!r}")
     return rc
 
 

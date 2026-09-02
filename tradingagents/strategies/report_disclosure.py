@@ -89,12 +89,16 @@ def invalidation_conditions(stop_loss: float | None = None, take_profit: float |
 
 
 def disclosure_footers(sources_used: list[str], sources_empty: list[str],
-                       models_used: list[str] | None = None) -> dict:
-    """Report honesty footers: which sources contributed vs empty, which model."""
+                       models_used: list[str] | None = None,
+                       calibers: dict | None = None) -> dict:
+    """Report honesty footers: which sources contributed vs empty, which model,
+    and (when passed) each source's served price caliber (Vibe-Trading
+    calibration honesty; None values render as 'unknown', never assumed)."""
     return {
         "sources_used": list(sources_used),
         "sources_empty": list(sources_empty),
         "models_used": list(models_used or []),
+        "price_calibers": {str(k): v for k, v in (calibers or {}).items()},
     }
 
 

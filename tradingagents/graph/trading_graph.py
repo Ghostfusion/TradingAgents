@@ -1226,24 +1226,26 @@ class TradingAgentsGraph:
                     if verdict["verdict"] == "REJECT":
                         final_state["risk_halt"] = True
                     if self.config.get("risk_audit_enabled"):
-                        import json as _json
+                        from tradingagents.strategies.hash_chain_audit import (
+                            append as _chain_append,
+                        )
 
                         base = Path(
                             self.config.get("data_cache_dir", "~/.tradingagents")
                         ).expanduser()
                         audit = base / "risk_audit.jsonl"
-                        audit.parent.mkdir(parents=True, exist_ok=True)
-                        with audit.open("a", encoding="utf-8") as fh:
-                            fh.write(
-                                _json.dumps(
-                                    {
-                                        "ticker": ticker,
-                                        "verdict": verdict["verdict"],
-                                        "reasons": verdict.get("reasons", []),
-                                    }
-                                )
-                                + "\n"
-                            )
+                        # Hash-chained tamper-evident ledger (Vibe-Trading
+                        # audit_chain): every row pins the previous row's hash,
+                        # so a later edit breaks the chain (risk_report.py
+                        # --audit verifies).
+                        _chain_append(
+                            audit,
+                            {
+                                "ticker": ticker,
+                                "verdict": verdict["verdict"],
+                                "reasons": verdict.get("reasons", []),
+                            },
+                        )
                 except Exception as risk_exc:
                     logger.warning("risk governor skipped: %s", risk_exc)
             if self.config.get("enable_computed_context"):

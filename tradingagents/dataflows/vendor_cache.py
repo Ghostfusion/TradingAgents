@@ -36,14 +36,47 @@ logger = logging.getLogger(__name__)
 
 _SENTINEL_PREFIXES = ("NO_DATA_AVAILABLE", "DATA_UNAVAILABLE", "DATA_DISABLED")
 
+def _ends_today(method: str, args: tuple, kwargs: dict) -> bool:
+    """True when a call's last/end date resolves to today (forming bar).
+
+    Conservative: only dates that look like YYYY-MM-DD and equal today's
+    local date. Anything unparseable is NOT today (fail-open to cache).
+    """
+    try:
+        from datetime import date
+
+        today = date.today().isoformat()
+        for v in list(args) + list(kwargs.values()):
+            vs = str(v)
+            if len(vs) == 10 and vs == today:
+                return True
+        # also check end_date-ish kwargs by name
+        for k in ("end_date", "end", "to", "curr_date"):
+            if str(kwargs.get(k) or "") == today:
+                return True
+    except Exception:  # noqa: BLE001 - guard is advisory
+        return False
+    return False
+
+# Cache-schema version (Vibe-Trading cache-version guard): bump when a
+# stored record's meaning changes (caliber fix, volume-unit change, key
+# semantics), so old entries can never resurface under a new schema. The
+# version is part of the key, so a bump invalidates every prior entry.
+_CACHE_VERSION = 2
+
 
 def _stable_key(method: str, args: tuple, kwargs: dict) -> str:
-    """A deterministic hash for a (method, args, kwargs) call."""
+    """A deterministic hash for a (method, args, kwargs) call.
+
+    Includes the cache-schema version so a semantic change (e.g. price
+    caliber) invalidates old entries instead of silently re-serving them.
+    """
     payload = json.dumps(
         [method, list(args), dict(sorted(kwargs.items()))],
         sort_keys=True,
         default=str,
     )
+    payload = f"v{_CACHE_VERSION}:{payload}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -132,11 +165,19 @@ class VendorCache:
         return None
 
     def set(self, method: str, category: str, args: tuple, kwargs: dict, value: str) -> None:
-        """Store a successful vendor result (sentinel strings are skipped)."""
+        """Store a successful vendor result (sentinel strings are skipped).
+
+        Vibe-Trading staleness guard: a call whose date range ENDS TODAY (the
+        last bar is still forming intraday) is never cached — caching a
+        forming bar freezes a half-printed close. Calls ending on a past date
+        (settled bars) cache normally.
+        """
         enabled, ttl = self._settings()
         if not enabled or ttl <= 0 or self.should_skip(category):
             return
         if not isinstance(value, str) or value.startswith(_SENTINEL_PREFIXES):
+            return
+        if _ends_today(method, args, kwargs):
             return
 
         key = _stable_key(method, args, kwargs)

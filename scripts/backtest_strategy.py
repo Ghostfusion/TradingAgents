@@ -106,7 +106,7 @@ def fetch_bars(ticker: str, bars: int) -> list[Bar]:
 def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
              qty: float, side: str, fee_bps: float, slippage_ticks: float,
              limit_threshold: float = 0.0, participation: float = 0.0,
-             deal_price: str = "close") -> dict:
+             deal_price: str = "close", next_bar_close: bool = True) -> dict:
     """Replay a single entry -> stop/target plan over bars, honoring order.
 
     A long plan enters at ``entry`` when a bar's low first reaches it (a
@@ -146,25 +146,37 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
             or (gate == "down" and side == OrderSide.SELL)
         )
 
-    # Entry: first bar whose range reaches the plan price (skipping
-    # suspended / limit-blocked bars).
-    entry_bar_i: int | None = None
+    # Entry (Vibe-Trading next-bar semantics, default on): a signal computed
+    # from bar T's close fills at bar T+1's close - never at T's own close
+    # (same-bar close lookahead). The legacy range-touch entry (a market-on-
+    # touch order resting until a bar's range reaches the price) stays opt-in
+    # via ``next_bar_close=False`` for backtests that model resting limit
+    # entries, not close-based signals.
     prev_close = None
-    for i, bar in enumerate(bars):
-        if _blocked(entry_side, bar, prev_close):
+    entry_bar_i: int | None = None
+    if next_bar_close:
+        if len(bars) >= 2:
+            entry_bar_i = 1
+            entry = bars[1].close
+        elif bars:
+            entry_bar_i = 0
+            entry = bars[0].close
+    else:
+        for i, bar in enumerate(bars):
+            if _blocked(entry_side, bar, prev_close):
+                prev_close = bar.close
+                continue
+            hit = (
+                (entry_side == OrderSide.BUY and bar.low <= entry)
+                or (entry_side == OrderSide.SELL and bar.high >= entry)
+            )
+            if hit:
+                entry_bar_i = i
+                break
             prev_close = bar.close
-            continue
-        hit = (
-            (entry_side == OrderSide.BUY and bar.low <= entry)
-            or (entry_side == OrderSide.SELL and bar.high >= entry)
-        )
-        if hit:
-            entry_bar_i = i
-            break
-        prev_close = bar.close
-    if entry_bar_i is None:
-        entry_bar_i = 0
-        entry = bars[0].close
+        if entry_bar_i is None:
+            entry_bar_i = 0
+            entry = bars[0].close
     entry_px = entry
     if participation > 0 and entry_bar_i < len(bars):
         qty = float(volume_gate(qty, getattr(bars[entry_bar_i], "volume", 0.0), participation))
@@ -177,7 +189,7 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
     exit_px = entry_px
     exit_label = "none"
     stop_px = stop
-    prev_close = bars[entry_bar_i].close if entry_bar_i < len(bars) else None
+    prev_close = bars[0].close if bars else None
     for i in range(entry_bar_i, len(bars)):
         bar = bars[i]
         stop_hit = (
@@ -204,13 +216,28 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
         exit_bar_i = len(bars) - 1
         exit_px = _deal_price(_bar_dict(bars[-1]), deal_price) or bars[-1].close
 
-    gross = (exit_px - entry_px) * qty if side == "long" else (entry_px - exit_px) * qty
-    cost = cost_fn(entry_px * qty, entry_side) + cost_fn(exit_px * qty, exit_side)
+    # The quantity that actually filled: participation caps it, and the
+    # legacy fallback entry (no range reached) means nothing traded.
+    filled_qty = float(qty)
+    if entry_bar_i < len(bars):
+        filled_qty = float(volume_gate(
+            qty, getattr(bars[entry_bar_i], "volume", 0.0), participation,
+        )) if participation > 0 else float(qty)
+    gross = (exit_px - entry_px) * filled_qty if side == "long" else (entry_px - exit_px) * filled_qty
+    cost = cost_fn(entry_px * filled_qty, entry_side) + cost_fn(exit_px * filled_qty, exit_side)
+    # Vibe-Trading fill-vs-target transparency: a plan that did NOT actually
+    # execute (participation gate zeroed it, or the legacy range-touch entry
+    # fell back to the last close) must be reported as such - the report never
+    # claims target-weighted exposure when the book only filled a fraction.
+    planned_qty = float(qty)
+    executed = filled_qty > 0
     return {
         "fills": [
-            {"side": entry_side.value, "qty": qty, "price": entry_px, "bar": entry_bar_i},
-            {"side": exit_side.value, "qty": qty, "price": exit_px, "bar": exit_bar_i},
+            {"side": entry_side.value, "qty": filled_qty, "price": entry_px, "bar": entry_bar_i},
+            {"side": exit_side.value, "qty": filled_qty, "price": exit_px, "bar": exit_bar_i},
         ],
+        "position_target": {"side": entry_side.value, "qty": planned_qty},
+        "position_filled": {"side": entry_side.value, "qty": filled_qty, "executed": executed},
         "entry_price": entry_px,
         "exit_price": exit_px,
         "exit_label": exit_label,
@@ -324,7 +351,9 @@ def main(argv: list[str] | None = None) -> int:
             w.writerow(["stop", stop])
             w.writerow(["targets", ",".join(map(str, targets))])
             w.writerow(["side", args.side])
-            w.writerow(["quantity", args.quantity])
+            w.writerow(["position_target_qty", result["position_target"]["qty"]])
+            w.writerow(["position_filled_qty", result["position_filled"]["qty"]])
+            w.writerow(["executed", result["position_filled"]["executed"]])
             w.writerow(["entry_bar", result["fills"][0]["bar"]])
             w.writerow(["exit_price", result["exit_price"]])
             w.writerow(["exit_label", result["exit_label"]])

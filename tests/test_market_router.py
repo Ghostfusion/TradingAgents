@@ -93,3 +93,85 @@ class TestVendorBreaker:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+class TestCaliberProvenance:
+    """Vibe-Trading cross-vendor calibration honesty (verified table; unknown
+    never assumed)."""
+
+    def test_verified_vendors(self):
+        from tradingagents.dataflows.market_router import price_caliber_for
+
+        assert price_caliber_for("alpha_vantage", "US") == "adjusted"
+        assert price_caliber_for("tiingo") == "split_adjusted"
+        assert price_caliber_for("y_finance", "JP") == "adjusted"
+
+    def test_unlisted_vendor_is_unknown(self):
+        from tradingagents.dataflows.market_router import price_caliber_for
+
+        assert price_caliber_for("moomoo") == "unknown"
+        assert price_caliber_for("") == "unknown"
+
+    def test_volume_units(self):
+        from tradingagents.dataflows.market_router import volume_unit_for
+
+        assert volume_unit_for("US") == "shares"
+        assert volume_unit_for("CN") == "board_lots"
+        assert volume_unit_for("ZZ") == "unknown"
+        assert volume_unit_for("") == "unknown"
+
+    def test_caliber_consistency_single(self):
+        from tradingagents.dataflows.market_router import caliber_consistency
+
+        out = caliber_consistency([{"_vendor": "alpha_vantage", "_market": "US"}])
+        assert out["consistent"] is True and out["calibers"] == {"alpha_vantage": "adjusted"}
+
+    def test_caliber_consistency_mixed_warns(self):
+        from tradingagents.dataflows.market_router import caliber_consistency
+
+        out = caliber_consistency([
+            {"_vendor": "alpha_vantage", "_market": "US"},   # adjusted
+            {"_vendor": "tiingo", "_market": "US"},          # split_adjusted
+        ])
+        assert out["consistent"] is False
+        assert "mixed price caliber" in out["warning"]
+        assert "alpha_vantage=adjusted" in out["warning"]
+
+    def test_caliber_consistency_empty_ok(self):
+        from tradingagents.dataflows.market_router import caliber_consistency
+
+        out = caliber_consistency([])
+        assert out["consistent"] is True and out["calibers"] == {} and out["warning"] == ""
+
+    def test_vendor_result_dict_carries_caliber(self):
+        from tradingagents.dataflows.schema import VendorResult
+
+        vr = VendorResult(results={"closes": [1]}, provider="tiingo",
+                          price_caliber="split_adjusted", volume_unit="shares")
+        d = vr.to_dict()
+        assert d["price_caliber"] == "split_adjusted"
+        assert d["volume_unit"] == "shares"
+
+    def test_route_to_vendor_typed_attaches_caliber(self, monkeypatch):
+        from tradingagents.dataflows import interface
+
+        def fake_route(method, *args, **kwargs):
+            return {"last": 100.0, "_vendor": "y_finance"}
+
+        def fake_vendor(category, method=None):
+            return "y_finance"
+
+        monkeypatch.setattr(interface, "route_to_vendor", fake_route)
+        monkeypatch.setattr(interface, "get_vendor", fake_vendor)
+        vr = interface.route_to_vendor_typed("get_stock_data", "AAPL", "2026-01-01", "2026-01-05")
+        assert vr.error_kind is None
+        assert vr.price_caliber == "adjusted"   # y_finance
+        assert vr.volume_unit == "shares"       # US
+        # news methods never carry caliber (meaningless there)
+        vr2 = interface.route_to_vendor_typed("get_news", "AAPL", "2026-01-01", "2026-01-05")
+        assert vr2.price_caliber is None
+
+    def test_disclosure_footers_calibers(self):
+        from tradingagents.strategies.report_disclosure import disclosure_footers
+
+        out = disclosure_footers(["eodhd"], [], calibers={"eodhd": None})
+        assert out["price_calibers"] == {"eodhd": None}
+        assert disclosure_footers([], [])["price_calibers"] == {}

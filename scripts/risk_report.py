@@ -27,7 +27,15 @@ def audit_summary(entries: list) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", default=None, help="path to risk_audit.jsonl")
+    parser.add_argument("--verify-chain", default=None,
+                        help="path to a hash-chained risk_audit.jsonl to verify tamper-evidence")
     args = parser.parse_args(argv)
+    if getattr(args, "verify_chain", None):
+        from tradingagents.strategies.hash_chain_audit import verify
+
+        ok, bad = verify(args.verify_chain)
+        print(f"chain {'OK' if ok else f'BROKEN at row {bad}'} ({args.verify_chain})")
+        return 0 if ok else 1
     path = args.audit
     if path is None:
         try:

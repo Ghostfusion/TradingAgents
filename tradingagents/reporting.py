@@ -740,4 +740,52 @@ def write_report_tree(
     (save_path / "complete_report.md").write_text(
         (header + toc + "\n\n---\n\n" + body).rstrip() + "\n", encoding="utf-8"
     )
+    # Vibe-Trading run_card.json reproducibility metadata (P2-5): one JSON file
+    # per report tree with the config hash, commit, LLM setup, and the
+    # computed decision summary, so a report folder is re-runnable/auditable
+    # without digging through log blobs. Advisory; never gates.
+    try:
+        import hashlib
+        import json as _json
+
+        from tradingagents.default_config import DEFAULT_CONFIG
+
+        cfg_hash = hashlib.sha256(
+            _json.dumps(DEFAULT_CONFIG, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+        commit = ""
+        try:
+            import subprocess as _sp
+
+            commit = _sp.run(
+                ["git", "-C", str(save_path.resolve().parents[1] if save_path.is_absolute() else save_path),
+                 "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+        except Exception:  # noqa: BLE001 - commit is best-effort
+            commit = ""
+        from datetime import timezone as _card_tz
+
+        verdict = (final_state.get("risk_gate") or {}).get("verdict")
+        card = {
+            "ticker": ticker,
+            "generated": datetime.now(_card_tz.utc).isoformat(),
+            "config_hash": cfg_hash,
+            "commit": commit,
+            "llm": {
+                "provider": DEFAULT_CONFIG.get("llm_provider"),
+                "deep_think_llm": DEFAULT_CONFIG.get("deep_think_llm"),
+                "quick_think_llm": DEFAULT_CONFIG.get("quick_think_llm"),
+            },
+            "decision": {
+                "verdict": verdict,
+                "risk_halt": bool(final_state.get("risk_halt")),
+            },
+            "sections": [],
+        }
+        (save_path / "run_card.json").write_text(
+            _json.dumps(card, indent=2, default=str), encoding="utf-8"
+        )
+    except Exception:  # noqa: BLE001 - card is advisory
+        pass
     return save_path / "complete_report.md"

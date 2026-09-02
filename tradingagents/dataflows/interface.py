@@ -44,6 +44,7 @@ from .finnhub import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
+from .market_router import market_for_symbol, price_caliber_for, volume_unit_for
 from .massive import (
     get_corporate_actions_massive,
     get_fundamentals_massive,
@@ -674,6 +675,26 @@ def route_to_vendor_typed(method: str, *args, **kwargs) -> "VendorResult":
     except Exception:  # noqa: BLE001
         provider = None
     result = route_to_vendor(method, *args, **kwargs)
+    vr = _wrap_vendor_result(result, provider)
+    # Price-caliber + volume-unit provenance (Vibe-Trading calibration
+    # honesty): attach when a ticker-looking first arg is present AND the
+    # method is not a news/global feed (caliber is meaningless there).
+    try:
+        sym = str(args[0]) if args and isinstance(args[0], str) else ""
+        if vr.error_kind is None and sym and len(sym) <= 12 and not any(
+            m in method for m in ("news", "sentiment", "global", "macro")
+        ):
+            market = market_for_symbol(sym)
+            vr.price_caliber = price_caliber_for(provider, market)
+            vr.volume_unit = volume_unit_for(market)
+    except Exception:  # noqa: BLE001 - provenance is advisory
+        pass
+    return vr
+
+
+def _wrap_vendor_result(result, provider: str | None) -> "VendorResult":
+    """Wrap the routed string/dict into a VendorResult (error sentinels map to
+    error_kind; everything else passes through untouched)."""
     if result is None:
         return VendorResult(results=None, provider=provider, error_kind="NoMarketDataError")
     if isinstance(result, str):

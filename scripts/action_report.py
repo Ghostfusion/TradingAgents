@@ -856,23 +856,40 @@ def main(argv: list[str] | None = None) -> int:
                 judge_calls += 1
             else:
                 judge = f"skipped (--llm-max {args.llm_max} reached)"
-        rows.append(
-            {
-                "symbol": sym,
-                "kind": kind,
-                "weight": basket.get(sym),
-                "report": folder.name,
-                "date": _folder_date(folder.name),
-                "rating": decision["rating"],
-                "condition": cond,
-                "verdict": result["verdict"],
-                "checks": result["checks"],
-                "reasons": result["reasons"],
-                "judge": judge,
-                "stop_loss": decision["stop_loss"],
-                "price_target": decision["price_target"],
-            }
-        )
+        row = {
+            "symbol": sym,
+            "kind": kind,
+            "weight": basket.get(sym),
+            "report": folder.name,
+            "date": _folder_date(folder.name),
+            "rating": decision["rating"],
+            "condition": cond,
+            "verdict": result["verdict"],
+            "checks": result["checks"],
+            "reasons": result["reasons"],
+            "judge": judge,
+            "stop_loss": decision["stop_loss"],
+            "price_target": decision["price_target"],
+        }
+        # Vibe-Trading persistent-invalidation: when the report's stop-loss
+        # clause is NOT_MET (live price breached), record an auto
+        # invalidation in the ledger so the next review sees why this thesis
+        # was retired (advisory; never gates).
+        if result["verdict"] == "NOT_MET" and decision["stop_loss"] is not None:
+            try:
+                from tradingagents.strategies.invalidation_ledger import append
+
+                append(
+                    sym,
+                    [f"price_stop_loss: breach below {decision['stop_loss']:g}"],
+                    date=_folder_date(folder.name),
+                    note=f"action_report NOT_MET on {folder.name}",
+                    source="action_report",
+                )
+                row["invalidation_recorded"] = True
+            except Exception:  # noqa: BLE001 - advisory, never blocks
+                pass
+        rows.append(row)
 
     if args.json:
         print(json.dumps(rows, indent=2, default=str))

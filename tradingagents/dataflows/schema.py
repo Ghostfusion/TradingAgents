@@ -46,6 +46,13 @@ class VendorResult:
     stale_seconds: float | None = None
     data_quality: str | None = None  # fresh | stale | partial | unknown
     missing_fields: list[str] = field(default_factory=list)
+    # Vibe-Trading cross-vendor calibration (honesty): the price adjustment
+    # caliber the serving vendor returns and the volume unit of its volume
+    # column. None = unknown/unmeasured (never assumed). Values:
+    #   price_caliber: adjusted | split_adjusted | raw | unknown
+    #   volume_unit: shares | board_lots | contracts | unknown
+    price_caliber: str | None = None
+    volume_unit: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -65,6 +72,8 @@ class VendorResult:
             "stale_seconds": self.stale_seconds,
             "data_quality": self.data_quality,
             "missing_fields": self.missing_fields,
+            "price_caliber": self.price_caliber,
+            "volume_unit": self.volume_unit,
         }
 
     def to_llm(self) -> str:

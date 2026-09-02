@@ -19,11 +19,22 @@ def _news_relevance_enabled() -> bool:
         return False
 
 
-def _cached_news(key: tuple, fn, *args) -> str:
+# Cache-schema version (Vibe-Trading cache-version guard): part of every key.
+# Bump when a stored news record's meaning changes so old entries can never
+# resurface under a new schema.
+_NEWS_CACHE_VERSION = 1
+
+
+def _news_key(*parts) -> tuple:
+    """Versioned cache key (schema version + call identity)."""
+    return (_NEWS_CACHE_VERSION, *parts)
+
+
+def _cached_news(parts: tuple, fn, *args) -> str:
     """Deduplicate identical concurrent fetches (one vendor call per key)."""
     if not _news_relevance_enabled():
         return fn(*args)
-    return _NEWS_CACHE.fetch(key, fn, *args)[0]
+    return _NEWS_CACHE.fetch(_news_key(*parts), fn, *args)[0]
 
 
 def _degrade_note(result: str) -> str:
