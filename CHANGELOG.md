@@ -8,6 +8,40 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Positions -> risk-basket utility + PM holdings read (Option A/B)** - the
+  risk basket now reflects the REAL book:
+  - `strategies/book_positions.py` (new, pure/hermetic): broker CSV parse
+    (Fidelity-style), cash detection via `**`-suffix / blank-symbol / sweep
+    description (the broker's `Type` column is NOT used - Fidelity labels
+    equities "Cash"), cross-account merge, `compute_weights` WITH cash in
+    the denominator (the <1.0 remainder is the cash sleeve, consistent with
+    `portfolio_cvar`'s documented "weights + cash" semantic), exact `.env`
+    line render (round-trips through `default_config._coerce`),
+    `patch_env_text` (only the two basket lines change), and
+    `render_holdings_block` (advisory "Computed book" line for the decision
+    agents; `holdings_tickers`/`holdings_weights` when set, else falls back
+    to the risk basket).
+  - `scripts/positions_to_basket.py` (new): dry-run default (per-account
+    cross-check vs the broker's own pct, total/cash, per-symbol weights),
+    `--apply` (`.env.bak` backup, rewrite the two basket lines),
+    `--min-value` / `--exclude`, `--write-book-json` (gitignored dollar
+    book = the Option-C artifact), `--json`.
+  - Graph: `_compiled_decision_context` now includes the "Computed book"
+    block, so the Trader / PM / risk debators / researchers see the actual
+    holdings read - the PM can state "you hold no TSLA -> size 0" instead
+    of the conditional "if you hold it, trim".
+  - Config: `holdings_tickers` / `holdings_weights` (+
+    `TRADINGAGENTS_HOLDINGS_TICKERS` / `TRADINGAGENTS_HOLDINGS_WEIGHTS`) =
+    Option B override; empty = Option A (basket is the book). `.env.example`
+    mirrors added.
+  - Security: the `.gitignore` `profolio/` typo is fixed and `positions/`
+    added (the CSV + book JSON are never commit-able).
+  Tests: `tests/test_book_positions.py` (24 hermetic, timed): cash
+  detection, merge, weights-including-cash, env round-trip, holdings
+  fallback, gitignore guard, CLI dry-run/apply/write-book-json.
+
+### Added
+
 - **Parent-repo ports — look-ahead window + debate opening** (ports from
   `TauricResearch/TradingAgents`, no merge):
   - `dataflows/date_window.py` (new): shared half-open UTC window

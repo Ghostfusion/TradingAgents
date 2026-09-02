@@ -30,6 +30,19 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-02] **Positions -> risk-basket utility + PM holdings read (Option A/B)** - 
+  `scripts/positions_to_basket.py` combines broker position CSVs (Fidelity-style,
+  under gitignored `positions/`) into the real `TRADINGAGENTS_RISK_BASKET_TICKERS` /
+  `_WEIGHTS` **with cash in the denominator** - the <1.0 weight remainder IS the
+  cash sleeve (`book_risk.portfolio_cvar`'s documented "weights + cash" semantic).
+  Dry-run by default (per-account cross-check, total/cash, per-symbol weights);
+  `--apply` backs up `.env` and rewrites only the two basket lines; `--write-book-json`
+  persists the dollar book (gitignored) - the Option-C artifact. New `holdings_tickers` /
+  `holdings_weights` config (+ env) feed an advisory **"Computed book"** block into the
+  computed decision context (Option A default: the basket IS the book; Option B: a
+  separate holdings map overrides it), so the PM now states "you hold no TSLA -> size 0"
+  instead of the conditional "if you hold it, trim". The `profolio/` gitignore typo is
+  fixed to also cover `positions/`. See CHANGELOG.
 - [2026-09-01] **Parent-repo ports: look-ahead safety + debate opening** (#1/#2) -
   `dataflows/date_window.py` now centralizes the half-open UTC content window;
   StockTwits and Reddit trim to the run's as-of window so a historical/backtest
