@@ -110,7 +110,7 @@ convergence into one merged module list.
 | **8. Baseline-relative evaluation** (FinRL-Meta Benchmark) | every result vs passive buy-hold / equal-weight / mean-variance / min-variance baselines; metrics = cum return, annualized return/vol, Sharpe, MaxDD | `evaluate.py` + `strategy_quality_report` report strategy rows; baselines exist only as alpha-vs-benchmark in memory | `strategies/benchmark_surface.py`: always render strategy **vs** passive/equal-weight/MVO baseline rows in `strategy_quality_report` + `evaluate_config_gate` (see §6.4) — a raw single curve is never the deliverable |
 | **9. Rolling ensemble re-train + OOS validation selection** (classic FinRL) | every rebalance window: train 5 algos on expanding data, pick the best by **validation Sharpe**, trade the forward window | the advisory factor-model design (Qlib §3.6) trains one model; no candidate-zoo + validation-selection policy | the Phase-4 factor model runs on a **FinRL ensemble cadence**: re-train at rebalance windows, evaluate a candidate zoo, select by OOS validation Sharpe (deflated/PBO-gated) — never in-sample argmax (see §6.6) |
 | **10. Multi-timeframe data** | 1-min bars for intraday/paper-trading examples | `alpaca.get_intraday`/`get_bars` (1m) exist, screener-only | **Note only** — no execution need (matches Qlib pillar 9 non-goal); the intraday data already lands in `market_session` tools |
-| **11. LLM+RL hybrid guidance** (web synthesis; FinRL-DeepSeek) | LLM extracts risk/text priors → RL policy + reward shaping; best practice = **hybridization** (LLM = reasoning/signal, RL = constrained allocation, deterministic rules last) | n/a — the fork is already the "policy wrapper over computed numbers with hard deterministic gates" | **Validation, not adoption**: the fork's architecture is the recommended hybrid shape. Any future learned allocator = advisory input behind the existing overlays; never the executor. Do NOT add an RL runtime |
+| **11. LLM+RL hybrid guidance** (web synthesis; FinRL-DeepSeek; QlibRL) | LLM extracts risk/text priors → RL policy + reward shaping; best practice = **hybridization** (LLM = reasoning/signal, RL = constrained allocation, deterministic rules last). Qlib ships its own RL toolkit (QlibRL, 2022, order-execution PPO/OPDS/TWAP) and warns that training/backtest simulators differ | n/a — the fork is already the "policy wrapper over computed numbers with hard deterministic gates" | **Validation, not adoption**: the fork's architecture is the recommended hybrid shape. Any future learned allocator = advisory input behind the existing overlays; never the executor. Do NOT add an RL runtime — QlibRL's simulator-gap warning (design_qlib §1a-21) reinforces why the fork's paper fills must state their model |
 
 ---
 
@@ -120,7 +120,7 @@ convergence into one merged module list.
 | --- | --- | --- | --- |
 | `factor_expressions` + `get_factor_profile` | FinRL's indicators (MACD/RSI/ADX/CCI stockstats) + its **52-factor fundamental list** are a feature-pool reference | **Keep as-is**; cite FinRL's factor list as the Phase-4 model's feature pool (plus Alpha158 subset) | Qlib (+FinRL feature list as reference) |
 | `signal_analysis` (rank IC/ICIR/quantile) | FinRL-Meta benchmarks use Sharpe/vol/MaxDD, not IC | **Keep as-is**; FinRL's metric set moves into `benchmark_surface` (§6.4) — two complementary surfaces | Qlib (IC) + FinRL (baseline-relative stats) |
-| `portfolio_strategy` (Topk-Drop + enhanced-index) | FinRL-X weight-centric contract + equal-weight/MVO/min-var zoo | **Wrap in `portfolio_contract`** (§6.3): Topk-Drop/enhanced-index keep Qlib math; equal-weight/MVO/min-var join as contract-conforming modules; all consumed by `pipeline.py --alloc` | shared (contract = FinRL, math = Qlib) |
+| `portfolio_strategy` (Topk-Drop + enhanced-index) | FinRL-X weight-centric contract + equal-weight/MVO/min-var zoo | **Wrap in `portfolio_contract`** (§6.3): Topk-Drop keeps Qlib selection math; enhanced-index is the Qlib convex program (turnover cap, benchmark-deviation, force-hold/sell masks, fallback — design_qlib §3.3); equal-weight/MVO/min-var join as contract-conforming modules; all consumed by `pipeline.py --alloc` | shared (contract = FinRL, math = Qlib) |
 | `runfile` + experiment ledger | FinRL-X Pydantic settings + YAML strategy configs + walk-forward engine; FinRL-Meta DataOps | **Extend**: runfile gains `stage` (train/test/trade date windows) + `environment` (named market context from `environment_registry`); ledger unchanged | shared |
 | `pit_registry` | FinRL-X `ML_STOCK_SELECTION.md` is a textbook PIT discipline (datadate→tradedate mapping, uniform SP500-membership filter at train AND inference, y_return verification) | **Reinforced** — the doc's worked example becomes the PIT-registry acceptance test corpus | shared |
 | `factor_model_train` (LightGBM advisory) | FinRL ensemble: candidate zoo + OOS validation-Sharpe selection, rolling re-train | **Extend**: ensemble cadence + selection policy (§6.6) | shared |
@@ -130,7 +130,13 @@ convergence into one merged module list.
 Nothing from the Qlib design is dropped; FinRL **adds** five net-new modules:
 `market_stress` (turbulence + two-layer regime + persistence), `stop_policy`
 (cooldown), `portfolio_contract` (weight-vector contract), `benchmark_surface`,
-and the ensemble cadence on the factor model.
+and the ensemble cadence on the factor model. The Qlib design itself gained
+four lessons after its direct-repo deep study (`docs/design_qlib_integration.md`
+§1a/§3.7-§3.10): the **RD-Agent factor-proposal loop** (LLM proposes
+candidates, deterministic math + PBO gate decides), the **learn/infer
+normalization split**, the **market-tradability** backtest model, and
+recorder-style ledger rows — ownership stays shared as in the table above
+(RL/non-goal rows unchanged).
 
 ---
 
@@ -234,7 +240,11 @@ and the ensemble cadence on the factor model.
 - Extend `scripts/factor_model_train.py`: a **candidate zoo** (LightGBM
   variants over Alpha158 + FinRL-52 features), re-trained at rebalance windows;
   **selection by OOS validation Sharpe (deflated/PBO-gated)**, never
-  in-sample argmax (FinRL 9).
+  in-sample argmax (FinRL 9). Every candidate is reported **vs simple
+  baselines (equal-weight / value-ratio / momentum) on the same IC + backtest
+  surface** — the Qlib model-zoo benchmark convention (design_qlib §1a-20),
+  which `benchmark_surface` (§6.4) + `signal_analysis` (Qlib §3.2) combine to
+  provide.
 - Gate unchanged: score reaches the LLM only after walk-forward+PBO passes;
   `enable_factor_model=False` default. (FinRL-DeepSeek's LLM-infused risk
   shaping stays out: LLM signals already flow via the news/sentiment tools.)
@@ -282,9 +292,14 @@ graph topology or the overlay order.
 
 - **No RL runtime, no execution layer.** The fork is deterministic-first,
   analysis-only; DRL and broker integration are non-goals (Qlib §6 echoes
-  this). The LLM+RL hybrid synthesis (web): LLM = reasoning/signal,
-  constrained alloc = advisory, deterministic rules last — the fork already
-  has that shape; any learned module plugs in behind the overlays.
+  this — Qlib itself shipped an RL toolkit in 2022, used for order execution,
+  and the fork still declines it). The LLM+RL hybrid synthesis (web): LLM =
+  reasoning/signal, constrained alloc = advisory, deterministic rules last —
+  the fork already has that shape; any learned module plugs in behind the
+  overlays. **Simulator-gap honesty (QlibRL lesson):** every paper/backtest
+  fill states its model (deal price, slippage, limit/participation gates —
+  the Qlib `Exchange` lessons, design_qlib §1a-13/§3.8) so training-vs-backtest
+  and paper-vs-book differences are labeled, never silent.
 - **DRL trading critiques apply to anything learned** (web): backtest
   overfitting, look-ahead bias (FinRL-X's own `ML_STOCK_SELECTION.md` documents
   how easily y_return leaks), seed/hyperparameter sensitivity, non-stationarity.
