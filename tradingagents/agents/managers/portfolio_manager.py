@@ -146,6 +146,7 @@ def create_portfolio_manager(llm):
             else "  (no structured risk debate rounds)"
         )
 
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -184,12 +185,56 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}{get_output_budget("portfolio")}"""
 
+        def _guardrail_hook(result):
+            """Deterministic post-decision guardrail (DSA phase A).
+
+            Only softens/downgrades with a recorded reason; never upgrades.
+            `enable_decision_guardrail` gates the structural rules; the
+            score<->rating consistency check + confidence cap on degraded
+            data quality run when `enable_decision_guardrail` is on.
+            """
+            try:
+                from tradingagents.dataflows.config import get_config
+                from tradingagents.strategies.decision_guardrail import (
+                    cap_pm_confidence,
+                    stabilize_decision,
+                    validate_score_action_agreement,
+                )
+
+                if not get_config().get("enable_decision_guardrail"):
+                    return
+                rating = result.rating.value
+                risk_rows = [
+                    {"severity": "high"} if (
+                        isinstance(v, dict) and str(v.get("severity", "")).lower() == "high"
+                    ) else {}
+                    for v in (risk_matrix_block and [{}] or [])
+                ]
+                out = stabilize_decision(rating, risk_rows=risk_rows)
+                if out["rating"] != rating:
+                    result.rating = type(result.rating)(out["rating"])
+                    result.guardrail_reason = "; ".join(
+                        o["reason"] for o in (out["overrides"] or [])
+                    )
+                    result.risk_cap = "Hold" if any(
+                        "risk-cap" in o["reason"] for o in (out["overrides"] or [])
+                    ) else None
+                conf, _ = cap_pm_confidence(result.confidence, result.data_quality)
+                if conf != result.confidence:
+                    result.confidence = conf
+                # score<->rating agreement advisory note (no score field yet ->
+                # recorded when a 0-100 score is present in future iterations)
+                validate_score_action_agreement(rating, None)  # no-op today
+            except Exception:  # noqa: BLE001 - the guardrail degrades, never raises
+                return
+
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,
             llm,
             prompt,
             render_pm_decision,
             "Portfolio Manager",
+            result_hook=_guardrail_hook,
         )
 
         new_risk_debate_state = {

@@ -253,6 +253,29 @@ class PortfolioDecision(BaseModel):
             "should reduce confidence and position size)."
         ),
     )
+    data_quality: Literal["fresh", "stale", "partial", "unknown"] | None = Field(
+        default=None,
+        description=(
+            "Advisory determinism flag: 'fresh' when the quoted/bar data used "
+            "was not stale/fallback/missing for this name; 'stale'/'partial'/"
+            "'unknown' when a data slice degraded (confidence MUST be lowered)."
+        ),
+    )
+    guardrail_reason: str | None = Field(
+        default=None,
+        description=(
+            "Filled by the deterministic post-decision guardrail when it softens "
+            "this rating (e.g. 'risk-cap: high-severity risk caps at Hold'). "
+            "Never changed by the model."
+        ),
+    )
+    risk_cap: Literal["Hold"] | None = Field(
+        default=None,
+        description=(
+            "When a high-severity risk row caps this decision, the guardrail sets "
+            "this to 'Hold' — the displayed recommendation never exceeds it."
+        ),
+    )
 
     @field_validator("price_target", "stop_loss", "confidence", mode="before")
     @classmethod

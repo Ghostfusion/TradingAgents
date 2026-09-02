@@ -1117,6 +1117,7 @@ only after validating in the evaluation harness:
   `--alloc` (+ Qlib Topk-Drop / enhanced-index behind `enable_topk_drop` /
   `enable_enhanced_index`), contract exits via `enable_exits`.
   Plan: `Strategies/value_style_gap_plan.md`.
+- **DSA decision quality (advisory, default off)** - `strategies/decision_guardrail.py` (post-PM downgrade-only stabilizer, risk-cap at Hold, score<->rating consistency, confidence cap on stale data; `enable_decision_guardrail`). Research: `docs/design_daily_stock_analysis_research.md`.
 - **Qlib Phase 1 (advisory, default off)** - `strategies/factor_expressions.py`
   (Alpha158-style 16-factor profile via `get_factor_profile`, expression-string
   cache, learn/infer train-only moments), `strategies/signal_analysis.py` (rank

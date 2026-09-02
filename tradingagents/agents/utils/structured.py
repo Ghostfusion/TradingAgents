@@ -406,3 +406,47 @@ def invoke_structured_or_freetext(
     # if still degenerate, return an explicit 'unavailable' notice so a
     # structured-output miss can never silently produce an empty decision.
     return _retry_if_stub(plain_llm, prompt, response_text, agent_name)
+
+
+def retry_structured_missing_fields(
+    structured_llm: Any,
+    prompt: Any,
+    result: T,
+    render: Callable[[T], str],
+    agent_name: str,
+    mandatory_fields: tuple[str, ...],
+    max_retries: int = 1,
+) -> str:
+    """DSA-style per-field integrity retry (research §3.2, pillar 4).
+
+    When the structured result is missing a mandatory field, re-invoke with a
+    TARGETED rebuild: the original prompt + the prior response + a per-field
+    spec of exactly what is missing — not a blind re-roll. Returns the render
+    of the repaired result (or the prior render when the retry fails / the
+    field appears absent after retry, so the pipeline never blocks).
+    """
+    missing = [f for f in mandatory_fields if getattr(result, f, None) in (None, "", [])]
+    if not missing:
+        return render(result)
+    current = result
+    for _ in range(max_retries):
+        still = [f for f in missing if getattr(current, f, None) in (None, "", [])]
+        if not still:
+            break
+        spec = "; ".join(f"{f} must be present and non-empty" for f in still)
+        retry_prompt = (
+            f"{prompt}\n\n---\nYour previous response was parsed into the "
+            f"schema but is missing required field(s): {spec}.\nPrevious "
+            f"response:\n{render(current)}\n\nRe-send the COMPLETE decision "
+            f"including the missing field(s)."
+        )
+        try:
+            repaired = structured_llm.invoke(retry_prompt)
+            if repaired is None:
+                continue
+            current = repaired
+        except Exception as exc:  # noqa: BLE001 - degrade, never raise
+            logger.warning("%s: integrity retry failed: %s", agent_name, exc)
+            break
+    return render(current)
+

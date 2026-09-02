@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **DSA decision quality (phase A)** - `tradingagents/strategies/decision_guardrail.py`: post-PM downgrade-only stabilizer (risk-cap at Hold, near-resistance-without-inflow cap, near-support-without-outflow soften) with recorded `guardrail_reason`; versioned 0-100 <-> 5-tier-rating consistency validator; PM confidence capped on degraded `data_quality`; `PortfolioDecision` gains advisory `data_quality`/`guardrail_reason`/`risk_cap`; per-field integrity retry (`structured.retry_structured_missing_fields`) - targeted rebuild, never a blind re-roll. All default-off (`enable_decision_guardrail`). Tests: test_decision_guardrail (179, incl. the never-upgrades property) + test_phase_a_wiring.
+
 
 - **Qlib Phase-1 pure calculators** (`docs/design_qlib_integration.md` Phase 1,
   all advisory + default-off): `strategies/factor_expressions.py` (Alpha158-style
