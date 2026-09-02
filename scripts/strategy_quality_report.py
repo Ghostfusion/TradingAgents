@@ -198,6 +198,25 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
                 "max_drawdown": round(max_drawdown(eq), 4) if eq else None,
             }
         )
+        # Qlib with/without-cost report table (design_qlib_integration.md
+        # §3.2): the same metrics on the RAW series vs the net-of-cost series,
+        # so the cost drag is visible side by side.
+        raw = [float(v) for v in pm_realized if v is not None]
+        if len(raw) >= 2:
+            raw_eq = equity_curve(raw)
+            out["metrics"]["with_without_cost"] = {
+                "without_cost": {
+                    "cagr": round(cagr(raw), 4),
+                    "sharpe": round(sharpe(raw), 3),
+                    "max_drawdown": round(max_drawdown(raw_eq), 4),
+                },
+                "with_cost": {
+                    "cagr": round(cagr(net), 4),
+                    "sharpe": round(sharpe(net), 3),
+                    "max_drawdown": round(max_drawdown(eq), 4),
+                },
+                "cost_bps": cost_bps,
+            }
         # D2 alpha-decay monitor: rolling 4-week hit rate / sharpe vs the
         # full-history baseline. DRIFT when the rolling measure trails the
         # baseline for 2 consecutive periods (config `drift_periods`).

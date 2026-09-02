@@ -104,20 +104,56 @@ def fetch_bars(ticker: str, bars: int) -> list[Bar]:
 
 
 def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
-             qty: float, side: str, fee_bps: float, slippage_ticks: float) -> dict:
+             qty: float, side: str, fee_bps: float, slippage_ticks: float,
+             limit_threshold: float = 0.0, participation: float = 0.0,
+             deal_price: str = "close") -> dict:
     """Replay a single entry -> stop/target plan over bars, honoring order.
 
     A long plan enters at ``entry`` when a bar's low first reaches it (a
     short when a bar's high reaches it), then exits at whichever of ``stop`` /
     ``targets`` the price touches first *after* entry. Returns fills + net PnL.
+
+    Tradability model (Qlib exchange, design_qlib_integration.md §3.8):
+    ``limit_threshold`` (fraction) blocks entry/exit on limit-up (buy) /
+    limit-down (sell) days; ``participation`` (>0) caps the fill qty at that
+    share of the bar's volume; ``deal_price`` selects close | open | vwap (or
+    "buy,sell") for the fallback last-bar/at-fill pricing. All three default
+    to currently-behavior identical (gates off, close pricing).
     """
+    from tradingagents.strategies.market_tradability import (
+        change_vs_prev,
+        deal_price_selector as _deal_price,
+        limit_gate,
+        suspended,
+        volume_gate,
+    )
+
     entry_side = OrderSide.BUY if side == "long" else OrderSide.SELL
     exit_side = OrderSide.SELL if side == "long" else OrderSide.BUY
     cost_fn = make_cost_fn(fee_bps=fee_bps)
 
-    # Entry: first bar whose range reaches the plan price.
+    def _bar_dict(bar) -> dict:
+        return {"open": bar.open, "high": bar.high, "low": bar.low,
+                "close": bar.close, "volume": getattr(bar, "volume", None)}
+
+    def _blocked(side, bar, prev_close) -> bool:
+        if suspended(bar.close):
+            return True
+        chg = change_vs_prev(bar.close, prev_close)
+        gate = limit_gate(chg, limit_threshold) if chg is not None else None
+        return bool(
+            (gate == "up" and side == OrderSide.BUY)
+            or (gate == "down" and side == OrderSide.SELL)
+        )
+
+    # Entry: first bar whose range reaches the plan price (skipping
+    # suspended / limit-blocked bars).
     entry_bar_i: int | None = None
+    prev_close = None
     for i, bar in enumerate(bars):
+        if _blocked(entry_side, bar, prev_close):
+            prev_close = bar.close
+            continue
         hit = (
             (entry_side == OrderSide.BUY and bar.low <= entry)
             or (entry_side == OrderSide.SELL and bar.high >= entry)
@@ -125,18 +161,23 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
         if hit:
             entry_bar_i = i
             break
+        prev_close = bar.close
     if entry_bar_i is None:
         entry_bar_i = 0
         entry = bars[0].close
     entry_px = entry
+    if participation > 0 and entry_bar_i < len(bars):
+        qty = float(volume_gate(qty, getattr(bars[entry_bar_i], "volume", 0.0), participation))
     if slippage_ticks:
         entry_px = entry * (1.0 + slippage_ticks) if entry_side == OrderSide.BUY else entry * (1.0 - slippage_ticks)
 
-    # Exit: stop or the first target touched after entry.
+    # Exit: stop or the first target touched after entry (skipping suspended /
+    # limit-blocked bars; the trade just rides through them).
     exit_bar_i = entry_bar_i
     exit_px = entry_px
     exit_label = "none"
     stop_px = stop
+    prev_close = bars[entry_bar_i].close if entry_bar_i < len(bars) else None
     for i in range(entry_bar_i, len(bars)):
         bar = bars[i]
         stop_hit = (
@@ -156,9 +197,12 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
                 break
         if exit_label != "none":
             break
-        exit_px = bar.close
+        if not _blocked(exit_side, bar, prev_close):
+            exit_px = _deal_price(_bar_dict(bar), deal_price) or bar.close
+        prev_close = bar.close
     if exit_label == "none":
-        exit_bar_i, exit_px = len(bars) - 1, bars[-1].close
+        exit_bar_i = len(bars) - 1
+        exit_px = _deal_price(_bar_dict(bars[-1]), deal_price) or bars[-1].close
 
     gross = (exit_px - entry_px) * qty if side == "long" else (entry_px - exit_px) * qty
     cost = cost_fn(entry_px * qty, entry_side) + cost_fn(exit_px * qty, exit_side)
@@ -173,6 +217,11 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
         "net_pnl": gross - cost,
         "gross_pnl": gross,
         "cost": cost,
+        "fill_model": {
+            "deal_price": deal_price,
+            "limit_threshold": limit_threshold,
+            "participation": participation,
+        },
     }
 
 
@@ -189,6 +238,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bars", type=int, default=250)
     parser.add_argument("--fee-bps", type=float, default=5.0)
     parser.add_argument("--slippage-ticks", type=float, default=0.0)
+    parser.add_argument("--limit-threshold", type=float, default=None,
+                        help="|day change| fraction for the limit-up/down gate (0=off; config backtest_limit_threshold)")
+    parser.add_argument("--participation", type=float, default=None,
+                        help="cap each fill at this share of the bar volume (0=off; config backtest_volume_participation)")
+    parser.add_argument("--deal-price", default=None,
+                        help="fill price model: close|open|vwap or 'buy,sell' (config backtest_deal_price)")
     parser.add_argument("--out", default=None, help="write a CSV of the plan + fills")
     args = parser.parse_args(argv)
 
@@ -230,10 +285,29 @@ def main(argv: list[str] | None = None) -> int:
         print("[err] no stop determined; pass --stop")
         return 3
 
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        _cfg = get_config()
+        limit_threshold = (args.limit_threshold if args.limit_threshold is not None
+                           else float(_cfg.get("backtest_limit_threshold", 0.0)))
+        participation = (args.participation if args.participation is not None
+                         else float(_cfg.get("backtest_volume_participation", 0.0)))
+        deal_price = args.deal_price or str(_cfg.get("backtest_deal_price", "close"))
+    except Exception:  # noqa: BLE001 - degraded config -> defaults
+        limit_threshold = args.limit_threshold if args.limit_threshold is not None else 0.0
+        participation = args.participation if args.participation is not None else 0.0
+        deal_price = args.deal_price or "close"
+
     result = backtest(bars, entry, stop, targets, args.quantity, args.side,
-                      args.fee_bps, args.slippage_ticks)
+                      args.fee_bps, args.slippage_ticks,
+                      limit_threshold=limit_threshold, participation=participation,
+                      deal_price=deal_price)
     print(f"entry={result['entry_price']:.2f} stop={stop:.2f} targets={targets}")
     print(f"fills={result['fills']}")
+    fm = result["fill_model"]
+    print(f"fill model: deal_price={fm['deal_price']} limit_threshold={fm['limit_threshold']} "
+          f"participation={fm['participation']}")
     print(f"exit={result['exit_price']:.2f} ({result['exit_label']}) "
           f"gross={result['gross_pnl']:.2f} net={result['net_pnl']:.2f} "
           f"(fees+slippage={result['cost']:.2f})")

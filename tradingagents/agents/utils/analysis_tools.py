@@ -4545,6 +4545,147 @@ def get_regime_gate_read(
     except Exception as exc:
         return f"regime gate read unavailable for {ticker}: {exc}"
 
+@tool
+def get_factor_profile(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Compact Alpha158-style factor profile for ONE ticker (Qlib pillar 1, advisory).
+
+    Returns the latest computed values of a 16-factor subset
+    (momentum/reversal/volatility/value) off the run-level OHLCV cache, with
+    the data as-of date. Gated by ``enable_factor_profile`` (default off):
+    when off, returns an explicit unavailable (never a guess). The values are
+    computed, citable numbers for the LLM - never gates.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.factor_expressions import cached_expression
+    except Exception as exc:  # noqa: BLE001
+        return f"factor profile unavailable: {exc}"
+    if not get_config().get("enable_factor_profile"):
+        return f"factor profile unavailable for {ticker}: enable_factor_profile is off"
+    try:
+        ohlcv = _ohlcv(ticker)
+        closes = ohlcv.get("closes") or []
+        if len(closes) < 25:
+            return (f"factor profile unavailable for {ticker}: "
+                    f"{len(closes)} closes < 25 (min-observation)")
+        dates = ohlcv.get("dates") or []
+        as_of = dates[-1] if dates else None
+        alpha = cached_expression("alpha158", ticker, 320, as_of, ohlcv)
+        lines = [f"## Factor profile {ticker} (as-of {as_of})", ""]
+        labels = {
+            "mom_5": "5d momentum", "mom_20": "20d momentum", "mom_60": "60d momentum",
+            "rsi_14": "RSI-14", "bias_20": "20d bias", "zscore_20": "20d z-score",
+            "return_std_10": "10d return vol", "high_low_range_20": "20d range/close",
+            "avg_vol_20": "20d avg volume", "corr_ret_vol_20": "close-vol corr",
+        }
+        shown = 0
+        for key, label in labels.items():
+            series = (alpha or {}).get(key)
+            if series and series[-1] is not None:
+                lines.append(f"- {label}: {float(series[-1]):.4f}")
+                shown += 1
+        if not shown:
+            return f"factor profile unavailable for {ticker}: no factor with a latest value"
+        lines.append("")
+        lines.append("computed, advisory - never a gate")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"factor profile unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_topk_drop_plan(
+    scores: Annotated[dict, "name -> score"],
+    topk: Annotated[int, "target book size (names to hold)"] = 10,
+    n_drop: Annotated[int, "worst-held names to sell each rebalance"] = 1,
+    held: Annotated[list | None, "current holdings (names); empty = fresh book"] = None,
+) -> str:
+    """Qlib Topk-Drop rebalance plan (pillar 3, advisory).
+
+    Holds the top-``topk`` by score, sells the worst-``n_drop`` of the current
+    holdings, buys the best unheld names, equal-weights. Reports the turnover
+    = 2 * drops / book-size. Never a gate - the PM decides.
+    """
+    try:
+        from tradingagents.strategies.portfolio_strategy import topk_drop_weights
+    except Exception as exc:  # noqa: BLE001
+        return f"topk-drop plan unavailable: {exc}"
+    try:
+        if not scores:
+            return "topk-drop plan unavailable: no scores"
+        out = topk_drop_weights(
+            scores,
+            held=[str(h).upper() for h in (held or [])],
+            topk=int(topk),
+            n_drop=int(n_drop),
+        )
+        if out is None:
+            return "topk-drop plan unavailable: degenerate input"
+        lines = [
+            "## Topk-Drop rebalance plan",
+            "",
+            f"hold: {', '.join(out['held'])}",
+            f"sell: {', '.join(out['dropped']) or 'none'}",
+            f"buy: {', '.join(out['added']) or 'none'}",
+        ]
+        if out["held"]:
+            eq = 1.0 / len(out["held"])
+            lines.append(f"turnover: {out['turnover']:.2%} · weights: equal {eq:.1%} each")
+        else:
+            lines.append("turnover: n/a (no holdings)")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"topk-drop plan unavailable: {exc}"
+
+
+@tool
+def get_enhanced_index_tilt(
+    scores: Annotated[dict, "name -> score"],
+    benchmark_weights: Annotated[dict, "name -> benchmark weight (sums to 1)"],
+    w0: Annotated[dict | None, "current portfolio weights; default = benchmark"] = None,
+    turnover_cap: Annotated[float, "max one-way turnover ||w - w0||_1"] = 0.2,
+    b_dev: Annotated[float, "max |w - benchmark| per name"] = 0.02,
+) -> str:
+    """Qlib convex enhanced-indexing tilt (pillar 14, advisory).
+
+    The pure constrained program: long-only, sum(w)=1, turnover cap,
+    benchmark-deviation bounds, two-stage fallback (drop the cap, then hold
+    ``w0``) on an infeasible problem. Outputs the target weights + turnover
+    vs ``w0``. Never a gate.
+    """
+    try:
+        from tradingagents.strategies.portfolio_strategy import enhanced_index_weights
+    except Exception as exc:  # noqa: BLE001
+        return f"enhanced-index tilt unavailable: {exc}"
+    try:
+        if not scores or not benchmark_weights:
+            return "enhanced-index tilt unavailable: scores and benchmark_weights required"
+        w0w = w0 or benchmark_weights
+        out = enhanced_index_weights(
+            scores, benchmark_weights, w0w,
+            turnover_cap=float(turnover_cap), b_dev=float(b_dev),
+        )
+        if out is None:
+            return "enhanced-index tilt unavailable: degenerate input"
+        w0_expect = {str(k).upper(): round(float(v), 6) for k, v in w0w.items()}
+        if out == w0_expect:
+            return ("enhanced-index tilt unavailable: infeasible, holdings "
+                    "unchanged (w0 kept)")
+        w0n = {str(k).upper(): float(v) for k, v in w0w.items()}
+        turn = sum(abs(float(out.get(n, 0.0)) - w0n.get(n.upper(), 0.0))
+                   for n in set(out) | set(w0n)) / 2.0
+        lines = ["## Enhanced-index tilt", ""]
+        for name, wt in sorted(out.items(), key=lambda kv: -kv[1])[:15]:
+            lines.append(f"- {name}: {wt:.2%}")
+        lines.append("")
+        lines.append(f"one-way turnover vs w0: {turn:.2%} · cap {float(turnover_cap):.0%}")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"enhanced-index tilt unavailable: {exc}"
+
+
 __all__ = [
     "get_sector_rank",
     "get_normality",
@@ -4606,4 +4747,7 @@ __all__ = [
     "get_treasury_curve",
     "screen_equities",
     "get_market_movers",
+    "get_factor_profile",
+    "get_topk_drop_plan",
+    "get_enhanced_index_tilt",
 ]

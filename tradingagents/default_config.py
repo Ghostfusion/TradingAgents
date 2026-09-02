@@ -75,6 +75,12 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_CALIBRATION": "enable_calibration",
     "TRADINGAGENTS_ENABLE_AGREEMENT": "enable_agreement",
     "TRADINGAGENTS_ENABLE_COMPOSITE_RANK": "enable_composite_rank",
+    "TRADINGAGENTS_ENABLE_FACTOR_PROFILE": "enable_factor_profile",
+    "TRADINGAGENTS_ENABLE_TOPK_DROP": "enable_topk_drop",
+    "TRADINGAGENTS_ENABLE_ENHANCED_INDEX": "enable_enhanced_index",
+    "TRADINGAGENTS_BACKTEST_LIMIT_THRESHOLD": "backtest_limit_threshold",
+    "TRADINGAGENTS_BACKTEST_VOLUME_PARTICIPATION": "backtest_volume_participation",
+    "TRADINGAGENTS_BACKTEST_DEAL_PRICE": "backtest_deal_price",
     "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
     "TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR": "enable_sentiment_factor",
     "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC": "sentiment_factor_min_ic",
@@ -561,6 +567,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_computed_context": False,  # V5: computed numbers into debate snippets
         "enable_composite_rank": False,  # V2: composite (value+momentum) ranking
         "enable_exits": False,  # V4: ATR exits / rebalance hints
+        # Qlib integration (design_qlib_integration.md): advisory calculators,
+        # all default-off; the factor profile tool returns "unavailable" when
+        # its flag is off (mirrors the OpenBB gated-tool convention).
+        "enable_factor_profile": False,  # Q1: get_factor_profile tool + expression cache
+        "enable_topk_drop": False,  # Q3: screener alloc block uses Topk-Drop
+        "enable_enhanced_index": False,  # Q3: screener alloc block uses the convex enhanced-index
+        "backtest_limit_threshold": 0.0,  # Q13: |day change| fraction for limit-up/down gate (0 = off)
+        "backtest_volume_participation": 0.0,  # Q13: cap order % of day volume (0 = off; 0.2 recommended)
+        "backtest_deal_price": "close",  # Q13: close | open | vwap, or "buy,sell" pair
         "breakeven_atr": 1.0,  # V4: stop-to-breakeven cushion (ATRs)
         "target_atr": 4.0,  # V4: profit target multiple
         "sector_cap_limit": 0.35,  # V3: max single-sector weight

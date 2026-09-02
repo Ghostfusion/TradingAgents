@@ -78,7 +78,40 @@ def allocation_block(
     max_n = float(cfg.get("max_name_weight", 0.25))
     sec_cap = float(cfg.get("sector_cap_limit", 0.35))
     min_n = int(cfg.get("max_book_names", 10))
+    # Qlib strategy selection (design_qlib_integration.md §3.3): when the
+    # opt-in flags are on, the allocation plan starts from Topk-Drop or the
+    # convex enhanced-index instead of the value-ratio baseline. Everything
+    # downstream (correlation penalty + caps) still applies to the chosen w.
     w = value_ratio_weights(scores, min_weight=0.0)
+    strat_note = ""
+
+    if cfg.get("enable_topk_drop"):
+        try:
+            from tradingagents.strategies.portfolio_strategy import topk_drop_weights
+
+            plan = topk_drop_weights(
+                scores, held=[], topk=max(1, min_n), n_drop=1
+            )
+            w = plan["weights"] if plan and plan["weights"] else w
+            strat_note = " · topk-drop weights"
+        except Exception:  # noqa: BLE001 - degrade to the baseline, never raise
+            w = value_ratio_weights(scores, min_weight=0.0)
+    elif cfg.get("enable_enhanced_index"):
+        try:
+            from tradingagents.strategies.portfolio_strategy import enhanced_index_weights
+
+            names = list(scores)
+            bench = {n: 1.0 / len(names) for n in names} if names else {}
+            out = enhanced_index_weights(
+                scores, bench, bench,  # w0 = benchmark: a pure tilt
+                turnover_cap=0.2, b_dev=0.1,
+            )
+            w = out if out else w
+            strat_note = " · enhanced-index weights"
+        except Exception:  # noqa: BLE001 - degrade to the baseline, never raise
+            w = value_ratio_weights(scores, min_weight=0.0)
+    if not w:
+        w = value_ratio_weights(scores, min_weight=0.0)
     corr_note = ""
     if returns_by_name and cfg.get("enable_correlation_penalty"):
         w = correlation_penalty(
@@ -101,6 +134,8 @@ def allocation_block(
         f"allocated: {info['allocated']:.1%} · names: {info['active']}/{info['names']}"
         f" · min-names-ok: {info['min_names_satisfied']}"
     )
+    if strat_note:
+        lines.append(f"strategy:{strat_note}")
     if corr_note:
         lines.append(corr_note)
     return "\n".join(lines)
