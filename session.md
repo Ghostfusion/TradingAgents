@@ -1,59 +1,54 @@
-# Session Handoff — TradingAgents (2026-09-01, continuation)
+# Session Handoff — TradingAgents (2026-09-02, continuation)
 
 ## 1. Task Objective & Scope
-- **Goal:** Expand the fork with the quant-strategy gap from `Strategies/cookbook.md` (5 recipes + common framework), bind the new calculators to the decision agents as tools, and port two data-safety/debate-quality fixes from the parent repo (`TauricResearch/TradingAgents`) — all without merging.
-- **Sub-task in progress:** **None — all phases complete and pushed.** Last completed work: parent-repo ports #1 (look-ahead window) and #2 (debate opening markers). Open optional follow-ups: (a) memory holding-window settle + FRED vintage pin from the parent; (b) parent hardening of `structured.py`/`openai_client.py` (schema-only no tool priming, Responses-API gating) — assessed but not yet ported.
+- **Goal:** Stabilize and extend the fork: fix two live bugs (StructuredTool crash, claim-ledger "(unused)" markers), improve claim-ledger provenance rendering, and ship a positions→risk-basket utility (Option A/B/C) that imports real broker positions (incl. cash) into `TRADINGAGENTS_RISK_BASKET_*` in `.env` and feeds an advisory "Computed book" block to the PM/decision agents.
+- **Sub-task in progress:** None — all phases complete, committed, pushed. `.env` has been updated via `--apply` (real book now live). Open optional follow-ups below (not started).
 
 ## 2. File Manifest & Modifications
-**Created:**
-- `tradingagents/strategies/cross_section.py` — winsorize / cross_sectional_z / centered_rank / quantile_split / residualize_returns / neutralize_book (numpy lstsq row-space projection: dollar+beta+sector neutral, gross-renormalized) / no_trade_band.
-- `tradingagents/dataflows/date_window.py` — shared half-open UTC window `[start, end+1d)`; `in_window`/`to_utc`; undated items kept only when window reaches present.
-- `tests/test_cookbook_gaps.py` (27 tests), `tests/test_parent_ports.py` (12 tests).
+**Modified/Created:**
+- `tradingagents/agents/utils/analysis_tools.py` — removed stray `@tool` from `_machine_chain_vrp` (the `get_variance_premium` crash fix).
+- `tradingagents/agents/researchers/structured_debate.py` — `create_debate_l1` now renders `claim_ledger_md` with `used_claim_ids` = rows with L1 status VALID or QUALITATIVE (fixes all-"(unused)"). `claim_records_from_turn` populates `severity` (enum `.value`) + `mitigation` from the schema `RiskFactor`.
+- `tradingagents/strategies/debate_claim.py` — `ClaimRecord` gains `severity`/`mitigation` fields (serialized in `to_dict`/`from_dict`, backward-compatible); `render_markdown` renders qualitative rows as `(MEDIUM, mitigation=true, weight ~0)` and falls back `src={r.source or '-'}` (the `-calculated` label was added then reverted per user).
+- `tradingagents/strategies/book_positions.py` (NEW) — pure module: `parse_rows`, `is_cash_row` (`**`-suffix / blank-symbol-with-value / sweep-description; NOT the broker `Type` column), `book_stats` (cross-account merge), `compute_weights` (cash IN denominator; <1.0 sum = cash sleeve), `render_env_basket` (exact `.env` format, round-trips via `default_config._coerce`), `patch_env_text` (replaces only the two basket lines), `render_holdings_block` (advisory book line; Option-B holdings override else basket fallback).
+- `scripts/positions_to_basket.py` (NEW) — CLI: dry-run default, `--apply` (`.env.bak` backup, rewrite the two basket lines), `--min-value`, `--exclude`, `--write-book-json` (gitignored dollar book), `--json`; testable `_cli(argv, _print)` + `main()`.
+- `tradingagents/graph/trading_graph.py` — `_compiled_decision_context` prepends the `render_holdings_block` "Computed book (advisory)" line (reaches Trader/PM/3 risk debators/researchers).
+- `tradingagents/default_config.py` — new `holdings_tickers`/`holdings_weights` (default `[]`/`{}`) + `TRADINGAGENTS_HOLDINGS_TICKERS`/`_WEIGHTS` env overrides.
+- `.gitignore` — fixed `profolio/` typo; added `positions/` and `.env.bak`.
+- `.env.example` — mirrors for the two `TRADINGAGENTS_HOLDINGS_*` keys.
+- `tests/test_book_positions.py` (NEW) — 24 hermetic tests (cash detection, merge, weights-incl-cash, env round-trip via `_coerce`, patch_env_text, holdings fallback, gitignore secrecy guard, CLI dry-run/apply/write-book-json via monkeypatched module globals).
+- `tests/test_debate_claim.py`, `tests/test_debate_risk_parity.py` — regression assertions for the provenance render + L1-used-set.
+- Docs: `readme.md` (News 2026-09-02), `changelog.md`, `docs/api_reference.md` (env rows + §9 entry-point row + detailed flags).
+- trading_web (separate repo `D:/Users/vince/PycharmProjects/TradingNew/trading_web`, own commit `50358f7`): `backend/config.py` raw allowlist += `"scripts/positions_to_basket.py --help"`.
 
-**Modified:**
-- `tradingagents/strategies/{momentum,factors,evaluate,options_math,statistical,book_risk,portfolio_optimizer,credit_spread,rate_utils,market_session}.py` — new calculators (below).
-- `tradingagents/agents/utils/analysis_tools.py` — new tools `get_ts_momentum_weights`, `get_pair_trade_signal`, `get_event_pnl_response`, `get_book_depth_read`, `get_merton_distance`; rewrote `get_variance_premium` (now real model-free VRP via machine chain `_machine_chain_vrp`); extended `get_tail_risk` (CDaR/DVaR), `get_risk_parity_alloc` (max-diversification row). Note: `statsmodels` unused; pure NumPy everywhere.
-- `tradingagents/agents/utils/agent_utils.py` — imports/`__all__` for new tools; NEW `opponent_argument_or_opening(text, opponent)`.
-- `tradingagents/agents/analysts/market_analyst.py` — 6 new tools bound + prompt lines.
-- `tradingagents/graph/trading_graph.py` — market ToolNode += new tools.
-- `tradingagents/agents/utils/risk_tool_loop.py` — `get_merton_distance` in RISK_DEBATOR_TOOLS.
-- `tradingagents/agents/researchers/{bull,bear}_researcher.py` + `risk_mgmt/{aggressive,conservative,neutral}_debator.py` — opening-marker interpolation (#1176).
-- `tradingagents/dataflows/{stocktwits,reddit}.py` — `_within_window` + `start_date`/`end_date` params (look-ahead safe, #1220). `yfinance_news.py` migrated to `date_window.in_window`.
-- `tradingagents/agents/analysts/sentiment_analyst.py` — threads run window into both social fetchers.
-- `scripts/pre_market_review.py` — thin-book directive += optional depth (microprice/OBI) line.
-- `tests/test_news_lookahead.py` — migrated to shared `date_window.in_window`.
-- Docs: README, CHANGELOG.md, docs/AGENT_ONBOARDING.md, docs/api_reference.md `§6.4`, docs/developer/04-strategies.md, Strategies/index.md (cookbook row 21).
-- trading_web (separate repo `../TradingNew/trading_web`, own commit `db3217d`-style sync untracked here): `backend/capabilities.py` += `variance_premium`, `ts_momentum_weights` (+ `_ohlcv_closes` helper); `frontend/src/App.jsx` TOOL_OPTS += 2 entries.
+**Key Changes Made:**
+- `.env` now holds the REAL book (from `positions/Account1` + `Account2` CSVs):
+  `TRADINGAGENTS_RISK_BASKET_TICKERS=SPY,GOOG,GLD,NVDA,NLR,AVGO,MSFT,QCOM,SKHY,BAC`
+  `TRADINGAGENTS_RISK_BASKET_WEIGHTS=SPY=0.1864,GOOG=0.1218,GLD=0.0971,NVDA=0.0532,NLR=0.0283,AVGO=0.0271,MSFT=0.0245,QCOM=0.0204,SKHY=0.0197,BAC=0.0061` (sum 0.5846; 41.5% cash implicit). Backup at `.env.bak`.
+- Live-verified TSLA run (`reports/TSLA_20260901_224741`): zero `(unused)` in both structured debate files; L1 GREEN both sections.
 
-**Key changes (calculators):**
-- `momentum.py::ts_momentum_weights` — MOP sign(trailing log ret)/EWMA-vol, target-vol normalized, gross leverage cap; `_log_returns`.
-- `factors.py::z_composite_alpha`, `momentum_multihorizon` (1/3/6/12m ensemble).
-- `evaluate.py::turnover`, `turnover_cost`, `gross_exposure`, `net_exposure`, `rolling_sharpe`, `regime_split_performance`.
-- `options_math.py::black76` += rho/vanna/vomma/charm; `bsm_equity_surface`; `greek_pnl_response` (ΔdS+½ΓdS²+νdσ+Θdt); `model_free_implied_variance` (Cboe/VIX form with F/K₀ term).
-- `statistical.py::spread_zscore` (rolling beta hedge + z), `pair_signal` (entry |z|≥2 / exit ≤0.5 / stop ≥3, cointegration+half-life), `pair_quantities` (dollar-neutral G/2 legs), `ecm_loading` (VECM γ).
-- `book_risk.py::cdar` (Chekhlov). `portfolio_optimizer.py::max_diversification_weights` (Σ⁻¹σ, non-neg + renormalize). `credit_spread.py::merton_distance_to_default` (fixed-point V/σV; DtD=d2, PD=N(−d2)). `rate_utils.py::forward_rate`. `market_session.py::book_depth_read` (microprice + OBI).
-- `date_window.py`: `in_window(None, start, end)` → kept ONLY when `end ≥ now−1d` (backtests exclude undated).
-
-**Untouched Dependencies (read-only):** `evaluate.py` tail (pbo/calmar etc. existing), `statistical.py` existing cointegration/granger, `options_math` `black_vol_surface`/`variance_swap_strike`, `_ohlcv` cache + `_daily_returns` in analysis_tools, `default_config.py`, `agents/schemas.py`, `graph/setup.py`/`conditional_logic.py`, `llm_clients/*`, `dataflows/interface.py` chains, `portfolio_optimizer._covariance_matrix`/`_invert` (single-name Gaussian inverse kept).
+**Untouched Dependencies (read-only):** `dataflows/symbol_utils.normalize_symbol` (BRK.B→BRK-B), `default_config._coerce`/`_apply_env_overrides`, `book_risk.portfolio_cvar` cash-remainder semantic, `risk_governor.govern`, `structured_debate` judge/finalize nodes, `debate_score.classify_severity`, `agents/schemas.py` RiskFactor/DebaterTurnPayload, `reporting.py`, `graph/setup.py`, `llm_clients/*`.
 
 ## 3. Current State & Validation
 **Working/Passing:**
-- `tests/test_cookbook_gaps.py` **27 passed**; `tests/test_parent_ports.py` **12 passed**; full suite **2114 passed / 2 skipped** (skips: bedrock extra, live DeepSeek key — baseline), `ruff check` clean repo-wide (`tradingagents/ scripts/ tests/ cli/`).
-- Key identity checks passing: put-call parity + BSM↔Black-76 equivalence; neutralize_book constraint residuals ≤1e-5 (6dp rounding); MDP ≠ min-var; Merton DtD ≈ d2; CDaR=0.97 on monotone 100→1 decline; stocktwits/reddit window trim confirms post-date items excluded, undated excluded in backtest.
-- Pushed: `94944d4` (cookbook gap) and `c97ee59` (parent ports) both on `origin/main`.
+- `tests/test_book_positions.py` 24 passed; `tests/test_debate_claim.py` + `test_debate_risk_parity.py` + `test_debate_integration.py` + `test_debate_score.py` + `test_debate_stream_hermetic.py` 104 passed; `test_env_overrides`/`test_dataflows_config`/`test_independent_vote`/`test_reporting`/`test_structured_agent_prompts`/`test_risk_agent_wiring` 167 passed. `ruff check` clean repo-wide (touched files) + trading_web.
+- Commits on `origin/main`: `bfd0b55` (StructuredTool fix), `0504b47` (unused fix), `d77a1c7` (provenance), `cbf5b7b` (src label — REVERTED), `38e6fc7` (revert), `eb5aeed` (positions util + holdings), `9f7d909` (docs follow-up), `09e6973` (.env.bak gitignore). trading_web `50358f7`.
+- Live runs: INTU (`reports/INTU_20260901_190729`) and TSLA (`reports/TSLA_20260901_224741`) both completed end-to-end — full report trees, no `tools_market` crash, PM decisions rendered. `get_variance_premium` live returns real model-free VRP (INTU vrp +4.09, TSLA vrp −0.08).
 
 **Failing/Incomplete:**
-- None known. Parent-repo diffs remaining (not yet ported): memory `holding_days` settle gating; FRED vintage pin; `structured.py` "no tool priming in schema-only agents"; `openai_client` Responses-API-only-native gating; `test_ohlcv_latest_bar` NaN-close-latest-bar-raise; `Retry-After` handling parity is already present in local `reddit.py` (verify parity vs parent `_jitter` if touching).
-- Not wired to trading_web (needs structured args): pair-signal / event-pnl / depth-read / merton tools (graph-bound only; documented in api_reference §6.4).
+- **CLI dispatch quirk (UNFIXED, flag):** installed typer 0.27 — `@app.command()` registers `analyze` with `name=None`, so the documented `tradingagents analyze --symbol X` fails with "Got unexpected extra argument(s) (analyze)". Working form is `tradingagents --symbol X`. README/howto still document the broken token form. Needs either `@app.command(name="analyze")` or a docs fix — user decision pending.
+- **Moomoo shutdown-block after successful CLI runs:** process hangs at interpreter exit after "Analysis Complete" (non-daemon threads; `_CLI_ENTRY` hard-exit only covers uncaught errors, not success). Reports save fully first; I stopped the supervised process (`hub stop`) each time. Not a data-loss bug, but a polish item.
+- **Parent-repo ports still open (from prior handoff, not started):** memory `holding_days` settle gating; FRED vintage pin; `structured.py` "no tool priming in schema-only agents"; `openai_client` Responses-API gating; `test_ohlcv_latest_bar` NaN-close-raise; Retry-After parity vs parent `reddit.py`.
+- Stale-tape data-quality flag in market reports (computed tools quoting old ~$647 price vs live ~$332 for INTU; noted in-report, not fixed).
 
-**Active Errors/Stack Traces:** None. Prior session blockers resolved: json_object 400 "json" token; empty dimension_scores; ragged enums/booleans; degraded-turn crashes; CLI moomoo shutdown-hang; neutralize_book pure-python matrix-inverse bugs (replaced with numpy lstsq — do NOT reintroduce Gaussian `_invert` for constraint projection).
+**Active Errors/Stack Traces:** None. Prior blockers resolved. No open exceptions in any suite.
 
 ## 4. Technical Constraints & Decisions
-- `py -3.12` only (bare `python` = hermes venv, no pytest). Windows heredocs corrupt → `write`/`edit` tools; existing files CRLF (match `\r?\n`); auto-fix import sorting with `ruff check --fix` but keep formatting scoped.
-- No-fabrication: every calculator returns `float | None` / explicit "unavailable"; min-obs guards everywhere.
-- Advisory-first: new tools never gate; hard gates stay in risk governor overlay.
-- Pure NumPy/scipy only — NO new deps (statsmodels/plotly explicitly avoided); `sector_neutral_z`/`residualize_*` in `sentiment_research.py` remain the reference for cross-sectional helpers (don't duplicate).
-- Rounding convention: financial numbers 4-6 dp; `neutralize_book` returns rounded-to-6dp weights → neutrality test tolerance `5e-5`; vol percentiles/ratios formatted `%`.
-- Working rules: compute-as-tools; docs/README/CHANGELOG true per change; every test file carries `pytestmark = pytest.mark.timeout(N)` (180s default); full suite ~5-6 min (only run whole `tests/` after a change); commit+push `origin/main` with Conventional Commits; `git add -A` will sweep stray `_probe*.ps1`/`Direction.md` (user files) — stage explicitly; never commit `.env` (real keys inside, gitignored).
-- Web mirror contract: repo capability adds must also land in `../TradingNew/trading_web` `backend/capabilities.py` job allowlist + `frontend/src/App.jsx` TOOL_OPTS; verify `py -3.12 -m py_compile` there.
-- Parent repo `TauricResearch/TradingAgents` has release branches (v0.2/v0.4) + ~1000 PRs; fork diverged ~302 files / 68k insertions — do NOT merge wholesale; cherry-pick only reviewed fixes (ports #1/#2 done; see "Failing/Incomplete" for remaining candidates).
+- `py -3.12` ONLY (bare `python` = hermes venv, no pytest). Windows heredocs corrupt → `write`/`edit` tools; existing files CRLF (match `\r?\n`). Never use shell `grep`/`ls` — use `grep`/`glob`.
+- **Sensitive:** `positions/` CSVs, `positions/book_value.json`, `.env`, `.env.bak` are all gitignored (verified via `git check-ignore` + a secrecy guard test). NEVER print or commit them. `git add -A` would sweep `Direction.md`/`_probe*.ps1` (user files) — stage explicitly. `.env` holds real API keys + now the real basket.
+- **Cash-in-denominator decision:** `compute_weights` divides by positions + cash; cash is shown as the implicit remainder (never a ticker — CASH has no vendor data and `portfolio_cvar` already treats weight-sum<1 as cash sleeve). The PM "Computed book" block and the risk gate are consistent.
+- **Cash detection NOT the broker `Type` column** (Fidelity labels equities "Cash"): `**`-suffix money-market funds (SPAXX**/FDRXX**), blank-symbol-with-value (unsettled), sweep-description. This is the critical parser assumption.
+- **Option A/B semantics:** `holdings_tickers`/`holdings_weights` when set override the basket for the PM read; empty → basket used (Option A default). Weights are fractions of the whole book incl. cash.
+- **Advisory-first:** the holdings block is a prompt string (never a gate); hard gating stays in the risk governor. No-fabrication: skipped rows carry reasons; qualitative claims render `(MEDIUM, mitigation=true, weight ~0)` + `src=-` (the `-calculated` label was deliberately reverted — do not reintroduce).
+- **Financial precision:** weights 4dp (`0.1864`); env render round-trips through `default_config._coerce` (must keep exact `SYM=0.xxxx` comma format).
+- **Every test has a timer** (`pytest.mark.timeout`); commit+push with Conventional Commits; docs/README/CHANGELOG stay true; trading_web mirrors capability adds.
+- **Utility usage:** `py -3.12 scripts/positions_to_basket.py` (dry-run) / `--apply` (writes .env, .env.bak backup) / `--write-book-json` (dollar book, Option C artifact) / `--json`. Re-run after position changes to keep the basket current (NVDA moved 10.4%→5.3% vs the old .env on first apply).
