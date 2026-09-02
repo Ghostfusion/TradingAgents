@@ -155,9 +155,7 @@ def _stub_completion_prompt(original: Any) -> str:
     )
 
 
-def _retry_if_stub(
-    plain_llm: Any, prompt: Any, response_text: str, agent_name: str
-) -> str:
+def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: str) -> str:
     """A stub free-text fallback is not a usable decision.
 
     The structured->free-text path can hand back a bare header (live runs
@@ -309,7 +307,14 @@ def invoke_structured_or_freetext(
                 raise ValueError("structured output returned no parsed result")
             if result_hook is not None:
                 result_hook(result)
-            return render(result)
+            rendered = render(result)
+            # Enforce completeness on the structured-success path too: a model
+            # can hit max_tokens mid-render and still parse into the schema,
+            # in which case render() ends mid-sentence and only the report
+            # marker would catch it. Merge a continuation exactly like the
+            # free-text path (no-op when the render is complete — the extra
+            # _looks_truncated check costs nothing).
+            return _retry_if_truncated(plain_llm, prompt, rendered)
         except Exception as exc:
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",

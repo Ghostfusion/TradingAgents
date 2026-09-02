@@ -306,6 +306,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-02 `(working tree)` - Batch + structured-output robustness: `batch.py`
+  gains the `_CLI_ENTRY` flush + `os._exit()` hard-exit (moomoo shutdown block
+  no longer hangs a finished batch at interpreter exit; the entry block moved
+  to file end); `invoke_structured_or_freetext` now runs the truncation
+  continuation retry on the structured-success render (previously only the
+  free-text fallback had it - a max_tokens cut inside a parsed structured
+  result passed through to the report marker, e.g. ADSK deep PM 2026-09-02).
+  Config guidance (gitignored `.env`): deep tier
+  `deepseek/deepseek-v4-pro-0813`, `MAX_OUTPUT_TOKENS_DEEP=4000`,
+  `LLM_MAX_RETRIES=3`. See CHANGELOG.
 - 2026-09-02 `(working tree)` - Nightly-review driver `--mode recent`:
   `scripts/nightly_review.py` gains a `--mode recent` option that reviews each
   symbol's MOST RECENT `reports/<TICKER>_<ts>/` folder (keyed on the

@@ -31,6 +31,35 @@ Breaking changes within the 0.x line are called out explicitly.
   `nightly_review.cmd` now runs `--mode recent --max-symbols 25` (outside the
   repos; ~45-50 min, finishes pre-open).
 
+### Fixed
+
+- **Batch hard-exit guard (moomoo shutdown block)** - `batch.py` now runs the
+  same `_CLI_ENTRY` flush + `os._exit()` after a completed (or failed) run
+  that the CLI and nightly driver already have. A finished batch (reports +
+  `batch_summary_*.jsonl` fully written) previously hung at interpreter exit
+  on the moomoo SDK's leaked non-daemon threads — the process stayed "Running"
+  indefinitely, and under Task Scheduler's single-instance default that would
+  skip the next day's run. The entry block was also moved to the file end so
+  `_batch_pre_market_check` is defined before `main()` runs. In-process
+  callers (tests) still return/raise normally.
+- **Truncation-retry on the structured-output success path** - a structured
+  call that parsed into the schema but was cut by `max_tokens` mid-render
+  previously skipped `_retry_if_truncated` (only the free-text fallback path
+  had it), so the report got the truncation marker with no continuation merge
+  (e.g. ADSK 2026-09-02 deep PM run). `invoke_structured_or_freetext` now
+  applies the same continuation retry to the rendered structured result.
+  Tests:
+  `test_invoke_structured_or_freetext_retries_truncated_structured_render` +
+  `test_invoke_structured_or_freetext_no_retry_when_structured_render_complete`.
+- **Run-config guidance (gitignored `.env`, not committed)** - deep tier
+  model separated from quick: `TRADINGAGENTS_DEEP_THINK_LLM=deepseek/
+  deepseek-v4-pro-0813` (RM + PM get reliable structured output; quick stays
+  flash for speed — NVDA's "Decision: unavailable" stub was flash's
+  structured-JSON miss), `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP=4000` (was
+  2500 — the deep prompt is the longest and 2500 truncated it mid-sentence),
+  `TRADINGAGENTS_LLM_MAX_RETRIES=3` (retry transient failures instead of
+  falling to the stub notice).
+
 - **Positions -> risk-basket utility + PM holdings read (Option A/B)** - the
   risk basket now reflects the REAL book:
   - `strategies/book_positions.py` (new, pure/hermetic): broker CSV parse

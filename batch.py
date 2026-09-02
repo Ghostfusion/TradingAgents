@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,6 +46,7 @@ def effective_workers(requested: int) -> int:
     except ValueError:
         pass
     return min(max(1, int(requested)), cap)
+
 
 # All four analyst teams, in the CLI's execution order. This mirrors the
 # interactive checkbox's "select all" so batch runs match the CLI default.
@@ -407,10 +409,6 @@ def main() -> int:
     return 0 if len(results) == len(symbols) else 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
     """Same-night pre-market re-check for one batch symbol (choice (a)).
 
@@ -442,8 +440,7 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
             print(f"[pre-market] catalyst unavailable for {symbol}: {exc}")
         verdict = review_decision(catalyst_snapshot=snapshot)
         cat_line = (
-            f"- catalyst: {verdict['catalyst']['verdict']} "
-            f"scale {verdict['catalyst']['scale']:.2f}"
+            f"- catalyst: {verdict['catalyst']['verdict']} scale {verdict['catalyst']['scale']:.2f}"
             if verdict.get("catalyst")
             else "- no measurable catalyst delta"
         )
@@ -465,3 +462,35 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
         print(f"[pre-market] {symbol}: {verdict['verdict']} -> {out}")
     except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
         print(f"[pre-market] review skipped for {symbol}: {exc}")
+
+
+# True only when this module is the real process entry point (not imported by
+# tests or another runner). Guards the moomoo shutdown-block hard-exit so
+# in-process callers return/raise normally (regression: an unconditional
+# os._exit killed pytest).
+_CLI_ENTRY = False
+
+
+if __name__ == "__main__":
+    _CLI_ENTRY = True
+    try:
+        code = main()
+    except SystemExit as _se:  # argparse --help / parse errors
+        code = _se.code if isinstance(_se.code, int) else 0
+    except BaseException:  # noqa: BLE001 - hard failure: hard-exit
+        # The moomoo SDK leaves non-daemon callback/network threads behind; a
+        # normal interpreter shutdown then blocks forever in
+        # threading._shutdown (reports + summary are already written). Print
+        # the traceback, flush, and hard-exit so the batch terminates instead
+        # of hanging at exit (a hung task skips the next day's run).
+        import traceback as _tb
+
+        _tb.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+    # Completed (or cleanly degraded) run: flush the redirected log and
+    # hard-exit so the moomoo thread leak never hangs the scheduled task.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code if isinstance(code, int) else 1)

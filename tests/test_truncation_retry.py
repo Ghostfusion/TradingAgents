@@ -17,7 +17,9 @@ pytestmark = pytest.mark.timeout(180)
 
 def _truncated_text() -> str:
     """A long report ending mid-sentence (the max_tokens cut signature)."""
-    return "This is a very detailed market analysis with lots of numbers and " * 10 + "the regime is"
+    return (
+        "This is a very detailed market analysis with lots of numbers and " * 10 + "the regime is"
+    )
 
 
 def _complete_text() -> str:
@@ -48,6 +50,50 @@ def test_retry_if_truncated_no_retry_when_complete():
     out = structured._retry_if_truncated(llm, "prompt", _complete_text())
     assert out == _complete_text()
     llm.invoke.assert_not_called()
+
+
+def test_invoke_structured_or_freetext_retries_truncated_structured_render():
+    """A structured-output call that parses but renders mid-sentence must be
+    continued via the LLM exactly like the free-text path (regression: the
+    structured-success path returned render() without truncation retry, so a
+    max_tokens cut passed through to the report marker)."""
+    structured_llm = mock.MagicMock()
+    structured_llm.invoke.return_value = object()  # parsed schema instance
+    plain_llm = mock.MagicMock()
+    plain_llm.invoke.side_effect = [
+        # 1st plain call: never reached (structured succeeded),
+        # 2nd: the truncation continuation.
+        mock.MagicMock(content=" and the trend is clearly down. Done."),
+    ]
+    out = structured.invoke_structured_or_freetext(
+        structured_llm,
+        plain_llm,
+        "prompt",
+        render=lambda _: _truncated_text(),
+        agent_name="PM",
+    )
+    assert "the regime is" in out  # original truncated tail preserved
+    assert "and the trend is clearly down. Done." in out  # continuation merged
+    assert structured._looks_truncated(out) is False
+    # Structured success path -> exactly one continuation call, no re-render.
+    assert plain_llm.invoke.call_count == 1
+    assert structured_llm.invoke.call_count == 1
+
+
+def test_invoke_structured_or_freetext_no_retry_when_structured_render_complete():
+    """A complete structured render must not trigger any plain-LLM call."""
+    structured_llm = mock.MagicMock()
+    structured_llm.invoke.return_value = object()
+    plain_llm = mock.MagicMock()
+    out = structured.invoke_structured_or_freetext(
+        structured_llm,
+        plain_llm,
+        "prompt",
+        render=lambda _: _complete_text(),
+        agent_name="PM",
+    )
+    assert out == _complete_text()
+    plain_llm.invoke.assert_not_called()
 
 
 def test_retry_if_truncated_gives_up_after_max_retries():
