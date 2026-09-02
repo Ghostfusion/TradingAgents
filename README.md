@@ -30,6 +30,17 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-02] **Nightly-review driver `--mode recent`** - `scripts/nightly_review.py`
+  can now review each symbol's MOST RECENT report folder instead of only the
+  newest `batch_summary_*.jsonl`, so interactive CLI / `propagate()` runs that
+  never wrote a batch summary (e.g. INTU / TSLA / DELL) get pre-open re-checks
+  too. Newest-per-symbol is keyed on the folder-name timestamp (fixed-width,
+  lexicographic); folders without a prior decision are skipped with a note.
+  Default `--mode batch` behavior is unchanged. trading_web `run_nightly`
+  forwards `--mode` and the Nightly form gains a "Review source" selector.
+  The scheduler wrapper now runs `--mode recent --max-symbols 25`, and the
+  driver hard-exits after a completed run (no moomoo shutdown hang).
+  See CHANGELOG.
 - [2026-09-02] **Positions -> risk-basket utility + PM holdings read (Option A/B)** - 
   `scripts/positions_to_basket.py` combines broker position CSVs (Fidelity-style,
   under gitignored `positions/`) into the real `TRADINGAGENTS_RISK_BASKET_TICKERS` /

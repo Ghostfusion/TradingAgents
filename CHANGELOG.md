@@ -8,6 +8,29 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+- **Nightly-review driver `--mode recent`** - `scripts/nightly_review.py
+  --mode recent` reviews each symbol's MOST RECENT
+  `reports/<TICKER>_<YYYYMMDD>_<HHMMSS>` folder instead of the newest
+  `batch_summary_*.jsonl`, so interactive CLI / `propagate()` / `pipeline.py`
+  runs (which never write a batch summary) get the scheduled 07:35 pre-open
+  review too. Newest-per-symbol is keyed on the folder-name timestamp
+  (fixed-width, lexicographic); a folder is skipped with a note when it has no
+  `5_portfolio/decision.md` or `full_states_log_*.json` to review; decoy
+  entries (`pipeline_*` dirs, batch-summary files) are ignored. Default
+  `--mode batch` is unchanged. trading_web `run_nightly` forwards `--mode`
+  and the Nightly form gains a "Review source" selector.
+  Tests: `test_nightly_review_recent_mode_newest_per_symbol` +
+  `test_nightly_review_recent_mode_empty` (hermetic, timed); the existing
+  batch-mode driver test is unchanged.
+  **Hard-exit guard**: when run as the process entry point the driver now
+  flushes and `os._exit()`s after a completed (or failed) run, mirroring the
+  CLI's `_CLI_ENTRY` pattern — the moomoo SDK's non-daemon threads no longer
+  hang the scheduled task at interpreter exit (a hung task would skip the next
+  day's run under Task Scheduler's single-instance default). In-process
+  callers (tests import the module) still return/raise normally. The scheduled
+  `nightly_review.cmd` now runs `--mode recent --max-symbols 25` (outside the
+  repos; ~45-50 min, finishes pre-open).
+
 - **Positions -> risk-basket utility + PM holdings read (Option A/B)** - the
   risk basket now reflects the REAL book:
   - `strategies/book_positions.py` (new, pure/hermetic): broker CSV parse
