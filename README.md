@@ -1154,6 +1154,11 @@ only after validating in the evaluation harness:
 - **Costs/capacity/actions (W2-6..10, advisory)** - `strategies/backtest_models.py` gains
   square-root market impact (from ADV+spread), one-way turnover, capacity-vs-ADV, short-borrow cost, and
   corporate-action price adjustment; `pit_registry.universe_membership` guards survivorship (W2-10).
+- **Ops + polish (W1-5/W3-5/W3-6/W3-8/W4-5/W4-7/W4-8, advisory)** - `strategies/quant_baseline.py`
+  (quant-only baseline for side-by-side LLM comparison), `strategies/options_surface.py` (IV rank/skew/OI/
+  expected-move/VRP), `strategies/integrity_tools.py` (thesis-evidence matrix, prompt-injection detection,
+  complexity report), `llm_clients/tier_router.py` (hybrid model tier), `strategies/monitor.py` (alert
+  notifier), `scripts/factor_bench.py --benchmark` model-vs-model.
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

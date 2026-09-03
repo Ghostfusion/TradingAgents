@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W1-5/W3-5/W3-6/W3-8/W4-5/W4-7/W4-8 ops + polish** - `strategies/quant_baseline.py`
+  (deterministic quant-only signal + rating for LLM comparison), `strategies/options_surface.py`
+  (IV percentile/skew/P-C OI/expected move/VRP), `strategies/integrity_tools.py` (thesis-evidence
+  matrix, prompt-injection detection, complexity report), `llm_clients/tier_router.py` (hybrid tier),
+  `strategies/monitor.py` (webhook/log notifier, default off).
+  Tests: test_phase8_ops (18 pass).
+
 - **Remediation W2-6..10 costs / capacity / actions / survivorship** - `strategies/backtest_models.py`
   (square_root_impact Almgren-Chriss from ADV, turnover, capacity_pct, borrow_cost, quote_adjust
   corporate-action), `pit_registry.universe_membership` (survivorship guard).
