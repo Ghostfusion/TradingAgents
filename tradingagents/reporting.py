@@ -12,6 +12,7 @@ transcripts with a single verdict file (config-gated, off by default).
 """
 
 import re
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -395,6 +396,75 @@ def _risk_gate_block(final_state: dict) -> str:
     if final_state.get("risk_halt"):
         parts.append("**RISK HALT ACTIVE - escalation required**")
     return "\n".join(parts) + "\n"
+
+
+def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
+    """Emit the deterministic execution contract next to run_card.json.
+
+    Subset of the plan schema (schema_version 1) consumed by the TradingExecution
+    layer: ticker, effective_date, rating, deterministic position levels from the
+    G1 position contract, data_quality/guardrail notes from the PM decision, and
+    the risk_gate verdict. Every unproducible field is ``null`` — the daemon
+    fails closed on anything it cannot validate. The artifact is hash-pinned
+    (``decision_hash``) so the executor can verify and dedupe it. Advisory;
+    never gates; never breaks a report write.
+    """
+    import hashlib as _hl
+    import json as _rj
+    from datetime import date as _date
+
+    pm = final_state.get("pm_decision") or {}
+    rg = final_state.get("risk_gate") or {}
+    contract = final_state.get("position_contract")
+    stop = target = size_pct = None
+    if isinstance(contract, dict):
+        stop = contract.get("stop_loss") or contract.get("stop")
+        target = contract.get("target")
+        size_pct = contract.get("size_pct")
+    elif isinstance(contract, str):
+        m = re.search(r"\bstop\s+([0-9.]+)", contract, re.IGNORECASE)
+        if m:
+            stop = float(m.group(1))
+        m2 = re.search(r"\btarget\s+([0-9.]+)", contract, re.IGNORECASE)
+        if m2:
+            target = float(m2.group(1))
+        m3 = re.search(r"\bsize[^0-9]*([0-9.]+)%?", contract, re.IGNORECASE)
+        if m3:
+            size_pct = float(m3.group(1)) / 100.0
+
+    pm_rating = pm.get("rating") if isinstance(pm, dict) else None
+    pm_dq = pm.get("data_quality") if isinstance(pm, dict) else None
+    pm_gr = pm.get("guardrail_reason") if isinstance(pm, dict) else None
+    rg_verdict = rg.get("verdict") if isinstance(rg, dict) else None
+    rg_reasons = rg.get("reasons") or [] if isinstance(rg, dict) else []
+
+    doc = {
+        "schema_version": 1,
+        "ticker": str(ticker).upper(),
+        "effective_date": _date.today().isoformat(),
+        "rating": pm_rating,
+        "direction": None,  # derived by the executor from rating
+        "thesis": pm.get("investment_thesis") if isinstance(pm, dict) else None,
+        "rationale": pm.get("executive_summary") if isinstance(pm, dict) else None,
+        "recommended_allocation_pct": None,  # PM position_size is prose; never parsed
+        "position": {
+            "target_notional": None,
+            "stop_loss": stop,
+            "take_profit": target,
+            "size_pct_book": size_pct,
+        },
+        "data_quality": pm_dq or "unknown",
+        "price_caliber": None,
+        "invalidations": [],
+        "guardrail_reason": pm_gr,
+        "risk_gate": {"verdict": rg_verdict, "reasons": rg_reasons},
+        "disclosure": {"sources_used": [], "sources_empty": []},
+    }
+    body = _rj.dumps(doc, sort_keys=True, default=str)
+    doc["decision_hash"] = "sha256:" + _hl.sha256(body.encode("utf-8")).hexdigest()
+    (Path(save_path) / "research_decision.json").write_text(
+        _rj.dumps(doc, indent=2, sort_keys=True, default=str), encoding="utf-8"
+    )
 
 
 def write_report_tree(
@@ -823,6 +893,11 @@ def write_report_tree(
         (save_path / "run_card.json").write_text(
             _json.dumps(card, indent=2, default=str), encoding="utf-8"
         )
+        # research_decision.json - deterministic execution contract for the
+        # TradingExecution layer (Phase A daemon input). Advisory; never gates;
+        # a failure here must never break the report tree.
+        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+            write_research_decision(final_state, ticker, save_path)
     except Exception:  # noqa: BLE001 - card is advisory
         pass
     return save_path / "complete_report.md"

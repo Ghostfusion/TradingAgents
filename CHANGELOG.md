@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **`research_decision.json` execution contract emitter** - `reporting.py`
+  `write_research_decision()` writes the deterministic, hash-pinned machine
+  contract beside `run_card.json` at the end of every report tree: ticker,
+  effective_date, PM rating + deterministic stop/target/size from the G1
+  position contract, data_quality/guardrail_reason, risk_gate verdict; every
+  unproducible field is null (fail closed). This is the ONLY input contract of
+  the TradingExecution signal daemon (Phase A) — the executor never reads
+  markdown. Advisory; never gates. Hermetic tests
+  `tests/test_research_decision_emission.py` (5 cases).
 - **Live-print reconciliation guard (AVGO 334.35-vs-357.16 audit)** -
   `dataflows/alpaca.py` `get_intraday` now drops symbols whose returned key
   does NOT match a requested symbol (Alpaca can return a different set

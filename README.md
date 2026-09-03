@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-03] **Execution-layer contract emitter** - every report tree now
+  writes `research_decision.json` (deterministic, hash-pinned; PM rating, G1
+  position contract stop/target/size, data_quality, risk_gate; nulls for the
+  unproducible — fail closed). It is the ONLY input contract of the new
+  TradingExecution signal daemon (Phase A; signals only, no orders).
 - [2026-09-02] **Nightly-review driver `--mode recent`** - `scripts/nightly_review.py`
   can now review each symbol's MOST RECENT report folder instead of only the
   newest `batch_summary_*.jsonl`, so interactive CLI / `propagate()` runs that
