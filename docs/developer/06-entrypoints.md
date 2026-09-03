@@ -45,14 +45,16 @@ Outputs `reports/pipeline_<ts>.md` (ranked candidates + per-symbol) and
 py -3.12 scripts/value_screener.py AAPL MSFT GOOG -d 2026-06-30
 py -3.12 scripts/value_screener.py --universe eodhd-us --scan all --alloc
 py -3.12 scripts/value_screener.py --universe top-losers --scan all --alloc
+py -3.12 scripts/value_screener.py --universe moomoo-screen -n 50 --scan value-dip --max-chg5d -5 --max-rsi 35
 py -3.12 scripts/value_screener.py --file universe.txt --limit 10 --rank composite
 ```
 
 `-u/--universe` (eodhd-us default | tickers | top-losers | heat-proxy |
-eodhd-losers)
+eodhd-losers | moomoo-screen)
 `--market` `-n/--movers-count` `--min-mcap` `--price-min`
 `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap`
-`--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--sector-rank` `--revision`
+`--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--max-chg5d` `--max-rsi`
+`--max-debt-assets` `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
 (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
 `--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`
@@ -69,7 +71,10 @@ the scan from the EODHD bulk US real-time feed (one call, ~18k rows,
 OpenD-independent) — the biggest intraday decliners by change%, so
 value-dip/momentum candidates are harvested loss-ordered instead of from an
 alphabetical slice (`-n` sets how many decliners; moomoo movers cap at 200,
-eodhd-losers accepts up to the whole feed). The bulk feed carries no
+eodhd-losers accepts up to the whole feed); `moomoo-screen` runs a
+whole-market value-dip scan server-side via moomoo Stock Screening V2
+(PE/mcap/ROE value anchors AND 5-day change + RSI dip timing, needs OpenD;
+`-n` caps the returned symbols). The bulk feed carries no
 name/type, so `eodhd-losers` equity-filters the seed against the EODHD
 exchange-symbol common-stock list (warrants/units/leveraged ETFs dropped;
 degrades to the unfiltered list if the reference call fails).

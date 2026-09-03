@@ -479,6 +479,16 @@ has changed before); never assume an endpoint works — the SDK's
   repro in both concurrency modes; regression tests
   `test_production_setup_registers_analyst_cap_self_loop` +
   `test_parallel_subgraph_registers_analyst_cap_self_loop`.
+- 2026-09-03 - `--universe moomoo-screen` in the value screener: a
+  whole-market value-dip scan via moomoo Stock Screening V2 (local OpenD) -
+  server-side AND of value anchors (PE_TTM, market cap, ROE, optional net
+  margin / debt-to-assets) with dip timing (5-day change, RSI 14, optional
+  52-week-high distance), paginated, sorted by 5-day change; filter defaults
+  from config (`TRADINGAGENTS_MOOMOO_SCREEN_*`, env-overridable) with
+  per-flag overrides (`--max-chg5d`/`--max-rsi`/`--max-debt-assets`); `-n`
+  caps total symbols. Need: OpenD logged in, `moomoo-api`, protobuf pin. Web
+  Screener exposes the universe + dip flags. Tests:
+  `test_moomoo_value_dip_screen` + web forwarding. See repo CHANGELOG.
 - 2026-08-31 `(working tree)` - `--value-dip-loose` harvest mode + eodhd-losers
   equity filter: the value-dip technical entry relaxes to `RSI<=35 OR %b<=0.10`
   (new `loose_technical` param on `value_dip_setup`, default False) and the
