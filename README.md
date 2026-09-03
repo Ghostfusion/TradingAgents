@@ -1148,6 +1148,9 @@ only after validating in the evaluation harness:
   AnalystSummary/ResearchVerdict/TradeProposal/RiskVerdict/Decision artifacts + compact summarizer),
   `falsification.evaluate_debate_claims` (judge grounding: cites-only-computed metrics, auto-reject
   already-invalidated theses).
+- **Regime + scenario (W1-10/W2-11/W4-6, advisory)** - `strategies/regime_performance.py`
+  (per-regime outcome tabulation, computed stress grid, cross-asset macro regime Risk-On/Contraction/
+  Stagflation), `scripts/agent_ablation.py` (W1-11 drop-one measurement harness).
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W1-10/W2-11/W4-6/W1-11 regime + scenario + ablation** - `strategies/regime_performance.py`
+  (regime_conditioned_performance per-regime hit/return, stress_grid computed sensitivity rows,
+  macro_regime cross-asset label fail-open), `scripts/agent_ablation.py` (drop-one measurement).
+  Tests: test_regime_performance (10 pass).
+
 - **Remediation W4 architecture (domain bundles / typed state / falsification schema / factor bridge)** -
   `strategies/domain_bundles.py` (get_market_technicals / get_fundamental_profile /
   get_sentiment_flow_feed / get_factor_profile / get_portfolio_risk_envelope + news_relevance_profile),
