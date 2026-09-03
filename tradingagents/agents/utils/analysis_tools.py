@@ -146,6 +146,7 @@ def _cfg_idx() -> str:
         return str(get_config().get("market_stress_index") or "").strip()
     except Exception:  # noqa: BLE001
         return ""
+@tool
 def get_swing_set(
     ticker: str,
 ) -> str:

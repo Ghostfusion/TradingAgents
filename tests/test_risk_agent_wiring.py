@@ -44,6 +44,38 @@ ANALYST_FILES = {
 
 
 @pytest.mark.unit
+def test_every_bound_analyst_tool_is_a_langchain_tool():
+    """Regression for the interactive-CLI crash ('function' object has no
+    attribute 'name'): every tool in an analyst's ``tools = [...]`` list must
+    be a LangChain tool object (StructuredTool) - a bare def (e.g. a @tool
+    decorator dropped) breaks ``[tool.name for tool in tools]`` when the
+    prompt is assembled."""
+    import inspect
+    import re
+
+    from tradingagents.agents.utils import agent_utils as au
+
+    mods = [
+        "tradingagents.agents.analysts.market_analyst",
+        "tradingagents.agents.analysts.news_analyst",
+        "tradingagents.agents.analysts.fundamentals_analyst",
+        # sentiment_analyst is a plain LLM (no tools list).
+    ]
+    for modname in mods:
+        mod = __import__(modname, fromlist=["x"])
+        src = inspect.getsource(mod)
+        m = re.search(r"tools = \[(.*?)\]\n", src, re.S)
+        assert m, f"no tools list in {modname}"
+        names = set(re.findall(r"get_[a-z_0-9]+", m.group(1)))
+        for n in names:
+            obj = getattr(mod, n, None) or getattr(au, n, None)
+            assert obj is not None, f"{modname}:{n} missing"
+            assert hasattr(obj, "name") and obj.name, (
+                f"{modname} binds {n} which is not a LangChain tool "
+                f"(type={type(obj).__name__})"
+            )
+
+
 def test_analyst_bound_tools_all_executable_in_toolnode():
     """Regression guard for the Phase-1 18-tool gap: no analyst may bind a
     tool the ToolNode cannot execute (the LLM would error 'not a valid tool')."""
