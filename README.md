@@ -1135,6 +1135,10 @@ only after validating in the evaluation harness:
   `cpcv_overfit_mask` / `oos_split` (combinatorial purged CV + out-of-sample bands); `bench_zoo` reports OOS
   rank-IC, walk-forward mean IC, CPCV overfit flag, and deflated IC; `factor_proposal_loop` requires a
   trailing-OOS IC for factor adoption.
+- **Data integrity (W3, advisory)** - `strategies/data_quality.py` (W3-1 decision-level
+  quality score + tier, W3-2 cross-vendor disagreement flag, W3-4 fundamentals-PIT invariant),
+  `strategies/falsification.py` (W3-7 structured numeric thesis invalidation auto-monitored into the
+  invalidation ledger).
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

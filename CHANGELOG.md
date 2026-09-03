@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W3 data integrity (quality score / disagreement / PIT / falsification)** -
+  `strategies/data_quality.py` (aggregate_quality weighted 0-100 + tier, disagreement_flag cross-vendor
+  spread, fundamentals_pit_ok fail-closed invariant), `strategies/falsification.py` (numeric thesis
+  invalidation conditions auto-monitored into the persistent ledger). Decision disclosure gains the
+  quality + falsification lines. Tests: test_data_quality_falsification (14 pass).
+
 - **Remediation W2 validation guards (CPCV / OOS / walk-forward / DSR)** - `strategies/evaluate.py`
   adds `purged_cpcv_splits`+`cpcv_overfit_mask` (W2-2) and `oos_split` (W2-4); `alpha_zoo.bench_zoo` now
   reports OOS rank-IC, walk-forward mean IC (W2-3), CPCV overfit flag, and deflated IC (W2-1);

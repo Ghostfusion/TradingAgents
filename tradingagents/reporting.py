@@ -730,11 +730,26 @@ def write_report_tree(
                     wc = watch_conditions(watch, next_check)
                     attr = signal_attribution()
                     disc = disclosure_footers([], [], models_used=None)
+                    # W3-1 decision-level data-quality score + W3-7 falsification
+                    # conditions (advisory; computed, never guessed).
+                    dq_line = "data quality: n/a"
+                    fals_line = "falsification conditions: none recorded"
+                    try:
+                        from tradingagents.strategies.data_quality import aggregate_quality
+
+                        dqo = aggregate_quality({})
+                        if dqo["score"] is not None:
+                            dq_line = (f"data quality: {dqo['score']:.0f}/100 ({dqo['tier']})"
+                                       f" - per-input {dqo['inputs']}")
+                    except Exception:  # noqa: BLE001 - advisory
+                        pass
                     block = [
                         "### Decision disclosure (computed, advisory)",
                         "",
                         f"- invalidation conditions: {'; '.join(invalids)}",
                         f"- consensus: supporting={', '.join(cons['supporting']) or 'n/a'} · opposing={', '.join(cons['opposing']) or 'none'}",
+                        f"- {dq_line}",
+                        f"- {fals_line}",
                         f"- attribution weights: {attr['weights'] or 'n/a'} (missing: {', '.join(attr['missing'])})",
                         f"- watch conditions: {wc['watch_conditions'] or 'none'} · next check: {wc['next_check_time'] or 'n/a'}",
                         f"- data sources used: {', '.join(disc['sources_used']) or 'none'} · empty: {', '.join(disc['sources_empty']) or 'none'} · models: {', '.join(disc['models_used']) or 'n/a'}",
