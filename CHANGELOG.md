@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Live-print reconciliation guard (AVGO 334.35-vs-357.16 audit)** -
+  `dataflows/alpaca.py` `get_intraday` now drops symbols whose returned key
+  does NOT match a requested symbol (Alpaca can return a different set
+  G/V/A/O when a ticker is misresolved - iterating those leaked a false live
+  print into reports). `dataflows/market_data_validator.py` adds
+  `live_price_sanity(live, day_low, day_high, buffer)` - flags a live print
+  BELOW the verified day-low / ABOVE the day-high as "likely stale feed /
+  symbol mismatch - do not reconcile" instead of presenting it as a clean
+  quote; exposed as `get_live_price_sanity` tool bound to the market analyst
+  + market ToolNode. The AVGO report's discrepancy note was REAL data
+  (Alpaca 334.35 still true today, vs EODHD 357.16) - the honest flag stood;
+  the guard now makes the conflict verifiable. Tests: sanity below-low /
+  inside / above-high / unknown (test_market_data_validator).
 - **Pairwise-correlation cluster gate + ATR-adaptive trailing stop** -
   `strategies/portfolio.py` `allocation_block` gains a hard
   `max_pairwise_corr` ceiling (advisory, default off): when the max pairwise

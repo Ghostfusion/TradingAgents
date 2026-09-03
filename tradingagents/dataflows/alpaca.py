@@ -57,9 +57,15 @@ def get_intraday(symbols: list) -> dict | None:
     data = alpaca_get("stocks/snapshots", {"symbols": ",".join(symbols)})
     if not isinstance(data, dict):
         return None
+    # Symbol-mismatch guard: keep ONLY entries whose returned key matches a
+    # requested symbol (case-insensitive). Alpaca can return a different set
+    # (e.g. single-letter G/V/A/O) when a ticker is delisted/misresolved -
+    # iterating those as if they were the requested symbol has leaked a false
+    # 'live print' into reports (AVGO 334.35 vs the 357.16 verified close).
+    wanted = {s.upper() for s in symbols}
     out = {}
     for sym, info in data.items():
-        if not isinstance(info, dict):
+        if not isinstance(info, dict) or (sym or "").upper() not in wanted:
             continue
         trade = info.get("latestTrade") or {}
         quote = info.get("latestQuote") or {}

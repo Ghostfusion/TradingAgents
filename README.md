@@ -184,6 +184,7 @@
   analyst nodes short-circuit the cap turn (strip dangling tool_calls, one
   terminal prose turn) so the loop always terminates and reports are never
   empty. Regression tests added. See CHANGELOG.
+- [2026-09-03] **Live-print reconciliation** - Alpaca `get_intraday` symbol-mismatch guard + `get_live_price_sanity` tool (flags live prints below the verified day low / above the high as likely-stale, never reconciled).
 - [2026-09-03] **Cluster/exit gates** - `allocation_block` hard `max_pairwise_corr` cluster gate + `trailing_stop_exit` ATR-adaptive trailing (`trailing_stop_atr_mult`); both advisory/default-off, notes sync'd.
 - [2026-09-03] **Mean-reversion hardenings** - `regime_gate_read` market-stress leg (`market_stress_index`=^SPX, `market_stress_vol_cap`=0.85), `liquidity_verdict` 20d dollar-volume floor (`min_dollar_volume`) + Roll-spread cap (`max_spread_bps`), `catalyst_hard_block_days` default 5 (forward earnings blackout). All advisory/default-off except the blackout. Tests in test_strategies_{liquidity,regime}.
 - [2026-09-03] **`--universe moomoo-screen` - whole-market value-dip scanner

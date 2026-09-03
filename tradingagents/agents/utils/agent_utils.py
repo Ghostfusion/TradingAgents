@@ -119,7 +119,10 @@ from tradingagents.agents.utils.fundamental_data_tools import (
     get_income_statement,
 )
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
-from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
+from tradingagents.agents.utils.market_data_validation_tools import (
+    get_live_price_sanity,
+    get_verified_market_snapshot,
+)
 from tradingagents.agents.utils.market_position_tools import (
     get_crypto_prices,
     get_liquidity_risk,
@@ -217,6 +220,7 @@ __all__ = [
     "get_expected_move",
     "get_institution_holdings",
     "get_verified_market_snapshot",
+    "get_live_price_sanity",
     "get_swing_set",
     "get_swing_exits",
     "get_dip_technical",

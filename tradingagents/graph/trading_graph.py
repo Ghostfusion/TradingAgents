@@ -37,6 +37,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_institution_holdings,
     get_ipos,
     get_liquidity_risk,
+    get_live_price_sanity,
     get_macro_indicators,
     get_market_breadth,
     get_market_snapshot,
@@ -389,6 +390,8 @@ class TradingAgentsGraph:
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").
                     get_verified_market_snapshot,
+                    # Live-print sanity guard (below-day-low / mismatch flag).
+                    get_live_price_sanity,
                     # Forward-looking positioning (free yfinance sources)
                     get_options_chain,
                     get_short_interest,

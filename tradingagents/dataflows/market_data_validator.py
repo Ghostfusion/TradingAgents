@@ -59,6 +59,46 @@ def _fmt(value) -> str:
     return str(value)
 
 
+
+def live_price_sanity(live_price: float | None, day_low: float | None,
+                      day_high: float | None, buffer_pct: float = 0.05) -> str:
+    """Label a live print that falls OUTSIDE the verified day's bar.
+
+    Guards the reconciliation path: a real-time quote far outside the
+    verified OHLC bar (by ``buffer_pct`` on either side) is far more likely a
+    stale feed / symbol-mismatch than a genuine move. Returns a one-line
+    advisory so reports can flag it instead of presenting it as a clean read.
+    Unknown inputs -> 'no bar to compare' (never fabricates).
+    """
+    if live_price is None or day_low is None or day_high is None:
+        return "live price sanity: insufficient data (no verified bar to compare)"
+    low, high = float(day_low), float(day_high)
+    lv = float(live_price)
+    lo_buf = low * (1.0 - abs(float(buffer_pct)))
+    hi_buf = high * (1.0 + abs(float(buffer_pct)))
+    if lv < low:
+        return (
+            f"live price sanity: BELOW verified day-low - live {lv:.2f} < "
+            f"verified low {low:.2f} (buffer {buffer_pct:.0%} => threshold "
+            f"{lo_buf:.2f}); likely stale feed / symbol mismatch - do not "
+            f"reconcile as a true print"
+        )
+    if lv > high:
+        return (
+            f"live price sanity: ABOVE verified day-high - live {lv:.2f} > "
+            f"verified high {high:.2f} (buffer {buffer_pct:.0%} => threshold "
+            f"{hi_buf:.2f}); likely stale feed / symbol mismatch - do not "
+            f"reconcile as a true print"
+        )
+    if lo_buf <= lv <= hi_buf:
+        return f"live price sanity: INSIDE verified bar ({lv:.2f} within [{low:.2f},{high:.2f}] +-{buffer_pct:.0%})"
+    return (
+        f"live price sanity: OUTSIDE verified bar - live {lv:.2f} vs "
+        f"verified [{low:.2f},{high:.2f}] (buffer {buffer_pct:.0%}); "
+        f"likely stale feed / symbol mismatch - do not reconcile as a true print"
+    )
+
+
 def build_verified_market_snapshot(
     symbol: str,
     curr_date: str,

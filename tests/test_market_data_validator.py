@@ -74,3 +74,23 @@ class TestTool:
             {"symbol": "COF", "curr_date": "2026-05-20"}
         )
         assert "Verified market data snapshot for COF" in out
+
+
+def test_live_price_sanity_below_day_low_flags():
+    # a live print below the verified day low must be flagged, not reconciled
+    from tradingagents.dataflows.market_data_validator import live_price_sanity
+    out = live_price_sanity(334.35, 342.3305, 359.40)
+    assert "BELOW verified day-low" in out
+    assert "do not reconcile" in out
+
+
+def test_live_price_sanity_inside_bar_ok():
+    from tradingagents.dataflows.market_data_validator import live_price_sanity
+    out = live_price_sanity(357.16, 342.3305, 359.40)
+    assert "INSIDE verified bar" in out
+
+
+def test_live_price_sanity_above_high_and_unknown():
+    from tradingagents.dataflows.market_data_validator import live_price_sanity
+    assert "ABOVE verified day-high" in live_price_sanity(400.0, 342.33, 359.40)
+    assert "insufficient data" in live_price_sanity(None, 342.33, 359.40)

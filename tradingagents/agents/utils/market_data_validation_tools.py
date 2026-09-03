@@ -32,3 +32,28 @@ def get_verified_market_snapshot(
             f"({exc}). The symbol may be invalid, delisted, or the vendor "
             f"returned stale data. Do not estimate or fabricate values."
         )
+
+@tool
+def get_live_price_sanity(
+    live_price: Annotated[float | None, "live/intraday print price"],
+    day_low: Annotated[float | None, "verified day low"],
+    day_high: Annotated[float | None, "verified day high"],
+    buffer_pct: Annotated[float, "outside-by fraction tolerated"] = 0.05,
+) -> str:
+    """Label whether a live print is INSIDE or OUTSIDE the verified day bar.
+
+    Reconciliation guard: a real-time quote far outside the verified OHLC
+    (by ``buffer_pct``) is far more likely a stale feed / symbol mismatch
+    than a genuine move. Call before reconciling an intraday print with the
+    verified bar - the verdict tells you whether to trust it as a true quote
+    or flag it as questionable.
+    """
+    from tradingagents.dataflows.market_data_validator import live_price_sanity
+
+    try:
+        return live_price_sanity(live_price, day_low, day_high, buffer_pct)
+    except Exception as exc:  # noqa: BLE001 - advisory read degrades
+        return f"live price sanity unavailable: {exc}"
+
+
+
