@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W2 validation guards (CPCV / OOS / walk-forward / DSR)** - `strategies/evaluate.py`
+  adds `purged_cpcv_splits`+`cpcv_overfit_mask` (W2-2) and `oos_split` (W2-4); `alpha_zoo.bench_zoo` now
+  reports OOS rank-IC, walk-forward mean IC (W2-3), CPCV overfit flag, and deflated IC (W2-1);
+  `factor_proposal_loop` adopts a factor only when its trailing-OOS IC clears the bar.
+  Tests: test_validation_guards (11 pass). Plan: docs/master_implementation_plan.md.
+
 - **Remediation W1 measurement (prediction ledger + cost)** - `strategies/prediction_ledger.py` (W1-1: every
   decision logged as a scorable prediction row; W1-3: MAE/MFE + stop/target outcome scoring against realized
   closes), `strategies/llm_cost.py` (W1-8: provider rate-table cost estimate). Graph wires the ledger behind

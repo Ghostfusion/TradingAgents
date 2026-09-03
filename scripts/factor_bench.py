@@ -33,6 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", default="AAPL")
     parser.add_argument("--days", type=int, default=250)
     parser.add_argument("--fwd", type=int, default=1, help="forward-return days for rank IC")
+    parser.add_argument("--walk-forward", action="store_true",
+                        help="report mean IC across rolling train/test folds (W2-3)")
+    parser.add_argument("--cpcv", type=int, default=0, metavar="FOLDS",
+                        help="run combinatorial purged CV and flag overfit (W2-2)")
+    parser.add_argument("--n-trials", type=int, default=1,
+                        help="factors tried; >1 deflates the IC/Sharpe (W2-1)")
     args = parser.parse_args(argv)
 
     from tradingagents.strategies.alpha_zoo import bench_zoo, purity_gate
@@ -63,12 +69,17 @@ def main(argv: list[str] | None = None) -> int:
         print("[err] no OHLCV for", args.symbol, file=sys.stderr)
         return 4
 
-    out = bench_zoo(exprs, recs, forward_days=args.fwd)
+    out = bench_zoo(exprs, recs, forward_days=args.fwd, n_trials=args.n_trials,
+                    walk_forward=args.walk_forward, cpcv_folds=args.cpcv)
     print(f"== alpha bench {args.symbol} fwd={args.fwd}d ==")
-    print(f"{'expr':<32}{'rank_ic':<10}error")
+    hdr = f"{'expr':<30}{'IC':<8}{'OOS':<8}{'WF':<8}{'CPCV':<7}{'defIC':<8}error"
+    print(hdr)
     for o in out:
-        ic = "n/a" if o["rank_ic"] is None else f"{o['rank_ic']:.3f}"
-        print(f"{o['expr']:<32}{ic:<10}{o['error'] or ''}")
+        def _fmt(v):
+            return "n/a" if v is None else f"{v:.3f}"
+        cpcv = "overfit" if o.get("cpcv_overfit") else ("ok" if o.get("cpcv_overfit") is not None else "-")
+        print(f"{o['expr']:<30}{_fmt(o['rank_ic']):<8}{_fmt(o.get('oos_rank_ic')):<8}"
+              f"{_fmt(o.get('wf_ic')):<8}{cpcv:<7}{_fmt(o.get('deflated_ic')):<8}{o['error'] or ''}")
     return 0
 
 

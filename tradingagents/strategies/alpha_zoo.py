@@ -206,25 +206,77 @@ def evaluate_expr(expr: str, records: list[dict]) -> tuple[list | None, str]:
 
 
 def bench_zoo(exprs: list[str], records: list[dict],
-              forward_days: int = 1) -> list[dict]:
-    """Rank-IC of each gated expression vs forward returns; never raises."""
+              forward_days: int = 1, n_trials: int = 1,
+              walk_forward: bool = False, cpcv_folds: int = 0) -> list[dict]:
+    """Rank-IC of each gated expression vs forward returns + validation
+    (W2): includes out-of-sample rank IC (leading-train split), walk-forward
+    across rolling train/test folds, CPCV overfit flag, and a deflated-Sharpe
+    adjusted IC when ``n_trials`` > 1. never raises."""
+    from tradingagents.strategies.evaluate import (
+        cpcv_overfit_mask,
+        deflated_sharpe,
+        purged_cpcv_splits,
+    )
     from tradingagents.strategies.signal_analysis import rank_ic
 
     closes = [r.get("close") for r in records]
+    n = len(closes)
+
+    def _fwd(i):
+        j = i + forward_days
+        if j < n and closes[i] and closes[j]:
+            return closes[j] / closes[i] - 1.0
+        return None
+
     out = []
     for expr in exprs:
         series, err = evaluate_expr(expr, records)
-        ic = None
+        row = {"expr": expr, "rank_ic": None, "error": err or None,
+               "oos_rank_ic": None, "wf_ic": None, "cpcv_overfit": None,
+               "deflated_ic": None}
         if series is not None and err == "":
-            fwd = []
-            for i in range(len(closes)):
-                j = i + forward_days
-                if j < len(closes) and closes[i] and closes[j]:
-                    fwd.append(closes[j] / closes[i] - 1.0)
-                else:
-                    fwd.append(None)
+            fwd = [_fwd(i) for i in range(n)]
             ic = rank_ic(series, fwd)
-        out.append({"expr": expr, "rank_ic": ic, "error": err or None})
+            row["rank_ic"] = ic
+            # OOS rank IC on the trailing 30% (W2-4)
+            sig_o, fwd_o = [], []
+            cut = int(n * 0.7)
+            sig_o, fwd_o = series[cut:], fwd[cut:]
+            if sig_o and any(v is not None for v in fwd_o):
+                row["oos_rank_ic"] = rank_ic(sig_o, fwd_o)
+            # walk-forward mean IC (W2-3) over index folds
+            if walk_forward and n >= 60:
+                ics = []
+                for s0 in range(0, n - 40, 20):
+                    t0 = s0 + 40
+                    sig_t = [series[i] for i in range(t0, min(n, t0 + 20))]
+                    fwd_t = [fwd[i] for i in range(t0, min(n, t0 + 20))]
+                    fri = rank_ic(sig_t, fwd_t)
+                    if fri is not None:
+                        ics.append(fri)
+                if ics:
+                    row["wf_ic"] = round(sum(ics) / len(ics), 4)
+            # CPCV overfit mask (W2-2)
+            if cpcv_folds >= 2 and n >= 40:
+                ipcs, oopcs = [], []
+                for train, test in purged_cpcv_splits(n, n_splits=cpcv_folds, embargo=forward_days):
+                    ipc = rank_ic([series[i] for i in train], [fwd[i] for i in train])
+                    opc = rank_ic([series[i] for i in test], [fwd[i] for i in test])
+                    if ipc is not None:
+                        ipcs.append(ipc)
+                    if opc is not None:
+                        oopcs.append(opc)
+                if ipcs:
+                    row["cpcv_overfit"] = cpcv_overfit_mask(ipcs, oopcs)
+            # deflated IC (W2-1): penalize multi-trial selection on the
+            # one-factor-per-expr directional series proxy.
+            if n_trials > 1:
+                dr = [0.0] * n
+                for i in range(n):
+                    if fwd[i] is not None and series[i] is not None:
+                        dr[i] = series[i] * fwd[i]
+                row["deflated_ic"] = round(deflated_sharpe(dr, n_trials), 4)
+        out.append(row)
     return out
 
 

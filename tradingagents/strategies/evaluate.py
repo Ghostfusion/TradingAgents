@@ -134,6 +134,57 @@ def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
         i += test_len
 
 
+def purged_cpcv_splits(n: int, n_splits: int = 5, embargo: int = 0):
+    """Combinatorial purged cross-validation (CPCV) fold indices (W2-2).
+
+    Yields (train_idx, test_idx) lists for ``n_splits`` groups. Each test
+    group is one contiguous block; the train set is ALL other groups with a
+    ``embargo``-bar purge gap around the test block (so nearby overlapping
+    labels never leak into training). Combinatorial => a factor must survive
+    on MANY train/test cuts, not one lucky split.
+    """
+    if n <= 0 or n_splits <= 1:
+        return
+    size = max(1, n // n_splits)
+    groups = [list(range(g * size, min(n, (g + 1) * size))) for g in range(n_splits)]
+    groups = [g for g in groups if g]
+    for g in range(len(groups)):
+        test = groups[g]
+        purged = set()
+        lo = min(test) - embargo if embargo else min(test)
+        hi = max(test) + 1 + embargo if embargo else max(test) + 1
+        for other_i, other in enumerate(groups):
+            if other_i == g:
+                continue
+            for idx in other:
+                if lo <= idx < hi:
+                    purged.add(idx)
+        train = [idx for gg in (groups[:g] + groups[g+1:]) for idx in gg if idx not in purged]
+        if train and test:
+            yield list(train), list(test)
+
+
+def cpcv_overfit_mask(ipcs: list[float], oopcs: list[float],
+                      threshold: float = 0.0) -> bool:
+    """CPCV overfitting signal (W2-2): a factor that wins in-sample (best IPC)
+    but fails out-of-sample will have its best-IPC fold show a poor OOPC. """
+    if not ipcs or not oopcs or len(ipcs) != len(oopcs):
+        return False
+    best = max(range(len(ipcs)), key=lambda i: ipcs[i])
+    return oopcs[best] < threshold
+
+
+def oos_split(signal: list, forward: list, train_frac: float = 0.7):
+    """(W2-4) leading-train / trailing-out-of-sample split; yields the OOS
+    (signal, forward) slices after a leading ``train_frac`` training band, so
+    an IC measured OOS never uses the same rows the parameters saw."""
+    n = len(signal)
+    cut = int(n * train_frac)
+    if cut <= 0 or cut >= n:
+        return [], []
+    return signal[cut:], forward[cut:]
+
+
 def pbo_flag(results_by_trial: list[float], test_results: list[float],
              threshold: float = 0.0) -> bool:
     """Crude overfit flag: best-trial in-sample picks fail out-of-sample."""
@@ -659,7 +710,7 @@ def implementation_shortfall(
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
-    "pbo_flag",
+    "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",

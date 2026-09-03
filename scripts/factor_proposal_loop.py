@@ -95,6 +95,13 @@ def evaluate_candidates(proposals: list[str], records: list[dict],
             continue
         sig, fwd = pair
         ic = rank_ic(sig, fwd)
+        # W2-4 OOS enforcement: rank IC on the trailing OOS band (leading
+        # 70% is the implicit training band). A candidate is not promoted on
+        # the in-sample IC alone.
+        from tradingagents.strategies.evaluate import oos_split
+
+        sig_oos, fwd_oos = oos_split(sig, fwd, train_frac=0.7)
+        oos_ic = rank_ic(sig_oos, fwd_oos) if sig_oos and any(v is not None for v in fwd_oos) else None
         ir = icir([ic]) if ic is not None else None  # single-IC IR proxy
         ls = quantile_long_short(sig, fwd, n_buckets=5, cost_bps=cost_bps)
         ls_ret = ls["long_short_return"] if ls else None
@@ -102,9 +109,11 @@ def evaluate_candidates(proposals: list[str], records: list[dict],
         dir_series = [float(sig[i] * fwd[i]) for i in range(len(sig))]
         verdict = gate_verdict(dir_series)
         gated = bool(verdict.get("ok"))
-        adopted = bool(ic is not None and abs(ic) >= min_ic and gated)
+        adopted = bool(ic is not None and abs(ic) >= min_ic and gated
+                      and (oos_ic is None or abs(oos_ic) >= min_ic * 0.5))
         out[factor] = {
             "ic": round(ic, 4) if ic is not None else None,
+            "oos_ic": round(oos_ic, 4) if oos_ic is not None else None,
             "icir": round(ir, 3) if ir is not None else None,
             "ls_return": round(ls_ret, 5) if ls_ret is not None else None,
             "n": len(sig),

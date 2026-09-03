@@ -1131,6 +1131,10 @@ only after validating in the evaluation harness:
   decision as a scorable prediction row; W1-3 MAE/MFE + stop/target hit scoring against realized closes),
   `strategies/llm_cost.py` (W1-8: provider rate-table cost estimate for quality-per-dollar); wired into the
   graph behind `enable_prediction_ledger`.
+- **Validation guards (W2, advisory)** - `strategies/evaluate.py` gains `purged_cpcv_splits` /
+  `cpcv_overfit_mask` / `oos_split` (combinatorial purged CV + out-of-sample bands); `bench_zoo` reports OOS
+  rank-IC, walk-forward mean IC, CPCV overfit flag, and deflated IC; `factor_proposal_loop` requires a
+  trailing-OOS IC for factor adoption.
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`
