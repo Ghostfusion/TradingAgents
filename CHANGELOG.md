@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W4 architecture (domain bundles / typed state / falsification schema / factor bridge)** -
+  `strategies/domain_bundles.py` (get_market_technicals / get_fundamental_profile /
+  get_sentiment_flow_feed / get_factor_profile / get_portfolio_risk_envelope + news_relevance_profile),
+  `strategies/typed_state.py` (schema-validated layer artifacts + compact summarizer),
+  `falsification.evaluate_debate_claims` (judge grounding + auto-reject already-breached theses).
+  Tests: test_phase5_architecture (9 pass).
+
 - **Remediation W1-2/4/6/7 measurement (calibration + scorecard + benchmarks + feedback)** -
   `strategies/calibration.py` (predicted-confidence bins vs actual hit rate; per-agent scorecard),
   `evaluate.benchmark_table` + `strategy_quality_report --benchmark` (market + simple comparators),

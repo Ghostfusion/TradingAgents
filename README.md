@@ -1143,6 +1143,11 @@ only after validating in the evaluation harness:
   calibration bins + per-agent scorecard from the prediction ledger), `evaluate.benchmark_table`
   (strategy vs market + simple-strategy comparators; `strategy_quality_report --benchmark SPY`),
   prediction-ledger auto-invalidation on stop-hit outcomes.
+- **Architecture (W4, advisory)** - `strategies/domain_bundles.py` (5 composite per-analyst
+  domain tools over the 146 atomic ones + news-relevance profile), `strategies/typed_state.py` (immutable
+  AnalystSummary/ResearchVerdict/TradeProposal/RiskVerdict/Decision artifacts + compact summarizer),
+  `falsification.evaluate_debate_claims` (judge grounding: cites-only-computed metrics, auto-reject
+  already-invalidated theses).
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

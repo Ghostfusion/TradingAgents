@@ -76,6 +76,34 @@ def monitor_conditions(conditions: list[FalsificationCondition],
     return out
 
 
+def evaluate_debate_claims(bull_conditions: list[FalsificationCondition],
+                          bear_conditions: list[FalsificationCondition],
+                          computed_metrics: dict) -> dict:
+    """Judge-side grounding + auto-rejection (W4-3): every falsification
+    condition must cite a metric present in the deterministic computed set,
+    and a thesis whose CURRENT level already breaches its own condition is
+    rejected on arrival (''REJECT_INVALIDATED_THESIS''). Returns a verdict
+    dict with per-side analysis — advisory, feeds the judge's scoring."""
+    issues: list[str] = []
+    for side, conds in (("bull", bull_conditions), ("bear", bear_conditions)):
+        if not conds:
+            issues.append(f"{side}: no falsification conditions (unfalsifiable thesis)")
+        for c in conds:
+            if c.metric_name not in (computed_metrics or {}):
+                issues.append(f"{side}: cites unverified metric '{c.metric_name}'")
+                continue
+            if check_breached(c, computed_metrics.get(c.metric_name)):
+                issues.append(f"{side}: thesis ALREADY invalidated "
+                              f"({c.metric_name} {c.invalidation_level:g})")
+    return {
+        "verdict": "REJECT_INVALIDATED_THESIS" if any(
+            "ALREADY invalidated" in i for i in issues) else "PROCEED_TO_SCORING",
+        "issues": issues,
+        "bull_ok": not any(issues and i.startswith("bull") for i in issues),
+        "bear_ok": not any(issues and i.startswith("bear") for i in issues),
+    }
+
+
 def record_breaches(breaches: list[dict], ticker: str, date: str,
                     results_dir: str | None = None) -> list[dict]:
     """Append the breached conditions to the persistent invalidation ledger
