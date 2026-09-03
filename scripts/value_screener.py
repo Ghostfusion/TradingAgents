@@ -1423,6 +1423,12 @@ def main(argv: list[str] | None = None) -> int:
             pb_min = args.pb_min if args.pb_min else cfg.get("moomoo_screen_pb_min")
             pb_max = args.pb_max if args.pb_max else cfg.get("moomoo_screen_pb_max")
             dip_days = args.dip_days or cfg.get("moomoo_screen_dip_days") or 5
+            # Align the client-side gates (results loop) to the server floors
+            # so moomoo-screen is not double-filtered at different thresholds
+            # (server price>=5 / mcap>=1B vs the CLI's 15 / 10B defaults).
+            # "0" disables: server floor off -> client gate off too.
+            args.price_min = price_server if price_server is not None else 0
+            args.min_mcap = mcap_min or 0
             # -n caps the TOTAL symbols returned: page through the screen in
             # page_size chunks until we have (roughly) n symbols.
             n_want = args.movers_count or 100
