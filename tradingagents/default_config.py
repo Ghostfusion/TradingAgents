@@ -154,11 +154,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MOOMOO_CALL_TIMEOUT": "moomoo_call_timeout",
     "TRADINGAGENTS_MOOMOO_SCREEN_ENABLE": "moomoo_screen_enable",
     "TRADINGAGENTS_MOOMOO_SCREEN_PE_MAX": "moomoo_screen_pe_max",
-    "TRADINGAGENTS_MOOMOO_SCREEN_MCAP_MIN": "moomoo_screen_mcap_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_ROE_MIN": "moomoo_screen_roe_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_MAX_CHG5D": "moomoo_screen_max_chg5d",
     "TRADINGAGENTS_MOOMOO_SCREEN_MAX_RSI": "moomoo_screen_max_rsi",
-    "TRADINGAGENTS_MOOMOO_SCREEN_PRICE_MIN": "moomoo_screen_price_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_PB_MIN": "moomoo_screen_pb_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_PB_MAX": "moomoo_screen_pb_max",
     "TRADINGAGENTS_MOOMOO_SCREEN_DIP_DAYS": "moomoo_screen_dip_days",
@@ -512,11 +510,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # gate the screen behind an explicit --universe moomoo-screen (CLI).
         "moomoo_screen_enable": False,
         "moomoo_screen_pe_max": 30.0,       # PE(TTM) upper bound (None/0 = off)
-        "moomoo_screen_mcap_min": 1e9,      # market-cap floor (USD)
         "moomoo_screen_roe_min": 0.12,      # ROE (annual) floor, decimal
         "moomoo_screen_max_chg5d": -0.05,   # 5-day change upper bound (decimal)
         "moomoo_screen_max_rsi": 35.0,      # RSI(14) upper bound
-        "moomoo_screen_price_min": 5.0,     # server-side PRICE floor (USD; 0 = off)
         "moomoo_screen_pb_min": None,       # P/B lower bound (off)
         "moomoo_screen_pb_max": None,       # P/B upper bound (off)
         "moomoo_screen_dip_days": 5,        # pullback window (days) for %-change filter

@@ -1392,11 +1392,10 @@ def main(argv: list[str] | None = None) -> int:
                 return parser.get_default(name)
 
             pe_max = args.pe_max if args.pe_max != _d("pe_max") else cfg.get("moomoo_screen_pe_max")
-            mcap_min = (
-                args.min_mcap
-                if args.min_mcap != _d("min_mcap")
-                else cfg.get("moomoo_screen_mcap_min")
-            )
+            # Server floors mirror the CLIENT's gates exactly (client is
+            # authoritative): --price-min / --min-mcap apply to both the
+            # server request and the results loop; 0 disables both.
+            mcap_min = args.min_mcap or None
             roe_min = (
                 args.min_roe / 100.0
                 if args.min_roe != _d("min_roe")
@@ -1412,23 +1411,10 @@ def main(argv: list[str] | None = None) -> int:
                 if args.max_rsi != _d("max_rsi")
                 else cfg.get("moomoo_screen_max_rsi")
             )
-            # Server-side price floor: explicit --price-min wins (argparse
-            # default 15.0 preserved for the other universes); default
-            # delegates to config (moomoo_screen_price_min, default 5.0).
-            price_server = (
-                args.price_min
-                if args.price_min != _d("price_min")
-                else cfg.get("moomoo_screen_price_min")
-            )
+            price_floor = args.price_min or None
             pb_min = args.pb_min if args.pb_min else cfg.get("moomoo_screen_pb_min")
             pb_max = args.pb_max if args.pb_max else cfg.get("moomoo_screen_pb_max")
             dip_days = args.dip_days or cfg.get("moomoo_screen_dip_days") or 5
-            # Align the client-side gates (results loop) to the server floors
-            # so moomoo-screen is not double-filtered at different thresholds
-            # (server price>=5 / mcap>=1B vs the CLI's 15 / 10B defaults).
-            # "0" disables: server floor off -> client gate off too.
-            args.price_min = price_server if price_server is not None else 0
-            args.min_mcap = mcap_min or 0
             # -n caps the TOTAL symbols returned: page through the screen in
             # page_size chunks until we have (roughly) n symbols.
             n_want = args.movers_count or 100
@@ -1444,7 +1430,7 @@ def main(argv: list[str] | None = None) -> int:
                 debt_assets_max=args.max_debt_assets / 100.0 if args.max_debt_assets else None,
                 chg5d_max=chg5d or None,
                 rsi_max=rsi or None,
-                price_min=price_server or None,
+                price_min=price_floor,
                 pb_min=pb_min or None,
                 pb_max=pb_max or None,
                 dip_days=dip_days,
