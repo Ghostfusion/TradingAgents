@@ -44,3 +44,40 @@ def test_rule_labels():
 def test_choppiness_bounds():
     c = choppiness(_uptrend())
     assert 0.0 <= c <= 1.0
+
+def _trend_closes(n=260, base=100.0, step=0.05):
+    """Monotone uptrend close series (low vol, above SMA200)."""
+    return [base + step * i for i in range(n)]
+
+
+def test_regime_market_stress_blocks_on_high_index_vol():
+    # stock series calm, index series extremely volatile -> market_stress
+    from tradingagents.strategies.regime import regime_gate_read
+    calm = _trend_closes()
+    # volatile index: alternate +/- big moves
+    idx = []
+    v = 100.0
+    for i in range(260):
+        v += (25.0 if i % 2 == 0 else -25.0)
+        idx.append(v)
+    rg = regime_gate_read(calm, cfg={"market_stress_vol_cap": 0.8}, index_closes=idx)
+    assert rg["market_stress"] is True
+    assert rg["pass"] is False
+    assert any("market stress" in r for r in rg["reasons"])
+
+
+def test_regime_market_stress_off_without_index():
+    # no index series -> market_stress False, pass unaffected
+    from tradingagents.strategies.regime import regime_gate_read
+    calm = _trend_closes()
+    rg = regime_gate_read(calm, cfg={})
+    assert rg["market_stress"] is False      # default leg (no index -> False)
+    assert rg["pass"] is True
+
+
+def test_regime_market_stress_index_returns_fields():
+    from tradingagents.strategies.regime import regime_gate_read
+    calm = _trend_closes()
+    rg = regime_gate_read(calm, cfg={}, index_closes=calm)
+    assert "index_vol_pct" in rg and "index_fast_downtrend" in rg
+    assert "market_stress" in rg

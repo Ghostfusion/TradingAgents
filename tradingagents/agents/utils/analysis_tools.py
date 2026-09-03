@@ -137,6 +137,15 @@ def _daily_returns(closes) -> list:
 
 
 @tool
+
+def _cfg_idx() -> str:
+    """Index symbol for the market-stress leg (config market_stress_index)."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return str(get_config().get("market_stress_index") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
 def get_swing_set(
     ticker: str,
 ) -> str:
@@ -4560,7 +4569,12 @@ def get_regime_gate_read(
         closes = _ohlcv(ticker).get("closes") or []
         if len(closes) < 60:
             return f"regime gate read unavailable for {ticker}: need >= 60 bars ({len(closes)})"
-        rg = regime_gate_read(closes, cfg=get_config(), catalyst_window=bool(catalyst_window)) or {}
+        _idx_sym = _cfg_idx()
+        index_closes = _ohlcv(_idx_sym).get("closes") if _idx_sym else []
+        rg = regime_gate_read(
+            closes, cfg=get_config(), catalyst_window=bool(catalyst_window),
+            index_closes=index_closes or None,
+        ) or {}
         return (
             f"regime gate {ticker}: verdict={rg.get('verdict')} pass={rg.get('pass')} "
             f"vol_pct={rg.get('vol_pct')} fast_downtrend={rg.get('fast_downtrend')} "

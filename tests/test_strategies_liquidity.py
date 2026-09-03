@@ -121,3 +121,32 @@ def test_liquidity_verdict_unknown_inputs_ignored():
     v = liquidity_verdict(None, None, None)
     assert v["verdict"] == "liquid"
     assert v["dangers"] == []
+
+def test_liquidity_verdict_min_dollar_volume_floor():
+    # thin book: 20d dollar volume below the floor -> ILLIQUID (slippage risk)
+    v = liquidity_verdict(None, None, None,
+                          adv_dollar=5e6, min_dollar_volume=20e6)
+    assert v["verdict"] == "illiquid"
+    assert any("ADV20d" in d for d in v["dangers"])
+    # floor unset -> no bump even with tiny dollar volume
+    v2 = liquidity_verdict(None, None, None, adv_dollar=5e6, min_dollar_volume=None)
+    assert v2["verdict"] == "liquid"
+
+
+def test_liquidity_verdict_max_spread_bps():
+    # wide estimated spread over the cap -> ILLIQUID
+    v = liquidity_verdict(None, None, None, spread_bps=95.0, max_spread_bps=50.0)
+    assert v["verdict"] == "illiquid"
+    assert any("spread" in d for d in v["dangers"])
+    # within cap -> stays liquid
+    v2 = liquidity_verdict(None, None, None, spread_bps=15.0, max_spread_bps=50.0)
+    assert v2["verdict"] == "liquid"
+
+
+def test_liquidity_verdict_roll_spread_helper():
+    # roll_spread on a trending series returns a finite non-negative bps proxy
+    from tradingagents.strategies.liquidity_risk import roll_spread
+    closes = [100 + i for i in range(120)]  # clean uptrend
+    sp = roll_spread(closes)
+    # trend produces zero autocovariance -> spread ~0/None, not negative
+    assert sp is None or sp >= 0

@@ -144,6 +144,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CATALYST_MISS_SCALE": "catalyst_miss_scale",
     "TRADINGAGENTS_CATALYST_SCALE_FLOOR": "catalyst_scale_floor",
     "TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS": "catalyst_hard_block_days",
+    "TRADINGAGENTS_MARKET_STRESS_INDEX": "market_stress_index",
+    "TRADINGAGENTS_MARKET_STRESS_VOL_CAP": "market_stress_vol_cap",
+    "TRADINGAGENTS_MIN_DOLLAR_VOLUME": "min_dollar_volume",
+    "TRADINGAGENTS_MAX_SPREAD_BPS": "max_spread_bps",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
     "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
@@ -529,6 +533,19 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "target_vol": 0.15,  # Phase 2: annualized vol target
         "enable_factors": False,  # RESERVED (not yet wired): value+momentum composite
         "enable_events": True,  # Phase 4: PEAD / catalyst sizing (B1, on by default)
+        # Market-level stress gate (mean-reversion; advisory). When
+        # market_stress_index is set (e.g. "^SPX"), regime_gate_read also
+        # screens the index close series and flags market_stress when
+        # index_vol_pct > market_stress_vol_cap (a market-wide liquidity-dry-up
+        # read - stock dips become value traps when the tape is stressy).
+        "market_stress_index": "",   # e.g. "^SPX" or "^VIX"; '' = off
+        "market_stress_vol_cap": 0.85,
+        # Liquidity / ADV gate thresholds (liquidity_verdict, advisory):
+        # a mean-reversion entry on a thin book faces severe slippage, so the
+        # verdict bumps ILLIQUID when 20d dollar volume is below the floor or
+        # the Roll-spread estimate exceeds the bps cap.
+        "min_dollar_volume": None,   # 20d avg dollar volume floor (USD); None = no filter
+        "max_spread_bps": None,      # Roll-spread upper bound in bps; None = no filter
         # B1 scheduled-catalyst overlay tuning (used when enable_events is on).
         "catalyst_window_days": 5,  # earnings within N days -> scale down
         "catalyst_baseline_move": 0.02,  # baseline expected move for the penalty
@@ -538,7 +555,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "catalyst_fed_scale": 0.6,  # multiplier when FOMC is imminent
         "catalyst_miss_scale": 0.5,  # last earnings miss during earnings window
         "catalyst_scale_floor": 0.25,  # never scale below this via catalysts
-        "catalyst_hard_block_days": 0,  # >0: REJECT new risk within N calendar
+        "catalyst_hard_block_days": 5,  # >0: REJECT new risk within N calendar days before a scheduled print (forward-looking; 5 = earnings-blackout)
         #   days of a scheduled earnings print (framework Phase-4 hard rule)
         "enable_reflection": True,  # Phase 5: post-trade analyst critique
         # News-sentiment factor overlay (News_Sentiment.md): position scale

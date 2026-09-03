@@ -484,7 +484,23 @@ def get_value_dip_setup(
     try:
         from tradingagents.strategies.regime import regime_gate_read
 
-        regime_row = regime_gate_read(closes, cfg=None, catalyst_window=False) or None
+        try:
+            from tradingagents.dataflows.config import get_config as _gc
+            _idx_sym = str(_gc().get("market_stress_index") or "").strip()
+        except Exception:  # noqa: BLE001
+            _idx_sym = ""
+        _idx_closes = []
+        if _idx_sym:
+            try:
+                from tradingagents.agents.utils.analysis_tools import _ohlcv as _ot_ohlcv
+
+                _idx_closes = _ot_ohlcv(_idx_sym).get("closes") or []
+            except Exception:  # noqa: BLE001
+                _idx_closes = []
+        regime_row = regime_gate_read(
+            closes, cfg=None, catalyst_window=False,
+            index_closes=_idx_closes or None,
+        ) or None
     except Exception:  # noqa: BLE001 - advisory row degrades to None
         regime_row = None
     try:

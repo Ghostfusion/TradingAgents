@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Market-stress / liquidity / earnings-blackout hardenings (mean-reversion)** -
+  `strategies/regime.py` `regime_gate_read` gains a market-level stress leg
+  (`index_closes`; config `market_stress_index` e.g. `^SPX` +
+  `market_stress_vol_cap` 0.85): when the index latest-21d realized-vol
+  percentile exceeds the cap, `market_stress=True` blocks MR entries
+  (advisory - stock dips become value traps on a stressed tape).
+  `strategies/liquidity_risk.py` `liquidity_verdict` gains optional
+  `adv_dollar`/`min_dollar_volume` (20d dollar-volume floor) and
+  `spread_bps`/`max_spread_bps` (Roll 1984 spread cap) -> ILLIQUID on a thin
+  book / wide spread; the graph's liquidity gate now feeds both. Config
+  `catalyst_hard_block_days` default 0 -> 5 (forward-looking earnings
+  blackout REJECTs new risk; existing forward logic). Tests:
+  test_strategies_liquidity + test_strategies_regime extend (28 pass).
 - **Moomoo value-dip screener (`--universe moomoo-screen`)** - `dataflows/moomoo.py`
   adds `screen_value_dip_moomoo()` (Stock Screening V2 against local OpenD: US market,
   PE_TTM / market-cap / ROE value anchors AND 5-day change + RSI dip timing, 52-week-high

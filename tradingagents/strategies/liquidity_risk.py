@@ -157,18 +157,39 @@ def liquidity_verdict(
     days_max: float = 30.0,
     hhi_max: float = 2500.0,
     iwf_min: float = 0.5,
+    adv_dollar: float | None = None,
+    min_dollar_volume: float | None = None,
+    spread_bps: float | None = None,
+    max_spread_bps: float | None = None,
 ) -> dict:
     """Composite liquidity/ownership risk verdict: LIQUID / CAUTION / ILLIQUID.
 
     Each checked input either confirms the current verdict or bumps it up;
     unknown inputs are ignored (never fail the read). Thresholds come from
-    risk2.md (turnover floor 0.5%, IWF < 0.5, HHI > 2500).
+    risk2.md (turnover floor 0.5%, IWF < 0.5, HHI > 2500). Optional dollar
+    volume / spread guards (mean-reversion slippage): when adv_dollar /
+    spread_bps are supplied and the matching thresholds are set, a thin book
+    (dollar volume below the floor) or a wide estimated spread (above the bps
+    cap) bumps the verdict to ILLIQUID - a dip-buy on a thin order book faces
+    severe slippage.
     """
     dangers: list[str] = []
     verdict = "liquid"
     if illiq is not None and illiq > illiq_high:
         verdict = "illiquid"
         dangers.append(f"ILLIQ={illiq:.4f} (high price impact)")
+    if (
+        min_dollar_volume is not None
+        and adv_dollar is not None
+        and adv_dollar < min_dollar_volume
+    ):
+        verdict = "illiquid"
+        dangers.append(
+            f"ADV20d ${adv_dollar / 1e6:.1f}M < ${min_dollar_volume / 1e6:.1f}M floor"
+        )
+    if max_spread_bps is not None and spread_bps is not None and spread_bps > max_spread_bps:
+        verdict = "illiquid"
+        dangers.append(f"spread {spread_bps:.1f}bps > {max_spread_bps:.0f}bps cap")
     if float_turnover is not None and float_turnover < float_turn_min:
         if verdict == "liquid":
             verdict = "caution"

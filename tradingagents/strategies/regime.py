@@ -148,6 +148,7 @@ def regime_gate_read(
     closes: list,
     cfg: dict | None = None,
     catalyst_window: bool = False,
+    index_closes: list | None = None,
 ) -> dict:
     """Deterministic tradability regime for MEAN-REVERSION entries (advisory).
 
@@ -174,6 +175,7 @@ def regime_gate_read(
         return {
             "pass": None, "verdict": "unknown", "vol_pct": None,
             "fast_downtrend": None, "above_sma200": None, "sma50_rising": None,
+            "index_vol_pct": None, "market_stress": None,
             "catalyst_window": bool(catalyst_window), "reasons": ["insufficient history"],
         }
     price = float(closes[-1])
@@ -188,6 +190,35 @@ def regime_gate_read(
         and price < sma200 * (1.0 - band)
         and sma50 < sma200
     )
+
+    # Market-level stress leg (mean-reversion value-trap defense): when an
+    # index close series is supplied, its latest-21d realized-vol percentile
+    # vs its own history is screened against market_stress_vol_cap. A stressed
+    # tape (SPX/VIX-like) queers stock-specific dip entries - the book dries
+    # up across names. ADVISORY: flags market_stress, never blocks by itself.
+    index_vol_pct = None
+    index_fast_downtrend = None
+    if index_closes and len(index_closes) >= 60:
+        idx_price = float(index_closes[-1])
+        idx_sma200 = _sma(index_closes, 200)
+        idx_sma50 = _sma(index_closes, 50)
+        idx_vols = [
+            realized_vol(index_closes[: i + 1], window=21)
+            for i in range(20, len(index_closes))
+        ]
+        idx_vols = [v for v in idx_vols if v is not None]
+        if idx_vols:
+            recent = idx_vols[-1]
+            hist = idx_vols[:-1] or [recent]
+            index_vol_pct = round(sum(1 for v in hist if v <= recent) / len(hist), 4)
+        index_fast_downtrend = bool(
+            idx_sma200 is not None
+            and idx_sma50 is not None
+            and idx_price < idx_sma200 * (1.0 - band)
+            and idx_sma50 < idx_sma200
+        )
+    market_vol_cap = float(cfg.get("market_stress_vol_cap", 0.85))
+    market_stress = bool(index_vol_pct is not None and index_vol_pct > market_vol_cap)
     vols = [realized_vol(closes[: i + 1], window=21) for i in range(20, len(closes))]
     vols = [v for v in vols if v is not None]
     vol_pct = None
@@ -196,7 +227,7 @@ def regime_gate_read(
         hist = vols[:-1] or [recent]
         vol_pct = round(sum(1 for v in hist if v <= recent) / len(hist), 4)
     high_vol = bool(vol_pct is not None and vol_pct > vol_cap)
-    blocked = bool(high_vol or fast_downtrend or catalyst_window)
+    blocked = bool(high_vol or fast_downtrend or market_stress or catalyst_window)
     verdict = (
         "high-vol"
         if high_vol
@@ -207,6 +238,8 @@ def regime_gate_read(
         reasons.append(f"vol_pct {vol_pct:.2f} > cap {vol_cap:.2f}")
     if fast_downtrend:
         reasons.append(f"price {band:.0%}+ below falling 200-SMA (knife guard)")
+    if market_stress:
+        reasons.append(f"market stress: index_vol_pct {index_vol_pct:.2f} > cap {market_vol_cap:.2f}")
     if catalyst_window:
         reasons.append("catalyst window open")
     if not blocked:
@@ -216,6 +249,10 @@ def regime_gate_read(
         "verdict": verdict,
         "vol_pct": vol_pct,
         "fast_downtrend": fast_downtrend,
+        "index_vol_pct": index_vol_pct,
+        "index_fast_downtrend": index_fast_downtrend,
+        "market_stress": market_stress,
+
         "above_sma200": above_200,
         "sma50_rising": sma50_rising,
         "catalyst_window": bool(catalyst_window),

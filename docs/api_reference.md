@@ -92,7 +92,7 @@ in `batch.py`).
 | `TRADINGAGENTS_CATALYST_FED_SCALE` | `catalyst_fed_scale` |
 | `TRADINGAGENTS_CATALYST_MISS_SCALE` | `catalyst_miss_scale` |
 | `TRADINGAGENTS_CATALYST_SCALE_FLOOR` | `catalyst_scale_floor` |
-| `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` |
+| `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` |  # default 5 (forward earnings blackout) | `market_stress_index`/`market_stress_vol_cap` (index vol cap) | `min_dollar_volume`/`max_spread_bps` (liquidity guards)
 | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` |
 | `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` |
 | `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` |

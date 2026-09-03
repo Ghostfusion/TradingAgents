@@ -1161,6 +1161,7 @@ class TradingAgentsGraph:
                                 float_turnover as _ft,
                                 free_float_factor as _iwf,
                                 liquidity_verdict as _lv,
+                                roll_spread as _roll,
                             )
 
                             closes = final_state.get("closes") or []
@@ -1171,6 +1172,18 @@ class TradingAgentsGraph:
                                 if len(volumes) >= 30
                                 else None
                             )
+                            # Dollar volume + Roll-spread (bps) for the
+                            # ADV/spread liquidity guards (mean-reversion
+                            # slippage; fees below match graph conventions).
+                            cur_price = final_state.get("last_price")
+                            adv_dollar = (
+                                (adv or 0) * (cur_price or 0)
+                                if adv and cur_price else None
+                            )
+                            _sp = _roll(closes)
+                            spread_bps = (_sp * 1e4) if _sp is not None else None
+                            cfg_min_dv = self.config.get("min_dollar_volume")
+                            cfg_max_sp = self.config.get("max_spread_bps")
                             float_sh = None
                             try:
                                 from tradingagents.dataflows.float_shares import (
@@ -1199,6 +1212,10 @@ class TradingAgentsGraph:
                                 ft,
                                 None,  # days-to-absorb needs a liquidation block
                                 iwf=iwf,
+                                adv_dollar=adv_dollar,
+                                min_dollar_volume=cfg_min_dv,
+                                spread_bps=spread_bps,
+                                max_spread_bps=cfg_max_sp,
                             )
                             liq_verdict = lv.get("verdict")
                             liq_dangers = lv.get("dangers")
