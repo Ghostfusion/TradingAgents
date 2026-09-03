@@ -180,7 +180,8 @@ class GraphSetup:
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
-        research_manager_node = create_research_manager(self.deep_thinking_llm)
+        research_manager_node = create_research_manager(self.deep_thinking_llm,
+                                               fallback_llm=self.quick_thinking_llm)
         trader_node = create_trader(self.quick_thinking_llm)
         # Option-A hybrid: ONE independent pre-debate stance per role, sampled
         # with no transcript / opponent responses; the debates below stay the
@@ -196,7 +197,8 @@ class GraphSetup:
         aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
         neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
         conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
-        portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
+        portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm,
+                                                  fallback_llm=self.quick_thinking_llm)
 
         # Create workflow
         workflow = StateGraph(AgentState)

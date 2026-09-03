@@ -15,7 +15,7 @@ from tradingagents.agents.utils.structured import (
 )
 
 
-def create_research_manager(llm):
+def create_research_manager(llm, fallback_llm=None):
     structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
 
     def research_manager_node(state) -> dict:
@@ -106,6 +106,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
             prompt,
             render_research_plan,
             "Research Manager",
+            fallback_llm=fallback_llm,
         )
 
         new_investment_debate_state = {

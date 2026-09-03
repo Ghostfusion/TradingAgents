@@ -155,17 +155,55 @@ def _stub_completion_prompt(original: Any) -> str:
     )
 
 
-def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: str) -> str:
+def _model_name(llm: Any) -> str:
+    """Best-effort model name for logs; '' when unreadable."""
+    for attr in ("model_name", "model", "model_id", "name"):
+        try:
+            v = getattr(llm, attr, None)
+            if v:
+                return str(v)
+        except Exception:  # noqa: BLE001
+            continue
+    return ""
+
+
+def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: str,
+                   fallback_llm: Any | None = None) -> str:
     """A stub free-text fallback is not a usable decision.
 
-    The structured->free-text path can hand back a bare header (live runs
-    have landed a lone ``**Decision`` in the final report). Re-invoke once
-    with a completion directive; if the retry is still degenerate, return an
-    explicit 'unavailable' notice instead of an empty decision, so downstream
-    never renders a bare header.
+    The structured->free-text path can carry back a bare stub (live runs have
+    landed a lone ``**Decision`` in the final report). Re-invoke with a
+    completion directive; if the retry is still degenerate, return an explicit
+    'unavailable' notice instead of an empty decision.
+
+    ``fallback_llm`` (optional): when the structured+free-text chain failed on
+    the model (a repeated no-parse/degenerate case), the FIRST stub retry runs
+    on this fallback model (e.g. the quick tier) instead of the same flaky
+    model — the degeneration-loop cost killer. A default of None keeps today's
+    behavior; the swap is skipped when the fallback is the same model.
     """
     text = response_text or ""
-    for _ in range(_MAX_TRUNCATION_RETRIES):
+    attempts = 0
+    if not _looks_stub(text):
+        return text
+    # 1st retry: fallback model when provided and different (model swap on
+    # fail - avoids re-paying the premium tier for a likely-repeat failure).
+    try:
+        if fallback_llm is not None and fallback_llm is not plain_llm:
+            logger.info(
+                "%s: stub after structured fail - retrying on fallback model %r",
+                agent_name, _model_name(fallback_llm) or fallback_llm,
+            )
+            resp = fallback_llm.invoke(_stub_completion_prompt(prompt))
+            nxt = resp.content if hasattr(resp, "content") else str(resp)
+            attempts += 1
+            if nxt and nxt.strip() and not _looks_stub(nxt):
+                return nxt
+            text = nxt if nxt and nxt.strip() else text
+    except Exception as exc:  # noqa: BLE001 - a failed fallback degrades
+        logger.warning("%s: fallback-model stub retry failed: %s", agent_name, exc)
+    # Remaining budget on the original model.
+    for _ in range(max(0, _MAX_TRUNCATION_RETRIES - attempts)):
         if not _looks_stub(text):
             return text
         try:
@@ -365,6 +403,7 @@ def invoke_structured_or_freetext(
     render: Callable[[T], str],
     agent_name: str,
     result_hook: Callable[[Any], None] | None = None,
+    fallback_llm: Any | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -405,7 +444,7 @@ def invoke_structured_or_freetext(
     # Harden: a bare header/stub is not a usable decision. Regenerate once;
     # if still degenerate, return an explicit 'unavailable' notice so a
     # structured-output miss can never silently produce an empty decision.
-    return _retry_if_stub(plain_llm, prompt, response_text, agent_name)
+    return _retry_if_stub(plain_llm, prompt, response_text, agent_name, fallback_llm=fallback_llm)
 
 
 def retry_structured_missing_fields(

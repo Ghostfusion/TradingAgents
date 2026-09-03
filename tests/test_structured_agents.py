@@ -222,6 +222,105 @@ def test_invoke_structured_stub_freetext_still_empty_returns_notice():
     assert plain.invoke.call_count == 1 + _MAX_TRUNCATION_RETRIES
 
 
+def test_invoke_structured_stub_uses_fallback_model_first():
+    # model-swap-on-fail: when fallback_llm is provided and different, the
+    # FIRST stub retry runs on the fallback (quick tier) instead of the
+    # flaky premium model; a non-stub answer there ends the loop.
+    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.side_effect = [
+        MagicMock(content="**Decision"),          # free-text fallback stub
+        MagicMock(content="**Rating**: Hold."),   # should NOT be reached
+    ]
+    fallback = MagicMock()
+    fallback.invoke.return_value = MagicMock(
+        content="**Rating**: Sell. Guidance cut; exit on strength."
+    )
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
+        fallback_llm=fallback,
+    )
+    assert out == "**Rating**: Sell. Guidance cut; exit on strength."
+    assert plain.invoke.call_count == 1          # only the first free-text stub
+    assert fallback.invoke.call_count == 1
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_fallback_still_stub_uses_plain_budget():
+    # when the fallback model ALSO returns a stub, the remaining budget runs
+    # on the original model, and a persistent stub yields the honest notice
+    # (no unlimited loop, model-agnostic).
+    from tradingagents.agents.utils.structured import (
+        _MAX_TRUNCATION_RETRIES,
+        invoke_structured_or_freetext,
+    )
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.return_value = MagicMock(content="**Decision")  # always stub
+    fallback = MagicMock()
+    fallback.invoke.return_value = MagicMock(content="**Decision")
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
+        fallback_llm=fallback,
+    )
+    assert "unavailable" in out
+    # 1 initial free-text + (budget-1) on plain after the fallback consumed one
+    assert plain.invoke.call_count == 1 + (_MAX_TRUNCATION_RETRIES - 1)
+    assert fallback.invoke.call_count == 1
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_skips_swap_when_same_model():
+    # fallback == plain => no extra call on the fallback (identical model);
+    # behavior identical to not passing fallback_llm.
+    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.side_effect = [
+        MagicMock(content="**Decision"),
+        MagicMock(content="**Rating**: Buy. Add on strength."),
+    ]
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
+        fallback_llm=plain,  # same object -> skip
+    )
+    assert "**Rating**: Buy" in out
+    assert plain.invoke.call_count == 2  # no fallback call was added
+
+
+@pytest.mark.unit
+def test_invoke_structured_stub_fallback_exception_degrades_notice():
+    # a fallback-model exception must degrade to the notice path (never raise).
+    from tradingagents.agents.utils.structured import (
+        invoke_structured_or_freetext,
+    )
+
+    structured = MagicMock()
+    structured.invoke.return_value = None
+    plain = MagicMock()
+    plain.invoke.side_effect = [MagicMock(content="**Decision"),
+                                MagicMock(content="**Decision")]
+    fallback = MagicMock()
+    fallback.invoke.side_effect = RuntimeError("provider down")
+
+    out = invoke_structured_or_freetext(
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
+        fallback_llm=fallback,
+    )
+    assert "unavailable" in out
+    assert fallback.invoke.call_count == 1
+
+
 @pytest.mark.unit
 def test_invoke_structured_stub_retry_exception_returns_notice():
     # A failed stub retry (provider error) must also degrade to the notice
