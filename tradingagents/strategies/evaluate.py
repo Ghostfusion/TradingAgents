@@ -134,6 +134,38 @@ def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
         i += test_len
 
 
+def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float],
+                     simple: dict | None = None,
+                     periods_per_year: float = 252.0) -> dict:
+    """Benchmark hierarchy (W1-6): the strategy vs a market benchmark and
+    (optional) simple strategies, aligned on the common window.
+
+    Returns rows: name, total_return, cagr, sharpe, max_drawdown — computed
+    from the supplied series only (honest: no fetched data, all None when the
+    series is too short). ``simple`` may be {name: returns} for buy&hold /
+    equal-weight / momentum / MA / vol-target comparators.
+    """
+    def _stats(name, rets):
+        if not rets or len(rets) < 2:
+            return {"name": name, "total_return": None, "cagr": None,
+                    "sharpe": None, "max_drawdown": None}
+        eq = equity_curve(rets)
+        return {
+            "name": name,
+            "total_return": round(total_return(rets), 4),
+            "cagr": round(cagr(rets, periods_per_year), 4),
+            "sharpe": round(sharpe(rets, periods_per_year), 3),
+            "max_drawdown": round(max_drawdown(eq), 4),
+        }
+
+    n = min(len(strategy_returns), len(benchmark_returns))
+    rows = [_stats("strategy", list(strategy_returns[-n:])),
+            _stats("benchmark", list(benchmark_returns[-n:]))]
+    for name, rets in (simple or {}).items():
+        rows.append(_stats(name, list(rets[-n:]) if len(rets) >= n else rets))
+    return {"window": n, "rows": rows}
+
+
 def purged_cpcv_splits(n: int, n_splits: int = 5, embargo: int = 0):
     """Combinatorial purged cross-validation (CPCV) fold indices (W2-2).
 
@@ -711,6 +743,7 @@ __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
+    "benchmark_table",
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",

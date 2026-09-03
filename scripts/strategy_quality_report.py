@@ -257,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--illiq", action="store_true",
                         help="scale net cost up to 50bps (illiquid / impact-heavy book)")
+    parser.add_argument("--benchmark", default=None,
+                        help="benchmark ticker (e.g. SPY) for the W1-6 benchmark hierarchy")
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir or _default_data_dir()
@@ -264,6 +266,29 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = os.path.abspath(os.path.expanduser(data_dir))
     cost_bps = 50.0 if args.illiq else 10.0
     report = build_report(data_dir, cost_bps=cost_bps)
+
+    # W1-6 benchmark hierarchy (advisory): compare the book's net returns
+    # against a fetched benchmark series (market) + simple-strategy
+    # comparators (buy&hold, momentum, MA) derived from that same series.
+    if args.benchmark:
+        try:
+            from scripts.backtest_strategy import fetch_bars
+            from tradingagents.strategies.evaluate import benchmark_table
+
+            bars = fetch_bars(args.benchmark, 500)
+            closes = [b.close for b in (bars or [])]
+            bench_rets = ([closes[i] / closes[i - 1] - 1.0 for i in range(1, len(closes))]
+                          if len(closes) > 1 else [])
+            pmr = report.get("ledgers", {}).get("pre_market", {})
+            book_rets = [float(v) for v in (pmr.get("realized") or []) if v is not None]
+            if bench_rets and book_rets:
+                bbh = [0.0] * len(book_rets)  # buy & hold zero-return proxy
+                mom = bench_rets  # momentum = the benchmark itself
+                report["benchmark_hierarchy"] = benchmark_table(
+                    book_rets, bench_rets,
+                    simple={"buy&hold": bbh, "momentum": mom})
+        except Exception as exc:  # noqa: BLE001 - benchmark is advisory
+            report["benchmark_hierarchy"] = {"error": str(exc)}
 
     if args.json:
         print(json.dumps(report, indent=2, default=str))

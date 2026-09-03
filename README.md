@@ -1139,6 +1139,10 @@ only after validating in the evaluation harness:
   quality score + tier, W3-2 cross-vendor disagreement flag, W3-4 fundamentals-PIT invariant),
   `strategies/falsification.py` (W3-7 structured numeric thesis invalidation auto-monitored into the
   invalidation ledger).
+- **Measurement (W1-2/4/6/7, advisory)** - `strategies/calibration.py` (confidence
+  calibration bins + per-agent scorecard from the prediction ledger), `evaluate.benchmark_table`
+  (strategy vs market + simple-strategy comparators; `strategy_quality_report --benchmark SPY`),
+  prediction-ledger auto-invalidation on stop-hit outcomes.
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

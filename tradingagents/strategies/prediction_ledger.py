@@ -152,8 +152,17 @@ def score_outcome(row: dict, closes: list[float | None]) -> dict:
     return row
 
 
-def score_all(closes_by_key: dict, results_dir: str | None = None) -> list[dict]:
-    """Score every ledger row using ``closes_by_key[(ticker, date)]``."""
+def score_all(closes_by_key: dict, results_dir: str | None = None,
+             auto_invalidate: bool = False) -> list[dict]:
+    """Score every ledger row using ``closes_by_key[(ticker, date)]``.
+
+    ``auto_invalidate`` (W1-7): when a scored outcome hit the stop loss, an
+    invalidation row is appended to the persistent invalidation ledger (and
+    the scorecard feedback loop sees it) — a stopped-out thesis is recorded
+    as retired, not silently forgotten.
+    """
+    from tradingagents.strategies.invalidation_ledger import append as _inv_append
+
     out = []
     for r in rows(results_dir):
         key = (r.get("ticker"), r.get("date"))
@@ -163,6 +172,16 @@ def score_all(closes_by_key: dict, results_dir: str | None = None) -> list[dict]
             r["outcome"] = None
         else:
             r = score_outcome(r, closes)
+            oc = r.get("outcome") or {}
+            if auto_invalidate and oc.get("stop_hit") and r.get("stop") is not None:
+                _inv_append(
+                    r.get("ticker"),
+                    [f"price_stop_loss: hit {r['stop']:g} (ledger outcome)"],
+                    date=r.get("date"),
+                    note="auto-invalidation from prediction outcome (W1-7)",
+                    source="prediction_ledger",
+                    results_dir=results_dir,
+                )
         out.append(r)
     return out
 

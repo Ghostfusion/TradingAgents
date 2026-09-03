@@ -1,99 +1,97 @@
-"""G2 - confidence calibration from realized outcomes.
+"""Confidence calibration + AI analyst scorecard (W1-2, W1-4).
 
-Buckets declared confidence into empirical win-rates and returns a
-calibrated probability (identity when a bucket has too few samples). The PM
-prompt consumes ``calibration_table_text`` so the LLM sees its own track
-record; sizing (G1) uses ``calibrated_confidence``.
+From the prediction ledger (W1-1) rows scored against realized outcomes:
+
+- ``calibration_table`` — bin predicted-confidence vs actual success
+  (ChatGPT's 50-60% -> 56% table): shows whether "90% confidence" really
+  wins ~90% of the time.
+- ``scorecard`` — per-agent measurement: predictions, hit rate, avg return,
+  calibration error (|reported - actual| per bin, weighted), horizon-window
+  contribution. This is what lets the system say "fundamentals analyst is
+  historically more reliable at 3-6 months; market analyst better at 1-5d".
+
+All inputs are SCORED ledger rows (dicts with `outcome`); all output is
+counts/ratios, None when there is nothing to measure (honest).
 """
 
 from __future__ import annotations
 
-#: (low, high) confidence buckets; high bound exclusive.
-BUCKETS = ((0.00, 0.50), (0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 1.01))
+_BINS = [(0.0, 0.5), (0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 0.9), (0.9, 1.0001)]
 
 
-def _bucket_of(p: float) -> tuple | None:
-    for lo, hi in BUCKETS:
-        if lo <= p < hi:
-            return (lo, hi)
-    return None
+def calibration_table(scored_rows: list[dict]) -> list[dict]:
+    """Predicted-confidence bins vs actual hit rate (W1-2).
 
-
-def fit_buckets(entries: list) -> dict:
-    """Bucket decision outcomes into empirical win-rates.
-
-    Entry shape: {"confidence": float, "won": bool} (won = delta_r > 0).
-    Returns {bucket: {"n": int, "win_rate": float|None}}.
+    Each row: {bin, n, predicted_mid, actual_hit_rate, calibration_gap}.
+    Rows with no confidence or no outcome are excluded (not counted as 0).
     """
-    table = {b: {"n": 0, "won": 0, "win_rate": None} for b in BUCKETS}
-    for e in entries:
-        p = e.get("confidence")
-        if p is None:
+    out = []
+    for lo, hi in _BINS:
+        rows = [
+            r for r in (scored_rows or [])
+            if r.get("confidence") is not None and lo <= r["confidence"] < hi
+            and isinstance(r.get("outcome"), dict) and r["outcome"].get("hit") is not None
+        ]
+        if not rows:
             continue
-        b = _bucket_of(float(p))
-        if b is None:
+        n = len(rows)
+        hit = sum(1 for r in rows if r["outcome"]["hit"])
+        mid = (lo + hi) / 2.0
+        rate = hit / n
+        out.append({
+            "bin": f"{lo:.0%}-{min(hi, 1.0):.0%}",
+            "n": n,
+            "predicted_mid": round(mid, 3),
+            "actual_hit_rate": round(rate, 3),
+            "calibration_gap": round(rate - mid, 3),
+        })
+    return out
+
+
+def _calibration_error(rows: list[dict]) -> float | None:
+    tab = calibration_table(rows)
+    if not tab:
+        return None
+    total = sum(t["n"] for t in tab)
+    if total <= 0:
+        return None
+    err = sum(abs(t["calibration_gap"]) * t["n"] for t in tab) / total
+    return round(err, 4)
+
+
+def scorecard(scored_rows: list[dict], agent_field: str = "agent") -> list[dict]:
+    """Per-agent measurement (W1-4).
+
+    Groups scored ledger rows by ``agent_field`` (analyst name, debate role,
+    any stored field) and reports: predictions, hit rate, avg return, mean
+    |return|, and calibration error. Sorted by hit rate desc.
+    """
+    from collections import defaultdict
+
+    by_agent: dict[str, list[dict]] = defaultdict(list)
+    for r in (scored_rows or []):
+        a = str(r.get(agent_field) or "unknown")
+        by_agent[a].append(r)
+    out = []
+    for agent, rows in sorted(by_agent.items()):
+        scored = [r for r in rows if isinstance(r.get("outcome"), dict)]
+        n = len(scored)
+        if n == 0:
+            out.append({"agent": agent, "predictions": len(rows), "hit_rate": None,
+                        "avg_return_pct": None, "calibration_error": None})
             continue
-        table[b]["n"] += 1
-        if e.get("won"):
-            table[b]["won"] += 1
-    for cell in table.values():
-        if cell["n"]:
-            cell["win_rate"] = cell["won"] / cell["n"]
-    return table
+        hits = sum(1 for r in scored if r["outcome"].get("hit"))
+        rets = [r["outcome"]["return_pct"] for r in scored
+                if r["outcome"].get("return_pct") is not None]
+        avg_ret = sum(rets) / len(rets) if rets else None
+        out.append({
+            "agent": agent,
+            "predictions": len(rows),
+            "hit_rate": round(hits / n, 3) if n else None,
+            "avg_return_pct": round(avg_ret, 3) if avg_ret is not None else None,
+            "calibration_error": _calibration_error(rows),
+        })
+    return sorted(out, key=lambda o: (o["hit_rate"] is None, -(o["hit_rate"] or 0)))
 
 
-def calibrated_confidence(p: float, table: dict, min_n: int = 5) -> float:
-    """Empirical win-rate of p's bucket; identity fallback below min samples."""
-    b = _bucket_of(float(p))
-    if b is None:
-        return float(p)
-    cell = table.get(b)
-    if cell is None or cell["n"] < min_n or cell["win_rate"] is None:
-        return float(p)
-    # Never fully trust scarcity: shrink toward identity with sample size.
-    trust = min(1.0, cell["n"] / (2 * min_n))
-    return float(p + trust * (cell["win_rate"] - p))
-
-
-def calibration_table_text(table: dict) -> str:
-    """Human-readable calibration summary for the PM prompt."""
-    lines = ["confidence calibration (from strategy ledger):"]
-    for b in BUCKETS:
-        cell = table.get(b)
-        if not cell or cell["n"] == 0:
-            continue
-        wr = f"{cell['win_rate']:.0%}" if cell["win_rate"] is not None else "n/a"
-        lo, hi = b
-        lines.append(f"  declared {lo:.2f}-{hi:.2f}: n={cell['n']} won={cell['won']} realized={wr}")
-    return "\n".join(lines) if len(lines) > 1 else "no calibration history yet"
-
-
-def record_calibration_entry(
-    ledger_path, analyst: str, ticker: str, trade_date: str, confidence: float, won: bool
-) -> None:
-    """Append a confidence-tagged outcome; separate file to keep the ledger clean."""
-    import json
-    import time
-    from pathlib import Path
-
-    path = Path(ledger_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "analyst": analyst,
-        "ticker": ticker,
-        "trade_date": trade_date,
-        "confidence": float(confidence),
-        "won": bool(won),
-        "ts": time.time(),
-    }
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry) + "\n")
-
-
-__all__ = [
-    "BUCKETS",
-    "fit_buckets",
-    "calibrated_confidence",
-    "calibration_table_text",
-    "record_calibration_entry",
-]
+__all__ = ["calibration_table", "scorecard", "_BINS"]

@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W1-2/4/6/7 measurement (calibration + scorecard + benchmarks + feedback)** -
+  `strategies/calibration.py` (predicted-confidence bins vs actual hit rate; per-agent scorecard),
+  `evaluate.benchmark_table` + `strategy_quality_report --benchmark` (market + simple comparators),
+  prediction-ledger auto-invalidation on stop-hit outcomes (W1-7).
+  Tests: test_calibration_scorecard (7 pass).
+
 - **Remediation W3 data integrity (quality score / disagreement / PIT / falsification)** -
   `strategies/data_quality.py` (aggregate_quality weighted 0-100 + tier, disagreement_flag cross-vendor
   spread, fundamentals_pit_ok fail-closed invariant), `strategies/falsification.py` (numeric thesis
