@@ -485,8 +485,11 @@ has changed before); never assume an endpoint works — the SDK's
   margin / debt-to-assets) with dip timing (5-day change, RSI 14, optional
   52-week-high distance), paginated, sorted by 5-day change; filter defaults
   from config (`TRADINGAGENTS_MOOMOO_SCREEN_*`, env-overridable) with
-  per-flag overrides (`--max-chg5d`/`--max-rsi`/`--max-debt-assets`); `-n`
-  caps total symbols. Need: OpenD logged in, `moomoo-api`, protobuf pin. Web
+  per-flag overrides (`--max-chg5d`/`--max-rsi`/`--max-debt-assets`); a
+  server-side price floor and P/B band (`--price-min`, `--pb-min`/`--pb-max`)
+  and a configurable pullback window (`--dip-days`, default 5, reference 20)
+  mirror the reference recipe; `-n` caps total symbols. Need: OpenD logged
+  in, `moomoo-api`, protobuf pin. Web
   Screener exposes the universe + dip flags. Tests:
   `test_moomoo_value_dip_screen` + web forwarding. See repo CHANGELOG.
 - 2026-08-31 `(working tree)` - `--value-dip-loose` harvest mode + eodhd-losers

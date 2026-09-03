@@ -158,6 +158,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MOOMOO_SCREEN_ROE_MIN": "moomoo_screen_roe_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_MAX_CHG5D": "moomoo_screen_max_chg5d",
     "TRADINGAGENTS_MOOMOO_SCREEN_MAX_RSI": "moomoo_screen_max_rsi",
+    "TRADINGAGENTS_MOOMOO_SCREEN_PRICE_MIN": "moomoo_screen_price_min",
+    "TRADINGAGENTS_MOOMOO_SCREEN_PB_MIN": "moomoo_screen_pb_min",
+    "TRADINGAGENTS_MOOMOO_SCREEN_PB_MAX": "moomoo_screen_pb_max",
+    "TRADINGAGENTS_MOOMOO_SCREEN_DIP_DAYS": "moomoo_screen_dip_days",
     "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
@@ -512,6 +516,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "moomoo_screen_roe_min": 0.12,      # ROE (annual) floor, decimal
         "moomoo_screen_max_chg5d": -0.05,   # 5-day change upper bound (decimal)
         "moomoo_screen_max_rsi": 35.0,      # RSI(14) upper bound
+        "moomoo_screen_price_min": 5.0,     # server-side PRICE floor (USD; 0 = off)
+        "moomoo_screen_pb_min": None,       # P/B lower bound (off)
+        "moomoo_screen_pb_max": None,       # P/B upper bound (off)
+        "moomoo_screen_dip_days": 5,        # pullback window (days) for %-change filter
         # Vendor-result cache (operational): re-serve successful vendor fetches
         # within a TTL instead of re-hitting free-tier APIs on every run.
         # Researched strategies (enhancement_plan.md - Phase 0..6). All off by

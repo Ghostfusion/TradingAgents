@@ -125,3 +125,39 @@ def test_default_params_match_value_dip_recipe():
     assert sig.parameters["chg5d_max"].default == -0.05
     assert sig.parameters["rsi_max"].default == 35.0
     assert sig.parameters["market"].default == "US"
+    assert sig.parameters["price_min"].default == 5.0
+    assert sig.parameters["pb_min"].default is None
+    assert sig.parameters["pb_max"].default is None
+    assert sig.parameters["dip_days"].default == 5
+
+
+@pytest.mark.unit
+def test_builder_uses_dip_days_and_pb_bounds():
+    """price/PB bounds and the dip window must reach the request builder."""
+    req = mock.MagicMock()
+    ctx = mock.MagicMock()
+    ctx.get_stock_screen.return_value = (0, (True, 0, []))
+    with (
+        mock.patch("moomoo.StockScreenRequest", return_value=req),
+        mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+        mock.patch.object(moomoo, "_sdk_call", side_effect=lambda fn, *a, **k: fn(*a, **k)),
+    ):
+        moomoo.screen_value_dip_moomoo(
+            dip_days=20, price_min=5.0, pb_min=0.5, pb_max=3.0,
+        )
+    # The fn imports enums locally; assert via the kwargs we can observe.
+    def _kw(name):
+        for c in req.add_simple_property.call_args_list:
+            if str(c.kwargs.get("name")) == str(name):
+                return c.kwargs
+        return None
+    from moomoo.quote.stock_screen_const import CumulativeProperty, SimpleProperty
+    price_kw = _kw(SimpleProperty.PRICE)
+    assert price_kw and price_kw.get("lower") == 5.0
+    pb_kw = _kw(SimpleProperty.PB)
+    assert pb_kw and pb_kw.get("lower") == 0.5 and pb_kw.get("upper") == 3.0
+    cum_kw = None
+    for c in req.add_cumulative_property.call_args_list:
+        if str(c.kwargs.get("name")) == str(CumulativeProperty.PRICE_CHANGE_PCT):
+            cum_kw = c.kwargs
+    assert cum_kw and cum_kw.get("days") == 20

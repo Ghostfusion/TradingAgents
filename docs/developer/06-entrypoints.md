@@ -54,7 +54,7 @@ eodhd-losers | moomoo-screen)
 `--market` `-n/--movers-count` `--min-mcap` `--price-min`
 `--pe-max` `--min-avg-vol` `--min-atr-pct` `--max-mcap`
 `--min-eps-yoy` `--min-rev-yoy` `--min-roe` `--max-chg5d` `--max-rsi`
-`--max-debt-assets` `--sector-rank` `--revision`
+`--max-debt-assets` `--dip-days` `--pb-min` `--pb-max` `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
 (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
 `--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`

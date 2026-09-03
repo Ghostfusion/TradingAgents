@@ -1934,6 +1934,7 @@ def _screen_row(item: dict, factor_labels: dict) -> dict | None:
         "name": row.get("NAME"),
         "price": _num_or_none(row.get("PRICE")),
         "pe_ttm": _num_or_none(row.get("PE_TTM")),
+        "pb": _num_or_none(row.get("PB")),
         "price_to_52w_high": _num_or_none(row.get("PRICE_TO_52W_HIGH")),
         "change_pct_5d": _num_or_none(row.get("PRICE_CHANGE_PCT")),
         "roe": _num_or_none(row.get("ROE")),
@@ -1951,6 +1952,10 @@ def screen_value_dip_moomoo(
     debt_assets_max: float | None = None,
     chg5d_max: float | None = -0.05,
     rsi_max: float | None = 35.0,
+    price_min: float | None = 5.0,
+    pb_min: float | None = None,
+    pb_max: float | None = None,
+    dip_days: int = 5,
     price_to_52w_min: float | None = None,
     price_to_52w_max: float | None = None,
     page_count: int = 100,
@@ -1960,10 +1965,10 @@ def screen_value_dip_moomoo(
     """US value-dip screen via moomoo Stock Screening V2 (``get_stock_screen``).
 
     Whole-market scan built from the value-dip recipe: quality/valuation
-    anchors (PE, ROE, optional net margin / leverage / 52-week-high distance)
-    ANDed with dip timing anchors (5-day % change, RSI) in one paginated
-    request tree. The screen runs server-side against real-time quotes, so the
-    list is current, not a delayed snapshot.
+    anchors (PE, ROE, optional net margin / leverage / 52-week-high distance
+    and a price/PB band) ANDed with dip timing anchors (``dip_days`` % change,
+    RSI) in one paginated request tree. The screen runs server-side against
+    real-time quotes, so the list is current, not a delayed snapshot.
 
     Unit conventions (verified live): ``change_pct_5d`` / ``roe`` are decimal
     fractions (-0.29 == -29%), ``rsi`` is 0-100, ``price_to_52w_high`` is
@@ -1971,9 +1976,14 @@ def screen_value_dip_moomoo(
     15%-30% pullback band is [-0.30, -0.15]). A ``None`` bound omits that
     filter entirely.
 
-    :returns: list of ``{symbol, name, price, pe_ttm, price_to_52w_high,
+    Example: ``screen_value_dip_moomoo(dip_days=20, pb_min=0.5, pb_max=3.0,
+    price_min=5.0)`` screens a 20-day pullback window with a P/B value band
+    and a penny-stock floor.
+
+    :returns: list of ``{symbol, name, price, pe_ttm, price_to_52w_high, pb,
         change_pct_5d, roe, rsi}`` (values ``None`` when the API did not
-        return them), sorted by 5-day change ascending (deepest dip first).
+        return them), sorted by ``dip_days``-change ascending (deepest dip
+        first).
     """
     try:
         from moomoo import StockScreenRequest  # noqa: PLC0415
@@ -2005,6 +2015,10 @@ def screen_value_dip_moomoo(
         req.add_simple_property(name=SimpleProperty.PE_TTM, lower=pe_min, upper=pe_max)
     if market_cap_min is not None:
         req.add_simple_property(name=SimpleProperty.MARKET_CAP, lower=market_cap_min)
+    if price_min is not None:
+        req.add_simple_property(name=SimpleProperty.PRICE, lower=price_min)
+    if pb_min is not None or pb_max is not None:
+        req.add_simple_property(name=SimpleProperty.PB, lower=pb_min, upper=pb_max)
     if price_to_52w_min is not None or price_to_52w_max is not None:
         req.add_simple_property(
             name=SimpleProperty.PRICE_TO_52W_HIGH,
@@ -2022,7 +2036,9 @@ def screen_value_dip_moomoo(
             name=FinancialProperty.DEBT_TO_ASSETS, term=Term.ANNUAL, upper=debt_assets_max
         )
     if chg5d_max is not None:
-        req.add_cumulative_property(name=CumulativeProperty.PRICE_CHANGE_PCT, days=5, upper=chg5d_max)
+        req.add_cumulative_property(
+            name=CumulativeProperty.PRICE_CHANGE_PCT, days=dip_days, upper=chg5d_max
+        )
     if rsi_max is not None:
         req.add_indicator_positional(
             first_indicator_name=Indicator.RSI,
@@ -2036,14 +2052,15 @@ def screen_value_dip_moomoo(
     req.add_retrieve_basic(name=BasicProperty.NAME)
     req.add_retrieve_simple(name=SimpleProperty.PRICE)
     req.add_retrieve_simple(name=SimpleProperty.PE_TTM)
+    req.add_retrieve_simple(name=SimpleProperty.PB)
     req.add_retrieve_simple(name=SimpleProperty.PRICE_TO_52W_HIGH)
-    req.add_retrieve_cumulative(name=CumulativeProperty.PRICE_CHANGE_PCT, days=5)
+    req.add_retrieve_cumulative(name=CumulativeProperty.PRICE_CHANGE_PCT, days=dip_days)
     req.add_retrieve_financial(name=FinancialProperty.ROE, term=Term.ANNUAL)
     req.add_retrieve_indicator(name=Indicator.RSI, period=Period.DAY, indicator_params=[14])
     req.set_sort(
         direction=ScrSortDir.ASC,
         property_type="cumulative",
-        property_params={"name": int(CumulativeProperty.PRICE_CHANGE_PCT), "days": 5},
+        property_params={"name": int(CumulativeProperty.PRICE_CHANGE_PCT), "days": dip_days},
     )
     req.page_count = int(page_count)
 

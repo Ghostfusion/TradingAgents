@@ -1159,6 +1159,20 @@ def main(argv: list[str] | None = None) -> int:
         help="moomoo-screen: max debt-to-assets as %% (0 disables)"
     )
     parser.add_argument(
+        "--dip-days", type=int, default=0,
+        help="moomoo-screen: pullback window in days for the %% change filter "
+        "(default 0 -> config moomoo_screen_dip_days, itself 5)"
+    )
+    parser.add_argument(
+        "--pb-min", type=float, default=0.0,
+        help="moomoo-screen: min price-to-book ratio (0 -> config default; 0.5 "
+        "with --pb-max 3.0 mirrors the reference value-dip band)"
+    )
+    parser.add_argument(
+        "--pb-max", type=float, default=0.0,
+        help="moomoo-screen: max price-to-book ratio (0 disables)"
+    )
+    parser.add_argument(
         "--min-avg-vol",
         type=float,
         default=1_000_000,
@@ -1398,6 +1412,17 @@ def main(argv: list[str] | None = None) -> int:
                 if args.max_rsi != _d("max_rsi")
                 else cfg.get("moomoo_screen_max_rsi")
             )
+            # Server-side price floor: explicit --price-min wins (argparse
+            # default 15.0 preserved for the other universes); default
+            # delegates to config (moomoo_screen_price_min, default 5.0).
+            price_server = (
+                args.price_min
+                if args.price_min != _d("price_min")
+                else cfg.get("moomoo_screen_price_min")
+            )
+            pb_min = args.pb_min if args.pb_min else cfg.get("moomoo_screen_pb_min")
+            pb_max = args.pb_max if args.pb_max else cfg.get("moomoo_screen_pb_max")
+            dip_days = args.dip_days or cfg.get("moomoo_screen_dip_days") or 5
             # -n caps the TOTAL symbols returned: page through the screen in
             # page_size chunks until we have (roughly) n symbols.
             n_want = args.movers_count or 100
@@ -1413,6 +1438,10 @@ def main(argv: list[str] | None = None) -> int:
                 debt_assets_max=args.max_debt_assets / 100.0 if args.max_debt_assets else None,
                 chg5d_max=chg5d or None,
                 rsi_max=rsi or None,
+                price_min=price_server or None,
+                pb_min=pb_min or None,
+                pb_max=pb_max or None,
+                dip_days=dip_days,
                 price_to_52w_min=None,
                 price_to_52w_max=None,
                 page_count=page_size,

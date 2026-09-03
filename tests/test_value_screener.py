@@ -784,6 +784,66 @@ def test_moomoo_screen_universe_builds_from_screener_rows(capsys):
     assert kw["rsi_max"] == 32.0
 
 
+def test_moomoo_screen_dip_days_pb_price_forward(capsys):
+    """--dip-days / --pb-min / --pb-max forward to the screen; config
+    defaults land when flags absent."""
+    rows = [
+        {"symbol": "AAPL", "name": "Apple Inc.",
+         "change_pct_5d": -0.1, "market_cap": 3.2e12},
+    ]
+    cfg = {
+        "moomoo_screen_pe_max": 17.0,
+        "moomoo_screen_mcap_min": 2e9,
+        "moomoo_screen_roe_min": 0.15,
+        "moomoo_screen_max_chg5d": -0.08,
+        "moomoo_screen_max_rsi": 32.0,
+        "moomoo_screen_price_min": 5.0,
+        "moomoo_screen_pb_min": 0.5,
+        "moomoo_screen_pb_max": 3.0,
+        "moomoo_screen_dip_days": 20,
+    }
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value=cfg),
+        _patched_router(fake_route),
+    ):
+        vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+        ])
+    kw = scr.call_args.kwargs
+    assert kw["price_min"] == cfg["moomoo_screen_price_min"]
+    assert kw["pb_min"] == cfg["moomoo_screen_pb_min"]
+    assert kw["pb_max"] == cfg["moomoo_screen_pb_max"]
+    assert kw["dip_days"] == cfg["moomoo_screen_dip_days"]
+
+
+def test_moomoo_screen_price_min_zero_disables_server_floor(capsys):
+    rows = [
+        {"symbol": "AAPL", "name": "Apple Inc.",
+         "change_pct_5d": -0.1, "market_cap": 3.2e12},
+    ]
+    cfg = {"moomoo_screen_price_min": 5.0, "moomoo_screen_dip_days": 5}
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value=cfg),
+        _patched_router(fake_route),
+    ):
+        vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+            "--price-min", "0",
+        ])
+    kw = scr.call_args.kwargs
+    assert kw["price_min"] is None  # 0 disables the server floor
+
+
 def test_moomoo_screen_flags_override_config_defaults(capsys):
     """Explicit CLI flags beat the config default for the screen filters."""
     rows = [
