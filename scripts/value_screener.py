@@ -1108,7 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-u",
         "--universe",
-        choices=("tickers", "eodhd-us", "top-losers", "heat-proxy", "eodhd-losers"),
+        choices=("tickers", "eodhd-us", "top-losers", "heat-proxy", "eodhd-losers", "moomoo-screen"),
         default="eodhd-us",
         help="symbol source: 'eodhd-us' (EODHD full US symbol list, default), "
         "'tickers' (positional/file), "
@@ -1144,6 +1144,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pe-max", type=float, default=40.0, help="max P/E (TTM) (default 40; 0 disables)"
+    )
+    parser.add_argument(
+        "--max-chg5d", type=float, default=0.0,
+        help="moomoo-screen: max 5-day change as %% (e.g. -5 = down 5%%+); "
+        "0 disables (default 0)"
+    )
+    parser.add_argument(
+        "--max-rsi", type=float, default=0.0,
+        help="moomoo-screen: max RSI(14) (oversold upper bound; 0 disables)"
+    )
+    parser.add_argument(
+        "--max-debt-assets", type=float, default=0.0,
+        help="moomoo-screen: max debt-to-assets as %% (0 disables)"
     )
     parser.add_argument(
         "--min-avg-vol",
@@ -1331,6 +1344,101 @@ def main(argv: list[str] | None = None) -> int:
                 )
         except Exception as exc:  # noqa: BLE001 - a universe source must fail loudly
             parser.error(f"eodhd-us universe failed: {exc}")
+
+    elif args.universe == "moomoo-screen":
+        # Whole-market value-dip scan via moomoo Stock Screening V2
+        # (get_stock_screen): server-side AND of value anchors + dip timing.
+        # Rows are the API's own output - price/pe/roe/rsi/52w-distance are
+        # already the screen's answer, so they feed mover_meta (name/day/mcap
+        # used by the results loop for rank context) and the results loop
+        # gates them like any other universe.
+        try:
+            from tradingagents.dataflows.moomoo import (
+                MoomooNotConfiguredError,
+                close_context,
+                screen_value_dip_moomoo,
+            )
+
+            def _err(msg: str):
+                with contextlib.suppress(Exception):
+                    close_context()
+                parser.error(msg)
+
+            # Screen defaults come from config (env-overridable); explicit
+            # CLI flags win over the config default when set.
+            cfg = {}
+            try:
+                from tradingagents.dataflows.config import get_config
+
+                cfg = get_config() or {}
+            except Exception:  # noqa: BLE001 - config absence degrades to built-ins
+                cfg = {}
+
+            def _d(name):  # argparse default for a flag (explicit flag wins)
+                return parser.get_default(name)
+
+            pe_max = args.pe_max if args.pe_max != _d("pe_max") else cfg.get("moomoo_screen_pe_max")
+            mcap_min = (
+                args.min_mcap
+                if args.min_mcap != _d("min_mcap")
+                else cfg.get("moomoo_screen_mcap_min")
+            )
+            roe_min = (
+                args.min_roe / 100.0
+                if args.min_roe != _d("min_roe")
+                else cfg.get("moomoo_screen_roe_min")
+            )
+            chg5d = (
+                args.max_chg5d / 100.0
+                if args.max_chg5d != _d("max_chg5d")
+                else cfg.get("moomoo_screen_max_chg5d")
+            )
+            rsi = (
+                args.max_rsi
+                if args.max_rsi != _d("max_rsi")
+                else cfg.get("moomoo_screen_max_rsi")
+            )
+            # -n caps the TOTAL symbols returned: page through the screen in
+            # page_size chunks until we have (roughly) n symbols.
+            n_want = args.movers_count or 100
+            page_size = min(n_want, 200)
+            n_pages = max(1, -(-n_want // page_size))
+            screen_rows = screen_value_dip_moomoo(
+                market=args.market,
+                pe_min=0.0 if (pe_max or 0) > 0 else None,
+                pe_max=pe_max or None,
+                market_cap_min=mcap_min or None,
+                roe_min=roe_min or None,
+                net_margin_min=None,
+                debt_assets_max=args.max_debt_assets / 100.0 if args.max_debt_assets else None,
+                chg5d_max=chg5d or None,
+                rsi_max=rsi or None,
+                price_to_52w_min=None,
+                price_to_52w_max=None,
+                page_count=page_size,
+                max_pages=n_pages,
+            )
+            # Gate on _is_non_equity; real-time cap/PE from the screen are
+            # authoritative, the results loop still applies its own gates.
+            seen = set()
+            for row in screen_rows:
+                if _is_non_equity(row.get("name")):
+                    continue
+                symbol = (row.get("symbol") or "").upper()
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                mover_meta[symbol] = {
+                    "name": row.get("name"),
+                    "day_change": row.get("change_pct_5d"),
+                    "market_cap": row.get("market_cap"),
+                }
+                tickers.append(symbol)
+            logger.info(
+                "moomoo-screen universe: %d value-dip symbols from moomoo "
+                "screener V2", len(tickers))
+        except MoomooNotConfiguredError as exc:
+            _err(f"moomoo screen unavailable: {exc}")
 
     elif args.universe in ("top-losers", "heat-proxy"):
         try:

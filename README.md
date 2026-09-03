@@ -184,6 +184,16 @@
   analyst nodes short-circuit the cap turn (strip dangling tool_calls, one
   terminal prose turn) so the loop always terminates and reports are never
   empty. Regression tests added. See CHANGELOG.
+- [2026-09-03] **`--universe moomoo-screen` - whole-market value-dip scanner
+  via moomoo Stock Screening V2** - the value screener can now seed from the
+  moomoo screener API (local OpenD): a server-side AND of value anchors
+  (PE_TTM, market cap, ROE) and dip timing (5-day change, RSI 14) over the
+  whole US market, plus the 52-week-high distance factor. Rows carry the
+  API's own price/PE/ROE/RSI/52w values, so the watchlist reflects the dip
+  without a per-symbol fetch. Filter defaults come from config
+  (TRADINGAGENTS_MOOMOO_SCREEN_*) and are overridable per flag
+  (--max-chg5d/--max-rsi/--max-debt-assets, plus the shared --pe-max/--min-mcap/
+  --min-roe). Needs OpenD logged in + `moomoo-api`; no other key.
 - [2026-08-31] **`--universe eodhd-losers` + `--value-dip-loose`** - the value
   screener can now seed the scan from the EODHD bulk US real-time feed (one
   call, ~18k rows, OpenD-independent): the biggest intraday decliners by

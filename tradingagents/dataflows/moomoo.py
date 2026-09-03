@@ -1895,6 +1895,189 @@ def get_top_movers_moomoo(
     return rows
 
 
+def _screen_row(item: dict, factor_labels: dict) -> dict | None:
+    """Map one Stock Screen V2 result row into the project's symbol-shaped dict.
+
+    The SDK returns each factor as ``{type, property.name, value_type,
+    sval|ival|aval|dval}`` with the *numeric* property id; ``factor_labels``
+    maps id -> enum name (built once per screen call). Values are passed
+    through verbatim (unit conventions: change/ROE as decimal fractions, RSI
+    0-100, price_to_52w_high as (price-52w_high)/52w_high). A row without a
+    code is dropped (parsing artifact), never fabricated.
+    """
+    row: dict[str, object] = {}
+    for r in item.get("results") or []:
+        prop = r.get("property") or {}
+        try:
+            fid = int(prop.get("name", -1))
+        except (TypeError, ValueError):
+            continue
+        key = factor_labels.get(fid, f"f{fid}")
+        vt = r.get("value_type")
+        if vt == 1:
+            val = r.get("sval")
+        elif vt == 3:
+            val = r.get("aval")
+        elif vt == 2:
+            val = r.get("ival")
+        elif vt == 4:
+            val = r.get("dval")
+        else:
+            val = None
+        if val is not None:
+            row[key] = val
+    code = row.get("CODE")
+    if not code:
+        return None
+    return {
+        "symbol": _yahoo_style_symbol(str(code)),
+        "name": row.get("NAME"),
+        "price": _num_or_none(row.get("PRICE")),
+        "pe_ttm": _num_or_none(row.get("PE_TTM")),
+        "price_to_52w_high": _num_or_none(row.get("PRICE_TO_52W_HIGH")),
+        "change_pct_5d": _num_or_none(row.get("PRICE_CHANGE_PCT")),
+        "roe": _num_or_none(row.get("ROE")),
+        "rsi": _num_or_none(row.get("RSI")),
+    }
+
+
+def screen_value_dip_moomoo(
+    market: str = "US",
+    pe_min: float | None = None,
+    pe_max: float | None = 30.0,
+    market_cap_min: float | None = 1_000_000_000.0,
+    roe_min: float | None = 0.12,
+    net_margin_min: float | None = None,
+    debt_assets_max: float | None = None,
+    chg5d_max: float | None = -0.05,
+    rsi_max: float | None = 35.0,
+    price_to_52w_min: float | None = None,
+    price_to_52w_max: float | None = None,
+    page_count: int = 100,
+    max_pages: int = 6,
+    timeout: float | None = None,
+) -> list[dict]:
+    """US value-dip screen via moomoo Stock Screening V2 (``get_stock_screen``).
+
+    Whole-market scan built from the value-dip recipe: quality/valuation
+    anchors (PE, ROE, optional net margin / leverage / 52-week-high distance)
+    ANDed with dip timing anchors (5-day % change, RSI) in one paginated
+    request tree. The screen runs server-side against real-time quotes, so the
+    list is current, not a delayed snapshot.
+
+    Unit conventions (verified live): ``change_pct_5d`` / ``roe`` are decimal
+    fractions (-0.29 == -29%), ``rsi`` is 0-100, ``price_to_52w_high`` is
+    ``(price - 52w_high) / 52w_high`` (negative == below the high; the
+    15%-30% pullback band is [-0.30, -0.15]). A ``None`` bound omits that
+    filter entirely.
+
+    :returns: list of ``{symbol, name, price, pe_ttm, price_to_52w_high,
+        change_pct_5d, roe, rsi}`` (values ``None`` when the API did not
+        return them), sorted by 5-day change ascending (deepest dip first).
+    """
+    try:
+        from moomoo import StockScreenRequest  # noqa: PLC0415
+        from moomoo.quote.stock_screen_const import (  # noqa: PLC0415
+            BasicProperty,
+            CumulativeProperty,
+            FinancialProperty,
+            Indicator,
+            Period,
+            Position,
+            ScrMarket,
+            ScrSortDir,
+            SimpleField,
+            SimpleProperty,
+            Term,
+        )
+    except ImportError as exc:
+        raise MoomooNotConfiguredError(
+            "moomoo-api SDK is not installed. Run: pip install moomoo-api"
+        ) from exc
+
+    market_enum = getattr(ScrMarket, market, None)
+    if market_enum is None:
+        raise MoomooNotConfiguredError(f"unknown moomoo screen market: {market!r}")
+
+    req = StockScreenRequest()
+    req.add_simple_field(field=SimpleField.MARKET, values=[market_enum])
+    if pe_min is not None or pe_max is not None:
+        req.add_simple_property(name=SimpleProperty.PE_TTM, lower=pe_min, upper=pe_max)
+    if market_cap_min is not None:
+        req.add_simple_property(name=SimpleProperty.MARKET_CAP, lower=market_cap_min)
+    if price_to_52w_min is not None or price_to_52w_max is not None:
+        req.add_simple_property(
+            name=SimpleProperty.PRICE_TO_52W_HIGH,
+            lower=price_to_52w_min,
+            upper=price_to_52w_max,
+        )
+    if roe_min is not None:
+        req.add_financial_property(name=FinancialProperty.ROE, term=Term.ANNUAL, lower=roe_min)
+    if net_margin_min is not None:
+        req.add_financial_property(
+            name=FinancialProperty.NET_PROFIT_RATIO, term=Term.ANNUAL, lower=net_margin_min
+        )
+    if debt_assets_max is not None:
+        req.add_financial_property(
+            name=FinancialProperty.DEBT_TO_ASSETS, term=Term.ANNUAL, upper=debt_assets_max
+        )
+    if chg5d_max is not None:
+        req.add_cumulative_property(name=CumulativeProperty.PRICE_CHANGE_PCT, days=5, upper=chg5d_max)
+    if rsi_max is not None:
+        req.add_indicator_positional(
+            first_indicator_name=Indicator.RSI,
+            period_type=Period.DAY,
+            position=Position.BELOW,
+            second_value=rsi_max,
+            first_indicator_params=[14],
+        )
+    # Explicit retrieve: factors the pipeline consumes are requested up front.
+    req.add_retrieve_basic(name=BasicProperty.CODE)
+    req.add_retrieve_basic(name=BasicProperty.NAME)
+    req.add_retrieve_simple(name=SimpleProperty.PRICE)
+    req.add_retrieve_simple(name=SimpleProperty.PE_TTM)
+    req.add_retrieve_simple(name=SimpleProperty.PRICE_TO_52W_HIGH)
+    req.add_retrieve_cumulative(name=CumulativeProperty.PRICE_CHANGE_PCT, days=5)
+    req.add_retrieve_financial(name=FinancialProperty.ROE, term=Term.ANNUAL)
+    req.add_retrieve_indicator(name=Indicator.RSI, period=Period.DAY, indicator_params=[14])
+    req.set_sort(
+        direction=ScrSortDir.ASC,
+        property_type="cumulative",
+        property_params={"name": int(CumulativeProperty.PRICE_CHANGE_PCT), "days": 5},
+    )
+    req.page_count = int(page_count)
+
+    factor_labels: dict = {}
+    for grp in (SimpleProperty, CumulativeProperty, FinancialProperty, Indicator, BasicProperty):
+        for nm in dir(grp):
+            if nm.startswith("_"):
+                continue
+            try:
+                factor_labels.setdefault(int(getattr(grp, nm)), nm)
+            except (TypeError, ValueError):
+                continue
+
+    ctx = _ensure_ctx()
+    rows: list[dict] = []
+    page = 0
+    while True:
+        # Pagination: page_from must advance or every page re-returns the
+        # same first rows (observed live: identical symbols repeated).
+        req.page_from = page * int(page_count)
+        ret, data = _sdk_call(ctx.get_stock_screen, req, timeout=timeout)
+        data = _check_ret(ret, data, market, f"{market} stock screen", "get_stock_screen")
+        last_page, _all_count, items = data
+        for item in items or []:
+            parsed = _screen_row(item, factor_labels)
+            if parsed:
+                rows.append(parsed)
+        page += 1
+        if last_page or page >= max_pages:
+            break
+    return rows
+
+
+
 # ---------------------------------------------------------------------------
 # A2: institutional ownership (13F-style aggregate, moomoo)
 # ---------------------------------------------------------------------------

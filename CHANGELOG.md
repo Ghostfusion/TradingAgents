@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Moomoo value-dip screener (`--universe moomoo-screen`)** - `dataflows/moomoo.py`
+  adds `screen_value_dip_moomoo()` (Stock Screening V2 against local OpenD: US market,
+  PE_TTM / market-cap / ROE value anchors AND 5-day change + RSI dip timing, 52-week-high
+  distance, paginated, sorted by 5-day change; unit conventions documented: change/ROE
+  decimal, RSI 0-100, price_to_52w_high as (price-high)/high). `scripts/value_screener.py`
+  gains the `moomoo-screen` universe: config-default filters (env-overridable via
+  `TRADINGAGENTS_MOOMOO_SCREEN_*`) with per-flag overrides (--max-chg5d/--max-rsi/
+  --max-debt-assets); rows feed mover_meta + the standard results loop. Dep guard:
+  `protobuf>=5.29,<6` (moomoo SDK needs the pre-6.0 upb API). Tests:
+  test_moomoo_value_dip_screen (6 pass) + 2 CLI tests.
 - **Remediation W1-5/W3-5/W3-6/W3-8/W4-5/W4-7/W4-8 ops + polish** - `strategies/quant_baseline.py`
   (deterministic quant-only signal + rating for LLM comparison), `strategies/options_surface.py`
   (IV percentile/skew/P-C OI/expected move/VRP), `strategies/integrity_tools.py` (thesis-evidence

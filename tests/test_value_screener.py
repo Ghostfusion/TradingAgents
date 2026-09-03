@@ -746,3 +746,75 @@ def test_eodhd_cheap_gate_before_fundamentals(monkeypatch, capsys):
     # fundamentals fetch; the oversold one (prefilter passes) advances to the
     # fundamentals stage. The rejected UPUP must NOT be fetched.
     assert "UPUP" not in fin_calls, f"gated-out UPUP fetched fundamentals: {fin_calls}"
+
+def test_moomoo_screen_universe_builds_from_screener_rows(capsys):
+    """--universe moomoo-screen: screener rows become the ticker universe and
+    the branch applies config-filter defaults when no flags are passed."""
+    rows = [
+        {"symbol": "AAPL", "name": "Apple Inc.",
+         "change_pct_5d": -0.0421, "market_cap": 3.2e12},
+    ]
+    cfg = {
+        "moomoo_screen_pe_max": 17.0,
+        "moomoo_screen_mcap_min": 2e9,
+        "moomoo_screen_roe_min": 0.15,
+        "moomoo_screen_max_chg5d": -0.08,
+        "moomoo_screen_max_rsi": 32.0,
+    }
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value=cfg),
+        _patched_router(fake_route),
+    ):
+        rc = vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+        ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Apple Inc." in out
+    kw = scr.call_args.kwargs
+    assert kw["pe_max"] == 17.0          # config default, no --pe-max flag
+    assert kw["market_cap_min"] == pytest.approx(2e9)
+    assert kw["roe_min"] == pytest.approx(0.15)
+    assert kw["chg5d_max"] == pytest.approx(-0.08)
+    assert kw["rsi_max"] == 32.0
+
+
+def test_moomoo_screen_flags_override_config_defaults(capsys):
+    """Explicit CLI flags beat the config default for the screen filters."""
+    rows = [
+        {"symbol": "AAPL", "name": "Apple Inc.",
+         "change_pct_5d": -0.1, "market_cap": 3.2e12},
+    ]
+    cfg = {
+        "moomoo_screen_pe_max": 17.0,
+        "moomoo_screen_mcap_min": 2e9,
+        "moomoo_screen_roe_min": 0.15,
+        "moomoo_screen_max_chg5d": -0.08,
+        "moomoo_screen_max_rsi": 32.0,
+    }
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value=cfg),
+        _patched_router(fake_route),
+    ):
+        rc = vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+            "--min-mcap", "5e9", "--pe-max", "20", "--max-chg5d", "-10",
+            "--max-rsi", "30",
+        ])
+    assert rc == 0
+    kw = scr.call_args.kwargs
+    assert kw["pe_max"] == 20.0
+    assert kw["market_cap_min"] == pytest.approx(5e9)
+    assert kw["chg5d_max"] == pytest.approx(-0.10)
+    assert kw["rsi_max"] == 30.0        # roe untouched -> config default kept
+    assert kw["roe_min"] == pytest.approx(0.15)
