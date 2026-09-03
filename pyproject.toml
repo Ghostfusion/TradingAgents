@@ -13,6 +13,8 @@ dependencies = [
     "backtrader>=1.9.78.123",
     "finnhub-python>=2.4.18",
     "moomoo-api>=10.5.6508",
+    # moomoo SDK 10.x needs the pre-6.0 upb API (FieldDescriptor.label); protobuf 6+ breaks every RPC.
+    "protobuf>=5.29,<6",
     "langchain-anthropic>=0.3.15",
     "langchain-experimental>=0.3.4",
     "langchain-google-genai>=4.0.0",
