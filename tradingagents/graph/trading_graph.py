@@ -18,7 +18,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
     get_cashflow,
     get_corporate_actions,
+    get_cost_models,
     get_crypto_prices,
+    get_debate_claims_verdict,
     get_dividends,
     get_earnings_calendar,
     get_earnings_catalyst,
@@ -50,6 +52,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_smart_money,
     get_stock_data,
     get_top_movers,
+    get_universe_membership,
     get_verified_market_snapshot,
     resolve_instrument_identity,
 )
@@ -124,6 +127,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
+    get_skill_read,
     get_sofr_curve,
     get_strategy_quality,
     get_swing_exits,
@@ -144,6 +148,7 @@ from tradingagents.agents.utils.analysis_tools import (
 from tradingagents.agents.utils.debate_roles import resolve_role_llm
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
+from tradingagents.agents.utils.news_data_tools import get_news_relevance_read
 from tradingagents.agents.utils.value_dip_tools import (
     get_balance_sheet_health,
     get_bollinger_pct_b,
@@ -390,6 +395,13 @@ class TradingAgentsGraph:
                     get_short_volume,
                     # Liquidity (Amihud ILLIQ / float turnover / IWF)
                     get_liquidity_risk,
+                    # W2-6..10 cost / capacity / borrow / fill reads.
+                    get_cost_models,
+                    get_debate_claims_verdict,
+                    get_universe_membership,
+                    # DSA-3 regime-from-opinion skill read (advisory; the
+                    # market analyst binds it, so the ToolNode must execute it).
+                    get_skill_read,
                     # Massive.com verification + movers (plan-gated, degrade)
                     get_market_snapshot,
                     get_crypto_prices,
@@ -490,6 +502,9 @@ class TradingAgentsGraph:
                     get_gdelt_sentiment,
                     get_news_sentiment,
                     get_news_sentiment_series,
+                    # DSA-3 news relevance + admission (the news analyst
+                    # binds it; the ToolNode must execute it).
+                    get_news_relevance_read,
                     get_global_news,
                     get_insider_transactions,
                     get_macro_indicators,

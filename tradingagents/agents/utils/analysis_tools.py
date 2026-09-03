@@ -4733,6 +4733,115 @@ def get_enhanced_index_tilt(
         return f"enhanced-index tilt unavailable: {exc}"
 
 
+
+@tool
+def get_cost_models(
+    notional_usd: float | None = None,
+    adv_usd: float | None = None,
+    short_notional: float | None = None,
+    annual_rate_pct: float | None = None,
+    price: float | None = None,
+    factor: float | None = None,
+    divisor: float | None = None,
+    distance_to_limit_pct: float | None = None,
+) -> str:
+    """Deterministic cost / capacity / fill-probability reads (W2-6..10).
+
+    Wraps the backtest cost models as an agent-readable advisory:
+      - square_root_impact(notional, adv): Almgren-Chriss market-impact cost
+        in bps (sqrt-impact participation).
+      - borrow_cost(short_notional, annual_rate_pct): annualized borrow fee.
+      - capacity_pct(notional, adv): position size as % of ADV (participation).
+      - quote_adjust(price, factor, divisor): corporate-action price adjust.
+      - turnover(fill_qty, target_qty) not needed here (list-based).
+      - fill_probability(distance_to_limit_pct): adverse-tick / limit-fill prob.
+    Use to ground any impact / borrow / capacity / adjustment claim - never
+    invent a cost figure.
+    """
+    from tradingagents.strategies.backtest_models import (
+        borrow_cost,
+        capacity_pct,
+        fill_probability,
+        quote_adjust,
+        square_root_impact,
+    )
+
+    lines = []
+    if notional_usd is not None:
+        imp = square_root_impact(notional_usd, adv_usd)
+        lines.append(f"impact_bps={imp if imp is None else round(imp, 3)}")
+        cap = capacity_pct(notional_usd, adv_usd)
+        lines.append(f"capacity_pct_adv={cap if cap is None else round(cap, 4)}")
+    if short_notional is not None and annual_rate_pct is not None:
+        bc = borrow_cost(short_notional, annual_rate_pct)
+        lines.append(f"borrow_cost_usd={bc if bc is None else round(bc, 2)}")
+    if price is not None:
+        adj = quote_adjust(price, factor, divisor)
+        lines.append(f"quote_adjusted={adj if adj is None else round(adj, 4)}")
+    if distance_to_limit_pct is not None:
+        fp = fill_probability(distance_to_limit_pct)
+        lines.append(f"fill_probability={fp if fp is None else round(fp, 4)}")
+    if not lines:
+        return "cost model read unavailable: supply notional_usd/adv_usd (impact), short_notional+annual_rate_pct (borrow), or distance_to_limit_pct (fill)"
+    return "cost model read: " + "; ".join(lines)
+
+
+
+
+@tool
+def get_debate_claims_verdict(
+    bull_conditions: list | None = None,
+    bear_conditions: list | None = None,
+    computed_metrics: dict | None = None,
+) -> str:
+    """Judge-side falsification grounding (W4-3): check whether the bull/bear
+    falsification conditions reference metrics present in the deterministic
+    computed set, and auto-reject a thesis whose CURRENT level already
+    breaches its own condition. Advisory - feeds the judge's scoring, never
+    blocks alone. Pass the conditions as dict lists
+    ({"metric": m, "operator": "<", "threshold": x, ...}).
+    """
+    try:
+        from tradingagents.strategies.falsification import (
+            FalsificationCondition,
+            evaluate_debate_claims,
+        )
+
+        def _cond(x):
+            if isinstance(x, FalsificationCondition):
+                return x
+            return FalsificationCondition(**x) if isinstance(x, dict) else None
+
+        b = [_cond(c) for c in (bull_conditions or [])]
+        b = [c for c in b if c]
+        br = [_cond(c) for c in (bear_conditions or [])]
+        br = [c for c in br if c]
+        out = evaluate_debate_claims(b, br, computed_metrics or {})
+        return "falsification verdict: " + str(out)
+    except Exception as exc:  # noqa: BLE001 - advisory read degrades
+        return f"falsification read unavailable: {exc}"
+
+
+@tool
+def get_universe_membership(
+    symbols: list | None = None,
+    as_of: str | None = None,
+) -> str:
+    """Survivorship guard (W2-10): which of ``symbols`` were alive as-of the
+    date (registry first_active <= as_of <= last_active). Unmeasured symbols
+    return 'unknown' - never assumed present. Advisory for the analyst: use
+    before claiming a name was in the tradable universe at a past date.
+    """
+    try:
+        from tradingagents.dataflows.pit_registry import universe_membership
+
+        out = universe_membership(symbols or [], as_of or "")
+        return "universe membership: " + str(out)
+    except Exception as exc:  # noqa: BLE001 - advisory read degrades
+        return f"universe membership unavailable: {exc}"
+
+
+
 __all__ = [
     "get_sector_rank",
     "get_normality",
