@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W1 measurement (prediction ledger + cost)** - `strategies/prediction_ledger.py` (W1-1: every
+  decision logged as a scorable prediction row; W1-3: MAE/MFE + stop/target outcome scoring against realized
+  closes), `strategies/llm_cost.py` (W1-8: provider rate-table cost estimate). Graph wires the ledger behind
+  `enable_prediction_ledger`. Tests: test_prediction_ledger (15 pass). Plan: `docs/master_implementation_plan.md`.
+
 - **Vibe-Trading transfer (research + 8 adopted hardening items)** - `docs/design_shadow_account.md`; `VendorResult.price_caliber`/`volume_unit` + `caliber_consistency` mixed-caliber warning; next-bar close fills + lookahead sentinel (`test_next_bar_fill`); `position_target`/`position_filled` in backtest output; persistent invalidation ledger (`--invalidate`, action-report auto-breach); `run_card.json` per report tree; versioned cache keys + no-forming-bar staleness guard; hash-chained `risk_audit` ledger (`--verify-chain`); `alpha_zoo` purity gate + bounded evaluator + `factor_bench` CLI.
 
 - **Fix: false 'Section truncated at the LLM output cap' marker in PM decision** - `reporting.write_report_tree` ran the truncation detector on the decision AFTER appending the computed disclosure block (which ends in lowercase, e.g. `models: n/a`), so a complete decision was flagged as an LLM cut whenever the Phase-D disclosure block was rendered. Truncation detection now runs on the raw LLM text only; audit/disclosure append after. Also tightened `_looks_truncated`'s bold-label exemption to short verdict lines (`**Action**: Buy`) - a long `**Executive Summary**: ...` prose line cut mid-word is now correctly flagged.

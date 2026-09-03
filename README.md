@@ -1127,6 +1127,10 @@ only after validating in the evaluation harness:
   versioned cache keys + no-forming-bar staleness guard (`vendor_cache` v2, news cache v1), hash-chained
   tamper-evident `risk_audit` ledger (`--verify-chain`), and `strategies/alpha_zoo.py` (AST purity gate +
   bounded evaluator + `scripts/factor_bench.py` rank-IC bench). Design: `docs/design_shadow_account.md`.
+- **Measurement (advisory, default off)** - `strategies/prediction_ledger.py` (W1-1: log every
+  decision as a scorable prediction row; W1-3 MAE/MFE + stop/target hit scoring against realized closes),
+  `strategies/llm_cost.py` (W1-8: provider rate-table cost estimate for quality-per-dollar); wired into the
+  graph behind `enable_prediction_ledger`.
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

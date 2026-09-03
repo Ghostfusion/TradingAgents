@@ -875,6 +875,26 @@ class TradingAgentsGraph:
         # Log state to disk.
         self._log_state(trade_date, final_state)
 
+        # W1-1 prediction ledger: every decision becomes a scorable prediction
+        # row (advisory; never gates). Guarded by enable_prediction_ledger.
+        try:
+            if self.config.get("enable_prediction_ledger"):
+                from tradingagents.strategies.prediction_ledger import log_decision
+
+                log_decision(
+                    ticker=company_name,
+                    date=trade_date,
+                    rating=str((final_state.get("pm_decision") or {}).get("rating") or ""),
+                    direction="",
+                    entry=None,
+                    confidence=None,
+                    horizon_days=int(self.config.get("prediction_horizon_days", 60)),
+                    data_quality=(final_state.get("pm_decision") or {}).get("data_quality") or "unknown",
+                    results_dir=self.config.get("results_dir"),
+                )
+        except Exception:  # noqa: BLE001 - ledger is advisory
+            pass
+
         # Store decision for deferred reflection on the next same-ticker run.
         self.memory_log.store_decision(
             ticker=company_name,

@@ -306,6 +306,7 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-02 `(working tree)` - remediation W1 measurement: `strategies/prediction_ledger.py` (decision prediction rows + MAE/MFE + hit/stop/target outcome scoring), `strategies/llm_cost.py` (rate-table cost estimates), wired behind `enable_prediction_ledger`. Plan: `docs/master_implementation_plan.md`.
 - 2026-09-02 `(working tree)` - DSA phase D reporting: `strategies/report_disclosure.py` (driver attribution sum-100, consensus support/oppose, watch_conditions/next_check_time, >=1 invalidation per decision with manual fallback, sources-vs-empty + models footers); `reporting.write_report_tree` appends the advisory disclosure block to decision.md.
 - 2026-09-02 `(working tree)` - DSA phase C polish: `strategies/skills.py` (YAML skill overlays + regime-from-opinion + router, `enable_skill_overlays` default off), `strategies/news_relevance.py` (relevance scoring + official boost + spam admission + degrade triple), `dataflows/news_cache.py` (owner-wait coalescing TTL cache).
 - 2026-09-02 `(working tree)` - DSA phase B robustness: `dataflows/market_router.py` (market-classified vendor priority), `vendor_breaker.py` (3-fail/300s breaker + half-open + negative cache), `VendorResult` honesty fields, `dataflows/effective_date.py` (effective-trading-date + all-closed skip, fail-open). All opt-in (`market_source_priority`), default bit-identical.

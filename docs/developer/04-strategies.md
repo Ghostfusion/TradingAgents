@@ -28,6 +28,7 @@ involved. This is the "compute, don't narrate" core.
   learn/infer fit-apply split (train-only moments), expression-string cache.
 - `signal_analysis.py` — rank IC/ICIR, quantile long-short, IC-decay
   half-life, prediction autocorrelation, with/without-cost report table.
+- `prediction_ledger.py` — decision prediction rows + outcome scoring (MAE/MFE, hit, level breaches); `llm_cost.py` — provider-rate cost estimates.
 - `report_disclosure.py` — attribution/consensus/watch/invalidation/disclosure footers (DSA research §3.7).
 - `skills.py` — declarative YAML strategy-skill overlays (bounded advisory adjustments), regime-from-opinion, router.
 - `news_relevance.py` — news relevance scoring + official-source boost + spam admission + degrade triple.

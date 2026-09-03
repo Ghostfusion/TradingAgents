@@ -88,6 +88,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_SKILL_DIR": "skill_dir",
     "TRADINGAGENTS_ENABLE_NEWS_RELEVANCE": "enable_news_relevance",
     "TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION": "enable_report_attribution",
+    "TRADINGAGENTS_ENABLE_PREDICTION_LEDGER": "enable_prediction_ledger",
+    "TRADINGAGENTS_PREDICTION_HORIZON_DAYS": "prediction_horizon_days",
     "TRADINGAGENTS_ENABLE_FACTOR_PROPOSAL_LOOP": "enable_factor_proposal_loop",
     "TRADINGAGENTS_ENABLE_TUNER": "enable_tuner",
     "TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE": "enable_independent_vote",
@@ -594,6 +596,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "skill_dir": "",  # DSA-3: custom skill dir (overrides builtin by name)
         "enable_news_relevance": False,  # DSA-3: news relevance scoring + official boost (advisory)
         "enable_report_attribution": False,  # DSA-2: computed driver attribution + disclosure blocks (advisory)
+        "enable_prediction_ledger": False,  # W1-1: log every decision as a scorable prediction row (advisory)
+        "prediction_horizon_days": 60,  # W1-1: outcome horizon for ledger scoring
         "enable_factor_proposal_loop": False,  # Q11: LLM-proposed candidates, math decides (gated)
         "enable_tuner": False,  # Q19: hyperparam grid search front-end (gate decides)
         "breakeven_atr": 1.0,  # V4: stop-to-breakeven cushion (ATRs)
