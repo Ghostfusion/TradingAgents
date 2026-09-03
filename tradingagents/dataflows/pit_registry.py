@@ -50,6 +50,33 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def universe_membership(symbols: list[str], as_of: str,
+                        registry: dict | None = None) -> dict:
+    """W2-10 survivorship guard: which of ``symbols`` were alive as-of a date.
+
+    ``registry`` maps symbol -> {first_active, last_active} (or any snapshot
+    dict with those keys). A symbol is "in universe" at ``as_of`` when
+    first_active <= as_of <= last_active (or last_active missing = still
+    listed). Unmeasured symbols return "unknown" (never assumed present).
+    """
+    out: dict[str, str] = {}
+    for sym in (symbols or []):
+        r = (registry or {}).get(sym)
+        sym = str(sym).upper()
+        if not r:
+            out[sym] = "unknown"
+            continue
+        first = str(r.get("first_active") or "")
+        last = str(r.get("last_active") or "")
+        if first and as_of < first:
+            out[sym] = "not_yet_listed"
+        elif last and as_of > last:
+            out[sym] = "delisted"
+        else:
+            out[sym] = "listed"
+    return out
+
+
 def store_snapshot(symbol: str, as_of: str, payload: dict, root: str | None = None) -> str | None:
     """Append one PIT snapshot ``{symbol, as_of, stored_at, payload}``.
 

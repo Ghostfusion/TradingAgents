@@ -66,6 +66,78 @@ def make_cost_fn(fee_bps: float = 0.0, maker_bps: float | None = None,
     return lambda notional, side: fixed_fee(notional, fee_bps)
 
 
+# ---------------------------------------------------------------------------
+# W2-6/7/8 impact + turnover + capacity + borrow models (remediation phase 7)
+# ---------------------------------------------------------------------------
+
+
+def square_root_impact(notional_usd: float, adv_usd: float | None,
+                       spread_bps: float | None = None,
+                       vol_pct: float | None = None) -> float | None:
+    """Almgren-Chriss style square-root market impact (W2-6).
+
+    impact = k * sigma * sqrt(q / adv) with k ~ 0.1 (documented). Missing
+    adv -> None (cannot compute, never assumed). ``spread_bps`` optionally
+    adds a participation-scaled spread cost (bps of notional).
+    Returns impact as a FRACTION of notional (e.g. 0.001 = 10bps).
+    """
+    if not adv_usd or adv_usd <= 0 or notional_usd <= 0:
+        return None
+    sig = (vol_pct or 0.20) / 100.0
+    partic = notional_usd / adv_usd
+    k = 0.1
+    impact = k * sig * (partic ** 0.5)
+    if spread_bps:
+        impact += (spread_bps / 10000.0) * 0.5
+    return round(impact, 6)
+
+
+def turnover(fill_qty: list[float], target_qty: list[float]) -> float | None:
+    """One-way turnover from fills vs targets (W2-7): mean |fill - target| /
+    mean |target|, None on unmeasured."""
+    if not fill_qty or not target_qty or len(fill_qty) != len(target_qty):
+        return None
+    denom = sum(abs(t) for t in target_qty) or 0.0
+    if denom <= 0:
+        return None
+    return round(sum(abs(f - t) for f, t in zip(fill_qty, target_qty, strict=False)) / denom, 4)
+
+
+def capacity_pct(notional_usd: float, adv_usd: float | None,
+                 max_participation: float = 0.10) -> float | None:
+    """W2-7 capacity check: the position as a fraction of ADV; False (None)
+    when unmeasurable or above ``max_participation`` (a signal that works at
+    size only if it stays within execution feasibility)."""
+    if not adv_usd or adv_usd <= 0 or notional_usd <= 0:
+        return None
+    pct = notional_usd / adv_usd
+    return round(pct, 4)
+
+
+def borrow_cost(short_notional: float, annual_rate_pct: float,
+                days: int) -> float | None:
+    """W2-8: the financing cost of a short position over ``days`` (None when
+    unmeasurable). Annual rate is the borrow/prime rate (e.g. 0.5% hard-to-
+    borrow premium; set 0 to model free-to-borrow)."""
+    if short_notional <= 0 or days <= 0 or annual_rate_pct is None:
+        return None
+    return round(short_notional * (annual_rate_pct / 100.0) * (days / 365.0), 6)
+
+
+def quote_adjust(price: float, factor: float | None = None, divisor: float | None = None,
+                 special_dividend: float = 0.0) -> float:
+    """W2-9 corporate-action price adjustment (backtest-normalized series):
+    multiply by a split factor (2 for a 2-for-1), divide by a divisor, and
+    subtract a special cash dividend. Pure; missing factor -> unchanged."""
+    out = price
+    if factor:
+        out *= factor
+    if divisor:
+        out /= divisor
+    out -= special_dividend
+    return round(out, 6)
+
+
 def limit_fill_probability(distance_to_limit_pct: float, base: float = 0.5) -> float:
     """Adverse-tick probability for a limit resting in the book.
 

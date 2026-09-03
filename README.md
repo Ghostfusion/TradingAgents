@@ -1151,6 +1151,9 @@ only after validating in the evaluation harness:
 - **Regime + scenario (W1-10/W2-11/W4-6, advisory)** - `strategies/regime_performance.py`
   (per-regime outcome tabulation, computed stress grid, cross-asset macro regime Risk-On/Contraction/
   Stagflation), `scripts/agent_ablation.py` (W1-11 drop-one measurement harness).
+- **Costs/capacity/actions (W2-6..10, advisory)** - `strategies/backtest_models.py` gains
+  square-root market impact (from ADV+spread), one-way turnover, capacity-vs-ADV, short-borrow cost, and
+  corporate-action price adjustment; `pit_registry.universe_membership` guards survivorship (W2-10).
 - **DSA robustness (advisory, default off)** - `dataflows/market_router.py` (market classifier + opt-in per-market
   vendor priority `market_source_priority` + gap-fill; default path bit-identical), `dataflows/vendor_breaker.py`
   (thread-safe 3-fail/300s circuit breaker + half-open probe + negative capability cache), `dataflows/effective_date.py`

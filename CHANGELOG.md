@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Remediation W2-6..10 costs / capacity / actions / survivorship** - `strategies/backtest_models.py`
+  (square_root_impact Almgren-Chriss from ADV, turnover, capacity_pct, borrow_cost, quote_adjust
+  corporate-action), `pit_registry.universe_membership` (survivorship guard).
+  Tests: test_cost_capacity_actions (14 pass).
+
 - **Remediation W1-10/W2-11/W4-6/W1-11 regime + scenario + ablation** - `strategies/regime_performance.py`
   (regime_conditioned_performance per-regime hit/return, stress_grid computed sensitivity rows,
   macro_regime cross-asset label fail-open), `scripts/agent_ablation.py` (drop-one measurement).
