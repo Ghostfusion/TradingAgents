@@ -138,10 +138,23 @@ def fake_hot(count=50, market="US", min_market_cap=0.0):
 
 @pytest.fixture(autouse=True)
 def _patch_vendors():
+    # Module-level exchange caches leak across tests (a fake symbol cached
+    # as '' / 'US_NYSE' in one test pollutes the next); reset per test.
+    vs._EODHD_EXCH_CACHE.clear()
+    try:
+        from tradingagents.dataflows import moomoo as _mm
+
+        _mm._EXCHANGE_CACHE.clear()
+    except Exception:  # noqa: BLE001
+        pass
     with (
         _patched_router(fake_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
         mock.patch("tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=fake_hot),
+        # The exchange gate (default NYSE/Nasdaq) hits moomoo basicinfo; the
+        # fakes are exchange-less, so report them NYSE-listed to keep the
+        # universe tests deterministic.
+        mock.patch("tradingagents.dataflows.moomoo.get_exchange_moomoo", return_value="US_NYSE"),
     ):
         yield
 
@@ -484,7 +497,7 @@ def test_eodhd_us_universe_filters_common_stocks(monkeypatch, capsys):
         {"Code": "MSFT", "Name": "Microsoft Corp.", "Type": "Common Stock"},
     ]
     monkeypatch.setattr(eodhd, "get_exchange_symbols_eodhd", lambda market: rows)
-    vs.main(["--universe", "eodhd-us", "-l", "2", "-d", "2026-01-02", "--min-mcap", "0"])
+    vs.main(["--universe", "eodhd-us", "-l", "2", "-d", "2026-01-02", "--min-mcap", "0", "--exchanges", ""])
     out = capsys.readouterr().out
     assert "AAPL" in out and "MSFT" in out
     assert "SPY" not in out  # ETF filtered out
@@ -509,7 +522,7 @@ def test_eodhd_losers_universe_seeds_scan(monkeypatch, capsys):
             {"Code": "MSFT", "Type": "Common Stock"},
         ],
     )
-    vs.main(["--universe", "eodhd-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0"])
+    vs.main(["--universe", "eodhd-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0", "--exchanges", ""])
     out = capsys.readouterr().out
     assert "AAPL" in out and "MSFT" in out
     assert "-4.21%" in out  # change_p -4.21 (percent) -> ratio -0.0421 -> -4.21%
@@ -532,7 +545,7 @@ def test_eodhd_losers_equity_filter_drops_non_common(monkeypatch, capsys):
         "get_exchange_symbols_eodhd",
         lambda market: [{"Code": "AAPL", "Type": "Common Stock"}],
     )
-    vs.main(["--universe", "eodhd-losers", "-n", "3", "-d", "2026-01-02", "--min-mcap", "0"])
+    vs.main(["--universe", "eodhd-losers", "-n", "3", "-d", "2026-01-02", "--min-mcap", "0", "--exchanges", ""])
     out = capsys.readouterr().out
     assert "AAPL" in out
     assert "LITU" not in out and "ABCW" not in out  # non-common stocks dropped
@@ -619,6 +632,7 @@ def test_eodhd_losers_loose_near_miss_renders(monkeypatch, capsys):
     vs.main(
         [
             "-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02",
+            "--exchanges", "",
             "--scan", "value-dip", "--value-dip-loose", "--min-mcap", "0",
         ]
     )
@@ -740,6 +754,7 @@ def test_eodhd_cheap_gate_before_fundamentals(monkeypatch, capsys):
     monkeypatch.setattr(vs, "_fetch_ohlcv", _fake_ohlcv)
 
     vs.main(["-u", "eodhd-us", "-l", "2", "-d", "2026-01-02",
+        "--exchanges", "",
              "--scan", "value-dip", "--min-mcap", "0", "--price-min", "0",
              "--pe-max", "0"])
     # The uptrend name is rejected by the cheap OHLCV gate before any
@@ -817,6 +832,58 @@ def test_moomoo_screen_dip_days_pb_price_forward(capsys):
     assert kw["pb_min"] == cfg["moomoo_screen_pb_min"]
     assert kw["pb_max"] == cfg["moomoo_screen_pb_max"]
     assert kw["dip_days"] == cfg["moomoo_screen_dip_days"]
+
+
+def test_moomoo_screen_exchanges_default_and_passthrough(capsys):
+    """--exchanges defaults to NYSE,NASDAQ (server gets US_NYSE/US_NASDAQ)
+    and '' disables the gate."""
+    rows = [
+        {"symbol": "AAPL", "name": "Apple Inc.",
+         "change_pct_5d": -0.1, "market_cap": 3.2e12},
+    ]
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value={}),
+        _patched_router(fake_route),
+    ):
+        vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+        ])
+    kw = scr.call_args.kwargs
+    assert kw["exchanges"] == {"US_NYSE", "US_NASDAQ"}   # default gate on
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr2,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value={}),
+        _patched_router(fake_route),
+    ):
+        vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+            "--exchanges", "",
+        ])
+    assert scr2.call_args.kwargs["exchanges"] is None       # gate off
+    # custom list passthrough
+    with (
+        mock.patch(
+            "tradingagents.dataflows.moomoo.screen_value_dip_moomoo",
+            return_value=rows,
+        ) as scr3,
+        mock.patch("tradingagents.dataflows.config.get_config", return_value={}),
+        _patched_router(fake_route),
+    ):
+        vs.main([
+            "--universe", "moomoo-screen", "-n", "5", "-d", "2026-01-02",
+            "--scan", "value", "--min-avg-vol", "0", "--min-atr-pct", "0",
+            "--exchanges", "NYSE",
+        ])
+    assert scr3.call_args.kwargs["exchanges"] == {"US_NYSE"}
 
 
 def test_moomoo_screen_price_min_zero_disables_server_floor(capsys):

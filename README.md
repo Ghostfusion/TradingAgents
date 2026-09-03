@@ -193,9 +193,12 @@
   without a per-symbol fetch. Filter defaults come from config
   (TRADINGAGENTS_MOOMOO_SCREEN_*) and are overridable per flag
   (--max-chg5d/--max-rsi/--max-debt-assets, plus the shared --pe-max/--min-mcap/
-  --min-roe) + server-side price/PB band (--price-min server floor,
-  --pb-min/--pb-max) and configurable pullback window (--dip-days, default 5;
-  the reference recipe uses 20). Needs OpenD logged in + `moomoo-api`; no other key.
+--min-roe) + server-side price/PB band (--price-min, --pb-min/--pb-max),
+  configurable pullback window (--dip-days, default 5; the reference recipe
+  uses 20), and a client-side NYSE/Nasdaq exchange gate (--exchanges,
+  default NYSE,NASDAQ, applied to every universe - moomoo screen V2 has no
+  functional US exchange filter, so candidates are checked via
+  get_stock_basicinfo / EODHD list). Needs OpenD logged in + `moomoo-api`; no other key.
 - [2026-08-31] **`--universe eodhd-losers` + `--value-dip-loose`** - the value
   screener can now seed the scan from the EODHD bulk US real-time feed (one
   call, ~18k rows, OpenD-independent): the biggest intraday decliners by

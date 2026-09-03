@@ -161,3 +161,38 @@ def test_builder_uses_dip_days_and_pb_bounds():
         if str(c.kwargs.get("name")) == str(CumulativeProperty.PRICE_CHANGE_PCT):
             cum_kw = c.kwargs
     assert cum_kw and cum_kw.get("days") == 20
+
+
+@pytest.mark.unit
+def test_exchange_gate_drops_non_nyse_nasdaq(monkeypatch):
+    """rows on OTC/unknown exchanges are dropped when exchanges given."""
+    items = [
+        _sdk_item((1101, 1, "US.EIX"), (1102, 1, "Edison")),
+        _sdk_item((1101, 1, "US.NGKSY"), (1102, 1, "Niterra ADR")),
+        _sdk_item((1101, 1, "US.TCOM"), (1102, 1, "Trip.com")),
+    ]
+    ctx = _patched_ctx(items)
+    exch = {"EIX": "US_NYSE", "NGKSY": "US_PINK", "TCOM": "US_NASDAQ"}  # bare codes (post _yahoo_style)
+    monkeypatch.setattr(moomoo, "get_exchange_moomoo", lambda sym: exch.get(sym))
+    with (
+        mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+        mock.patch.object(moomoo, "_sdk_call", side_effect=lambda fn, *a, **k: fn(*a, **k)),
+    ):
+        rows = moomoo.screen_value_dip_moomoo(exchanges={"US_NYSE", "US_NASDAQ"})
+    assert [r["symbol"] for r in rows] == ["EIX", "TCOM"]
+    assert {"US_NYSE", "US_NASDAQ"} == moomoo.NYSE_NASDAQ
+
+
+@pytest.mark.unit
+def test_exchange_gate_off_without_exchanges():
+    """no exchanges param -> no gate, all rows kept."""
+    items = [
+        _sdk_item((1101, 1, "US.NGKSY"), (1102, 1, "Niterra ADR")),
+    ]
+    ctx = _patched_ctx(items)
+    with (
+        mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+        mock.patch.object(moomoo, "_sdk_call", side_effect=lambda fn, *a, **k: fn(*a, **k)),
+    ):
+        rows = moomoo.screen_value_dip_moomoo()
+    assert len(rows) == 1

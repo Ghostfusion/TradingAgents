@@ -160,6 +160,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MOOMOO_SCREEN_PB_MIN": "moomoo_screen_pb_min",
     "TRADINGAGENTS_MOOMOO_SCREEN_PB_MAX": "moomoo_screen_pb_max",
     "TRADINGAGENTS_MOOMOO_SCREEN_DIP_DAYS": "moomoo_screen_dip_days",
+    "TRADINGAGENTS_MOOMOO_SCREEN_EXCHANGES": "moomoo_screen_exchanges",
     "TRADINGAGENTS_RISK_COMPACT_REPORT": "risk_compact_report",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
@@ -516,6 +517,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "moomoo_screen_pb_min": None,       # P/B lower bound (off)
         "moomoo_screen_pb_max": None,       # P/B upper bound (off)
         "moomoo_screen_dip_days": 5,        # pullback window (days) for %-change filter
+        "moomoo_screen_exchanges": "NYSE,NASDAQ",  # listing exchanges to keep ('' = off)
         # Vendor-result cache (operational): re-serve successful vendor fetches
         # within a TTL instead of re-hitting free-tier APIs on every run.
         # Researched strategies (enhancement_plan.md - Phase 0..6). All off by

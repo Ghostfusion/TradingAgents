@@ -1094,6 +1094,39 @@ def _alloc_returns(results: list) -> dict:
     return out
 
 
+# Client-side exchange gate (default NYSE+Nasdaq, applied to every
+# universe): moomoo's screen V2 EXCHANGE simple field is non-functional for
+# US, so each candidate is checked via get_stock_basicinfo exchange_type
+# (moomoo universes / tickers) or the EODHD symbol-list Exchange column
+# (eodhd-us / eodhd-losers). Unknown exchange -> dropped (strict, default-on).
+_EODHD_EXCH_CACHE: dict[str, str] = {}
+
+
+def _parse_exchanges(raw: str) -> set[str]:
+    """'NYSE,NASDAQ' -> {'NYSE','NASDAQ'}; '' / None -> empty (gate off)."""
+    if not raw:
+        return set()
+    return {e.strip().upper() for e in str(raw).split(",") if e.strip()}
+
+
+def _exchange_ok(symbol: str, allowed: set[str]) -> bool:
+    """True when the symbol's exchange is in ``allowed`` (canonical short
+    names). EODHD cache first (list-based, for eodhd universes), else the
+    moomoo basicinfo lookup (cached per symbol). A failed lookup drops the
+    symbol (strict) but never aborts the run.
+    """
+    ex = _EODHD_EXCH_CACHE.get(symbol)
+    if ex is None:
+        try:
+            from tradingagents.dataflows.moomoo import get_exchange_moomoo
+
+            raw = get_exchange_moomoo(symbol)
+            ex = (raw or "").removeprefix("US_").upper() if raw else ""
+        except Exception:  # noqa: BLE001 - lookup failure drops, never aborts
+            ex = ""
+    return (ex or "") in allowed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tickers", nargs="*", help="ticker symbols")
@@ -1171,6 +1204,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--pb-max", type=float, default=0.0,
         help="moomoo-screen: max price-to-book ratio (0 disables)"
+    )
+    parser.add_argument(
+        "--exchanges", type=str, default="NYSE,NASDAQ",
+        help="comma list of listing exchanges to keep (all universes; "
+        "default NYSE,NASDAQ; empty '' disables the gate)"
     )
     parser.add_argument(
         "--min-avg-vol",
@@ -1316,6 +1354,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.universe == "heat-proxy":
         args.market = "US"
 
+    # Exchange gate: allowed set from --exchanges ('' disables). Applied to
+    # every universe - server list (moomoo-screen), EODHD list (eodhd-us /
+    # eodhd-losers), or per-symbol basicinfo (tickers / top-losers /
+    # heat-proxy).
+    try:
+        from tradingagents.dataflows.config import get_config as _gc
+
+        _exch_cfg = (_gc().get("moomoo_screen_exchanges") or "NYSE,NASDAQ")
+    except Exception:  # noqa: BLE001 - config absence degrades to default
+        _exch_cfg = "NYSE,NASDAQ"
+    allowed_exch = _parse_exchanges(
+        args.exchanges
+        if args.exchanges != parser.get_default("exchanges")
+        else _exch_cfg
+    )
     mover_meta: dict = {}
     float_cache: dict = {}
     scan_meta: dict = {}
@@ -1349,6 +1402,18 @@ def main(argv: list[str] | None = None) -> int:
             # EODHD codes are bare ("AAPL"); the rest of the pipeline expects
             # Yahoo-style tickers, which for US common stocks is the bare code.
             tickers = [c.upper() for c in common]
+            # Exchange gate via the same symbol list (one cached call): keep
+            # only NYSE/Nasdaq when the default --exchanges is active.
+            if allowed_exch:
+                _EODHD_EXCH_CACHE.update(
+                    {str(s.get("Code")).upper(): str(s.get("Exchange") or "").upper()
+                     for s in symbols if s.get("Code")}
+                )
+                before = len(tickers)
+                tickers = [c for c in tickers if _exchange_ok(c, allowed_exch)]
+                logger.info(
+                    "exchange gate: eodhd-us %d -> %d (NYSE/Nasdaq)", before, len(tickers)
+                )
             logger.info("eodhd-us universe: %d common stocks from EODHD", len(tickers))
             if len(tickers) > args.limit:
                 print(
@@ -1434,6 +1499,10 @@ def main(argv: list[str] | None = None) -> int:
                 pb_min=pb_min or None,
                 pb_max=pb_max or None,
                 dip_days=dip_days,
+                exchanges=(
+                    {"US_" + e for e in allowed_exch}
+                    if allowed_exch else None
+                ),
                 price_to_52w_min=None,
                 price_to_52w_max=None,
                 page_count=page_size,
@@ -1688,11 +1757,17 @@ def main(argv: list[str] | None = None) -> int:
             # call) and keep only genuine common stocks; degrade to the
             # unfiltered list if the reference call fails (never abort).
             try:
+                eodhd_symbols = get_exchange_symbols_eodhd("US")
                 common_set = {
                     str(s.get("Code")).upper()
-                    for s in get_exchange_symbols_eodhd("US")
+                    for s in eodhd_symbols
                     if s.get("Type") == "Common Stock" and s.get("Code")
                 }
+                if allowed_exch:
+                    _EODHD_EXCH_CACHE.update(
+                        {str(s.get("Code")).upper(): str(s.get("Exchange") or "").upper()
+                         for s in eodhd_symbols if s.get("Code")}
+                    )
             except Exception:  # noqa: BLE001 - reference unavailability degrades
                 common_set = set()
             if common_set:
@@ -1705,6 +1780,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if not gated:
                 parser.error("no common stocks after eodhd-losers equity filter")
+            if allowed_exch:
+                before = len(gated)
+                gated = [m for m in gated if _exchange_ok(m["symbol"], allowed_exch)]
+                logger.info(
+                    "exchange gate: eodhd-losers %d -> %d (NYSE/Nasdaq)",
+                    before, len(gated),
+                )
+            if not gated:
+                parser.error("no NYSE/Nasdaq symbols after exchange gate")
             for m in gated:
                 tickers.append(m["symbol"])
                 if m.get("change_p") is not None:
@@ -1737,6 +1821,16 @@ def main(argv: list[str] | None = None) -> int:
         fmp_use = False
     for ticker in tickers[: args.limit]:
         try:
+            # Exchange gate for the per-symbol universes (tickers /
+            # top-losers / heat-proxy); eodhd-us / eodhd-losers are already
+            # list-filtered above, moomoo-screen inside the screen fn.
+            if (
+                allowed_exch
+                and args.universe not in ("eodhd-us", "eodhd-losers")
+                and not _exchange_ok(ticker.upper(), allowed_exch)
+            ):
+                logger.info("exchange gate: drop %s", ticker)
+                continue
             meta = mover_meta.get(ticker.upper(), {})
             # STAGE A: cheap OHLCV-only gate (no provider) BEFORE any
             # fundamentals fetch. Only the single cached OHLCV series is used;

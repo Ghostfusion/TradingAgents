@@ -79,6 +79,13 @@ class MoomooNotConfiguredError(VendorNotConfiguredError):
 # ---------------------------------------------------------------------------
 
 _tls = threading.local()
+
+# Per-symbol exchange cache (get_stock_basicinfo exchange_type) so the
+# NYSE/Nasdaq client gate never re-queries the same symbol twice.
+_EXCHANGE_CACHE: dict[str, str] = {}
+# Canonical NYSE / Nasdaq exchange names (client-side gate; moomoo returns
+# these as ``US_NYSE`` / ``US_NASDAQ``, EODHD as ``NYSE`` / ``NASDAQ``).
+NYSE_NASDAQ = {"US_NYSE", "US_NASDAQ"}
 _autostart_attempted = False  # module-level flag: try autostart at most once
 _last_probe_fail = 0.0  # monotonic() time of the last failed OpenD probe
 _PROBE_FAIL_TTL = 20.0  # skip re-probing for this long after a failure
@@ -1942,6 +1949,37 @@ def _screen_row(item: dict, factor_labels: dict) -> dict | None:
     }
 
 
+def get_exchange_moomoo(symbol: str) -> str | None:
+    """NYSE / Nasdaq / OTC exchange name for a symbol (``get_stock_basicinfo``).
+
+    Returns the moomoo exchange string (``US_NYSE``, ``US_NASDAQ``,
+    ``US_PINK``, ``US_AMEX``, ...) or ``None`` when the lookup fails (bad
+    symbol / no data). Cached per symbol; used by the client-side
+    NYSE/Nasdaq gate (the screener V2 EXCHANGE field is non-functional for
+    the US market).
+    """
+    code = _moomoo_code(symbol)
+    cached = _EXCHANGE_CACHE.get(code)
+    if cached is not None:
+        return cached
+    try:
+        from moomoo import Market, SecurityType  # noqa: PLC0415
+
+        ctx = _ensure_ctx()
+        ret, df = _sdk_call(ctx.get_stock_basicinfo, Market.US, SecurityType.STOCK, [code])
+        df = _check_ret(ret, df, symbol, code, "get_stock_basicinfo")
+        if df is None or not len(df):
+            return None
+        row = df.iloc[0]
+        ex = str(row.get("exchange_type") or "")
+        if not ex or ex == "N/A":
+            return None
+        _EXCHANGE_CACHE[code] = ex
+        return ex
+    except Exception:  # noqa: BLE001 - a failed lookup degrades to unknown
+        return None
+
+
 def screen_value_dip_moomoo(
     market: str = "US",
     pe_min: float | None = None,
@@ -1956,6 +1994,7 @@ def screen_value_dip_moomoo(
     pb_min: float | None = None,
     pb_max: float | None = None,
     dip_days: int = 5,
+    exchanges: set[str] | None = None,
     price_to_52w_min: float | None = None,
     price_to_52w_max: float | None = None,
     page_count: int = 100,
@@ -1978,7 +2017,11 @@ def screen_value_dip_moomoo(
 
     Example: ``screen_value_dip_moomoo(dip_days=20, pb_min=0.5, pb_max=3.0,
     price_min=5.0)`` screens a 20-day pullback window with a P/B value band
-    and a penny-stock floor.
+    and a penny-stock floor. ``exchanges`` (optional) is a client-side
+    exchange gate (``{"US_NYSE", "US_NASDAQ"}``): the V2 ``EXCHANGE`` simple
+    field is non-functional for US, so each row is checked via
+    ``get_stock_basicinfo`` exchange_type; symbols whose exchange is unknown
+    are dropped (strict; never fabricated).
 
     :returns: list of ``{symbol, name, price, pe_ttm, price_to_52w_high, pb,
         change_pct_5d, roe, rsi}`` (values ``None`` when the API did not
@@ -2091,6 +2134,18 @@ def screen_value_dip_moomoo(
         page += 1
         if last_page or page >= max_pages:
             break
+    if exchanges:
+        kept = []
+        for r in rows:
+            ex = get_exchange_moomoo(r["symbol"])
+            if ex in exchanges:
+                kept.append(r)
+        if len(kept) != len(rows):
+            logger.info(
+                "moomoo screen: exchange gate dropped %d/%d rows (allowed %s)",
+                len(rows) - len(kept), len(rows), sorted(exchanges),
+            )
+        rows = kept
     return rows
 
 

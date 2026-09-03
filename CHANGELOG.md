@@ -16,7 +16,11 @@ Breaking changes within the 0.x line are called out explicitly.
   `TRADINGAGENTS_MOOMOO_SCREEN_*`) with per-flag overrides (--max-chg5d/--max-rsi/
   --max-debt-assets) + server-side price floor/PB band (--price-min, --pb-min/
   --pb-max) + configurable pullback window (--dip-days, default 5; reference
-  recipe 20); rows feed mover_meta + the standard results loop. Dep guard:
+  recipe 20) + client-side NYSEX/Nasdaq exchange gate (--exchanges, default
+  NYSE,NASDAQ, all universes; screen V2's EXCHANGE field is non-functional
+  for US, so candidates are checked via get_stock_basicinfo / the EODHD
+  symbol-list Exchange column); rows feed mover_meta + the standard results
+  loop. Dep guard:
   `protobuf>=5.29,<6` (moomoo SDK needs the pre-6.0 upb API). Tests:
   test_moomoo_value_dip_screen (6 pass) + 2 CLI tests.
 - **Remediation W1-5/W3-5/W3-6/W3-8/W4-5/W4-7/W4-8 ops + polish** - `strategies/quant_baseline.py`
