@@ -1535,16 +1535,39 @@ def _dcf_cash_debt(bal):
 
 
 def _dcf_shares(fund, bal, market_cap, ticker):
-    """Shares from balance/fundamentals, else derived (market_cap / last close)."""
+    """Shares from balance/fundamentals, else derived (market_cap / last close).
+
+    Cross-check (remediation W2-9/vibe-fix): when BOTH a reported share count
+    and market_cap/close are available, keep the count only if it is within a
+    2x band of the derived count (market_cap / close). A restated/diluted
+    share count that is wildly off the live price basis (e.g. SNDK 1.61B vs
+    ~147M) would otherwise produce a phantom per-share DCF and a fake margin
+    of safety. When the reported count passes the band, it wins; otherwise the
+    derived count wins. Returns (count, chosen_basis) where chosen_basis is
+    "reported" | "derived" | None.
+    """
+    last = _dcf_last_close(ticker)
+    derived = float(market_cap) / float(last) if (last and market_cap) else None
+    reported = None
     for src in (bal, fund):
         for key in ("diluted_shares", "shares_outstanding", "shares", "shares_os"):
             v = _dcf_latest(src.get(key)) if isinstance(src, dict) else None
             if v:
-                return float(v)
-    last = _dcf_last_close(ticker)
-    if last and market_cap:
-        return float(market_cap) / float(last)
-    return None
+                reported = float(v)
+                break
+        if reported is not None:
+            break
+    if reported is not None and derived is not None and derived > 0:
+        ratio = reported / derived
+        if 0.5 <= ratio <= 2.0:
+            return reported, "reported"
+        # wildly inconsistent -> prefer the derived (price-consistent) count
+        return derived, "derived"
+    if reported is not None:
+        return reported, "reported"
+    if derived is not None:
+        return derived, "derived"
+    return None, None
 
 
 def _dcf_rf(current_date):
@@ -1592,7 +1615,7 @@ def get_dcf_valuation(
         market_cap = _dcf_market_cap(fin)
         beta = _dcf_beta(fin)
         cash, debt = _dcf_cash_debt(fin)
-        shares = _dcf_shares(fin, fin, market_cap, ticker)
+        shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
         if not shares:
             return f"dcf unavailable for {ticker}: no shares outstanding."
         if rf is None:
@@ -1618,6 +1641,7 @@ def get_dcf_valuation(
         f"pv_terminal={res['pv_tv']:.2f} terminal_share={res['terminal_share']:.0%} "
         f"wacc={res['wacc']:.2%} g={res['growth']:.2%} "
         f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
+        f"share_basis={shares_basis or 'n/a'} "
         f"(provider-derived; growth/ERP are analyst overrides)"
     )
 
