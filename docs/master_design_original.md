@@ -210,7 +210,7 @@ batch summary JSONL + per-symbol report folders.
 **Pipeline** (`pipeline.py`) — universe sources (tickers/top-losers/
 heat-proxy/top-movers), top-N, vendor, market, movers count, workers.
 
-**Scripts (24)** — `value_screener`, `pre_market_review`, `nightly_review`
+**Scripts (25)** — `value_screener` (incl. `--universe moomoo-screen` whole-market value-dip via Stock Screening V2), `pre_market_review`, `nightly_review`
 (effective-date skip + `--force-run`), `action_report` (basket vs report
 conditions MET/NOT_MET/UNKNOWN), `backtest_strategy` (next-bar fills, fills
 vs targets), `factor_bench`, `factor_model_train`, `factor_proposal_loop`,
