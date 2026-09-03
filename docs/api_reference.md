@@ -143,6 +143,8 @@ in `batch.py`).
 
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
 | `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
+| `TRADINGAGENTS_MAX_PAIRWISE_CORR` | `max_pairwise_corr` | hard cluster ceiling on pairwise position correlation (default off) |
+| `TRADINGAGENTS_TRAILING_STOP_ATR_MULT` | `trailing_stop_atr_mult` | ATR-multiplied trailing stop (atr*mult) instead of static %% (default off) |
 | `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` | `correlation_penalty_frac` | weight cut for a penalized name, renormalized across the book (default 0.3) |
 | `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
 | `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |

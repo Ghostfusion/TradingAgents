@@ -457,3 +457,21 @@ def test_calculators_do_not_raise(func, args, kwargs):
     if isinstance(out, dict):
         # a dict result is fine; assert it does not carry a bare exception
         assert not (isinstance(out, str))
+
+
+def test_trailing_stop_exit_atr_variant():
+    """ATR-multiplied trailing: high ATR -> wider band than static 5%, so a
+    -5% pullback does NOT exit; low ATR -> tighter, so -5% DOES exit."""
+    # entry 100, peak 120, current 114 = -5% from peak (static 5% would exit)
+    static = exits.trailing_stop_exit(100, 120, 114, 0.05)
+    assert static["exit"] is True
+    # high ATR 8.0 x mult 2.0 = 16% band -> no exit at -5%
+    wide = exits.trailing_stop_exit(100, 120, 114, 0.05, atr_value=8.0, atr_mult=2.0)
+    assert wide["exit"] is False
+    assert wide["stop_px"] == 120 * (1 - 16.0 / 120)  # 120 - 16
+    # low ATR 1.0 x mult 0.5 = 0.5% band -> exit much earlier
+    tight = exits.trailing_stop_exit(100, 120, 114, 0.05, atr_value=1.0, atr_mult=0.5)
+    assert tight["exit"] is True
+    # atr_value None -> falls back to static % (backward compat)
+    fb = exits.trailing_stop_exit(100, 120, 114, 0.05, atr_value=None, atr_mult=None)
+    assert fb == static

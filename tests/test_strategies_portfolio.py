@@ -113,3 +113,40 @@ def test_allocation_block_gate_on_missing_series_unchanged():
     )
     assert "- A: 50.0%" in text
     assert "- B: 50.0%" in text
+
+
+def _returns_correlated():
+    # A and B move together (corr ~1); C is independent (mixed) -> gate drops one of A/B.
+    base = [10, 11, 12, 13, 14, 15, 16, 17]
+    return {
+        "A": base,
+        "B": [x + 0.1 for x in base],           # corr(A,B) ~ 1
+        "C": [10, 15, 12, 19, 13, 18, 14, 20],  # low corr
+    }
+
+
+def test_allocation_block_max_pairwise_corr_drops_cluster():
+    # max_pairwise_corr hard gate (default off): when set low, a correlated
+    # pair (A/B) must be thinned - the cluster gate drops one and the note
+    # names it (never fabricates the return series).
+    rets = _returns_correlated()
+    text = allocation_block(
+        {"A": 0.4, "B": 0.4, "C": 0.2},
+        cfg={"max_name_weight": 0.5, "max_pairwise_corr": 0.3},
+        returns_by_name=rets,
+    )
+    assert "cluster-dropped" in text or "cluster-gate" in text
+    # A and B cannot BOTH stay at 40% when corr(A,B) ~ 1 > 0.3
+    assert "- A: 40.0%" not in text or "- B: 40.0%" not in text
+
+
+def test_allocation_block_max_pairwise_corr_off_when_unset():
+    # no max_pairwise_corr -> no cluster gate regardless of returns
+    rets = _returns_correlated()
+    text = allocation_block(
+        {"A": 0.4, "B": 0.4, "C": 0.2},
+        cfg={"max_name_weight": 0.5},   # gate off (None)
+        returns_by_name=rets,
+    )
+    assert "cluster" not in text
+    assert "- A: 40.0%" in text and "- B: 40.0%" in text

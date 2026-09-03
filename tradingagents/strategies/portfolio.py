@@ -56,6 +56,38 @@ def adjust_for_caps(
     return out
 
 
+def _max_pairwise_corr(returns_by_name: dict, names: list[str]) -> float | None:
+    """Max pairwise Pearson correlation across the candidate names.
+
+    Simple, pure, no-fabrication: returns None when fewer than 2 names have a
+    return series (or the series are empty) - the gate never fails on missing
+    data. Used as a hard cluster ceiling (max_pairwise_corr) so a book of 10
+    correlated names (semis/energy) isn't a single leveraged trade.
+    """
+    import numpy as np
+
+    valid = {}
+    for n in names:
+        r = returns_by_name.get(n) or []
+        if len(r) >= 2:
+            valid[n] = [float(x) for x in r]
+    if len(valid) < 2:
+        return None
+    keys = list(valid)
+    best = None
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            a, b = np.array(valid[keys[i]]), np.array(valid[keys[j]])
+            denom = float(np.std(a) * np.std(b))
+            if denom == 0:
+                continue
+            c = float(np.cov(a, b)[0, 1]) / denom
+            c = max(-1.0, min(1.0, c))
+            if best is None or abs(c) > abs(best):
+                best = c
+    return best
+
+
 def allocation_block(
     scores: dict,
     cfg: dict | None = None,
@@ -121,6 +153,28 @@ def allocation_block(
             penalty=float(cfg.get("correlation_penalty_frac", 0.3)),
         )
         corr_note = " · correlation-penalized"
+    # Hard pairwise-correlation cluster gate (max_pairwise_corr, advisory):
+    # a book of highly-correlated names is one leveraged trade; when the
+    # configured ceiling is breached the offending names are dropped from the
+    # plan (never fabricated - names without a return series are kept).
+    pair_corr_cap = cfg.get("max_pairwise_corr")
+    if returns_by_name and pair_corr_cap:
+        cap = float(pair_corr_cap)
+        base_names = list(w)
+        # iterative: drop the name whose removal best reduces max pairwise
+        # corr, until under the cap (max 3 rounds to bound runtime).
+        for _ in range(3):
+            mx = _max_pairwise_corr(returns_by_name, [n for n in base_names if w.get(n, 0) > 0])
+            if mx is None or mx <= cap:
+                break
+            # drop the member with the highest average corr to the rest
+            worst = _worst_correlated(returns_by_name, [n for n in base_names if w.get(n, 0) > 0])
+            if not worst:
+                break
+            w.pop(worst, None)
+            corr_note = f" · cluster-dropped {worst}"
+        else:
+            corr_note = " · cluster-gate (still > cap)"
     if sector_map:
         w = adjust_for_caps(w, sector_map, sector_cap_limit=sec_cap, max_name=max_n)
     else:
@@ -240,3 +294,32 @@ __all__ = [
     "mean_correlation",
     "correlation_penalty",
 ]
+
+
+def _worst_correlated(returns_by_name: dict, names: list[str]) -> str | None:
+    """Name with the highest average |corr| to the rest (cluster-gate drop)."""
+    import numpy as np
+
+    valid = {}
+    for n in names:
+        r = returns_by_name.get(n) or []
+        if len(r) >= 2:
+            valid[n] = [float(x) for x in r]
+    if len(valid) < 2:
+        return None
+    keys = list(valid)
+    avg = {}
+    for i, n in enumerate(keys):
+        a = np.array(valid[n])
+        cs = []
+        for j in range(len(keys)):
+            if i == j:
+                continue
+            b = np.array(valid[keys[j]])
+            denom = float(np.std(a) * np.std(b))
+            if denom == 0:
+                continue
+            cs.append(abs(float(np.cov(a, b)[0, 1]) / denom))
+        avg[n] = sum(cs) / len(cs) if cs else 0.0
+    return max(avg, key=avg.get) if avg else None
+

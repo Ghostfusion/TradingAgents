@@ -479,6 +479,7 @@ has changed before); never assume an endpoint works — the SDK's
   repro in both concurrency modes; regression tests
   `test_production_setup_registers_analyst_cap_self_loop` +
   `test_parallel_subgraph_registers_analyst_cap_self_loop`.
+- 2026-09-03 - cluster/exit gates: `allocation_block` hard `max_pairwise_corr` cluster gate (drop worst-correlated name when max pairwise corr exceeds the cap) + `trailing_stop_exit` ATR-adaptive trailing (`trailing_stop_atr_mult`); advisory/default-off; precedence documented (terminal risk > stop-loss > trailing > min-holding).
 - 2026-09-03 - `--universe moomoo-screen` in the value screener: a
   whole-market value-dip scan via moomoo Stock Screening V2 (local OpenD) -
   server-side AND of value anchors (PE_TTM, market cap, ROE, optional net

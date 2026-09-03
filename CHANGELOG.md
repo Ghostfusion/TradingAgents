@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Pairwise-correlation cluster gate + ATR-adaptive trailing stop** -
+  `strategies/portfolio.py` `allocation_block` gains a hard
+  `max_pairwise_corr` ceiling (advisory, default off): when the max pairwise
+  Pearson corr across the candidate names exceeds the cap, the worst-
+  correlated name is dropped (never fabricates - names without a return
+  series are kept). `strategies/exits.py` `trailing_stop_exit` gains an
+  ATR-multiplied variant (`atr_value` + `atr_mult`): stop distance = atr*mult
+  instead of the static `trail_pct`, so high-beta names stop at a
+  proportionate width (premature-exit fix); precedence declared in the
+  docstring (terminal risk > stop-loss > trailing > min-holding; breakeven
+  resets baseline, trailing only ratchets up). Config keys
+  `max_pairwise_corr` / `trailing_stop_atr_mult` (env-overridable).
+  Tests: test_strategies_portfolio + test_quantlib_lean_enhancements (74
+  pass). Gemini review: stale typos already fixed, cvar/drawdown defaults
+  present; these two were the genuinely-missing pieces.
 - **Market-stress / liquidity / earnings-blackout hardenings (mean-reversion)** -
   `strategies/regime.py` `regime_gate_read` gains a market-level stress leg
   (`index_closes`; config `market_stress_index` e.g. `^SPX` +

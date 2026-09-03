@@ -117,7 +117,9 @@ def breakeven_after_confirmation(
 
 
 def trailing_stop_exit(entry: float, peak: float, current: float,
-                       trail_pct: float = 0.05) -> dict:
+                       trail_pct: float = 0.05,
+                       atr_value: float | None = None,
+                       atr_mult: float | None = None) -> dict:
     """Peak-trailing exit (Lean L4): exit when ``current`` has pulled back
     ``trail_pct`` below the highest value seen since entry.
 
@@ -125,6 +127,19 @@ def trailing_stop_exit(entry: float, peak: float, current: float,
     fixed ATE/ATR rules never force such a giveback. Long-only. ``exit`` True
     (and a ``stop_px`` below current) means the peak-trail stop is struck.
     Returns all-``None``/``exit=False`` on unusable inputs — never fabricates.
+
+    Regime-adaptive trailing (``atr_value`` + ``atr_mult``): when both are
+    supplied (and positive), the stop distance is ``atr_mult * ATR`` instead
+    of the static ``trail_pct`` — a high-beta name at 2x ATR > 5% gets a
+    proportionate trailing band instead of being stopped out prematurely, and
+    a defensive name at 0.4x ATR gets a tighter stop than the static 5%.
+    A static 5% works poorly across regimes (premature exits on vol names,
+    too loose on sleepers); the ATR form is the regime-adaptive alternative.
+
+    Precedence (exit hierarchy, matches the framework): terminal risk
+    (HWM / daily-loss / drawdown) > stop-loss > trailing stop > min-holding.
+    The trailing stop only *ratchets upward* from its baseline; breakeven
+    (contract.py) resets the *baseline*, never the other way around.
     """
     if entry is None or peak is None or current is None:
         return {"exit": False, "stop_px": None, "drawdown_from_peak": None}
@@ -132,7 +147,11 @@ def trailing_stop_exit(entry: float, peak: float, current: float,
     current = float(current)
     if peak <= 0:
         return {"exit": False, "stop_px": None, "drawdown_from_peak": None}
-    pct = abs(float(trail_pct))
+    # ATR-adaptive band when both supplied and positive; else static %.
+    if atr_value is not None and atr_mult is not None and float(atr_value) > 0 and float(atr_mult) > 0:
+        pct = abs(float(atr_value) * float(atr_mult) / peak)
+    else:
+        pct = abs(float(trail_pct))
     dd = current / peak - 1.0
     return {
         "exit": dd < -pct,

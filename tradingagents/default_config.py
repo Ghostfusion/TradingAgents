@@ -207,6 +207,8 @@ _ENV_OVERRIDES = {
     # pairwise correlation with the rest of the book exceeds the threshold.
     "TRADINGAGENTS_ENABLE_CORRELATION_PENALTY": "enable_correlation_penalty",
     "TRADINGAGENTS_CORRELATION_THRESHOLD": "correlation_threshold",
+    "TRADINGAGENTS_MAX_PAIRWISE_CORR": "max_pairwise_corr",
+    "TRADINGAGENTS_TRAILING_STOP_ATR_MULT": "trailing_stop_atr_mult",
     "TRADINGAGENTS_CORRELATION_PENALTY_FRAC": "correlation_penalty_frac",
     # OpenBB Phase-3 free-tier data surfaces (off by default; opt-in via env).
     "TRADINGAGENTS_ENABLE_OPTIONS_SURFACE": "enable_options_surface",
@@ -608,6 +610,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "rolling_window": 132,  # L3: rolling-beta window (Lean default 132)
         "downside_mar": 0.0,  # L3: Sortino/downside minimum-return target (MAR)
         "trailing_stop_pct": 0.05,  # L4: peak-trailing stop (% from peak)
+        "trailing_stop_atr_mult": None,  # L4: when set, the trailing stop is ATR-multiplied (atr * mult) instead of a static % — regime-adaptive (None = static %)
         "enable_trailing_exit": False,  # L4: emit peak-trail exit overrides
         "risk_parity_enabled": False,  # L2: use covariance risk-parity in alloc
         "risk_manager_drawdown_pct": 0.05,  # L1: two-pass exit-minus-% override
@@ -649,6 +652,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "target_atr": 4.0,  # V4: profit target multiple
         "sector_cap_limit": 0.35,  # V3: max single-sector weight
         "max_name_weight": 0.25,  # V3: max single-name weight
+        "max_pairwise_corr": None,  # V3/Opt: hard ceiling on pairwise position correlation (e.g. 0.70); None = off (advisory cluster gate)
         "max_book_names": 10,  # V3: minimum names for diversification
         # Risk governor (risk_management_plan.md): deterministic risk gate.
         "enable_risk_governor": False,
