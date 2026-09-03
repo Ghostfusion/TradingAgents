@@ -121,9 +121,13 @@ def _looks_truncated(text: str) -> bool:
     last_line = t.rsplit("\n", 1)[-1].strip()
     if last_line.startswith("**") and "**:" in last_line and len(last_line) <= 60:
         return False
-    # Real cuts end mid-word in lowercase (or a digit); an uppercase bare
-    # ending is usually a deliberate verdict word, not a cut.
-    return last.islower() or last.isdigit()
+    # Real cuts end mid-word in lowercase. A digit ending is a COMPLETE
+    # measured value / indicator line (e.g. "DI- 25.1", "RS line 0.526",
+    # "$287", a table cell) - not a cut. Treating a trailing digit as a cut
+    # caused false "Section truncated" markers on otherwise complete analyst
+    # reports (AVGO market.md ended "ADX 11.0 (no trend force), DI- 25.1" and
+    # was wrongly flagged despite being only ~1.3k tokens at an 8k cap).
+    return last.islower()
 
 
 def _finalize_section(text: str) -> str:

@@ -200,6 +200,33 @@ def test_truncation_marker_appended_to_mid_sentence_sections(tmp_path):
     assert "Section truncated at the LLM output cap" in report
 
 
+def test_numeric_outro_marker_false_positive_fixed():
+    """AVGO regression: market.md ended 'ADX 11.0 (no trend force), DI- 25.1'
+    and was wrongly flagged as truncated (4.3KB, ~1.3k tokens, way under the
+    8k cap). A trailing digit is a complete measured value, not a cut."""
+    from tradingagents.reporting import _looks_truncated
+
+    numeric_end = (
+        "The stock is weak below the 50-SMA; I look for a reclaim of VWAP "
+        "before adding. The signal stack: Ichimoku price below cloud "
+        "(span_a 371.7 / span_b 355.0); ADX 11.0 (no trend force), DI- 25.1"
+    )
+    assert not _looks_truncated(numeric_end)
+
+    # report-ending measured values / tables are also complete
+    assert not _looks_truncated("Relative volume 0.83")
+    assert not _looks_truncated("| US recession 2026 | 8% (-1pp) | Low odds |")
+
+    # a REAL mid-word cut still flags
+    real_cut = (
+        "The stock trades at a deep discount and the balance sheet is clean, "
+        "but the near-term catalyst is missing and the technicals are "
+        "rolling over, so the entry should wait for a confirmed reversal "
+        "candle before any scale-in is justified and the thesis is cut"
+    )
+    assert _looks_truncated(real_cut)
+
+
 def test_finalize_section_roundtrip():
     from tradingagents.reporting import _finalize_section
 
