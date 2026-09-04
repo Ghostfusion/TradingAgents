@@ -106,6 +106,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
     "TRADINGAGENTS_ENABLE_DECISION_AUDIT": "enable_decision_audit",
+    "TRADINGAGENTS_REGIME_STATE_ENABLE": "regime_state_enable",
     "TRADINGAGENTS_KNIFE_COMPOSITE_ENABLE": "knife_composite_enable",
     "TRADINGAGENTS_KNIFE_SCORE_WEIGHTS": "knife_score_weights",
     "TRADINGAGENTS_KNIFE_SCORE_BANDS": "knife_score_bands",
@@ -593,6 +594,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "value_dip_require_catalyst": False,  # A2: re-rating evidence required
         "value_dip_knife_enable": False,  # knife guards enforce (advisory rows by default)
         "knife_composite_enable": False,  # composite K gates sizing (advisory default)
+        "regime_state_enable": False,  # multi-axis regime factor gates sizing
         "knife_score_weights": [0.25, 0.20, 0.20, 0.20, 0.15],
         "knife_score_bands": [1.5, 2.5, 3.0],
         "value_dip_regime_gate": False,  # A1: hard-gate on regime (advisory by default)

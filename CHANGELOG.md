@@ -13,6 +13,20 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Multi-axis regime state + F_regime sizing** - `strategies/regime_state.py`
+  adds four independent crisp regime dimensions (TrendScore=(EMA20-EMA50)/ATR14
+  -> STRONG_BULL/BULL/BEAR/STRONG_BEAR; VolRatio=ATR14/Median(ATR,N) ->
+  LOW/NORMAL/HIGH/EXTREME; Relative=R_stock-R_bench vs a benchmark ->
+  UNDERPERFORM/NEUTRAL/OUTPERFORM; Drawdown=P/RollingHigh-1 ->
+  NORMAL/CORRECTION/BEAR/SEVERE) aggregated by `regime_state()` (multi-axis,
+  never a single forced label) with a graduated `regime_factor` (Bull/Normal
+  1.0, Bear/Normal 0.5, Bear+High 0.5, Extreme/Severe 0.0; conservative min
+  composition). `build_position_contract` accepts `regime_factor` (sized *=
+  F_regime * F_knife); graph feeds it when `regime_state_enable` (default
+  off); re-exported from `regime.py`. Thresholds are config defaults, not
+  universal (calibrate per universe/backtests). Tests: 10 regime tests
+  (trend/vol/relative/drawdown axes, factor composition, missing-input
+  unknowns, contract scaling) + knife + liquidity = 51 total.
 - **Composite knife-guard score + graduated sizing** - `strategies/knife_guard.py`
   adds the weighted composite falling-knife score K (Z_return / Z_volume /
   Z_ATR / Z_drawdown / downside-VPIN legs, weights `[0.25,0.20,0.20,0.20,0.15]`)

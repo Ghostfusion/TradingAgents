@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Multi-axis regime state** - four crisp dimensions
+  (Trend/Volatility/Relative-vs-benchmark/Drawdown) instead of one label,
+  aggregated with a graduated `F_regime` position-size factor composed with
+  the knife guard (`sized ×= F_regime × F_knife`). Advisory
+  (`regime_state_enable`, default off).
 - [2026-09-04] **Composite knife-guard score** - a weighted falling-knife
   score K (return/volume/ATR/drawdown/order-flow z legs) with a graduated
   position-size multiplier (1.0 → 0.5 → 0.25 → block) instead of a binary

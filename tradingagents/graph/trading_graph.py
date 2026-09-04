@@ -1070,6 +1070,20 @@ class TradingAgentsGraph:
                     entry_price = None
                     if tranche_read and tranche_read.get("valid"):
                         entry_price = tranche_read.get("avg_entry")
+                    _rf = 1.0
+                    if self.config.get("regime_state_enable"):
+                        try:
+                            from tradingagents.strategies.regime_state import regime_state as _rs
+
+                            _ohlcv_state = final_state.get("ohlcv") or {}
+                            _rsd = _rs(
+                                closes,
+                                _ohlcv_state.get("highs") or None,
+                                _ohlcv_state.get("lows") or None,
+                            )
+                            _rf = _rsd["factor"]
+                        except Exception:  # noqa: BLE001 - advisory scale degrades
+                            _rf = 1.0
                     _kf = 1.0
                     if self.config.get("knife_composite_enable"):
                         try:
@@ -1095,6 +1109,7 @@ class TradingAgentsGraph:
                         trail_stop=(final_state.get("swing_exits") or {}).get("chandelier"),
                         implied_move_pct=(catalyst_snapshot or {}).get("implied_move_pct"),
                         knife_factor=_kf,
+                        regime_factor=_rf,
                     )
                     if contract is not None:
                         final_state["position_contract"] = (

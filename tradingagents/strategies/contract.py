@@ -74,6 +74,7 @@ def build_position_contract(
     trail_stop: float | None = None,
     implied_move_pct: float | None = None,
     knife_factor: float = 1.0,
+    regime_factor: float = 1.0,
 ) -> PositionContract | None:
     """Compute the authoritative size + stop from config budgets.
 
@@ -174,7 +175,16 @@ def build_position_contract(
     if kf < 1.0:
         reasons.append(f"knife_scale={kf:.2f}")
 
-    sized = min(size_base * vol_s * flow_s * agree * cat_s * kf, max_pct)
+    rf = 1.0
+    if regime_factor is not None:
+        try:
+            rf = _clamp(float(regime_factor), 0.0, 1.0)
+        except (TypeError, ValueError):
+            rf = 1.0
+    if rf < 1.0:
+        reasons.append(f"regime_scale={rf:.2f}")
+
+    sized = min(size_base * vol_s * flow_s * agree * cat_s * kf * rf, max_pct)
     # Implied-move scaling: a binary event (earnings straddle) widens the
     # single-day gap; scale the position down by (1 - implied_move_pct) so the
     # event can't blow the risk budget.

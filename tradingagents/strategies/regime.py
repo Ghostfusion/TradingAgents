@@ -268,5 +268,17 @@ __all__ = [
     "choppiness",
     "regime_label",
     "hmm_regime",
-    "make_vol_series_of_closes",    "regime_gate_read",
+    "make_vol_series_of_closes",
+    "regime_gate_read",
+    "regime_state",
+    "regime_factor",
 ]
+
+
+def _lazy_regime_state():
+    """Late import: regime_state lives in regime_state.py (mirrors re-export)."""
+    from tradingagents.strategies.regime_state import regime_factor, regime_state
+    return regime_factor, regime_state
+
+
+regime_factor, regime_state = _lazy_regime_state()
