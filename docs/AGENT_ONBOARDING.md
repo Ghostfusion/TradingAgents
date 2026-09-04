@@ -306,6 +306,9 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-03 `(working tree)` - PM node persists structured `pm_decision`
+  (post-guardrail, model_dump json) -> research_decision.json carries real
+  rating/data_quality on new runs; legacy nulls fail closed.
 - 2026-09-03 `(working tree)` - `reporting.write_research_decision` emits the
   hash-pinned `research_decision.json` execution contract (TradingExecution
   daemon input; advisory; nulls for unproducible fields).

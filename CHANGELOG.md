@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Structured PM decision persisted (`pm_decision`)** - `agent_states.AgentState`
+  gains `pm_decision`; the Portfolio Manager node captures the structured
+  PortfolioDecision (post-guardrail, `model_dump(mode=json)`) and returns it
+  in state, so the `research_decision.json` emitter + prediction-ledger log
+  read the REAL rating/data_quality/guardrail_reason instead of defaults.
+  Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
 - **`research_decision.json` execution contract emitter** - `reporting.py`
   `write_research_decision()` writes the deterministic, hash-pinned machine
   contract beside `run_card.json` at the end of every report tree: ticker,

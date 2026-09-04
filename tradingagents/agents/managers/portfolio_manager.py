@@ -228,13 +228,22 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             except Exception:  # noqa: BLE001 - the guardrail degrades, never raises
                 return
 
+        _pm_capture: dict = {}
+
+        def _result_hook(result):
+            _guardrail_hook(result)
+            try:
+                _pm_capture["obj"] = result.model_dump(mode="json")
+            except Exception:  # noqa: BLE001 - pm_decision is advisory
+                _pm_capture["obj"] = None
+
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,
             llm,
             prompt,
             render_pm_decision,
             "Portfolio Manager",
-            result_hook=_guardrail_hook,
+            result_hook=_result_hook,
             fallback_llm=fallback_llm,
         )
 
@@ -254,6 +263,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
         return {
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
+            "pm_decision": _pm_capture.get("obj"),
         }
 
     return portfolio_manager_node

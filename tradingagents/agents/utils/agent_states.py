@@ -82,6 +82,11 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+    pm_decision: Annotated[
+        dict | None,
+        "Structured PortfolioDecision output (model_dump mode=json) adjacent to "
+        "the rendered final_trade_decision text; absent on free-text fallback",
+    ]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
     risk_context: Annotated[dict, "Deterministic risk snapshot (CVaR/stress) precomputed for the Portfolio Manager prompt before the graph runs"]
     computed_decision_context: Annotated[str, "Deterministic Phase A-E advisory context (regime gate / trade plan card / risk snapshot / pre-open rows) injected to the Trader, Portfolio Manager and the 3 risk debators"]
