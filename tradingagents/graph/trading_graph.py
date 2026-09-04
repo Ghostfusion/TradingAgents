@@ -150,6 +150,12 @@ from tradingagents.agents.utils.debate_roles import resolve_role_llm
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 from tradingagents.agents.utils.news_data_tools import get_news_relevance_read
+from tradingagents.agents.utils.quant_adds_tools import (
+    get_allocation_black_litterman,
+    get_kalman_spread,
+    get_position_risk_multiplier,
+    get_regime_state,
+)
 from tradingagents.agents.utils.value_dip_tools import (
     get_balance_sheet_health,
     get_bollinger_pct_b,
@@ -425,6 +431,8 @@ class TradingAgentsGraph:
                     get_risk_gate,
                     get_regime_read,
                     get_regime_components,
+                    get_regime_state,
+                    get_position_risk_multiplier,
                     get_exit_check,
                     get_exit_plan,
                     get_scaleout_plan,
@@ -569,6 +577,10 @@ class TradingAgentsGraph:
                     get_ownership_concentration,
                     get_fixed_income_risk,
                     get_alpha_scoring,
+                    get_regime_state,
+                    get_kalman_spread,
+                    get_allocation_black_litterman,
+                    get_position_risk_multiplier,
                 ]
             ),
         }
@@ -1070,6 +1082,22 @@ class TradingAgentsGraph:
                     entry_price = None
                     if tranche_read and tranche_read.get("valid"):
                         entry_price = tranche_read.get("avg_entry")
+                    _hard_guards: tuple[str, ...] = ()
+                    if self.config.get("enable_hard_guards"):
+                        # hard-guard sources from the deterministic risk state:
+                        # liquidity ILLIQUID, data-quality failure, risk_halt.
+                        _hard_guards = []
+                        _rg = final_state.get("risk_gate") or {}
+                        _verdict = str(_rg.get("verdict") or "")
+                        if _verdict == "REJECT":
+                            _hard_guards.append("max_portfolio_risk")
+                        _dq = str((final_state.get("pm_decision") or {}).get("data_quality") or "unknown").lower()
+                        if _dq in ("stale", "unknown"):
+                            _hard_guards.append("data_quality_failure")
+                        _liq = (final_state.get("risk_snapshot") or {}).get("liquidity_verdict")
+                        if _liq == "ILLIQUID":
+                            _hard_guards.append("insufficient_liquidity")
+                        _hard_guards = tuple(_hard_guards)
                     _rf = 1.0
                     _vcf = 1.0
                     if self.config.get("regime_state_enable") or self.config.get("vol_cap_enable"):
@@ -1128,6 +1156,7 @@ class TradingAgentsGraph:
                         knife_factor=_kf,
                         regime_factor=_rf,
                         vol_cap_factor=_vcf,
+                        hard_guards=_hard_guards,
                     )
                     if contract is not None:
                         final_state["position_contract"] = (

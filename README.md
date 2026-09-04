@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Agent-visible quant tools** - regime state, Kalman pair
+  spread, execution multiplier, Black-Litterman allocation and the no-trade
+  guard band are now @tools bound to the Market/Fundamentals analysts (+
+  ToolNodes), and the graph feeds real hard guards (risk REJECT / stale data /
+  illiquid) into position sizing under `enable_hard_guards`.
 - [2026-09-04] **Kalman dynamic spread + Black-Litterman** - a pure Kalman
   filter tracks a pair's hedge ratio online (adapts to drift; static rolling
   beta doesn't) for pairs/stat-arb signals; Black-Litterman view blending

@@ -13,6 +13,18 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Agent tools for the quant adds (regime/kalman/multiplier/BL/guard-band)** -
+  `agents/utils/quant_adds_tools.py` binds the new calculations to the virtual
+  agents so they can cite computed reads:
+  `get_regime_state` (multi-axis, Market analyst + node), `get_kalman_spread`
+  (Fundamentals), `get_position_risk_multiplier` (Market + Fundamentals),
+  `get_allocation_black_litterman` (Fundamentals), plus
+  `get_no_trade_guard_band` (guards the wiring gate: `guard_band_halfwidth`/
+  `should_trade` were zero-reference). All re-exported via `agent_utils`,
+  bound in both analyst tool lists + both ToolNodes; the graph now feeds
+  actual `hard_guards` (risk REJECT / stale-or-unknown data / ILLIQUID) into
+  `build_position_contract` under `enable_hard_guards` (default off).
+  Wiring + structured_agents + calc suites green (33 + 32); ruff clean.
 - **Kalman-filter dynamic hedge-ratio spread** - `strategies/statistical_kalman.py`
   `kalman_spread(x, y, Q, R, alpha)` tracks the pair's hedge ratio ONLINE via
   a scalar Kalman filter (`K = P x/(P x^2+R); beta += K(y-alpha-beta x);

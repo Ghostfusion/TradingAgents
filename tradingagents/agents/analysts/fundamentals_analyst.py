@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     get_allocation,
+    get_allocation_black_litterman,
     get_alpha_scoring,
     get_analyst_ratings,
     get_analyst_verdict,
@@ -26,12 +27,15 @@ from tradingagents.agents.utils.agent_utils import (
     get_insider_activity,
     get_institution_holdings,
     get_instrument_context_from_state,
+    get_kalman_spread,
     get_language_instruction,
     get_margin_of_safety,
     get_output_budget,
     get_ownership_concentration,
     get_portfolio_weights,
+    get_position_risk_multiplier,
     get_ratios,
+    get_regime_state,
     get_revenue_breakdown,
     get_smart_money,
     get_valuation_z_score,
@@ -79,6 +83,10 @@ def create_fundamentals_analyst(llm):
             get_value_floors,
             get_fixed_income_risk,
             get_alpha_scoring,
+            get_regime_state,
+            get_kalman_spread,
+            get_allocation_black_litterman,
+            get_position_risk_multiplier,
         ]
 
         system_message = (
