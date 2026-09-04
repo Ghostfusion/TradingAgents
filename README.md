@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Screener column pruning** - the value watchlist hides any
+  column with no data in every row (`n/a`/`no`/empty), keeping only columns
+  that carry real values (Rank/Ticker always shown); the legend follows the
+  table. Sparse runs report compact results instead of 60+ mostly-empty
+  columns.
 - [2026-09-03] **Execution-layer contract emitter** - every report tree now
   writes `research_decision.json` (deterministic, hash-pinned; PM rating, G1
   position contract stop/target/size, data_quality, risk_gate; nulls for the

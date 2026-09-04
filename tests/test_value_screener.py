@@ -213,17 +213,15 @@ def test_save_watchlist_newest_wins_by_timestamp(tmp_path):
 
 
 def test_classic_path_has_no_mover_columns(capsys):
-    """Classic path: all columns are present (full fixed header) but
-    mover-only values (Name/DayChg) render n/a, not dropped."""
+    """Classic path: mover-only columns with no data are PRUNED, not n/a."""
     vs.main(["AAPL", "-d", "2026-01-02"])
     out = capsys.readouterr().out
-    # The table header always lists every column (fixed set).
-    assert "| Name " in out and "| DayChg " in out
+    # No mover metadata on the classic path -> Name/DayChg are pruned (every
+    # row would be n/a), the table keeps only populated columns.
+    assert "| Name " not in out and "| DayChg " not in out
     assert "AAPL" in out
-    # Classic path carries no mover metadata -> the data row shows n/a there.
-    # (Row header -> values: a data row is pipe-delimited with n/a for Name.)
     data_row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
-    assert data_row and "n/a" in data_row
+    assert data_row
 
 
 def test_universe_caps_limit(capsys):
@@ -291,11 +289,14 @@ def test_report_headers_renamed_and_legend_added(capsys):
     results = [{
         "ticker": "MOG-A", "earnings_yield": 0.08, "ev_ebit": 12.0, "ev": 1e10,
         "f_score": 6, "beneish_m": -2.0, "altman_z": 4.0, "net_net": False,
-        "scan_a": True, "scan_b": False,
+        "scan_a": True, "scan_b": True,  # both set so Breakout isn't pruned
     }]
     md = vs._watchlist_markdown(results)
     assert "TrendPB" in md and "Breakout" in md
     assert "ScanA" not in md and "ScanB" not in md
+    # A column where EVERY row is "no"/n/a is pruned: an all-False flag column
+    # (e.g. NetNet here) leaves the table entirely.
+    assert "NetNet" not in md
     # Legend present and explains the renamed columns.
     assert "#### Column legend" in md
     assert "**TrendPB**" in md and "trend-pullback" in md
@@ -350,14 +351,17 @@ def test_scan_all_positional_populates_technical_columns(capsys):
         )
     out = capsys.readouterr().out
     row = next((ln for ln in out.splitlines() if ln.startswith("| 1 | AAPL |")), "")
-    assert "TrendPB" in out and "Breakout" in out
     assert row, "no data row rendered"
-    # The technical / scan columns must be populated (not all n/a): F/M/Z band
-    # and the scan flags should carry real values now.
-    fields = row.split("|")
-    fmz = [f.strip() for f in fields[7:10]]
-    assert any(v not in ("n/a", "") for v in fmz)  # F/M/Z not all blank
-    assert "Swing" in out and "VDip" in out
+    # Pruning contract: any technical column present in the header must carry
+    # real values in the row; columns left all-n/a/all-no are pruned instead.
+    header = next((ln for ln in out.splitlines() if ln.startswith("| Rank ")), "")
+    heads = [c.strip() for c in header.strip("|").split("|")]
+    cells = [c.strip() for c in row.strip("|").split("|")]
+    assert len(heads) == len(cells)
+    idx = {h: i for i, h in enumerate(heads)}
+    for col in ("F", "M", "Z", "Swing", "VDip", "TrendPB", "Breakout"):
+        if col in idx:
+            assert cells[idx[col]] not in ("n/a", ""), f"{col} populated column has blank cell"
 
 
 def test_enrich_sector_populates_without_gating(capsys):

@@ -153,13 +153,40 @@ _WATCHLIST_LEGEND = (
 )
 
 
-def _legend_markdown() -> str:
-    """Render the column legend as a markdown bullet list."""
+def _legend_markdown(only: set[str] | None = None) -> str:
+    """Render the column legend as a markdown bullet list.
+
+    ``only`` restricts the legend to the columns actually shown (the watchlist
+    table prunes all-empty/all-"n/a"/all-"no" columns, so the legend has to
+    match the table).
+    """
     lines = ["\n#### Column legend", ""]
     for name, meaning in _WATCHLIST_LEGEND:
-        lines.append(f"- **{name}** - {meaning}")
+        if only is None or name in only:
+            lines.append(f"- **{name}** - {meaning}")
     lines.append("")
     return "\n".join(lines)
+
+
+_EMPTY_CELLS = {"", "n/a", "no", "none", "-", "—", "nan"}
+
+
+def _empty_cell(v) -> bool:
+    return str(v).strip().lower() in _EMPTY_CELLS
+
+
+def prune_empty_columns(heads: list, rows: list[dict]) -> tuple:
+    """Drop columns where EVERY row is empty / "n/a" / "no" / "-".
+
+    ``Rank`` and ``Ticker`` are always kept; a column survives when any row
+    carries real content (a number or an explicit marker). Returns
+    ``(kept_heads, pruned_rows)``.
+    """
+    kept = [
+        h for h in heads
+        if h in ("Rank", "Ticker") or any(not _empty_cell(r.get(h)) for r in rows)
+    ]
+    return kept, [[r.get(h) for h in kept] for r in rows]
 
 
 def _sector_table_markdown(ranking: dict | None) -> str:
@@ -251,6 +278,7 @@ def _watchlist_markdown(results: list) -> str:
         "| " + " | ".join(heads) + " |",
         "| " + " | ".join(seps) + " |",
     ]
+    rows: list[dict] = []
     for i, r in enumerate(results, 1):
         rank = r.get("sec_rank")
         sec_rank = (
@@ -304,8 +332,20 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("sent7"), "{:+.2f}"),
             cell(r.get("sentz"), "{:+.2f}"),
         ]
-        out.append("| " + " | ".join(cells) + " |")
-    out.append(_legend_markdown())
+        rows.append(dict(zip(heads, cells, strict=True)))
+    if not rows:
+        out.append(_legend_markdown())
+        return "\n".join(out)
+    kept, pruned = prune_empty_columns(heads, rows)
+    out = [
+        header,
+        "",
+        "| " + " | ".join(kept) + " |",
+        "| " + " | ".join(["---"] * len(kept)) + " |",
+    ]
+    for row in pruned:
+        out.append("| " + " | ".join(str(c) for c in row) + " |")
+    out.append(_legend_markdown(set(kept)))
     return "\n".join(out)
 
 

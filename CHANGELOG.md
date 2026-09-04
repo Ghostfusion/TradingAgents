@@ -13,6 +13,14 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Screener column pruning** - `scripts/value_screener.py` `_watchlist_markdown`
+  now hides any column where EVERY row is empty / `n/a` / `no` / `-`
+  (`prune_empty_columns`; `Rank`/`Ticker` always kept), so a sparse run no
+  longer drowns in blank columns. The column legend is filtered to the
+  columns actually shown. Verified against real reports (top-losers run:
+  64 standard columns -> 44 kept; all-no flag columns + all-n/a vendor
+  columns dropped). Tests updated to the pruning contract (all-empty/all-no
+  columns absent, populated columns keep real values).
 - **`research_decision.json` execution contract emitter** - `reporting.py`
   `write_research_decision()` writes the deterministic, hash-pinned machine
   contract beside `run_card.json` at the end of every report tree: ticker,
