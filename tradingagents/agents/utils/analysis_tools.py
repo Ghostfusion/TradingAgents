@@ -2995,7 +2995,7 @@ def get_book_tail_risk(
             book_correlated_stress as _stress,
             drawdown_gate as _gate,
             portfolio_cvar as _pcvar,
-            portfolio_returns as _prets,
+            portfolio_drawdown as _pdd,
         )
     except Exception as exc:  # noqa: BLE001
         return f"book tail risk unavailable for {ticker}: {exc}"
@@ -3013,17 +3013,11 @@ def get_book_tail_risk(
             return f"book tail risk unavailable for {ticker}: no return series."
         pcvar = _pcvar(returns_by_name, weights=w)
         stress = _stress(returns_by_name, weights=w, shock=-0.10)
-        # realized drawdown of the weighted book (best-effort)
+        # realized drawdown of the weighted book (best-effort) - shared helper
+        # with the governor's measured-drawdown feed (book_risk.portfolio_drawdown)
         dd = None
         try:
-            from tradingagents.strategies.evaluate import max_drawdown
-
-            eq = []
-            acc = 1.0
-            for r in _prets(w, returns_by_name):
-                acc *= 1.0 + r
-                eq.append(acc)
-            dd = max_drawdown(eq) if eq else None
+            dd = _pdd(w, returns_by_name)
         except Exception:
             dd = None
         gate = _gate(dd) if dd is not None else None

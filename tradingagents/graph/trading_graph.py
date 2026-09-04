@@ -1323,11 +1323,16 @@ class TradingAgentsGraph:
                             }
                         except Exception:  # noqa: BLE001 - gate must never crash
                             liq_verdict = None
+                    basket_dd = self._basket_drawdown(ticker)
                     verdict = govern(
                         govern_size,
                         self.config,
                         cvar_pct=cvar_pct,
-                        drawdown_pct=self.config.get("risk_max_drawdown_pct"),
+                        # measured book drawdown, not the config limit - a
+                        # realized >limit drawdown must actually block new risk
+                        # (previously the limit was passed to itself: the
+                        # R0/R2 drawdown stop could never fire).
+                        drawdown_pct=basket_dd,
                         capital_at_risk_pct=cap_at_risk,
                         risk_cap_pct=risk_cap,
                         liquidity_verdict=liq_verdict,
@@ -1354,6 +1359,7 @@ class TradingAgentsGraph:
                             stop_pct,
                             cvar_pct,
                             capital_at_risk_pct=cap_at_risk,
+                            drawdown_pct=basket_dd,
                         )
                     if verdict["verdict"] == "REJECT":
                         final_state["risk_halt"] = True
@@ -1850,6 +1856,40 @@ class TradingAgentsGraph:
             from tradingagents.strategies.book_risk import book_correlated_stress
 
             return book_correlated_stress(returns_by_name, weights=weights, shock=shock)
+        except Exception:  # noqa: BLE001 - fall back gracefully
+            return None
+
+    def _basket_drawdown(self, ticker: str) -> float | None:
+        """Measured drawdown of the weighted book, or None (unknown never
+        fails the gate).
+
+        Resolves the configured risk basket exactly like ``_basket_cvar`` /
+        ``_basket_stress`` (same names + weights + fetch pattern), mixes the
+        daily returns and returns the max peak-to-trough drop of the equity
+        curve (``book_risk.portfolio_drawdown``). This is the *measured* book
+        drawdown - the governor compares it against ``risk_max_drawdown_pct``
+        so a realized >limit drawdown actually blocks new risk. None when the
+        basket is unconfigured or unresolvable.
+        """
+        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
+        if len(tickers) < 2:
+            return None
+        weights = self.config.get("risk_basket_weights") or {}
+        returns_by_name: dict[str, list] = {}
+        for name in tickers:
+            try:
+                closes = self._try_fetch_closes(str(name))
+                rets = self._log_returns_from_closes(closes)
+                if len(rets) >= 5:
+                    returns_by_name[str(name)] = rets
+            except Exception:  # noqa: BLE001 - a missing name just drops out
+                continue
+        if len(returns_by_name) < 2:
+            return None
+        try:
+            from tradingagents.strategies.book_risk import portfolio_drawdown
+
+            return portfolio_drawdown(weights, returns_by_name)
         except Exception:  # noqa: BLE001 - fall back gracefully
             return None
 

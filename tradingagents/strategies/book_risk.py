@@ -97,6 +97,29 @@ def portfolio_returns(weights: dict, returns_by_name: dict) -> list:
     return out
 
 
+def portfolio_drawdown(weights: dict, returns_by_name: dict) -> float | None:
+    """Maximum drawdown of the weighted book equity curve (positive magnitude).
+
+    ``portfolio_returns`` mixed to a cumulative equity curve, then the max
+    peak-to-trough drop (``evaluate.max_drawdown``). None when the mix is
+    unmeasurable (missing names / short series) - callers treat None as
+    "unknown, never fails the gate".
+    """
+    if not weights:
+        return None
+    mixed = portfolio_returns(weights, returns_by_name)
+    if not mixed:
+        return None
+    from tradingagents.strategies.evaluate import max_drawdown
+
+    eq = []
+    acc = 1.0
+    for r in mixed:
+        acc *= 1.0 + r
+        eq.append(acc)
+    return max_drawdown(eq) if eq else None
+
+
 def stress_loss(weights: dict, shock: float = -0.10) -> float:
     """Uniform shock loss (positive number) under given weights."""
     return -float(shock) * sum(max(0.0, float(w)) for w in weights.values())

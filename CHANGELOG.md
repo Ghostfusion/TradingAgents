@@ -13,6 +13,18 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **fix(risk): governor's drawdown stop now uses the measured book drawdown** -
+  ``trading_graph`` fed ``drawdown_pct = risk_max_drawdown_pct`` (the config
+  limit) into ``govern``, so ``limit > limit`` was always False and the R0/R2
+  realized-drawdown stop could never fire. Found via LULU (2026-09-04, CLI):
+  the market analyst measured book drawdown 25.6% -> ``drawdown_gate=True``
+  (BLOCKED) yet the final Risk Gate said PASS. Fix: ``_basket_drawdown``
+  resolves the measured basket drawdown via the new
+  ``book_risk.portfolio_drawdown`` (max peak-to-trough of the weighted book
+  equity curve), ``govern`` is fed that value, and the risk snapshot exposes
+  ``dd=`` so the debate sees it. ``get_book_tail_risk`` now reuses the shared
+  helper. Regression tests: governor measured-fed REJECT, graph helper
+  returns measured not limit, book_risk pure drawdown. Hermetic; no network.
 - **Alpha-health ledger + monitor (market-research material)** -
   ``reporting.write_alpha_ledger`` appends one jsonl row per emitted decision
   (ticker/effective_date/rating/data_quality/guardrail/decision_hash) when

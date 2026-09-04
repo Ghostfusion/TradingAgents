@@ -8,6 +8,7 @@ from tradingagents.strategies.book_risk import (
     cvar,
     drawdown_gate,
     portfolio_cvar,
+    portfolio_drawdown,
     portfolio_returns,
     simple_var,
     stress_loss,
@@ -52,6 +53,23 @@ def test_portfolio_cvar_mixes_weighted_series():
 def test_portfolio_cvar_requires_two_names():
     assert portfolio_cvar({}) is None
     assert portfolio_cvar({"a": [0.01] * 30}) is None
+
+
+def test_portfolio_drawdown_peak_to_trough():
+    # weighted book climbs 10 days then crashes: the measured max drawdown is
+    # the crash magnitude, NOT the config limit (0.10 default).
+    up = [0.01] * 10
+    crash = [-0.05] * 7  # ~ -30% compounded from the peak
+    series = {"a": up + crash, "b": up + crash}
+    dd = portfolio_drawdown({"a": 0.6, "b": 0.4}, series)
+    assert dd is not None
+    assert dd > 0.25  # well past the 10% drawdown limit
+    assert dd < 0.40
+
+
+def test_portfolio_drawdown_none_on_unmeasurable():
+    assert portfolio_drawdown({}, {"a": [0.01] * 10}) is None  # no weights
+    assert portfolio_drawdown({"a": 1.0}, {}) is None  # no series
 
 
 def test_portfolio_cvar_normalizes_missing_weights():

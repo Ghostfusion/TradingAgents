@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **fix: risk governor drawdown stop** - the R0/R2 realized-
+  drawdown stop could never fire (the config limit was fed into its own
+  comparison). Now resolved from the measured basket drawdown
+  (`book_risk.portfolio_drawdown`), so a real >limit book drawdown blocks new
+  risk - LULU's BLOCKED analyst read now matches the final Risk Gate.
 - [2026-09-04] **Alpha-health ledger + monitor** - ``scripts/alpha_health.py``
   collects emitted decisions into ``reports/alpha_ledger.jsonl`` and joins
   realized 1/5/20/60d forward returns to report score distribution, rank IC /
