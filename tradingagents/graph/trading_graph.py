@@ -1070,6 +1070,20 @@ class TradingAgentsGraph:
                     entry_price = None
                     if tranche_read and tranche_read.get("valid"):
                         entry_price = tranche_read.get("avg_entry")
+                    _kf = 1.0
+                    if self.config.get("knife_composite_enable"):
+                        try:
+                            from tradingagents.strategies.knife_guard import knife_score as _ks
+
+                            _kc = _ks(
+                                closes,
+                                (final_state.get("ohlcv") or {}).get("highs") or None,
+                                (final_state.get("ohlcv") or {}).get("lows") or None,
+                                (final_state.get("ohlcv") or {}).get("volumes") or None,
+                            )
+                            _kf = _kc["factor"]
+                        except Exception:  # noqa: BLE001 - advisory scale degrades
+                            _kf = 1.0
                     contract = build_position_contract(
                         cfg=self.config,
                         closes=closes,
@@ -1080,6 +1094,7 @@ class TradingAgentsGraph:
                         entry_price=entry_price,
                         trail_stop=(final_state.get("swing_exits") or {}).get("chandelier"),
                         implied_move_pct=(catalyst_snapshot or {}).get("implied_move_pct"),
+                        knife_factor=_kf,
                     )
                     if contract is not None:
                         final_state["position_contract"] = (

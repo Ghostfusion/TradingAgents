@@ -13,6 +13,20 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Composite knife-guard score + graduated sizing** - `strategies/knife_guard.py`
+  adds the weighted composite falling-knife score K (Z_return / Z_volume /
+  Z_ATR / Z_drawdown / downside-VPIN legs, weights `[0.25,0.20,0.20,0.20,0.15]`)
+  with a graduated `knife_factor` (1.0 <1.5 / 0.5 1.5-2.5 / 0.25 2.5-3.0 / 0.0
+  >=3.0) plus the cube-root transaction-cost guard band
+  (`guard_band_halfwidth`, `should_trade`). `value_dip_setup` gains a
+  `knife_composite` row (display; hard-gates only in the block band under
+  `require_knife`); `build_position_contract` accepts `knife_factor` and
+  scales sized by it (reason `knife_scale`); graph passes the composite
+  factor into the contract when `knife_composite_enable` (default off).
+  Directional conditioning everywhere (volume/ATR legs only count while
+  falling) - never blocks up-breakouts. Tests: composite calm/crash/borderline/
+  directional/guard-band + setup row (22 knife tests, incl. a real bug caught
+  - `volume_shock_z` double-divided by the median).
 - **Screener column pruning** - `scripts/value_screener.py` `_watchlist_markdown`
   now hides any column where EVERY row is empty / `n/a` / `no` / `-`
   (`prune_empty_columns`; `Rank`/`Ticker` always kept), so a sparse run no

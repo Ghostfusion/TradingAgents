@@ -530,6 +530,11 @@ def get_value_dip_setup(
         fcf=fcf,
         regime_gate=regime_row,
         eps_surprise=eps_surprise,
+        require_knife=bool(
+            (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
+                "value_dip_knife_enable"
+            )
+        ),
     )
     if not setup.get("rows"):
         return f"value dip setup unavailable for {ticker}: insufficient price history."
@@ -583,6 +588,32 @@ def get_value_dip_setup(
     if rr.get("measured"):
         lines.append(
             f"  re_rating: pass={rr.get('pass')} evidence={rr.get('evidence') or 'none measured'}"
+        )
+    kv = rows.get("knife_velocity") or {}
+    if kv:
+        lines.append(
+            f"  knife_velocity: active={kv.get('active')} z={_txt_round(kv.get('velocity_z'), 2)} "
+            f"(thr {kv.get('threshold')})"
+        )
+    kr = rows.get("knife_range") or {}
+    if kr:
+        lines.append(
+            f"  knife_range: active={kr.get('active')} range_atr={kr.get('range_atr_mult')}x "
+            f"(max {kr.get('max_mult')}x, close_below_ema={kr.get('close_below_ema')})"
+        )
+    kf = rows.get("knife_flow") or {}
+    if kf:
+        lines.append(
+            f"  knife_flow: active={kf.get('active')} vpin={kf.get('vpin')} "
+            f"delta={kf.get('price_delta')} (thr {kf.get('threshold')})"
+        )
+    kc = rows.get("knife_composite") or {}
+    if kc:
+        lines.append(
+            f"  knife_composite: K={kc.get('K')} factor={kc.get('factor')} "
+            f"band={kc.get('band')} (z_ret={kc.get('z', {}).get('ret')}, "
+            f"z_vol={kc.get('z', {}).get('vol')}, z_atr={kc.get('z', {}).get('atr')}, "
+            f"z_dd={kc.get('z', {}).get('dd')}, below_ema={kc.get('below_ema')})"
         )
     if setup.get("reasons"):
         lines.append("  reasons: " + "; ".join(setup["reasons"]))

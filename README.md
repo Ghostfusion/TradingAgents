@@ -30,6 +30,12 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Composite knife-guard score** - a weighted falling-knife
+  score K (return/volume/ATR/drawdown/order-flow z legs) with a graduated
+  position-size multiplier (1.0 → 0.5 → 0.25 → block) instead of a binary
+  buy/don't-buy, plus a transaction-cost no-trade guard band for the
+  execution layer. Advisory (`knife_composite_enable`, default off);
+  displayed in every value-dip setup.
 - [2026-09-04] **Screener column pruning** - the value watchlist hides any
   column with no data in every row (`n/a`/`no`/empty), keeping only columns
   that carry real values (Rank/Ticker always shown); the legend follows the

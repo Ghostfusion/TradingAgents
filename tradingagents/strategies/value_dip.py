@@ -867,6 +867,100 @@ def decline_driver_check(
     return {"verdict": verdict, "reasons": reasons, "clean": verdict == "clean"}
 
 
+def price_velocity_z(
+    closes: list,
+    lookback: int = 3,
+    window: int = 20,
+    min_closes: int = 25,
+) -> float | None:
+    """Normalized price-velocity z-score (knife-guard read).
+
+    ``v = (P_t - P_{t-tau}) / (P_t * sigma_daily * sqrt(tau))`` where
+    ``sigma_daily`` is the rolling std of daily returns over ``window``. An
+    unresolved cascade prints a large negative z; a healthy pullback in a
+    calm tape stays mild. Returns None when history is too short or vol is
+    degenerate (never fabricates).
+
+    Args:
+        closes: daily close series (newest last).
+        lookback: tau - short window for the price change.
+        window: rolling-vol lookback for sigma_daily.
+        min_closes: minimum series length (window + lookback + margin).
+
+    Returns:
+        float | None: the velocity z-score.
+    """
+    if not closes or len(closes) < min_closes:
+        return None
+    price = float(closes[-1])
+    past = float(closes[-1 - lookback])
+    rets = []
+    for i in range(1, window + 1):
+        if closes[i] > 0 and closes[i - 1] > 0:
+            rets.append(closes[i] / closes[i - 1] - 1.0)
+    if len(rets) < window * 0.6:
+        return None
+    mean_r = sum(rets) / len(rets)
+    var = sum((r - mean_r) ** 2 for r in rets) / len(rets)
+    sd = var ** 0.5
+    if sd <= 0 or price <= 0:
+        return None
+    expected = price * sd * (lookback ** 0.5)
+    if expected <= 0:
+        return None
+    return (price - past) / expected
+
+
+def range_expansion_guard(
+    highs: list,
+    lows: list,
+    closes: list,
+    atr_value: float | None = None,
+    max_mult: float = 2.5,
+    ema_window: int = 20,
+) -> dict | None:
+    """ATR-expansion entry blocker (knife-guard read).
+
+    A single monster candle ``(High - Low) / ATR > max_mult`` while the close
+    sits below the slow EMA is a liquidity event, not a tradeable value dip.
+    Returns a dict (``active`` False when the range is contained, True when
+    the guard is live) or None when the inputs are insufficient.
+
+    Args:
+        highs/lows/closes: daily OHLC series (newest last).
+        atr_value: precomputed ATR; when None, computed internally.
+        max_mult: the (High-Low)/ATR ceiling, commonly 2.5-3.0.
+        ema_window: slow EMA for the close-below-EMA condition.
+
+    Returns:
+        dict | None: {active, range_atr_mult, max_mult, close_below_ema, ema}.
+    """
+    if not highs or not lows or not closes or len(closes) < max(ema_window + 3, 25):
+        return None
+    try:
+        a = atr_value if atr_value is not None and atr_value > 0 else _atr(highs, lows, closes, window=14)
+    except Exception:  # noqa: BLE001 - guard degrades to None
+        a = None
+    if not a or a <= 0:
+        return None
+    span = float(highs[-1]) - float(lows[-1])
+    ema = None
+    if len(closes) >= ema_window:
+        try:
+            ema = _ema_series(closes, ema_window)[-1]
+        except Exception:  # noqa: BLE001
+            ema = None
+    mult = span / a
+    close_below = ema is not None and float(closes[-1]) < ema
+    return {
+        "active": bool(mult > float(max_mult) and close_below),
+        "range_atr_mult": round(mult, 2),
+        "max_mult": float(max_mult),
+        "close_below_ema": close_below,
+        "ema": round(ema, 4) if ema is not None else None,
+    }
+
+
 def value_dip_setup(
     closes: list,
     highs: list,
@@ -903,6 +997,14 @@ def value_dip_setup(
     forward_peg: float | None = None,
     require_regime: bool = False,
     require_catalyst: bool = False,
+    vpin_value: float | None = None,
+    price_delta_tau: float | None = None,
+    knife_vpin_threshold: float = 0.75,
+    knife_velocity_threshold: float = -2.5,
+    knife_range_max_mult: float = 2.5,
+    require_knife: bool = False,
+    knife_weights: dict | None = None,
+    knife_bands: tuple | None = None,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -1069,6 +1171,106 @@ def value_dip_setup(
         if re_rating_row.get("pass") is False and not require_catalyst:
             reasons.append("no measured re-rating catalyst (EPS surprise / revisions / accumulation / forward PEG)")
 
+    # Knife guards (falling-knife filters - advisory display rows; hard-gated
+    # only via ``require_knife``, mirroring require_trend/regime/catalyst):
+    #   1) downside-conditioned order-flow toxicity (VPIN > thr AND price down)
+    #   2) normalized price velocity z (unresolved cascade = large negative z)
+    #   3) ATR range expansion (monster candle + close below slow EMA)
+    # All three prefer unknown over fabricated when inputs are missing.
+    knife_flow_row = None
+    if vpin_value is not None:
+        delta = price_delta_tau
+        if delta is None and len(closes) >= 4:
+            delta = float(closes[-1]) - float(closes[-4])
+        try:
+            from tradingagents.strategies.orderflow import knife_guard_vpin as _kgv
+
+            active = _kgv(vpin_value, delta, threshold=knife_vpin_threshold)
+        except Exception:  # noqa: BLE001 - advisory row degrades
+            active = None
+        if active is not None:
+            knife_flow_row = {
+                "pass": not active,
+                "active": active,
+                "vpin": round(float(vpin_value), 3),
+                "price_delta": round(delta, 4) if delta is not None else None,
+                "threshold": float(knife_vpin_threshold),
+            }
+            if active and not require_knife:
+                reasons.append(
+                    f"knife advisory: toxic order flow (VPIN {vpin_value:.2f} > "
+                    f"{knife_vpin_threshold:.2f}) with downside price move"
+                )
+
+    knife_velocity_row = None
+    vz = price_velocity_z(closes) if len(closes) >= 25 else None
+    if vz is not None:
+        active = bool(vz < float(knife_velocity_threshold))
+        knife_velocity_row = {
+            "pass": not active,
+            "active": active,
+            "velocity_z": round(vz, 3),
+            "threshold": float(knife_velocity_threshold),
+            "lookback": 3,
+            "window": 20,
+        }
+        if active and not require_knife:
+            reasons.append(
+                f"knife advisory: price velocity z={vz:.2f} < {knife_velocity_threshold:.2f} "
+                "(falling-knife cascade)"
+            )
+
+    knife_range_row = None
+    rg = range_expansion_guard(highs, lows, closes, atr_value=a, max_mult=knife_range_max_mult)
+    if rg is not None:
+        knife_range_row = {
+            "pass": not rg["active"],
+            "active": rg["active"],
+            "range_atr_mult": rg["range_atr_mult"],
+            "max_mult": rg["max_mult"],
+            "close_below_ema": rg["close_below_ema"],
+        }
+        if rg["active"] and not require_knife:
+            reasons.append(
+                f"knife advisory: ATR range expansion {rg['range_atr_mult']:.1f}x "
+                f"> {float(knife_range_max_mult):.1f}x with close below EMA"
+            )
+
+    # Composite knife score (weighted Z legs -> graduated F_knife): the
+    # continuous upgrade over the three boolean rows. Always computed when
+    # enough history exists (display); hard-gates only via require_knife when
+    # the score lands in the BLOCK band (factor == 0).
+    knife_composite = None
+    if len(closes) >= 25:
+        try:
+            from tradingagents.strategies.knife_guard import knife_factor as _kfac, knife_score
+
+            kw = dict(knife_weights) if knife_weights else None
+            kc = knife_score(
+                closes, highs, lows, volumes if volumes else None,
+                vpin_downside=vpin_value,
+                weights=kw,
+            )
+            kb = tuple(float(x) for x in (knife_bands or (1.5, 2.5, 3.0)))
+            factor, band = _kfac(kc["K"], kb)
+            knife_composite = {
+                "K": kc["K"],
+                "factor": factor,
+                "band": band,
+                "bands": kb,
+                "z": kc["z"],
+                "severities": kc["severities"],
+                "regime": kc["regime"],
+                "below_ema": kc["regime"]["below_ema"],
+            }
+            if factor == 0.0 and not require_knife:
+                reasons.append(
+                    f"knife advisory: composite K={kc['K']:.2f} >= {kb[2]} "
+                    "(block band) — treat as falling-knife"
+                )
+        except Exception:  # noqa: BLE001 - advisory row degrades
+            knife_composite = None
+
     rows = {
         "value_floor": {
             "pass": value_floor,
@@ -1107,6 +1309,10 @@ def value_dip_setup(
         "trend": trend,
         "regime_gate": regime_row,
         "re_rating": re_rating_row,
+        "knife_flow": knife_flow_row,
+        "knife_velocity": knife_velocity_row,
+        "knife_range": knife_range_row,
+        "knife_composite": knife_composite,
         "fib_retrace": fib_retrace_entry(closes, highs, lows),
         "stochastic": _stochastic_oversold(highs, lows, closes),
     }
@@ -1193,6 +1399,18 @@ def value_dip_setup(
         measured_gates.append(bool(regime_row["pass"]))
     if require_catalyst and re_rating_row is not None and re_rating_row.get("pass") is not None:
         measured_gates.append(bool(re_rating_row["pass"]))
+    if require_knife:
+        for _kname, _krow in (("knife_flow", knife_flow_row), ("knife_velocity", knife_velocity_row), ("knife_range", knife_range_row)):
+            if _krow is not None and _krow.get("pass") is not None:
+                measured_gates.append(bool(_krow["pass"]))
+                if _krow["pass"] is False:
+                    reasons.append(f"knife guard blocked: {_kname} active")
+        if knife_composite is not None and knife_composite["factor"] == 0.0:
+            measured_gates.append(False)
+            reasons.append(
+                f"knife guard blocked: composite K={knife_composite['K']:.2f} "
+                "in block band"
+            )
     if strict_vdu:
         # Promote the Step-2 ladder + valuation + support to hard gates
         # (measured only; unknown rows still never fail).
