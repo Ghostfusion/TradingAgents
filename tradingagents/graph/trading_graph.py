@@ -1071,9 +1071,13 @@ class TradingAgentsGraph:
                     if tranche_read and tranche_read.get("valid"):
                         entry_price = tranche_read.get("avg_entry")
                     _rf = 1.0
-                    if self.config.get("regime_state_enable"):
+                    _vcf = 1.0
+                    if self.config.get("regime_state_enable") or self.config.get("vol_cap_enable"):
                         try:
-                            from tradingagents.strategies.regime_state import regime_state as _rs
+                            from tradingagents.strategies.regime_state import (
+                                regime_state as _rs,
+                                vol_cap_factor as _vcfn,
+                            )
 
                             _ohlcv_state = final_state.get("ohlcv") or {}
                             _rsd = _rs(
@@ -1082,8 +1086,21 @@ class TradingAgentsGraph:
                                 _ohlcv_state.get("lows") or None,
                             )
                             _rf = _rsd["factor"]
+                            if self.config.get("vol_cap_enable"):
+                                # double-count guard: F_regime drops its vol leg
+                                # when the standalone ladder carries it.
+                                from tradingagents.strategies.regime_state import (
+                                    regime_factor as _rfn,
+                                )
+
+                                _rf = _rfn(
+                                    _rsd["trend"]["label"], "NORMAL", _rsd["drawdown"]["label"],
+                                    include_vol_leg=False,
+                                )
+                                _vcf = _vcfn(_rsd["vol_ratio"])
                         except Exception:  # noqa: BLE001 - advisory scale degrades
                             _rf = 1.0
+                            _vcf = 1.0
                     _kf = 1.0
                     if self.config.get("knife_composite_enable"):
                         try:
@@ -1110,6 +1127,7 @@ class TradingAgentsGraph:
                         implied_move_pct=(catalyst_snapshot or {}).get("implied_move_pct"),
                         knife_factor=_kf,
                         regime_factor=_rf,
+                        vol_cap_factor=_vcf,
                     )
                     if contract is not None:
                         final_state["position_contract"] = (

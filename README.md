@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Regime Vol Cap (F_vol)** - the ATR-ratio ladder
+  (1.2→100% / 1.5→75% / 2.0→50% / 3.0→25% / >3→block) scales position size
+  continuously instead of binary on/off, composing with F_regime and F_knife;
+  the vol leg leaves F_regime when the ladder is enabled (no double half).
+  Advisory (`vol_cap_enable`, default off).
 - [2026-09-04] **Multi-axis regime state** - four crisp dimensions
   (Trend/Volatility/Relative-vs-benchmark/Drawdown) instead of one label,
   aggregated with a graduated `F_regime` position-size factor composed with

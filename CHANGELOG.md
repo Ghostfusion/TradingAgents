@@ -13,6 +13,16 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Regime Vol Cap ladder (F_vol)** - `strategies/regime_state.py`
+  `vol_cap_factor(atr_ratio, bands)` implements the material's ATR-ratio
+  table (<1.2 1.0 / 1.2-1.5 0.75 / 1.5-2.0 0.5 / 2.0-3.0 0.25 / >3.0 0.0
+  hard block); `regime_factor` gains `include_vol_leg` so when the standalone
+  ladder is enabled F_regime drops its vol dimension (no HIGH 0.5x0.5 double
+  count); `regime_state` exposes `vol_ratio`. `build_position_contract`
+  composes `vol_cap_factor` in the size chain (`sized *= ... * rf * vcf`,
+  reason `vol_cap_scale`); the graph feeds it under `vol_cap_enable` (default
+  off, advisory; thresholds are config defaults, not universal). 55 total
+  knife+regime+liquidity tests; ruff clean.
 - **Multi-axis regime state + F_regime sizing** - `strategies/regime_state.py`
   adds four independent crisp regime dimensions (TrendScore=(EMA20-EMA50)/ATR14
   -> STRONG_BULL/BULL/BEAR/STRONG_BEAR; VolRatio=ATR14/Median(ATR,N) ->

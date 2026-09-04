@@ -130,3 +130,54 @@ def test_contract_scales_by_regime_and_knife():
     assert c2.size_pct <= c1.size_pct * 0.6
     assert any("knife_scale" in r for r in c2.reason_parts)
     assert any("regime_scale" in r for r in c2.reason_parts)
+
+
+# --- Regime Vol Cap (F_vol ladder) ---
+
+
+def test_vol_cap_factor_ladder():
+    from tradingagents.strategies.regime_state import vol_cap_factor
+
+    assert vol_cap_factor(1.0) == 1.0
+    assert vol_cap_factor(1.2001) == 0.75
+    assert vol_cap_factor(1.7) == 0.5
+    assert vol_cap_factor(2.5) == 0.25
+    assert vol_cap_factor(3.5) == 0.0
+    assert vol_cap_factor(None) == 1.0  # unknown -> advisory 1.0
+    # boundary
+    assert vol_cap_factor(1.2) == 0.75  # material: <1.2 is 100%, 1.2 starts 75%
+
+
+def test_regime_factor_drops_vol_leg_on_request():
+    # HIGH vol halves F_regime when the leg is included...
+    assert regime_factor("BULL", "HIGH", include_vol_leg=True) == 0.5
+    # ...and stops halving when the standalone F_vol ladder carries it
+    assert regime_factor("BULL", "HIGH", include_vol_leg=False) == 1.0
+    # a BEAR trend still halves regardless of the vol leg
+    assert regime_factor("BEAR", "HIGH", include_vol_leg=False) == 0.5
+    assert regime_factor("STRONG_BEAR", "NORMAL", include_vol_leg=False) == 0.25
+
+
+def test_regime_state_exposes_vol_ratio():
+    c, h, low_ = _walk(n=80, noise=0.2, seed=5)
+    rs = regime_state(c, h, low_)
+    assert "vol_ratio" in rs
+    assert rs["vol_ratio"] is None or rs["vol_ratio"] > 0
+    # a spike pushes the ratio up and F_vol down
+    h2 = h[:-1] + [h[-1] * 2.5]
+    l2 = low_[:-1] + [low_[-1] * 0.5]
+    rs2 = regime_state(c[:-1] + [c[-1]], h2, l2)
+    from tradingagents.strategies.regime_state import vol_cap_factor
+
+    assert vol_cap_factor(rs2["vol_ratio"]) <= vol_cap_factor(rs["vol_ratio"] or 1.0)
+
+
+def test_contract_scales_by_vol_cap():
+    closes = [100.0 + 0.1 * i for i in range(60)]
+    highs = [c + 0.2 for c in closes]
+    lows = [c - 0.2 for c in closes]
+    c1 = build_position_contract(cfg={}, closes=closes, high=highs, low=lows)
+    c2 = build_position_contract(cfg={}, closes=closes, high=highs, low=lows, vol_cap_factor=0.25)
+    assert c1 is not None and c2 is not None
+    assert c2.size_pct <= c1.size_pct * 0.3
+    assert any("vol_cap_scale" in r for r in c2.reason_parts)

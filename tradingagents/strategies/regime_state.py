@@ -163,15 +163,46 @@ def regime_drawdown(closes: list[float], window: int = 252) -> dict:
     return {"drawdown": round(float(dd), 4), "label": label, "thresholds": [DD_CORRECTION, DD_BEAR, DD_SEVERE]}
 
 
+DEFAULT_VOL_CAP_BANDS = (1.2, 1.5, 2.0, 3.0)
+
+
+def vol_cap_factor(atr_ratio: float | None, bands: tuple = DEFAULT_VOL_CAP_BANDS) -> float:
+    """Standalone Regime Vol Cap ladder (the material's ATR-ratio table).
+
+    ``F_vol = {ratio<1.2: 1.0, 1.2-1.5: 0.75, 1.5-2.0: 0.5, 2.0-3.0: 0.25, >3.0: 0.0}``.
+    The >3.0 floor is a hard block (no new longs). Unknown ratio -> 1.0
+    (advisory, never fabricate). Bands are config defaults, not universal.
+    """
+    if atr_ratio is None:
+        return 1.0
+    b1, b2, b3, b4 = bands
+    r = float(atr_ratio)
+    if r < b1:
+        return 1.0
+    if r < b2:
+        return 0.75
+    if r < b3:
+        return 0.5
+    if r < b4:
+        return 0.25
+    return 0.0
+
+
 def regime_factor(
     trend: str,
     volatility: str,
     drawdown: str = "NORMAL",
+    include_vol_leg: bool = True,
 ) -> float:
-    """Graduated F_regime for position sizing (Bull/Normal=1.0, Bear/High=0.25, Crash=0.0).
+    """Graduated F_regime (Bull/Normal=1.0, Bear/High=0.25, Crash=0.0).
 
     Conservative composition: the worst of (trend, volatility, drawdown) wins.
+    ``include_vol_leg=False`` drops the vol dimension so the standalone
+    ``vol_cap_factor`` (F_vol ladder) contributes each vol measurement once
+    (avoids HIGH 0.5 x 0.5 = 0.25 double-counting).
     """
+    if not include_vol_leg:
+        volatility = "NORMAL"
     if "CRASH" in drawdown.upper() or volatility == "EXTREME":
         return 0.0
     scores = {"STRONG_BULL": 1.0, "BULL": 1.0, "BEAR": 0.5, "STRONG_BEAR": 0.25}
@@ -209,4 +240,5 @@ def regime_state(
         "labels": labels,
         "crash": crash,
         "factor": factor,
+        "vol_ratio": vol.get("ratio"),
     }
