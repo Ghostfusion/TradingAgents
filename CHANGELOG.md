@@ -13,6 +13,16 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Kalman-filter dynamic hedge-ratio spread** - `strategies/statistical_kalman.py`
+  `kalman_spread(x, y, Q, R, alpha)` tracks the pair's hedge ratio ONLINE via
+  a scalar Kalman filter (`K = P x/(P x^2+R); beta += K(y-alpha-beta x);
+  P = (1-Kx)P+Q`) instead of a static rolling-OLS beta — adapts to drifting
+  pairs and regime shifts (verified: converges to the true beta; a mid-sample
+  1.5->3.0 beta shift is tracked). Outputs the dynamic beta + model spread +
+  a mean-reversion signal. Pure, no numpy. 8 tests (Kalman + the already-
+  implemented Black-Litterman optimiser: equilibrium with market-cap weights,
+  view blending toward Q, equal-weight degrade); Russian/web formula check
+  confirmed BL matches the standard Π=λΣw_mkt + posterior precision form.
 - **Execution multiplier (soft/hard two-tier)** - `strategies/risk_multiplier.py`
   `RiskMultiplier(soft, hard)` + `combine()` implements the halve-not-block
   philosophy with an explicit soft-vs-hard split: SOFT guards (regime /

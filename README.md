@@ -30,6 +30,10 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Kalman dynamic spread + Black-Litterman** - a pure Kalman
+  filter tracks a pair's hedge ratio online (adapts to drift; static rolling
+  beta doesn't) for pairs/stat-arb signals; Black-Litterman view blending
+  (P/Ω/Q) already ships in the optimiser. Both web-formula-verified, tested.
 - [2026-09-04] **Execution multiplier (soft/hard)** - one tunable
   `execution_multiplier` over an explicit two-tier policy: soft guards
   (regime/vol/knife/flow) scale size down, hard guards
