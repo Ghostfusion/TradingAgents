@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Execution multiplier (soft/hard)** - one tunable
+  `execution_multiplier` over an explicit two-tier policy: soft guards
+  (regime/vol/knife/flow) scale size down, hard guards
+  (halt/liquidity/portfolio-risk/data-quality/broker-safety) block outright.
+  Halve-not-block, with a real stop only when warranted.
 - [2026-09-04] **Regime Vol Cap (F_vol)** - the ATR-ratio ladder
   (1.2→100% / 1.5→75% / 2.0→50% / 3.0→25% / >3→block) scales position size
   continuously instead of binary on/off, composing with F_regime and F_knife;

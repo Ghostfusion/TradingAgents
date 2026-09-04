@@ -76,6 +76,7 @@ def build_position_contract(
     knife_factor: float = 1.0,
     regime_factor: float = 1.0,
     vol_cap_factor: float = 1.0,
+    hard_guards: tuple[str, ...] = (),
 ) -> PositionContract | None:
     """Compute the authoritative size + stop from config budgets.
 
@@ -194,7 +195,24 @@ def build_position_contract(
     if vcf < 1.0:
         reasons.append(f"vol_cap_scale={vcf:.2f}")
 
-    sized = min(size_base * vol_s * flow_s * agree * cat_s * kf * rf * vcf, max_pct)
+    # Two-tier risk policy (halve-not-block): soft factors scale size, a live
+    # HARD guard blocks outright (halt / insufficient liquidity / max
+    # portfolio risk / data-quality / broker safety) via the execution
+    # multiplier. Hard guards outrank every multiplier.
+    from tradingagents.strategies.risk_multiplier import RiskMultiplier, combine
+
+    _rm = combine(RiskMultiplier(
+        soft={"regime": rf, "vol_cap": vcf, "knife": kf, "flow": flow_s},
+        hard=hard_guards,
+    ))
+    if _rm["blocked"]:
+        reasons.append("HARD BLOCK: " + ", ".join(_rm["hard_reasons"]))
+    if _rm["soft_reasons"]:
+        reasons.append(
+            "exec_mult=" + ", ".join(f"{k}:{_rm['soft_reasons'][_i]}" for _i, k in enumerate(_rm["soft_reasons"]))
+        )
+
+    sized = min(size_base * vol_s * agree * cat_s * _rm["factor"], max_pct)
     # Implied-move scaling: a binary event (earnings straddle) widens the
     # single-day gap; scale the position down by (1 - implied_move_pct) so the
     # event can't blow the risk budget.

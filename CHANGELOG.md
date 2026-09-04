@@ -13,6 +13,18 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Execution multiplier (soft/hard two-tier)** - `strategies/risk_multiplier.py`
+  `RiskMultiplier(soft, hard)` + `combine()` implements the halve-not-block
+  philosophy with an explicit soft-vs-hard split: SOFT guards (regime /
+  vol_cap / knife / flow) multiply exposure down (catalog-ordered reasons);
+  HARD guards (halt / insufficient_liquidity / max_portfolio_risk /
+  data_quality_failure / broker_safety) BLOCK the order to 0 regardless of
+  any multiplier; unknown hard flags fail SAFE (block). `build_position_contract`
+  takes `hard_guards` and runs the terminal execution multiplier (`sized *=
+  combine(softs, hard)`; reasons `HARD BLOCK:` / `exec_mult=`). Replaces the
+  previous folded 0.x multipliers with one tunable field. Verified: soft
+  knife 0.5 halves 0.1125->0.0563, hard halt -> 0.0. 46 tests
+  (knife+regime+multiplier); ruff clean.
 - **Regime Vol Cap ladder (F_vol)** - `strategies/regime_state.py`
   `vol_cap_factor(atr_ratio, bands)` implements the material's ATR-ratio
   table (<1.2 1.0 / 1.2-1.5 0.75 / 1.5-2.0 0.5 / 2.0-3.0 0.25 / >3.0 0.0
