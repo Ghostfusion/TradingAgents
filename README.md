@@ -30,6 +30,12 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Alpha-health ledger + monitor** - ``scripts/alpha_health.py``
+  collects emitted decisions into ``reports/alpha_ledger.jsonl`` and joins
+  realized 1/5/20/60d forward returns to report score distribution, rank IC /
+  ICIR, the horizon alpha-decay curve and win rates - answering "did the
+  scorer stop finding opportunities, or did the market get efficient?"
+  (`TRADINGAGENTS_ALPHA_LEDGER_ENABLE`).
 - [2026-09-04] **Agent-visible quant tools** - regime state, Kalman pair
   spread, execution multiplier, Black-Litterman allocation and the no-trade
   guard band are now @tools bound to the Market/Fundamentals analysts (+

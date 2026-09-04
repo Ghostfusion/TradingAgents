@@ -467,6 +467,44 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     )
 
 
+def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict | None" = None) -> "Path | None":
+    """Append one alpha-ledger row next to research_decision.json (default off).
+
+    The market-research material's diagnostic ledger: each emitted decision is
+    stamped (ticker, effective_date, rating, data_quality, guardrail note) so
+    a later collector can join realized forward returns and answer "did the
+    scorer stop finding opportunities, or did the market get efficient?".
+    Gated by ``alpha_ledger_enable`` (default False). Pure append, one JSON
+    line per row, hash-pinned like research_decision.json. Advisory: a
+    failure here must never break the report tree.
+    """
+    import hashlib as _hl
+    import json as _rj
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+
+    cfg = _config(config)
+    if not bool(cfg.get("alpha_ledger_enable")):
+        return None
+    pm = final_state.get("pm_decision") or {}
+    rg = final_state.get("risk_gate") or {}
+    body = {
+        "schema_version": 1,
+        "emitted_at": _dt.now(_tz.utc).isoformat(),
+        "ticker": str(ticker).upper(),
+        "effective_date": _date.today().isoformat(),
+        "rating": pm.get("rating") if isinstance(pm, dict) else None,
+        "data_quality": (pm.get("data_quality") if isinstance(pm, dict) else None) or "unknown",
+        "guardrail_reason": pm.get("guardrail_reason") if isinstance(pm, dict) else None,
+        "risk_gate_verdict": rg.get("verdict") if isinstance(rg, dict) else None,
+    }
+    doc = dict(body)
+    doc["decision_hash"] = "sha256:" + _hl.sha256(_rj.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    p = Path(save_path) / "alpha_ledger.jsonl"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(_rj.dumps(doc, sort_keys=True, default=str) + "\n")
+    return p
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None
 ) -> Path:
@@ -898,6 +936,8 @@ def write_report_tree(
         # a failure here must never break the report tree.
         with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
             write_research_decision(final_state, ticker, save_path)
+        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+            write_alpha_ledger(final_state, ticker, save_path, cfg)
     except Exception:  # noqa: BLE001 - card is advisory
         pass
     return save_path / "complete_report.md"

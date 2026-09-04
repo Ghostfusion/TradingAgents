@@ -13,6 +13,19 @@ Breaking changes within the 0.x line are called out explicitly.
   in state, so the `research_decision.json` emitter + prediction-ledger log
   read the REAL rating/data_quality/guardrail_reason instead of defaults.
   Legacy runs (pre-fix) keep nulls and are fail-closed by the executor.
+- **Alpha-health ledger + monitor (market-research material)** -
+  ``reporting.write_alpha_ledger`` appends one jsonl row per emitted decision
+  (ticker/effective_date/rating/data_quality/guardrail/decision_hash) when
+  ``alpha_ledger_enable`` (default off); ``strategies/alpha_health.py``
+  aggregates the ledger with joined realized forward returns - score
+  distribution, cross-sectional dispersion, rank IC per horizon, ICIR, the
+  horizon alpha-decay curve (does edge accrue with horizon?), per-rating win
+  rates and opportunity counts (missing ratings are ``n/a``, never UNKNOWN).
+  ``scripts/alpha_health.py`` rebuilds the ledger from
+  ``reports/*/research_decision.json`` and prints the monitor. Answers the
+  material's core question empirically: scorer compression vs market
+  efficiency. Hermetic tests (26); wiring gates 33; live smoke on the Sep
+  decisions; ruff clean.
 - **Agent tools for the quant adds (regime/kalman/multiplier/BL/guard-band)** -
   `agents/utils/quant_adds_tools.py` binds the new calculations to the virtual
   agents so they can cite computed reads:

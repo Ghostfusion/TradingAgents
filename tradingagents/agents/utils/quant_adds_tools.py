@@ -119,17 +119,21 @@ def get_no_trade_guard_band(
     ticker: Annotated[str, "ticker symbol"],
     cost_bps: Annotated[float, "proportional transaction cost in bps, default 10"] = 10.0,
     risk_aversion: Annotated[float, "gamma in the guard-band formula, default 1.0"] = 1.0,
+    target_weight: Annotated[float | None, "target portfolio weight (0..1), optional"] = None,
+    current_weight: Annotated[float | None, "current portfolio weight (0..1), optional"] = None,
 ) -> str:
     """No-trade guard band (Davis-Norman / Shreve-Soner): the half-width h of
     the rebalancing inaction zone for a position, ``h = (1.5*lambda*sigma^2/
     gamma)^(1/3)`` over the ticker's daily returns. A target-weight drift
     smaller than h does not justify paying transaction costs - rebalance only
-    beyond the band edge. Call before any 'should we rebalance X' claim.
+    beyond the band edge. Give ``target_weight``/``current_weight`` for the
+    actual rebalance decision. Call before any 'should we rebalance X' claim.
     Advisory.
     """
     try:
         from tradingagents.strategies.knife_guard import (
             guard_band_halfwidth,
+            should_trade,
         )
     except Exception as exc:  # noqa: BLE001
         return f"no-trade guard band unavailable: {exc}"
@@ -142,11 +146,21 @@ def get_no_trade_guard_band(
     h = guard_band_halfwidth(lam, sigma, float(risk_aversion))
     if h is None:
         return f"no-trade guard band unavailable for {ticker}: degenerate inputs"
-    return (
+    out = (
         f"no-trade guard band {ticker}: h={h:.4f} (cost {cost_bps:.0f}bps, "
-        f"sigma={sigma:.4f}, gamma={float(risk_aversion):.2f}) - rebalance only "
-        f"when |w_target-w_current| > h (drift {h:.1%} of book)"
+        f"sigma={sigma:.4f}, gamma={float(risk_aversion):.2f})"
     )
+    if target_weight is not None and current_weight is not None:
+        drift = abs(float(target_weight) - float(current_weight))
+        goes = should_trade(drift, h)
+        out += (
+            f"; decision: {'REBALANCE' if goes else 'NO-TRADE'} "
+            f"(w_target={float(target_weight):.3f}, w_current={float(current_weight):.3f}, "
+            f"drift {drift:.3f} vs h {h:.3f})"
+        )
+    else:
+        out += " - rebalance only when |w_target-w_current| > h"
+    return out
 
 
 @tool
