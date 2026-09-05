@@ -188,6 +188,35 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
     #    book as the canonical series; flat 10bps default, scaled by --illiq).
     out["metrics"] = {"available": bool(pm_realized), "cost_bps": cost_bps}
     if pm_realized:
+        # W1-10 regime-conditioned performance (strategies/regime_performance.py):
+        # per-regime hit rate + avg return from the resolved ledger rows (a row
+        # with realized_return carries an implicit outcome; the regime comes
+        # from a `regime` / `sleeve` field when the driver stamps it, else the
+        # honest "unknown" bucket - never fabricated).
+        try:
+            from tradingagents.strategies.regime_performance import (
+                regime_conditioned_performance,
+            )
+
+            out["regime"] = regime_conditioned_performance(
+                [
+                    {
+                        "regime": str(_r.get("regime") or _r.get("sleeve") or "unknown"),
+                        "outcome": {
+                            "hit": (_r.get("realized_return") or 0.0) > 0,
+                            "return_pct": (
+                                round(float(_r.get("realized_return")) * 100.0, 4)
+                                if _r.get("realized_return") is not None else None
+                            ),
+                        },
+                    }
+                    for _r in pm_rows
+                    if _r.get("realized_return") is not None
+                ],
+                regime_field="regime",
+            )
+        except Exception:  # noqa: BLE001 - advisory
+            out["regime"] = None
         net = net_returns(pm_realized, cost_bps=cost_bps)
         eq = equity_curve(net)
         out["metrics"].update(
@@ -199,24 +228,24 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
             }
         )
         # Qlib with/without-cost report table (design_qlib_integration.md
-        # §3.2): the same metrics on the RAW series vs the net-of-cost series,
-        # so the cost drag is visible side by side.
+        # §3.2, signal_analysis.with_without_cost_table): the same metrics on
+        # the RAW series vs the net-of-cost series, so the cost drag is
+        # visible side by side.
         raw = [float(v) for v in pm_realized if v is not None]
-        if len(raw) >= 2:
-            raw_eq = equity_curve(raw)
-            out["metrics"]["with_without_cost"] = {
-                "without_cost": {
-                    "cagr": round(cagr(raw), 4),
-                    "sharpe": round(sharpe(raw), 3),
-                    "max_drawdown": round(max_drawdown(raw_eq), 4),
-                },
-                "with_cost": {
-                    "cagr": round(cagr(net), 4),
-                    "sharpe": round(sharpe(net), 3),
-                    "max_drawdown": round(max_drawdown(eq), 4),
-                },
-                "cost_bps": cost_bps,
-            }
+        try:
+            from tradingagents.strategies.signal_analysis import (
+                with_without_cost_table,
+            )
+
+            wwc = with_without_cost_table(raw, cost_bps=cost_bps)
+            if wwc:
+                out["metrics"]["with_without_cost"] = {
+                    "without_cost": wwc["without_cost"],
+                    "with_cost": wwc["with_cost"],
+                    "cost_bps": cost_bps,
+                }
+        except Exception:  # noqa: BLE001 - advisory table degrades
+            out["metrics"]["with_without_cost"] = None
         # D2 alpha-decay monitor: rolling 4-week hit rate / sharpe vs the
         # full-history baseline. DRIFT when the rolling measure trails the
         # baseline for 2 consecutive periods (config `drift_periods`).

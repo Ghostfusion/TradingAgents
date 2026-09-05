@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_news_sentiment_series,
     get_normality,
     get_opening_range,
+    get_options_iv_read,
     get_options_surface,
     get_order_imbalance,
     get_orderflow_read,
@@ -120,6 +122,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_post_close_confirmation,
     get_premarket_liquidity,
     get_premarket_review,
+    get_prompt_injection_read,
     get_ratios,
     get_regime_components,
     get_regime_read,
@@ -141,6 +144,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_tail_extreme_var,
     get_tail_risk,
     get_technical_factors,
+    get_thesis_evidence_matrix,
     get_topk_drop_plan,
     get_trailing_exit,
     get_treasury_curve,
@@ -313,6 +317,30 @@ class TradingAgentsGraph:
                 self.debate_llms[_role] = resolve_role_llm(
                     self.config, _role, factory=create_llm_client
                 )
+            # R3 config-time capability matrix (strategies/debate_capability.py):
+            # warn (or fail closed under debate_require_capability_matrix) when a
+            # resolved role model cannot meet its strictness floor (context /
+            # structured-output / tool-binding). Advisory by default - the matrix
+            # only refuses when the flag demands it.
+            try:
+                from tradingagents.agents.utils.debate_roles import role_model_spec
+                from tradingagents.strategies.debate_capability import (
+                    assess_model_capability,
+                    capability_gate,
+                )
+
+                caps = {}
+                for _role in self.debate_llms:
+                    spec = role_model_spec(self.config, _role)
+                    if spec:
+                        provider, model = spec
+                        caps[_role] = assess_model_capability(provider, model)
+                for _msg in capability_gate(
+                    caps, require=bool(self.config.get("debate_require_capability_matrix", False))
+                ):
+                    print(f"[debate-capability] {_msg}", file=sys.stderr)
+            except Exception:  # noqa: BLE001 - advisory startup check
+                pass
 
         self.memory_log = TradingMemoryLog(self.config)
 
@@ -507,6 +535,8 @@ class TradingAgentsGraph:
                     get_tail_extreme_var,
                     get_kyle_lambda,
                     get_kelly_alloc,
+                    get_options_iv_read,
+                    get_thesis_evidence_matrix,
                 ]
             ),
             "social": ToolNode(
@@ -544,6 +574,8 @@ class TradingAgentsGraph:
                     get_earnings_event_read,
                     get_beat_miss_sizing,
                     get_credit_spread_read,
+                    # W3-8 prompt-injection hardening (ingested news/social).
+                    get_prompt_injection_read,
                 ]
             ),
             "fundamentals": ToolNode(

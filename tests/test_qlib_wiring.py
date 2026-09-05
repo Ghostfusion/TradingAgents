@@ -150,8 +150,11 @@ class TestBacktestTradability:
         res = bs.backtest(bars, entry=100.0, stop=90.0, targets=[150.0],
                           qty=100, side="long", fee_bps=5.0, slippage_ticks=0.0,
                           limit_threshold=0.10)
-        # entry must not happen on the +12% bar (entry_bar > 0)
+        # entry must not happen on the +12% bar (entry_bar > 0); the market
+        # order rides through to the first tradable bar's close (bar 2, 113).
         assert res["fills"][0]["bar"] != 1
+        assert res["fills"][0]["bar"] == 2
+        assert res["fills"][0]["price"] == pytest.approx(113.0)
 
     def test_suspended_day_skipped(self):
         from scripts import backtest_strategy as bs
@@ -177,7 +180,9 @@ class TestBacktestTradability:
 
         closes = [100.0, 101.0]
         bars = self._bars(closes)
-        bars[0].volume = 10_000
+        # Next-bar-close semantics: the fill happens on bar 1 (the bar after
+        # the signal bar), so the participation cap binds bar 1's volume.
+        bars[1].volume = 10_000
         res = bs.backtest(bars, entry=100.0, stop=95.0, targets=[120.0],
                           qty=5000, side="long", fee_bps=5.0, slippage_ticks=0.0,
                           participation=0.2)

@@ -42,6 +42,8 @@ def _build_lists() -> None:
         return
     from tradingagents.agents.utils.analysis_tools import (
         get_book_tail_risk,
+        get_concentration_read,
+        get_covariance_read,
         get_credit_spread_read,
         get_downside_read,
         get_exit_check,
@@ -58,6 +60,7 @@ def _build_lists() -> None:
         get_regime_gate_read,
         get_risk_gate,
         get_tail_decomposition,
+        get_tail_extreme_var,
         get_tail_risk,
         get_trade_plan,
         get_trailing_exit,
@@ -78,6 +81,9 @@ def _build_lists() -> None:
         get_tail_risk,
         get_book_tail_risk,
         get_tail_decomposition,
+        get_tail_extreme_var,
+        get_covariance_read,
+        get_concentration_read,
         get_horizon_var,
         get_downside_read,
         get_credit_spread_read,

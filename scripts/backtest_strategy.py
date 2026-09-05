@@ -155,12 +155,23 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
     prev_close = None
     entry_bar_i: int | None = None
     if next_bar_close:
-        if len(bars) >= 2:
-            entry_bar_i = 1
-            entry = bars[1].close
-        elif bars:
-            entry_bar_i = 0
-            entry = bars[0].close
+        # Signal from bar T's close fills at bar T+1's close - but only on a
+        # TRADABLE bar: a suspended day (NaN close) or a limit-up day for a
+        # buy (limit-down for a sell) cannot fill, so the market order rides
+        # through to the first tradable bar's close. Falling back to the last
+        # bar's close when nothing is tradable mirrors the legacy path's
+        # fallback shape (the fill report always emits an entry).
+        prev = bars[0].close if bars else None
+        for i in range(1, len(bars)):
+            if _blocked(entry_side, bars[i], prev):
+                prev = bars[i].close
+                continue
+            entry_bar_i = i
+            entry = bars[i].close
+            break
+        if entry_bar_i is None:
+            entry_bar_i = len(bars) - 1
+            entry = bars[entry_bar_i].close if bars else entry
     else:
         for i, bar in enumerate(bars):
             if _blocked(entry_side, bar, prev_close):

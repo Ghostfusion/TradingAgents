@@ -103,6 +103,19 @@ def main(argv: list[str] | None = None) -> int:
 
     out = {"ok": True, "n_names": len(names), "grid": rows,
            "best_gated": best}
+    # Robustness read (strategies/config_robustness.py, Lean L8): is the best
+    # cell at the search-box edge / an isolated spike? Advisory - argmax over
+    # one grid cell is overfit-to-one-point without this context.
+    try:
+        from tradingagents.strategies.config_robustness import config_robustness
+
+        scored = [
+            {**r, "score": r.get("oos_sharpe")}
+            for r in rows if r.get("oos_sharpe") is not None
+        ]
+        out["robustness"] = config_robustness(scored, param_names=["alpha"])
+    except Exception:  # noqa: BLE001 - advisory read degrades
+        out["robustness"] = None
     try:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as fh:

@@ -164,7 +164,11 @@ def test_catalyst_scale_computed():
     }
     with mock.patch("tradingagents.strategies.catalyst.fetch_catalyst_data", return_value=fake):
         out = T.get_catalyst_scale.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
-    assert "scale=" in out and "verdict=earnings-window" in out
+    # Forward earnings 2026-08-24 sits inside the shipped hard-block window
+    # (catalyst_hard_block_days default 5): the verdict is now the hard block,
+    # not the legacy earnings-window soft scale. The HIGH macro event inside
+    # 3d still scales x0.60 on top.
+    assert "scale=" in out and "verdict=earnings-hard-block" in out
     assert "reasons:" in out
 
 

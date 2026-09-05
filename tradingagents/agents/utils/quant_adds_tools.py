@@ -41,13 +41,22 @@ def get_regime_state(
     except Exception as exc:  # noqa: BLE001 - advisory read degrades
         return f"regime state unavailable for {ticker}: {exc}"
     lb = rs["labels"]
-    return (
+    out = (
         f"regime state {ticker}: trend={lb['trend']} (score {rs['trend']['score']}), "
         f"volatility={lb['volatility']} (ratio {rs['volatility']['ratio']}), "
         f"relative={lb['relative']} ({rs['relative']['relative_ret']}), "
         f"drawdown={lb['drawdown']} ({rs['drawdown']['drawdown']}), "
         f"F_regime={rs['factor']} (crash={rs.get('crash')})"
     )
+    # Optional HMM regime label (strategies/regime.hmm_regime): a 2-state
+    # Gaussian-HMM macro regime - 'unknown' without hmmlearn (never a guess).
+    try:
+        from tradingagents.strategies.regime import hmm_regime
+
+        out += f" | hmm={hmm_regime(closes, n_states=2)}"
+    except Exception:  # noqa: BLE001 - advisory axis degrades
+        pass
+    return out
 
 
 @tool

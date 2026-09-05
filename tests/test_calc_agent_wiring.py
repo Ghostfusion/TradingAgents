@@ -38,6 +38,26 @@ LEGACY_WHITELIST = {
     "strategies/liquidity_risk.py:market_impact_slippage": "legacy slippage model (not used by the liquidity gate)",
     "dataflows/config.py:reset_config": "test/utility helper, not a calc",
     "dataflows/schema.py:to_markdown": "dead formatting utility (schema layer)",
+    # W4-2 typed-state schema artifacts - explicitly FUTURE/advisory by design
+    # (module doc: "nothing re-wires the existing graph"; the compact
+    # summarizer lands with the typed-state cutover).
+    "strategies/typed_state.py:summarize_report": "advisory typed-state (W4-2) artifact for a future graph cutover",
+    "strategies/typed_state.py:to_compact": "advisory typed-state (W4-2) artifact for a future graph cutover",
+    # W4-8 complexity/maintenance-tax report - a developer ops tool, not an
+    # agent read; run on demand (no periodic hook yet).
+    "strategies/integrity_tools.py:complexity_report": "developer ops report (LOC/fan-in), no periodic hook yet",
+    # W2-11/W4-6 scenario-grid reads - DCF-at-price consumers; no decision
+    # surface prices them today (the DCF tool is the live fundamental path).
+    "strategies/regime_performance.py:stress_grid": "advisory scenario grid; no DCF-at-price consumer yet",
+    "strategies/regime_performance.py:macro_regime": "advisory cross-asset regime label; no consumer yet",
+    # W1 scoring helpers - need the prediction-horizon close join; log_decision
+    # is wired, the scoring consumption lands with fast-path horizon resolution.
+    "strategies/prediction_ledger.py:score_all": "scoring needs the horizon close join (fast-path T0/T1 work)",
+    "strategies/prediction_ledger.py:score_outcome": "scoring needs the horizon close join (fast-path T0/T1 work)",
+    "strategies/prediction_ledger.py:outcome_metrics": "scoring needs the horizon close join (fast-path T0/T1 work)",
+    # options_surface IV-rank read - needs a per-day IV history no vendor
+    # delivers (cboe/chain is spot-only); the chain-based reads are tool-wired.
+    "strategies/options_surface.py:iv_percentile": "needs per-day IV history no vendor delivers (chain is spot-only)",
 }
 
 
@@ -63,6 +83,37 @@ def _reference_blob() -> str:
 
 
 blob = _reference_blob()
+
+# A strategy module with ZERO references anywhere in the production domains
+# (agents / graph / reporting / dataflows-interface / scripts / entrypoints)
+# is either a wiring gap or dead legacy - same contract as the per-fn check,
+# but at the module level so a whole unwired module cannot hide behind its own
+# internal self-references. Whitelisted definitions live in LEGACY_WHITELIST
+# keyed by ANY of the module's public functions (the per-fn gate below still
+# requires each specific fn to be wired or whitelisted).
+_MODULE_CASES = []
+for f in sorted(REPO.joinpath("tradingagents", "strategies").glob("*.py")):
+    try:
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        continue
+    fns = {n.name for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+           and not n.name.startswith("_")}
+    if fns and not any(fn in blob for fn in fns):
+        key = next(iter(sorted(fns)))
+        _MODULE_CASES.append((f"{f.parent.name}/{f.name}", key))
+
+
+@pytest.mark.parametrize("case", _MODULE_CASES, ids=[c[0] for c in _MODULE_CASES])
+def test_module_reachable_or_whitelisted(case):
+    module, any_fn = case
+    assert f"{module}:{any_fn}" in LEGACY_WHITELIST, (
+        f"strategy module {module} has zero references outside itself - it is "
+        "either a wiring gap (the virtual agents cannot reach its calculations) "
+        "or dead code. Wire it to an agent tool / graph / reporting / script, "
+        "or whitelist one of its functions in LEGACY_WHITELIST with a reason."
+    )
 
 CASES = []
 for calc_dir in CALC_DIRS:

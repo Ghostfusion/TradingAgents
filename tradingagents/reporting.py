@@ -505,6 +505,38 @@ def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict 
     return p
 
 
+def _run_card_llm_cost_est() -> dict:
+    """Advisory LLM cost block for run_card.json (llm_cost.py W1-8).
+
+    Reports the provider rate-table entry per model (USD per 1M tokens) plus
+    an upper-bound output-leg cost at the configured max-output cap. Token
+    counts per run are not tracked, so the cap-bound figure is exactly that -
+    labeled, never a billing claim.
+    """
+    try:
+        from tradingagents.strategies.llm_cost import estimate_cost, rate_for
+
+        cfg = _config(None)
+        out = {}
+        for key in ("deep_think_llm", "quick_think_llm"):
+            model = cfg.get(key)
+            if not model:
+                continue
+            rate = rate_for(model)
+            cap = float(cfg.get("max_output_tokens_deep" if key == "deep_think_llm" else "max_output_tokens", 8000))
+            out[key] = {
+                "model": model,
+                "rate_usd_per_1m": {"in": rate[0], "out": rate[1]} if rate else None,
+                "max_output_leg_usd": (
+                    estimate_cost(model, 0, int(cap)) if rate else None
+                ),
+                "note": "upper bound of the output leg at the configured max_output cap",
+            }
+        return out
+    except Exception:  # noqa: BLE001 - advisory block degrades
+        return {}
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None
 ) -> Path:
@@ -922,6 +954,7 @@ def write_report_tree(
                 "deep_think_llm": DEFAULT_CONFIG.get("deep_think_llm"),
                 "quick_think_llm": DEFAULT_CONFIG.get("quick_think_llm"),
             },
+            "llm_cost_est": _run_card_llm_cost_est(),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),
