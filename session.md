@@ -53,6 +53,15 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Vendor outage hardening** (user option 1 from the no-data audit): added
+  core_stock_apis / technical_indicators / fundamental_data / news_data to
+  OPTIONAL_CATEGORIES so an all-vendors-error storm returns the
+  DATA_UNAVAILABLE sentinel instead of raising (graph no longer aborts on the
+  instructed-first tools); per-vendor logs kept; sentinel text no longer says
+  "optional". Tests: 3 rewritten to the new contract (vendor_routing,
+  vendor_absence typed wrapper now attaches rate_limited absence, moomoo_vendor
+  degrade); vendor suites 134 + wiring gate + analysis_tools 141 + value-dip 57
+  green; ruff clean; docs/developer/03-dataflow-vendors.md updated.
 - **Earnings quality wired to consensus verdict** (user option 1):
   `get_earnings_quality(ticker, date)` now self-fetches canonical statements
   and runs `earnings_quality_verdict` (cash conversion, accrual, FCF=OCF-|capex|,

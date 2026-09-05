@@ -22,7 +22,10 @@ route_to_vendor(method, ...)
         catches VendorRateLimit / VendorNotConfigured / NoMarketData / generic
         -> continue to next vendor
   6. if no data: return NO_DATA_AVAILABLE / DATA_UNAVAILABLE / DATA_DISABLED
-     (or re-raise the first error for a non-optional category)
+     (a total vendor outage degrades EVERY category to DATA_UNAVAILABLE,
+     including the flow-critical ones - get_stock_data, get_indicators,
+     the statement tools, news - so the run never aborts on a ToolNode
+     exception; per-vendor failures are always logged, never silent)
 ```
 
 **Key invariants**
@@ -31,8 +34,12 @@ route_to_vendor(method, ...)
   to an un-listed vendor (that prevented cross-vendor inconsistency).
 - A vendor setting of `"none"` / `"off"` / `"disabled"` disables that whole
   category (returns `DATA_DISABLED`).
-- Optional categories degrade to a sentinel string; core categories re-raise
-  the first error so a broken primary is loud.
+- Every category degrades to a sentinel on a vendor outage (2026-09 outage
+  hardening): flow-critical categories (core_stock_apis, technical_indicators,
+  fundamental_data, news_data) were moved into `OPTIONAL_CATEGORIES` so a
+  rate-limit / network storm produces `DATA_UNAVAILABLE` and the agent reports
+  "unavailable" instead of aborting the run. Clean no-data and disabled-config
+  sentinels are unchanged; vendor failure logs remain the audit trail.
 - Successful results are cached in `vendor_cache` (skip category `news_data`).
 
 ## 3.2 `TOOLS_CATEGORIES`, `VENDOR_LIST`, `VENDOR_METHODS`

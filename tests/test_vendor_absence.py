@@ -138,15 +138,19 @@ class VendorAbsenceRouterTests(unittest.TestCase):
         self.assertFalse(vr.absence["retryable"])
         self.assertIn("stale", vr.absence.get("detail", ""))
 
-    def test_typed_wrapper_rate_limited_core_raises_no_envelope(self):
-        # A single core vendor throttled is a REAL failure per the router
-        # contract (#989): it raises, so the typed wrapper cannot attach an
-        # envelope. The absence reason only materializes on sentinel paths.
+    def test_typed_wrapper_rate_limited_core_attaches_absence(self):
+        # Flow-critical categories are outage-hardened: a single core vendor
+        # throttled returns the DATA_UNAVAILABLE sentinel (not a raise), so
+        # the typed wrapper attaches the rate_limited absence envelope —
+        # mirroring the optional-category contract.
         set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
-        with self._route({"yfinance": _raises(VendorRateLimitError())}), self.assertRaises(
-            VendorRateLimitError
-        ):
-            interface.route_to_vendor_typed("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        with self._route({"yfinance": _raises(VendorRateLimitError())}):
+            vr = interface.route_to_vendor_typed("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertEqual(vr.error_kind, "VendorNotConfiguredError")
+        self.assertIsNotNone(vr.absence)
+        self.assertEqual(vr.absence["reason"], "rate_limited")
+        self.assertTrue(vr.absence["retryable"])
+        self.assertEqual(vr.absence["source"], "yfinance")
 
     def test_typed_wrapper_rate_limit_then_no_data_attaches_verdict_reason(self):
         # [rate_limited, no_data] -> NO_DATA sentinel; the reason follows the

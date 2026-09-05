@@ -316,9 +316,18 @@ VENDOR_LIST = [
 # Optional enrichment categories. These add macro/event context to the news
 # analyst but are not core to a decision, so a vendor failure here degrades to a
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
-# key, or a network blip should not crash an analysis over flavour data). Core
-# categories (prices, fundamentals, news) still raise so a broken primary is loud.
+# key, or a network blip should not crash an analysis over flavour data).
+# Flow-critical categories (prices, indicators, statements, news) are also in
+# this set: the analysis pipeline is *instructed* to call them first, so a
+# total vendor outage degrades them to a sentinel rather than killing the
+# graph via a ToolNode exception. Clean no-data / disabled-config sentinels
+# are unchanged; vendor failures are still logged per-vendor (never silent)
+# and a single vendor failing while another can serve it still falls through.
 OPTIONAL_CATEGORIES = {
+    "core_stock_apis",
+    "technical_indicators",
+    "fundamental_data",
+    "news_data",
     "macro_data",
     "prediction_markets",
     "analyst_ratings",
@@ -753,15 +762,17 @@ def route_to_vendor(method: str, *args, **kwargs):
         )
 
     # No vendor returned data and none reported clean "no data" — surface the
-    # first real error (e.g. the primary vendor's network failure). Optional
-    # enrichment categories degrade to a sentinel instead, so flavour data can't
-    # abort the run.
+    # first real error (e.g. the primary vendor's network failure). Every
+    # configured category degrades to a sentinel instead, so a vendor outage /
+    # rate-limit storm can't abort the run (the agent proceeds and reports
+    # "unavailable"; clean no-data and disabled-config sentinels are emitted
+    # above / earlier). Vendor failures are still logged per-vendor.
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
-            logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
+            logger.warning("Vendor outage for %s (%s): %s", category, method, first_error)
             _set_last_absence(absence or VendorAbsence.from_error(first_error, source=absent_vendor))
             return (
-                f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
+                f"DATA_UNAVAILABLE: {category} could not be retrieved "
                 f"({first_error}). Proceed without it; do not fabricate values."
             )
         raise first_error

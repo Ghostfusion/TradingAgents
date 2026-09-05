@@ -114,12 +114,19 @@ class VendorRoutingTests(unittest.TestCase):
         self.assertIn("DATA_UNAVAILABLE", result)
         self.assertIn("macro_data", result)
 
-    def test_core_category_still_raises_on_error(self):
-        # A core category (single configured vendor) propagates the error so a
-        # broken primary is loud, not silently degraded.
+    def test_core_category_degrades_on_error(self):
+        # Flow-critical categories are outage-hardened: a single configured
+        # vendor raising (network/auth/rate-limit storm) must NOT abort the
+        # run — the router returns the DATA_UNAVAILABLE sentinel so the
+        # agent reports "unavailable" instead of the graph dying on the
+        # ToolNode exception. Clean no-data and disabled-config sentinels
+        # are unchanged.
         set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
-        with self._route({"yfinance": _raises(ValueError("boom"))}), self.assertRaises(ValueError):
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        with self._route({"yfinance": _raises(ValueError("boom"))}):
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertIn("DATA_UNAVAILABLE", result)
+        self.assertIn("core_stock_apis", result)
+        self.assertIn("boom", result)
 
 
 if __name__ == "__main__":

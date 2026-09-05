@@ -7,6 +7,23 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
+- **Vendor outage hardening** (option 1 from the no-data audit;
+  `docs/developer/03-dataflow-vendors.md`): the four flow-critical categories
+  (`core_stock_apis`, `technical_indicators`, `fundamental_data`, `news_data`)
+  joined `OPTIONAL_CATEGORIES`, so a total vendor outage (every vendor in the
+  chain raising network/auth/rate-limit errors) returns the `DATA_UNAVAILABLE`
+  sentinel instead of re-raising the first error — the graph no longer dies on
+  a ToolNode exception when `get_stock_data` / `get_indicators` / the
+  statement tools / `get_news` all fail. The analyst proceeds and reports
+  "unavailable". Clean no-data and disabled-config sentinels are unchanged;
+  per-vendor failures are still logged (never silent); a single vendor failing
+  while another can serve it still falls through. The sentinel text now says
+  "`<category>` could not be retrieved" (drops the now-wrong "optional" label).
+  Tests updated to the new contract (vendor_routing
+  `test_core_category_degrades_on_error`, vendor_absence
+  `test_typed_wrapper_rate_limited_core_attaches_absence` — the typed wrapper
+  now attaches the `rate_limited` envelope instead of raising,
+  moomoo_vendor `test_moomoo_alone_and_failing_degrades`).
 - **Earnings quality wired to the consensus verdict** (option 1): the
   ticker-based `get_earnings_quality` now fetches canonical statements
   (net income / OCF / total assets / capex) and runs the consensus

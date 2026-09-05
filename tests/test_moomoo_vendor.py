@@ -165,21 +165,23 @@ class MoomooRoutingTests(unittest.TestCase):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "a", "b")
         self.assertEqual(out, "YF_DATA")
 
-    def test_moomoo_alone_and_failing_raises(self):
-        # Only moomoo configured + it fails → core category propagates the error
+    def test_moomoo_alone_and_failing_degrades(self):
+        # Only moomoo configured + it fails → flow-critical category degrades
+        # to the DATA_UNAVAILABLE sentinel instead of propagating the error
+        # (outage hardening: the run proceeds, the agent reports unavailable).
         def _no_data(*a, **k):
             raise MoomooNotConfiguredError("OpenD not reachable")
 
         set_config({"data_vendors": {"core_stock_apis": "moomoo"}})
-        with (
-            mock.patch.dict(
-                interface.VENDOR_METHODS,
-                {"get_stock_data": {"moomoo": _no_data}},
-                clear=False,
-            ),
-            self.assertRaises(MoomooNotConfiguredError),
+        with mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_stock_data": {"moomoo": _no_data}},
+            clear=False,
         ):
-            interface.route_to_vendor("get_stock_data", "AAPL", "a", "b")
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "a", "b")
+        self.assertIn("DATA_UNAVAILABLE", result)
+        self.assertIn("core_stock_apis", result)
+        self.assertIn("OpenD not reachable", result)
 
     def test_successful_moomoo_serves_the_call(self):
         def _moomoo_ok(*a, **k):
