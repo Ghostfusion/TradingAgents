@@ -7,6 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **ai-hedge-fund v2 teacher study** - `docs/design_ai_hedge_fund_integration.md`:
+  direct-source study of `virattt/ai-hedge-fund` v2.2.0 (hedge_fund/: data,
+  signals, llm, features, fund, strategies, portfolio, risk, brokers,
+  pipeline, backtesting, event_study, validation, tui) + web grounding.
+  Adopted as 5 advisory, phase-gated, default-off items: P1 declarative
+  mandate (fund/strategy/model as YAML data — `strategies/mandate.py` +
+  `strategies/mandates/*.yaml` + `pipeline.py --mandate` +
+  `scripts/mandate_rebalance.py`), P2 event-study market-model CAR with
+  t-test + bootstrap CI significance (`strategies/event_study.py` +
+  `pead_car_test` in `events.py` + `get_event_study_read` tool), P3
+  abstention-vs-neutral conviction blending (`consensus.agreement_weighted`
+  + `n_abstained` in the computed context), P4 per-clamp risk audit events
+  (`portfolio.clamp_events` rendered in allocation reads), P5 prompt-level
+  provenance vault (exact prompts + responses per decision, keyed to
+  `research_decision.json`). Validation table shows the fork is already
+  ahead on CPCV/PBO/evaluate metrics/LLM registry. Explicit non-goals:
+  live brokers, the TUI, persona voicing, financial-datasets provider,
+  market-neutral shorts, per-call prompt caching for cost — the
+  no-execution/advisory mandates stand. Design only; no code changed.
+  Strategies/index row 23.
 - **Hummingbot V2 teacher study** - `docs/design_hummingbot_integration.md`:
   direct-source study of the Hummingbot V2 framework (StrategyV2Base /
   Controllers / Executors / Connectors, backtesting executors-simulators,

@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **ai-hedge-fund teacher study** - a direct-source study of
+  virattt/ai-hedge-fund v2 (mandate-as-data fund YAML, event-study
+  market-model CAR significance, abstention-vs-neutral conviction blending,
+  per-clamp risk audit, prompt provenance vault) mapped onto the fork's
+  seams as 5 advisory, phase-gated, default-off adoptions
+  (`docs/design_ai_hedge_fund_integration.md`); the validation table also
+  shows the fork is already ahead on CPCV/PBO/evaluate metrics. Design
+  only — no code, the no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-04] **Hummingbot teacher study** - a direct-source study of
   Hummingbot's V2 framework (Strategy/Controller/Executor, per-executor
   CloseType accounting, pre-trade budget-collateral lock, live-book

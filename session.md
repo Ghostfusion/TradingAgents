@@ -53,6 +53,17 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **ai-hedge-fund v2 teacher study** (docs-only):
+  `docs/design_ai_hedge_fund_integration.md` — direct-source study of
+  virattt/ai-hedge-fund v2.2.0 (data/signals/llm/features/fund/strategies/
+  portfolio/risk/brokers/pipeline/backtesting/event_study/validation/tui).
+  5 advisory phase-gated adoptions: P1 mandate-as-data (fund/strategy/model
+  YAML + pipeline --mandate), P2 event-study market-model CAR + significance
+  (t-test + bootstrap CI), P3 abstention-vs-neutral conviction blending,
+  P4 per-clamp risk audit events, P5 prompt provenance vault (decision_hash
+  linked). Validation table: fork already ahead on CPCV/PBO/evaluate/LLM
+  registry. Non-goals: live brokers, TUI, persona voicing, market-neutral
+  shorts, prompt caching for cost. No code changed.
 
 ## 2. What Landed — Files & Commits
 **Code (repo):**
