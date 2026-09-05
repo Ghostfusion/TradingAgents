@@ -1,11 +1,14 @@
 # Sector Rotation — Reference & Design
 
-Status: **reference / design doc.** Distilled (2026-09-05) from two
-LLM-generated specs that previously sat in this folder — `sector_calc.md`
-(1,520 lines: the 100-point multi-factor sector score) and
+Status: **reference / design doc — P1-P3 ADOPTED (2026-09-05); A1/A3
+(RRG quadrant + cadence) and A2 (cycle tilt) ADOPTED (2026-09-05).**
+Distilled from two LLM-generated specs that previously sat in this folder —
+`sector_calc.md` (1,520 lines: the 100-point multi-factor sector score) and
 `sector_instruction.md` (773 lines: the staged-pipeline correction). Both
 are **deleted** after this distillation; this is the single surviving
-source. No code changes.
+source. Implementation live in `strategies/sector_rank.py` (P1-P3 +
+quadrant), `strategies/cycle_tilt.py` (A2) and the `get_sector_rank` /
+`get_cycle_tilt` tools, gated default-off.
 
 ---
 
@@ -21,10 +24,15 @@ Hold". `sector_calc`: the concrete 8-factor 100-point score
 (momentum/RS/trend/risk/breadth/valuation/flow/fundamentals at
 25/15/15/15/10/10/5/5), cross-sectional percentile normalization, and the
 grade bands + regime cap. Both independently validate the fork's existing
-architecture — regime gate, momentum-based sector rank, advisory
-computed reads, deterministic backtest — and their genuinely new ideas are
+architecture — regime gate, momentum-based sector rank, advisory computed
+reads, deterministic backtest — and their genuinely new ideas are
 **constituent breadth**, the **equal-weight vs cap-weight leadership ratio**
 (SOXX concentration), and **two-level universe** (sectors → industries).
+Web research on institutional practice (2026-09-05) added the
+**RRG-level x RS-momentum quadrant** (the separate-signal discipline firms
+actually use) and the **business-cycle → sector-tilt** map — both adopted.
+
+…
 
 ## 2. Where it maps onto the existing repo (validated)
 
@@ -194,6 +202,26 @@ Hold / no new entry.
    the read. Tests: ratio sign/scale on synthetic constituents.
 4. **Valuation stays n/a** unless an ETF-level fundamental source lands;
    then sector-relative z only, house-styled.
+
+## 9.5 Adopted implementation (2026-09-05)
+
+- **A1 — RRG quadrant** (`sector_rank.rrg_quadrant(rs_level, rs_momentum)`,
+  gated by `enable_sector_multifactor`): the RS-level percentile (ranking)
+  and RS-momentum percentile (timing) are kept SEPARATE axes → Leading /
+  Weakening / Improving / Lagging (median split, None-aware). `get_sector_rank`
+  emits a quadrant line ("rotation: Leading=…; Improving=…") + exit line
+  ("Weakening=…") — the score≠signal fix, advisory.
+- **A3 — Rotation cadence note** (`get_sector_rank`): monthly rebalance,
+  hold top 2-3, trim/exit on Weakening, turnover is the main cost risk —
+  advisory context, not a metric.
+- **A2 — Business-cycle tilt** (`strategies/cycle_tilt.py` + `get_cycle_tilt`
+  tool, market analyst): phase = early/mid/late/recession from PMI (FRED
+  NAPM), the 10y-2y spread and HY OAS; `TILT_MAP` → favored sectors. All
+  inputs None-safe (missing → phase None, tilt [], "n/a"); `fred.get_macro_value`
+  returns the latest float directly. Advisory — the regime-gate enhancement.
+- **P4 — validation script** (sector-rotation Action 4) is a research option,
+  not built (monthly top-3 SPDR by P1 score vs equal-weight/SPY with costs,
+  via evaluate.py/CPCV). No trading_web surface (LLM-facing tools).
 
 ## 10. Honest limits
 
