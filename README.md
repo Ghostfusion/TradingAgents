@@ -30,6 +30,16 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **FinceptTerminal teacher study** - a direct-source study of
+  Fincept-Corporation/FinceptTerminal v4 (typed topic-registry refresh
+  policy, tool-result park-and-page budgets, dual tool-loop budget + visible
+  exhaustion, SQLite per-step checkpoints + resume, org-as-data governance
+  metadata, single-source-of-truth capability gate) mapped onto the fork +
+  trading_web as 6 advisory, phase-gated, default-off adoptions
+  (`docs/design_fincept_terminal_integration.md`); validation table shows
+  the fork is already ahead on LLM providers, Qlib study and backtest
+  semantics. Design only — no code, the no-execution/advisory mandates
+  stand. See CHANGELOG.
 - [2026-09-04] **ai-hedge-fund teacher study** - a direct-source study of
   virattt/ai-hedge-fund v2 (mandate-as-data fund YAML, event-study
   market-model CAR significance, abstention-vs-neutral conviction blending,

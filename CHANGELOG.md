@@ -7,6 +7,34 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **FinceptTerminal v4 teacher study** - `docs/design_fincept_terminal_integration.md`:
+  direct-source study of `Fincept-Corporation/FinceptTerminal` v4 (C++20 +
+  Qt6 desktop terminal w/ embedded Python 3.11; `src/datahub`, `src/
+  services/llm`, `src/trading`, `src/mcp`, `scripts/agents/finagent_core`,
+  `scripts/ai_quant_lab`, `docs/DATAHUB_TOPICS.md`, `docs/
+  agentic-research/`) + web grounding. Adopted as 6 advisory, phase-gated,
+  default-off items: P1 typed topic-registry refresh policy (per-family
+  TTL / min-interval / coalesce / force-bypass / freshness fields + a
+  `docs/web_TOPICS.md` registry — trading_web REST seam), P2 tool-result
+  size budget with park-and-page (`agents/utils/result_store.py` +
+  `fetch_result` tool + `max_bytes` envelopes with `truncated`/`result_id`
+  — detail on demand, not by default), P3 dual tool-loop budget + visible
+  exhaustion (`run_card` + jobs rows gain `tool_rounds_used` /
+  `tool_deadline_exhausted` / `exhaustion_note`; web job view shows the
+  last probe line), P4 SQLite per-step checkpoints + resume (`jobs.
+  checkpoint_json` + `resume_job` capability; crash mid-batch resumes
+  un-done symbols), P5 org-as-data governance metadata
+  (`consensus.agreement_weighted` + `n_abstained` decision context + PM
+  statistical-rigor criteria + persona metadata doc — composes with the
+  ai-hedge-fund abstention study), P6 single-source-of-truth capability
+  cross-check gate (`test_web_capabilities`: every JSX capability string
+  resolves in `backend/capabilities.py`, public capabilities referenced or
+  documented API-only). Validation table: fork already ahead on
+  multi-provider LLM registry, Qlib teacher study, backtest PIT/fill
+  semantics. Explicit non-goals: C++/Qt6 frontend, paper-trading runtime,
+  crypto/$FNCPT tokenomics, MCP marketplace, Ollama-default, Qlib
+  wholesale wrapper, per-persona SQLite session memory. Design only; no
+  code changed. Strategies/index row 24.
 - **ai-hedge-fund v2 teacher study** - `docs/design_ai_hedge_fund_integration.md`:
   direct-source study of `virattt/ai-hedge-fund` v2.2.0 (hedge_fund/: data,
   signals, llm, features, fund, strategies, portfolio, risk, brokers,

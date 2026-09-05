@@ -53,6 +53,21 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **FinceptTerminal v4 teacher study** (docs-only):
+  `docs/design_fincept_terminal_integration.md` — direct-source study of
+  Fincept-Corporation/FinceptTerminal (C++20/Qt6 + embedded Python;
+  DataHub topic registry, LlmService tool loop, trading, FinAgent Core,
+  ai_quant_lab, agentic-research docs). 6 advisory phase-gated adoptions:
+  P1 typed topic-registry refresh policy for trading_web (TTL/min-interval/
+  coalesce/freshness fields + web_TOPICS.md), P2 tool-result size budget with
+  park-and-page (result_store + fetch_result tool), P3 dual tool-loop budget
+  + visible exhaustion (run_card/jobs fields + progress line), P4 SQLite
+  per-step checkpoints + resume_job, P5 org-as-data governance metadata
+  (agreement_weighted + n_abstained + PM rigor criteria), P6 single-source
+  capability cross-check gate (test_web_capabilities). Validation table:
+  fork ahead on LLM registry, Qlib study, backtest semantics. Non-goals:
+  C++ frontend, paper trading, crypto tokenomics, MCP marketplace, Ollama
+  default, Qlib wrapper, per-persona SQLite memory. No code changed.
 - **ai-hedge-fund v2 teacher study** (docs-only):
   `docs/design_ai_hedge_fund_integration.md` — direct-source study of
   virattt/ai-hedge-fund v2.2.0 (data/signals/llm/features/fund/strategies/
