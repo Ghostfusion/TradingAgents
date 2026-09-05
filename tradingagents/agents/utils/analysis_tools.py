@@ -3480,6 +3480,155 @@ def get_prompt_injection_read(
 
 @tool
 
+def get_trade_outcome_metrics(
+    ticker: Annotated[str, "ticker symbol"],
+    entry: Annotated[float, "entry price"],
+    stop: Annotated[float | None, "stop-loss price, optional"] = None,
+    target: Annotated[float | None, "profit-target price, optional"] = None,
+    direction: Annotated[str, "long or short"] = "long",
+    window: Annotated[int, "trailing close window to measure, default 60"] = 60,
+) -> str:
+    """MAE / MFE + stop/target hits for a held trade (W1-3): max adverse /
+    favorable excursion % after entry against the trailing closes, whether the
+    stop or target was touched. Use before any 'this trade went X against us /
+    the stop held' claim - the excursions come from the close series, never
+    the narrative. Advisory."""
+    try:
+        from tradingagents.strategies.prediction_ledger import outcome_metrics as _om
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"trade outcome metrics unavailable: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) < 2:
+        return f"trade outcome metrics unavailable for {ticker}: insufficient history"
+    use = closes[-max(2, int(window)):]
+    r = _om(use, float(entry), stop=stop, target=target, direction=direction)
+    if r.get("n_bars", 0) == 0:
+        return f"trade outcome metrics unavailable for {ticker}: no valid closes"
+    return (
+        f"trade outcome {ticker}: mae_pct={r['mae_pct']:.2f} mfe_pct={r['mfe_pct']:.2f} "
+        f"stop_hit={r['stop_hit']} target_hit={r['target_hit']} n={r['n_bars']} "
+        f"(entry {entry}, window {len(use)})"
+    )
+
+
+@tool
+
+def get_prediction_ledger_score(
+    results_dir: Annotated[str | None, "results dir holding the prediction ledger (default: config)"] = None,
+    auto_invalidate: Annotated[bool, "append stop-hit outcomes to the invalidation ledger (W1-7)"] = False,
+) -> str:
+    """Prediction-ledger calibration read: scores every logged decision
+    against its realized closes (MAE/MFE, stop/target hits, hit rate, avg
+    return). Answers 'is the scorer calibrated' - the ledger rows are joined
+    to the trailing OHLCV of each ticker (the fast-path horizon re-join is
+    approximated with the available series; outcome fields are honest None
+    when the price history cannot be aligned). Advisory; never gates.
+    """
+    try:
+        from tradingagents.strategies.prediction_ledger import (
+            rows as _rows,
+            score_all as _score_all,
+        )
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"prediction ledger score unavailable: {exc}"
+    ledger = _rows(results_dir)
+    if not ledger:
+        return "prediction ledger score: no ledger rows"
+    closes_by_key = {}
+    for r in ledger:
+        tk = str(r.get("ticker") or "").upper()
+        if tk and (tk, r.get("date")) not in closes_by_key:
+            closes_by_key[(tk, r.get("date"))] = _ohlcv(tk).get("closes") or []
+    scored = _score_all(closes_by_key, results_dir=results_dir, auto_invalidate=bool(auto_invalidate))
+    n = len(scored)
+    outcomes = [s.get("outcome") for s in scored if s.get("outcome")]
+    hits = sum(1 for o in outcomes if o.get("hit") is True)
+    rets = [o.get("return_pct") for o in outcomes if o.get("return_pct") is not None]
+    lines = [
+        f"prediction ledger score: {n} rows, {len(outcomes)} scored, "
+        f"hit_rate={hits / len(outcomes):.1%}" if outcomes else
+        f"prediction ledger score: {n} rows, 0 scored (no aligned closes)",
+        f"avg_return_pct={sum(rets) / len(rets):.2f}" if rets else "",
+        f"stops_hit={sum(1 for o in outcomes if o.get('stop_hit'))} "
+        f"targets_hit={sum(1 for o in outcomes if o.get('target_hit'))}" if outcomes else "",
+    ]
+    return "\n".join(ln for ln in lines if ln)
+
+
+@tool
+
+def get_stress_grid_read(
+    base_value: Annotated[float, "base read (e.g. DCF fair value)"],
+    revenue_shifts_pct: Annotated[str, "comma-separated revenue shifts in %, default -10,-5,0,5,10"] = "",
+    discount_shifts_bps: Annotated[str, "comma-separated discount-rate shifts in bps, default -50,0,50,100"] = "",
+) -> str:
+    """Computed stress grid around a base read (W2-11): base_value +
+    revenue-shift x responsiveness + discount-shift x responsiveness, cells
+    rendered as a table. Responsiveness defaults to ±1% of base per unit when
+    unmapped (documented approximation). Use before any 'the valuation is
+    robust to a -10% revenue cut' claim - show the grid, don't assert it.
+    Advisory."""
+    try:
+        from tradingagents.strategies.regime_performance import stress_grid as _sg
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"stress grid unavailable: {exc}"
+    try:
+        rev = [float(x) for x in revenue_shifts_pct.split(",") if x.strip()] \
+            if revenue_shifts_pct else None
+        disc = [float(x) for x in discount_shifts_bps.split(",") if x.strip()] \
+            if discount_shifts_bps else None
+    except ValueError as exc:
+        return f"stress grid unavailable: bad shift list - {exc}"
+    r = _sg(float(base_value), revenue_shifts_pct=rev, discount_shifts_bps=disc)
+    if r.get("base") is None:
+        return "stress grid unavailable: base value missing"
+    rows_out = r["rows"]
+    lines = [
+        f"## Stress grid — base {r['base']:.2f}",
+        "",
+        "| revenue shift % | disc shift bps | value |",
+        "| --- | --- | --- |",
+    ]
+    for cell in rows_out[:20]:
+        lines.append(f"| {cell['revenue_shift_pct']:+.0f} | {cell['discount_shift_bps']:+.0f} | {cell['value']:.2f} |")
+    lines.append("\n(note: un-mapped responsiveness = flat ±1% of base per unit, approximated)")
+    return "\n".join(lines)
+
+
+@tool
+
+def get_macro_regime_read(
+    rate_change_bps: Annotated[float | None, "fed-policy rate change in bps this window, optional"] = None,
+    yield_curve_slope_bps: Annotated[float | None, "10y-2y slope in bps, optional"] = None,
+    credit_spread_bps: Annotated[float | None, "credit-spread level in bps (e.g. HY - IG), optional"] = None,
+    dollar_index_chg_pct: Annotated[float | None, "USD index change in %, optional"] = None,
+    vol_percentile: Annotated[float | None, "market vol percentile 0..1, optional"] = None,
+) -> str:
+    """Cross-asset macro regime (W4-6): Risk-On / Liquidity-Contraction /
+    Stagflation from the macro markers you pass (fed-watch / curve / credit /
+    dollar / vol reads). Fail-open: unmeasured inputs leave the label None, a
+    partial set uses what exists - never fabricates. Use before any 'the tape
+    is risk-on / we are in a liquidity crunch' claim. Advisory."""
+    try:
+        from tradingagents.strategies.regime_performance import macro_regime as _mr
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"macro regime unavailable: {exc}"
+    r = _mr(
+        rate_change_bps=rate_change_bps,
+        yield_curve_slope_bps=yield_curve_slope_bps,
+        credit_spread_bps=credit_spread_bps,
+        dollar_index_chg_pct=dollar_index_chg_pct,
+        vol_percentile=vol_percentile,
+    )
+    reg = r["regime"]
+    base = f"macro regime: {reg if reg is not None else 'n/a (mixed/unknown inputs)'}"
+    if r["reasons"]:
+        base += " — " + "; ".join(r["reasons"])
+    return base
+
+
+@tool
+
 def get_liquidation_days(
     ticker: Annotated[str, "ticker symbol"],
     shares_to_liquidate: Annotated[

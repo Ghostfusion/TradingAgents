@@ -38,25 +38,19 @@ LEGACY_WHITELIST = {
     "strategies/liquidity_risk.py:market_impact_slippage": "legacy slippage model (not used by the liquidity gate)",
     "dataflows/config.py:reset_config": "test/utility helper, not a calc",
     "dataflows/schema.py:to_markdown": "dead formatting utility (schema layer)",
-    # W4-2 typed-state schema artifacts - explicitly FUTURE/advisory by design
-    # (module doc: "nothing re-wires the existing graph"; the compact
-    # summarizer lands with the typed-state cutover).
-    "strategies/typed_state.py:summarize_report": "advisory typed-state (W4-2) artifact for a future graph cutover",
-    "strategies/typed_state.py:to_compact": "advisory typed-state (W4-2) artifact for a future graph cutover",
-    # W4-8 complexity/maintenance-tax report - a developer ops tool, not an
-    # agent read; run on demand (no periodic hook yet).
-    "strategies/integrity_tools.py:complexity_report": "developer ops report (LOC/fan-in), no periodic hook yet",
-    # W2-11/W4-6 scenario-grid reads - DCF-at-price consumers; no decision
-    # surface prices them today (the DCF tool is the live fundamental path).
-    "strategies/regime_performance.py:stress_grid": "advisory scenario grid; no DCF-at-price consumer yet",
-    "strategies/regime_performance.py:macro_regime": "advisory cross-asset regime label; no consumer yet",
-    # W1 scoring helpers - need the prediction-horizon close join; log_decision
-    # is wired, the scoring consumption lands with fast-path horizon resolution.
-    "strategies/prediction_ledger.py:score_all": "scoring needs the horizon close join (fast-path T0/T1 work)",
-    "strategies/prediction_ledger.py:score_outcome": "scoring needs the horizon close join (fast-path T0/T1 work)",
-    "strategies/prediction_ledger.py:outcome_metrics": "scoring needs the horizon close join (fast-path T0/T1 work)",
-    # options_surface IV-rank read - needs a per-day IV history no vendor
-    # delivers (cboe/chain is spot-only); the chain-based reads are tool-wired.
+    # W4-2 typed-state schema artifacts - DESIGN REFERENCE by explicit design
+    # (module doc: \"nothing re-wires the existing graph\"): the dataclass
+    # schemas + pure compact summarizer are the pinned spec for the future
+    # typed-state cutover, not an agent calc. Permanent classification, not
+    # deferred work - the tests pin the behavior today.
+    "strategies/typed_state.py:summarize_report": "design-reference artifact (W4-2 typed-state spec), tests-pinned, intentionally not agent-bound",
+    "strategies/typed_state.py:to_compact": "design-reference artifact (W4-2 typed-state spec), tests-pinned, intentionally not agent-bound",
+    # W4-8 complexity/maintenance-tax report - a developer ops tool (LOC +
+    # fan-in), not an agent read; no periodic hook by design.
+    "strategies/integrity_tools.py:complexity_report": "developer ops report (LOC/fan-in); not an agent calc",
+    # options_surface IV-rank read - PERMANENT data limitation: no vendor
+    # delivers a per-day IV history (the cboe/chain reads are spot-only), so
+    # the percentile has no input and stays a tested helper awaiting source.
     "strategies/options_surface.py:iv_percentile": "needs per-day IV history no vendor delivers (chain is spot-only)",
 }
 
@@ -119,10 +113,18 @@ CASES = []
 for calc_dir in CALC_DIRS:
     for f in sorted(calc_dir.glob("*.py")):
         text = f.read_text(encoding="utf-8", errors="ignore")
-        for fn in sorted(_public_funcs(f)):
-            # referenced inside its own module (self-count >1) or anywhere in
-            # the production reference domains -> wired.
-            if text.count(fn) > 1 or blob.count(fn) > 1:
+        fns = sorted(_public_funcs(f))
+        # Module-level reachability (any public fn referenced outside the
+        # module itself) - the whole-module escape hatch.
+        module_reachable = any(blob.count(fn) - text.count(fn) > 0 for fn in fns)
+        for fn in fns:
+            # Wired = referenced OUTSIDE its own module, OR an internal
+            # helper of a module that is itself externally reachable. A fn
+            # referenced only by its own module's text (the old self-count
+            # escape) is NOT wired unless the module is reachable.
+            outside = blob.count(fn) - text.count(fn)
+            internal_use = text.count(fn) > 1
+            if outside > 0 or (module_reachable and internal_use):
                 continue
             CASES.append((f"{calc_dir.name}/{f.name}:{fn}", f"{calc_dir.name}/{f.name}:{fn}"))
 
@@ -131,10 +133,91 @@ for calc_dir in CALC_DIRS:
 def test_public_calc_reachable_or_whitelisted(case):
     key, _ = case
     assert key in LEGACY_WHITELIST, (
-        f"calculation {key} has zero references outside its module - it is "
-        "either a wiring gap (virtual agents cannot reach a computed read) or "
-        "dead code. Wire it as an agent tool / pipeline hook, or move it to "
-        "the LEGACY_WHITELIST with a reason."
+        f"calculation {key} has zero references outside its module (and is "
+        "not an internal helper of a reachable module) - it is either a wiring "
+        "gap (virtual agents cannot reach a computed read) or dead code. Wire "
+        "it as an agent tool / pipeline hook, or move it to the "
+        "LEGACY_WHITELIST with a reason."
+    )
+
+
+# ---------------------------------------------------------------------------
+# @tool -> agent-binding gate: every LangChain @tool in agents/utils/*_tools.py
+# must be bound by name in the agent-side binding surface (the graph ToolNode
+# lists, the Trader/risk-debator tool loops, or an analyst/arbiter binding
+# file) - otherwise the analyst can never actually call it. This closes the
+# "defined but unbound" gap that text-substring audits cannot see.
+# ---------------------------------------------------------------------------
+
+TOOL_BINDING_DOMAINS = (
+    list((REPO / "tradingagents" / "agents" / "analysts").rglob("*.py"))
+    + list((REPO / "tradingagents" / "agents" / "arbiters").rglob("*.py"))
+    + list((REPO / "tradingagents" / "agents" / "managers").rglob("*.py"))
+    + list((REPO / "tradingagents" / "agents" / "risk_mgmt").rglob("*.py"))
+    + list((REPO / "tradingagents" / "agents" / "researchers").rglob("*.py"))
+    + [REPO / "tradingagents" / "agents" / "utils" / "risk_tool_loop.py"]
+    + list((REPO / "tradingagents" / "graph").glob("*.py"))
+)
+TOOL_BINDING_BLOB = "\n".join(
+    p.read_text(encoding="utf-8", errors="ignore")
+    for p in TOOL_BINDING_DOMAINS
+    if p.exists()
+)
+
+# Tools bound only inside their own module (no agent-side binding) -> must be
+# whitelisted with a reason (e.g. internal helpers a wrapper calls directly).
+TOOL_LEGACY_BINDING = {}
+
+
+def _tool_names(path: Path):
+    """Names of @tool-decorated PUBLIC functions in a file (LangChain
+    decorator). Underscore-prefixed (private @tool helpers called by other
+    tools) are excluded from the binding requirement."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return []
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        for dec in node.decorator_list:
+            is_tool = (
+                isinstance(dec, ast.Name) and dec.id == "tool"
+            ) or (
+                isinstance(dec, ast.Call)
+                and isinstance(dec.func, ast.Name)
+                and dec.func.id == "tool"
+            ) or (
+                isinstance(dec, ast.Attribute) and dec.attr == "tool"
+            )
+            if is_tool:
+                out.append(node.name)
+                break
+    return out
+
+
+TOOL_CASES = []
+for f in sorted((REPO / "tradingagents" / "agents" / "utils").glob("*_tools.py")):
+    own = f.read_text(encoding="utf-8", errors="ignore")
+    for name in sorted(_tool_names(f)):
+        # The tool's own module is in agents/utils - binding must be in the
+        # non-utils binding surface (its own def text would self-count).
+        if name in TOOL_BINDING_BLOB:
+            continue
+        TOOL_CASES.append((f"{f.parent.name}/{f.name}:{name}", name))
+
+
+@pytest.mark.parametrize("case", TOOL_CASES, ids=[c[0] for c in TOOL_CASES])
+def test_tool_bound_to_agent_surface(case):
+    key, name = case
+    assert name in TOOL_LEGACY_BINDING, (
+        f"@tool {key} is not bound anywhere in the agent surface (graph "
+        "ToolNode lists / risk-tool loop / analyst files) - the agents can "
+        "never call it. Bind it to a ToolNode or the risk loop, or "
+        "whitelist it in TOOL_LEGACY_BINDING with a reason."
     )
 
 

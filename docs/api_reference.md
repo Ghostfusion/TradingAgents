@@ -552,6 +552,10 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_tail_extreme_var(ticker, alpha?)` | `book_risk.extreme_quantile_var` | market | EVT/GPD extreme-quantile VaR/ES (extrapolates beyond the observed worst day) |
 | `get_kyle_lambda(ticker)` | `liquidity_risk.kyle_lambda` | market | daily-bar price-impact slope (cross-sectional liquidity proxy) |
 | `get_kelly_alloc(expected_excess_returns)` | `portfolio.kelly_weights` | market + fundamentals | multi-asset fractional Kelly alloc (w = f·Σ⁻¹μ, long-only) |
+| `get_trade_outcome_metrics(ticker, entry, stop?, target?, direction?)` | `prediction_ledger.outcome_metrics` | market | MAE/MFE + stop/target hits over the trailing closes (W1-3) |
+| `get_prediction_ledger_score(results_dir?, auto_invalidate?)` | `prediction_ledger.score_all` | market | calibration read: scores every logged prediction vs realized closes (W1-1) |
+| `get_stress_grid_read(base_value, revenue_shifts?, discount_shifts?)` | `regime_performance.stress_grid` | market | DCF-style scenario grid (W2-11) |
+| `get_macro_regime_read(rate_change?, curve?, spread?, usd?, vol?)` | `regime_performance.macro_regime` | market | cross-asset Risk-On / Liquidity-Contraction / Stagflation (W4-6) |
 | `get_liquidation_days(ticker, shares_to_liquidate?)` | `liquidity_risk.days_to_absorb` | market | days for the market to absorb a block at a 15% participation cap |
 | `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?, entry_price?)` | `pre_market.review_decision` | market | deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas |
 | `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |

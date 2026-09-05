@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Calc → agent wiring gates (no more silent gaps)** - the wiring audit is
+  now a permanent test, not a one-off find:
+  1. `test_calc_agent_wiring` per-fn rule tightened: a public calc counts as
+     wired only when referenced OUTSIDE its module, or as an internal helper
+     of a module that is itself externally reachable — the old "self-count
+     escape" (a fn referenced only by its own module's text) no longer
+     passes, and the module-level gate fails any wholly-unreachable module.
+  2. NEW `@tool` → agent-surface binding gate: every public LangChain `@tool`
+     in `agents/utils/*_tools.py` must appear in the graph ToolNode lists /
+     risk-tool loop / analyst bindings, or fail. It immediately caught 4
+     tools that were defined and exported but never bound since the
+     7-phase risk wiring: `get_pair_risk`, `get_trade_excursions`,
+     `get_vif_read`, `get_no_trade_guard_band` — now bound (market /
+     fundamentals).
+  3. Whitelist purge: the "future work will wire it" entries are gone.
+     `prediction_ledger.score_all/score_outcome/outcome_metrics` and
+     `regime_performance.stress_grid/macro_regime` are now wired as
+     agent tools: `get_prediction_ledger_score` (calibration read),
+     `get_trade_outcome_metrics` (MAE/MFE), `get_stress_grid_read`
+     (DCF-style scenario grid), `get_macro_regime_read` (cross-asset
+     regime) — all bound to the market node + web Value Tools. Remaining
+     whitelist entries are permanent classifications (design-reference
+     `typed_state` W4-2, dev-ops `complexity_report`, `iv_percentile` needs
+     a per-day IV history no vendor ships), each with a stated reason.
 - **Formula-catalog additions (six-pillar / master-catalog)** -
   ``strategies/covariance_models.py`` (NEW): Ledoit-Wolf (2004) shrunk
   covariance (scaled-identity / diag targets, ``delta = clip(b2/d2, 0, 1)``,

@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Calc→agent wiring gates** - the wiring contract is now a
+  permanent test: every public calc must be externally referenced (or a
+  helper of a reachable module) and every `@tool` must be bound to a
+  ToolNode / risk loop / analyst — the gate instantly caught 4 previously
+  unbound tools (`get_pair_risk`, `get_trade_excursions`, `get_vif_read`,
+  `get_no_trade_guard_band`) and wired the parked scoring/scenario reads
+  (`get_prediction_ledger_score`, `get_trade_outcome_metrics`,
+  `get_stress_grid_read`, `get_macro_regime_read`). No more silent gaps.
 - [2026-09-04] **Formula-catalog quant adds (six-pillar + master-catalog)** -
   Ledoit-Wolf shrunk covariance + EWMA covariance + Yang-Zhang vol (completes
   the estimator set: close/Parkinson/GK/YZ/EWMA/GARCH), a book-concentration

@@ -29,6 +29,22 @@ Also this session:
   `test_strategies_covariance_models` (8) + `test_formulas_p2` (11) +
   `test_formulas_p3` (7). Formals grounded via web_search (YZ k-weight,
   Ledoit-Wolf b2/d2, Kyle ΔP~Q regression, Kelly Σ⁻¹μ).
+- **Calc→agent wiring made permanent** - the wiring audit is now a gate:
+  per-fn rule requires an outside-module reference (or internal-helper of a
+  reachable module) and a NEW `@tool`→binding test requires every public
+  tool in graph ToolNodes/risk-loop/analysts. It caught 4 never-bound tools
+  (get_pair_risk/get_trade_excursions/get_vif_read/get_no_trade_guard_band;
+  from the 7-phase risk + quant-adds batches — defined, exported, never
+  bound) and wired the parked scoring/scenario reads
+  (get_prediction_ledger_score, get_trade_outcome_metrics,
+  get_stress_grid_read, get_macro_regime_read). Whitelist now holds only
+  permanent classifications (typed_state design-reference, complexity_report
+  dev-ops, iv_percentile needs a per-day IV history) + dead-legacy entries.
+  ALSO: fixed the 3 pre-existing test_qlib_wiring tradability failures
+  (backtest next-bar entry never applied limit/suspension/participation
+  gates — restored) + the stale catalyst test expectation. Note: agent_utils
+  must list a re-export in `__all__` or ruff F401 silently deletes it - the
+  new tools were re-added with __all__ entries.
 
 ## 2. What Landed — Files & Commits
 **Code (repo):**
