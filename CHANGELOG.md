@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **myhhub/stock teacher study** - `docs/design_myhhub_stock_integration.md`:
+  direct-source study of the Chinese A-share rule-based quant platform
+  InStock (`instock/`: MySQL daily-job pipeline, uniform
+  `check(...) -> bool` strategy predicates with min-observation self-guards,
+  trading-calendar singleton with None fallbacks, declarative web table
+  registry, live-trade robot + Eastmoney cookie-triangle fetcher). Adopted
+  as 4 advisory, phase-gated, default-off items: P1 managed trading-calendar
+  cache (`dataflows/trading_calendar.py` feeding the existing
+  `effective_date.non_trading_days` override — serves the yfinance A2/P2
+  "exchange closed vs no data" calendar half), P2 session-aware scheduling
+  hint (`run_nightly` + web jobs `session=pre|after|any`; skipped mid-session
+  jobs), P3 min-obs guard helper (`strategies/obs_guard.py` +
+  `require_observations` convention; no migration of existing guards), P4
+  env-first credential-priority note (docs). Validation table: fork already
+  ahead on backtest metrics (evaluate.py vs rate_stats.py), stepwise jobs,
+  web surface; uniform-predicate full layer is deliberately NOT built (the
+  ai-hedge-fund mandate AlphaModel is the right shape for typed views).
+  Explicit non-goals: live-trade robot (TradingExecution successor), MySQL
+  persistence (stateless-per-run + FinceptTerminal P4 plan), chip
+  distribution, A-share feeds, GUI. Design only; no code changed.
+  Strategies/index row 27.
 - **anthropics/financial-services teacher study** - `docs/design_anthropic_financial_services_integration.md`:
   direct-source study of the Anthropic financial-services monorepo (skills
   authored once under `vertical-plugins/*/skills/`, vendored into agent

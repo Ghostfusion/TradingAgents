@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **myhhub/stock teacher study** - a direct-source study of the
+  InStock A-share rule-based quant platform (uniform strategy predicates,
+  trading-calendar singleton, declarative web table registry, daily job
+  pipeline) mapped onto the fork as 4 advisory, phase-gated, default-off
+  adoptions — flagship: a managed trading-calendar cache feeding the
+  existing `effective_date` override hook, serving the yfinance study's
+  "exchange closed vs no data" gap
+  (`docs/design_myhhub_stock_integration.md`). Design only — no code, the
+  no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-04] **anthropics/financial-services teacher study** - a
   direct-source study of the Anthropic financial-services monorepo
   (skills-as-single-source vendored into agent bundles with a byte-identity

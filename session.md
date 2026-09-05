@@ -53,6 +53,19 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **myhhub/stock teacher study** (docs-only):
+  `docs/design_myhhub_stock_integration.md` — direct-source study of the
+  InStock A-share rule-based quant platform (MySQL daily-job pipeline,
+  uniform check()->bool strategy predicates with min-obs self-guards,
+  trading-calendar singleton with None fallbacks, declarative web table
+  registry, live robot + Eastmoney cookie-triangle fetcher). 4 advisory
+  phase-gated adoptions: P1 managed trading-calendar cache
+  (dataflows/trading_calendar.py feeding effective_date.non_trading_days —
+  serves the yfinance A2/P2 calendar half), P2 session-aware scheduling
+  hint (nightly/web jobs session=pre|after|any), P3 min-obs guard helper
+  (strategies/obs_guard.py, no migration), P4 env-first credential-priority
+  note. Non-goals: live robot (TradingExecution), MySQL persistence, chip
+  distribution, A-share feeds, GUI. No code changed.
 - **anthropics/financial-services teacher study** (docs-only):
   `docs/design_anthropic_financial_services_integration.md` — direct-source
   study of the monorepo (vertical skills vendored into agent bundles +
