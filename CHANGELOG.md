@@ -7,6 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Quant-engine additions** (per the end-to-end quant spec review; `docs/design_quant_engine_additions.md`): HRP (`strategies/hierarchical_risk_parity.py` + `get_hrp_alloc` — Lopez de Prado single-linkage HRP, robust/no-inversion, equal-weight degrade), 12-1 momentum (`strategies/momentum.momentum_12_1` + `get_momentum_12_1` — Jegadeesh-Titman, skips last month), Omega row in `get_strategy_quality` (via existing `statistical.omega`), industry-neutral z (`cross_section.industry_neutral_z` — winsorize → demean-by-sector → z). Tests `test_quant_engine_additions.py` (10); suite 210 green; ruff clean. See the design doc + api_reference.
 - **Option-position breakeven / PMCC advisory read** (per the AVGO PMCC
   sample review + user's "go straight to implementation") —
   `strategies/options_breakeven.py` + `get_option_breakeven` tool (market

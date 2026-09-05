@@ -53,6 +53,7 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Quant-engine additions implemented** (per end-to-end quant spec + user): HRP (`hierarchical_risk_parity.py` + `get_hrp_alloc`, single-linkage, no Σ inversion, equal-weight degrade), 12-1 momentum (`momentum_12_1` + `get_momentum_12_1`, Jegadeesh-Titman skip-last-month), Omega row in `get_strategy_quality` (via `statistical.omega` — already existed as `get_payoff_asymmetry`), industry-neutral z (`cross_section.industry_neutral_z`, Grinold-Kahn demean-by-sector). `docs/design_quant_engine_additions.md`. Tests 10; suite 210 green; ruff clean; no web change.
 - **Option breakeven / PMCC read implemented** (per AVGO PMCC sample review
   + user): `strategies/options_breakeven.py` + `get_option_breakeven` tool
   (market analyst; always-on advisory). pmcc_breakeven (strike+premium),

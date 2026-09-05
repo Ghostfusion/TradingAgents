@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Quant-engine additions** - HRP portfolio construction (`get_hrp_alloc`), 12-1 momentum (`get_momentum_12_1`), an Omega row in `get_strategy_quality`, and industry-neutral factor z — all advisory, from the end-to-end quant spec + web evidence (`docs/design_quant_engine_additions.md`). 210 suite green. See CHANGELOG.
 - [2026-09-05] **Option breakeven / PMCC read** - from the AVGO PMCC sample
   review: `get_option_breakeven` (new `strategies/options_breakeven.py`,
   market analyst) — breakeven = strike + premium, the short-call floor above

@@ -616,7 +616,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 | `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown |
 | `get_sector_rank(ticker)` | `strategies.sector_rank.rank_sectors` + `sector_standing` (+ gated `rank_sectors_multifactor` / `rank_industry_group` / `constituent_breadth` / `leadership_ratio`) | market | 11-SPDR 1m/3m momentum ranking + the ticker's sector standing; when `enable_sector_multifactor` (P1) `/enable_sector_industry` (P2) `/enable_sector_breadth` (P3) are on, advisory score / industry / breadth / leadership lines append (default off ⇒ legacy output unchanged) |
-| `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` | market | net CAGR / annualized vol / Sharpe / Sortino / PSR / max drawdown over a return series |
+| `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` + `statistical.omega` | market | net CAGR / annualized vol / Sharpe / Sortino / PSR / max drawdown / Omega over a return series |
 | `get_downside_read(ticker, target?)` | `strategies.rate_utils.downside_measures` | market | semi-deviation / downside deviation / shortfall probability / average shortfall vs a target (MAR) |
 | `get_horizon_var(ticker, horizon_days?, alpha?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate |
 | `get_trailing_exit(ticker, entry, peak, current, trail_pct?)` | `strategies.exits.trailing_stop_exit` | market | peak-trailing / give-back stop verdict + exit price |
@@ -625,6 +625,8 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_payoff_asymmetry(ticker, returns?, threshold?)` | `strategies.statistical.omega` | market | Omega ratio (gains/losses payoff asymmetry) about a threshold |
 | `get_book_correlation(returns_by_name, method?)` | `strategies.statistical.correlation_matrix` | market | full pairwise correlation (avg + max pair) over a book |
 | `get_risk_parity_alloc(ticker, returns_by_name)` | `strategies.portfolio_optimizer` (risk_parity + min_variance + **max_diversification** + risk_contribution) | market | risk-parity weights, min-variance weights, max-diversification weights (Choueifaty `Σ⁻¹σ`) and per-name risk contributions from a real covariance matrix |
+| `get_hrp_alloc(ticker, returns_by_name)` | `strategies.hierarchical_risk_parity` | market | Hierarchical Risk Parity book weights (single-linkage HRP; robust under noisy covariance, no Σ inversion) + cluster order |
+| `get_momentum_12_1(ticker)` | `strategies.momentum.momentum_12_1` | market | canonical 12-1 momentum (skips the last month's short-term reversal; needs ~274 bars) |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
 | `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
 | `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` + **`cdar`** | market | historical VaR / CVaR tail budget + CDaR/DVaR drawdown-tail + -10% uniform stress loss |

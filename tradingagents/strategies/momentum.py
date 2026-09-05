@@ -349,6 +349,21 @@ def intraday_pullback(bars: list, window: int = 6) -> dict:
     return fp
 
 
+def momentum_12_1(closes: list, skip: int = 21, window: int = 252) -> float | None:
+    """Canonical 12-1 momentum (Jegadeesh-Titman): P(t-21)/P(t-252-21) - 1.
+
+    Skips the most recent month (t-1 is short-term reversal, not momentum
+    continuation) and requires window + skip + 1 bars; None otherwise.
+    """
+    if not closes or len(closes) <= window + skip:
+        return None
+    base = closes[-skip - window - 1]
+    ref = closes[-skip]
+    if base is None or base <= 0 or ref is None or ref <= 0:
+        return None
+    return round(ref / base - 1.0, 6)
+
+
 __all__ = ["rvol", "ema9", "vwap", "pillars", "first_pullback", "session_flags",
            "past_optimal_window", "psych_level", "intraday_pullback", "twap",
-           "ts_momentum_weights"]
+           "ts_momentum_weights", "momentum_12_1"]

@@ -1966,6 +1966,58 @@ def get_derivatives_flow(
         return f"derivatives flow unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_hrp_alloc(
+    ticker: Annotated[str, "anchor ticker (signal context)"],
+    returns_by_name: Annotated[
+        dict, "dict of name -> return series (aligned daily/monthly returns)"
+    ],
+) -> str:
+    """Hierarchical Risk Parity (HRP) weights over a book (Lopez de Prado).
+
+    HRP builds a single-linkage tree from the correlation distance, quasi-
+    diagonalizes the covariance, and recursively bisects risk inverse to
+    cluster variance — no matrix inversion, robust out-of-sample under noisy
+    covariance (better than unconstrained MVO at limiting extreme losses; more
+    conservative in returns). Pass ``returns_by_name`` of the book.
+
+    Reports the HRP weights + cluster order; degrades to equal-weight with a
+    note when covariance is unusable.
+    """
+    try:
+        from tradingagents.strategies.hierarchical_risk_parity import hrp_weights
+    except Exception as exc:  # noqa: BLE001
+        return f"hrp alloc unavailable: {exc}"
+    r = hrp_weights(returns_by_name)
+    if not r["weights"]:
+        return f"hrp alloc unavailable for {ticker}: no aligned returns."
+    w_s = ", ".join(f"{k}={v:.1%}" for k, v in r["weights"].items())
+    order_s = " -> ".join(r["order"]) if r["order"] else "n/a"
+    return f"hrp_alloc {ticker}: {w_s} [{r['note']}]; order={order_s}"
+
+
+@tool
+def get_momentum_12_1(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """12-1 momentum (Jegadeesh-Titman): P(t-21) / P(t-273) - 1 — skips the
+    most recent month (short-term reversal, not continuation). Use before any
+    '11-month momentum' / 'skip-the-last-month' factor claim. Requires ~14
+    months of bars; None-safe.
+    """
+    try:
+        from tradingagents.strategies.momentum import momentum_12_1
+    except Exception as exc:  # noqa: BLE001
+        return f"momentum 12-1 unavailable for {ticker}: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    if len(closes) <= 252 + 21:
+        return f"momentum 12-1 unavailable for {ticker}: need >= 274 bars"
+    m = momentum_12_1(closes)
+    if m is None:
+        return f"momentum 12-1 unavailable for {ticker}: unusable prices"
+    return f"momentum 12-1 {ticker}: {m:+.3f} (12m minus last month, needs ~14mo bars)"
+
+
 # ---------------------------------------------------------------------------
 # Item-1: sector leadership / sector standing (market analyst)
 # ---------------------------------------------------------------------------
@@ -2227,6 +2279,14 @@ def get_strategy_quality(
     te = tracking_error(net, returns)
     trn = treynor(net, returns)
     cap = capture_ratio(net, returns)
+    # Omega (full-distribution gains/losses vs 0; better than Sharpe for
+    # skewed/fat-tailed returns) — surfaced from statistical.omega.
+    try:
+        from tradingagents.strategies.statistical import omega as _omega
+
+        omg = _omega(net)
+    except Exception:  # noqa: BLE001 - advisory
+        omg = None
     # Regime split: rolling 21d realized-vol percentile series (aligned to the
     # tail), so the low/high-vol buckets are measured, not assumed.
     reg_split = {}
@@ -2259,7 +2319,7 @@ def get_strategy_quality(
         f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} "
         f"calmar={_f(cal)} ulcer={_f(ul)} tail_ratio={_f(tr)} "
         f"info_ratio={_f(ir)} tracking_err={_f(te)} treynor={_f(trn)} "
-        f"capture={_f(cap)} {ex_txt} regime={reg_txt} n={len(net)}"
+        f"capture={_f(cap)} omega={_f(omg)} {ex_txt} regime={reg_txt} n={len(net)}"
     )
 
 
@@ -5882,6 +5942,8 @@ __all__ = [
     "get_gamma_profile",
     "get_opex_read",
     "get_derivatives_flow",
+    "get_hrp_alloc",
+    "get_momentum_12_1",
     "get_normality",
     "get_unit_root",
     "get_relative_rotation",

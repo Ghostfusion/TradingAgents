@@ -86,6 +86,53 @@ def cross_sectional_z(values) -> dict | None:
     return {"z": z, "mean": m, "std": sd}
 
 
+def industry_neutral_z(
+    values, sector_map: dict | None = None,
+    lower_q: float = 0.01, upper_q: float = 0.99,
+) -> dict | None:
+    """Industry-neutralized factor z (Grinold-Kahn): winsorize -> demean by
+    sector -> z-score the residuals.
+
+    ``values``: iterable aligned with ``sector_map`` entries (index -> sector
+    name). Within each sector the factor is demeaned (removes the average
+    sector effect), then the demeaned values are standardized cross-sectionally.
+    Names NOT in ``sector_map`` are left in a residual "unknown" bucket (they
+    are demeaned against each other, not dropped). Requires >= 2 finite
+    sector-demeaned values and nonzero std; returns ``{"z": [..], "mean": ..,
+    "std": .., "n_sectors": ..}`` or None. Pure / never fabricates.
+    """
+    wins = winsorize(values, lower_q, upper_q)
+    sector_mean: dict = {}
+    for idx, v in enumerate(wins):
+        if v is None:
+            continue
+        sec = (sector_map.get(idx) if sector_map else None) or "unknown"
+        sector_mean.setdefault(sec, [0.0, 0])
+        sector_mean[sec][0] += float(v)
+        sector_mean[sec][1] += 1
+    demeaned: list = []
+    for idx, v in enumerate(wins):
+        if v is None:
+            demeaned.append(None)
+            continue
+        sec = (sector_map.get(idx) if sector_map else None) or "unknown"
+        m, cnt = sector_mean[sec]
+        demeaned.append(float(v) - (m / cnt if cnt else 0.0))
+    z = cross_sectional_z([x for x in demeaned if x is not None])
+    if z is None:
+        return None
+    out = []
+    zi = 0
+    for v in demeaned:
+        if v is None:
+            out.append(None)
+        else:
+            out.append(z["z"][zi])
+            zi += 1
+    return {"z": out, "mean": z["mean"], "std": z["std"],
+            "n_sectors": len(sector_mean)}
+
+
 def centered_rank(values) -> list[float] | None:
     """Cookbook recipe 4 rank score: ``2 * RankPct(x_i) - 1`` in [-1, 1].
 
@@ -278,6 +325,7 @@ def no_trade_band(target_weights: dict, prev_weights: dict, delta: float = 0.02)
 __all__ = [
     "winsorize",
     "cross_sectional_z",
+    "industry_neutral_z",
     "centered_rank",
     "quantile_split",
     "residualize_returns",
