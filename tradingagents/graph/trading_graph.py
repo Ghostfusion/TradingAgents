@@ -22,6 +22,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_cost_models,
     get_crypto_prices,
     get_debate_claims_verdict,
+    get_derivatives_flow,
     get_dividends,
     get_earnings_calendar,
     get_earnings_catalyst,
@@ -30,6 +31,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_expected_move,
     get_fed_watch,
     get_fundamentals,
+    get_gamma_profile,
     get_gdelt_sentiment,
     get_global_news,
     get_income_statement,
@@ -46,6 +48,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_massive_news,
     get_news,
     get_news_sentiment,
+    get_opex_read,
     get_options_chain,
     get_prediction_markets,
     get_revenue_breakdown,
@@ -443,6 +446,9 @@ class TradingAgentsGraph:
                     get_live_price_sanity,
                     # Forward-looking positioning (free yfinance sources)
                     get_options_chain,
+                    get_gamma_profile,
+                    get_derivatives_flow,
+                    get_opex_read,
                     get_short_interest,
                     get_short_volume,
                     # Liquidity (Amihud ILLIQ / float turnover / IWF)

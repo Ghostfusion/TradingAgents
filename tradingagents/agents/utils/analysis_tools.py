@@ -1793,6 +1793,180 @@ def get_option_breakeven(
 
 
 # ---------------------------------------------------------------------------
+# Derivatives-flow A1+A2: chain gamma profile (GEX) + OPEX calendar (market analyst)
+# ---------------------------------------------------------------------------
+
+
+def _options_chain_rows_lambda(ticker: str) -> tuple | None:
+    """Best-effort chain rows + spot + T for the gamma/iv reads.
+
+    Returns ``(rows, spot, t_years)`` where rows = [{strike, iv, oi, spot,
+    side}] (the shape gex_per_strike consumes), or None when the chain has no
+    usable IV rows. Mirrors get_options_iv_read's builder.
+    """
+    try:
+        import datetime as _dt
+        import re as _re
+
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 30:
+            return None
+        import yfinance as _yf
+
+        tk = _yf.Ticker(str(ticker).upper())
+        expiries = list(tk.options or [])
+        if not expiries:
+            return None
+        expiry = expiries[min(2, len(expiries) - 1)]
+        chain = tk.option_chain(expiry)
+        spot = float(closes[-1])
+        m = _re.search(r"(\d{6})", expiry)
+        T = 30.0 / 365.0
+        if m:
+            try:
+                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
+                T = max((exp_d - _dt.datetime.now()).days, 1) / 365.0
+            except ValueError:
+                T = 30.0 / 365.0
+        rows = []
+        for side, df in (("call", chain.calls), ("put", chain.puts)):
+            for _, r in df.iterrows():
+                try:
+                    iv = r.get("impliedVolatility")
+                    if iv is not None and float(iv) > 0:
+                        oi = r.get("openInterest")
+                        rows.append({
+                            "strike": float(r["strike"]), "iv": float(iv),
+                            "days_to_expiry": max(int(T * 365.0), 1),
+                            "oi": float(oi) if oi is not None else None,
+                            "spot": spot, "side": side,
+                        })
+                except (TypeError, ValueError, KeyError):
+                    continue
+        if len(rows) < 3:
+            return None
+        return rows, spot, T
+    except Exception:  # noqa: BLE001 - advisory, degrades
+        return None
+
+
+@tool
+def get_gamma_profile(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Dealer-gamma regime + call/put wall strikes (GEX-style) from the
+    machine options chain. Short gamma = dealers chase price (momentum /
+    cascade risk); long gamma = dealers fade price (mean-reversion). Use
+    before any 'the stock is pinned / trending / at a structural wall'
+    claim. Advisory — walls/zero-gamma are market-structure heuristics, not
+    support/resistance guarantees. Degrades to unavailable without a chain.
+    """
+    try:
+        from tradingagents.strategies.derivatives_gamma import (
+            gamma_regime,
+            gex_per_strike,
+        )
+
+        out = _options_chain_rows_lambda(ticker)
+        if out is None:
+            return f"gamma profile unavailable for {ticker}: no usable option chain"
+        rows, spot, T = out
+        prof = gex_per_strike(rows, spot, T)
+        regime = gamma_regime(prof["net_gamma"])
+        lines = [f"## Gamma — {ticker}", ""]
+        lines.append(f"- spot {spot:.2f}")
+        lines.append(f"- gamma regime: {regime if regime else 'n/a'}")
+        lines.append(f"- net dealer gamma: {prof['net_gamma']}")
+        for wall in ("call_wall", "put_wall"):
+            v = prof.get(wall)
+            lines.append(f"- {wall.replace('_', ' ')}: {v if v is not None else 'n/a'}")
+        lines.append("- note: market-structure heuristic, not a price law")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - advisory, never blocks
+        return f"gamma profile unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_opex_read(
+    current_date: Annotated[str, "current date YYYY-MM-DD"],
+) -> str:
+    """Option-expiration (OPEX) calendar context: the next monthly/quarterly
+    expiry, OPEX-week flag, and the post-OPEX unwind window. Use before any
+    'pinned into expiry / the move may be OPEX-driven / post-expiry breakout'
+    claim. Advisory.
+    """
+    try:
+        from datetime import date
+
+        from tradingagents.strategies.derivatives_gamma import opex_note, opex_status
+
+        today = date.fromisoformat(current_date)
+        status = opex_status(today)
+        note = opex_note(status)
+        lines = [
+            "## OPEX — " + today.isoformat(),
+            "",
+            f"- next OPEX: {status['next_opex'] if status.get('next_opex') else 'n/a'} "
+            f"(in {status['days_to_next']}d)"
+            if status.get("days_to_next") is not None else "- next OPEX: n/a",
+            f"- in OPEX week: {status['in_opex_week']}",
+            f"- post-OPEX unwind window: {status['post_opex_unwind']}",
+            f"- quarterly: {status['quarterly']}",
+        ]
+        if note:
+            lines.append(f"- note: {note}")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"opex read unavailable: {exc}"
+
+
+@tool
+def get_derivatives_flow(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "current date YYYY-MM-DD"],
+) -> str:
+    """Combined derivatives-flow context: gamma regime/walls + OPEX window +
+    the options IV read (skew/PCR/expected move). Use before any 'options
+    flow / pinning / structural wall / expiration-effect' claim. Advisory.
+    """
+    try:
+        from datetime import date
+
+        from tradingagents.strategies.derivatives_gamma import (
+            gamma_regime,
+            gex_per_strike,
+            opex_note,
+            opex_status,
+        )
+
+        lines = [f"## Derivatives Flow — {ticker} ({current_date})", ""]
+        out = _options_chain_rows_lambda(ticker)
+        if out is None:
+            lines.append("- gamma: n/a (no usable option chain)")
+        else:
+            rows, spot, T = out
+            prof = gex_per_strike(rows, spot, T)
+            lines.append(
+                f"- gamma regime: {gamma_regime(prof['net_gamma']) if prof['net_gamma'] is not None else 'n/a'}"
+            )
+            lines.append(
+                f"- call wall: {prof.get('call_wall') if prof.get('call_wall') else 'n/a'} · "
+                f"put wall: {prof.get('put_wall') if prof.get('put_wall') else 'n/a'}"
+            )
+        opex = opex_status(date.fromisoformat(current_date))
+        note = opex_note(opex)
+        if note:
+            lines.append(f"- OPEX: {note}")
+        iv = get_options_iv_read.invoke({"ticker": ticker})
+        if iv and "unavailable" not in iv:
+            lines.append("")
+            lines.append(iv)
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - advisory
+        return f"derivatives flow unavailable for {ticker}: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Item-1: sector leadership / sector standing (market analyst)
 # ---------------------------------------------------------------------------
 
@@ -5705,6 +5879,9 @@ __all__ = [
     "get_sector_rank",
     "get_cycle_tilt",
     "get_option_breakeven",
+    "get_gamma_profile",
+    "get_opex_read",
+    "get_derivatives_flow",
     "get_normality",
     "get_unit_root",
     "get_relative_rotation",

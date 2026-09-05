@@ -14,6 +14,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_crypto_prices,
     get_cycle_tilt,
     get_debate_claims_verdict,
+    get_derivatives_flow,
     get_dip_technical,
     get_downside_read,
     get_event_pnl_response,
@@ -21,6 +22,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_exit_plan,
     get_expected_move,
     get_extended_indicators,
+    get_gamma_profile,
     get_gap_type,
     get_garch_volatility,
     get_horizon_var,
@@ -40,6 +42,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_news_sentiment_series,
     get_normality,
     get_opening_range,
+    get_opex_read,
     get_option_breakeven,
     get_options_chain,
     get_options_surface,
@@ -114,6 +117,9 @@ def create_market_analyst(llm):
             get_top_movers,
             get_option_breakeven,
             get_options_chain,
+            get_gamma_profile,
+            get_derivatives_flow,
+            get_opex_read,
             get_short_interest,
             get_short_volume,
             get_liquidity_risk,
@@ -258,6 +264,10 @@ You also have decision-grounding tools:
 - get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
 - get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
+- get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
+- get_option_breakeven(long_strike, long_premium, short_strike?, spot?, short_ttm_days?, delta?, days_to_earnings?, days_to_ex_div?) - the option-position breakeven + PMCC discipline read. Use it before any 'breakeven / the sold call sits above cost / option-rent' claim.
+- get_gamma_profile(ticker) - the dealer-gamma regime (short = momentum/cascade, long = mean-reversion) + call/put walls from the options chain. Use it before any 'options flow / structural wall / pinning' claim — advisory market-structure context, never a price law.
+- get_opex_read(current_date) / get_derivatives_flow(ticker, current_date) - option-expiry calendar context (OPEX week, post-OPEX unwind) and the combined gamma + OPEX + IV read. Use before any 'pinned into expiry / OPEX-driven / expiration-effect' claim. (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.

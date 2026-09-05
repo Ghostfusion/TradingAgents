@@ -790,6 +790,47 @@ def test_sector_rank_resolves_standing(monkeypatch):
     assert "top3_3m=" in out and "standing=" in out
 
 
+def test_gamma_profile_unavailable_without_chain(monkeypatch):
+    # No usable chain -> explicit unavailable, never raises.
+    monkeypatch.setattr(T, "_options_chain_rows_lambda", lambda t: None)
+    out = T.get_gamma_profile.invoke({"ticker": "AAPL"})
+    assert "unavailable" in out
+
+
+def test_gamma_profile_renders_regime(monkeypatch):
+
+    rows = []
+    for k in (90.0, 110.0):
+        rows.append({"strike": k, "iv": 0.3, "oi": 200.0, "side": "call"})
+        rows.append({"strike": k, "iv": 0.3, "oi": 50.0, "side": "put"})
+    monkeypatch.setattr(T, "_options_chain_rows_lambda", lambda t: (rows, 100.0, 0.0833))
+    out = T.get_gamma_profile.invoke({"ticker": "AAPL"})
+    assert "gamma regime: short" in out  # call-dominated -> short
+    assert "call wall" in out and "put wall" in out
+    assert "heuristic" in out
+
+
+def test_opex_read_renders_window():
+    # 2026-09-18 is OPEX; 2026-09-16 is in the week.
+    out = T.get_opex_read.invoke({"current_date": "2026-09-16"})
+    assert "next OPEX: 2026-09-18" in out
+    assert "in OPEX week: True" in out
+    out2 = T.get_opex_read.invoke({"current_date": "2026-09-21"})
+    assert "post-OPEX unwind window: True" in out2
+
+
+def test_opex_read_bad_date_degrades():
+    out = T.get_opex_read.invoke({"current_date": "not-a-date"})
+    assert "unavailable" in out
+
+
+def test_derivatives_flow_degrades_without_chain(monkeypatch):
+    monkeypatch.setattr(T, "_options_chain_rows_lambda", lambda t: None)
+    out = T.get_derivatives_flow.invoke({"ticker": "AAPL", "current_date": "2026-09-04"})
+    assert "gamma: n/a" in out
+    assert "OPEX" in out
+
+
 def test_option_breakeven_renders_full_read():
     # AVGO-style PMCC: breakeven + floor violation + intrinsic split + windows.
     out = T.get_option_breakeven.invoke({
