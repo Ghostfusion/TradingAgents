@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Hummingbot V2 teacher study** - `docs/design_hummingbot_integration.md`:
+  direct-source study of the Hummingbot V2 framework (StrategyV2Base /
+  Controllers / Executors / Connectors, backtesting executors-simulators,
+  paper-trade connector, budget checker, async notifier, SQLite executor
+  ledger) + web grounding. Adopted as 5 advisory, default-off, phase-gated
+  items mapped onto existing seams: P1 exit-accounting
+  (`exit_cause_frequency` + `close_type` backtest tagging + report block +
+  `exit_cause_read`), P2 pre-trade budget as a stateful collateral lock
+  (`CollateralLock` + `available()` in `get_pre_trade_read`, sharing the
+  backtest envelope), P3 live-book fill-latency paper model
+  (`fill_latency_model` / `paper_fill_price`, advisory default-off
+  `get_fill_model_read`), P4 unified executor-ledger schema
+  (docs-only spec reusing the alpha-ledger row + pnl/fee columns), P5 async
+  queue notifier (`monitor.notify` queue-drain). Explicit non-goals: live
+  execution/order management, the controller runtime, encrypted keystore,
+  per-exchange websocket feeds, MCP/skills — the fork's advisory-only,
+  math-decides mandates are unchanged. Design only; no code changed.
+  Strategies/index row 22.
 - **Calc → agent wiring gates (no more silent gaps)** - the wiring audit is
   now a permanent test, not a one-off find:
   1. `test_calc_agent_wiring` per-fn rule tightened: a public calc counts as

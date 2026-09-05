@@ -30,6 +30,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Hummingbot teacher study** - a direct-source study of
+  Hummingbot's V2 framework (Strategy/Controller/Executor, per-executor
+  CloseType accounting, pre-trade budget-collateral lock, live-book
+  fill-latency, unified executor ledger, async notifier) mapped onto the
+  fork's seams as 5 advisory, phase-gated, default-off adoptions
+  (`docs/design_hummingbot_integration.md`). Design only — no code, the
+  no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-04] **Calc→agent wiring gates** - the wiring contract is now a
   permanent test: every public calc must be externally referenced (or a
   helper of a reachable module) and every `@tool` must be bound to a

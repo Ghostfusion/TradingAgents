@@ -45,6 +45,14 @@ Also this session:
   gates — restored) + the stale catalyst test expectation. Note: agent_utils
   must list a re-export in `__all__` or ruff F401 silently deletes it - the
   new tools were re-added with __all__ entries.
+- **Hummingbot V2 teacher study** (docs-only): `docs/design_hummingbot_integration.md`
+  — direct-source study (sparse clone at 2025 V2) of StrategyV2Base/
+  Controllers/Executors/Connectors, per-executor CloseType accounting,
+  budget-collateral lock, live-book paper-trade fill-latency, unified
+  executor ledger, async notifier. 5 advisory phase-gated adoptions
+  (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
+  spec P4, async notifier P5); explicit non-goals keep the no-execution /
+  math-decides mandates. No code changed.
 
 ## 2. What Landed — Files & Commits
 **Code (repo):**
