@@ -53,6 +53,22 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **yfinance v1.7.0 teacher study** (docs-only):
+  `docs/design_yfinance_integration.md` — direct-source study of
+  ranaroussi/yfinance 1.7.0 (YfData cookie/crumb, cache.py SQLite KVs,
+  base.py tz fetch + validation, history price repair, multi.py error
+  grouping, exceptions taxonomy) + fork's existing yfinance integration.
+  5 advisory phase-gated adoptions: P1 typed absence reasons through the
+  read envelope (VendorAbsence + OHLCV absence field + CLI period
+  validation), P2 exchange-tz + currency KV cache for OHLCV reads
+  (dataflows/exchange_tz.py, envelope tz/currency, statement currency
+  prefers cache over ADR heuristic), P3 100x currency-unit repair
+  (config-gated, detected + flagged), P4 batch error grouping +
+  debug-serialize rule, P5 deliberate yfinance~=1.4 pin + vendor quirk
+  notes. Validation table: fork already has yf_retry/typed errors/stale
+  guard/statement-currency/sentinel cache. Non-goals: WebSocket/protobuf,
+  login cookies, SQLite persistent caches, curl_cffi, ISIN, screener DSL,
+  domain objects. No code changed.
 - **FinceptTerminal v4 teacher study** (docs-only):
   `docs/design_fincept_terminal_integration.md` — direct-source study of
   Fincept-Corporation/FinceptTerminal (C++20/Qt6 + embedded Python;

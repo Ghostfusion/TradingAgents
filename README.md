@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **yfinance teacher study** - a direct-source study of
+  ranaroussi/yfinance v1.7.0 (one of the fork's no-key vendors) mapped onto
+  the fork's vendor layer as 5 advisory, phase-gated, default-off adoptions
+  (typed absence reasons, exchange-tz + currency cache for OHLCV reads, 100x
+  currency-unit repair, batch error grouping + debug-serialize, deliberate
+  1.x pin — `docs/design_yfinance_integration.md`); validation table shows
+  the fork already adopted the retry/typed-error/stale-guard/
+  statement-currency halves of the discipline. Design only — no code, the
+  no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-04] **FinceptTerminal teacher study** - a direct-source study of
   Fincept-Corporation/FinceptTerminal v4 (typed topic-registry refresh
   policy, tool-result park-and-page budgets, dual tool-loop budget + visible

@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **yfinance v1.7.0 teacher study** - `docs/design_yfinance_integration.md`:
+  direct-source study of `ranaroussi/yfinance` v1.7.0 (the v2 rewrite:
+  `data.py` YfData + Auth cookie/crumb, `_http.py` backend abstraction,
+  `cache.py` SQLite KV caches, `base.py` ticker-tz fetch + validation +
+  invalidation, `scrapers/history.py` price repair, `multi.py` download
+  error grouping, typed `exceptions.py` taxonomy) + full inventory of the
+  fork's existing yfinance integration and web grounding on the 1.x line.
+  Adopted as 5 advisory, phase-gated, default-off items: P1 typed absence
+  reasons through the read envelope (`VendorAbsence(reason, source,
+  retryable, yahoo_reason)` + OHLCV `absence` field + CLI period validation
+  with valid options), P2 exchange-tz + currency KV cache for OHLCV reads
+  (`dataflows/exchange_tz.py`, validated + invalidated + capped; `tz`/
+  `currency` on the OHLCV envelope; statement currency prefers the cache
+  over the ADR heuristic), P3 100x currency-unit repair (config-gated,
+  detected + flagged via tolerance bands, ambiguous refuses, never silent),
+  P4 batch error grouping + debug-serialize rule (grouped failure summary +
+  debug⇒single-thread), P5 deliberate `yfinance~=1.4` pin + vendor quirk
+  notes (#986 exclusive-end, #1021 stale frames, unnamed index). Validation
+  table shows the fork already adopted the retry/typed-error/stale-guard/
+  statement-currency/sentinel-cache halves. Explicit non-goals: WebSocket
+  live pricing (protobuf), login cookies + tier scraping, SQLite persistent
+  caches, curl_cffi impersonation, ISIN lookup, typed screener DSL, domain
+  objects. Design only; no code changed. Strategies/index row 25.
 - **FinceptTerminal v4 teacher study** - `docs/design_fincept_terminal_integration.md`:
   direct-source study of `Fincept-Corporation/FinceptTerminal` v4 (C++20 +
   Qt6 desktop terminal w/ embedded Python 3.11; `src/datahub`, `src/
