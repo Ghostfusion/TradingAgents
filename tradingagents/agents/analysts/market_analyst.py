@@ -12,6 +12,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_cost_models,
     get_credit_spread_read,
     get_crypto_prices,
+    get_cycle_tilt,
     get_debate_claims_verdict,
     get_dip_technical,
     get_downside_read,
@@ -140,6 +141,7 @@ def create_market_analyst(llm):
             get_volatility_contraction,
             get_orderflow_read,
             get_sector_rank,
+            get_cycle_tilt,
             get_session_discipline,
             get_news_sentiment_series,
             get_sentiment_lead_lag,
@@ -254,6 +256,7 @@ You also have decision-grounding tools:
 - get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
 - get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
+- get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
 - get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.

@@ -285,6 +285,27 @@ def _pct_rank(values: dict, good_high: bool = True) -> dict:
     return out
 
 
+def rrg_quadrant(rs_level: float | None, rs_momentum: float | None) -> str | None:
+    """RRG quadrant from the RS percentile axes (Action 1; RRG reference).
+
+    ``rs_level`` = percentile of the RS-Ratio (ranking), ``rs_momentum`` =
+    percentile of RS-Ratio acceleration (timing). Intersection of the two
+    median splits:
+      Leading    level >= 50 and momentum >= 50  - strongest hold candidates
+      Weakening  level >= 50 and momentum <  50  - exit/reduction warning
+      Improving  level <  50 and momentum >= 50  - early-entry watchlist
+      Lagging    level <  50 and momentum <  50  - avoid/underweight
+    Returns None when either axis is missing (never fabricates a quadrant).
+    The two axes stay separate: momentum turns before level, so Improving/
+    Weakening precede Leading/Lagging in the clockwise rotation.
+    """
+    if rs_level is None or rs_momentum is None:
+        return None
+    if rs_level >= 50.0:
+        return "Leading" if rs_momentum >= 50.0 else "Weakening"
+    return "Improving" if rs_momentum >= 50.0 else "Lagging"
+
+
 def rank_sectors_multifactor(
     closes_map: dict,
     bench_closes: list | None = None,
@@ -308,9 +329,9 @@ def rank_sectors_multifactor(
         row = {"etf": etf, "name": SPDR_SECTORS.get(etf, etf), "rank": None}
         if not closes or len(closes) < min_bars:
             row.update({"ret_1m": None, "ret_3m": None, "accel": None, "sma50": None,
-                      "sharpe_126": None, "mdd_126": None, "trend_raw": None,
-                      "momentum_raw": None, "rs_raw": None, "risk_raw": None,
-                      "score": None})
+                        "sharpe_126": None, "mdd_126": None, "trend_raw": None,
+                        "momentum_raw": None, "rs_raw": None, "risk_raw": None,
+                        "rs_momentum": None, "quadrant": None, "score": None})
             rows.append(row)
             continue
         row["ret_1m"] = round(_momentum(closes, 21), 4) if _momentum(closes, 21) is not None else None
@@ -371,6 +392,26 @@ def rank_sectors_multifactor(
     rs_pct = _pct_rank(rs_raw)
     for etf, r in row_by.items():
         r["rs"] = rs_pct.get(etf)
+
+    # rs momentum: acceleration of the RS ratio (63d vs 126d), percentile-
+    # ranked across the universe - the RRG timing axis, kept SEPARATE from the
+    # rs level (RRG: RS-Ratio = ranking signal, RS-Momentum = timing signal).
+    rsm_raw: dict[str, float] = {}
+    if bench_closes:
+        for etf, r in row_by.items():
+            if r["ret_3m"] is None:
+                continue
+            try:
+                rs63 = _rs_ratio_return(closes_map[etf], bench_closes, 63)
+                rs126 = _rs_ratio_return(closes_map[etf], bench_closes, 126)
+                if rs63 is not None and rs126 is not None:
+                    rsm_raw[etf] = rs63 - 0.5 * rs126
+            except Exception:  # noqa: BLE001 - advisory
+                continue
+    rsm_pct = _pct_rank(rsm_raw)
+    for etf, r in row_by.items():
+        r["rs_momentum"] = rsm_pct.get(etf)
+        r["quadrant"] = rrg_quadrant(r["rs"], r["rs_momentum"])
 
     # trend
     trend_raw = {etf: r["trend_raw"] for etf, r in row_by.items() if r["trend_raw"] is not None}
@@ -531,6 +572,7 @@ __all__ = [
     "rank_sectors",
     "sector_standing",
     "rank_sectors_multifactor",
+    "rrg_quadrant",
     "INDUSTRY_ETFS",
     "rank_industry_group",
     "SECTOR_CONSTITUENTS",

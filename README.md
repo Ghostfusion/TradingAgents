@@ -30,6 +30,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Sector-rotation research actions 1+3+2** - RRG quadrant
+  (`rs_level x rs_momentum` → Leading/Weakening/Improving/Lagging, the
+  separate-signal discipline firms use) + rotation cadence note in
+  `get_sector_rank` (gated `enable_sector_multifactor`), and a
+  business-cycle → sector-tilt read (`get_cycle_tilt`, new
+  `strategies/cycle_tilt.py`, FRED PMI/curve/spreads, market analyst,
+  None-safe). All advisory/default-off. 212 suite green. See CHANGELOG.
 - [2026-09-05] **Sector-rotation P1-P3 implemented** - `sector_rank.py` gains
   the multi-factor machinery: tie-aware percentile ranking over momentum /
   RS-vs-SPY / trend / risk (P1), parent-gated industry layer (P2), constituent

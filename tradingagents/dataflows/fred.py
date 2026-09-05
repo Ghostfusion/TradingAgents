@@ -54,6 +54,8 @@ MACRO_SERIES = {
     "real_gdp": "GDPC1",
     "gdp": "GDP",
     "industrial_production": "INDPRO",
+    "pmi": "NAPM",
+    "manufacturing_pmi": "NAPM",
     # Labor
     "unemployment_rate": "UNRATE",
     "unemployment": "UNRATE",
@@ -141,6 +143,38 @@ def _request(path: str, params: dict) -> dict:
         raise ValueError(f"FRED request failed: {message}")
     response.raise_for_status()
     return response.json()
+
+
+def get_macro_value(indicator: str, curr_date: str) -> float | None:
+    """Latest observation of a FRED series as a float, or None.
+
+    Used by the cycle-tilt read (sector-rotation Action 2) so a macro signal
+    (PMI / yield curve / credit spread) resolves to a number without the
+    analyst string-parsing the markdown report. Never raises: any missing
+    value / bad indicator / transient FRED failure returns None so the tilt
+    degrades to 'n/a' rather than aborting or fabricating.
+    """
+    try:
+        series_id = _resolve_series_id(indicator)
+        meta = _request("series", {"series_id": series_id}).get("seriess") or []
+        if not meta:
+            return None
+        observations = _request(
+            "series/observations",
+            {
+                "series_id": series_id,
+                "observation_end": curr_date,
+                "sort_order": "desc",
+                "limit": 1,
+            },
+        ).get("observations", [])
+        for o in observations:
+            v = o.get("value")
+            if v not in (".", None, ""):
+                return float(v)
+    except Exception:  # noqa: BLE001 - advisory; None degrades
+        return None
+    return None
 
 
 def get_macro_data(

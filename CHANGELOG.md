@@ -7,6 +7,31 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Sector-rotation research actions 1+3+2 implemented** (per the web-research
+  findings + user instruction; `strategies/formulas/sector_rotation.md`):
+  - **A1 — RRG quadrant** (`strategies/sector_rank.py`): `rrg_quadrant(
+    rs_level, rs_momentum)` — the RS-level percentile (ranking) and the
+    RS-momentum percentile (RS-ratio acceleration, NEW axis) are kept
+    SEPARATE → Leading / Weakening / Improving / Lagging (median split,
+    None-aware; not until both axes resolve). The multifactor ranking carries
+    a `quadrant` field; `get_sector_rank` emits a rotation line
+    ("Leading=…; Improving=…") and an exit line ("Weakening=…") plus a
+    cadence note (monthly rebalance, hold top 2-3, trim on Weakening,
+    turnover is the main cost risk — A3). Advisory; gated by
+    `enable_sector_multifactor`.
+  - **A2 — Business-cycle tilt** (`strategies/cycle_tilt.py` + `get_cycle_tilt`
+    tool bound to the market analyst): phase = early/mid/late/recession from
+    PMI (FRED NAPM alias added) + 10y-2y spread + HY OAS; `TILT_MAP` → favored
+    sectors. All inputs None-safe (missing → phase None, tilt [], "n/a" —
+    never fabricated). `fred.get_macro_value` returns the latest float
+    directly (never raises). Advisory — the regime-gate enhancement.
+  - **A4/validation script**: research option, NOT built (per plan).
+  - Tests: `test_cycle_tilt.py` (9: phase rules, None-degrade, TILT_MAP);
+    `test_sector_rank.py` +5 (quadrant mapping/boundaries/None/carry/field);
+    `test_analysis_tools.py` +3 (cycle-tilt render/n-a/never-aborts) + gated
+    rotation render. Suite: 212 passed / 2 pre-existing skips; wiring gate
+    green (get_cycle_tilt bound); graph import OK; ruff clean.
+  - No trading_web change (both tools are LLM-facing).
 - **Sector-rotation P1-P3 implemented** (per `strategies/formulas/sector_rotation.md`):
   `strategies/sector_rank.py` gains the multi-factor machinery, additive to
   the legacy single-factor path (byte-identical default):

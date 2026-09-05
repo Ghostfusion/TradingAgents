@@ -12,6 +12,7 @@ from tradingagents.strategies.sector_rank import (
     rank_industry_group,
     rank_sectors,
     rank_sectors_multifactor,
+    rrg_quadrant,
     sector_standing,
 )
 
@@ -257,3 +258,49 @@ def test_constituents_core_subset_documented():
     for fam, members in SECTOR_CONSTITUENTS.items():
         assert fam in INDUSTRY_ETFS
         assert members and all(m == m.upper() for m in members)
+
+
+# ---------------------------------------------------------------------------
+# Sector-rotation Action 1: RRG quadrant (RS-level x RS-momentum axes)
+# ---------------------------------------------------------------------------
+
+
+def test_rrg_quadrant_four_quadrants():
+    assert rrg_quadrant(80.0, 80.0) == "Leading"
+    assert rrg_quadrant(80.0, 20.0) == "Weakening"
+    assert rrg_quadrant(20.0, 80.0) == "Improving"
+    assert rrg_quadrant(20.0, 20.0) == "Lagging"
+
+
+def test_rrg_quadrant_boundary_uses_median_split():
+    assert rrg_quadrant(50.0, 50.0) == "Leading"  # >= 50 on both axes
+
+
+def test_rrg_quadrant_none_never_fabricates():
+    assert rrg_quadrant(None, 50.0) is None
+    assert rrg_quadrant(50.0, None) is None
+    assert rrg_quadrant(None, None) is None
+
+
+def test_multifactor_rows_carry_quadrant():
+    cm = {
+        "XLK": _uptrend(step=0.8),   # strong RS
+        "XLF": _uptrend(step=0.4),
+        "XLE": _uptrend(step=0.1),
+        "XLV": [100.0 - 0.05 * i for i in range(260)],  # weak
+    }
+    r = rank_sectors_multifactor(cm, bench_closes=_bench())
+    xlk = [x for x in r["ranked"] if x["etf"] == "XLK"][0]
+    xlv = [x for x in r["ranked"] if x["etf"] == "XLV"][0]
+    assert xlk["quadrant"] in ("Leading", "Weakening")  # high RS level
+    assert xlv["rs"] == 0.0  # weakest RS level -> not a leading quadrant
+    assert xlv["quadrant"] in ("Lagging", "Improving")  # low level + (mom) axis
+    assert all(row.get("quadrant") is not None
+               for row in r["ranked"] if row.get("rs") is not None)
+
+
+def test_multifactor_quadrant_none_without_benchmark():
+    cm = {"XLK": _uptrend(), "XLF": _uptrend(step=0.4)}
+    r = rank_sectors_multifactor(cm, bench_closes=None)
+    for row in r["ranked"]:
+        assert row.get("quadrant") is None  # no RS axes -> no quadrant

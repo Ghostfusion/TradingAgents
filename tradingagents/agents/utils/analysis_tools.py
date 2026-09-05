@@ -1664,6 +1664,53 @@ def get_dcf_valuation(
 
 
 # ---------------------------------------------------------------------------
+# Sector-rotation Action 2: business-cycle -> sector tilt (market analyst)
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_cycle_tilt(
+    current_date: Annotated[str, "current date YYYY-MM-DD (for the FRED window)"],
+) -> str:
+    """Business-cycle phase -> advisory sector tilt (early / mid / late /
+    recession -> favored SPDR groups) from PMI, the Treasury yield curve and
+    high-yield credit spreads. Use before any 'cyclicals should lead now' /
+    'defensives are favored' / regime rotation claim.
+
+    Args:
+        current_date: current date YYYY-MM-DD (macro observations never extend
+            past it - no lookahead).
+
+    Returns:
+        The cycle phase + favored sectors, or an explicit 'n/a' when no macro
+        signal resolves (never fabricated).
+    """
+    try:
+        from tradingagents.dataflows.fred import get_macro_value
+        from tradingagents.strategies import cycle_tilt
+
+        pmi = get_macro_value("pmi", current_date)
+        curve = get_macro_value("10y_2y_spread", current_date)
+        hy = get_macro_value("high_yield_spread", current_date)
+        til = cycle_tilt.cycle_tilt(pmi, curve, hy)
+        phase = til.get("phase")
+        if not phase:
+            return (
+                "cycle tilt: n/a - no macro signal resolved"
+                f" (pmi={pmi if pmi is not None else 'n/a'}, "
+                f"curve={curve if curve is not None else 'n/a'}, "
+                f"hy_spread={hy if hy is not None else 'n/a'})"
+            )
+        names = ", ".join(til["tilt"])
+        return (
+            f"cycle tilt: {phase} - favored: {names} "
+            f"(pmi={pmi}, curve={curve}, hy_spread={hy})"
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory, never blocks
+        return f"cycle tilt: n/a ({exc})"
+
+
+# ---------------------------------------------------------------------------
 # Item-1: sector leadership / sector standing (market analyst)
 # ---------------------------------------------------------------------------
 
@@ -1764,6 +1811,32 @@ def get_sector_rank(
                 f"  mf {r['etf']} score={r.get('score') if r.get('score') is not None else 'n/a'} "
                 f"accel={r.get('accel') if r.get('accel') is not None else 'n/a'}"
             )
+        # RRG quadrant line (Action 1): separate RS-level (ranking) and
+        # RS-momentum (timing) axes — Leading hold candidates, Improving
+        # early-entry watch, Weakening exit warning. Advisory.
+        lead = [r for r in ranking.get("ranked", []) if r.get("quadrant") == "Leading"]
+        impro = [r for r in ranking.get("ranked", []) if r.get("quadrant") == "Improving"]
+        weak = [r for r in ranking.get("ranked", []) if r.get("quadrant") == "Weakening"]
+        if lead or impro:
+            lines.append(
+                "  rotation: Leading=" + ",".join(r["etf"] for r in lead) +
+                ("; Improving=" + ",".join(r["etf"] for r in impro) if impro else "")
+            )
+        if weak:
+            lines.append(
+                "  rotation exit: Weakening=" + ",".join(
+                    f"{r['etf']} (RS {r.get('rs') if r.get('rs') is not None else 'n/a'}, "
+                    f"RS-mom {r.get('rs_momentum') if r.get('rs_momentum') is not None else 'n/a'})"
+                    for r in weak
+                )
+            )
+        # Cadence note (Action 3): institutional sector rotation rebalances
+        # monthly, holds top-2/3, exits when leadership fades (Weakening).
+        lines.append(
+            "  rotation note: firms rebalance ~monthly, hold top 2-3, "
+            "trim/exit when a holding turns Weakening; turnover control is "
+            "the strategy's main cost risk (advisory cadence, not a metric)"
+        )
 
     ind_closes: dict = {}
     if use_ind:
@@ -5548,6 +5621,7 @@ def get_universe_membership(
 
 __all__ = [
     "get_sector_rank",
+    "get_cycle_tilt",
     "get_normality",
     "get_unit_root",
     "get_relative_rotation",

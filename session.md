@@ -53,6 +53,18 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector-rotation actions 1+3+2 executed** (per web research + user):
+  A1 RRG quadrant (`sector_rank.rrg_quadrant` — separate rs_level x
+  rs_momentum axes → Leading/Weakening/Improving/Lagging; `quadrant` row
+  field; `get_sector_rank` rotation + exit + cadence lines; gated
+  `enable_sector_multifactor`). A3 cadence note (monthly/top-2-3/Weakening
+  trim/turnover advisory). A2 `strategies/cycle_tilt.py` +
+  `get_cycle_tilt` tool (market analyst; FRED PMI NAPM alias +
+  `get_macro_value` helper + 10y-2y + HY OAS → early/mid/late/recession →
+  TILT_MAP; None-safe n/a). A4 validation script left as research option
+  (NOT built). Tests: test_cycle_tilt (9) + sector_rank +5 + analysis_tools
+  +3; wiring gate green (get_cycle_tilt bound); 212 suite green; ruff clean;
+  no web change. Reference doc marked adopted + §9.5.
 - **Sector-rotation P1-P3 implemented** (per user "implement all phases"):
   `strategies/sector_rank.py` — `rank_sectors_multifactor` (tie-aware
   cross-sectional percentiles: momentum composite 21/63/126/252d+accel, RS

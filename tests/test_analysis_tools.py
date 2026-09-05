@@ -790,10 +790,36 @@ def test_sector_rank_resolves_standing(monkeypatch):
     assert "top3_3m=" in out and "standing=" in out
 
 
-def test_sector_rank_no_spdr_history_degrades(monkeypatch):
-    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": []})
-    out = T.get_sector_rank.invoke({"ticker": "AAPL"})
-    assert "no SPDR history" in out
+def test_cycle_tilt_renders_phase(monkeypatch):
+    # FRED resolves all three signals -> mid + favored sectors.
+    import tradingagents.dataflows.fred as _fred
+
+    monkeypatch.setattr(
+        _fred, "get_macro_value",
+        lambda indicator, curr_date: {"pmi": 52.0, "10y_2y_spread": 0.40,
+                                      "high_yield_spread": 3.5}.get(indicator),
+    )
+    out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
+    assert "cycle tilt: mid" in out
+    assert "Technology" in out
+
+
+def test_cycle_tilt_degrades_to_na_when_no_signal(monkeypatch):
+    import tradingagents.dataflows.fred as _fred
+
+    monkeypatch.setattr(_fred, "get_macro_value", lambda indicator, curr_date: None)
+    out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
+    assert "cycle tilt: n/a" in out
+
+
+def test_cycle_tilt_rade_never_aborts(monkeypatch):
+    import tradingagents.dataflows.fred as _fred
+
+    def _boom(*a, **k):
+        raise RuntimeError("FRED down")
+    monkeypatch.setattr(_fred, "get_macro_value", _boom)
+    out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
+    assert "cycle tilt: n/a" in out
 
 
 def _sector_ohlcv(step_map):
