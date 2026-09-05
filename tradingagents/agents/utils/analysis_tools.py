@@ -1711,6 +1711,88 @@ def get_cycle_tilt(
 
 
 # ---------------------------------------------------------------------------
+# Option-position breakeven / PMCC advisory read (market analyst)
+# ---------------------------------------------------------------------------
+
+
+@tool
+def get_option_breakeven(
+    long_strike: Annotated[float, "long call strike price"],
+    long_premium: Annotated[float, "long call premium paid per share"],
+    short_strike: Annotated[float | None, "short call strike (optional)"] = None,
+    spot: Annotated[float | None, "underlying spot price (optional; latest close when omitted)"] = None,
+    short_ttm_days: Annotated[float | None, "sold call days to expiry (optional)"] = None,
+    delta: Annotated[float | None, "leg delta (optional)"] = None,
+    days_to_earnings: Annotated[float | None, "days to next earnings/catalyst (optional)"] = None,
+    days_to_ex_div: Annotated[float | None, "days to ex-dividend date (optional)"] = None,
+) -> str:
+    """Option-position breakeven + PMCC discipline read (advisory).
+
+    Breakeven = long strike + premium paid per share (cost basis of a long
+    call held to expiry). The short-call floor rule: a sold call's strike must
+    be ABOVE that breakeven. Also renders the long-leg intrinsic/extrinsic
+    split, delta band, sold-call theta window (30-45d), and earnings /
+    ex-dividend assignment risk windows. Inputs are caller-supplied position
+    parameters; anything missing renders n/a, never fabricated.
+
+    Args:
+        long_strike: long call strike (e.g. 300).
+        long_premium: long call premium per share (e.g. 103.13).
+        short_strike: sold call strike (optional).
+        spot: underlying spot (optional; the latest close when omitted).
+        short_ttm_days: sold call days to expiry (optional).
+        delta: leg delta (optional).
+        days_to_earnings: days to next earnings/catalyst (optional).
+        days_to_ex_div: days to ex-dividend date (optional).
+
+    Returns:
+        A markdown read of breakeven, floor discipline, time split, delta,
+        theta window and risk windows.
+    """
+    try:
+        from tradingagents.strategies.options_breakeven import pmcc_read
+
+        read = pmcc_read(
+            long_strike, long_premium,
+            short_strike=short_strike, spot=spot, short_ttm_days=short_ttm_days,
+            delta=delta, days_to_earnings=days_to_earnings,
+            days_to_ex_div=days_to_ex_div,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory, never blocks
+        return f"option breakeven: unavailable ({exc})"
+    b = read.get("long_breakeven")
+    lines = [
+        "option breakeven read:",
+        f"  long breakeven = {b if b is not None else 'n/a'} "
+        f"(strike {long_strike} + premium {long_premium})",
+    ]
+    disc = read.get("short_discipline") or {}
+    if disc.get("ok") is not None:
+        lines.append(
+            f"  short-call floor: strike {short_strike} vs breakeven {disc.get('breakeven')} "
+            f"-> {'OK, cushion ' + str(disc.get('cushion')) if disc['ok'] else 'VIOLATES the floor (sell higher or buy back)'}"
+        )
+    split = read.get("long_leg_split") or {}
+    if split.get("intrinsic") is not None:
+        lines.append(
+            f"  long-leg time split: intrinsic {split['intrinsic']} "
+            f"({split.get('intrinsic_pct')}%), extrinsic {split['extrinsic']} "
+            f"({split.get('extrinsic_pct')}%)"
+        )
+    for key in ("delta_profile", "short_theta_zone"):
+        v = read.get(key)
+        if v:
+            lines.append(f"  {key.replace('_', ' ')}: {v}")
+    earn = read.get("earnings_window") or {}
+    if earn.get("note"):
+        lines.append(f"  earnings: {earn['note']}")
+    ass = read.get("assignment") or {}
+    if ass.get("note"):
+        lines.append(f"  assignment: {ass['note']}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Item-1: sector leadership / sector standing (market analyst)
 # ---------------------------------------------------------------------------
 
@@ -5622,6 +5704,7 @@ def get_universe_membership(
 __all__ = [
     "get_sector_rank",
     "get_cycle_tilt",
+    "get_option_breakeven",
     "get_normality",
     "get_unit_root",
     "get_relative_rotation",

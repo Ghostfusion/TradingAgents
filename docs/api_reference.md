@@ -571,6 +571,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_dip_technical(ticker)` | `swing.rsi` + `technical_factors` (KST/MFI/Stoch) + `value_dip.bollinger_pct_b` | market | RSI/%b + Stochastic + MFI + KST dip-timing read (OVERSOLD / not-oversold) |
 | `get_mean_reversion_tech(ticker)` | `technical_factors` (StochRSI/RSI2/W%R/Keltner/Donchian/OBV/PSAR/Elder) | market | mean-reversion dip-timing + exit technicals |
 | `get_opening_range(ticker)` | `market_session.opening_range` | market | ORB breakout + 2R stop/target |
+| `get_option_breakeven(long_strike, long_premium, short_strike?, spot?, short_ttm_days?, delta?, days_to_earnings?, days_to_ex_div?)` | `strategies.options_breakeven.pmcc_read` | market | option-position breakeven (strike + premium) + PMCC short-call floor, long-leg intrinsic/extrinsic split, delta band, 30-45d theta window, earnings/ex-div assignment risk — advisory, None-safe (n/a, never fabricated) |
 | `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |

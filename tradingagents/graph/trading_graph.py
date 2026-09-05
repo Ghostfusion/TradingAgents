@@ -112,6 +112,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_news_sentiment_series,
     get_normality,
     get_opening_range,
+    get_option_breakeven,
     get_options_iv_read,
     get_options_surface,
     get_order_imbalance,
@@ -507,6 +508,7 @@ class TradingAgentsGraph:
                     get_mean_reversion_quality,
                     # Market-session mechanics (pre/post-market, opening range).
                     get_opening_range,
+                    get_option_breakeven,
                     get_gap_type,
                     get_order_imbalance,
                     get_premarket_liquidity,

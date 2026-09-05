@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Option-position breakeven / PMCC advisory read** (per the AVGO PMCC
+  sample review + user's "go straight to implementation") —
+  `strategies/options_breakeven.py` + `get_option_breakeven` tool (market
+  analyst; always-on advisory like `get_cycle_tilt`):
+  - `pmcc_breakeven` = long strike + premium paid per share (cost basis held
+    to expiry); `short_call_discipline` = the PMCC floor rule (sold strike
+    must exceed breakeven, with cushion); `long_leg_time_split` =
+    intrinsic vs extrinsic (time) value + ITM flag; `delta_profile` (deep-ITM
+    0.75-0.85 long / 0.20-0.30 short advisory bands); `theta_zone` (30-45d
+    rent window); `catalyst_window` (earnings imminence -> never hold a
+    low-strike short call through it); assignment note on ex-div near-term.
+  - Everything None-safe (missing input -> n/a, never fabricated); negative
+    inputs -> None; `pmcc_read` combines it all + labels inputs.
+  - Bound via the wiring gate (market analyst import + tool list + prompt
+    line, graph market ToolNode, agent_utils re-export + `__all__`).
+  - Tests: `test_options_breakeven.py` (11: breakeven sum, floor ok/violate/
+    None, intrinsic/extrinsic split + OTM-lock, delta bands, theta zones,
+    catalyst imminence, combined AVGO sample, partial-input n/a) +
+    `test_analysis_tools.py` +3 render tests (full/partial/never-aborts).
+    Suite: 151 passed / 2 pre-existing skips; wiring gate green; ruff clean.
+  - No execution, no trading_web change (LLM-facing tool).
 - **Sector-rotation research actions 1+3+2 implemented** (per the web-research
   findings + user instruction; `strategies/formulas/sector_rotation.md`):
   - **A1 — RRG quadrant** (`strategies/sector_rank.py`): `rrg_quadrant(

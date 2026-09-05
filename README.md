@@ -30,6 +30,12 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Option breakeven / PMCC read** - from the AVGO PMCC sample
+  review: `get_option_breakeven` (new `strategies/options_breakeven.py`,
+  market analyst) — breakeven = strike + premium, the short-call floor above
+  breakeven, long-leg intrinsic/extrinsic split, delta bands, 30-45d theta
+  window, earnings + ex-div assignment risk. Advisory, None-safe (n/a, never
+  fabricated), no execution. 151 suite green. See CHANGELOG.
 - [2026-09-05] **Sector-rotation research actions 1+3+2** - RRG quadrant
   (`rs_level x rs_momentum` → Leading/Weakening/Improving/Lagging, the
   separate-signal discipline firms use) + rotation cadence note in

@@ -53,6 +53,16 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Option breakeven / PMCC read implemented** (per AVGO PMCC sample review
+  + user): `strategies/options_breakeven.py` + `get_option_breakeven` tool
+  (market analyst; always-on advisory). pmcc_breakeven (strike+premium),
+  short_call_discipline (floor rule + cushion), long_leg_time_split
+  (intrinsic/extrinsic), delta_profile (0.75-0.85/0.20-0.30 bands),
+  theta_zone (30-45d), catalyst_window (earnings imminence), ex-div
+  assignment note; pmcc_read combined, None-safe (n/a never fabricated).
+  Bound via wiring gate; tests test_options_breakeven (11) + analysis_tools
+  +3; 151 suite green; ruff clean; no execution/web. api_reference row +
+  CHANGELOG + README News.
 - **Sector-rotation actions 1+3+2 executed** (per web research + user):
   A1 RRG quadrant (`sector_rank.rrg_quadrant` — separate rs_level x
   rs_momentum axes → Leading/Weakening/Improving/Lagging; `quadrant` row

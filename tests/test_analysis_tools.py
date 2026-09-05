@@ -790,6 +790,35 @@ def test_sector_rank_resolves_standing(monkeypatch):
     assert "top3_3m=" in out and "standing=" in out
 
 
+def test_option_breakeven_renders_full_read():
+    # AVGO-style PMCC: breakeven + floor violation + intrinsic split + windows.
+    out = T.get_option_breakeven.invoke({
+        "long_strike": 300.0, "long_premium": 103.13,
+        "short_strike": 390.0, "spot": 346.0, "short_ttm_days": 35.0,
+        "delta": 0.8, "days_to_earnings": 6, "days_to_ex_div": 2,
+    })
+    assert "long breakeven = 403.13" in out
+    assert "short-call floor" in out and "VIOLATES" in out
+    assert "intrinsic 46.0" in out
+    assert "deep-ITM" in out
+    assert "30-45d" in out
+    assert "earnings" in out and "assignment" in out
+
+
+def test_option_breakeven_partial_renders_na():
+    # Only the mandatory pair -> everything else n/a, never fabricated.
+    out = T.get_option_breakeven.invoke({"long_strike": 300.0, "long_premium": 103.13})
+    assert "long breakeven = 403.13" in out
+    assert "short-call floor" not in out  # no short strike -> floor omitted
+    assert "intrinsic" not in out
+
+
+def test_option_breakeven_never_aborts():
+    # Negative (invalid) floats are schema-valid but math-None -> n/a render.
+    out = T.get_option_breakeven.invoke({"long_strike": -1.0, "long_premium": -1.0})
+    assert "long breakeven = n/a" in out
+
+
 def test_cycle_tilt_renders_phase(monkeypatch):
     # FRED resolves all three signals -> mid + favored sectors.
     import tradingagents.dataflows.fred as _fred
