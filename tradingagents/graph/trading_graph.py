@@ -75,7 +75,9 @@ from tradingagents.agents.utils.analysis_tools import (
     get_clenow_momentum,
     get_company_peers,
     get_composite_rank,
+    get_concentration_read,
     get_consensus,
+    get_covariance_read,
     get_credit_spread_read,
     get_dcf_valuation,
     get_dip_technical,
@@ -95,6 +97,8 @@ from tradingagents.agents.utils.analysis_tools import (
     get_garch_volatility,
     get_horizon_var,
     get_insider_activity,
+    get_kelly_alloc,
+    get_kyle_lambda,
     get_liquidation_days,
     get_margin_of_safety,
     get_market_movers,
@@ -134,6 +138,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_swing_exits,
     get_swing_set,
     get_tail_decomposition,
+    get_tail_extreme_var,
     get_tail_risk,
     get_technical_factors,
     get_topk_drop_plan,
@@ -496,6 +501,12 @@ class TradingAgentsGraph:
                     get_ts_momentum_weights,
                     get_pair_trade_signal,
                     get_merton_distance,
+                    # Formula-catalog advisory reads (six-pillar/master-catalog).
+                    get_covariance_read,
+                    get_concentration_read,
+                    get_tail_extreme_var,
+                    get_kyle_lambda,
+                    get_kelly_alloc,
                 ]
             ),
             "social": ToolNode(
@@ -581,6 +592,7 @@ class TradingAgentsGraph:
                     get_kalman_spread,
                     get_allocation_black_litterman,
                     get_position_risk_multiplier,
+                    get_kelly_alloc,
                 ]
             ),
         }

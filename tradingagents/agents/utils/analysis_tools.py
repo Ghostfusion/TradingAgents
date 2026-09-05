@@ -20,6 +20,7 @@ analyst then says the signal is unavailable rather than inventing it.
 from __future__ import annotations
 
 import contextlib
+import math
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -3036,6 +3037,258 @@ def get_book_tail_risk(
 
 @tool
 
+def get_covariance_read(
+    tickers: Annotated[str, "Comma-separated ticker list for the covariance matrix"],
+) -> str:
+    """Covariance-robustness read: Ledoit-Wolf shrunk covariance + EWMA
+    covariance for a name list (advisory). The sample covariance overfits when
+    the name count approaches the observation count; shrinkage stabilizes it
+    (delta = b^2/d^2 in [0,1]). Reports the shrinkage intensity, the implied
+    vol of each name under the shrunk matrix, and the EWMA (RiskMetrics 0.94)
+    vol - so 'the covariance is noisy / these names correlate' claims are
+    grounded in the shrunk numbers, not the raw sample. Use before any
+    pairwise-correlation / risk-parity / allocation claim on a multi-name
+    book. Advisory.
+    """
+    try:
+        from tradingagents.strategies.covariance_models import (
+            ewma_covariance as _ewma_cov,
+            ledoit_wolf_shrink as _lw,
+        )
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"covariance read unavailable: {exc}"
+    names = [t.strip().upper() for t in str(tickers).split(",") if t.strip()]
+    if len(names) < 2:
+        return "covariance read unavailable: need >= 2 names"
+    returns_by_name = {}
+    for nm in names:
+        closes = _ohlcv(nm).get("closes") or []
+        rets = _daily_returns(closes)
+        if len(rets) < 30:
+            return f"covariance read unavailable for {nm}: insufficient history"
+        returns_by_name[nm] = rets
+    lw = _lw(returns_by_name)
+    ew = _ewma_cov(returns_by_name)
+    lines = [f"## Covariance Read — {', '.join(names)}", ""]
+    if lw.get("cov") is not None:
+        cov = lw["cov"]
+        idx = {nm: i for i, nm in enumerate(lw["names"])}
+        lines.append(
+            f"- Ledoit-Wolf shrinkage delta={lw['shrinkage']} "
+            f"(n_obs={lw['n_obs']}, n_names={lw['n_names']}, target={lw['target']})"
+        )
+        for nm in names:
+            i = idx.get(nm)
+            if i is not None and cov[i][i] > 0:
+                lines.append(f"  - {nm} shrunk vol = {math.sqrt(cov[i][i]) * math.sqrt(252):.2%}")
+        if len(names) >= 2:
+            pairs = []
+            for a in range(len(names)):
+                for b in range(a + 1, len(names)):
+                    da = math.sqrt(cov[a][a]) if cov[a][a] > 0 else 0.0
+                    db = math.sqrt(cov[b][b]) if cov[b][b] > 0 else 0.0
+                    if da > 0 and db > 0:
+                        pairs.append((names[a], names[b], cov[a][b] / (da * db)))
+            if pairs:
+                lines.append("- shrunk pairwise correlation:")
+                for a, b, r in sorted(pairs, key=lambda kv: -abs(kv[2])):
+                    lines.append(f"  - {a}~{b}: {r:.2f}")
+    else:
+        lines.append("- Ledoit-Wolf unavailable (insufficient/degenerate history)")
+    if ew.get("cov") is not None:
+        cov = ew["cov"]
+        vols = []
+        for i, nm in enumerate(ew["names"]):
+            if cov[i][i] > 0:
+                vols.append(f"{nm}={math.sqrt(cov[i][i]) * math.sqrt(252):.2%}")
+        lines.append(f"- EWMA(0.94) vol: {', '.join(vols)} (n_obs={ew['n_obs']})")
+    lines.append(
+        "\nNote: delta ~ 0 = sample covariance is trustworthy; delta -> 1 = "
+        "heavy shrinkage (N near T). EWMA down-weights distant history."
+    )
+    return "\n".join(lines)
+
+
+@tool
+
+def get_concentration_read(
+    weights: Annotated[str, "Comma-separated name=weight pairs (sums to 1)"],
+    benchmark_weights: Annotated[str, "Comma-separated benchmark name=weight pairs (optional)"] = "",
+) -> str:
+    """Portfolio concentration read: active share vs a benchmark book,
+    effective number of holdings, weight HHI and weight entropy for a
+    proposed weight set. Answers 'how concentrated is this book' - active
+    share 0 = mirrors the benchmark, 1 = fully disjoint; HHI 1 = one name,
+    1/N = equal weight; entropy ln(N) = perfectly diversified. Use before any
+    'we are (not) diversified / this tilts the book' claim. Advisory.
+    """
+    try:
+        from tradingagents.strategies.portfolio import (
+            active_share as _as,
+            effective_holdings as _eh,
+            weight_entropy as _we,
+            weight_hhi as _wh,
+        )
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"concentration read unavailable: {exc}"
+
+    def _parse(pairs: str) -> dict:
+        out = {}
+        for pair in str(pairs).split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                try:
+                    out[k.strip().upper()] = float(v)
+                except ValueError:
+                    continue
+        return out
+
+    w = _parse(weights)
+    if not w:
+        return "concentration read unavailable: no name=weight pairs"
+    b = _parse(benchmark_weights)
+    lines = [f"## Concentration Read — {len(w)} names"]
+    ah = _as(w, b) if b else None
+    eh = _eh(w)
+    hh = _wh(w)
+    en = _we(w)
+    if ah is not None:
+        lines.append(f"- active share vs benchmark: {ah:.2f} (0=mirror, 1=disjoint)")
+    elif b:
+        lines.append("- active share: n/a (benchmark given but unmeasurable)")
+    if hh is not None:
+        lines.append(f"- weight HHI: {hh:.3f} ({1.0/hh:.1f} effective holdings if equal)")
+    if eh is not None:
+        lines.append(f"- effective holdings: {eh:.2f}")
+    if en is not None:
+        ideal = _ln_ideal(len(w))
+        lines.append(f"- weight entropy: {en:.3f} (max {ideal:.3f} = equal weight; 0 = one name)")
+    if not b and eh is not None and len(w) >= 2:
+        lines.append("- benchmark weights not given: active share skipped (pass benchmark_weights)")
+    return "\n".join(lines)
+
+
+@tool
+
+def get_tail_extreme_var(
+    ticker: Annotated[str, "ticker symbol"],
+    alpha: Annotated[float, "tail probability, e.g. 0.01 = 1% worst day"] = 0.01,
+) -> str:
+    """EVT / GPD extreme-tail VaR and Expected Shortfall for one name: the
+    generalized-Pareto tail fit extrapolates BEYOND the observed worst day
+    (the historical quantile cannot). Reports the GPD shape xi, threshold,
+    exceedance count and the extreme VaR/ES at the tail probability. Use
+    before any 'worst case / tail risk / fat tails' claim - a xi > 0 book
+    reads a VaR worse than anything in the sample. Advisory.
+    """
+    try:
+        from tradingagents.strategies.book_risk import extreme_quantile_var as _eqv
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"extreme tail var unavailable: {exc}"
+    closes = _ohlcv(ticker).get("closes") or []
+    rets = _daily_returns(closes)
+    if len(rets) < 40:
+        return f"extreme tail var unavailable for {ticker}: insufficient history"
+    try:
+        r = _eqv(rets, alpha=float(alpha))
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"extreme tail var unavailable for {ticker}: {exc}"
+    if not r:
+        return f"extreme tail var unavailable for {ticker}: tail fit needs >= 10 exceedances"
+    var = f"{abs(r['var']):.2%}" if r.get("var") is not None else "n/a"
+    es = f"{abs(r['es']):.2%}" if r.get("es") is not None else "n/a"
+    tail = "fat" if r["xi"] > 0.05 else ("bounded" if r["xi"] < -0.05 else "exponential")
+    return (
+        f"extreme tail var {ticker} (alpha={alpha}): var={var}, es={es}, "
+        f"gpd_shape_xi={r['xi']} ({tail} tail), threshold={r['threshold']:.2%}, "
+        f"n_exceed={r['n_exceed']} n={r['n']}"
+    )
+
+
+def _ln_ideal(n: int) -> float:
+    import math as _m
+
+    return _m.log(n) if n > 1 else 0.0
+
+
+@tool
+
+def get_kyle_lambda(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Kyle lambda (price-impact slope) for one name from daily bars:
+    Delta Price_t = alpha + lambda * signed_volume_t. A larger lambda = a
+    thinner book (a small order moves the price). Daily-bar proxy - use
+    cross-sectionally (this name vs its peers), never as an absolute market
+    quote. Call before any 'this name is cheap/dear to trade / impact is
+    low' claim. Advisory.
+    """
+    try:
+        from tradingagents.strategies.liquidity_risk import kyle_lambda as _kl
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"kyle lambda unavailable: {exc}"
+    oh = _ohlcv(ticker, days=320)
+    closes = oh.get("closes") or []
+    volumes = oh.get("volumes") or []
+    if len(closes) < 32 or len(volumes) < 32:
+        return f"kyle lambda unavailable for {ticker}: insufficient history"
+    lam = _kl(closes, volumes)
+    if lam is None:
+        return f"kyle lambda unavailable for {ticker}: degenerate regression"
+    return (
+        f"kyle lambda {ticker}: {lam:.3e} price-units per unit signed volume "
+        f"(daily-bar proxy; compare across names, never an absolute quote)"
+    )
+
+
+@tool
+
+def get_kelly_alloc(
+    expected_excess_returns: Annotated[str, "Comma-separated name=annualized excess return pairs (a forecast source)"],
+) -> str:
+    """Multi-asset fractional Kelly allocation: w = fraction * Sigma^-1 * mu
+    (Merton log-utility optimum) with Sigma from the aligned daily returns.
+    Pass the annualized excess return of each name (over the risk-free rate)
+    — that is the forecast source, always declared by the caller. Negative
+    full weights are clipped to 0 (long-only) and the remainder normalized.
+    Use before any 'allocate proportional to expected return' claim; the
+    covariance inversion captures both vol and correlation. Advisory.
+    """
+    try:
+        from tradingagents.strategies.portfolio import kelly_weights as _kw
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"kelly allocation unavailable: {exc}"
+    mu = {}
+    for pair in str(expected_excess_returns).split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            try:
+                mu[k.strip().upper()] = float(v)
+            except ValueError:
+                continue
+    names = list(mu)
+    if len(names) < 2:
+        return "kelly allocation unavailable: need >= 2 name=excess_return pairs"
+    returns_by_name = {}
+    for nm in names:
+        closes = _ohlcv(nm).get("closes") or []
+        rets = _daily_returns(closes)
+        if len(rets) < 60:
+            return f"kelly allocation unavailable for {nm}: insufficient history"
+        returns_by_name[nm] = rets
+    w = _kw(mu, returns_by_name, fraction=0.25)
+    if not w:
+        return "kelly allocation unavailable: degenerate covariance"
+    line = "kelly allocation (fraction 0.25, long-only): " + "; ".join(
+        f"{nm}={w.get(nm, 0.0):.1%}" for nm in names
+    )
+    return line
+
+
+@tool
+
 def get_liquidation_days(
     ticker: Annotated[str, "ticker symbol"],
     shares_to_liquidate: Annotated[
@@ -3416,12 +3669,16 @@ def get_volatility_estimators(
         gk = _vm.garman_klass_vol(
             ohlcv["opens"], ohlcv["highs"], ohlcv["lows"], closes, window=min(60, len(closes))
         )
+        yz = _vm.yang_zhang_vol(
+            ohlcv["opens"], ohlcv["highs"], ohlcv["lows"], closes, window=min(60, len(closes))
+        )
         ew = _vm.ewma_vol(logrets)
         garch = _vm.garch11_fit(logrets)
         rows = [
             ("close-to-close (60d)", close_v),
             ("parkinson (60d, day-only)", par),
             ("garman-klass (60d, day-only)", gk),
+            ("yang-zhang (60d, overnight+range)", yz),
             ("ewma 0.94", ew),
             ("garch long-run", (garch or {}).get("long_run_vol")),
         ]

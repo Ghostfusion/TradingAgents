@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Formula-catalog quant adds (six-pillar + master-catalog)** -
+  Ledoit-Wolf shrunk covariance + EWMA covariance + Yang-Zhang vol (completes
+  the estimator set: close/Parkinson/GK/YZ/EWMA/GARCH), a book-concentration
+  suite (active share / effective holdings / HHI / entropy), EVT/GPD
+  extreme-tail VaR/ES (extrapolates beyond the observed worst day), Kyle
+  lambda (daily-bar impact slope) and multi-asset fractional Kelly allocation
+  — all advisory, default-off config, bound as market/fundamentals analyst
+  tools (+ trading_web Value Tools). See CHANGELOG.
 - [2026-09-04] **Value-dip `--knife-z` velocity gate + batch `--probe` tracing** -
   the value screener's value-dip scan can now enforce the falling-knife
   velocity-z guard (``--knife-z -2.5`` blocks candidates whose 3-day price

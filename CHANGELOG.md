@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Formula-catalog additions (six-pillar / master-catalog)** -
+  ``strategies/covariance_models.py`` (NEW): Ledoit-Wolf (2004) shrunk
+  covariance (scaled-identity / diag targets, ``delta = clip(b2/d2, 0, 1)``,
+  web-verified formula) + RiskMetrics EWMA covariance; ``yang_zhang_vol``
+  (overnight + range, drift-independent — completes the estimator set;
+  ``get_volatility_estimators`` now renders close/Parkinson/GK/**YZ**/EWMA/
+  GARCH). ``strategies/portfolio.py``: book-concentration suite
+  (``active_share`` / ``weight_hhi`` / ``effective_holdings`` /
+  ``weight_entropy``) + multi-asset fractional Kelly
+  (``kelly_weights`` = ``f·Σ⁻¹μ``, long-only clip; ``allocation_block``
+  switches onto it via ``enable_kelly_alloc``). ``strategies/book_risk.py``:
+  EVT/GPD peaks-over-threshold ``extreme_quantile_var`` (extreme-quantile
+  VaR + GPD ES, extrapolates beyond the observed worst day). 
+  ``strategies/liquidity_risk.py``: ``kyle_lambda`` daily-bar price-impact
+  slope (OLS of ΔP on signed volume). New advisory tools bound to the
+  market + fundamentals ToolNodes: ``get_covariance_read``,
+  ``get_concentration_read``, ``get_tail_extreme_var``, ``get_kyle_lambda``,
+  ``get_kelly_alloc`` (+ YZ row in ``get_volatility_estimators``). Config:
+  ``covariance_shrinkage_enable`` / ``covariance_shrinkage_target`` /
+  ``enable_kelly_alloc`` / ``kelly_alloc_fraction`` (all default off,
+  existing runs bit-identical). Tests: ``test_strategies_covariance_models``
+  (8), ``test_formulas_p2`` (11), ``test_formulas_p3`` (7) — all hermetic.
+  trading_web Value Tools += 5 (capabilities/App/README); docs
+  api_reference + Strategies/index synced. See next entry.
 - **Value-dip falling-knife velocity-z gate (`--knife-z`) + batch `--probe` tracing** -
   the value screener's value-dip scan can now enforce the falling-knife
   velocity-z guard: ``--knife-z -2.5`` blocks candidates whose 3-day price

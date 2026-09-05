@@ -253,6 +253,53 @@ def market_impact_slippage(order_qty: float, adv: float, price: float,
     return p * abs(float(impact_coeff)) * (q / a)
 
 
+def kyle_lambda(
+    closes: list,
+    volumes: list,
+    min_obs: int = 30,
+) -> float | None:
+    """Kyle lambda (price-impact slope) from daily bars.
+
+    ``Delta P_t = alpha + lambda * Q_t + eps`` where ``Q_t`` is the signed
+    flow proxy ``sign(dP_t) * volume_t`` and ``lambda`` is the OLS slope —
+    the price change per unit of signed volume. Larger lambda = thinner book
+    (a small order moves the price). Daily-bar proxy: no quote data, so it is
+    a cross-sectional / relative liquidity read, never an absolute market
+    quote. Returns None with too little history or a degenerate regression
+    (zero flow variance). Uses the repo-standard gaussian-elimination inverse
+    (2x2) so it stays pure and offline.
+    """
+    import math as _math
+
+    n = min(len(closes), len(volumes))
+    if n < min_obs + 1:
+        return None
+    dp: list[float] = []
+    q: list[float] = []
+    for i in range(1, n):
+        pc = float(closes[i - 1])
+        cc = float(closes[i])
+        v = float(volumes[i])
+        if pc <= 0 or cc <= 0 or v <= 0 or not _math.isfinite(pc + cc + v):
+            continue
+        d = cc - pc
+        dp.append(d)
+        q.append((1.0 if d >= 0.0 else -1.0) * v)
+    m = len(dp)
+    if m < min_obs:
+        return None
+    mean_d = sum(dp) / m
+    mean_q = sum(q) / m
+    s_qq = sum((x - mean_q) ** 2 for x in q)
+    if s_qq <= 0:
+        return None
+    s_dq = sum((dp[i] - mean_d) * (q[i] - mean_q) for i in range(m))
+    lam = s_dq / s_qq
+    if not _math.isfinite(lam):
+        return None
+    return round(lam, 8)
+
+
 def roll_spread(closes: list, min_obs: int = 30) -> float | None:
     """Roll (1984) effective-spread estimator from daily prices alone.
 

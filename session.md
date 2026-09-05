@@ -17,6 +17,19 @@ fix its wiring gap, mirror to trading_web, document, test, commit + push.
 - CHANGELOG / README News / api_reference / Strategies/scan.md synced;
   `session.md` replaced with this handoff.
 
+Also this session:
+- **Formula-catalog implementation** (from `Strategies/formulas/6 pillars...` +
+  `Quant Finance Formula Master Catalog` — the ~300-formula zoo deltas were
+  small; implemented the 6 non-existant families): P1 `covariance_models.py`
+  (Ledoit-Wolf shrink + RiskMetrics EWMA cov) + `yang_zhang_vol`; P2
+  concentration suite (active_share/hhi/effective_holdings/entropy) + EVT/GPD
+  `extreme_quantile_var`; P3 `kyle_lambda` + multi-asset fractional Kelly
+  (in `allocation_block` behind `enable_kelly_alloc`); 5 new analyst tools +
+  YZ row; web Value Tools += 5; config keys added; docs synced; tests
+  `test_strategies_covariance_models` (8) + `test_formulas_p2` (11) +
+  `test_formulas_p3` (7). Formals grounded via web_search (YZ k-weight,
+  Ledoit-Wolf b2/d2, Kyle ΔP~Q regression, Kelly Σ⁻¹μ).
+
 ## 2. What Landed — Files & Commits
 **Code (repo):**
 - `tradingagents/strategies/orderflow.py` — `knife_guard_vpin(vpin, price_delta,

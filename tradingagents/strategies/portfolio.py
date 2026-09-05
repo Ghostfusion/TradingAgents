@@ -9,6 +9,8 @@ uncapped names in production.
 
 from __future__ import annotations
 
+import math
+
 
 def value_ratio_weights(scores: dict, min_weight: float = 0.0) -> dict:
     """Weight proportional to composite score (no cap); zero-score->min weight."""
@@ -98,8 +100,10 @@ def allocation_block(
 
     cfg keys: max_name_weight (0.25), sector_cap_limit (0.35),
     max_book_names (10), enable_correlation_penalty (False),
-    correlation_threshold (0.6), correlation_penalty_frac (0.3). With a
-    sector_map, per-sector caps apply too. When ``returns_by_name`` is
+    correlation_threshold (0.6), correlation_penalty_frac (0.3),
+    enable_kelly_alloc (False) + kelly_alloc_fraction (0.25) + risk_free_rate
+    (0.0) - fractional multi-asset Kelly from the aligned return series.
+    With a sector_map, per-sector caps apply too. When ``returns_by_name`` is
     provided AND ``enable_correlation_penalty`` is on, names whose average
     pairwise correlation with the rest of the book exceeds the threshold are
     down-weighted before the caps (risk-parity style concentration control,
@@ -117,7 +121,25 @@ def allocation_block(
     w = value_ratio_weights(scores, min_weight=0.0)
     strat_note = ""
 
-    if cfg.get("enable_topk_drop"):
+    if cfg.get("enable_kelly_alloc") and returns_by_name:
+        try:
+            from tradingagents.strategies.portfolio import kelly_weights as _kw
+
+            names = list(scores)
+            mu = {}
+            for n in names:
+                s = returns_by_name.get(n) or []
+                if len(s) >= 20:
+                    mean = sum(s) / len(s)
+                    rf = float(cfg.get("risk_free_rate", 0.0))
+                    mu[n] = mean - rf / 252.0
+            kk = _kw(mu, returns_by_name, fraction=float(cfg.get("kelly_alloc_fraction", 0.25)))
+            if kk:
+                w = {n: kk.get(n, 0.0) for n in names}
+                strat_note = " · kelly weights"
+        except Exception:  # noqa: BLE001 - degrade to the baseline, never raise
+            w = value_ratio_weights(scores, min_weight=0.0)
+    elif cfg.get("enable_topk_drop"):
         try:
             from tradingagents.strategies.portfolio_strategy import topk_drop_weights
 
@@ -293,6 +315,11 @@ __all__ = [
     "allocation_block",
     "mean_correlation",
     "correlation_penalty",
+    "active_share",
+    "effective_holdings",
+    "weight_hhi",
+    "weight_entropy",
+    "kelly_weights",
 ]
 
 
@@ -322,4 +349,130 @@ def _worst_correlated(returns_by_name: dict, names: list[str]) -> str | None:
             cs.append(abs(float(np.cov(a, b)[0, 1]) / denom))
         avg[n] = sum(cs) / len(cs) if cs else 0.0
     return max(avg, key=avg.get) if avg else None
+
+
+def active_share(weights: dict, benchmark_weights: dict) -> float | None:
+    """Active share = 1/2 * sum_i |w_p,i - w_b,i| (Cremers-Petajisto).
+
+    Measures how far the book's weights sit from the benchmark book: 0.0 when
+    identical, 1.0 when fully disjoint, in between for a tilt. Names present
+    in only one book count as the full weight (the missing side is 0). None
+    when either book is empty or the total weights are non-positive.
+    """
+    if not weights or not benchmark_weights:
+        return None
+    keys = set(weights) | set(benchmark_weights)
+    total = 0.0
+    for k in keys:
+        w = float(weights.get(k, 0.0) or 0.0)
+        b = float(benchmark_weights.get(k, 0.0) or 0.0)
+        total += abs(w - b)
+    return 0.5 * total  # 0.0 = identical books (a valid, meaningful result)
+
+
+def effective_holdings(weights: dict) -> float | None:
+    """Effective number of positions = 1 / sum(w_i^2) (the inverse HHI).
+
+    A 10-name equal-weight book has ~10 effective holdings; a book dominated
+    by one 50% name drops toward ~2. None when the weights are empty or the
+    HHI is degenerate (non-positive total).
+    """
+    if not weights:
+        return None
+    hhi = 0.0
+    for w in weights.values():
+        v = float(w)
+        if v > 0:
+            hhi += v * v
+    if hhi <= 0:
+        return None
+    return 1.0 / hhi
+
+
+def weight_hhi(weights: dict) -> float | None:
+    """Weight HHI = sum(w_i^2), the book's concentration index.
+
+    1.0 = a single name, 1/N = equal weight across N names. None on empty /
+    non-positive total (leverage would distort the index).
+    """
+    if not weights:
+        return None
+    total = sum(float(v) for v in weights.values())
+    if total <= 0:
+        return None
+    return sum((float(v) / total) ** 2 for v in weights.values())
+
+
+def weight_entropy(weights: dict) -> float | None:
+    """Weight entropy = -sum(w_i ln w_i) (diversification entropy).
+
+    Higher = more diversified; 0.0 = a single name; ln(N) = perfect
+    equal-weight across N. None when any weight is non-positive (leverage /
+    shorts make the log undefined).
+    """
+    if not weights:
+        return None
+    total = sum(float(v) for v in weights.values())
+    if total <= 0:
+        return None
+    ent = 0.0
+    for v in weights.values():
+        w = float(v) / total
+        if w <= 0:
+            return None
+        ent -= w * math.log(w)
+    return ent
+
+
+def kelly_weights(
+    expected_excess_returns: dict,
+    returns_by_name: dict,
+    fraction: float = 0.25,
+) -> dict:
+    """Multi-asset fractional Kelly weights (Merton log-utility optimum).
+
+    ``w_full = Sigma^-1 (mu - rf*1)`` then ``w = fraction * w_full`` — the
+    excess returns must be declared by the caller (a forecast source), the
+    covariance is the sample of the aligned return series. A negative full
+    weight (a name whose excess return is below the book's risk-free floor)
+    is clipped to 0 and the remainder renormalized (long-only fractional
+    Kelly). Degrades to equal-weight on a singular / degenerate covariance —
+    never fabricates.
+    """
+    names = [n for n in (expected_excess_returns or {}) if n in (returns_by_name or {})]
+    if len(names) < 2:
+        return {}
+    # Reuse the gaussian-elimination inverse used by the other allocators.
+    import numpy as np
+
+    series = []
+    for n in names:
+        s = [float(v) for v in returns_by_name[n] if v is not None]
+        if len(s) < 2:
+            return {}
+        series.append(s)
+    n_obs = min(len(s) for s in series)
+    mat = np.array([s[-n_obs:] for s in series], dtype=float)  # N x T
+    mat = mat - mat.mean(axis=1, keepdims=True)
+    cov = (mat @ mat.T) / (n_obs - 1)  # N x N sample covariance
+    import contextlib as _cl
+
+    inv = None
+    with _cl.suppress(Exception):  # singular -> degrade, never fabricate
+        inv = np.linalg.inv(cov)
+    if inv is None:
+        w = 1.0 / len(names)
+        return dict.fromkeys(names, w)
+    mu = np.array([float(expected_excess_returns[n]) for n in names])
+    full = inv @ mu
+    frac = float(fraction)
+    if not 0.0 < frac <= 1.0:
+        frac = 0.25
+    raw = [float(full[i]) * frac for i in range(len(names))]
+    raw = [max(0.0, x) for x in raw]
+    total = sum(raw)
+    if total <= 0:
+        w = 1.0 / len(names)
+        return dict.fromkeys(names, w)
+    return {names[i]: round(raw[i] / total, 6) for i in range(len(names))}
 

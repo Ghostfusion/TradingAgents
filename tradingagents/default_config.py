@@ -102,6 +102,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE": "sentiment_factor_max_scale",
     "TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE": "sentiment_factor_min_scale",
     "TRADINGAGENTS_VOLATILITY_ESTIMATOR": "volatility_estimator",
+    "TRADINGAGENTS_COVARIANCE_SHRINKAGE_ENABLE": "covariance_shrinkage_enable",
+    "TRADINGAGENTS_COVARIANCE_SHRINKAGE_TARGET": "covariance_shrinkage_target",
+    "TRADINGAGENTS_ENABLE_KELLY_ALLOC": "enable_kelly_alloc",
+    "TRADINGAGENTS_KELLY_FRACTION": "kelly_alloc_fraction",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
     "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
@@ -644,6 +648,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_factor_profile": False,  # Q1: get_factor_profile tool + expression cache
         "enable_topk_drop": False,  # Q3: screener alloc block uses Topk-Drop
         "enable_enhanced_index": False,  # Q3: screener alloc block uses the convex enhanced-index
+        "covariance_shrinkage_enable": False,  # formulas: LW-shrink covariance in alloc (advisory)
+        "covariance_shrinkage_target": "scaled_identity",  # formulas: scaled_identity | diag
+        "enable_kelly_alloc": False,  # formulas: multi-asset fractional Kelly alloc (advisory)
+        "kelly_alloc_fraction": 0.25,  # formulas: fractional-Kelly scaling (0 < f <= 1)
         "backtest_limit_threshold": 0.0,  # Q13: |day change| fraction for limit-up/down gate (0 = off)
         "backtest_volume_participation": 0.0,  # Q13: cap order % of day volume (0 = off; 0.2 recommended)
         "backtest_deal_price": "close",  # Q13: close | open | vwap, or "buy,sell" pair

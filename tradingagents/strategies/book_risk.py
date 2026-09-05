@@ -391,5 +391,126 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
     return out
 
 
+# ---------------------------------------------------------------------------
+# EVT / GPD extreme tail (six-pillar §4.23-4.24, master-catalog PART XX)
+# ---------------------------------------------------------------------------
+
+
+def _gpd_fit(exceedances: list[float]) -> tuple[float, float] | None:
+    """Fit a Generalized Pareto Distribution to positive exceedances.
+
+    ``G(y) = 1 - (1 + xi*y/beta)^(-1/xi)`` fit by maximum likelihood
+    (Nelder-Mead, method-of-moments warm start). Returns ``(xi, beta)`` or
+    None when the fit fails / is degenerate. The ``xi < 0`` (bounded tail),
+    ``xi = 0`` (exponential) and ``xi > 0`` (fat tail) cases all fall out of
+    the same likelihood; ``xi >= 1`` is rejected by the caller (mean
+    undefined).
+    """
+    import numpy as _np
+    from scipy.optimize import minimize
+
+    y = _np.array(exceedances, dtype=float)
+    n = len(y)
+    if n < 2:
+        return None
+    mean = float(y.mean())
+    var = float(y.var(ddof=0))
+    if var <= 0 or mean <= 0:
+        return None
+    # Method-of-moments warm start.
+    xi0 = 0.5 * (1.0 - mean * mean / var)
+    b0 = 0.5 * mean * (1.0 + mean * mean / var)
+    if b0 <= 0:
+        return None
+
+    def negll(p):
+        xi, beta = float(p[0]), float(p[1])
+        if beta <= 0 or xi <= -0.5:
+            return 1e15
+        t = 1.0 + xi * y / beta
+        if (t <= 0).any():
+            return 1e15
+        if abs(xi) < 1e-8:
+            return float(n * math.log(beta) + y.sum() / beta)
+        return float(n * math.log(beta) + (1.0 + 1.0 / xi) * float(_np.log(t).sum()))
+
+    try:
+        res = minimize(negll, [xi0, b0], method="Nelder-Mead",
+                       options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-10})
+        if res.success:
+            xi, beta = float(res.x[0]), float(res.x[1])
+        else:
+            xi, beta = xi0, b0
+    except Exception:  # noqa: BLE001 - no fabrication
+        xi, beta = xi0, b0
+    if not math.isfinite(xi) or not math.isfinite(beta) or beta <= 0:
+        return None
+    return xi, beta
+
+
+def extreme_quantile_var(
+    returns: list,
+    alpha: float = 0.01,
+    threshold_quantile: float = 0.90,
+    min_exceed: int = 10,
+) -> dict | None:
+    """EVT extreme-quantile VaR / Expected Shortfall from a GPD tail fit.
+
+    Peaks-over-threshold: take the loss series ``L = -returns``, set the
+    threshold ``u`` at the ``threshold_quantile`` quantile of L, fit a GPD to
+    the ``N_u`` exceedances, and read the extreme quantile
+    ``VaR_p = u + (beta/xi)[(N_u/(N*p))^xi - 1]`` (``u + beta*ln(N_u/(N*p))``
+    when ``xi = 0``) with the GPD Expected Shortfall
+    ``ES_p = (VaR_p + beta - xi*u) / (1 - xi)`` (McNeil-Frey-Embrechts).
+
+    VaR / ES are returned NEGATIVE (loss convention, matching ``simple_var`` /
+    ``cvar``). Unlike the historical quantile, the GPD extrapolates beyond the
+    observed worst day — a fat-tailed book reads a VaR beyond its sample
+    maximum. Returns None when the series is too short, fewer than
+    ``min_exceed`` exceedances fall above the threshold, or the fit is
+    degenerate — never fabricated.
+    """
+    vals = [float(r) for r in returns if r is not None]
+    n = len(vals)
+    if n < 3 * min_exceed:
+        return None
+    alpha = float(alpha)
+    q = float(threshold_quantile)
+    if not 0.0 < alpha < 1.0 or not 0.5 < q < 1.0:
+        return None
+    losses = sorted(-v for v in vals)
+    k = max(1, int(q * n))
+    u = losses[k - 1]
+    exceed = [e - u for e in losses if e > u]  # positive exceedances
+    if len(exceed) < min_exceed:
+        return None
+    fit = _gpd_fit(exceed)
+    if fit is None:
+        return None
+    xi, beta = fit
+    if xi >= 1.0:
+        return None
+    nu = len(exceed)
+    tail = nu / (n * alpha)
+    if tail <= 0:
+        return None
+    var_pos = u + beta * math.log(tail) if abs(xi) < 1e-8 else u + (beta / xi) * (tail ** xi - 1.0)
+    if not math.isfinite(var_pos) or var_pos <= u:
+        return None
+    es_pos = (var_pos + beta - xi * u) / (1.0 - xi)
+    if not math.isfinite(es_pos) or es_pos < var_pos:
+        return None
+    return {
+        "var": round(-var_pos, 6),
+        "es": round(-es_pos, 6),
+        "xi": round(xi, 6),
+        "beta": round(beta, 6),
+        "threshold": round(u, 6),
+        "n_exceed": nu,
+        "n": n,
+        "alpha": alpha,
+    }
+
+
 __all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
-           "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var"]
+           "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var"]

@@ -76,7 +76,11 @@ in `batch.py`).
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC` | `sentiment_factor_min_ic` | measured rank-IC floor for the sentiment fold (default 0.02) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE` | `sentiment_factor_max_scale` | max +/- position-scale move from the sentiment fold (default 0.2) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE` | `sentiment_factor_min_scale` | floor for the sentiment fold scale (default 0.5) |
-| `TRADINGAGENTS_VOLATILITY_ESTIMATOR` | `volatility_estimator` | overlay sizing estimator: `close` (default) \| `ewma` \| `garch` (parkinson / garman-klass are analyst tools, need OHLC) |
+| `TRADINGAGENTS_VOLATILITY_ESTIMATOR` | `volatility_estimator` | overlay sizing estimator: `close` (default) \| `ewma` \| `garch` (parkinson / garman-klass / yang-zhang are analyst tools, need OHLC) |
+| `TRADINGAGENTS_COVARIANCE_SHRINKAGE_ENABLE` | `covariance_shrinkage_enable` | Ledoit-Wolf shrunk covariance in the covariance allocators (advisory, default off) |
+| `TRADINGAGENTS_COVARIANCE_SHRINKAGE_TARGET` | `covariance_shrinkage_target` | shrinkage target: `scaled_identity` (default) \| `diag` |
+| `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | `enable_kelly_alloc` | allocation block uses multi-asset fractional Kelly (advisory, default off) |
+| `TRADINGAGENTS_KELLY_FRACTION` | `kelly_alloc_fraction` | fractional-Kelly scaling (default 0.25) |
 | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
@@ -399,7 +403,7 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`, `gdelt`, `benzinga`, `newsapi` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier - GDELT/Benzinga opt-in via `news_data` chain, not default)
 - news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` tone
-- quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/EWMA/GARCH), `get_garch_volatility`, `get_tail_decomposition` (incremental/component VaR), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread (in `get_liquidity_risk`), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
+- quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/YZ/EWMA/GARCH), `get_garch_volatility`, `get_covariance_read` (Ledoit-Wolf shrunk + EWMA covariance), `get_concentration_read` (active share / effective holdings / HHI / entropy), `get_tail_decomposition` (incremental/component VaR), `get_tail_extreme_var` (EVT/GPD extreme-quantile VaR/ES), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread + Kyle lambda (`get_liquidity_risk`/`get_kyle_lambda`), `get_kelly_alloc` (multi-asset fractional Kelly), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)
@@ -543,6 +547,11 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |
 | `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` | market | book-level portfolio CVaR + correlated -10% stress + drawdown gate |
+| `get_covariance_read(tickers)` | `covariance_models.ledoit_wolf_shrink` + `ewma_covariance` | market | Ledoit-Wolf shrunk covariance (delta = b2/d2) + EWMA vol for a name list |
+| `get_concentration_read(weights, benchmark_weights?)` | `portfolio.active_share` + `weight_hhi` + `effective_holdings` + `weight_entropy` | market | how concentrated a proposed book is (active share vs benchmark, HHI, entropy) |
+| `get_tail_extreme_var(ticker, alpha?)` | `book_risk.extreme_quantile_var` | market | EVT/GPD extreme-quantile VaR/ES (extrapolates beyond the observed worst day) |
+| `get_kyle_lambda(ticker)` | `liquidity_risk.kyle_lambda` | market | daily-bar price-impact slope (cross-sectional liquidity proxy) |
+| `get_kelly_alloc(expected_excess_returns)` | `portfolio.kelly_weights` | market + fundamentals | multi-asset fractional Kelly alloc (w = f·Σ⁻¹μ, long-only) |
 | `get_liquidation_days(ticker, shares_to_liquidate?)` | `liquidity_risk.days_to_absorb` | market | days for the market to absorb a block at a 15% participation cap |
 | `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?, entry_price?)` | `pre_market.review_decision` | market | deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas |
 | `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |

@@ -22,6 +22,7 @@ import math
 __all__ = [
     "parkinson_vol",
     "garman_klass_vol",
+    "yang_zhang_vol",
     "ewma_vol",
     "garch11_fit",
 ]
@@ -107,6 +108,75 @@ def garman_klass_vol(
         return None
     var = total / n
     return math.sqrt(max(var, 0.0) * periods)
+
+
+def yang_zhang_vol(
+    opens: list,
+    highs: list,
+    lows: list,
+    closes: list,
+    window: int | None = None,
+    periods: float = _DAYS,
+) -> float | None:
+    """Annualized Yang-Zhang drift-independent volatility estimator.
+
+    ``sigma_YZ^2 = sigma_o^2 + k*sigma_c^2 + (1-k)*sigma_RS^2`` (Yang & Zhang
+    2000) where the overnight leg ``sigma_o^2`` is the sample variance of
+    ``ln(O_t / C_{t-1})``, the intraday leg ``sigma_c^2`` is the sample
+    variance of ``ln(C_t / O_t)``, ``sigma_RS^2`` is the Rogers-Satchell
+    range term, and ``k = 0.34 / (1.34 + (m+1)/(m-1))`` with ``m`` the number
+    of aligned interior rows. Unlike Parkinson / Garman-Klass (day-only
+    estimates), the overnight leg captures the news-gap component, so the
+    estimator is drift-independent and complete over the full day. None with
+    < 3 bars or a zero total variance (degenerate) — never fabricated.
+    """
+    o = [float(x) for x in opens]
+    h = [float(x) for x in highs]
+    lo = [float(x) for x in lows]
+    c = [float(x) for x in closes]
+    n = min(len(o), len(h), len(lo), len(c))
+    if n < 3:
+        return None
+    if window:
+        o, h, lo, c = o[-window:], h[-window:], lo[-window:], c[-window:]
+        n = min(len(o), len(h), len(lo), len(c))
+        if n < 3:
+            return None
+
+    def _var(vals: list[float]) -> float | None:
+        m = len(vals)
+        if m < 2:
+            return None
+        mean = sum(vals) / m
+        s = sum((v - mean) ** 2 for v in vals)
+        return s / (m - 1)
+
+    o_terms: list[float] = []
+    c_terms: list[float] = []
+    rs_terms: list[float] = []
+    m = 0  # aligned interior rows (i needs a prior close)
+    for i in range(1, n):
+        if o[i] <= 0 or c[i - 1] <= 0 or c[i] <= 0 or lo[i] <= 0:
+            continue
+        m += 1
+        o_terms.append(math.log(o[i] / c[i - 1]))
+        c_terms.append(math.log(c[i] / o[i]))
+        rs_terms.append(
+            math.log(h[i] / c[i]) * math.log(h[i] / o[i])
+            + math.log(lo[i] / c[i]) * math.log(lo[i] / o[i])
+        )
+    if m < 2:
+        return None
+    var_o = _var(o_terms)
+    var_c = _var(c_terms)
+    var_rs = sum(rs_terms) / m  # Rogers-Satchell is a mean, not mean-corrected
+    if var_o is None or var_c is None:
+        return None
+    k = 0.34 / (1.34 + (m + 1.0) / (m - 1.0))
+    var = var_o + k * var_c + (1.0 - k) * var_rs
+    if var <= 0:
+        return None
+    return math.sqrt(var * periods)
 
 
 def ewma_vol(
