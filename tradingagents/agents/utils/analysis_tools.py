@@ -2044,10 +2044,10 @@ def get_dupont_read(
         return "dupont read: n/a (incomplete inputs)"
     f = r["factors"]
     return (
-        f"dupont ROE {r['roe']:.1%}: net_margin={f.get('net_margin')} "
+        f"dupont ROE {r['roe']:.1%} ({r['note']}, driver {r['driver']}): "
+        f"net_margin={f.get('net_margin')} "
         f"asset_turnover={f.get('asset_turnover')} "
-        f"equity_multiplier={f.get('equity_multiplier')} "
-        f"driver={r['driver']} ({r['note']})"
+        f"equity_multiplier={f.get('equity_multiplier')}"
     )
 
 
@@ -2061,10 +2061,15 @@ def get_scenario_dcf(
     g_base: Annotated[float, "base-case growth, default 0.03"] = 0.03,
     g_bear: Annotated[float | None, "bear-case growth (default base-0.02)"] = None,
     g_bull: Annotated[float | None, "bull-case growth (default base+0.02)"] = None,
+    margin_shock_bear: Annotated[float | None, "bear-case FCF margin shock (fraction, negative)"] = None,
+    margin_shock_bull: Annotated[float | None, "bull-case FCF margin shock (fraction, positive)"] = None,
+    market_price: Annotated[float | None, "current market price (to get the band + margin of safety)"] = None,
 ) -> str:
     """Scenario DCF (bear/base/bull) vs a single deterministic DCF. Varies the
     growth rate (and optional margin shocks) into a value range + the implied
-    per-share prices. Use before any 'intrinsic value is X' claim — show the
+    per-share prices; when a market price is given, reports the band the price
+    sits in (below bear / bear-base / base-bull / above bull) and the base-case
+    margin of safety. Use before any 'intrinsic value is X' claim — show the
     range, don't assert a point. Advisory; None-safe.
     """
     try:
@@ -2072,7 +2077,10 @@ def get_scenario_dcf(
     except Exception as exc:  # noqa: BLE001
         return f"scenario dcf unavailable: {exc}"
     r = scenario_dcf(fcf, wacc, shares=shares, cash=cash, debt=debt,
-                     g_base=g_base, g_bear=g_bear, g_bull=g_bull)
+                     g_base=g_base, g_bear=g_bear, g_bull=g_bull,
+                     margin_shock_bear=margin_shock_bear,
+                     margin_shock_bull=margin_shock_bull,
+                     market_price=market_price)
     if not r["scenarios"]:
         return "scenario dcf: n/a (need fcf + wacc > 0)"
     parts = []
@@ -2080,7 +2088,13 @@ def get_scenario_dcf(
         sc = r["scenarios"].get(name) or {}
         p = sc.get("price")
         parts.append(f"{name}={p if p is not None else 'n/a'}")
-    return "scenario dcf: " + " ".join(parts) + " (growth shocks ±2%)"
+    out = "scenario dcf: " + " ".join(parts) + " (growth shocks ±2%)"
+    mkt = r.get("market") or {}
+    if mkt.get("band"):
+        mos = mkt.get("mos_base")
+        mos_s = f"{mos:+.1%}" if mos is not None else "n/a"
+        out += f"; vs market {mkt['price']}: {mkt['band']} (mos vs base {mos_s})"
+    return out
 
 
 @tool
@@ -2093,10 +2107,11 @@ def get_earnings_quality_verdict(
     eps_growth: Annotated[float | None, "EPS growth (fraction)"] = None,
     fcf_growth: Annotated[float | None, "FCF growth (fraction)"] = None,
 ) -> str:
-    """Earnings-quality verdict from the consensus layer: cash conversion
-    (OCF/NI), accrual ratio, negative-FCF-with-positive-NI, and the
-    'rising EPS while FCF falls' penalty. Use before any 'earnings are high
-    quality' claim. Advisory; None-safe.
+    """Earnings-quality concern verdict from the consensus layer: cash
+    conversion (OCF/NI), accrual ratio, negative-FCF-with-positive-NI, and the
+    'rising EPS while FCF falls' penalty. Level = concern (LOW/MEDIUM/HIGH —
+    HIGH means most concern = lowest quality). Use before any 'earnings are
+    high quality' claim. Advisory; None-safe.
     """
     try:
         from tradingagents.strategies.earnings_quality import earnings_quality_verdict
@@ -2108,7 +2123,7 @@ def get_earnings_quality_verdict(
         return "earnings quality: n/a (no usable inputs)"
     ev = "; ".join(r["evidence"]) if r["evidence"] else "none"
     return (
-        f"earnings quality: {r['level']} evidence=({ev}) "
+        f"earnings quality concern: {r['level']} evidence=({ev}) "
         f"cash_conversion={r['cash_conversion'] if r['cash_conversion'] is not None else 'n/a'} "
         f"accrual={r['accrual'] if r['accrual'] is not None else 'n/a'} "
         f"fcf={r['fcf'] if r['fcf'] is not None else 'n/a'}"

@@ -19,8 +19,8 @@ implemented here.
 - **Scenario DCF** — practice favors scenario (bear/base/bull), not a single
   deterministic DCF: vary revenue growth, operating margin, WACC, terminal
   growth; report the range + margin-of-safety under each.
-- **Earnings quality** — the consensus layer: OCF/NI >1.0 healthy, <0.8
-  caution, <0.6 warning; accrual ratio <5% acceptable, 5-10% elevated,
+- **Earnings quality** — the consensus layer: OCF/NI >1.0 healthy, 0.8-1.0
+  caution, <0.8 warning; accrual ratio <5% acceptable, 5-10% elevated,
   >10% concerning; FCF = OCF − capex sustainability; and the classic red
   flag "rising EPS while FCF/OCF deteriorates → quality penalty".
 
@@ -28,33 +28,39 @@ implemented here.
 
 ### 2.1 DuPont ROE (`strategies/dupont.py` + `get_dupont_read`)
 
-- `dupont_3(roe, net_margin, asset_turnover, equity_multiplier)`: cross-check
-  consistency (product ≈ ROE) + a ``driver`` verdict (margin-led /
-  turnover-led / leverage-led / mixed) using the largest-magnitude deviation
-  of each factor from its own-ratio benchmark.
-- `dupont_5(net_margin, tax_burden, interest_burden, asset_turnover,
-  equity_multiplier)`: the extended decomposition.
+- `dupont_3(net_margin, asset_turnover, equity_multiplier)` (and
+  `dupont_5(net_margin, tax_burden, interest_burden, asset_turnover,
+  equity_multiplier)`): ROE = product of legs + a ``driver`` verdict via
+  **log-DuPont attribution** (each leg's |ln(factor)| deviation from the
+  neutral 1.0 benchmark, shared over the total) labeled margin-led /
+  turnover-led / leverage-led / tax- or interest-driven / mixed; a
+  non-positive margin (loss-making) is always the story. Advisory.
 - Tool `get_dupont_read(...)` — advisory "why ROE is high" context.
 
 ### 2.2 Scenario DCF (`strategies/scenario_dcf.py` + `get_scenario_dcf`)
 
-- `scenario_dcf(fcf, wacc, scenarios: dict)` — one DCF per scenario
-  (bear/base/bull each with ``g`` growth + optional margin-scaled FCF),
-  returns per-scenario {price, ev, equity, mos} + the scenario range.
-  Reuses the Gordon TV / parity math conventions from ``dcf.py``.
-- Tool `get_scenario_dcf(fcf, shares, cash, debt, wacc, g_base,
-  g_bear?, g_bull?, margin_shocks?)` — None-safe; base+lateral shocks.
+- `scenario_dcf(fcf, wacc, *, shares, cash, debt, g_base=0.03, g_bear?,
+  g_bull?, margin_shock_bear?, margin_shock_bull?, market_price?)` — one DCF
+  per scenario (bear/base/bull; growth defaults base±2%, margin shocks scale
+  FCF; g_base=0.0 is respected, not coerced to 3%), returns per-scenario
+  {price, g, fcf_scale, mos}; when ``market_price`` is given the market dict
+  adds the band (below bear / bear-base / base-bull / above bull) + base-case
+  mos. Reuses the Gordon TV / parity math conventions from ``dcf.py``.
+- Tool `get_scenario_dcf(...)` — None-safe; base+lateral shocks + band/mos.
 
 ### 2.3 Earnings-quality verdict (`strategies/earnings_quality.py` +
 `get_earnings_quality` combined with the existing accruals/cash-conversion)
 
-- `earnings_quality_verdict(net_income, ocf, cfo?, fcf, total_assets,
-  shares?)` — the consensus thresholds: OCF/NI >1 healthy, 0.8-1 caution,
-  <0.8 warning; accrual ratio <5% ok, 5-10 elevated, >10 concerning; FCF
-  negative + positive NI red flag; "rising EPS + deteriorating FCF" quality
-  penalty flag. Returns {level: LOW/MEDIUM/HIGH, evidence, cash_conversion,
-  accrual, fcf}.
-- Tool `get_earnings_quality(...)` — advisory.
+- `earnings_quality_verdict(net_income, ocf, total_assets, *, fcf?, capex?,
+  eps_growth?, fcf_growth?)` — the consensus thresholds: OCF/NI >1 healthy,
+  0.8-1 caution, <0.8 warning; accrual ratio <5% ok, 5-10 elevated, >10
+  concerning; FCF negative + positive NI red flag; "rising EPS + falling FCF"
+  quality penalty flag. Level = **concern** (LOW/MEDIUM/HIGH; HIGH = most
+  concern = lowest quality) — never LOW confidence on no inputs: level is
+  None (n/a) when nothing is usable. Returns {level, evidence,
+  cash_conversion, accrual, fcf}.
+- Tool `get_earnings_quality_verdict(...)` — advisory (distinct from the
+  pre-existing `get_earnings_quality`).
 
 ## 3. Non-goals
 
@@ -68,7 +74,8 @@ implemented here.
 - All three are **calculation layers on caller-supplied inputs** (the fork's
   statements parse supplies NI/OCF/FCF/assets); the reads surface the numbers
   + verdict, never fabricate.
-- The DuPont "driver" is a heuristic (largest relative deviation), advisory.
+- The DuPont "driver" is a heuristic (log-DuPont attribution vs the
+  neutral 1.0 benchmark), advisory.
 - Scenario DCF growth/margin scenarios are analyst overrides; the repo's
   "never fabricate" rule means a scenario with no inputs renders n/a.
 

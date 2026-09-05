@@ -16,7 +16,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_dcf_valuation,
     get_decline_driver_check,
     get_dividends,
+    get_dupont_read,
     get_earnings_quality,
+    get_earnings_quality_verdict,
     get_earnings_surprise,
     get_earnings_surprise_history,
     get_fcf_yield,
@@ -37,6 +39,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_ratios,
     get_regime_state,
     get_revenue_breakdown,
+    get_scenario_dcf,
     get_smart_money,
     get_valuation_z_score,
     get_value_dip_setup,
@@ -72,6 +75,9 @@ def create_fundamentals_analyst(llm):
             get_ratios,
             get_allocation,
             get_dcf_valuation,
+            get_scenario_dcf,
+            get_dupont_read,
+            get_earnings_quality_verdict,
             get_margin_of_safety,
             get_composite_rank,
             get_fcf_yield,
@@ -104,7 +110,7 @@ def create_fundamentals_analyst(llm):
             + " You also have a structural-value tool: `get_value_floors(ticker, current_date)` returns the Graham Number, NCAV (net-net) and Earnings Power Value (EPV) floors - cite it (or its explicit 'unavailable') before any 'cheap on assets / below book / earnings-power floor' claim; it is the asset/earnings-backed cheapness floor beyond DCF/MoS/FCF yield."
             + " You also have an ownership tool: `get_ownership_concentration(ticker, current_date)` returns the free-float factor (IWF = float / total shares; < 0.5 = structural passive under-allocation) and, when a per-holder breakdown is available, the Herfindahl-Hirschman index (HHI; > 2500 = highly concentrated governance risk) per Strategies/risk2.md - cite it (or its explicit 'unavailable') before any 'widely held / concentrated ownership / index-eligible' claim."
             + " You also have income/outcome tools: `get_fixed_income_risk(ticker, years=...)` returns the indicated yield and - only when a call/redemption horizon is inferable - YTM, Macaulay/modified duration, DV01 and convexity for bond-like preferreds (a perpetual renders YTM n/a, never a fake yield) - cite it before any 'yield / duration / income risk' claim on a preferred; `get_alpha_scoring(direction, predicted_magnitude, period_days, actual_return, confidence)` scores a past insight's direction + magnitude accuracy ('I said +12%, realized +2%') for the journal/reflection - use it to audit past calls, not to invent a track record."
-            + get_language_instruction() + get_output_budget("analyst"),
+            + " You also have quant-engine v2 reads (ground your 'quality / value / accounting risk' claims in them; all advisory): `get_dupont_read(net_margin, asset_turnover, equity_multiplier, tax_burden?, interest_burden?)` decomposes ROE into margin/turnover/leverage legs and tells you whether it is margin-led (quality) or leverage-led (lower quality); `get_scenario_dcf(fcf, wacc, shares?, cash?, debt?, g_base?, g_bear?, g_bull?, margin_shock_bear?, margin_shock_bull?, market_price?)` gives the bear/base/bull intrinsic range and, when you pass the market price, the band it sits in (below bear / bear-base / base-bull / above bull) plus the base-case margin of safety - cite it before any 'undervalued/overvalued on intrinsic value' framing; `get_earnings_quality_verdict(net_income, ocf, total_assets, fcf?, capex?, eps_growth?, fcf_growth?)` returns the earnings-quality concern level (LOW/MEDIUM/HIGH = concern; HIGH means most concern, lowest quality) with the cash-conversion and accrual evidence - cite it before any 'earnings quality' claim." + get_language_instruction() + get_output_budget("analyst"),
         )
 
         prompt = ChatPromptTemplate.from_messages(

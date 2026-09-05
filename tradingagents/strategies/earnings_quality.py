@@ -43,8 +43,14 @@ def earnings_quality_verdict(
     ta = _num(total_assets)
     fc = _num(fcf)
     cx = _num(capex)
+    eg = _num(eps_growth)
+    fg = _num(fcf_growth)
     if fc is None and cx is not None and o is not None:
         fc = o - cx
+    if (ni is None and o is None and ta is None and fc is None
+            and cx is None and eg is None and fg is None):
+        return {"level": None, "evidence": [], "cash_conversion": None,
+                "accrual": None, "fcf": None, "flags": []}
     evidence: list = []
     flags: list = []
     cc = None
@@ -68,8 +74,7 @@ def earnings_quality_verdict(
                 evidence.append(f"accruals {accrual:.3f} (5-10% elevated)")
     if ni is not None and fc is not None and fc < 0 and ni > 0:
         evidence.append("negative FCF with positive NI (red flag)")
-    if (eps_growth is not None and fcf_growth is not None
-            and eps_growth > 0 and fcf_growth < 0):
+    if eg is not None and fg is not None and eg > 0 and fg < 0:
         evidence.append("rising EPS while FCF falls (quality penalty)")
     level = "LOW" if not evidence else "HIGH" if len(evidence) >= 2 else "MEDIUM"
     return {
