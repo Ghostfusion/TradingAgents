@@ -1713,6 +1713,41 @@ def get_sector_rank(
     except Exception:  # noqa: BLE001
         sector = None
     standing = sector_standing(sector, ranking)
+
+    # Sector-rotation P1-P3 (strategies/formulas/sector_rotation.md), each
+    # gated default-off: P1 multi-factor rank, P2 industry layer, P3
+    # constituent breadth + EW/CW leadership. Advisory render lines; any
+    # factor that cannot resolve renders n/a, never fabricated. When all
+    # gates are off (default) the output is byte-identical to the legacy read.
+    cfg = {}
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    use_mf = bool(cfg.get("enable_sector_multifactor", False))
+    use_ind = bool(cfg.get("enable_sector_industry", False))
+    use_brd = bool(cfg.get("enable_sector_breadth", False))
+    bench = None
+    if use_mf or use_ind:
+        try:
+            bench = _benchmark_closes() or None
+        except Exception:  # noqa: BLE001 - advisory
+            bench = None
+    if use_mf:
+        try:
+            from tradingagents.strategies.sector_rank import rank_sectors_multifactor
+
+            mf = rank_sectors_multifactor(closes_map, bench_closes=bench)
+            if mf.get("ranked"):
+                ranking = mf
+                standing = sector_standing(sector, mf)
+                top3 = mf.get("top3_3m") or []
+                top3_names = [SPDR_SECTORS.get(e, e) for e in top3]
+        except Exception:  # noqa: BLE001 - advisory
+            pass
+
     lines = [
         f"sector rank {ticker}:",
         f"  top3_3m={top3_names}",
@@ -1720,6 +1755,71 @@ def get_sector_rank(
         f"  sector={sector or 'n/a'} standing={standing.get('verdict')} "
         f"rank={standing.get('rank') if standing.get('rank') is not None else 'n/a'}",
     ]
+
+    if use_mf and ranking.get("multifactor"):
+        for r in ranking.get("ranked", [])[:3]:
+            if r.get("rank") is None:
+                continue
+            lines.append(
+                f"  mf {r['etf']} score={r.get('score') if r.get('score') is not None else 'n/a'} "
+                f"accel={r.get('accel') if r.get('accel') is not None else 'n/a'}"
+            )
+
+    ind_closes: dict = {}
+    if use_ind:
+        try:
+            from tradingagents.strategies.sector_rank import (
+                INDUSTRY_ETFS,
+                rank_industry_group,
+            )
+
+            parent = (standing or {}).get("etf")
+            for ietf in INDUSTRY_ETFS:
+                if not parent or INDUSTRY_ETFS[ietf][0] != parent:
+                    continue
+                ic = _ohlcv(ietf).get("closes") or []
+                if len(ic) >= 65:
+                    ind_closes[ietf] = ic
+            if parent and ind_closes:
+                ir = rank_industry_group(ind_closes, parent, bench_closes=bench)
+                top = next((r for r in ir.get("ranked", []) if r.get("rank") is not None), None)
+                if top is not None:
+                    lines.append(
+                        f"  industry {parent}: top={top['etf']} ({top['name']}) "
+                        f"score={top.get('score') if top.get('score') is not None else 'n/a'}"
+                    )
+        except Exception:  # noqa: BLE001 - advisory
+            pass
+
+    if use_brd:
+        try:
+            from tradingagents.strategies.sector_rank import (
+                INDUSTRY_ETFS,
+                SECTOR_CONSTITUENTS,
+                constituent_breadth,
+                leadership_ratio,
+            )
+
+            parent = (standing or {}).get("etf")
+            for fam, members in SECTOR_CONSTITUENTS.items():
+                if not parent or INDUSTRY_ETFS[fam][0] != parent:
+                    continue
+                cmap = {}
+                for m in members:
+                    mc = _ohlcv(m).get("closes") or []
+                    if len(mc) >= 60:
+                        cmap[m] = mc
+                b = constituent_breadth(cmap)
+                fam_closes = _ohlcv(fam).get("closes") or []
+                lr = leadership_ratio(cmap, fam_closes) if fam_closes else None
+                if b.get("pct") is not None or lr is not None:
+                    lines.append(
+                        f"  breadth {fam}: {b.get('pct') if b.get('pct') is not None else 'n/a'}% "
+                        f"above MA{b['window']} (n={b['n']})"
+                    )
+                    lines.append(f"  leadership {fam}: EW/CW={lr if lr is not None else 'n/a'}")
+        except Exception:  # noqa: BLE001 - advisory
+            pass
     return "\n".join(lines)
 
 

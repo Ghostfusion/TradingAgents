@@ -7,6 +7,32 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Sector-rotation P1-P3 implemented** (per `strategies/formulas/sector_rotation.md`):
+  `strategies/sector_rank.py` gains the multi-factor machinery, additive to
+  the legacy single-factor path (byte-identical default):
+  - P1 `rank_sectors_multifactor` — tie-aware cross-sectional percentiles
+    over momentum (21/63/126/252d composite + acceleration), RS vs the SPY
+    benchmark, trend (P/SMA50 + P/SMA200 + MA alignment), risk
+    (Sharpe-126 blended with 1 - |MDD-126| percentile); weighted score
+    (FACTOR_WEIGHTS .37/.21/.21/.21) with rank + factors; same result shape
+    so `sector_standing` consumes it unchanged. None-safe throughout.
+  - P2 `rank_industry_group` + `INDUSTRY_ETFS` — industry ETFs (SOXX/IGV/
+    HACK/CLOU/SMH/XBI/IBB/KRE/XHB/XAR/XOP/XRT) ranked ONLY inside their
+    parent sector (never XLK+SOXX in one pool); single-factor by default,
+    multi-factor when a benchmark is supplied.
+  - P3 `constituent_breadth` + `leadership_ratio` + `SECTOR_CONSTITUENTS`
+    (curated core subset, documented small) — % above SMA50 and the
+    EW-vs-CW leadership ratio.
+  - `get_sector_rank` renders gated advisory lines when the config keys are
+    on: P1 `enable_sector_multifactor`, P2 `enable_sector_industry`, P3
+    `enable_sector_breadth` (all default OFF ⇒ legacy output unchanged; any
+    unresolvable factor renders n/a).
+  - Tests: `test_sector_rank.py` 24 (multifactor ordering/bounds/normalization/
+    standing-consumption, industry parent-gating + names, breadth fraction,
+    EW/CW ratio + insufficiency, weights sum, documented-constituents);
+    `test_analysis_tools.py` gated-render tests (default-off unchanged,
+    P1/P2/P3 lines when on). Suite: 210 passed / 2 pre-existing skips.
+  - No trading_web change (the read is LLM-facing, not a web capability).
 - **Sector-rotation reference** - `strategies/formulas/sector_rotation.md`:
   distilled from two deleted LLM-generated specs (`sector_calc.md`,
   `sector_instruction.md` — removed after distillation, were untracked).

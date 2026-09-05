@@ -755,6 +755,14 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_risk_free_curve": False,
         "enable_screener": False,
         "enable_market_movers": False,
+        # Sector rotation P1-P3 (strategies/formulas/sector_rotation.md): each
+        # advisory layer is default-off so the sector read is unchanged until
+        # opted in. P1 multi-factor rank, P2 industry layer, P3 constituent
+        # breadth + EW/CW leadership (the last two are fetch-heavy: ~10
+        # extra OHLCV pulls per eligible family, run-cached).
+        "enable_sector_multifactor": False,
+        "enable_sector_industry": False,
+        "enable_sector_breadth": False,
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

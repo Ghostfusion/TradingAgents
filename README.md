@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Sector-rotation P1-P3 implemented** - `sector_rank.py` gains
+  the multi-factor machinery: tie-aware percentile ranking over momentum /
+  RS-vs-SPY / trend / risk (P1), parent-gated industry layer (P2), constituent
+  breadth + EW/CW leadership (P3) — all advisory and default-off
+  (`enable_sector_multifactor` / `enable_sector_industry` /
+  `enable_sector_breadth`), so the legacy sector read is unchanged until
+  opted in. 24 new module tests, gated render tests, 210 suite green. See
+  CHANGELOG.
 - [2026-09-05] **Sector-rotation reference** - distilled from two deleted
   LLM-generated specs into `strategies/formulas/sector_rotation.md`:
   staged Market→Sector→Industry→Stock pipeline (regime = gate, score ≠

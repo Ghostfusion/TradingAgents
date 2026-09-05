@@ -796,6 +796,65 @@ def test_sector_rank_no_spdr_history_degrades(monkeypatch):
     assert "no SPDR history" in out
 
 
+def _sector_ohlcv(step_map):
+    def _impl(t):
+        step = step_map.get(t, 0.2)
+        return {"closes": [100.0 + step * i for i in range(260)]}
+    return _impl
+
+
+def test_sector_rank_multifactor_gated_render(monkeypatch):
+    # P1: with enable_sector_multifactor on, the read adds score/accel lines.
+    from tradingagents.dataflows.config import reset_config, set_config
+
+    set_config({"enable_sector_multifactor": True})
+    try:
+        steps = {"XLK": 0.8, "XLF": 0.4, "SPY": 0.15}
+        monkeypatch.setattr(T, "_ohlcv", _sector_ohlcv(steps))
+        monkeypatch.setattr(T, "_benchmark_closes", lambda: [100.0 + 0.15 * i for i in range(260)])
+        with mock.patch(
+            "tradingagents.dataflows.yfinance_sector.fetch_sector",
+            return_value="Technology",
+        ):
+            out = T.get_sector_rank.invoke({"ticker": "AAPL"})
+        assert "mf XLK score=" in out
+        assert "accel=" in out
+    finally:
+        reset_config()
+
+
+def test_sector_rank_pipeline_gated_render(monkeypatch):
+    # P2 + P3: industry layer + constituent breadth/leadership on for the
+    # parent sector (XLK -> SOXX family).
+    from tradingagents.dataflows.config import reset_config, set_config
+
+    set_config({
+        "enable_sector_multifactor": True,
+        "enable_sector_industry": True,
+        "enable_sector_breadth": True,
+    })
+    try:
+        steps = {
+            "XLK": 0.4, "XLF": 0.2, "SPY": 0.15,
+            "SOXX": 0.9, "IGV": 0.5, "HACK": 0.3, "SMH": 0.2, "CLOU": 0.1,
+            # SOXX constituents all above their MAs -> breadth 100%
+            "NVDA": 0.6, "AMD": 0.6, "AVGO": 0.6, "MU": 0.6, "TSM": 0.6,
+            "AMAT": 0.6, "LRCX": 0.6, "KLAC": 0.6, "MRVL": 0.6, "QCOM": 0.6,
+        }
+        monkeypatch.setattr(T, "_ohlcv", _sector_ohlcv(steps))
+        monkeypatch.setattr(T, "_benchmark_closes", lambda: [100.0 + 0.15 * i for i in range(260)])
+        with mock.patch(
+            "tradingagents.dataflows.yfinance_sector.fetch_sector",
+            return_value="Technology",
+        ):
+            out = T.get_sector_rank.invoke({"ticker": "AAPL"})
+        assert "industry XLK: top=SOXX" in out
+        assert "breadth SOXX:" in out
+        assert "leadership SOXX:" in out
+    finally:
+        reset_config()
+
+
 def test_credit_spread_read_uses_oas_series(monkeypatch):
     # No FRED data -> explicit unavailable (no-fabrication).
     monkeypatch.setattr(T, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")

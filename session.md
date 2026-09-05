@@ -53,6 +53,17 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector-rotation P1-P3 implemented** (per user "implement all phases"):
+  `strategies/sector_rank.py` — `rank_sectors_multifactor` (tie-aware
+  cross-sectional percentiles: momentum composite 21/63/126/252d+accel, RS
+  vs SPY, trend P/SMA50+P/SMA200+alignment, risk Sharpe126+(1-|MDD126|);
+  FACTOR_WEIGHTS .37/.21/.21/.21; same result shape → sector_standing
+  consumes unchanged), `rank_industry_group` (INDUSTRY_ETFS parent-gated,
+  never XLK+SOXX same pool), `constituent_breadth` + `leadership_ratio`
+  (SECTOR_CONSTITUENTS curated core subset). `get_sector_rank` gated
+  advisory lines via `enable_sector_multifactor/industry/breadth` (default
+  off ⇒ legacy output byte-identical). Tests: test_sector_rank.py 24 +
+  tool gated-render tests; 210 suite green; no web change (LLM-facing tool).
 - **Sector-rotation reference** (docs only, per user): distilled
   `strategies/formulas/sector_calc.md` (1520 ln) + `sector_instruction.md`
   (773 ln) — two LLM-generated sector-rotation specs (12-ETF XLK/SOXX…

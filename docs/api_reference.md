@@ -144,6 +144,9 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | `enable_risk_free_curve` | NY Fed SOFR + Treasury par-yield curve (default OFF) |
 | `TRADINGAGENTS_ENABLE_SCREENER` | `enable_screener` | yfinance universe screener (symbol/PE/EPS/beta/mkt-cap) (default OFF) |
 | `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | `enable_market_movers` | yfinance gainers/losers/actives (default OFF) |
+| — | `enable_sector_multifactor` | sector-rotation P1: `get_sector_rank` adds a multi-factor score — momentum composite + RS vs benchmark + trend + risk, tie-aware cross-sectional percentiles (default OFF; `strategies/formulas/sector_rotation.md`) |
+| — | `enable_sector_industry` | sector-rotation P2: industry-ETF layer ranked only inside the parent sector (default OFF) |
+| — | `enable_sector_breadth` | sector-rotation P3: constituent % above MA50 + EW/CW leadership for the curated core set (`sector_rank.SECTOR_CONSTITUENTS`); fetch-heavy, run-cached (default OFF) |
 
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
 | `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
@@ -611,7 +614,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 | `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown |
-| `get_sector_rank(ticker)` | `strategies.sector_rank.rank_sectors` + `sector_standing` | market | 11-SPDR 1m/3m momentum ranking + the ticker's sector standing |
+| `get_sector_rank(ticker)` | `strategies.sector_rank.rank_sectors` + `sector_standing` (+ gated `rank_sectors_multifactor` / `rank_industry_group` / `constituent_breadth` / `leadership_ratio`) | market | 11-SPDR 1m/3m momentum ranking + the ticker's sector standing; when `enable_sector_multifactor` (P1) `/enable_sector_industry` (P2) `/enable_sector_breadth` (P3) are on, advisory score / industry / breadth / leadership lines append (default off ⇒ legacy output unchanged) |
 | `get_strategy_quality(ticker, returns?)` | `strategies.evaluate` | market | net CAGR / annualized vol / Sharpe / Sortino / PSR / max drawdown over a return series |
 | `get_downside_read(ticker, target?)` | `strategies.rate_utils.downside_measures` | market | semi-deviation / downside deviation / shortfall probability / average shortfall vs a target (MAR) |
 | `get_horizon_var(ticker, horizon_days?, alpha?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate |
