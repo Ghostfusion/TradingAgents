@@ -17,6 +17,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_derivatives_flow,
     get_dip_technical,
     get_downside_read,
+    get_dupont_read,
+    get_earnings_quality_verdict,
     get_event_pnl_response,
     get_exit_check,
     get_exit_plan,
@@ -66,6 +68,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_risk_gate,
     get_risk_parity_alloc,
     get_scaleout_plan,
+    get_scenario_dcf,
     get_sector_rank,
     get_sentiment_computed,
     get_sentiment_lead_lag,
@@ -184,6 +187,9 @@ def create_market_analyst(llm):
             get_exit_plan,
             get_horizon_var,
             get_hrp_alloc,
+            get_dupont_read,
+            get_scenario_dcf,
+            get_earnings_quality_verdict,
             get_momentum_12_1,
             get_market_movers,
             get_normality,
@@ -268,6 +274,9 @@ You also have decision-grounding tools:
 - get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
 - get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
+- get_dupont_read(net_margin, asset_turnover, equity_multiplier, tax_burden?, interest_burden?) - the DuPont ROE decomposition (why ROE is high: margin vs turnover vs leverage; leverage-led is lower quality).
+- get_scenario_dcf(fcf, wacc, shares?, cash?, debt?, g_base?, g_bear?, g_bull?) - a bear/base/bull DCF value range; use before any 'intrinsic value is X' claim.
+- get_earnings_quality(net_income, ocf, total_assets, fcf?, capex?, eps_growth?, fcf_growth?) - the earnings-quality verdict (cash conversion, accruals, FCF vs EPS divergence).
 - get_hrp_alloc(ticker, returns_by_name) - Hierarchical Risk Parity book weights (robust under noisy covariance, no matrix inversion; more conservative returns). Use before any 'HRP / hierarchical risk / robust book allocation' claim.
 - get_momentum_12_1(ticker) - the canonical 12-1 momentum (skips the last month's short-term reversal). Use before any '11-month momentum / 12-1 factor' claim.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.

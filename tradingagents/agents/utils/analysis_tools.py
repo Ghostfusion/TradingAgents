@@ -2018,6 +2018,103 @@ def get_momentum_12_1(
     return f"momentum 12-1 {ticker}: {m:+.3f} (12m minus last month, needs ~14mo bars)"
 
 
+@tool
+def get_dupont_read(
+    net_margin: Annotated[float | None, "net profit margin (fraction)"] = None,
+    asset_turnover: Annotated[float | None, "revenue / total assets"] = None,
+    equity_multiplier: Annotated[float | None, "total assets / equity"] = None,
+    tax_burden: Annotated[float | None, "5-factor: net income / pretax"] = None,
+    interest_burden: Annotated[float | None, "5-factor: pretax income / EBIT"] = None,
+) -> str:
+    """DuPont ROE decomposition (3- or 5-factor): explains WHERE ROE comes
+    from — margin vs turnover vs leverage. Use before any 'high ROE means
+    quality' / 'ROE rising' claim; a leverage-led ROE is lower quality than a
+    margin-led one. Advisory.
+    """
+    try:
+        from tradingagents.strategies.dupont import dupont_3, dupont_5
+
+        if tax_burden is not None or interest_burden is not None:
+            r = dupont_5(net_margin, tax_burden, interest_burden, asset_turnover, equity_multiplier)
+        else:
+            r = dupont_3(net_margin, asset_turnover, equity_multiplier)
+    except Exception as exc:  # noqa: BLE001
+        return f"dupont read unavailable: {exc}"
+    if r["roe"] is None:
+        return "dupont read: n/a (incomplete inputs)"
+    f = r["factors"]
+    return (
+        f"dupont ROE {r['roe']:.1%}: net_margin={f.get('net_margin')} "
+        f"asset_turnover={f.get('asset_turnover')} "
+        f"equity_multiplier={f.get('equity_multiplier')} "
+        f"driver={r['driver']} ({r['note']})"
+    )
+
+
+@tool
+def get_scenario_dcf(
+    fcf: Annotated[float, "latest free cash flow"],
+    wacc: Annotated[float, "discount rate (WACC, fraction)"],
+    shares: Annotated[float | None, "diluted shares outstanding"] = None,
+    cash: Annotated[float | None, "cash + equivalents"] = None,
+    debt: Annotated[float | None, "total debt"] = None,
+    g_base: Annotated[float, "base-case growth, default 0.03"] = 0.03,
+    g_bear: Annotated[float | None, "bear-case growth (default base-0.02)"] = None,
+    g_bull: Annotated[float | None, "bull-case growth (default base+0.02)"] = None,
+) -> str:
+    """Scenario DCF (bear/base/bull) vs a single deterministic DCF. Varies the
+    growth rate (and optional margin shocks) into a value range + the implied
+    per-share prices. Use before any 'intrinsic value is X' claim — show the
+    range, don't assert a point. Advisory; None-safe.
+    """
+    try:
+        from tradingagents.strategies.scenario_dcf import scenario_dcf
+    except Exception as exc:  # noqa: BLE001
+        return f"scenario dcf unavailable: {exc}"
+    r = scenario_dcf(fcf, wacc, shares=shares, cash=cash, debt=debt,
+                     g_base=g_base, g_bear=g_bear, g_bull=g_bull)
+    if not r["scenarios"]:
+        return "scenario dcf: n/a (need fcf + wacc > 0)"
+    parts = []
+    for name in ("bear", "base", "bull"):
+        sc = r["scenarios"].get(name) or {}
+        p = sc.get("price")
+        parts.append(f"{name}={p if p is not None else 'n/a'}")
+    return "scenario dcf: " + " ".join(parts) + " (growth shocks ±2%)"
+
+
+@tool
+def get_earnings_quality_verdict(
+    net_income: Annotated[float, "net income"],
+    ocf: Annotated[float, "operating cash flow"],
+    total_assets: Annotated[float, "total assets"],
+    fcf: Annotated[float | None, "free cash flow (or derive = ocf - capex)"] = None,
+    capex: Annotated[float | None, "capex (used to derive fcf when fcf omitted)"] = None,
+    eps_growth: Annotated[float | None, "EPS growth (fraction)"] = None,
+    fcf_growth: Annotated[float | None, "FCF growth (fraction)"] = None,
+) -> str:
+    """Earnings-quality verdict from the consensus layer: cash conversion
+    (OCF/NI), accrual ratio, negative-FCF-with-positive-NI, and the
+    'rising EPS while FCF falls' penalty. Use before any 'earnings are high
+    quality' claim. Advisory; None-safe.
+    """
+    try:
+        from tradingagents.strategies.earnings_quality import earnings_quality_verdict
+    except Exception as exc:  # noqa: BLE001
+        return f"earnings quality unavailable: {exc}"
+    r = earnings_quality_verdict(net_income, ocf, total_assets, fcf=fcf, capex=capex,
+                                 eps_growth=eps_growth, fcf_growth=fcf_growth)
+    if r["level"] is None:
+        return "earnings quality: n/a (no usable inputs)"
+    ev = "; ".join(r["evidence"]) if r["evidence"] else "none"
+    return (
+        f"earnings quality: {r['level']} evidence=({ev}) "
+        f"cash_conversion={r['cash_conversion'] if r['cash_conversion'] is not None else 'n/a'} "
+        f"accrual={r['accrual'] if r['accrual'] is not None else 'n/a'} "
+        f"fcf={r['fcf'] if r['fcf'] is not None else 'n/a'}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Item-1: sector leadership / sector standing (market analyst)
 # ---------------------------------------------------------------------------
@@ -5944,6 +6041,9 @@ __all__ = [
     "get_derivatives_flow",
     "get_hrp_alloc",
     "get_momentum_12_1",
+    "get_dupont_read",
+    "get_scenario_dcf",
+    "get_earnings_quality_verdict",
     "get_normality",
     "get_unit_root",
     "get_relative_rotation",

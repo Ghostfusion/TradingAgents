@@ -831,6 +831,34 @@ def test_derivatives_flow_degrades_without_chain(monkeypatch):
     assert "OPEX" in out
 
 
+def test_dupont_read_renders_roe():
+    out = T.get_dupont_read.invoke({
+        "net_margin": 0.2, "asset_turnover": 0.9, "equity_multiplier": 2.0,
+    })
+    assert "dupont ROE 36.0%" in out and "driver=equity_multiplier" in out
+
+
+def test_scenario_dcf_renders_range():
+    out = T.get_scenario_dcf.invoke({
+        "fcf": 100.0, "wacc": 0.09, "shares": 10.0, "cash": 50.0, "debt": 100.0,
+        "g_base": 0.03,
+    })
+    assert "scenario dcf:" in out and "bear=120.0" in out and "bull=245.0" in out
+
+
+def test_earnings_quality_verdict_renders_level():
+    out = T.get_earnings_quality_verdict.invoke({
+        "net_income": 10.0, "ocf": 9.0, "total_assets": 100.0,
+        "fcf": 4.0, "eps_growth": 0.2, "fcf_growth": -0.1,
+    })
+    assert "earnings quality: HIGH" in out and "cash_conversion=0.9" in out
+
+
+def test_scenario_dcf_degrades_without_wacc():
+    out = T.get_scenario_dcf.invoke({"fcf": 100.0, "wacc": 0.0})
+    assert "n/a" in out
+
+
 def test_option_breakeven_renders_full_read():
     # AVGO-style PMCC: breakeven + floor violation + intrinsic split + windows.
     out = T.get_option_breakeven.invoke({
