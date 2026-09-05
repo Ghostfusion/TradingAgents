@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Earnings quality wired to the consensus verdict** - `get_earnings_quality(ticker, date)` is now a provider-fed read: it fetches net income / operating cash flow / total assets / capex and returns the consensus concern level (cash conversion, accrual ratio, FCF=OCF-|capex|, negative-FCF red flag) plus the forensic trap. Capex handling is sign-robust; the old ad-hoc 6%/2% accrual band is superseded.
 - [2026-09-05] **Quant-engine v2 (audited)** - DuPont driver is now log-attribution (margin/leverage/mixed-led labels), scenario DCF respects g_base=0 and reports the market-price band + margin of safety, earnings-quality renders a concern level (None on no inputs); trio wired into the fundamentals analyst. DuPont ROE decomposition (`get_dupont_read`), scenario DCF (`get_scenario_dcf`), and an earnings-quality verdict (`get_earnings_quality_verdict`) — all advisory, from the 69-section quant spec (`docs/design_quant_engine_v2.md`). See CHANGELOG.
 - [2026-09-05] **Quant-engine additions** - HRP portfolio construction (`get_hrp_alloc`), 12-1 momentum (`get_momentum_12_1`), an Omega row in `get_strategy_quality`, and industry-neutral factor z — all advisory, from the end-to-end quant spec + web evidence (`docs/design_quant_engine_additions.md`). 210 suite green. See CHANGELOG.
 - [2026-09-05] **Option breakeven / PMCC read** - from the AVGO PMCC sample

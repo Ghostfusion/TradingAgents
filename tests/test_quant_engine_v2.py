@@ -118,3 +118,19 @@ def test_earnings_quality_no_inputs_is_none():
     r = earnings_quality_verdict(None, None, None)
     assert r["level"] is None and r["evidence"] == []
     assert r["cash_conversion"] is None and r["accrual"] is None
+
+
+def test_earnings_quality_capex_derived_fcf_sign_robust():
+    # FCF = OCF - |capex|: a negative GAAP-signed capex must give the same
+    # FCF as the positive magnitude (project convention, matches dcf.py).
+    pos = earnings_quality_verdict(10, 8, 100, capex=12)
+    neg = earnings_quality_verdict(10, 8, 100, capex=-12)
+    assert pos["fcf"] == -4.0 and neg["fcf"] == -4.0
+    assert any("negative FCF with positive NI" in e for e in pos["evidence"])
+    assert any("negative FCF with positive NI" in e for e in neg["evidence"])
+
+
+def test_earnings_quality_capex_positive_fcf_no_red_flag():
+    r = earnings_quality_verdict(10, 8, 100, capex=5)
+    assert r["fcf"] == 3.0
+    assert not any("negative FCF" in e for e in r["evidence"])

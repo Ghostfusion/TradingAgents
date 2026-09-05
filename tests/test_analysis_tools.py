@@ -1078,7 +1078,8 @@ def test_earnings_quality_reports_accruals(monkeypatch):
     monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda ticker, date: _eq_canonical())
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "earnings quality AAPL" in out
-    assert "accrual_ratio=" in out  # (100 - 45) / 1000 = 0.055 (moderate)
+    assert "consensus_concern: HIGH" in out  # cc 0.45 warning + accrual 0.055 elevated
+    assert "accrual=0.055" in out  # (100 - 45) / 1000
     assert "trap_risk=" in out
 
 
@@ -1087,14 +1088,44 @@ def test_earnings_quality_high_accruals_flagged(monkeypatch):
 
     def fake_fetch(ticker, date):
         fin = _eq_canonical()
-        fin["net_income"] = 200e6  # accrual = 155e6 / 1e9 = 0.155 (risk)
+        fin["net_income"] = 200e6  # accrual = 155e6 / 1e9 = 0.155 (concerning)
         return fin
 
     monkeypatch.setattr(sp, "fetch_ticker", fake_fetch)
     monkeypatch.setattr(sp, "screen_ticker", lambda ticker, fin: {})
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "0.155" in out
-    assert "low-earnings-quality-risk" in out
+    assert "concerning" in out
+    assert "consensus_concern: HIGH" in out
+
+
+def test_earnings_quality_capex_negative_fcf_red_flag(monkeypatch):
+    """capex derives FCF = OCF - |capex|; negative FCF + positive NI = red flag
+    (also verifies the sign-robustness: a negative GAAP-signed capex gives the
+    same FCF as the positive magnitude)."""
+    from tradingagents.dataflows import statement_parsing as sp
+
+    def fake_fetch(ticker, date):
+        fin = _eq_canonical()
+        fin["operating_cashflow"] = 20e6
+        fin["capex"] = 30e6  # FCF = 20 - 30 = -10e6
+        return fin
+
+    monkeypatch.setattr(sp, "fetch_ticker", fake_fetch)
+    monkeypatch.setattr(sp, "screen_ticker", lambda ticker, fin: {})
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "negative FCF with positive NI" in out
+
+    # GAAP-outflow sign: capex = -30e6 must give the SAME -10e6 FCF.
+    def fake_fetch_neg(ticker, date):
+        fin = _eq_canonical()
+        fin["operating_cashflow"] = 20e6
+        fin["capex"] = -30e6
+        return fin
+
+    monkeypatch.setattr(sp, "fetch_ticker", fake_fetch_neg)
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "negative FCF with positive NI" in out
 
 
 def test_earnings_quality_no_data_degrades(monkeypatch):

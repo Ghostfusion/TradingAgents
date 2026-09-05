@@ -3053,22 +3053,24 @@ def get_earnings_quality(
     ticker: Annotated[str, "ticker symbol"],
     current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
 ) -> str:
-    """Deterministic earnings-quality read: Sloan accruals + forensic trap.
+    """Provider-fed earnings-quality read: consensus concern + forensic trap.
 
-    Computes the accruals ratio (net income - operating cash flow) / total
-    assets - a high value signals earnings quality risk - then folds it into
-    the forensic trap verdict (Beneish M / Altman Z / F-Score) with the
-    accrual as an extra evidence trigger. Call this before any
-    'strong earnings quality / accrual-driven earnings / manipulation risk'
-    claim; it is the computed number, not a guess.
+    Fetches canonical statements (net income / operating cash flow / total
+    assets via ``fetch_ticker``), runs the consensus earnings-quality verdict
+    (cash conversion OCF/NI, accrual ratio (NI-OCF)/TA, FCF = OCF - capex,
+    negative-FCF-with-positive-NI red flag - computed numbers, not a guess),
+    then folds the same accrual into the forensic trap verdict (Beneish M /
+    Altman Z / F-Score). Level = concern (LOW/MEDIUM/HIGH; HIGH = most
+    concern = lowest quality). Call before any 'strong earnings quality /
+    accrual-driven earnings / manipulation risk' claim.
 
     Args:
         ticker: single ticker symbol.
         current_date: the current trading date (YYYY-mm-dd).
 
     Returns:
-        accruals + quality/trap verdict lines, or an explicit 'unavailable'
-        message when the vendor chain yields no statements.
+        consensus concern verdict + forensic trap lines, or an explicit
+        'unavailable' message when the vendor chain yields no statements.
     """
     try:
         from tradingagents.dataflows.statement_parsing import fetch_ticker
@@ -3082,24 +3084,34 @@ def get_earnings_quality(
         )
     try:
         from tradingagents.dataflows.statement_parsing import _latest
-        from tradingagents.strategies.normalized import accruals_ratio, trap_verdict
+        from tradingagents.strategies.earnings_quality import earnings_quality_verdict
+        from tradingagents.strategies.normalized import trap_verdict
     except Exception as exc:  # noqa: BLE001
         return f"earnings quality unavailable for {ticker}: {exc}"
     ni = _latest(fin.get("net_income"))
     cfo = _latest(fin.get("operating_cashflow"))
     ta = _latest(fin.get("total_assets"))
-    accrual = accruals_ratio(ni, cfo, ta) if (ni is not None or cfo is not None) else None
+    cx = _latest(fin.get("capex"))
+    verdict = earnings_quality_verdict(ni, cfo, ta, capex=cx)
+    accrual = verdict.get("accrual")
     lines = [f"earnings quality {ticker}:"]
-    if accrual is None:
-        lines.append("  accruals_ratio: n/a (needs net_income + operating_cashflow + total_assets)")
-        lines.append("  guidance: do not claim earnings quality without the accrual input.")
+    if verdict.get("level") is None:
+        lines.append("  consensus: n/a (needs net_income + operating_cashflow + total_assets)")
+        lines.append("  guidance: do not claim earnings quality without the cash-conversion input.")
     else:
-        band = (
-            "low-earnings-quality-risk"
-            if accrual > 0.06
-            else ("moderate" if accrual > 0.02 else "clean")
+        lines.append(
+            f"  consensus_concern: {verdict['level']} "
+            "(LOW/MEDIUM/HIGH = concern; HIGH = lowest quality)"
         )
-        lines.append(f"  accrual_ratio={accrual:.3f} ({band}): high accruals = quality risk")
+        for ev in verdict.get("evidence") or []:
+            lines.append(f"    - {ev}")
+        cc = verdict.get("cash_conversion")
+        fc = verdict.get("fcf")
+        lines.append(
+            f"  cash_conversion={cc if cc is not None else 'n/a'} "
+            f"accrual={accrual if accrual is not None else 'n/a'} "
+            f"fcf={fc if fc is not None else 'n/a'}"
+        )
     m = z = f = None
     try:
         # Reuse the screener's screens so the trap verdict includes the accrual,

@@ -59,8 +59,11 @@ implemented here.
   concern = lowest quality) — never LOW confidence on no inputs: level is
   None (n/a) when nothing is usable. Returns {level, evidence,
   cash_conversion, accrual, fcf}.
-- Tool `get_earnings_quality_verdict(...)` — advisory (distinct from the
-  pre-existing `get_earnings_quality`).
+- Tool `get_earnings_quality_verdict(...)` — advisory raw-number variant
+  (distinct from the pre-existing ticker-based `get_earnings_quality`, which
+  now feeds this same verdict: it fetches canonical statements via
+  `fetch_ticker`, derives capex-signed FCF, and renders the concern level +
+  evidence while keeping the forensic trap layer).
 
 ## 3. Non-goals
 

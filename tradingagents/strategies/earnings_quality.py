@@ -36,7 +36,8 @@ def earnings_quality_verdict(
     Returns ``{'level': 'LOW'|'MEDIUM'|'HIGH', 'evidence': [..],
     'cash_conversion': float|None, 'accrual': float|None, 'fcf': float|None,
     'flags': [..]}``. Evidence counts flags -> level (>=2 HIGH, >=1 MEDIUM,
-    else LOW). No inputs -> {'level': None, ...} (n/a).
+    else LOW). FCF = OCF - |capex| (capex treated as a magnitude; vendors may
+    sign it as a GAAP outflow). No inputs -> {'level': None, ...} (n/a).
     """
     ni = _num(net_income)
     o = _num(ocf)
@@ -46,7 +47,10 @@ def earnings_quality_verdict(
     eg = _num(eps_growth)
     fg = _num(fcf_growth)
     if fc is None and cx is not None and o is not None:
-        fc = o - cx
+        # Capex is a magnitude: vendors may sign it as a GAAP outflow
+        # (yfinance/Tiingo) or a positive value; |capex| matches the DCF
+        # machinery's convention so OCF - capex never inflates FCF.
+        fc = o - abs(cx)
     if (ni is None and o is None and ta is None and fc is None
             and cx is None and eg is None and fg is None):
         return {"level": None, "evidence": [], "cash_conversion": None,

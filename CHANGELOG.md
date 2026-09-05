@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Fixed
+- **Earnings quality wired to the consensus verdict** (option 1): the
+  ticker-based `get_earnings_quality` now fetches canonical statements
+  (net income / OCF / total assets / capex) and runs the consensus
+  `earnings_quality_verdict` as its evidence layer (cash conversion,
+  accrual ratio, FCF = OCF - |capex|, negative-FCF red flag) while keeping
+  the forensic trap; the old ad-hoc 6%/2% accrual band (whose
+  "low-earnings-quality-risk" label read backwards for high accruals) is
+  superseded by the consensus 5%/10% bands. `capex` in the verdict is now
+  sign-robust (abs, matching dcf.py) so a GAAP-signed outflow can't
+  inflate FCF. Tests: consensus-render assertions + capex red-flag/sign
+  cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
 ### Added
 - **Quant-engine v2** (per the 69-section quant spec + user; `docs/design_quant_engine_v2.md`): DuPont 3/5-factor ROE decomposition (`strategies/dupont.py` + `get_dupont_read` — explains why ROE is high, margin vs turnover vs leverage), scenario DCF (`strategies/scenario_dcf.py` + `get_scenario_dcf` — bear/base/bull value range with growth ±2% + margin shocks), earnings-quality verdict (`strategies/earnings_quality.py` + `get_earnings_quality_verdict` — cash conversion OCF/NI, accrual ratio, negative-FCF red flag, rising-EPS-with-falling-FCF penalty). Tests `test_quant_engine_v2.py` (10) + `test_analysis_tools.py` +4 render; suite green; ruff clean. See the design doc.
