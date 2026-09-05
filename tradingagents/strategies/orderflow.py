@@ -100,6 +100,31 @@ def alignment(nets: dict) -> str:
     return "mixed"
 
 
+def knife_guard_vpin(
+    vpin_value: float | None,
+    price_delta: float | None,
+    threshold: float = 0.75,
+) -> bool:
+    """Downside-conditioned order-flow toxicity filter.
+
+    Standard VPIN is NON-directional (total informed trading); a knife guard
+    must only suppress dip-buying when the toxicity is driven by SELLING, or
+    it wrongly blocks entries during rapid up-breakouts. Returns True only
+    when VPIN exceeds ``threshold`` AND the price moved down over the bucket.
+
+    Args:
+        vpin_value: the VPIN read (0..1) over the equal-volume bucket window.
+        price_delta: price change over the same window (negative = down move).
+        threshold: VPIN level above which flow is treated as toxic.
+
+    Returns:
+        bool: True when toxic AND downside (suppress dip-buy entry).
+    """
+    if vpin_value is None or price_delta is None:
+        return False
+    return bool(float(vpin_value) > float(threshold) and float(price_delta) < 0.0)
+
+
 def summarize(
     buckets: dict, direction: str = "flat", weekly_nets: list | None = None, thresholds: dict = None
 ) -> dict:

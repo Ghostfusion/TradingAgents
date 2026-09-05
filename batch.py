@@ -212,6 +212,10 @@ def _per_symbol_memory_path(symbol: str) -> str:
     return str(base.parent / f"{safe_ticker_component(symbol)}.md")
 
 
+_probe_start: float = 0.0
+config_probe = None
+
+
 def analyze(
     symbol: str,
     trade_date: str,
@@ -226,6 +230,7 @@ def analyze(
     VENDOR_PRESETS data-vendors chain ("default" = leave .env chains alone).
     """
     started = time.monotonic()
+    probe = config_probe if "config_probe" in globals() and config_probe is not None else None
     config = DEFAULT_CONFIG.copy()
     # DEFAULT_CONFIG.copy() is a shallow copy — the nested data_vendors dict is
     # shared with the module global, so give this worker its own copy before
@@ -267,8 +272,17 @@ def analyze(
         debug=False,
         config=config,
     )
-    final_state, decision = ta.propagate(symbol, trade_date)
+    if probe:
+        probe(symbol, "graph_start", started, config=config)
+    try:
+        final_state, decision = ta.propagate(symbol, trade_date)
+    except Exception as exc:  # noqa: BLE001 - probe the failure, re-raise
+        if probe:
+            probe(symbol, "graph_failed", time.monotonic(), error=str(exc), config=config)
+        raise
     wall_seconds = round(time.monotonic() - started, 2)
+    if probe:
+        probe(symbol, "graph_done", time.monotonic(), wall_seconds=wall_seconds, config=config)
 
     # Extract the 5-tier rating deterministically (same helper the graph uses).
     from tradingagents.agents.utils.rating import parse_rating
@@ -320,6 +334,10 @@ def main() -> int:
         help="Research depth: shallow(1) / medium(3) / deep(5) rounds (default: deep).",
     )
     parser.add_argument(
+        "--probe", action="store_true",
+        help="write a per-stage trace JSONL (batch_probe_*.jsonl) for debugging",
+    )
+    parser.add_argument(
         "--vendor",
         choices=["default", *VENDOR_PRESETS],
         default="default",
@@ -328,6 +346,31 @@ def main() -> int:
         "default keeps the .env / DEFAULT_CONFIG chains. (default: default)",
     )
     args = parser.parse_args()
+    if args.probe:
+        probe_path = (
+            resolve_output_path("reports")
+            / f"batch_probe_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        )
+        import threading as _th
+
+        _probe_lock = _th.Lock()
+
+        def _probe(symbol, stage, t, config=None, error=None, wall_seconds=None):
+            row = {"symbol": symbol, "stage": stage,
+                   "t_abs": time.strftime("%H:%M:%S", time.localtime(t)),
+                   "elapsed_s": round(t - _probe_start, 3),
+                   "error": error}
+            if wall_seconds is not None:
+                row["wall_seconds"] = wall_seconds
+            if config is not None:
+                row["data_vendors"] = config.get("data_vendors")
+            with _probe_lock, open(probe_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row) + "\n")
+
+        global _probe_start, config_probe
+        _probe_start = time.monotonic()
+        config_probe = _probe
+        print(f"[probe] tracing to {probe_path}", file=sys.stderr)
 
     symbols = args.symbols
     analysts = tuple(args.analysts)

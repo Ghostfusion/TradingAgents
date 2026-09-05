@@ -707,7 +707,7 @@ preserves `Risk Gate (computed)` blocks.
   `--revision` `--inst-accum`
   `--intraday` `--enrich-sector` `--enrich-rev` `--enrich-inst` `--scan`
   (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
-  `--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`
+  `--value-dip-loose` `--knife-z` `--out-dir` `--rank` `--enable-float` `--journal`
   `--alloc`.
 - action_report.py: `--basket` (SYM=W,SYM=W override; default config
   `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`

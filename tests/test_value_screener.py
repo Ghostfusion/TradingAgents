@@ -648,6 +648,110 @@ def test_eodhd_losers_loose_near_miss_renders(monkeypatch, capsys):
     assert "value_floor" in out
 
 
+def _patch_all_routes(monkeypatch, route):
+    """Patch the vendor router at every binding the screener reaches.
+
+    ``_value_dip_scan`` re-imports ``route_to_vendor`` from the interface
+    module inside the function, so patching only ``vs.route_to_vendor`` would
+    leak a live vendor call for the cashflow leg. Patch the interface module
+    attr (the source), plus the two re-export bindings.
+    """
+    from tradingagents.dataflows import interface as _iface
+
+    monkeypatch.setattr(vs, "route_to_vendor", route)
+    monkeypatch.setattr(_sp_parsing, "route_to_vendor", route)
+    monkeypatch.setattr(_iface, "route_to_vendor", route)
+
+
+def _gentle_dip_csv(ticker, drop=-0.85, dip_bars=3):
+    """Calm series (mild ±0.3 noise) with a trailing 3-bar -2.5% cascade.
+
+    The 2-ATR stop stays inside 2% (trade_risk passes) while the 3-day
+    velocity z is far below -2.5 (a real falling-knife cascade) — exactly the
+    case the knife-z guard exists for.
+    """
+    import random as _r
+
+    rng = _r.Random(11)
+    closes = [100.0]
+    for _ in range(1, 57):
+        closes.append(closes[-1] + rng.uniform(-0.3, 0.3))
+    for _ in range(dip_bars):
+        closes.append(closes[-1] + drop)
+    out_rows = ["Date,Open,High,Low,Close,Volume"]
+    for i, c in enumerate(closes):
+        out_rows.append(
+            f"2026-01-{i % 28 + 1:02d},{c - 0.1:.2f},{c + 0.2:.2f},{c - 0.2:.2f},{c:.2f},5000000"
+        )
+    return "\n".join(out_rows) + "\n"
+
+
+def test_value_dip_scan_knife_z_blocks_velocity_guard(monkeypatch):
+    """--knife-z wiring: the same inputs flip candidate True -> False when the
+    falling-knife velocity-z guard is enforced. Calm tape + 3-day -2.5% dip:
+    RSI/%b + trade-risk gates pass, but the velocity z (≈-8) is far below the
+    -2.5 threshold - the exact cascade the flag exists to block."""
+    cashflow = "### 2025/FY\n| Free Cash Flow | 60000000 |\n"
+
+    def _route(method, *a, **k):
+        return cashflow if method == "get_cashflow" else "NO_DATA"
+
+    _patch_all_routes(monkeypatch, _route)
+    ohlcv = {"closes": [], "highs": [], "lows": [], "volumes": []}
+    closes = [100.0]
+    import random as _r
+
+    rng = _r.Random(11)
+    for _ in range(1, 57):
+        closes.append(closes[-1] + rng.uniform(-0.3, 0.3))
+    for _ in range(3):
+        closes.append(closes[-1] - 0.85)
+    ohlcv["closes"] = closes
+    ohlcv["highs"] = [c + 0.2 for c in closes]
+    ohlcv["lows"] = [c - 0.2 for c in closes]
+    ohlcv["volumes"] = [1_000_000] * len(closes)
+    fin = {"market_cap": 1_000_000_000}
+
+    vd_off = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=0.0)
+    vd_on = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=-2.5)
+    assert vd_off is not None and vd_on is not None
+    assert vd_off["candidate"] is True  # advisory rows only by default
+    assert vd_on["candidate"] is False
+    assert any("knife guard blocked" in r for r in vd_on["reasons"])
+
+
+def test_knife_z_flag_reaches_scan_seam(monkeypatch, capsys):
+    """--knife-z flows from the CLI args into _value_dip_scan; default 0
+    disables the guard (flag absent -> knife_z == 0.0)."""
+    from tradingagents.dataflows import eodhd as _eodhd
+
+    rows = [{"symbol": "AAPL", "close": 97.5, "change_p": -2.5}]
+    monkeypatch.setattr(_eodhd, "get_top_movers_symbols_eodhd", lambda **k: rows)
+    monkeypatch.setattr(
+        _eodhd,
+        "get_exchange_symbols_eodhd",
+        lambda market: [{"Code": "AAPL", "Type": "Common Stock"}],
+    )
+    seen = {}
+
+    def _stub_scan(symbol, ohlcv, fin, current_date="", loose=False, knife_z=0.0):
+        seen["symbol"] = symbol
+        seen["knife_z"] = knife_z
+        return {"candidate": True, "gates": {}, "missing": [], "reasons": []}
+
+    monkeypatch.setattr(vs, "_value_dip_scan", _stub_scan)
+    _patch_all_routes(monkeypatch, lambda method, *a, **k: _gentle_dip_csv(a[0]) if method == "get_stock_data" else "NO_DATA")
+
+    vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0", "--knife-z", "-2.5"])
+    assert seen == {"symbol": "AAPL", "knife_z": -2.5}
+
+    seen.clear()
+    vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0"])
+    assert seen == {"symbol": "AAPL", "knife_z": 0.0}  # default: guard disabled
+    out = capsys.readouterr().out
+    assert "AAPL" in out
+
+
 def test_get_top_movers_symbols_eodhd_sorts_strips_caps(monkeypatch):
     """The new helper consumes the bulk real-time feed: losers sorted ascending
     by change_p, the .US suffix stripped, min_price applied, and capped."""

@@ -30,6 +30,15 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **Value-dip `--knife-z` velocity gate + batch `--probe` tracing** -
+  the value screener's value-dip scan can now enforce the falling-knife
+  velocity-z guard (``--knife-z -2.5`` blocks candidates whose 3-day price
+  velocity z drops below -2.5 — the unresolved-cascade case the composite knife
+  guard warns about; knife rows were always displayed, the flag just decides
+  whether they gate). Wired across the tickers/eodhd-us/eodhd-losers/moomoo
+  universes; web Screener form mirrors it. ``batch.py --probe`` writes a
+  per-stage trace JSONL (graph_start / graph_done / graph_failed) so a hung or
+  failed symbol shows exactly which stage broke. See CHANGELOG.
 - [2026-09-04] **fix: risk governor drawdown stop** - the R0/R2 realized-
   drawdown stop could never fire (the config limit was fed into its own
   comparison). Now resolved from the measured basket drawdown
@@ -1025,6 +1034,9 @@ the scan (degrades to the unfiltered list if the reference call fails).
 Adding `--value-dip-loose` relaxes the value-dip entry to `RSI<=35 OR %b<=0.10`
 (was AND) and appends a ranked **near-miss table** naming the gate each near
 candidate missed — the daily practical watchlist, honestly labelled.
+`--knife-z -2.5` enforces the falling-knife velocity-z guard: candidates whose
+3-day price velocity z drops below -2.5 are blocked (unresolved cascade), not
+just flagged.
 
 Numeric hygiene: statements reported in a non-USD currency (JPY etc., e.g.
 many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net

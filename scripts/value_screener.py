@@ -518,6 +518,7 @@ def _compute_scan_row(
     current_date: str = "",
     enable_float: bool = False,
     loose: bool = False,
+    knife_z: float = 0.0,
 ) -> dict:
     """All scan intelligence for one symbol -> a flat dict of flags + metrics.
 
@@ -525,6 +526,9 @@ def _compute_scan_row(
     and sub-dicts ``momentum``/``swing``/``vcp``/``value_dip`` so every scan
     column can be filled regardless of the active ``--scan`` mode. Each bucket
     is best-effort (a failure leaves that bucket absent -> the row shows n/a).
+    ``knife_z`` forwards the ``--knife-z`` velocity guard into the value-dip
+    read (0 disables), so the guard also applies on the tickers / eodhd-us /
+    eodhd-losers universes, not just the movers gating pass.
     """
     out: dict = {}
     try:
@@ -588,7 +592,7 @@ def _compute_scan_row(
         pass
     # Value-dip (needs the canonical financials).
     try:
-        vd = _value_dip_scan(symbol, ohlcv, fin, current_date, loose)
+        vd = _value_dip_scan(symbol, ohlcv, fin, current_date, loose, knife_z=knife_z)
         if vd is not None:
             out["value_dip"] = vd
     except Exception:  # noqa: BLE001
@@ -689,7 +693,8 @@ def _value_dip_technical_prefilter(ohlcv: dict, loose: bool = False) -> bool:
 
 
 def _value_dip_scan(
-    symbol: str, ohlcv: dict, fin: dict, current_date: str = "", loose: bool = False
+    symbol: str, ohlcv: dict, fin: dict, current_date: str = "", loose: bool = False,
+    knife_z: float = 0.0,
 ) -> dict | None:
     """Value Dip + Swing hybrid setup read for one symbol.
 
@@ -767,6 +772,8 @@ def _value_dip_scan(
             roe=roe,
             fcf=fcf_raw,
             loose_technical=loose,
+            require_knife=bool(knife_z),
+            knife_velocity_threshold=knife_z if knife_z else -2.5,
         )
         if not setup.get("rows"):
             return None
@@ -1217,6 +1224,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pe-max", type=float, default=40.0, help="max P/E (TTM) (default 40; 0 disables)"
+    )
+    parser.add_argument(
+        "--knife-z", type=float, default=0.0,
+        help="value-dip: enforce the falling-knife velocity-z guard (e.g. -2.5 "
+        "blocks entries when the 3-day price velocity z < -2.5; 0 disables, "
+        "default 0). Rows always display; only gates when set."
     )
     parser.add_argument(
         "--max-chg5d", type=float, default=0.0,
@@ -1724,7 +1737,10 @@ def main(argv: list[str] | None = None) -> int:
                         if not _value_dip_technical_prefilter(ohlcv, loose=args.value_dip_loose):
                             continue
                         fin = _fetch_fin_cached(symbol, args.date)
-                        vd = _value_dip_scan(symbol, ohlcv, fin, args.date, loose=args.value_dip_loose)
+                        vd = _value_dip_scan(
+                            symbol, ohlcv, fin, args.date,
+                            loose=args.value_dip_loose, knife_z=args.knife_z,
+                        )
                         if vd is not None:
                             scan_meta[symbol]["value_dip"] = vd
                         if not (vd and vd.get("candidate")):
@@ -1961,7 +1977,8 @@ def main(argv: list[str] | None = None) -> int:
                     ohlcv = _fetch_ohlcv(ticker)
                     _RUN_OHLCV_CACHE[sym] = ohlcv
                 row_scan = _compute_scan_row(
-                    ticker, ohlcv, fin, args.date, args.enable_float, loose=args.value_dip_loose
+                    ticker, ohlcv, fin, args.date, args.enable_float,
+                    loose=args.value_dip_loose, knife_z=args.knife_z,
                 )
                 if args.scan == "trend-pullback" and not row_scan.get("a"):
                     continue

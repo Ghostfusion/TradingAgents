@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Value-dip falling-knife velocity-z gate (`--knife-z`) + batch `--probe` tracing** -
+  the value screener's value-dip scan can now enforce the falling-knife
+  velocity-z guard: ``--knife-z -2.5`` blocks candidates whose 3-day price
+  velocity z drops below -2.5 (the unresolved-cascade case the composite
+  knife guard warns about), mapping onto the existing
+  ``value_dip_setup`` ``require_knife`` / ``knife_velocity_threshold`` seam.
+  The knife rows were always displayed; the flag just decides whether they
+  gate. Wired for the tickers / eodhd-us / eodhd-losers universes (the
+  flagships) via ``_compute_scan_row`` as well as the moomoo movers loop
+  (the WIP slice only had the movers path — fixed). Also added
+  ``strategies/orderflow.knife_guard_vpin`` (downside-conditioned VPIN
+  toxicity filter; the guard only suppresses dip-buys when high VPIN
+  coincides with a down move, never blocks up-breakouts). New hermetic
+  tests ``tests/test_value_screener.py`` (semantics + CLI seam). Trading-web
+  mirrors: ``run_screener`` ``knife_z`` + ``--knife-z``, the Screener form
+  gains the field, web README synced. ``batch.py --probe`` writes a
+  per-stage trace JSONL (``batch_probe_*.jsonl``: symbol / stage /
+  elapsed / error / ``wall_seconds`` / per-worker ``data_vendors``) around
+  the graph run — graph_start, graph_done, graph_failed(re-raise) — so a
+  hung or failed symbol shows exactly which stage broke;
+  ``tests/test_batch_probe.py`` (3, hermetic).
 - **Structured PM decision persisted (`pm_decision`)** - `agent_states.AgentState`
   gains `pm_decision`; the Portfolio Manager node captures the structured
   PortfolioDecision (post-guardrail, `model_dump(mode=json)`) and returns it

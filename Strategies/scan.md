@@ -169,6 +169,16 @@ with the `eodhd-losers` universe this is the practical daily watchlist: the
 equity-filtered decliners are harvested loss-ordered, near names are labelled
 with the missing gate, nothing invented.
 
+**`--knife-z <z>` (enforce the falling-knife velocity-z guard).** When set
+(e.g. `-2.5`), a value-dip candidate whose 3-day price velocity z drops below
+the threshold is **blocked** — the unresolved cascade the composite knife
+guard warns about becomes a hard gate for the scan. The velocity row is
+*always* displayed; the flag only decides whether it gates. `0` (default)
+disables the guard. The knife rows themselves are computed by
+`value_dip_setup` (downside-conditioned VPIN toxicity, normalized velocity z,
+ATR range expansion — advisory by default, gated via `require_knife`, which
+this flag maps to).
+
 ## `all` (default)
 
 Everything survives; `TrendPB`/`Breakout` columns flag trend-pullback and
