@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Added
+- **Sector-rotation reference** - `strategies/formulas/sector_rotation.md`:
+  distilled from two deleted LLM-generated specs (`sector_calc.md`,
+  `sector_instruction.md` — removed after distillation, were untracked).
+  Single surviving source for the 12-ETF sector-rotation design: staged
+  Market→Sector→Industry→Stock→Entry→Sizing→Portfolio-Risk pipeline
+  (regime is a gate, not a factor; score ≠ signal), reconciled 8-factor
+  100-point sector score (momentum 25 / RS 15 / trend 15 / risk 15 /
+  breadth 10 / valuation 10 / flow 5 / fundamentals 5, variant B
+  momentum-heavy when breadth/valuation data lacks), cross-sectional
+  percentile normalization, grade table + regime cap, two-level universe
+  (11 SPDR sectors + industry ETFs like SOXX, never ranked in one pool —
+  resolves the spec conflict), and the two genuinely new factors
+  (constituent breadth; EW-vs-CW leadership ratio). Maps onto existing
+  `strategies/sector_rank.py` (momentum-only today): P1 multi-factor
+  extension (RS/trend/risk/acceleration), P2 industry layer, P3
+  breadth+EW/CW (fetch-heavy, cached). Rejected outright: the spec's
+  "expected return/risk" construction (`evaluate.py` + CPCV/PBO is the
+  repo's method). Design only; no code changed.
+
 ### Changed
 - **LLM client request-timeout fix** (diagnosis: "interactive CLI job stuck
   re-trying truncated output" under provider congestion — DeepSeek US-night

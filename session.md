@@ -53,6 +53,22 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector-rotation reference** (docs only, per user): distilled
+  `strategies/formulas/sector_calc.md` (1520 ln) + `sector_instruction.md`
+  (773 ln) — two LLM-generated sector-rotation specs (12-ETF XLK/SOXX…
+  XLU multi-factor ranking) — into a single
+  `strategies/formulas/sector_rotation.md`, then DELETED both originals
+  (they were untracked; no git history impact). Doc: staged
+  Market→Sector→Industry→Stock→Entry→Sizing→Risk pipeline (regime gate,
+  score≠signal), reconciled 8-factor 100-pt score
+  (25/15/15/15/10/10/5/5, variant B momentum-heavy), percentile
+  normalization, grade table + regime cap, two-level universe (11 SPDR +
+  SOXX/IGV as industries, never one pool), genuinely-new factors =
+  constituent breadth + EW/CW leadership ratio. Maps onto existing
+  `strategies/sector_rank.py` (momentum-only today): P1 multi-factor
+  extension, P2 industry layer, P3 breadth+EW/CW (fetch-heavy). Rejected:
+  the spec's E[R]/vol "expected score" (evaluate.py/CPCV is the method).
+  Strategies/index row 28; CHANGELOG + README News.
 - **LLM request-timeout fix** (per diagnosis of "interactive job stuck
   re-trying truncated output" under DeepSeek US-night congestion): the
   `timeout` passthrough in openai/anthropic clients was a latent TypeError
