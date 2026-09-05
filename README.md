@@ -30,6 +30,21 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-04] **anthropics/financial-services teacher study** - a
+  direct-source study of the Anthropic financial-services monorepo
+  (skills-as-single-source vendored into agent bundles with a byte-identity
+  drift gate, one-source/two-wrapper prompts, harness-side output_schema
+  validation, data-vs-directions guardrails) mapped onto the fork as 5
+  advisory, phase-gated, default-off adoptions — flagship: a skill-sync
+  drift gate extending the permanent calc→agent wiring discipline
+  (`docs/design_anthropic_financial_services_integration.md`). Design only —
+  no code, the no-execution/advisory mandates stand. See CHANGELOG.
+- [2026-09-04] **yfinance study P1 + P5 implemented** - typed absence
+  reasons now travel through the read envelope (`VendorAbsence` +
+  `VendorResult.absence` + OHLCV/run_card/web `absence` field; string
+  callers untouched) and yfinance is deliberately pinned `~=1.4` with
+  vendor-quirk notes (`tradingagents/dataflows/README.md`). P2/P3/P4 of the
+  study stay design-only. 181 tests green. See CHANGELOG.
 - [2026-09-04] **yfinance teacher study** - a direct-source study of
   ranaroussi/yfinance v1.7.0 (one of the fork's no-key vendors) mapped onto
   the fork's vendor layer as 5 advisory, phase-gated, default-off adoptions

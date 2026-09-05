@@ -7,6 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **anthropics/financial-services teacher study** - `docs/design_anthropic_financial_services_integration.md`:
+  direct-source study of the Anthropic financial-services monorepo (skills
+  authored once under `vertical-plugins/*/skills/`, vendored into agent
+  bundles with a `check.py` byte-identity drift gate + reference-resolution
+  gate; "one source, two wrappers" agent prompts reused by Cowork plugin and
+  headless `agent.yaml`; per-subagent `output_schema` enforced harness-side
+  by `validate.py`; data-vs-directions guardrails in every agent/skill).
+  Adopted as 5 advisory, phase-gated, default-off items: P1 skill-sync drift
+  gate (extends `test_calc_agent_wiring` with a parse gate + skill
+  reference-resolution gate + drift check — the skill-layer half of the
+  fork's permanent wiring discipline), P2 data-vs-directions guardrail
+  (news/filings/earnings tool prompt preamble + `disclosure_footers` row),
+  P3 declared output shape + harness-side advisory validation (extends
+  `structured.py`; `None` still degrades, never blocks), P4 trigger-phrase
+  discipline for skill YAMLs, P5 one-source/two-wrappers assessment note.
+  Validation table shows the fork already ahead on per-role analysts,
+  tool-catalog governance, and disclosure. Explicit non-goals: MCP
+  connectors (.mcp.json), Cowork plugins / claude-for-msft, Claude Managed
+  Agents deployment, partner plugins, version-bump git hooks, slash
+  commands. Design only; no code changed. Strategies/index row 26.
 - **yfinance teacher-study phases P1 + P5 implemented** (per user: adopt
   only these two):
   - **P1 typed absence reasons through the read envelope** -

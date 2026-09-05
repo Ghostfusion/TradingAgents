@@ -53,6 +53,19 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **anthropics/financial-services teacher study** (docs-only):
+  `docs/design_anthropic_financial_services_integration.md` — direct-source
+  study of the monorepo (vertical skills vendored into agent bundles +
+  check.py byte-identity drift gate + reference resolution; one
+  source/two wrappers; harness-side output_schema validation; data-vs-
+  directions guardrails). 5 advisory phase-gated adoptions: P1 skill-sync
+  drift gate (extends test_calc_agent_wiring: parse + reference-resolution +
+  drift checks on skills/*.yaml), P2 data-vs-directions guardrail (news/
+  filings tool prompts + disclosure_footers row), P3 declared output shape +
+  harness-side advisory validation (structured.py), P4 trigger-phrase skill
+  convention, P5 one-source/two-wrappers assessment. Non-goals: MCP
+  connectors, Cowork plugins, Claude Managed Agents deployment. No code
+  changed.
 - **yfinance study P1 + P5 implemented** (user approved only these two):
   `VendorAbsence` (errors.py) + per-call contextvar side channel in
   `route_to_vendor` (string contract preserved) → `VendorResult.absence`
