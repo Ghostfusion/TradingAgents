@@ -30,6 +30,20 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Sector-rotation reference** - distilled from two deleted
+  LLM-generated specs into `strategies/formulas/sector_rotation.md`:
+  staged Market→Sector→Industry→Stock pipeline (regime = gate, score ≠
+  signal), reconciled 8-factor sector score, two-level universe, and the
+  two genuinely new factors (constituent breadth, EW-vs-CW leadership
+  ratio) — mapped onto the existing `sector_rank.py` as P1-P3 advisory
+  phases. See CHANGELOG.
+- [2026-09-05] **LLM request-timeout fix** - every client request (incl.
+  streaming) is now bounded by a 300 s default (`request_timeout` /
+  `default_request_timeout` — the SDKs' real fields; the legacy `timeout`
+  passthrough was a latent TypeError and no default was ever set). A
+  stalled provider (e.g. DeepSeek at US-night peak) now raises + degrades
+  instead of hanging the CLI job in an apparent "re-trying truncated
+  output" loop. See CHANGELOG.
 - [2026-09-04] **myhhub/stock teacher study** - a direct-source study of the
   InStock A-share rule-based quant platform (uniform strategy predicates,
   trading-calendar singleton, declarative web table registry, daily job
