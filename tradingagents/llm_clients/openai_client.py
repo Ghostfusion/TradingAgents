@@ -164,7 +164,7 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort", "temperature",
+    "timeout", "request_timeout", "max_retries", "reasoning_effort", "temperature",
     "api_key", "callbacks", "http_client", "http_async_client",
     "max_tokens",
 )
@@ -328,7 +328,21 @@ class OpenAIClient(BaseLLMClient):
                 continue
             if key == "reasoning_effort" and not _supports_reasoning_effort(self.model):
                 continue
+            if key == "timeout":
+                # langchain-openai 1.x exposes the openai SDK timeout as
+                # `request_timeout`; `timeout` is not a valid field and would
+                # TypeError at construction (latent passthrough bug). Map the
+                # public alias to the real field.
+                llm_kwargs["request_timeout"] = self.kwargs[key]
+                continue
             llm_kwargs[key] = self.kwargs[key]
+
+        # Bound every request (incl. streaming) so a stalled provider raises
+        # instead of hanging the job indefinitely — observed as "job stuck
+        # re-trying truncated output" under provider congestion (US night =
+        # DeepSeek peak). Explicit request_timeout / timeout alias wins over
+        # this default.
+        llm_kwargs.setdefault("request_timeout", 300)
 
         # OpenRouter provider routing: block slow/unreliable providers via
         # provider.ignore in the request body (sent as extra_body so it nests

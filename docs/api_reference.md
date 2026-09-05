@@ -259,6 +259,16 @@ bedrock}_client.py` + `model_catalog.py` (CLI model lists).
 | `azure` | `azure` | Azure OpenAI env | see `.env.enterprise.example` |
 | `bedrock` | `bedrock` | AWS creds / `AWS_BEARER_TOKEN_BEDROCK` | `pip install ".[bedrock]"` |
 
+**Request timeout.** Every client request (incl. streaming) is bounded by a
+300 s default: `request_timeout` for the OpenAI-compatible family,
+`default_request_timeout` for Anthropic (the SDKs' real fields — the legacy
+`timeout` passthrough key is mapped to them, and a config `timeout` /
+`request_timeout` / `default_request_timeout` passed to `create_llm_client`
+wins over the default). This prevents a stalled provider (e.g. DeepSeek at
+US-night peak) from hanging a `chain.invoke` / the truncation-retry loop
+indefinitely — a stuck job now raises and degrades instead of appearing to
+re-try forever.
+
 ## 3. Graph & subagents
 
 `AgentState` (LangGraph `MessagesState`): `messages, company_of_interest,

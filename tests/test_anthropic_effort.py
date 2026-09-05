@@ -94,5 +94,8 @@ class TestEffortGate:
         ).get_llm()
         assert captured["kwargs"]["api_key"] == "placeholder"
         assert captured["kwargs"]["max_tokens"] == 1024
-        assert captured["kwargs"]["timeout"] == 30
+        # `timeout` is a disallowed ChatAnthropic ctor arg (latent TypeError);
+        # it is mapped to the SDK's real field (default_request_timeout).
+        assert captured["kwargs"].get("default_request_timeout") == 30
+        assert "timeout" not in captured["kwargs"]
         assert "effort" not in captured["kwargs"]

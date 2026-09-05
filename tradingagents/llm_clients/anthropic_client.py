@@ -7,7 +7,7 @@ from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "max_tokens", "temperature",
+    "timeout", "default_request_timeout", "max_retries", "api_key", "max_tokens", "temperature",
     "callbacks", "http_client", "http_async_client", "effort",
 )
 
@@ -69,7 +69,16 @@ class AnthropicClient(BaseLLMClient):
                 continue
             if key == "effort" and not _supports_effort(self.model):
                 continue
+            if key == "timeout":
+                # langchain-anthropic exposes the SDK timeout as
+                # `default_request_timeout`; `timeout` is not a valid field
+                # (same latent passthrough bug as the openai client). Map the
+                # alias and default so a stalled stream cannot hang a run.
+                llm_kwargs["default_request_timeout"] = self.kwargs[key]
+                continue
             llm_kwargs[key] = self.kwargs[key]
+
+        llm_kwargs.setdefault("default_request_timeout", 300)
 
         return NormalizedChatAnthropic(**llm_kwargs)
 

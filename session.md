@@ -53,6 +53,14 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **LLM request-timeout fix** (per diagnosis of "interactive job stuck
+  re-trying truncated output" under DeepSeek US-night congestion): the
+  `timeout` passthrough in openai/anthropic clients was a latent TypeError
+  (not a valid SDK ctor arg) and no default was set. Now maps to
+  `request_timeout` / `default_request_timeout` + 300 s default; wedged
+  provider raises + degrades instead of hanging. tests/
+  test_llm_client_timeout.py (9); test_anthropic_effort updated. Suite 53
+  green. Per user: only committed, NOT the retry-loop treadmill work.
 - **myhhub/stock teacher study** (docs-only):
   `docs/design_myhhub_stock_integration.md` — direct-source study of the
   InStock A-share rule-based quant platform (MySQL daily-job pipeline,

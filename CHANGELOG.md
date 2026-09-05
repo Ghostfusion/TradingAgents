@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Changed
+- **LLM client request-timeout fix** (diagnosis: "interactive CLI job stuck
+  re-trying truncated output" under provider congestion — DeepSeek US-night
+  peak). Two latent bugs: the `timeout` key in the openai-compatible and
+  anthropic passthrough lists was NOT a valid constructor arg in the
+  installed langchain SDKs (a TypeError at construction), and no default
+  timeout was ever set — so a stalled provider stream could hang
+  `chain.invoke` and the truncation/stub retry loop indefinitely. Now:
+  `timeout` maps to the SDKs' real fields (`request_timeout` /
+  `default_request_timeout`), both are valid passthrough args, and every
+  request defaults to 300 s (explicit `timeout`/`request_timeout`/
+  `default_request_timeout` wins). A wedged provider now raises and
+  degrades instead of hanging the job. Tests: `tests/
+  test_llm_client_timeout.py` (9: alias mapping, default, explicit-wins, for
+  both clients); `test_anthropic_effort.py` `test_other_kwargs_...` updated
+  to the corrected mapping (was pinning the latent-broken `timeout` kwarg).
+  Docs: api_reference §2 request-timeout note. Suite: 53 client/agent/
+  wiring tests + 2 pre-existing skips green; real (un-mocked) deepseek +
+  anthropic construction smoke-tested.
+
 ### Added
 - **myhhub/stock teacher study** - `docs/design_myhhub_stock_integration.md`:
   direct-source study of the Chinese A-share rule-based quant platform
