@@ -537,6 +537,32 @@ def _run_card_llm_cost_est() -> dict:
         return {}
 
 
+def _run_card_data_absence(save_path) -> dict | None:
+    """Chain-end data-absence reason for run_card.json (yfinance P1).
+
+    Reads the deterministic execution contract (``research_decision.json``)
+    for an existing ``data_absence`` record; returns it or None so the card
+    stays null on success paths. Advisory — nothing here ever gates.
+    """
+    try:
+        save_path = Path(save_path)
+        for name in ("research_decision.json", "5_portfolio/execution_contract.json"):
+            p = save_path / name
+            if not p.exists():
+                continue
+            import json as _rj
+
+            doc = _rj.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                continue
+            a = doc.get("data_absence") or doc.get("absence")
+            if isinstance(a, dict) and a.get("reason"):
+                return a
+    except Exception:  # noqa: BLE001 - advisory block degrades
+        pass
+    return None
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None
 ) -> Path:
@@ -955,6 +981,10 @@ def write_report_tree(
                 "quick_think_llm": DEFAULT_CONFIG.get("quick_think_llm"),
             },
             "llm_cost_est": _run_card_llm_cost_est(),
+            # yfinance P1: chain-end data-absence reason so a run_card can
+            # audit "no data" vs "rate-limited" vs "not configured" without
+            # re-running the fetch. Advisory; null on success paths.
+            "data_absence": _run_card_data_absence(save_path),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),

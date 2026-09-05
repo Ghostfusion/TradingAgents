@@ -55,14 +55,18 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
     cached = _RUN_OHLCV_CACHE.get(key)
     if cached is not None:
         return cached
+    absence: dict | None = None
     try:
         from datetime import datetime, timedelta
 
-        from tradingagents.dataflows.interface import route_to_vendor
+        from tradingagents.dataflows.interface import route_to_vendor_typed
 
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        out = route_to_vendor("get_stock_data", ticker, start, end) or ""
+        vr = route_to_vendor_typed("get_stock_data", ticker, start, end)
+        out = (vr.results or "") if isinstance(vr.results, str) else ""
+        if vr.error_kind is not None:
+            absence = vr.absence
         dates, closes, opens, highs, lows, volumes = [], [], [], [], [], []
         for line in out.splitlines():
             line = line.strip()
@@ -87,6 +91,7 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "lows": lows,
             "volumes": volumes,
             "opens": opens,
+            "absence": absence,
         }
         _RUN_OHLCV_CACHE[key] = result
         return result
@@ -98,6 +103,7 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "highs": [],
             "lows": [],
             "volumes": [],
+            "absence": absence or {"reason": "error", "retryable": True},
         }
         _RUN_OHLCV_CACHE[key] = result
         return result

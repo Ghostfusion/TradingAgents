@@ -53,6 +53,14 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **yfinance study P1 + P5 implemented** (user approved only these two):
+  `VendorAbsence` (errors.py) + per-call contextvar side channel in
+  `route_to_vendor` (string contract preserved) → `VendorResult.absence`
+  (schema.py) → OHLCV envelope (analysis_tools), run_card `data_absence`
+  block (reporting.py, null on success), web `/api/ohlcv` absence field
+  (trading_web); CLI period-validation N/A (no such CLI). `yfinance~=1.4`
+  pin + `tradingagents/dataflows/README.md` vendor notes.
+  tests/test_vendor_absence.py (15). P2/P3/P4 design-only.
 - **yfinance v1.7.0 teacher study** (docs-only):
   `docs/design_yfinance_integration.md` — direct-source study of
   ranaroussi/yfinance 1.7.0 (YfData cookie/crumb, cache.py SQLite KVs,

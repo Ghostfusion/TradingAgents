@@ -7,6 +7,32 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **yfinance teacher-study phases P1 + P5 implemented** (per user: adopt
+  only these two):
+  - **P1 typed absence reasons through the read envelope** -
+    `dataflows/errors.py` gains `VendorAbsence` (frozen dataclass:
+    `reason ∈ no_data | rate_limited | not_configured | error | unknown`,
+    `source`, `retryable`, `detail`; `from_error()` taxonomy + JSON-safe
+    `to_dict()`). `dataflows/interface.py`: `route_to_vendor` keeps its
+    plain-string contract (sentinels unchanged) and carries the chain-end
+    reason via a per-call contextvar side channel (`_last_absence`, reset at
+    the top of every call and after the typed read — no cross-call/thread
+    leak); the reason follows the verdict (NO_DATA → the no-data vendor's
+    reason; optional DATA_UNAVAILABLE → the first real error). The typed
+    wrapper reads it onto `VendorResult.absence` (new field + `to_dict`).
+    `analysis_tools._ohlcv` envelope gains `absence` (via
+    `route_to_vendor_typed`), `run_card.json` gains a `data_absence` block
+    (null on success), trading_web `/api/ohlcv` returns `absence` on the
+    no-history path. CLI period/interval validation was N/A (no such CLI
+    exists — all CLIs take dates/bars). Always-on but read-only (new fields
+    default null); scripts/* string callers untouched. Tests:
+    `tests/test_vendor_absence.py` (15: taxonomy, string-contract guard,
+    envelope reasons, verdict-follows-reason, no-leak).
+  - **P5 deliberate yfinance pin** - `yfinance>=1.4.1` →
+    `yfinance~=1.4` (requirements.txt + pyproject.toml); new
+    `tradingagents/dataflows/README.md` vendor notes (guarded quirks
+    #986 exclusive-end, #1021 stale frames, unnamed index, statements
+    newest-first, `yf_retry` rate-limit backoff) + version-bump checklist.
 - **yfinance v1.7.0 teacher study** - `docs/design_yfinance_integration.md`:
   direct-source study of `ranaroussi/yfinance` v1.7.0 (the v2 rewrite:
   `data.py` YfData + Auth cookie/crumb, `_http.py` backend abstraction,

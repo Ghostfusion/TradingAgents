@@ -351,6 +351,26 @@ Everything flows through `route_to_vendor(method, *args, **kwargs)` in
 `technical_indicators` / `fundamental_data` / `news_data` end their chains with
 `alpha_vantage` (key-gated last fallback via `ALPHA_VANTAGE_API_KEY` in `.env`).
 
+**Typed absence reasons (yfinance P1).** When a chain ends on a typed
+failure, `route_to_vendor_typed` attaches a machine-readable `absence`
+dict to the `VendorResult` envelope: `{reason, source, retryable, detail}`
+where `reason` ∈ `no_data | rate_limited | not_configured | error | unknown`.
+The reason follows the verdict: `no_data` when the returned sentinel is
+`NO_DATA_AVAILABLE` (from the no-data vendor), the first real error for
+optional `DATA_UNAVAILABLE`. `route_to_vendor` (string path) keeps its plain
+contract — the reason is carried via a per-call contextvar side channel read
+(and reset) by `route_to_vendor_typed`, never in the returned string. The
+OHLCV read envelope (`analysis_tools._ohlcv`) surfaces `absence`, the web
+`/api/ohlcv` returns it on the no-history path, and `run_card.json` carries a
+`data_absence` block (null on success paths). Direct string callers
+(scripts/*) are unchanged.
+
+**yfinance pin (yfinance P5).** `yfinance~=1.4` (verified 1.4+); the
+guarded quirks (#986 exclusive-end, #1021 stale frames, unnamed index,
+statement newest-first, rate-limit retries in `yf_retry`) are documented in
+`dataflows/README.md` with a version-bump checklist — a 1.x bump is a
+deliberate step with a vendor-suite re-run.
+
 ### ## 6.1 Tools by category (auto-generated)
 
 - `core_stock_apis` : `get_stock_data`

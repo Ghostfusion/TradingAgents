@@ -53,6 +53,10 @@ class VendorResult:
     #   volume_unit: shares | board_lots | contracts | unknown
     price_caliber: str | None = None
     volume_unit: str | None = None
+    # yfinance P1: chain-end absence reason (dict of
+    # {reason, source, retryable, detail}) when error_kind is set.
+    # None = success path or absence not computed.
+    absence: dict | None = None
 
     @property
     def ok(self) -> bool:
@@ -74,6 +78,7 @@ class VendorResult:
             "missing_fields": self.missing_fields,
             "price_caliber": self.price_caliber,
             "volume_unit": self.volume_unit,
+            "absence": self.absence,
         }
 
     def to_llm(self) -> str:

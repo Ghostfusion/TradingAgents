@@ -152,7 +152,7 @@ tradingagents/
 ├─ dataflows/              # VENDOR LAYER
 │  ├─ interface.py        # route_to_vendor(): TOOLS_CATEGORIES, VENDOR_METHODS, chains
 │  ├─ config.py           # thread-local config (set_config/get_config/reset_config)
-│  ├─ errors.py           # NoMarketDataError / VendorRateLimitError / VendorNotConfiguredError
+│  ├─ errors.py           # NoMarketDataError / VendorRateLimitError / VendorNotConfiguredError / VendorAbsence (chain-end reason)
 │  ├─ vendor_cache.py     # disk TTL cache (6h, news excluded, sentinels never cached)
 │  └─ vendors: y_finance.py, alpha_vantage*.py, finnhub.py, sec_edgar.py, fred.py,
 │     polymarket.py, moomoo.py (main live vendor, ~1500 lines), fmp.py, alpaca.py,

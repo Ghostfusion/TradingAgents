@@ -17,6 +17,8 @@ they share ``NoMarketDataError`` and differ only in the free-text ``detail``.
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
+
 
 class VendorError(Exception):
     """Base for any condition where a vendor could not return usable data."""
@@ -53,3 +55,45 @@ class VendorNotConfiguredError(VendorError, ValueError):
     Also a ``ValueError`` so existing callers that catch ``ValueError`` keep
     working while the routing layer can treat it as "vendor unavailable".
     """
+
+
+@dataclass(frozen=True)
+class VendorAbsence:
+    """Machine-readable *reason* a vendor chain ended without data (yfinance
+    P1 study: typed absence reasons through the read envelope).
+
+    The router already distinguishes *reactions* (``NoMarketDataError`` vs
+    ``VendorRateLimitError`` vs ``VendorNotConfiguredError``); this carries
+    which kind ended the chain OUT of the router so a run_card / OHLCV
+    envelope can audit "ticker not found" apart from "rate-limited" apart
+    from "vendor disabled" without re-running the fetch.
+
+    Serializes via ``to_dict()`` (dataclass ``asdict``); defaults keep it
+    JSON-safe and null-friendly.
+    """
+
+    reason: str = "unknown"
+    source: str | None = None
+    retryable: bool = False
+    detail: str = ""
+
+    @classmethod
+    def from_error(cls, error: BaseException, source: str | None = None) -> VendorAbsence:
+        """Build from a routed exception (or None -> unknown)."""
+        if error is None:
+            return cls()
+        if isinstance(error, NoMarketDataError):
+            return cls(
+                reason="no_data",
+                source=source,
+                retryable=False,
+                detail=getattr(error, "detail", "") or "",
+            )
+        if isinstance(error, VendorRateLimitError):
+            return cls(reason="rate_limited", source=source, retryable=True)
+        if isinstance(error, VendorNotConfiguredError):
+            return cls(reason="not_configured", source=source, retryable=False)
+        return cls(reason="error", source=source, retryable=True, detail=str(error))
+
+    def to_dict(self) -> dict:
+        return asdict(self)

@@ -26,6 +26,7 @@ from .eodhd import (
 )
 from .errors import (
     NoMarketDataError,
+    VendorAbsence,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
@@ -133,6 +134,21 @@ from .yfinance_options import get_options_chain_yfinance
 from .yfinance_short_interest import get_short_interest_yfinance
 
 logger = logging.getLogger(__name__)
+
+import contextvars as _contextvars  # noqa: E402 - must follow the import wall
+
+# yfinance P1: chain-end absence reason carried OUT of route_to_vendor via a
+# contextvar side channel. route_to_vendor's public contract stays a plain
+# string (sentinels unchanged); route_to_vendor_typed reads the var right
+# after its own call and resets it, so direct string callers are untouched
+# while the typed envelope gains a machine-readable absence reason.
+_last_absence: _contextvars.ContextVar = _contextvars.ContextVar(
+    "vendor_absence", default=None
+)
+
+
+def _set_last_absence(value) -> None:
+    _last_absence.set(value)
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -554,6 +570,8 @@ def get_vendor(category: str, method: str = None) -> str:
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    # Reset the per-call absence side channel: only sentinel returns set it.
+    _last_absence.set(None)
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(",")]
@@ -592,6 +610,14 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
+    # yfinance P1: the chain-end *reason* (which typed absence ended the
+    # chain), carried out of the router so callers can audit "ticker not
+    # found" vs "rate-limited" vs "not configured" without re-running.
+    # Deliberately only from vendor exceptions: the DISABLED / early-return
+    # sentinels and the cache-hit path return before the chain runs.
+    absent_vendor: str | None = None
+    no_data_source: str | None = None
+    absence: VendorAbsence | None = None
 
     # DSA research §3.4 market routing + vendor breaker (enable_market_routing,
     # default off): reorder the chain per-market and skip open (tripped)
@@ -660,6 +686,8 @@ def route_to_vendor(method: str, *args, **kwargs):
             # RuntimeError. It sorts below a clean no-data verdict.
             if first_error is None:
                 first_error = e
+            absent_vendor = vendor
+            absence = VendorAbsence.from_error(e, source=vendor)
             continue
         except VendorNotConfiguredError as e:
             if routed_market:
@@ -667,11 +695,16 @@ def route_to_vendor(method: str, *args, **kwargs):
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
                 first_error = e  # Surface it if no other vendor can serve the call.
+            absent_vendor = vendor
+            absence = VendorAbsence.from_error(e, source=vendor)
             continue
         except NoMarketDataError as e:
             if routed_market:
                 _breaker_fail(routed_market, vendor)
             last_no_data = e  # No data here; another configured vendor may have it
+            no_data_source = vendor
+            absent_vendor = vendor
+            absence = VendorAbsence.from_error(e, source=vendor)
             continue
         except Exception as e:
             if routed_market:
@@ -711,6 +744,7 @@ def route_to_vendor(method: str, *args, **kwargs):
         # stale") so the agent sees the specific reason — invalid symbol, no
         # coverage, or stale data — not just a generic "unavailable".
         reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
+        _set_last_absence(VendorAbsence.from_error(last_no_data, source=no_data_source or absent_vendor))
         return (
             f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
             f"any configured vendor{reason}. The symbol may be invalid, delisted, "
@@ -725,6 +759,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
             logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
+            _set_last_absence(absence or VendorAbsence.from_error(first_error, source=absent_vendor))
             return (
                 f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
                 f"({first_error}). Proceed without it; do not fabricate values."
@@ -749,7 +784,17 @@ def route_to_vendor_typed(method: str, *args, **kwargs) -> "VendorResult":
     except Exception:  # noqa: BLE001
         provider = None
     result = route_to_vendor(method, *args, **kwargs)
+    # Absence provenance (yfinance P1): the chain-end reason from the call
+    # just made, via the contextvar side channel (reset so it can't leak
+    # into the next call / thread).
+    absent = _last_absence.get()
+    _last_absence.set(None)
     vr = _wrap_vendor_result(result, provider)
+    try:
+        if vr.error_kind is not None and absent is not None:
+            vr.absence = absent.to_dict() if absent else None
+    except Exception:  # noqa: BLE001 - advisory
+        pass
     # Price-caliber + volume-unit provenance (Vibe-Trading calibration
     # honesty): attach when a ticker-looking first arg is present AND the
     # method is not a news/global feed (caliber is meaningless there).
