@@ -53,6 +53,12 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector rotation screen: EODHD breadth (2026-09-06)** - wired the
+  EODHD full-US symbol list into the breadth layer: sector_group_of with
+  sub-industry aliases (yfinance granularity), major-exchange filter,
+  per-sector cap + budget + dead-classifier early-bail, in-process cache,
+  all-sector render (n shown). Live: 8 sectors, AACO A:fire. 17 screen
+  tests green + gate.
 - **Sector rotation screen (2026-09-06)**: P1-P4 built -
   `sector_screener.py` (regime cap, multifactor rank reuse, quadrant,
   pullback divergence, dispersion, breadth/EW-CW/Setup A-Bs),

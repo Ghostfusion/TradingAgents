@@ -16,6 +16,7 @@ from tradingagents.strategies.sector_screener import (
     cap_grade,
     classify_regime,
     constituent_screens,
+    constituent_universe,
     dispersion_trend,
     grade_for,
     pullback_divergence,
@@ -240,3 +241,80 @@ def test_backtest_rotation_no_lookahead_and_cost():
 def test_backtest_rotation_short_input_none():
     bt = backtest_rotation({}, [])
     assert bt["strategy"] == [] and bt["turns"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# EODHD constituent universe (breadth-layer wiring)
+# ---------------------------------------------------------------------------
+
+
+def _symbol(code, stype="Common Stock"):
+    return {"Code": code, "Name": code, "Country": "US", "Exchange": "NYSE",
+            "Currency": "USD", "Type": stype}
+
+
+def _sector_of(name):
+    return {"NVDA": "Information Technology", "AMD": "Information Technology",
+            "JPM": "Financial Services", "GS": "Financial Services",
+            "DUKE": "Utilities", "F": "Consumer Discretionary"}.get(name)
+
+
+@pytest.fixture(autouse=True)
+def _clear_sector_lookup_cache():
+    """The module-level sector-lookup cache must not leak between tests."""
+    import tradingagents.strategies.sector_screener as sc
+    sc._SECTOR_LOOKUP_CACHE.clear()
+    yield
+    sc._SECTOR_LOOKUP_CACHE.clear()
+
+
+def test_constituent_universe_buckets_and_caps():
+    symbols = [_symbol("NVDA"), _symbol("AMD"), _symbol("JPM"), _symbol("GS"),
+               _symbol("DUKE"), _symbol("F"), _symbol("ZZZ")]  # ZZZ unknown -> dropped
+    uni = constituent_universe(symbols, _sector_of, per_sector_cap=1, budget=10)
+    stats = uni.pop("stats")
+    assert uni["XLK"] == ["NVDA"] or uni["XLK"] == ["AMD"]  # first win under cap 1
+    assert uni["XLF"] == ["JPM"] or uni["XLF"] == ["GS"]
+    assert uni["XLU"] == ["DUKE"]
+    assert "XLX" not in uni  # every key is a real SPDR ETF
+    assert stats["n_bucketed"] >= 4
+
+
+def test_constituent_universe_budget_and_type_filter():
+    symbols = ([_symbol("AMD", "Fund")]  # not Common Stock -> dropped before lookup
+               + [_symbol("NVDA"), _symbol("JPM"), _symbol("GS"), _symbol("DUKE")]
+               + [_symbol("Q" + str(i)) for i in range(30)])
+    def of(name):
+        return _sector_of(name) if _sector_of(name) else "Unmapped Sector"
+    uni = constituent_universe(symbols, of, per_sector_cap=5, budget=6)
+    stats = uni.pop("stats")
+    assert stats["n_looked_up"] <= 6  # budget-bounded
+    bucketed = {t for v in uni.values() for t in v}
+    assert "AMD" not in bucketed  # Fund type dropped (never classified)
+
+
+def test_constituent_universe_early_bail_on_dead_classifier():
+    # a classifier that always returns None must not burn the budget
+    symbols = [_symbol("A" + str(i)) for i in range(40)]
+    calls = {"n": 0}
+
+    def dead(name):
+        calls["n"] += 1
+        return None
+
+    uni = constituent_universe(symbols, dead, per_sector_cap=3, budget=40)
+    stats = uni.pop("stats")
+    assert stats["dead"] is True
+    assert uni == {}
+    assert calls["n"] <= 14  # bailed after max(6, budget//3)=13 dead lookups
+
+
+def test_eodhd_breadth_composition(monkeypatch):
+    from tradingagents.strategies import sector_screener as sc
+    # a fake member map drives constituent_screens (the tool's post-bucket path)
+    member_closes = {"NVDA": {"closes": _gen(seed=41), "highs": _gen(seed=42),
+                              "volumes": [1e6] * 320, "opens": _gen(seed=43)}}
+    cs = sc.constituent_screens(_closes_map(seed=44), {"XLK": member_closes})
+    assert "XLK" in cs
+    assert cs["XLK"]["members"] == 1
+    assert isinstance(cs["XLK"]["breadth"]["pct"], float)

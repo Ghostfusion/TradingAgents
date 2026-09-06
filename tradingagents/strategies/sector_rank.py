@@ -88,7 +88,89 @@ _GICS_TO_SPDR = {
     "energy": "energy",
     "materials": "materials",
     "industrials": "industrials",
+    # yfinance `info.sector` returns SUB-INDUSTRY granularity (not GICS
+    # sector) - map the common Yahoo values so the EODHD constituent
+    # universe can bucket them too. Conservative: only unambiguous names.
+    "semiconductors": "technology",
+    "semiconductor": "technology",
+    "software": "technology",
+    "hardware": "technology",
+    "computer hardware": "technology",
+    "computer software": "technology",
+    "software (internet)": "technology",
+    "internet software & services": "technology",
+    "information services": "technology",
+    "data processing": "technology",
+    "communications equipment": "technology",
+    "banking": "financials",
+    "banks": "financials",
+    "regional banks": "financials",
+    "diversified banks": "financials",
+    "insurance": "financials",
+    "insurance (life)": "financials",
+    "investment banking & brokerage": "financials",
+    "asset management": "financials",
+    "capital markets": "financials",
+    "consumer finance": "financials",
+    "pharmaceuticals": "health care",
+    "biotechnology": "health care",
+    "biotech & pharma": "health care",
+    "medical devices": "health care",
+    "healthcare products": "health care",
+    "managed care": "health care",
+    "aerospace & defense": "industrials",
+    "aerospace and defense": "industrials",
+    "defense & aerospace": "industrials",
+    "machinery": "industrials",
+    "construction & engineering": "industrials",
+    "electrical equipment": "industrials",
+    "packaging & containers": "materials",
+    "metals & mining": "materials",
+    "chemicals": "materials",
+    "oil & gas": "energy",
+    "oil, gas & consumable fuels": "energy",
+    "coal": "energy",
+    "utilities (independent power)": "utilities",
+    "telecommunications": "communications",
+    "telecom services": "communications",
+    "wireless telecommunication": "communications",
+    "media": "communications",
+    "entertainment": "communications",
+    "consumer electronics": "consumer disc.",
+    "retail": "consumer disc.",
+    "specialty retail": "consumer disc.",
+    "apparel retail": "consumer disc.",
+    "auto manufacturing": "consumer disc.",
+    "automobiles": "consumer disc.",
+    "hotels, restaurants & leisure": "consumer disc.",
+    "home builders": "consumer disc.",
+    "real estate investment trusts": "real estate",
+    "reits": "real estate",
+    "reit": "real estate",
+    "real estate management": "real estate",
+    "household & personal products": "consumer staples",
+    "food & beverage": "consumer staples",
+    "food, beverages & tobacco": "consumer staples",
+    "tobacco": "consumer staples",
 }
+
+
+# Reverse map: canonical label -> SPDR ETF (used by the EODHD constituent
+# universe: GICS sector name -> canonical label (_canonical_sector) -> ETF).
+_SPDR_BY_LABEL = {name.strip().lower(): etf for etf, name in SPDR_SECTORS.items()}
+
+
+def sector_group_of(gics_sector: str | None) -> str | None:
+    """GICS sector name -> the SPDR ETF that owns it (None when unmapped).
+
+    "Information Technology" -> "XLK", "Financial Services" -> "XLF",
+    "Health Care" -> "XLV", etc. Unknown/None -> None (the caller drops the
+    ticker from the constituent universe rather than mis-bucketing it).
+    """
+    if not gics_sector:
+        return None
+    canon = _canonical_sector(gics_sector)
+    return _SPDR_BY_LABEL.get(canon)
 
 
 def sector_standing(sector: str | None, ranking: dict | None) -> dict:
@@ -579,4 +661,5 @@ __all__ = [
     "constituent_breadth",
     "leadership_ratio",
     "FACTOR_WEIGHTS",
+    "sector_group_of",
 ]

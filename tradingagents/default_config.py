@@ -765,6 +765,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_sector_multifactor": False,
         "enable_sector_industry": False,
         "enable_sector_breadth": False,
+        "enable_sector_eodhd_constituents": False,  # EODHD full-US universe for the breadth layer (sector_screener)
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

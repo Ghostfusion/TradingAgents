@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-06] **Sector rotation screen + EODHD breadth** — constituent breadth/EW-CW/setups now run off the EODHD full-US universe (major-exchange filtered, budget-capped, per-sector n shown). See CHANGELOG.
 - [2026-09-06] **Sector rotation screen** — sector-first screener tool (regime/RS/quadrant/pullback-divergence/dispersion + breadth/EW-CW/setups), LLM-facing, after-cost-validated context-only. See CHANGELOG.
 - [2026-09-06] **Industry depth** — SEC EDGAR full-text search (keyless; customer-concentration footnotes, peer 10-Ks) + USPTO PatentsView patent activity (free key); wired to the fundamentals analyst. See CHANGELOG.
 - [2026-09-06] **Order-flow depth** — FINRA ATS dark-pool flow + Reg SHO short-sale volume (official, keyless, as-of-gated); wired to the market analyst. See CHANGELOG.

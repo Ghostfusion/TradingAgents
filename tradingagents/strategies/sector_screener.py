@@ -420,6 +420,75 @@ def constituent_screens(
     return out
 
 
+# In-process sector-lookup cache (EODHD member tagging is the expensive
+# part: FMP profile call or a guarded yfinance fallback). Survives the run so
+# repeat screens never re-classify the same ticker.
+_SECTOR_LOOKUP_CACHE: dict[str, str | None] = {}
+
+
+def constituent_universe(
+    symbols: list,
+    sector_of,
+    *,
+    per_sector_cap: int = 10,
+    budget: int = 40,
+) -> dict:
+    """Bucket Common-Stock symbols into the 11 SPDR groups via ``sector_of``.
+
+    ``sector_of(ticker) -> GICS sector name`` (network; the caller's free-tier
+    budget drives ``budget`` - the repo's FMP key is 250 req/day and yfinance
+    is throttled, so we classify only up to ``budget`` symbols, stop early
+    once every sector reaches ``per_sector_cap``, and cache each lookup.
+    Returns ``{spdr_etf: [tickers, ...], 'stats': {...}}`` - sectors with zero
+    classified members are absent (the caller renders n/a, never fabricated).
+    """
+    from .sector_rank import sector_group_of
+
+    buckets: dict[str, list] = {}
+    looked_up = 0
+    dead_streak = 0
+    for item in symbols or []:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("Code") or "").strip().upper()
+        if item.get("Type") not in (None, "Common Stock"):
+            continue
+        if not code:
+            continue
+        etf = _SECTOR_LOOKUP_CACHE.get(code)
+        if etf is None and code not in _SECTOR_LOOKUP_CACHE:
+            if looked_up >= budget:
+                break
+            _SECTOR_LOOKUP_CACHE[code] = sector_group_of(sector_of(code))
+            looked_up += 1
+        etf = _SECTOR_LOOKUP_CACHE.get(code)
+        if etf is None:
+            # every source failing (FMP quota + yfinance throttled) means
+            # further lookups are wasted: bail before burning the budget
+            dead_streak += 1
+            if dead_streak >= max(6, budget // 3):
+                buckets["stats"] = {
+                    "n_looked_up": looked_up,
+                    "n_bucketed": sum(len(v) for v in buckets.values()),
+                    "cached": len(_SECTOR_LOOKUP_CACHE),
+                    "dead": True,
+                }
+                return buckets
+            continue
+        dead_streak = 0
+        members = buckets.setdefault(etf, [])
+        if len(members) >= per_sector_cap:
+            continue
+        members.append(code)
+    buckets["stats"] = {
+        "n_looked_up": looked_up,
+        "n_bucketed": sum(len(v) for v in buckets.values()),
+        "cached": len(_SECTOR_LOOKUP_CACHE),
+        "dead": False,
+    }
+    return buckets
+
+
 def backtest_rotation(
     closes_map: dict,
     bench_closes: list,
@@ -494,6 +563,7 @@ __all__ = [
     "_no_chase",
     "sector_screen",
     "constituent_screens",
+    "constituent_universe",
     "backtest_rotation",
 ]
 

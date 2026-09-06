@@ -51,6 +51,17 @@ Breaking changes within the 0.x line are called out explicitly.
   cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
 ### Added
+- **Sector rotation screen: EODHD constituent universe for breadth** -
+  the breadth/EW-CW/setup layer can now be driven by the EODHD full-US
+  symbol list (`get_exchange_symbols_eodhd`, ~51k symbols, major-exchange
+  filtered) instead of the static curated subset: GICS + sub-industry
+  sector bucketing (`sector_group_of`, alias map extended for the yfinance
+  sub-industry granularity), per-sector cap + classifier budget with an
+  early-bail when every lookup fails, in-process lookup cache, and breadth
+  rendered for every sector with classified members (n shown - small n is
+  noisy, raise eodhd_cap). Tool: `constituent_universe='eodhd'` param or
+  `enable_sector_eodhd_constituents` config. Live: 8 sectors breadth/EW-CW
+  + Setup A/B states. LLM-facing, advisory, budget-capped for free tiers.
 - **Sector rotation screen (P1-P4, design doc)**: new
   `strategies/sector_screener.py` + `get_sector_rotation_screen` tool (market
   analyst): regime (SPY>SMA200+slope) grade cap + multi-factor SPDR rank

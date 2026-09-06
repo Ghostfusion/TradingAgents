@@ -2389,6 +2389,8 @@ def get_sector_rank(
 def get_sector_rotation_screen(
     enable_breadth: Annotated[bool, "include constituent breadth + EW/CW + Setup A/B screens (cfg enable_sector_breadth too)"] = False,
     top_n: Annotated[int, "number of top sectors to carry into the read (default 5)"] = 5,
+    constituent_universe: Annotated[str, "constituent universe: 'curated' (default, static) | 'eodhd' (EODHD full-US symbol list, capped per sector)"] = "curated",
+    eodhd_cap: Annotated[int, "max EODHD members to classify per sector (default 10; budget-bounded)"] = 10,
 ) -> str:
     """Sector-rotation SCREEN — early leader identification (advisory).
 
@@ -2464,32 +2466,96 @@ def get_sector_rotation_screen(
         lines.append("")
         lines.append("pullback divergence: none (benchmark not in a 2-down / swing-low undercut)")
     if use_brd:
-        parent_of = {etf: INDUSTRY_ETFS[etf][0] for etf in SECTOR_CONSTITUENTS}
-        # group the constituent groups by their parent sector (SPDR)
-        groups_by_parent: dict[str, list[str]] = {}
-        for grp in SECTOR_CONSTITUENTS:
-            parent = parent_of.get(grp)
-            if parent:
-                groups_by_parent.setdefault(parent, []).append(grp)
+        use_eodhd = str(constituent_universe or "curated").strip().lower() == "eodhd" \
+            or bool(cfg.get("enable_sector_eodhd_constituents", False))
+        range_sector = str(constituent_universe or "curated").strip().lower() in ("all", "eodhd", "curated")
+        _ = range_sector  # keep the universe selector explicit for future modes
         cons: dict = {}
-        top_parents = [r["etf"] for r in rows[:3] if r.get("rank")]
-        for parent in top_parents:
-            members: dict = {}
-            for grp in groups_by_parent.get(parent, []):
-                for t in SECTOR_CONSTITUENTS[grp]:
-                    o = _ohlcv(t)
-                    members[t] = {
-                        "closes": o.get("closes") or [],
-                        "highs": o.get("highs") or [],
-                        "volumes": o.get("volumes") or [],
-                        "opens": o.get("opens") or [],
-                    }
-            if members:
-                cons[parent] = members
+        if use_eodhd:
+            # EODHD full-US universe (free when EODHD_API_KEY is set): bucket
+            # Common-Stock symbols into the 11 SPDR groups, capped per sector,
+            # then fetch each classified member via the run cache.
+            try:
+                from tradingagents.dataflows.eodhd import get_exchange_symbols_eodhd
+                from tradingagents.dataflows.yfinance_sector import fetch_sector
+                from tradingagents.strategies.sector_screener import constituent_universe
+
+                _MAJOR_FX = ("NYSE", "NASDAQ", "AMEX", "NYSEMKT")
+                # the EODHD list covers every US exchange incl. OTC microcaps
+                # that yfinance drops (404) - pre-filter to the liquid markets
+                # so the classifier budget goes to names Yahoo actually covers
+                eodhd_symbols = [
+                    x for x in get_exchange_symbols_eodhd("US") or []
+                    if isinstance(x, dict) and str(x.get("Exchange") or "").upper() in _MAJOR_FX
+                ]
+                members_map = constituent_universe(
+                    eodhd_symbols,
+                    fetch_sector,
+                    per_sector_cap=max(2, min(int(eodhd_cap or 10), 30)),
+                    budget=max(24, min(120, 6 * max(2, min(int(eodhd_cap or 10), 30)))),
+                )
+                # render breadth for EVERY sector with classified members
+                # (not just the top-3 parents - a small lookup budget often
+                # lands on non-top sectors, and universe-wide breadth is the
+                # honest read); top sectors are marked in the output.
+                top_parents = [r["etf"] for r in rows[:top_n] if r.get("rank")]
+                for parent, tickers in sorted(members_map.items()):
+                    if parent == "stats" or not tickers:
+                        continue
+                    members: dict = {}
+                    for t in tickers:
+                        o = _ohlcv(t)
+                        if len(o.get("closes") or []) < 65:
+                            continue
+                        members[t] = {
+                            "closes": o.get("closes") or [],
+                            "highs": o.get("highs") or [],
+                            "volumes": o.get("volumes") or [],
+                            "opens": o.get("opens") or [],
+                        }
+                    if members:
+                        cons[parent] = members
+                _top_note = "".join(
+                    f" {e}=top" for e in top_parents if e in cons
+                )
+                _stats = members_map.get("stats", {})
+                if not _stats.get("n_bucketed", 0):
+                    _line_note = (" (EODHD universe: no members classified - "
+                                  "sector lookups failed; see per-vendor logs)")
+                elif _stats.get("dead"):
+                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} members; "
+                                  "classifier degraded early)")
+                else:
+                    _line_note = f" (EODHD universe: {_stats['n_bucketed']} members classified)"
+            except Exception as exc:  # noqa: BLE001 - advisory; degrade to curated
+                _line_note = f" (EODHD universe unavailable: {exc})"
+                cons = {}
+        else:
+            _line_note = ""
+            parent_of = {etf: INDUSTRY_ETFS[etf][0] for etf in SECTOR_CONSTITUENTS}
+            groups_by_parent: dict[str, list[str]] = {}
+            for grp in SECTOR_CONSTITUENTS:
+                parent = parent_of.get(grp)
+                if parent:
+                    groups_by_parent.setdefault(parent, []).append(grp)
+            top_parents = [r["etf"] for r in rows[:3] if r.get("rank")]
+            for parent in top_parents:
+                members: dict = {}
+                for grp in groups_by_parent.get(parent, []):
+                    for t in SECTOR_CONSTITUENTS[grp]:
+                        o = _ohlcv(t)
+                        members[t] = {
+                            "closes": o.get("closes") or [],
+                            "highs": o.get("highs") or [],
+                            "volumes": o.get("volumes") or [],
+                            "opens": o.get("opens") or [],
+                        }
+                if members:
+                    cons[parent] = members
         if cons:
             cs = constituent_screens(closes_map, cons, top_n=3)
             lines.append("")
-            lines.append("### Constituent screens (breadth / EW-CW leadership / setups)")
+            lines.append("### Constituent screens (breadth / EW-CW leadership / setups)" + _line_note + _top_note)
             for parent, blk in cs.items():
                 b = blk["breadth"]
                 lr = blk["leadership"]
