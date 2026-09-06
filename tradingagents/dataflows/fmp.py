@@ -226,6 +226,92 @@ def _closes_by_year(route_to_vendor, symbol: str, days: int = 2000) -> dict:
     return closes
 
 
+def get_earning_call_transcripts(symbol: str, limit: int = 4) -> list | None:
+    """List of latest earnings-call transcripts (metadata; FMP free tier).
+
+    Returns the FMP ``earning_call_transcripts`` rows (newest first) or None
+    on any failure / missing key — the tool renders an explicit 'unavailable'
+    then. Free-plan accessible (FMP free = 250 req/day).
+    """
+    data = fmp_get("earning_call_transcripts", {"symbol": symbol, "limit": limit})
+    return data[:limit] if isinstance(data, list) else None
+
+
+def get_earning_call_transcript(symbol: str, year: int, quarter: int) -> dict | None:
+    """Full earnings-call transcript text for one print, or None on failure."""
+    data = fmp_get(
+        "earning_call_transcript",
+        {"symbol": symbol, "year": year, "quarter": quarter},
+    )
+    return data if isinstance(data, dict) and data.get("content") else None
+
+
+def get_earnings_transcript_fmp(symbol: str, limit: int = 4) -> dict | None:
+    """Latest-transcript block: metadata + (best-effort) full text excerpt.
+
+    Returns ``{'date', 'year', 'quarter', 'excerpt', 'content_len'}`` — the
+    excerpt is the first ~3500 chars of the full text when the content fetch
+    succeeds; ``content_len == 0`` means metadata-only (rate-limit/coverage),
+    never invented prose. None on any failure (missing key, network, 429).
+    """
+    rows = get_earning_call_transcripts(symbol, limit=limit)
+    if not rows:
+        return None
+    latest = rows[0]
+    out = {
+        "date": latest.get("date"),
+        "year": latest.get("year"),
+        "quarter": latest.get("quarter"),
+        "excerpt": "",
+        "content_len": 0,
+    }
+    try:
+        yr = int(latest.get("year") or 0)
+        q = int(latest.get("quarter") or 0)
+        if yr and q:
+            body = get_earning_call_transcript(symbol, yr, q)
+            if body and body.get("content"):
+                text = str(body["content"])
+                out["excerpt"] = text[:3500]
+                out["content_len"] = len(text)
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def get_earnings_transcript_report(symbol: str, limit: int = 4) -> str:
+    """Latest earnings-call transcript as a formatted report (FMP, free tier).
+
+    Includes the print date/quarter and, when the full-text fetch succeeds,
+    the opening excerpt (management commentary + Q&A start); content_len == 0
+    means the body was unavailable (quota/coverage) — the report says so
+    explicitly rather than inventing quotes. Returns an explicit
+    'earnings transcript unavailable for X: ...' on any failure/missing key.
+    """
+    try:
+        blk = get_earnings_transcript_fmp(symbol, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return f"earnings transcript unavailable for {symbol}: {exc}"
+    if not blk:
+        return f"earnings transcript unavailable for {symbol} (FMP key missing, quota reached, or no transcript coverage)"
+    lines = [f"## Latest earnings call transcript — {symbol}"]
+    meta = f"date={blk['date']}" if blk.get("date") else ""
+    if blk.get("year") and blk.get("quarter"):
+        meta = (meta + " " if meta else "") + f"Q{blk['quarter']} FY{blk['year']}"
+    lines.append(meta)
+    if blk.get("content_len"):
+        lines.append("")
+        lines.append(f"(excerpt, {blk['content_len']} chars total)")
+        lines.append(blk["excerpt"])
+    else:
+        lines.append("Full transcript body unavailable (FMP quota/coverage) — "
+                     "do not fabricate management quotes.")
+    lines.append("")
+    lines.append("Source: FMP Earnings Transcript API (free tier). Advisory — "
+                 "cite quotes only from the excerpt above.")
+    return "\n".join(lines)
+
+
 __all__ = [
     "get_income_history",
     "get_balance_history",
@@ -235,4 +321,7 @@ __all__ = [
     "get_earnings_surprises",
     "get_historical_prices",
     "normalized_score",
+    "get_earning_call_transcripts",
+    "get_earning_call_transcript",
+    "get_earnings_transcript_fmp",
 ]

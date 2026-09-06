@@ -6360,6 +6360,57 @@ def get_risk_overlay(
 
 
 @tool
+def get_financial_history(
+    ticker: Annotated[str, "ticker symbol"],
+    years: Annotated[int, "max fiscal years of annual history (default 15)"] = 15,
+) -> str:
+    """Annual 10-K financial history from SEC EDGAR XBRL (free, keyless).
+
+    Pulls up to ``years`` of annual revenue / net income / operating cash flow
+    / capex / assets / liabilities / equity / cash from the SEC companyconcept
+    API and lays them out as a year-over-year table. This is the only free
+    source deeper than the ~4-5y statement history of the vendor APIs; XBRL
+    coverage starts around 2009-2011 per filer (stated in the report's
+    history-span line) so pre-XBRL years render n/a, never invented. Use
+    before any 'long-run revenue / margin / balance-sheet trajectory' claim —
+    cite the actual values for the specific fiscal years.
+    """
+    return route_to_vendor("get_financial_history", ticker, years)
+
+
+@tool
+def get_congress_trades(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Congressional stock trades for a ticker (House + Senate).
+
+    Returns the matched open-market purchases/sales by members of Congress
+    (and spouses) from the House and Senate Stock Watcher datasets, with net
+    buy/sell counts and recent sample trades per chamber. Free, keyless
+    sources. Use before any 'what is Congress doing with this name / insider-
+    Washington flow' claim; a negative net (more sells) is a (secondary)
+    caution flag, never a gate.
+    """
+    return route_to_vendor("get_congress_trades", ticker)
+
+
+@tool
+def get_earnings_transcript(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Latest earnings-call transcript (FMP free tier).
+
+    Returns the most recent print's date/quarter and — when the full-text
+    fetch succeeds — an opening excerpt of the call (management commentary /
+    Q&A). When the body is unavailable (FMP quota/coverage) the report says so
+    explicitly; never invent management quotes. Use before any
+    'management said / guided / sounded ...' claim on the call — quote only
+    from the returned text.
+    """
+    return route_to_vendor("get_earnings_transcript", ticker)
+
+
+@tool
 def get_topk_drop_plan(
     scores: Annotated[dict, "name -> score"],
     topk: Annotated[int, "target book size (names to hold)"] = 10,
@@ -6634,6 +6685,9 @@ __all__ = [
     "get_market_movers",
     "get_factor_profile",
     "get_lottery_factors",
+    "get_financial_history",
+    "get_congress_trades",
+    "get_earnings_transcript",
     "get_execution_schedule",
     "get_risk_overlay",
     "get_topk_drop_plan",

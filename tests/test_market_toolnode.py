@@ -115,15 +115,19 @@ def test_sec_filings_falls_back_on_no_data_sentinel(monkeypatch):
     assert "FALLBACK 0700.HK" in out
 
 
-def test_sec_filings_massive_fallback_returns_insider_body(monkeypatch):
+def test_sec_filings_edgar_is_the_normal_path():
+    """Live: with a valid SEC-compliant User-Agent, EDGAR serves the filings
+    (no Massive fallback). Previously this suite asserted the fallback fired
+    because the bare-project UA was 403-rejected by EDGAR; the UA fix made
+    the EDGAR path the healthy default."""
+    import pytest
+
     from tradingagents.agents.utils import market_position_tools as mpt
 
-    fake_massive = "## EIX Insider Transactions (Form 4, Massive.com)\n- BUY 100 sh"
-    monkeypatch.setattr("tradingagents.dataflows.massive.get_form4_insider_massive", lambda *a, **k: fake_massive)
-    out = mpt.get_sec_filings.invoke({"ticker": "EIX"})
-    assert "Massive insider-activity fallback" in out
-    assert "Form 4" in out
-    assert "Insider Transactions" in out
+    pytest.importorskip("requests")
+    out = mpt.get_sec_filings.invoke({"ticker": "AAPL"})
+    assert "SEC Filings (EDGAR)" in out
+    assert "Massive insider-activity fallback" not in out
 
 
 def test_sec_filings_massive_fallback_degrades_when_both_down(monkeypatch):

@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Fundamentals-analyst depth (2026-09-06)**: `get_earnings_transcript` (FMP
+  free), `get_congress_trades` (keyless watchers; live AAPL/MSFT/NVDA
+  smokes), `get_financial_history` (EDGAR XBRL; live 8y AAPL table correct;
+  fixed the SEC User-Agent 403 root cause). 13 tests; suite 2973 green;
+  wired + prompts + gate green.
 - **Quant-formula Phase 6 implemented**: lottery factors (MAX/IVOL,
   `get_lottery_factors`), Almgren-Chriss + TWAP/VWAP/POV
   (`get_execution_schedule`), CPPI + vol-target (`get_risk_overlay`). 20 new

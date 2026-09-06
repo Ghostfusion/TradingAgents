@@ -17,6 +17,7 @@ from .alpha_vantage_news import (
 from .benzinga import get_news_benzinga
 from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
+from .congress import get_congress_trades
 from .eodhd import (
     get_corporate_actions_eodhd,
     get_exchange_symbols_text_eodhd,
@@ -96,7 +97,7 @@ from .screener import (
     get_market_movers as get_market_movers_yfinance,
     screen_equities as screen_equities_yfinance,
 )
-from .sec_edgar import get_sec_filings
+from .sec_edgar import get_financial_history, get_sec_filings
 from .stockdata import (
     get_news_stockdata,
     get_stock_data_stockdata,
@@ -212,9 +213,22 @@ TOOLS_CATEGORIES = {
         ],
     },
     "sec_filings": {
-        "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G)",
+        "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G) + XBRL financial history",
         "tools": [
             "get_sec_filings",
+            "get_financial_history",
+        ],
+    },
+    "earnings_transcripts": {
+        "description": "Earnings-call transcripts (FMP free tier)",
+        "tools": [
+            "get_earnings_transcript",
+        ],
+    },
+    "congress_trades": {
+        "description": "Congressional stock trades (House/Senate Stock Watcher, keyless)",
+        "tools": [
+            "get_congress_trades",
         ],
     },
     "short_interest": {
@@ -335,6 +349,8 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
+    "earnings_transcripts",
+    "congress_trades",
     "news_sentiment",
     # moomoo-only enrichment (Tier 1/2 + A-series): failures degrade to a sentinel.
     "capital_flow",
@@ -357,6 +373,16 @@ OPTIONAL_CATEGORIES = {
 }
 
 # Mapping of methods to their vendor-specific implementations
+def _fmp_transcript_report(symbol: str, limit: int = 4):
+    """Call-time FMP import: fmp.py -> statement_parsing -> interface forms a
+    load-order cycle at module import; deferring the import keeps interface.py
+    importable (the cycle resolves on first tool call, by which point the
+    module graph is fully loaded)."""
+    from .fmp import get_earnings_transcript_report
+
+    return get_earnings_transcript_report(symbol, limit)
+
+
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
@@ -542,6 +568,18 @@ VENDOR_METHODS = {
     # market_movers
     "get_market_movers": {
         "yfinance": get_market_movers_yfinance,
+    },
+    # earnings_transcripts (FMP free tier)
+    "get_earnings_transcript": {
+        "fmp": _fmp_transcript_report,
+    },
+    # congress_trades (keyless House/Senate Stock Watcher mirrors)
+    "get_congress_trades": {
+        "congress": get_congress_trades,
+    },
+    # financial history (SEC EDGAR XBRL companyconcept, keyless)
+    "get_financial_history": {
+        "sec_edgar": get_financial_history,
     },
 }
 

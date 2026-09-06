@@ -37,6 +37,16 @@ Breaking changes within the 0.x line are called out explicitly.
   cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
 ### Added
+- **Fundamentals-analyst depth (spec gaps 1-3)**: `get_earnings_transcript`
+  (FMP Earnings Transcript API, free tier; date/quarter + excerpt, never
+  fabricated quotes), `get_congress_trades` (House + Senate Stock Watcher
+  mirrors, keyless; net buys/sells + samples per chamber),
+  `get_financial_history` (SEC EDGAR XBRL companyconcept, keyless; annual
+  10-K revenue/NI/OCF/capex/assets/liabilities/equity/cash ~10-15y, honest
+  pre-XBRL n/a). All wired to the fundamentals analyst + graph ToolNode with
+  prompts; router categories earnings_transcripts / congress_trades +
+  sec_filings extended; also fixed the SEC User-Agent (the bare project-form
+  UA was 403-rejected by EDGAR: 404/403 on every host now returns data).
 - **Quant-formula Phase 6** (the research-plan 'medium effort' items;
   `docs/design_quant_formulas_research.md` A6-H2): lottery-tilt screen
   (`strategies/lottery.py`: MAX = largest single-day return over the trailing

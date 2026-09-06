@@ -579,6 +579,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_lottery_factors(ticker)` | `strategies.lottery` | market | MAX (largest single-day return in the month) + IVOL (idiosyncratic vol) lottery-tilt screen — high = expected underperformance (quality penalty) |
 | `get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...)` | `strategies.execution_schedule` | market | Almgren-Chriss optimal trajectory + TWAP/VWAP/POV benchmarks (E[IS]/var(IS), per-interval trades) |
 | `get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?)` | `strategies.portfolio.cppi_exposure` + `size.volatility_target_scale` | market | CPPI floor-protected risky exposure + vol-targeting scale (advisory overlay) |
+| `get_earnings_transcript(ticker)` | FMP Earnings Transcript API (free tier) | fundamentals | Latest earnings-call transcript: date/quarter + (when served) excerpt — quote only from returned text |
+| `get_congress_trades(ticker)` | House/Senate Stock Watcher mirrors (keyless) | fundamentals | Congressional open-market stock trades: net buys/sells + samples per chamber |
+| `get_financial_history(ticker, years=?)` | SEC EDGAR XBRL companyconcept (keyless) | fundamentals | Annual 10-K financial history (~10-15y; pre-XBRL years n/a) |
 | `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
