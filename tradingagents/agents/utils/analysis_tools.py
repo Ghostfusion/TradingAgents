@@ -2386,6 +2386,137 @@ def get_sector_rank(
 
 
 @tool
+def get_sector_rotation_screen(
+    enable_breadth: Annotated[bool, "include constituent breadth + EW/CW + Setup A/B screens (cfg enable_sector_breadth too)"] = False,
+    top_n: Annotated[int, "number of top sectors to carry into the read (default 5)"] = 5,
+) -> str:
+    """Sector-rotation SCREEN — early leader identification (advisory).
+
+    Composes the existing rotation machinery into one sector-first read:
+    regime (SPY > SMA200 + slope) with the grade cap, the multi-factor SPDR
+    rank (momentum/RS/trend/risk) + RRG quadrant, the pullback-divergence
+    leader flags (benchmark 2+ down-sessions or swing-low undercut -> which
+    sectors held green), and the cross-sectional dispersion trend (rising =
+    rotation regime). With ``enable_breadth`` also fetches the curated
+    constituents of the top sectors and renders breadth (%-above-50d SMA),
+    the EW/CW leadership ratio (cap >> EW = narrow mega-cap rally) and the
+    Setup-A (high-tight shelf) / Setup-B (first pullback to a rising 20d EMA)
+    states. Use instead of raw rank reads before any 'sector is rotating /
+    leadership shifting / early rotation' claim. None-safe: a missing series
+    renders n/a, never fabricated; advisory, never a gate.
+    """
+    from tradingagents.strategies.sector_rank import (
+        INDUSTRY_ETFS,
+        SECTOR_CONSTITUENTS,
+        SPDR_SECTORS,
+    )
+    from tradingagents.strategies.sector_screener import (
+        constituent_screens,
+        sector_screen,
+    )
+
+    try:
+        from tradingagents.dataflows.config import get_config
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - advisory
+        cfg = {}
+    use_brd = enable_breadth or bool(cfg.get("enable_sector_breadth", False))
+    top_n = max(1, min(int(top_n or 5), len(SPDR_SECTORS)))
+
+    closes_map: dict = {}
+    highs_map: dict = {}
+    for etf in SPDR_SECTORS:
+        o = _ohlcv(etf)
+        if len(o.get("closes") or []) >= 65:
+            closes_map[etf] = o["closes"]
+            if o.get("highs"):
+                highs_map[etf] = o["highs"]
+    bench = _benchmark_closes()
+    if not closes_map or not bench:
+        return "sector rotation screen unavailable: no SPDR/benchmark history from the vendor chain."
+
+    screen = sector_screen(closes_map, bench, highs_map=highs_map, top_n=top_n, regime=None)
+    rows = screen["rows"]
+    lines = [
+        "## Sector Rotation Screen (advisory)",
+        f"regime: {screen['regime'] or 'n/a'} | dispersion: {screen['dispersion'] or 'n/a'} "
+        "(rising = rotation regime) | top sectors: " +
+        ", ".join(r["etf"] for r in rows[:top_n] if r.get("rank")),
+        "",
+        "| rank | sector | score | grade (cap) | quadrant |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows[:top_n]:
+        if r.get("rank") is None:
+            continue
+        grade = r.get("grade_capped") or r.get("grade") or "n/a"
+        lines.append(
+            f"| {r['rank']} | {r['etf']} ({SPDR_SECTORS.get(r['etf'], r['etf'])}) | "
+            f"{r.get('score') if r.get('score') is not None else 'n/a'} | {grade} | "
+            f"{r.get('quadrant') or 'n/a'} |"
+        )
+    div = screen["divergence"]
+    if div and div.get("triggered"):
+        leaders = ", ".join(screen["leaders"]) if screen["leaders"] else "—"
+        lines.append("")
+        lines.append(f"pullback divergence: {div['reason']} -> rotation leaders: {leaders}")
+    else:
+        lines.append("")
+        lines.append("pullback divergence: none (benchmark not in a 2-down / swing-low undercut)")
+    if use_brd:
+        parent_of = {etf: INDUSTRY_ETFS[etf][0] for etf in SECTOR_CONSTITUENTS}
+        # group the constituent groups by their parent sector (SPDR)
+        groups_by_parent: dict[str, list[str]] = {}
+        for grp in SECTOR_CONSTITUENTS:
+            parent = parent_of.get(grp)
+            if parent:
+                groups_by_parent.setdefault(parent, []).append(grp)
+        cons: dict = {}
+        top_parents = [r["etf"] for r in rows[:3] if r.get("rank")]
+        for parent in top_parents:
+            members: dict = {}
+            for grp in groups_by_parent.get(parent, []):
+                for t in SECTOR_CONSTITUENTS[grp]:
+                    o = _ohlcv(t)
+                    members[t] = {
+                        "closes": o.get("closes") or [],
+                        "highs": o.get("highs") or [],
+                        "volumes": o.get("volumes") or [],
+                        "opens": o.get("opens") or [],
+                    }
+            if members:
+                cons[parent] = members
+        if cons:
+            cs = constituent_screens(closes_map, cons, top_n=3)
+            lines.append("")
+            lines.append("### Constituent screens (breadth / EW-CW leadership / setups)")
+            for parent, blk in cs.items():
+                b = blk["breadth"]
+                lr = blk["leadership"]
+                lines.append(
+                    f"- {parent}: breadth {b.get('pct') if b.get('pct') is not None else 'n/a'}% "
+                    f"({b.get('above', 0)}/{b.get('n', 0)} above 50d SMA) | EW/CW "
+                    f"{lr if lr is not None else 'n/a'} (cw) "
+                    f"{'narrow mega-cap rally' if lr is not None and lr < 0.95 else ('broadening participation' if lr is not None else '')}"
+                )
+                for row in blk["setups"]:
+                    a, bb = row["setup_a"], row["setup_b"]
+                    a_state = (a or {}).get("state", "none")
+                    b_state = (bb or {}).get("state", "none")
+                    hits = []
+                    if a_state in ("fire", "ready"):
+                        hits.append(f"A:{a_state}")
+                    if b_state == "fired":
+                        hits.append("B:fired")
+                    lines.append(f"  {row['ticker']}: " + (", ".join(hits) if hits else "no setup"))
+    lines.append("")
+    lines.append("Advisory — sector rotation screen, not a gate. Everything "
+                 "None-safe (n/a = data unavailable, never fabricated); "
+                 "the risk governor / regime gate stay authoritative.")
+    return "\n".join(lines)
+
+
+@tool
 def get_strategy_quality(
     ticker: Annotated[str, "ticker symbol"],
     returns: Annotated[
@@ -6705,6 +6836,7 @@ def get_universe_membership(
 
 __all__ = [
     "get_sector_rank",
+    "get_sector_rotation_screen",
     "get_cycle_tilt",
     "get_taylor_read",
     "get_option_breakeven",

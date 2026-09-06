@@ -75,6 +75,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_scaleout_plan,
     get_scenario_dcf,
     get_sector_rank,
+    get_sector_rotation_screen,
     get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
@@ -167,6 +168,7 @@ def create_market_analyst(llm):
             get_volatility_contraction,
             get_orderflow_read,
             get_sector_rank,
+            get_sector_rotation_screen,
             get_cycle_tilt,
             get_session_discipline,
             get_news_sentiment_series,
@@ -289,6 +291,7 @@ You also have decision-grounding tools:
 - get_regime_components(ticker) - drill into why the regime label says what it does: vol_pct, trend strength, choppiness, label. Use before any regime claim, alongside get_regime_read.
 - get_exit_check(entry, close, atr, ...) - the deterministic stop-to-breakeven, ATR target, and holding action (stop/target/hold) for a held long. Use its numbers, not a guessed stop, when proposing an exit or a stop/target level.
 - get_momentum_detail(ticker) - exact momentum microstructure (pillars, rvol, vwap, ema9, first-pullback) for a day-trade pre-filter. Use before any momentum/pullback claim.
+- get_sector_rotation_screen(enable_breadth?, top_n?) - the sector rotation SCREEN: regime cap + multi-factor SPDR rank (momentum/RS/trend/risk) + RRG quadrant + pullback-divergence leader flags + dispersion trend, and (with breadth on) constituent breadth / EW-CW leadership / Setup A-B states. Use it before any 'sector is rotating / leadership shifting / early rotation' claim - a sector-first screen, advisory, never a gate.
 - get_sector_rank(ticker) - the 11-SPDR sector momentum ranking (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_dupont_read(net_margin, asset_turnover, equity_multiplier, tax_burden?, interest_burden?) - the DuPont ROE decomposition (why ROE is high: margin vs turnover vs leverage; leverage-led is lower quality).
 - get_scenario_dcf(fcf, wacc, shares?, cash?, debt?, g_base?, g_bear?, g_bull?) - a bear/base/bull DCF value range; use before any 'intrinsic value is X' claim.

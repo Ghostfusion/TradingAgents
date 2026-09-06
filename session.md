@@ -53,6 +53,13 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector rotation screen (2026-09-06)**: P1-P4 built -
+  `sector_screener.py` (regime cap, multifactor rank reuse, quadrant,
+  pullback divergence, dispersion, breadth/EW-CW/Setup A-Bs),
+  `get_sector_rotation_screen` wired to market analyst + gate green;
+  P4 `validate_sector_rotation.py`: with-cost rotation 0.655 Sharpe vs
+  equal-weight 1.10 -> **context-only, no performance claim** (design rule).
+  LLM-facing only.
 - **Wiring audit (2026-09-06)**: ran an AST-based prompt-coverage audit -
   every analyst-bound `@tool` must be mentioned in that analyst's
   `system_message`. Found + closed 28 real gaps (6 fundamentals, 16 market,

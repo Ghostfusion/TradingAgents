@@ -51,6 +51,15 @@ Breaking changes within the 0.x line are called out explicitly.
   cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
 ### Added
+- **Sector rotation screen (P1-P4, design doc)**: new
+  `strategies/sector_screener.py` + `get_sector_rotation_screen` tool (market
+  analyst): regime (SPY>SMA200+slope) grade cap + multi-factor SPDR rank
+  (momentum/RS/trend/risk reusing sector_rank) + RRG quadrant +
+  pullback-divergence leader flags + dispersion trend; constituent
+  breadth/EW-CW/Setup-A-B behind enable_sector_breadth; P4
+  scripts/validate_sector_rotation.py after-cost gate (with-cost rotation
+  Sharpe 0.655/IR 1.05 < equal-weight 1.10/1.40 -> screen is context-only,
+  no outperformance claim). LLM-facing only (web untouched by design rule).
 - **Industry-depth tools (spec rec 1-2)**: `get_edgar_fulltext_search(query,
   forms?, date_range?)` - SEC EDGAR full-text search (efts.sec.gov, keyless):
   fetch the 10-K customer/supplier-concentration footnote ('major customer'),
