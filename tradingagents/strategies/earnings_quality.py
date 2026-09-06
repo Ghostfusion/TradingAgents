@@ -91,4 +91,60 @@ def earnings_quality_verdict(
     }
 
 
-__all__ = ["earnings_quality_verdict"]
+def dechow_dichev_aq(accruals: list, cfo: list) -> float | None:
+    """Dechow-Dichev accrual quality = residual std of the regression of
+    working-capital accruals on cash from operations lagged/current/lead.
+
+    Regresses ``accruals_t`` on ``[cfo_{t-1}, cfo_t, cfo_{t+1}]`` (OLS) and
+    returns the residual standard deviation (smaller = better accrual quality
+    — accruals map into cash flow). Requires >= 6 aligned periods (enough
+    residual degrees of freedom); None otherwise / zero-variance regressor.
+    The accrual series is centered first (the classical DD uses period t
+    working-capital accruals; a mean-shift is immaterial to the residual std).
+    """
+    a = [float(x) for x in (accruals or []) if x is not None]
+    c = [float(x) for x in (cfo or []) if x is not None]
+    n = min(len(a), len(c))
+    if n < 6:
+        return None
+    # build aligned regressor rows: [cfo_{t-1}, cfo_t, cfo_{t+1}]
+    rows = []
+    y = []
+    for i in range(1, n - 1):
+        rows.append([c[i - 1], c[i], c[i + 1]])
+        y.append(a[i])
+    if len(rows) < 6:
+        return None
+    # OLS via normal equations
+    X = [[1.0] + r for r in rows]
+    k = len(X[0])
+    m = len(X)
+    XtX = [[sum(X[t][i] * X[t][j] for t in range(m)) for j in range(k)] for i in range(k)]
+    Xty = [sum(X[t][i] * y[t] for t in range(m)) for i in range(k)]
+    try:
+        # Gaussian elimination
+        aug = [row[:] + [Xty[i]] for i, row in enumerate(XtX)]
+        nk = k
+        for col in range(nk):
+            pivot = max(range(col, nk), key=lambda r: abs(aug[r][col]))
+            aug[col], aug[pivot] = aug[pivot], aug[col]
+            pv = aug[col][col]
+            if abs(pv) < 1e-12:
+                return None
+            aug[col] = [v / pv for v in aug[col]]
+            for r in range(nk):
+                if r != col and abs(aug[r][col]) > 1e-15:
+                    f = aug[r][col]
+                    aug[r] = [aug[r][j] - f * aug[col][j] for j in range(nk + 1)]
+        beta = [aug[i][nk] for i in range(nk)]
+    except (ZeroDivisionError, ValueError):
+        return None
+    resid = [y[i] - sum(beta[j] * X[i][j] for j in range(k)) for i in range(m)]
+    rss = sum(rr * rr for rr in resid)
+    dof = m - k
+    if dof <= 0:
+        return None
+    return round((rss / dof) ** 0.5, 6)
+
+
+__all__ = ["earnings_quality_verdict", "dechow_dichev_aq"]

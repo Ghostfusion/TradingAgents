@@ -179,5 +179,53 @@ def downside_measures(returns: list, target: float = 0.0) -> dict:
     return out
 
 
+def lower_partial_moment(returns: list, target: float = 0.0,
+                         order: float = 2.0) -> float | None:
+    """LPM of order ``l`` about a target (MAR): mean of max(target - R, 0)^l.
+
+    l=2 specializes to downside deviation (squared); l=1 to average shortfall;
+    higher l penalizes deep shortfalls more heavily. None on empty/None inputs.
+    """
+    vals = [float(r) for r in returns if r is not None]
+    if not vals:
+        return None
+    tgt = float(target)
+    order_f = float(order)
+    below = [max(tgt - v, 0.0) for v in vals]
+    if not below:
+        return 0.0
+    return (sum(x ** order_f for x in below) / len(below)) ** (1.0 / order_f)
+
+
+def kappa_ratio(returns: list, mar: float = 0.0, order: float = 2.0) -> float | None:
+    """Kappa ratio = (r_mean - MAR) / LPM_l(returns, MAR) — downside-adjusted
+    return generalizing Sortino (l=2). Higher = better return per unit of
+    downside shortfall. None when LPM is 0 (no shortfalls) or no data.
+    """
+    vals = [float(r) for r in returns if r is not None]
+    if not vals:
+        return None
+    lpm = lower_partial_moment(vals, float(mar), float(order))
+    if lpm is None or lpm == 0:
+        return None
+    mean = sum(vals) / len(vals)
+    return (mean - float(mar)) / lpm
+
+
+def gain_to_pain(returns: list) -> float | None:
+    """Gain-to-pain ratio = sum(positive returns) / |sum(negative returns)|.
+    None on no negative returns (infinite pain) or empty input — a lossless
+    series has no meaningful ratio (report as None, not inf)."""
+    vals = [float(r) for r in returns if r is not None]
+    if not vals:
+        return None
+    gains = sum(v for v in vals if v > 0)
+    pain = abs(sum(v for v in vals if v < 0))
+    if pain == 0:
+        return None
+    return gains / pain
+
+
 __all__ = ["discount_factor", "compound_factor", "equivalent_rate",
-           "forward_rate", "monotone_fill", "downside_measures"]
+           "forward_rate", "monotone_fill", "downside_measures",
+           "lower_partial_moment", "kappa_ratio", "gain_to_pain"]

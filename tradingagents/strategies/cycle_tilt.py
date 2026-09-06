@@ -79,4 +79,69 @@ def cycle_tilt(pmi: float | None, spread10_2: float | None, hy_spread: float | N
     }
 
 
-__all__ = ["cycle_phase", "cycle_tilt", "TILT_MAP"]
+
+
+# ---------------------------------------------------------------------------
+# Taylor-rule implied policy rate (P5, advisory macro stance)
+# ---------------------------------------------------------------------------
+
+
+def taylor_rule(
+    policy_rate, inflation, output_gap=None,
+    r_star=0.005, inflation_target=0.02,
+    inflation_weight=0.5, output_weight=0.5,
+):
+    """Classic Taylor (1993) rule implied nominal policy rate.
+
+    i = r* + pi + w_pi*(pi - pi*) + w_y*(y - y*) with r* neutral real rate
+    (0.5%), pi inflation, pi* target (2%), y-y* output gap (default 0).
+    Returns the implied nominal policy rate (fraction) or None on missing
+    policy_rate/inflation.
+    """
+    try:
+        float(policy_rate)
+        infl = float(inflation)
+        og = float(output_gap) if output_gap is not None else 0.0
+        rs = float(r_star)
+        pt = float(inflation_target)
+        iw = float(inflation_weight)
+        ow = float(output_weight)
+    except (TypeError, ValueError):
+        return None
+    return rs + infl + iw * (infl - pt) + ow * og
+
+
+def taylor_deviation(policy_rate, implied_rate):
+    """Actual policy rate minus the Taylor-rule implied rate. Positive =
+    policy tighter than the rule (restrictive); negative = looser. None when
+    either input missing."""
+    if policy_rate is None or implied_rate is None:
+        return None
+    try:
+        return float(policy_rate) - float(implied_rate)
+    except (TypeError, ValueError):
+        return None
+
+
+def macro_stance(pmi, spread10_2, hy_spread, policy_rate, inflation,
+                 output_gap=None):
+    """Combined advisory macro read: cycle phase + Taylor stance + deviation.
+
+    Returns {'phase', 'taylor_implied', 'deviation', 'stance', 'tilt'};
+    stance = tight/easy/neutral (None when unmeasurable). Missing inputs
+    degrade to None. Advisory, never a gate."""
+    phase = cycle_phase(pmi, spread10_2, hy_spread)
+    implied = taylor_rule(policy_rate, inflation, output_gap)
+    dev = taylor_deviation(policy_rate, implied)
+    stance = None
+    if dev is not None:
+        stance = "tight" if dev > 0.005 else "easy" if dev < -0.005 else "neutral"
+    return {
+        "phase": phase,
+        "taylor_implied": round(implied, 4) if implied is not None else None,
+        "deviation": round(dev, 4) if dev is not None else None,
+        "stance": stance,
+        "tilt": list(TILT_MAP[phase]) if phase else [],
+    }
+
+__all__ = ["cycle_phase", "cycle_tilt", "TILT_MAP", "taylor_rule", "taylor_deviation", "macro_stance"]

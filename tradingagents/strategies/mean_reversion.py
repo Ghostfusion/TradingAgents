@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 
-__all__ = ["ar1_half_life", "ou_half_life", "hurst_exponent", "mean_reversion_verdict"]
+__all__ = ["ar1_half_life", "ou_half_life", "hurst_exponent", "mean_reversion_verdict", "variance_ratio"]
 
 
 def _clean(series) -> list[float]:
@@ -211,3 +211,43 @@ def mean_reversion_verdict(
     )
     verdict = "mean-reverting" if hl is not None else "trending"
     return {"verdict": verdict, "half_life": hl, "phi": round(phi, 4), "n": n}
+
+
+def variance_ratio(series: list, k: int = 5, min_obs: int = 60) -> dict | None:
+    """Lo-MacKinlay variance ratio VR(k) with the heteroskedasticity-robust
+    z-stat. VR = Var(r^(k)) / (k * Var(r^(1))); VR > 1 = positive serial
+    correlation (momentum), VR < 1 = mean reversion, VR ~ 1 = random walk.
+
+    Returns ``{'vr', 'z', 'k', 'n'}``; ``z`` uses the Lo-MacKinlay
+    overlapping estimator (robust to heteroskedasticity). None when the
+    series is too short / zero variance.
+    """
+    vals = _clean(series)
+    n = len(vals)
+    if n < min_obs or k < 2 or k >= n:
+        return None
+    # single-period variance (overlapping)
+    mu = sum(vals) / n
+    var1 = sum((v - mu) ** 2 for v in vals) / (n - 1)
+    if var1 <= 1e-12:
+        return None
+    # k-period overlapping returns: r_t + ... + r_{t+k-1}
+    krets = [sum(vals[t:t + k]) for t in range(n - k + 1)]
+    mu_k = sum(krets) / len(krets)
+    var_k = sum((r - mu_k) ** 2 for r in krets) / (len(krets) - 1)
+    vr = var_k / (k * var1)
+    # Lo-MacKinlay heteroskedasticity-robust standard error (overlapping).
+    # delta_j = sum_{t=j+1}^n (r_t - mu)^2 (r_{t-j} - mu)^2 / (sum ...)^2
+    num = 0.0
+    for j in range(1, k):
+        num += (1.0 - j / k) ** 2 * sum(
+            (vals[t] - mu) ** 2 * (vals[t - j] - mu) ** 2
+            for t in range(j, n)
+        )
+    den = sum((v - mu) ** 2 for v in vals) ** 2
+    if den <= 1e-12:
+        return None
+    theta = num / den * 2.0
+    z = (vr - 1.0) / (theta ** 0.5) if theta > 0 else None
+    return {"vr": round(vr, 4), "z": round(z, 3) if z is not None else None,
+            "k": k, "n": n}

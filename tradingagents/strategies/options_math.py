@@ -32,15 +32,16 @@ def black76(forward: float, strike: float, t: float, vol: float,
 
     ``forward`` is the discounted underlying forward (F = S * e^((r-q)t); the
     caller passes F directly). Returns ``{'price', 'delta', 'gamma', 'vega',
-    'theta'}`` (per unit; theta annualized, in price units per year) or a
-    dict of ``None`` values when inputs are unusable.
+    'theta', 'rho', 'vanna', 'vomma', 'charm', 'speed', 'zomma'}`` (per unit;
+    theta annualized, in price units per year; speed/zomma are the third-order
+    gamma derivatives) or a dict of ``None`` values when inputs are unusable.
     """
     if (forward is None or strike is None or t is None or vol is None
             or float(forward) <= 0 or float(strike) <= 0 or float(t) <= 0
             or float(vol) <= 0):
         return {"price": None, "delta": None, "gamma": None, "vega": None,
                 "theta": None, "rho": None, "vanna": None, "vomma": None,
-                "charm": None}
+                "charm": None, "speed": None, "zomma": None}
     F = float(forward)
     K = float(strike)
     T = float(t)
@@ -49,7 +50,7 @@ def black76(forward: float, strike: float, t: float, vol: float,
     if T <= 0 or sig <= 0:
         return {"price": None, "delta": None, "gamma": None, "vega": None,
                 "theta": None, "rho": None, "vanna": None, "vomma": None,
-                "charm": None}
+                "charm": None, "speed": None, "zomma": None}
     d1 = (math.log(F / K) + 0.5 * sig * sig * T) / (sig * math.sqrt(T))
     d2 = d1 - sig * math.sqrt(T)
     disc = math.exp(-float(r) * T) if r else 1.0
@@ -72,6 +73,14 @@ def black76(forward: float, strike: float, t: float, vol: float,
     # Forward (Black-76) convention: r enters only through the discount, so
     # the (r - q) alpha term of the BSM charm vanishes.
     charm = disc * _npdf(d1) * d2 / (2.0 * T) if T > 0 else None
+    # Third-order Greeks (Black-76, forward substitution S->F): speed
+    # (dGamma/dS, gamma-of-gamma) and zomma (dGamma/dSigma, gamma stability
+    # across vol regimes). Standard closed forms; None when the underlying
+    # gamma leg is unusable.
+    speed = None
+    if gamma is not None and sig > 0 and T > 0 and F > 0:
+        speed = -gamma * (1.0 + d1 / (sig * math.sqrt(T))) / F
+    zomma = gamma * (d1 * d2 - 1.0) / sig if (gamma is not None and sig > 0) else None
     return {
         "price": price,
         "delta": delta,
@@ -82,6 +91,8 @@ def black76(forward: float, strike: float, t: float, vol: float,
         "vanna": vanna,
         "vomma": vomma,
         "charm": charm,
+        "speed": speed,
+        "zomma": zomma,
     }
 
 

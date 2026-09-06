@@ -115,6 +115,87 @@ def position_size_with_risk(
     return max(0.0, min(kelly_part, risk_part, cap))
 
 
+def modified_var(returns: list[float], alpha: float = 0.05,
+                 periods_per_year: float = 252.0) -> float | None:
+    """Cornish-Fisher modified VaR (skewness/kurtosis-adjusted quantile).
+
+    z_CF = z + (z^2 - 1)*S/6 + (z^3 - 3z)*K/24 - (2z^3 - 5z)*S^2/36; VaR =
+    -(mu + z_CF * sigma) over the horizon. More accurate than Gaussian VaR for
+    skewed/leptokurtic returns (the standard practice between historical and
+    EVT VaR). Returns a positive loss magnitude (None on <5 obs / zero sigma).
+    """
+    vals = [float(r) for r in returns if r is not None]
+    if len(vals) < 5:
+        return None
+    from tradingagents.strategies.evaluate import kurtosis, skewness
+
+    mu = sum(vals) / len(vals)
+    var = sum((v - mu) ** 2 for v in vals) / (len(vals) - 1)
+    sig = var ** 0.5
+    if sig <= 0:
+        return None
+    from statistics import NormalDist
+
+    z = NormalDist().inv_cdf(float(alpha))
+    s = skewness(vals) or 0.0
+    k = kurtosis(vals) or 0.0
+    z_cf = z + (z * z - 1.0) * s / 6.0 + (z * z * z - 3.0 * z) * k / 24.0 \
+        - (2.0 * z * z * z - 5.0 * z) * s * s / 36.0
+    return -(mu + z_cf * sig)
+
+
+def risk_of_ruin(p_win: float, payoff: float, fraction: float) -> float | None:
+    """Approximate fixed-fraction risk of ruin (survival constraint).
+
+    Ruin = falling to zero after repeated trades at a fixed fraction of
+    capital. Uses the biased-random-walk approximation: with per-trade log
+    growth ``g = p*ln(1+f*b) + (1-p)*ln(1-f)`` and per-trade log variance
+    ``v = p*ln(1+f*b)^2 + (1-p)*ln(1-f)^2 - g^2``, the infinite-horizon ruin
+    probability from unit bankroll is ``min(exp(-2g/v), 1)`` for a positive
+    edge, and ~1 for a negative edge (eventual ruin). This is the survival
+    constraint fractional Kelly ignores. None when inputs unusable.
+    """
+    try:
+        p = float(p_win)
+        b = float(payoff)
+        f = float(fraction)
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 < p < 1.0) or b <= 0 or f <= 0 or f >= 1.0:
+        return None
+    import math
+
+    l1 = math.log(1.0 + f * b)
+    l2 = math.log(1.0 - f)
+    g = p * l1 + (1.0 - p) * l2
+    if g < 0:
+        # Negative expected log growth -> ruin is (asymptotically) certain.
+        return 1.0
+    v = p * l1 * l1 + (1.0 - p) * l2 * l2 - g * g
+    if v <= 0:
+        return 0.0
+    return min(math.exp(-2.0 * g / v), 1.0)
+
+
+def optimal_f(returns: list[float], fracs: int = 80) -> float | None:
+    """Vince optimal f: the fixed fraction maximizing geometric growth
+    (max of prod(1 + f*r_i) over a grid). Advisory sizing input — combine with
+    fractional-Kelly discipline; never used directly as a live size.
+    """
+    vals = [float(r) for r in returns if r is not None]
+    if len(vals) < 5 or any(v <= -1.0 for v in vals):
+        return None
+    best_f, best_g = 0.0, -1.0
+    for i in range(1, fracs + 1):
+        f = i / float(fracs)
+        g = 1.0
+        for v in vals:
+            g *= (1.0 + f * v)
+        if g > best_g:
+            best_g, best_f = g, f
+    return best_f
+
+
 __all__ = [
     "kelly_fraction",
     "position_size_kelly",
@@ -123,4 +204,7 @@ __all__ = [
     "stop_loss_atr",
     "cvar_budget",
     "position_size_with_risk",
+    "modified_var",
+    "risk_of_ruin",
+    "optimal_f",
 ]

@@ -54,6 +54,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_orderflow_read,
     get_output_budget,
     get_pair_trade_signal,
+    get_parity_screen,
     get_payoff_asymmetry,
     get_position_risk_multiplier,
     get_position_sizing,
@@ -73,6 +74,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_sentiment_computed,
     get_sentiment_lead_lag,
     get_session_discipline,
+    get_shift_detection,
     get_short_interest,
     get_short_volume,
     get_skill_read,
@@ -96,6 +98,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_variance_premium,
     get_vdu_entry_setup,
     get_verified_market_snapshot,
+    get_vol_surface_shape,
     get_volatility_contraction,
     get_volatility_estimators,
 )
@@ -123,6 +126,8 @@ def create_market_analyst(llm):
             get_option_breakeven,
             get_options_chain,
             get_gamma_profile,
+            get_vol_surface_shape,
+            get_parity_screen,
             get_derivatives_flow,
             get_opex_read,
             get_short_interest,
@@ -147,6 +152,7 @@ def create_market_analyst(llm):
             get_position_risk_multiplier,
             get_risk_gate,
             get_regime_read,
+            get_shift_detection,
             get_regime_components,
             get_regime_state,
             get_exit_check,
@@ -282,7 +288,9 @@ You also have decision-grounding tools:
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_option_breakeven(long_strike, long_premium, short_strike?, spot?, short_ttm_days?, delta?, days_to_earnings?, days_to_ex_div?) - the option-position breakeven + PMCC discipline read. Use it before any 'breakeven / the sold call sits above cost / option-rent' claim.
 - get_gamma_profile(ticker) - the dealer-gamma regime (short = momentum/cascade, long = mean-reversion) + call/put walls from the options chain. Use it before any 'options flow / structural wall / pinning' claim — advisory market-structure context, never a price law.
-- get_opex_read(current_date) / get_derivatives_flow(ticker, current_date) - option-expiry calendar context (OPEX week, post-OPEX unwind) and the combined gamma + OPEX + IV read. Use before any 'pinned into expiry / OPEX-driven / expiration-effect' claim. (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
+- get_opex_read(current_date) / get_derivatives_flow(ticker, current_date) - option-expiry calendar context (OPEX week, post-OPEX unwind) and the combined gamma + OPEX + IV read. Use before any 'pinned into expiry / OPEX-driven / expiration-effect' claim.
+- get_vol_surface_shape(ticker) - 25-delta risk reversal (skew direction: negative = puts rich), 25-delta butterfly (smile curvature), and term-structure slope (long vs short-dated ATM IV). Use before any 'the vol curve is steep / skew is rich / wings are expensive' claim.
+- get_parity_screen(ticker, cost_bps=...) - put-call parity / conversion-reversal only screen across the chain. Use before any 'options are mispriced / an arbitrage exists' claim; a flag is a screen, not a trade. (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.

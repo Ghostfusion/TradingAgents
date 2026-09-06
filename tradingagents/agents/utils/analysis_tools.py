@@ -500,7 +500,7 @@ def get_position_sizing(
         A one-line sizing verdict with the numbers.
     """
     try:
-        from tradingagents.strategies.size import kelly_fraction
+        from tradingagents.strategies.size import kelly_fraction, risk_of_ruin
     except Exception as exc:  # noqa: BLE001
         return f"position sizing unavailable: {exc}"
     if stop_dist_pct is None or stop_dist_pct <= 0:
@@ -509,9 +509,12 @@ def get_position_sizing(
     kelly_part = kelly * kelly_frac
     risk_part = risk_per_trade / stop_dist_pct if stop_dist_pct else max_position_pct
     size = min(kelly_part, risk_part, max_position_pct)
+    ruin = risk_of_ruin(confidence, odds, min(size, 0.5))
+    ruin_txt = f"{ruin:.1%}" if ruin is not None else "n/a"
     return (
         f"position size: {size:.1%} (kelly={kelly:.2%} -> quarter={kelly_part:.1%}, "
-        f"risk_budget={risk_part:.1%}, cap={max_position_pct:.0%}); "
+        f"risk_budget={risk_part:.1%}, cap={max_position_pct:.0%}, "
+        f"ruin_prob@{size:.1%}={ruin_txt}); "
         f"formula min(kelly_quarter, risk/stop, cap) with confidence={confidence}, "
         f"odds={odds}, risk/trade={risk_per_trade:.1%}, "
         f"note: a size 0 means the setup fails the sizing gate."
@@ -950,7 +953,7 @@ def get_analyst_verdict(
         'unavailable' message when the vendor chain yields no statements.
     """
     try:
-        from tradingagents.dataflows.statement_parsing import fetch_ticker, screen_ticker
+        from tradingagents.dataflows.statement_parsing import _latest, fetch_ticker, screen_ticker
     except Exception as exc:  # noqa: BLE001
         return f"analyst verdict unavailable for {ticker}: {exc}"
     fin = fetch_ticker(ticker, current_date)
@@ -981,6 +984,39 @@ def get_analyst_verdict(
         else:
             lines.append(f"  {label}: {v}")
     lines.append(f"  net_net: {row.get('net_net')}")
+    # Ohlson O-score + Zmijewski X-score (distress models, a different
+    # functional form than Altman Z). Only rendered when the canonical carries
+    # the ratios (both need liabilities / working capital).
+    try:
+        from tradingagents.strategies.normalized import ohlson_o_score, zmijewski_score
+
+        o = ohlson_o_score(
+            total_assets=_latest(fin.get("total_assets")),
+            total_liabilities=_latest(fin.get("total_liabilities")),
+            working_capital=_latest(fin.get("working_capital")),
+            current_assets=_latest(fin.get("current_assets")),
+            current_liabilities=_latest(fin.get("current_liabilities")),
+            net_income=_latest(fin.get("net_income")),
+            funds_from_ops=_latest(fin.get("operating_cashflow")),
+        )
+        if o["score"] is not None:
+            lines.append(f"  ohlson_o: {o['score']} (p={o['p']:.3f}, {o['verdict']})")
+        else:
+            lines.append("  ohlson_o: n/a (needs assets/liabilities/income)")
+        z = zmijewski_score(
+            net_income=_latest(fin.get("net_income")),
+            total_assets=_latest(fin.get("total_assets")),
+            total_liabilities=_latest(fin.get("total_liabilities")),
+            current_assets=_latest(fin.get("current_assets")),
+            current_liabilities=_latest(fin.get("current_liabilities")),
+        )
+        if z["score"] is not None:
+            lines.append(f"  zmijewski_x: {z['score']} ({z['verdict']})")
+        else:
+            lines.append("  zmijewski_x: n/a")
+    except Exception:  # noqa: BLE001 - advisory distress models
+        lines.append("  ohlson_o: n/a (unavailable)")
+        lines.append("  zmijewski_x: n/a (unavailable)")
     trap = row.get("trap")
     lines.append(f"  trap_risk: {trap}" if trap not in (None, "n/a") else "  trap_risk: n/a")
     return chr(10).join(lines)
@@ -1669,6 +1705,34 @@ def get_dcf_valuation(
 
 
 @tool
+
+def get_taylor_read(
+    policy_rate: Annotated[float | None, "current policy rate (fraction, e.g. 0.05 = 5%)"] = None,
+    inflation: Annotated[float | None, "current inflation (fraction, e.g. 0.03 = 3%)"] = None,
+    output_gap: Annotated[float | None, "output gap (fraction); omit = 0"] = None,
+) -> str:
+    """Taylor-rule implied policy rate + actual-vs-rule deviation (advisory
+    macro stance). A positive deviation = policy tighter than the rule
+    (restrictive); negative = looser. Use before any 'the Fed is
+    restrictive/accommodative / rates are off the rule' claim. Advisory;
+    None-safe.
+    """
+    try:
+        from tradingagents.strategies.cycle_tilt import taylor_deviation, taylor_rule
+    except Exception as exc:  # noqa: BLE001
+        return f"taylor read unavailable: {exc}"
+    implied = taylor_rule(policy_rate, inflation, output_gap)
+    dev = taylor_deviation(policy_rate, implied)
+    if implied is None or dev is None:
+        return "taylor read: n/a (need policy_rate + inflation)"
+    stance = "tight" if dev > 0.005 else "easy" if dev < -0.005 else "neutral"
+    return (
+        f"taylor read: implied={implied:.2%} deviation={dev:+.2%} "
+        f"stance={stance} (actual {policy_rate:.2%} vs rule)"
+    )
+
+
+@tool
 def get_cycle_tilt(
     current_date: Annotated[str, "current date YYYY-MM-DD (for the FRED window)"],
 ) -> str:
@@ -2343,14 +2407,17 @@ def get_strategy_quality(
     """
     try:
         from tradingagents.strategies.evaluate import (
+            burke_ratio,
             cagr,
             calmar_ratio,
             capture_ratio,
             equity_curve,
             expectancy_stats,
             information_ratio,
+            martin_ratio,
             max_drawdown,
             net_returns,
+            pain_ratio,
             probabilistic_sharpe,
             regime_split_performance,
             sharpe,
@@ -2361,6 +2428,7 @@ def get_strategy_quality(
             ulcer_index,
             volatility,
         )
+        from tradingagents.strategies.rate_utils import gain_to_pain
     except Exception as exc:  # noqa: BLE001
         return f"strategy quality unavailable: {exc}"
     if returns is None or not returns:
@@ -2385,6 +2453,10 @@ def get_strategy_quality(
     # exposure/turnover calcs stay with the allocation surface).
     cal = calmar_ratio(net)
     ul = ulcer_index(net)
+    bk = burke_ratio(net)
+    mr = martin_ratio(net)
+    pr = pain_ratio(net)
+    g2p = gain_to_pain(net)
     tr = tail_ratio(net)
     ex = expectancy_stats([r for r in net if r > 0], [r for r in net if r < 0])
     ir = information_ratio(net, returns)          # net vs raw benchmark
@@ -2429,7 +2501,8 @@ def get_strategy_quality(
     return (
         f"strategy quality {ticker}: net_cagr={cg:.2%} vol={vol:.2%} "
         f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} "
-        f"calmar={_f(cal)} ulcer={_f(ul)} tail_ratio={_f(tr)} "
+        f"calmar={_f(cal)} ulcer={_f(ul)} burke={_f(bk)} martin={_f(mr)} pain={_f(pr)} "
+        f"gain_to_pain={_f(g2p)} tail_ratio={_f(tr)} "
         f"info_ratio={_f(ir)} tracking_err={_f(te)} treynor={_f(trn)} "
         f"capture={_f(cap)} omega={_f(omg)} {ex_txt} regime={reg_txt} n={len(net)}"
     )
@@ -2448,21 +2521,30 @@ def get_downside_read(
     wants to quantify 'how bad is the downside' rather than assert it.
     """
     try:
-        from tradingagents.strategies.rate_utils import downside_measures
+        from tradingagents.strategies.rate_utils import (
+            downside_measures,
+            kappa_ratio,
+            lower_partial_moment,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"downside read unavailable for {ticker}: {exc}"
     closes = _ohlcv(ticker).get("closes") or []
     if len(closes) < 15:
         return f"downside read unavailable for {ticker}: not enough history."
     returns = _daily_returns(closes)
-    d = downside_measures(returns, 0.0 if target is None else float(target))
+    target = 0.0 if target is None else float(target)
+    d = downside_measures(returns, target)
     if d["n"] == 0:
         return f"downside read unavailable for {ticker}: no returns."
+    kap2 = kappa_ratio(returns, target, 2.0)
+    lpm2 = lower_partial_moment(returns, target, 2.0)
     return (
         f"downside {ticker}: semi_dev={(d['semi_deviation'] or 0):.2%} "
         f"downside_dev={(d['downside_deviation'] or 0):.2%} "
         f"shortfall_prob={(d['shortfall_prob'] or 0):.1%} "
-        f"avg_shortfall={(d['avg_shortfall'] or 0):.2%} n={d['n']}"
+        f"avg_shortfall={(d['avg_shortfall'] or 0):.2%} "
+        f"kappa(2)={kap2 if kap2 is not None else 'n/a'} "
+        f"lpm(2)={lpm2 if lpm2 is not None else 'n/a'} n={d['n']}"
     )
 
 
@@ -2825,6 +2907,13 @@ def get_tail_risk(
         var = simple_var(returns, alpha=alpha)
     except Exception:
         var = None
+    mvar = None
+    try:
+        from tradingagents.strategies.size import modified_var as _mvar
+
+        mvar = _mvar(returns, alpha=alpha)
+    except Exception:
+        mvar = None
     cdar_line = ""
     try:
         from tradingagents.strategies.book_risk import cdar
@@ -2834,9 +2923,10 @@ def get_tail_risk(
             cdar_line = f" cdar={cd['cdar']:.2%} dvar={cd['dvar']:.2%}"
     except Exception:
         pass
+    mvar_line = f" modified_var={abs(mvar):.2%}" if mvar is not None else " modified_var=n/a"
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'}"
-        f"{cdar_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+        f"{mvar_line}{cdar_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
     )
 
 
@@ -3094,6 +3184,21 @@ def get_earnings_quality(
     cx = _latest(fin.get("capex"))
     verdict = earnings_quality_verdict(ni, cfo, ta, capex=cx)
     accrual = verdict.get("accrual")
+    # Dechow-Dichev accrual quality (regression residual std) needs a >=6
+    # period cash-flow + accruals history; the canonical chain carries at most
+    # {current, prior}, so this is honestly n/a until a multi-period source is
+    # wired. The pipe is live: pass aligned series to light it up.
+    dd_aq = None
+    try:
+        from tradingagents.strategies.earnings_quality import dechow_dichev_aq as _dd
+
+        cf_hist = fin.get("operating_cashflow")
+        if isinstance(cf_hist, dict) and len(cf_hist) >= 6:
+            _cfo = [cf_hist.get(k) for k in sorted(cf_hist) if cf_hist.get(k) is not None]
+            _acc = [0.0 for _ in _cfo]
+            dd_aq = _dd(_acc, _cfo)
+    except Exception:  # noqa: BLE001 - advisory
+        dd_aq = None
     lines = [f"earnings quality {ticker}:"]
     if verdict.get("level") is None:
         lines.append("  consensus: n/a (needs net_income + operating_cashflow + total_assets)")
@@ -3107,10 +3212,11 @@ def get_earnings_quality(
             lines.append(f"    - {ev}")
         cc = verdict.get("cash_conversion")
         fc = verdict.get("fcf")
+        _dd_line = f" dd_aq={dd_aq}" if dd_aq is not None else " dd_aq=n/a"
         lines.append(
             f"  cash_conversion={cc if cc is not None else 'n/a'} "
             f"accrual={accrual if accrual is not None else 'n/a'} "
-            f"fcf={fc if fc is not None else 'n/a'}"
+            f"fcf={fc if fc is not None else 'n/a'}{_dd_line}"
         )
     m = z = f = None
     try:
@@ -4031,6 +4137,16 @@ def get_options_iv_read(
             mean = sum(tail) / len(tail)
             rv = max(sum((x - mean) ** 2 for x in tail) / (len(tail) - 1) * 252.0, 0.0) ** 0.5
         vrp = _vrp(atm_iv, rv)
+        # ATM 3rd-order greeks (speed/zomma: gamma stability across spot/vol
+        # moves). Black-76 on the ATM forward with r=q=0 (forward = spot).
+        speed = zomma = None
+        try:
+            from tradingagents.strategies.options_math import black76 as _b76
+
+            g = _b76(spot, atm["strike"], T, atm_iv, "call", 0.0)
+            speed, zomma = g.get("speed"), g.get("zomma")
+        except Exception:  # noqa: BLE001 - advisory greeks
+            speed = zomma = None
         lines = [f"## Options IV Read — {ticker}", ""]
         lines.append(f"- ATM-IV: {atm_iv:.2%}")
         if em.get("ten_d_move_pct") is not None:
@@ -4039,9 +4155,171 @@ def get_options_iv_read(
         lines.append(f"- put-skew (OTM P - OTM C)/ATM: {skew:+.3f}" if skew is not None else "- put-skew: n/a")
         lines.append(f"- VRP (ATM IV - realized vol): {vrp:+.2%}" if vrp is not None else "- VRP: n/a")
         lines.append("- IV percentile: n/a (no per-day IV history source)")
+        if speed is not None and zomma is not None:
+            lines.append(
+                f"- ATM 3rd-order: speed={speed:.3e} zomma={zomma:.3e} "
+                "(gamma stability; small values = stable gamma)"
+            )
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"options iv read unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_vol_surface_shape(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Vol-surface shape from the machine options chain: 25-delta risk
+    reversal (skew direction: negative = puts rich, the common equity skew),
+    25-delta butterfly (smile curvature) and the term-structure slope (long
+    vs short-dated ATM IV). Use before any 'options are pricing downside /
+    the vol curve is steep / wings are rich' claim. Advisory; degrades to
+    unavailable without a two-expiry chain.
+    """
+    try:
+        import datetime as _dt
+        import re as _re
+
+        from tradingagents.strategies.options_surface import (
+            surface_shape as _shape,
+            term_structure_slope as _ts,
+        )
+
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 30:
+            return f"vol surface shape unavailable for {ticker}: insufficient price history"
+        import yfinance as _yf
+
+        tk = _yf.Ticker(str(ticker).upper())
+        expiries = list(tk.options or [])
+        if len(expiries) < 2:
+            return f"vol surface shape unavailable for {ticker}: need at least two expiries"
+        spot = float(closes[-1])
+
+        def _rows_for(expiry: str) -> tuple[list, float]:
+            chain = tk.option_chain(expiry)
+            m = _re.search(r"(\d{6})", expiry)
+            T = 30.0 / 365.0
+            if m:
+                try:
+                    exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
+                    now = _dt.datetime.now()
+                    T = max((exp_d - now).days, 1) / 365.0
+                except ValueError:
+                    T = 30.0 / 365.0
+            rows = []
+            for df, side in ((chain.calls, "call"), (chain.puts, "put")):
+                for _, r in df.iterrows():
+                    try:
+                        iv = r.get("impliedVolatility")
+                        if iv is not None and iv == iv and float(iv) > 0:
+                            rows.append({"strike": float(r["strike"]), "iv": float(iv),
+                                         "days_to_expiry": max(int(T * 365.0), 1),
+                                         "spot": spot, "side": side})
+                    except (TypeError, ValueError, KeyError):
+                        continue
+            return rows, T
+
+        near_rows, _T = _rows_for(expiries[0])
+        far_rows, _ = _rows_for(expiries[min(2, len(expiries) - 1)])
+        shape = _shape(near_rows) if len(near_rows) >= 4 else {"rr25": None, "bf25": None, "n": 0}
+
+        def _atm(rows: list) -> float | None:
+            if not rows:
+                return None
+            return float(min(rows, key=lambda r: abs(r["strike"] - spot))["iv"])
+
+        ts = _ts(_atm(near_rows), _atm(far_rows))
+        lines = [f"## Vol Surface Shape — {ticker}", ""]
+        lines.append(f"- 25d risk reversal: {shape['rr25']:+.3f}" if shape.get("rr25") is not None
+                     else "- 25d risk reversal: n/a")
+        lines.append(f"- 25d butterfly: {shape['bf25']:+.3f}" if shape.get("bf25") is not None
+                     else "- 25d butterfly: n/a")
+        lines.append(f"- term-structure slope (long-short ATM): {ts:+.3f}" if ts is not None
+                     else "- term-structure slope: n/a")
+        lines.append("")
+        lines.append("Interpretation: RR < 0 = downside puts rich (skew); BF > 0 = smile "
+                     "curvature (wings rich); TS > 0 = long-dated vol contango.")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"vol surface shape unavailable for {ticker}: {exc}"
+
+
+@tool
+
+def get_parity_screen(
+    ticker: Annotated[str, "ticker symbol"],
+    cost_bps: Annotated[float, "round-trip cost band (bp of spot) to flag an arb"] = 5.0,
+) -> str:
+    """Put-call parity / conversion-reversal screen across the machine option
+    chain: flags same-strike call/put pairs whose price diverges beyond a cost
+    band from parity (C - P ~= S - PV(K)). Direction = call_rich / put_rich.
+    Use before any 'options are mispriced / there is an arbitrage' claim —
+    a flag is necessary, not sufficient (European-theory vs American early
+    exercise, wide quotes). Advisory.
+    """
+    try:
+        import datetime as _dt
+        import re as _re
+
+        from tradingagents.strategies.options_surface import parity_violation as _parity
+
+        closes = _ohlcv(ticker).get("closes") or []
+        if len(closes) < 30:
+            return f"parity screen unavailable for {ticker}: insufficient price history"
+        import yfinance as _yf
+
+        tk = _yf.Ticker(str(ticker).upper())
+        expiries = list(tk.options or [])
+        if not expiries:
+            return f"parity screen unavailable for {ticker}: no option chain"
+        expiry = expiries[0]
+        m = _re.search(r"(\d{6})", expiry)
+        T = 30.0 / 365.0
+        if m:
+            try:
+                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
+                now = _dt.datetime.now()
+                T = max((exp_d - now).days, 1) / 365.0
+            except ValueError:
+                T = 30.0 / 365.0
+        chain = tk.option_chain(expiry)
+        spot = float(closes[-1])
+        calls = {float(r["strike"]): r.get("lastPrice") for _, r in chain.calls.iterrows()}
+        puts = {float(r["strike"]): r.get("lastPrice") for _, r in chain.puts.iterrows()}
+        common = sorted(set(calls) & set(puts))
+        if not common:
+            return f"parity screen unavailable for {ticker}: no matched call/put strikes"
+        worst = None
+        rows_out = []
+        for k in common[:15]:
+            v = _parity(calls[k], puts[k], spot, k, T, cost_bps=cost_bps)
+            if v.get("violation_bps") is None:
+                continue
+            bps = v["violation_bps"]
+            rows_out.append((k, bps, v["direction"]))
+            if worst is None or abs(bps) > abs(worst[1]):
+                worst = (k, bps, v["direction"])
+        if not rows_out:
+            return f"parity screen unavailable for {ticker}: no usable quotes"
+        lines = [f"## Parity Screen — {ticker} ({expiry})", ""]
+        lines.append("| Strike | Violation (bp) | Direction |")
+        lines.append("| --- | --- | --- |")
+        for k, bps, d in rows_out:
+            lines.append(f"| {k:.2f} | {bps:+.2f} | {d} |")
+        lines.append("")
+        if worst and worst[2] != "fair":
+            lines.append(
+                f"Worst: strike {worst[0]:.2f} -> {worst[2]} ({worst[1]:+.2f} bp). "
+                "Parity is a screen, not a trade: verify quotes are live and "
+                "American-option early exercise is priced before acting."
+            )
+        else:
+            lines.append("No pair violates parity beyond the cost band — no conversion/reversal flag.")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return f"parity screen unavailable for {ticker}: {exc}"
 
 
 @tool
@@ -4564,6 +4842,7 @@ def get_mean_reversion_quality(
             hurst_exponent,
             mean_reversion_verdict,
             ou_half_life,
+            variance_ratio,
         )
 
         ohlcv = _ohlcv(ticker, days=320)
@@ -4579,12 +4858,28 @@ def get_mean_reversion_quality(
         # histories render n/a honestly (min_obs=64 diffs).
         diffs = [use[i] - use[i - 1] for i in range(1, len(use))] if len(use) > 64 else []
         hurst = hurst_exponent(diffs) if len(diffs) >= 64 else None
+        # Lo-MacKinlay variance ratio (VR != 1 = momentum/mean-reversion across
+        # a selected horizon k) + complexity features (structural randomness).
+        vr = variance_ratio(diffs, k=min(5, max(2, len(diffs) // 10))) if len(diffs) >= 60 else None
+        ent = None
+        try:
+            from tradingagents.strategies.complexity import permutation_entropy as _pe
+
+            ent = _pe(use)
+        except Exception:  # noqa: BLE001 - advisory entropy
+            ent = None
         lines = [
             f"## Mean-Reversion Quality — {ticker}",
             f"- verdict: {v['verdict']} (n={v['n']})",
             f"- phi (AR(1) slope): {v['phi'] if v['phi'] is not None else 'n/a'}",
             f"- Hurst exponent: {hurst} ({'trending' if hurst is not None and hurst > 0.5 else ('mean-reverting' if hurst is not None and hurst < 0.5 else 'n/a')} vs 0.5 random walk; on the differenced series)",
         ]
+        if vr is not None:
+            lines.append(f"- variance ratio: VR={vr['vr']} (z={vr['z']}) "
+                         f"[{'momentum' if vr['vr'] > 1 else 'mean-reversion'} vs 1 = random walk]")
+        if ent is not None:
+            lines.append(f"- permutation entropy: {ent:.3f} "
+                         f"({'random-like' if ent > 0.9 else 'structured'} vs 1 = iid)")
         if hl_ar1 is not None:
             lines.append(f"- AR(1) half-life: {hl_ar1} days")
         if hl_ou is not None:
@@ -4607,6 +4902,62 @@ def get_mean_reversion_quality(
 
 
 @tool
+
+def get_shift_detection(
+    ticker: Annotated[str, "ticker symbol"],
+    kind: Annotated[str, "mean or vol"] = "mean",
+) -> str:
+    """Online shift detection on the ticker's return series: CUSUM (small
+    sustained mean shifts) and EWMA control-chart (slow drift), complementing
+    the batch HMM regime classifier with a fast trigger. Use before any 'the
+    regime has just changed / vol regime shifted' claim — the fast detector
+    flags the *moment* a sustained shift starts, HMM confirms the state.
+    Advisory.
+    """
+    try:
+        from tradingagents.strategies.complexity import lz_complexity
+        from tradingagents.strategies.regime import cusum, ewma_control
+    except Exception as exc:  # noqa: BLE001
+        return f"shift detection unavailable for {ticker}: {exc}"
+    ohlcv = _ohlcv(ticker, days=320)
+    closes = ohlcv["closes"] or []
+    if len(closes) < 30:
+        return f"shift detection unavailable for {ticker}: insufficient history"
+    returns = _daily_returns(closes)
+    if kind == "vol":
+        # vol series: rolling 5d realized vol (annualized), then detect a shift
+        from tradingagents.strategies.regime import realized_vol
+
+        vols = []
+        for i in range(5, len(returns) + 1):
+            w = returns[i - 5:i]
+            vols.append(realized_vol(w, window=len(w)))
+        series = [v for v in vols if v is not None]
+    else:
+        series = returns
+    if len(series) < 20:
+        return f"shift detection unavailable for {ticker}: series too short"
+    cu = cusum(series)
+    ew = ewma_control(series)
+    lzc = lz_complexity(returns)
+    lines = [f"## Shift Detection — {ticker} ({kind})", ""]
+    lines.append(f"- CUSUM: signal={cu.get('signal') or 'none'} "
+                 f"(at index {cu.get('signal_at') if cu.get('signal_at') is not None else '-'}) "
+                 f"mu0={cu.get('mu0')}")
+    lines.append(f"- EWMA: signal={ew.get('signal') or 'none'} "
+                 f"(at index {ew.get('signal_at') if ew.get('signal_at') is not None else '-'})")
+    if lzc is not None:
+        lines.append(f"- LZ complexity (returns): {lzc:.3f} "
+                     f"({'random/inefficient' if lzc > 0.9 else 'structured'})")
+    lines.append("")
+    lines.append("Interpretation: a CUSUM/EWMA up-signal right after a calm "
+                 "stretch = the regime may just have shifted; confirm with "
+                 "get_regime_read before acting. Advisory, never a gate.")
+    return "\n".join(lines)
+
+
+@tool
+
 def get_volatility_estimators(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
@@ -6062,6 +6413,7 @@ def get_universe_membership(
 __all__ = [
     "get_sector_rank",
     "get_cycle_tilt",
+    "get_taylor_read",
     "get_option_breakeven",
     "get_gamma_profile",
     "get_opex_read",
@@ -6088,6 +6440,7 @@ __all__ = [
     "get_position_sizing",
     "get_risk_gate",
     "get_regime_read",
+    "get_shift_detection",
     "get_volatility_contraction",
     "get_swing_exits",
     "get_dip_technical",

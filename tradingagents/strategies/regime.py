@@ -261,6 +261,85 @@ def regime_gate_read(
     }
 
 
+def cusum(series: list, k: float | None = None, h: float | None = None,
+          calib: int = 30) -> dict:
+    """Tabular CUSUM: detect small sustained mean shifts in a series.
+
+    C_t^+ = max(0, C^+_{t-1} + x_t - mu0 - k), C_t^- = max(0, C^-_{t-1} + mu0
+    - k - x_t); signal when C^+ > h or C^- > h. ``mu0``/``sigma`` are
+    calibrated on the first ``calib`` bars (the pre-shift baseline — the
+    standard change-detection anchor), so a mean shift AFTER that window is
+    detected as a genuine up/down shift rather than the base registering as
+    "down" against the full-series mean. ``k = delta*sigma/2``,
+    ``h = 5*sigma`` when not given (delta=1 shift). Returns
+    ``{'mu0', 'sigma', 'k', 'h', 'signal', 'signal_at', 'max_cusum'}``;
+    ``signal`` is ``up`` / ``down`` / ``None``.
+    """
+    vals = [float(v) for v in series if v is not None]
+    if len(vals) < 20:
+        return {"mu0": None, "sigma": None, "k": None, "h": None,
+                "signal": None, "signal_at": None, "max_cusum": None}
+    cal = max(10, min(int(calib), len(vals) // 3))
+    base = vals[:cal]
+    mu0 = sum(base) / len(base)
+    sig = (sum((v - mu0) ** 2 for v in base) / (len(base) - 1)) ** 0.5 if len(base) > 1 else 0.0
+    if sig <= 1e-12:
+        return {"mu0": round(mu0, 6), "sigma": 0.0, "k": 0.0, "h": 0.0,
+                "signal": None, "signal_at": None, "max_cusum": 0.0}
+    kk = 0.5 * sig if k is None else float(k)
+    hh = 5.0 * sig if h is None else float(h)
+    cup = cdn = 0.0
+    signal = None
+    signal_at = None
+    max_c = 0.0
+    for i, x in enumerate(vals):
+        cup = max(0.0, cup + x - mu0 - kk)
+        cdn = max(0.0, cdn + mu0 - kk - x)
+        max_c = max(max_c, cup, cdn)
+        if signal is None:
+            if cup > hh:
+                signal, signal_at = "up", i
+            elif cdn > hh:
+                signal, signal_at = "down", i
+    return {"mu0": round(mu0, 6), "sigma": round(sig, 6), "k": round(kk, 6),
+            "h": round(hh, 6), "signal": signal, "signal_at": signal_at,
+            "max_cusum": round(max_c, 6)}
+
+
+def ewma_control(series: list, lambd: float = 0.2, l_width: float = 3.0) -> dict:
+    """EWMA control chart: z_t = lambda*x_t + (1-lambda)*z_{t-1} with
+    time-varying control limits mu0 +/- L*sigma*sqrt(lambda/(2-lambda) *
+    (1 - (1-lambda)^(2t))). Detects slow drifts / small persistent shifts.
+
+    ``lambd`` in (0, 1]; ``l`` = the control-limit width in sigma units.
+    Returns ``{'mu0', 'sigma', 'lambda', 'L', 'signal', 'signal_at',
+    'last_z'}``; ``signal`` = ``up``/``down``/``None``.
+    """
+    vals = [float(v) for v in series if v is not None]
+    if len(vals) < 10 or not (0 < float(lambd) <= 1):
+        return {"mu0": None, "sigma": None, "signal": None, "signal_at": None, "last_z": None}
+    mu0 = sum(vals) / len(vals)
+    sig = (sum((v - mu0) ** 2 for v in vals) / (len(vals) - 1)) ** 0.5
+    if sig <= 1e-12:
+        return {"mu0": round(mu0, 6), "sigma": 0.0, "signal": None,
+                "signal_at": None, "last_z": mu0}
+    lam = float(lambd)
+    L = float(l_width)
+    z = mu0
+    signal = None
+    signal_at = None
+    for i, x in enumerate(vals, start=1):
+        z = lam * x + (1.0 - lam) * z
+        lim = L * sig * (lam / (2.0 - lam) * (1.0 - (1.0 - lam) ** (2 * i))) ** 0.5
+        if signal is None:
+            if z > mu0 + lim:
+                signal, signal_at = "up", i - 1
+            elif z < mu0 - lim:
+                signal, signal_at = "down", i - 1
+    return {"mu0": round(mu0, 6), "sigma": round(sig, 6), "lambda": lam, "L": L,
+            "signal": signal, "signal_at": signal_at, "last_z": round(z, 6)}
+
+
 __all__ = [
     "realized_vol",
     "vol_percentile",
@@ -272,6 +351,8 @@ __all__ = [
     "regime_gate_read",
     "regime_state",
     "regime_factor",
+    "cusum",
+    "ewma_control",
 ]
 
 

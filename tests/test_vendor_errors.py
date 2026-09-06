@@ -87,21 +87,24 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         self.assertEqual(out, "YF")
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
-        # With no fallback, the not-configured condition must surface (not vanish).
+        # Outage-hardening (2026-09): a sole not-configured vendor degrades
+        # to the DATA_UNAVAILABLE sentinel (the run proceeds, agent reports
+        # unavailable) instead of raising — core categories are
+        # flow-critical and must never abort the graph.
         set_config({"data_vendors": {"core_stock_apis": "alpha_vantage"}})
 
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
 
-        with (
-            mock.patch.dict(
-                interface.VENDOR_METHODS,
-                {"get_stock_data": {"alpha_vantage": _unconfigured}},
-                clear=False,
-            ),
-            self.assertRaises(AlphaVantageNotConfiguredError),
+        with mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_stock_data": {"alpha_vantage": _unconfigured}},
+            clear=False,
         ):
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertIn("DATA_UNAVAILABLE", result)
+        self.assertIn("core_stock_apis", result)
+        self.assertIn("no key", result)
 
 
 if __name__ == "__main__":

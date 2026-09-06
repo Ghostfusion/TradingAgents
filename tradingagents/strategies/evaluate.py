@@ -455,6 +455,82 @@ def ulcer_index(returns: list[float]) -> float | None:
     return math.sqrt(mean_sq)
 
 
+def burke_ratio(returns: list[float], periods_per_year: float = 252.0,
+                risk_free: float = 0.0) -> float | None:
+    """Burke ratio = annualized excess return / sqrt(sum of squared drawdowns).
+
+    Penalizes the *frequency+size* of drawdown events (via underwater_drawdowns
+    event DEPTHS), unlike max-drawdown which only sees the worst. None when no
+    drawdown events or <2 obs.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    eq = equity_curve(vals)
+    events = underwater_drawdowns(eq)
+    if not events:
+        return None
+    annual_c = cagr(vals, periods_per_year)
+    if annual_c is None:
+        return None
+    denom = math.sqrt(sum((e["depth"] ** 2 for e in events), 0.0))
+    if denom <= 0:
+        return None
+    return (annual_c - risk_free) / denom
+
+
+def martin_ratio(returns: list[float], periods_per_year: float = 252.0,
+                 risk_free: float = 0.0) -> float | None:
+    """Martin ratio / Ulcer Performance Index = annualized excess return / Ulcer
+    index. Ulcer penalizes *sustained* drawdowns; this is the UI- adjusted
+    return. None when ulcer is 0 or <2 obs.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    ui = ulcer_index(vals)
+    if ui is None or ui <= 0:
+        return None
+    annual_c = cagr(vals, periods_per_year)
+    if annual_c is None:
+        return None
+    return (annual_c - risk_free) / ui
+
+
+def pain_index(returns: list[float]) -> float | None:
+    """Pain index = mean periodic drawdown depth over the equity curve (a
+    sustained-drawdown measure like ulcer, but arithmetic not RMS). None on <2
+    obs.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    eq = equity_curve(vals)
+    peak = eq[0]
+    dds: list[float] = []
+    for v in eq:
+        peak = max(peak, v)
+        dds.append((peak - v) / peak if peak > 0 else 0.0)
+    return sum(dds) / len(dds)
+
+
+def pain_ratio(returns: list[float], periods_per_year: float = 252.0,
+               risk_free: float = 0.0) -> float | None:
+    """Pain ratio = annualized excess return / pain index. None when pain is
+    0 or <2 obs.
+    """
+    vals = _clean(returns)
+    if len(vals) < 2:
+        return None
+    pi = pain_index(vals)
+    if pi is None or pi <= 0:
+        return None
+    annual_c = cagr(vals, periods_per_year)
+    if annual_c is None:
+        return None
+    return (annual_c - risk_free) / pi
+
+
 def capture_ratio(returns: list[float], benchmark: list[float], up: bool = True) -> float | None:
     """Up/down capture: average of (algo / benchmark) moves in up (or down) periods.
 
@@ -751,4 +827,5 @@ __all__ = [
     "expectancy_stats", "implementation_shortfall",
     "turnover", "turnover_cost", "gross_exposure", "net_exposure",
     "rolling_sharpe", "regime_split_performance",
+    "burke_ratio", "martin_ratio", "pain_index", "pain_ratio",
 ]
