@@ -55,7 +55,11 @@ def _patch_network():
             "tradingagents.dataflows.moomoo.get_hot_movers_moomoo", side_effect=_fake_losers_offline
         ),
     ):
+        # The run-level OHLCV cache is module-global; clear it per test so the
+        # route fixture (not a prior test's series) serves every symbol.
+        vs._RUN_OHLCV_CACHE.clear()
         yield
+        vs._RUN_OHLCV_CACHE.clear()
 
 
 def test_breakout_strategy_flagged():
@@ -95,9 +99,17 @@ def _breakout_route(method, *a, **k):
     return "NO_DATA_AVAILABLE: no usable market data"
 
 
-def test_scan_all_keeps_rows_and_flags(capsys):
-    """--scan all keeps everything and adds TrendPB/Breakout columns."""
-    with _patched_router(_breakout_route):
+def test_scan_all_keeps_rows_and_flags(capsys, tmp_path):
+    """--scan all keeps everything and adds TrendPB/Breakout columns.
+
+    The report is a FILE contract (the screener saves the markdown and prints
+    only logs); assert on the saved watchlist. ``_fixture_route`` produces a
+    genuine trend-pullback (Strategy A) row so TrendPB is not pruned away.
+    """
+    import glob
+    import os
+
+    with _patched_router(_fixture_route):
         vs.main(
             [
                 "--universe",
@@ -110,34 +122,77 @@ def test_scan_all_keeps_rows_and_flags(capsys):
                 "1e9",
                 "--scan",
                 "all",
+                "--out-dir",
+                str(tmp_path),
             ]
         )
-    out = capsys.readouterr().out
-    assert "TrendPB" in out and "Breakout" in out
+    reports = sorted(glob.glob(str(tmp_path / "*.md")), key=os.path.getmtime)
+    assert reports
+    with open(reports[-1], encoding="utf-8") as fh:
+        body = fh.read()
+    assert "TrendPB" in body and "Breakout" in body
 
 
 def _fixture_route(method, *a, **k):
+    if method == "get_fundamentals":
+        # The min-mcap / EY screens need a market cap from the fundamentals
+        # chain; without it the movers are dropped at the cap gate.
+        return "Market Cap: 3.2e12\nRevenue: 9e11\n"
     if method == "get_stock_data":
         rows = ["Date,Open,High,Low,Close,Volume"]
+        sym = (a[0] if a and isinstance(a[0], str) else "").upper()
+        breakout = sym != "AAPL"  # AAPL = trend-pullback; others = breakout
         price = 100.0
-        for i in range(240):
-            price += 0.2  # steady uptrend, flat volume -> rvol ~1 -> B false
+        # 180-bar steady uptrend (close > sma50 > sma200, qret >= 10%)...
+        for i in range(180):
+            price += 0.5
             rows.append(
                 f"2026-01-{i % 28 + 1:02d},{price:.2f},{price + 3:.2f},{price - 3:.2f},{price:.2f},5000000"
+            )
+        # ...then 20 bars of SIDEWAYS price at the trend top (RSI decays toward
+        # 50 as the gains stop) so the trend-pullback gate 40<=RSI<=55 opens...
+        top = price
+        for i in range(20):
+            rows.append(
+                f"2026-02-{i + 1:02d},{top:.2f},{top + 3:.2f},{top - 3:.2f},{top:.2f},5000000"
+            )
+        # ...then a 2-bar shallow dip: LOW touches EMA20 (flat closes keep the
+        # close >= EMA20 after the flat 20 bars pin EMA20 ~= top). The final
+        # bar carries a 40x volume spike so ``b`` (breakout) also fires and the
+        # Breakout column is not pruned in --scan all.
+        for i, off in enumerate((-1.5, -1.0)):
+            rows.append(
+                f"2026-03-{i + 1:02d},{top + off:.2f},{top + 3:.2f},{top - 3:.2f},{top:.2f},5000000"
+            )
+        if breakout:
+            rows.append(
+                f"2026-03-{3:02d},{top + 1.5:.2f},{top + 3:.2f},{top - 3:.2f},{top + 1.5:.2f},200000000"
             )
         return "\n".join(rows) + "\n"
     return "NO_DATA_AVAILABLE: no usable market data"
 
 
 def _momentum_route(method, *a, **k):
+    if method == "get_fundamentals":
+        return "Market Cap: 3.2e12\nRevenue: 9e11\n"
     if method == "get_stock_data":
         rows = ["Date,Open,High,Low,Close,Volume"]
-        price = 15.0  # in the $2-$20 band
-        vols = ["1000000"] * 59 + ["8000000"]  # RVOL ~8
-        for i, vol in enumerate(vols):
-            rows.append(
-                f"2026-01-{i % 28 + 1:02d},{price:.2f},{price + 0.2:.2f},{price - 0.2:.2f},{price:.2f},{vol}"
-            )
+        # 60-bar quiet base at 15, then a 3-bar +6% surge to a new high 15.9,
+        # then a shallow 3-bar pullback that HOLDS above the 9-EMA / VWAP and
+        # triggers a new high with a measured reward >= 2x the stop -> the
+        # first-pullback candidate (so the Pull column is non-empty).
+        base = [(f"2026-01-{i + 1:02d}", 15.0) for i in range(55)]
+        # 6-bar surge 15 -> 18.8, then a 2-bar shallow pull + re-trigger -> the
+        # first-pullback candidate passes (surge, retrace<=50%, rr>=2).
+        surge = [("2026-02-01", 15.4), ("2026-02-02", 15.9), ("2026-02-03", 16.5),
+                 ("2026-02-04", 17.2), ("2026-02-05", 18.0), ("2026-02-06", 18.8),
+                 ("2026-02-07", 19.3), ("2026-02-08", 19.9)]
+        # large surge then shallow pull + re-trigger well above the peak -> the
+        # first-pullback candidate passes (surge, retrace<=50%, rr>=2).
+        pull = [("2026-02-07", 19.6), ("2026-02-08", 19.6), ("2026-02-09", 20.2)]
+        for i, (d, c) in enumerate(base + surge + pull):
+            vol = "40000000" if i == len(base + surge + pull) - 1 else "7000000"
+            rows.append(f"{d},{c:.2f},{c + 0.2:.2f},{c - 0.1:.2f},{c:.2f},{vol}")
         return "\n".join(rows) + "\n"
     return "NO_DATA_AVAILABLE"
 
@@ -242,7 +297,8 @@ def test_scan_breakout_filters_non_matches(capsys):
     import pytest as _pytest
 
     with (
-        _patched_router(_fixture_route),
+        _patched_router(_momentum_flat_route),  # flat series -> no breakout
+
         mock.patch(
             "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
             side_effect=_fake_losers_offline,

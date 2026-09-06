@@ -326,7 +326,8 @@ def test_write_alpha_ledger_append_row(tmp_path):
     save = tmp_path / "reports" / "REP1"
     save.mkdir(parents=True, exist_ok=True)
     write_alpha_ledger(
-        {"pm_decision": {"rating": "Overweight", "data_quality": "fresh", "guardrail_reason": None}},
+        {"pm_decision": {"rating": "Overweight", "trade_date": "2026-09-04",
+                         "data_quality": "fresh", "guardrail_reason": None}},
         "aapl",
         save,
         {"alpha_ledger_enable": True},
@@ -337,7 +338,7 @@ def test_write_alpha_ledger_append_row(tmp_path):
     row = json.loads(line)
     assert row["ticker"] == "AAPL"
     assert row["rating"] == "Overweight"
-    assert row["effective_date"] == "2026-09-04"  # today; the emitter stamps it
+    assert row["effective_date"] == "2026-09-04"  # the trade date, not today
     assert "decision_hash" in row
 
 

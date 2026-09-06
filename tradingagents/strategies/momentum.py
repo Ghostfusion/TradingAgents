@@ -222,9 +222,15 @@ def first_pullback(closes: list, highs: list, lows: list, volumes: list,
     segment = closes[-window:]
     surge_ok = segment[0] and segment[-1] / segment[0] - 1.0 >= 0.03
     recent_high = max(highs[-window - 1 : -1]) if len(highs) > window else max(highs)
-    near = lows[-window - 1 : -1]
-    low_start = min(near) if near else 0.0
-    pull_low = min(lows[-window:])
+    # low_start = the low immediately BEFORE the window (the pre-surge base when
+    # the window is the pull) — NOT the window's own min, which collapses the
+    # retrace to ~1.0 whenever the window contains only the pull (the surge
+    # low would otherwise dominate pull_low).
+    low_start = lows[-window - 1] if len(lows) > window else (min(lows) if lows else 0.0)
+    # pull_low = the min low of the PULL region — excludes the window's first
+    # bar (the last surge bar), which would otherwise dominate pull_low and
+    # force retrace ~1.0. The pull is the bars after the surge peak.
+    pull_low = min(lows[-window + 1:]) if window > 1 else min(lows[-window:])
     retrace = (recent_high - pull_low) / max(recent_high - low_start, 1e-9)
     retrace_ok = retrace <= 0.5
     hold9 = ema is not None and c > ema

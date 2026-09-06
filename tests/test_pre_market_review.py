@@ -65,6 +65,10 @@ def test_script_dry_run_writes_nothing(tmp_path):
             "pathlib.Path.cwd",
             return_value=tmp_path,
         ),
+        mock.patch(
+            "tradingagents.dataflows.utils.resolve_output_path",
+            return_value=tmp_path / "reports",
+        ),
     ):
         pass
     # discovery uses Path.cwd()/reports — point it at tmp_path
@@ -72,7 +76,8 @@ def test_script_dry_run_writes_nothing(tmp_path):
     import shutil
 
     shutil.move(str(report), str(tmp_path / "reports" / report.name))
-    rc = mod.main(["--ticker", "EIX", "--dry-run", "--skip-llm"])
+    rc = mod.main(["--ticker", "EIX", "--report-dir", str(tmp_path / "reports" / report.name),
+               "--dry-run", "--skip-llm"])
     assert rc == 0
     assert not (tmp_path / "reports" / report.name / "pre_market_review_*.md").exists()
 
@@ -201,6 +206,9 @@ def test_decision_history_missing_returns_empty(tmp_path):
 def test_nightly_review_drives_from_summary(tmp_path, monkeypatch):
     """The batch-summary driver calls the review per symbol and maps REJECTs."""
     import scripts.nightly_review as nr
+    monkeypatch.setattr(
+        "tradingagents.dataflows.effective_date.should_skip_all_closed", lambda regions: False
+    )
 
     summary = tmp_path / "batch_summary_20260822_190000.jsonl"
     summary.write_text(
@@ -236,6 +244,9 @@ def test_nightly_review_recent_mode_newest_per_symbol(tmp_path, monkeypatch, cap
     that never wrote a batch summary), keyed on the folder-name timestamp, and
     skips folders with no prior decision."""
     import scripts.nightly_review as nr
+    monkeypatch.setattr(
+        "tradingagents.dataflows.effective_date.should_skip_all_closed", lambda regions: False
+    )
 
     # Two generations of AAPL (newer must win) + a CLI-only INTU run.
     for name in ("AAPL_20260820_153136", "AAPL_20260828_113630", "INTU_20260901_190729"):
@@ -278,6 +289,9 @@ def test_nightly_review_recent_mode_empty(tmp_path, monkeypatch):
     """--mode recent with nothing reviewable returns 3 and invokes no reviews."""
     import scripts.nightly_review as nr
 
+    monkeypatch.setattr(
+        "tradingagents.dataflows.effective_date.should_skip_all_closed", lambda regions: False
+    )
     monkeypatch.setattr("tradingagents.dataflows.utils.resolve_output_path", lambda which: tmp_path)
     called = []
 

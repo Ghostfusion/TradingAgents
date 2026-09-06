@@ -59,6 +59,97 @@ def _calibration_error(rows: list[dict]) -> float | None:
     return round(err, 4)
 
 
+# ---------------------------------------------------------------------------
+# G2 confidence calibration (decision_hardening_spec G2): an online ledger of
+# {confidence, won} stamps, bucketed per _BINS, mapped back onto a declared
+# confidence. Mirrors the PM calibration wiring in graph/trading_graph.py.
+# ---------------------------------------------------------------------------
+
+
+def fit_buckets(entries: list[dict]) -> dict:
+    """Bin calibration-ledger rows ``{confidence, won}`` into ``_BINS``.
+
+    Returns ``{(lo, hi): {'n', 'win_rate'}}`` for non-empty bins; ``won`` must
+    be a real bool/0-1 (None rows dropped, never counted as losses). Empty
+    entries -> ``{}``.
+    """
+    out: dict = {}
+    for lo, hi in _BINS:
+        rows = [
+            r for r in (entries or [])
+            if r.get("confidence") is not None and lo <= r["confidence"] < hi
+            and r.get("won") is not None
+        ]
+        if not rows:
+            continue
+        wins = sum(1 for r in rows if bool(r["won"]))
+        out[(lo, hi)] = {"n": len(rows), "win_rate": round(wins / len(rows), 4)}
+    return out
+
+
+def calibrated_confidence(declared: float | None, table: dict,
+                          min_n: int = 5) -> float | None:
+    """Map a declared confidence onto its bucket's realized win rate.
+
+    Returns the bucket ``win_rate`` when the bucket has >= ``min_n`` stamps,
+    else the identity (``declared``) — a thin sample cannot re-calibrate.
+    None when ``declared`` is None.
+    """
+    if declared is None:
+        return None
+    try:
+        d = float(declared)
+    except (TypeError, ValueError):
+        return None
+    for (lo, hi), b in (table or {}).items():
+        if lo <= d < hi:
+            if b.get("n", 0) >= int(min_n):
+                return b.get("win_rate")
+            return d
+    return d  # no bucket for this confidence -> identity (honest)
+
+
+def calibration_table_text(table: dict) -> str:
+    """Render a ``fit_buckets`` table as a compact line. Empty table ->
+    ``"no calibration history yet"`` (the graph uses that exact string to
+    suppress the box).
+    """
+    if not table:
+        return "no calibration history yet"
+    parts = []
+    for (lo, hi), b in sorted(table.items()):
+        parts.append(
+            f"{lo:.0%}-{hi:.0%}: n={b['n']} win_rate={b['win_rate']:.1%}"
+        )
+    return "calibration table | " + " | ".join(parts)
+
+
+def record_calibration_entry(path: str, source: str, ticker: str,
+                             date: str, confidence: float | None,
+                             won: bool | None) -> None:
+    """Append one ``{source, ticker, date, confidence, won}`` row to the JSONL
+    ledger at ``path`` (best-effort; caller guards the try/except). No row is
+    written when ``confidence``/``won`` are None (never fabricate)."""
+    if confidence is None or won is None or not path:
+        return
+    import json as _json
+    import os
+
+    row = {
+        "source": source,
+        "ticker": str(ticker),
+        "date": str(date),
+        "confidence": round(float(confidence), 4),
+        "won": bool(won),
+    }
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(row) + "\n")
+    except OSError:
+        return
+
+
 def scorecard(scored_rows: list[dict], agent_field: str = "agent") -> list[dict]:
     """Per-agent measurement (W1-4).
 
@@ -94,4 +185,6 @@ def scorecard(scored_rows: list[dict], agent_field: str = "agent") -> list[dict]
     return sorted(out, key=lambda o: (o["hit_rate"] is None, -(o["hit_rate"] or 0)))
 
 
-__all__ = ["calibration_table", "scorecard", "_BINS"]
+__all__ = ["calibration_table", "scorecard", "_BINS", "fit_buckets",
+           "calibrated_confidence", "calibration_table_text",
+           "record_calibration_entry"]

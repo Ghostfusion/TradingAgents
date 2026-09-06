@@ -46,8 +46,8 @@ class TestProposalLoop:
         recs = _records(predictive=True)
         out = fpl.evaluate_candidates(["mom_5"], recs)
         row = out["mom_5"]
-        assert set(row) == {"ic", "icir", "ls_return", "n", "gated", "adopted",
-                            "gate_reason"}
+        assert set(row) == {"ic", "icir", "oos_ic", "ls_return", "n", "gated",
+                            "adopted", "gate_reason"}
         assert isinstance(row["ic"], float) and isinstance(row["n"], int)
         assert isinstance(row["gated"], bool) and isinstance(row["adopted"], bool)
 

@@ -491,7 +491,11 @@ def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict 
         "schema_version": 1,
         "emitted_at": _dt.now(_tz.utc).isoformat(),
         "ticker": str(ticker).upper(),
-        "effective_date": _date.today().isoformat(),
+        # effective_date = the TRADE date the decision targets (from the PM
+        # state when present; fall back to today only when the caller did not
+        # pass a trade date — a stale-date stamp is worse than an honest
+        # today-stamp for the forward-return join).
+        "effective_date": (pm.get("trade_date") or _date.today().isoformat()),
         "rating": pm.get("rating") if isinstance(pm, dict) else None,
         "data_quality": (pm.get("data_quality") if isinstance(pm, dict) else None) or "unknown",
         "guardrail_reason": pm.get("guardrail_reason") if isinstance(pm, dict) else None,
