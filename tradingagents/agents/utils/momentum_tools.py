@@ -46,6 +46,24 @@ def get_momentum_scan(ticker: str) -> str:
     except Exception:
         data = None
     if not data or not data["closes"]:
+        # Alpaca disabled/unconfigured/empty -> the vendor chain (the same
+        # OHLCV source the other technical tools use; _ohlcv normalizes rows
+        # to ascending order so closes[-1] is the latest bar).
+        try:
+            from tradingagents.agents.utils.analysis_tools import _ohlcv
+
+            o = _ohlcv(ticker)
+            if len(o.get("closes") or []) >= 2:
+                data = {
+                    "closes": list(o["closes"]),
+                    "highs": list(o.get("highs") or []),
+                    "lows": list(o.get("lows") or []),
+                    "volumes": list(o.get("volumes") or []),
+                    "opens": list(o.get("opens") or []),
+                }
+        except Exception:
+            data = None
+    if not data or not data["closes"]:
         return "momentum scan unavailable (no daily bars)"
     return _momentum_text(ticker, data)
 

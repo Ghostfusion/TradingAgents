@@ -231,6 +231,23 @@ def test_market_tool_reports_scan():
     assert "volrule=" in out and "tailok=" in out  # phase 2 flags surfaced
 
 
+def test_market_tool_falls_back_to_vendor_chain_when_alpaca_empty():
+    """Alpaca disabled/empty -> the vendor chain (_ohlcv) serves the scan."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.momentum_tools import get_momentum_scan
+
+    closes = [15.0 + i * 0.01 for i in range(60)]
+    ohlcv = {"closes": closes, "highs": [15.1] * 60, "lows": [14.9] * 60,
+             "volumes": [1_000_000] * 60, "opens": closes}
+    with mock.patch("tradingagents.dataflows.alpaca.get_bars", return_value=None), \
+            mock.patch("tradingagents.agents.utils.analysis_tools._ohlcv",
+                       return_value=ohlcv):
+        out = get_momentum_scan.func("AAPL")
+    assert "momentum scan AAPL:" in out
+    assert "pillars:" in out
+
+
 def test_journal_roundtrip_and_stats(tmp_path):
     """Phase 3: JSONL journal + win/loss analytics."""
     from tradingagents.strategies.journal import (
