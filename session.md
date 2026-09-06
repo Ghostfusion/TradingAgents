@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector breadth layer (2026-09-06)** - sector_breadth.py: multi-
+  timeframe breadth matrix + McClellan Oscillator + cumulative-sum MSI
+  + RRG heading/trajectory + advisory MSI-zone risk note. Fixed `_sma`
+  negative-slice bug + the normalized-A/D steady-state-zero artifact
+  (raw-net, size-scaled oscillator). 9 tests; matrix wired into the screen.
 - **Sector rotation screen: review fixes (2026-09-06)** - breadth
   denominator gate (n<20 -> n/a), EW/CW rebuilt on the real RSP*
   equal-weight sector index (canonical tickers) vs its own 50d SMA,

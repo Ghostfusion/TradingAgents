@@ -65,6 +65,17 @@ Breaking changes within the 0.x line are called out explicitly.
   broadening, all breadth n/a sample<20. Tests: gate, price-level immunity,
   map completeness (20 screen tests green).
 ### Added
+- **Sector breadth layer (McClellan/MSI/multi-timeframe, review-driven)** -
+  `strategies/sector_breadth.py`: (1) multi-timeframe breadth matrix
+  (% > 20d/50d/200d, n-gated); (2) per-sector McClellan Oscillator
+  (EMA19-EMA39 of the size-normalized daily net A-D, cumulative-sum MSI -
+  the correct definition; fixed a steady-state-zero artifact on
+  one-directional markets and a negative-slice `_sma` bug that broke the
+  whole matrix); (3) RRG heading + constructive/weakening-trap flags
+  (`rrg_heading`, standalone); (4) advisory MSI-zone risk-budget note
+  (never a gate). Wired into `get_sector_rotation_screen`
+  ('## Sector breadth matrix' table: n / 20d / 50d / 200d / MO / slope /
+  MSI / RRG). 9 hermetic tests.
 - **Sector rotation screen: full S&P-500 universe (review fix 2)** -
   `dataflows/sp500_universe.py` harvests the full S&P-500 constituent table
   (Wikipedia REST wikitext, keyless, disk-cached weekly) and maps GICS

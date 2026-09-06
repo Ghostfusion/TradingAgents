@@ -2511,6 +2511,32 @@ def get_sector_rotation_screen(
                         }
                     if members:
                         cons[parent] = members
+                # multi-timeframe breadth + McClellan/MSI on the full universe
+                # (advisory, None-safe, n-gated; RRG quadrant from the rank).
+                from tradingagents.strategies.sector_breadth import (
+                    mcclellan_read,
+                    multi_breadth,
+                )
+                mb = multi_breadth({p: {t: c["closes"] for t, c in cons[p].items()} for p in cons}, min_n=20)
+                mc = mcclellan_read({p: {t: c["closes"] for t, c in cons[p].items()} for p in cons})
+                lines.append("")
+                lines.append("## Sector breadth matrix (multi-timeframe, advisory)")
+                lines.append("| sector | n | % > 20d | % > 50d | % > 200d | MO | MO slope | MSI | RRG |")
+                lines.append("|---|---|---|---|---|---|---|---|---|")
+                for p in sorted(cons):
+                    b = mb.get(p) or {}
+                    m = mc.get(p) or {}
+                    rank_row = next((r for r in rows if r.get("etf") == p), None)
+                    q = (rank_row or {}).get("quadrant") or "n/a"
+                    bd, mo, msi = b.get("pct_20d"), m.get("mo"), m.get("msi")
+                    mo_l = m.get("mo_slope") or ""
+                    lines.append(
+                        f"| {p} | {b.get('n', 0)} | {bd if bd is not None else 'n/a'}% | "
+                        f"{b.get('pct_50d') if b.get('pct_50d') is not None else 'n/a'}% | "
+                        f"{b.get('pct_200d') if b.get('pct_200d') is not None else 'n/a'}% | "
+                        f"{mo if mo is not None else 'n/a'} | {mo_l} | "
+                        f"{msi if msi is not None else 'n/a'} | {q} |"
+                    )
             except Exception as exc:  # noqa: BLE001 - advisory; degrade to curated
                 _line_note = f" (universe unavailable: {exc})"
                 cons = {}
