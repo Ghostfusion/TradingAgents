@@ -2474,39 +2474,29 @@ def get_sector_rotation_screen(
         _ = range_sector  # keep the universe selector explicit for future modes
         cons: dict = {}
         if use_eodhd:
-            # EODHD full-US universe (free when EODHD_API_KEY is set): bucket
-            # Common-Stock symbols into the 11 SPDR groups, capped per sector,
-            # then fetch each classified member via the run cache.
+            # Full-S&P-500 universe (free, wiki-sourced, disk-cached weekly):
+            # harvest EVERY constituent per sector (no alphabetical cutoff),
+            # fetch each member's OHLCV through the shared run cache, feed the
+            # breadth gate. This is the fix for the 1-3-ticker alphabetical
+            # samples - the denominator is now the whole sector.
             try:
-                from tradingagents.dataflows.eodhd import get_exchange_symbols_eodhd
-                from tradingagents.dataflows.yfinance_sector import fetch_sector
+                from tradingagents.dataflows.sp500_universe import fetch_sp500_universe
                 from tradingagents.strategies.sector_screener import (
                     breadth_with_gate,
-                    constituent_universe,
                     leadership_ratio_ewcw,
                 )
 
-                _MAJOR_FX = ("NYSE", "NASDAQ", "AMEX", "NYSEMKT")
-                # the EODHD list covers every US exchange incl. OTC microcaps
-                # that yfinance drops (404) - pre-filter to the liquid markets
-                # so the classifier budget goes to names Yahoo actually covers
-                eodhd_symbols = [
-                    x for x in get_exchange_symbols_eodhd("US") or []
-                    if isinstance(x, dict) and str(x.get("Exchange") or "").upper() in _MAJOR_FX
-                ]
-                members_map = constituent_universe(
-                    eodhd_symbols,
-                    fetch_sector,
-                    per_sector_cap=max(2, min(int(eodhd_cap or 10), 30)),
-                    budget=max(24, min(120, 6 * max(2, min(int(eodhd_cap or 10), 30)))),
-                )
-                # render breadth for EVERY sector with classified members
-                # (not just the top-3 parents - a small lookup budget often
-                # lands on non-top sectors, and universe-wide breadth is the
-                # honest read); top sectors are marked in the output.
+                uni = fetch_sp500_universe()  # disk-cached weekly
+                if not uni or not uni.get("rows"):
+                    raise RuntimeError("sp500 universe unavailable")
+                universe_map = uni["rows"]
+                _line_note = (" (S&P500 universe: {n} constituents across {k} sectors)"
+                              .format(n=uni.get("stats", {}).get("n_total", 0),
+                                      k=len(universe_map)))
                 top_parents = [r["etf"] for r in rows[:top_n] if r.get("rank")]
-                for parent, tickers in sorted(members_map.items()):
-                    if parent == "stats" or not tickers:
+                _top_note = ""
+                for parent, tickers in sorted(universe_map.items()):
+                    if not tickers:
                         continue
                     members: dict = {}
                     for t in tickers:
@@ -2521,28 +2511,8 @@ def get_sector_rotation_screen(
                         }
                     if members:
                         cons[parent] = members
-                _top_note = "".join(
-                    f" {e}=top" for e in top_parents if e in cons
-                )
-                _stats = members_map.get("stats", {})
-                # per-sector classified counts (the universe stats line) -
-                # makes the small-n caveat visible instead of buried
-                _per_sector = " ".join(
-                    f"{e}:{len(v)}" for e, v in sorted(members_map.items())
-                    if e != "stats" and v
-                )
-                _kept_n = sum(1 for e in members_map if e != "stats" and e in cons)
-                if not _stats.get("n_bucketed", 0):
-                    _line_note = (" (EODHD universe: no members classified - "
-                                  "sector lookups failed; see per-vendor logs)")
-                elif _stats.get("dead"):
-                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} classified "
-                                  f"({_per_sector}); classifier degraded early)")
-                else:
-                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} classified "
-                                  f"({_per_sector}); {_kept_n} sectors kept with OHLCV)")
             except Exception as exc:  # noqa: BLE001 - advisory; degrade to curated
-                _line_note = f" (EODHD universe unavailable: {exc})"
+                _line_note = f" (universe unavailable: {exc})"
                 cons = {}
         else:
             _line_note = ""

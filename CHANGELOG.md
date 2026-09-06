@@ -65,6 +65,15 @@ Breaking changes within the 0.x line are called out explicitly.
   broadening, all breadth n/a sample<20. Tests: gate, price-level immunity,
   map completeness (20 screen tests green).
 ### Added
+- **Sector rotation screen: full S&P-500 universe (review fix 2)** -
+  `dataflows/sp500_universe.py` harvests the full S&P-500 constituent table
+  (Wikipedia REST wikitext, keyless, disk-cached weekly) and maps GICS
+  sector -> SPDR ETF. `get_sector_rotation_screen` with
+  `constituent_universe='eodhd'` now uses THIS universe (no alphabetical
+  cutoff): every constituent per sector gets its OHLCV through the run cache,
+  breadth is computed on the real sector denominator (n=20-60 samples vs the
+  previous 1-3), EW/CW stays RSP*-based + own-50d-normalized. Kills the
+  'sample truncation' distortion. n_total ~315 constituents, sector n shown.
 - **Sector rotation screen: EODHD constituent universe for breadth** -
   the breadth/EW-CW/setup layer can now be driven by the EODHD full-US
   symbol list (`get_exchange_symbols_eodhd`, ~51k symbols, major-exchange
