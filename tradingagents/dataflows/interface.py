@@ -44,6 +44,7 @@ from .finnhub import (
     get_insider_activity_finnhub,
     get_news_finnhub,
 )
+from .finra import get_dark_pool_flow, get_short_sale_volume
 from .fred import get_macro_data as get_fred_macro_data
 from .fx import get_fx_snapshot
 from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
@@ -246,6 +247,18 @@ TOOLS_CATEGORIES = {
             "get_short_interest",
         ],
     },
+    "short_sale_volume": {
+        "description": "FINRA daily short-sale volume (keyless)",
+        "tools": [
+            "get_short_sale_volume",
+        ],
+    },
+    "dark_pool_flow": {
+        "description": "FINRA ATS weekly off-exchange flow (keyless)",
+        "tools": [
+            "get_dark_pool_flow",
+        ],
+    },
     # moomoo-only enrichment categories (Tier 1/2). All optional — a vendor
     # failure degrades to a sentinel instead of aborting the run.
     "capital_flow": {
@@ -359,6 +372,8 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
+    "short_sale_volume",
+    "dark_pool_flow",
     "earnings_transcripts",
     "congress_trades",
     "news_sentiment",
@@ -526,6 +541,13 @@ VENDOR_METHODS = {
         "yfinance": get_short_interest_yfinance,
         "moomoo": get_short_interest_moomoo,
         "massive": get_short_interest_massive,
+    },
+    # FINRA official (keyless public tier; as-of dates rendered + staleness-gated)
+    "get_short_sale_volume": {
+        "finra": get_short_sale_volume,
+    },
+    "get_dark_pool_flow": {
+        "finra": get_dark_pool_flow,
     },
     # moomoo-only enrichment (Tier 1/2)
     "get_capital_flow": {

@@ -13,6 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_credit_spread_read,
     get_crypto_prices,
     get_cycle_tilt,
+    get_dark_pool_flow,
     get_debate_claims_verdict,
     get_derivatives_flow,
     get_dip_technical,
@@ -79,6 +80,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_session_discipline,
     get_shift_detection,
     get_short_interest,
+    get_short_sale_volume,
     get_short_volume,
     get_skill_read,
     get_sofr_curve,
@@ -134,6 +136,8 @@ def create_market_analyst(llm):
             get_derivatives_flow,
             get_opex_read,
             get_short_interest,
+            get_short_sale_volume,
+            get_dark_pool_flow,
             get_short_volume,
             get_liquidity_risk,
             get_cost_models,
@@ -254,7 +258,7 @@ Before writing the final report, call get_verified_market_snapshot for this tick
 
 You also have Massive.com verification tools (plan-gated): get_market_snapshot(ticker) returns a consolidated latest trade/bar/VWAP/change block you can cross-check against the verified snapshot when available; get_top_movers('gainers'|'losers') lists the day's biggest movers for market-context / relative-breadth framing. If either returns 'unavailable', proceed without it.
 
-You also have two forward-looking positioning tools: call get_options_chain(ticker, current_date) for implied volatility, open interest, and the put/call ratio (leading positioning/expectation signals), and get_short_interest(ticker) for short % of float, days-to-cover, and ownership split (squeeze and conviction signals). For intraday shorting conviction, call get_short_volume(ticker, start_date, end_date) for the daily short-sale volume ratio (% of total volume sold short) — elevated readings indicate heavy shorting pressure. Weigh these as positioning gauges, not directional price calls.
+You also have two forward-looking positioning tools: call get_options_chain(ticker, current_date) for implied volatility, open interest, and the put/call ratio (leading positioning/expectation signals), and get_short_interest(ticker) for short % of float, days-to-cover, and ownership split (squeeze and conviction signals). For intraday shorting conviction, call get_short_volume(ticker, start_date, end_date) for the daily short-sale volume ratio (% of total volume sold short) — elevated readings indicate heavy shorting pressure. Weigh these as positioning gauges, not directional price calls. For a keyless official variant and the off-exchange read: get_short_sale_volume(ticker, days?) returns the FINRA Reg SHO daily short-sale volume (% short-sale of volume; FINRA public tier serves historical dates, as-of stated — get_short_volume above stays the current source when the MASSIVE key is set), and get_dark_pool_flow(ticker, weeks?) returns the FINRA ATS weekly off-exchange share/trade/notional flow (public tier historical, as-of stated; a free FINRA API key upgrades to the current window) - cite it before any 'dark-pool / off-exchange flow' claim.
 You also have a liquidity tool: call get_liquidity_risk(ticker, current_date) for the computed Amihud ILLIQ (price impact per dollar traded), float turnover (ADV / float), the free-float factor (IWF) and a LIQUID / CAUTION / ILLIQUID verdict (Strategies/risk2.md). Cite it (or its explicit 'unavailable') before any 'liquid enough to trade / thin book / slippage risk / index-eligible' claim.
 
 You also have a money-flow tool: call get_capital_flow(ticker) for weekly net capital inflow/outflow split by order size (super/big/mid/small) and the latest session's capital distribution. Sustained large/super-order outflows suggest institutional distribution; sustained inflows suggest accumulation. Weigh this as a positioning gauge alongside the options and short-interest signals.

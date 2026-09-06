@@ -37,6 +37,16 @@ Breaking changes within the 0.x line are called out explicitly.
   cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
 ### Added
+- **Order-flow depth (spec items 1-2, official FINRA keyless)**:
+  `get_dark_pool_flow(ticker, weeks?)` - FINRA ATS weekly off-exchange
+  share/trade/notional flow (OTC Transparency); `get_short_sale_volume(ticker,
+  days?)` - FINRA Reg SHO daily short-sale volume (% short-sale of volume),
+  keyless variant beside the Massive-backed get_short_volume. Both render the
+  served as-of dates with a staleness gate (FINRA's public consumer tier serves
+  a historical window; a free FINRA API key upgrades to the current daily
+  file) - never present old data as current. Wired to the market analyst
+  (imports + tool list + prompt) + graph ToolNode; router categories
+  dark_pool_flow + short_sale_volume (optional, degrade).
 - **Macro-strategist depth (spec: liquidity/FX/commodities/global rates)**:
   FRED alias extensions (liquidity: tga/reverse_repo/repo/fed_balance_sheet/effr/sofr;
   commodities: wti/gold/natgas/copper; global policy rates: ecb_rate/boj_rate),

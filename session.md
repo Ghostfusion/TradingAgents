@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Order-flow depth (2026-09-06)**: `get_dark_pool_flow` (FINRA ATS weekly,
+  keyless; public tier frozen at 2023-11 - honest as-of + staleness gate),
+  `get_short_sale_volume` (FINRA Reg SHO daily; served date 2026-01-06,
+  keyless variant beside Massive get_short_volume). 6 tests; wired + prompts +
+  gate green.
 - **Macro-strategist depth (2026-09-06)**: FRED aliases (liquidity /
   commodities / ECB+BOJ rates), `get_tga_balance` (Treasury Fiscal keyless;
   live 2026-09-02 944.4B matches FRED WDTGAL), `get_fx_snapshot` (yfinance

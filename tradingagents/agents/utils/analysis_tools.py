@@ -6438,6 +6438,39 @@ def get_fx_snapshot() -> str:
 
 
 @tool
+def get_short_sale_volume(
+    ticker: Annotated[str, "ticker symbol"],
+    days: Annotated[int, "number of recent trade dates to show (default 5)"] = 5,
+) -> str:
+    """Daily Reg SHO short-sale volume for a ticker (FINRA, keyless).
+
+    Aggregates short-sale shares, short-exempt shares and total shares per
+    trade date (newest first) with the short-sale % of volume. FINRA's public
+    consumer tier serves historical dates (the report states the newest
+    published date + a staleness note when it is old); get_short_interest
+    remains the current short-interest source. Use before any 'short-sale
+    pressure / short volume spike' claim; advisory, as-of the rendered dates.
+    """
+    return route_to_vendor("get_short_sale_volume", ticker, days)
+
+
+@tool
+def get_dark_pool_flow(
+    ticker: Annotated[str, "ticker symbol"],
+    weeks: Annotated[int, "number of recent ATS weeks to show (default 3)"] = 3,
+) -> str:
+    """Weekly ATS / off-exchange flow for a ticker (FINRA OTC Transparency).
+
+    Aggregates per-week off-exchange share volume, trade count and notional
+    across reporting ATS participants. FINRA's public consumer tier's weekly
+    summary is a historical window (as-of stated in the report; a free FINRA
+    API key upgrades to the current window). Use before any 'dark-pool /
+    off-exchange volume' claim; never a gate.
+    """
+    return route_to_vendor("get_dark_pool_flow", ticker, weeks)
+
+
+@tool
 def get_topk_drop_plan(
     scores: Annotated[dict, "name -> score"],
     topk: Annotated[int, "target book size (names to hold)"] = 10,
@@ -6717,6 +6750,8 @@ __all__ = [
     "get_earnings_transcript",
     "get_tga_balance",
     "get_fx_snapshot",
+    "get_short_sale_volume",
+    "get_dark_pool_flow",
     "get_execution_schedule",
     "get_risk_overlay",
     "get_topk_drop_plan",

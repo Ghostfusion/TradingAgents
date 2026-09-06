@@ -585,6 +585,8 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_tga_balance(days=?)` | US Treasury Fiscal Data API (keyless) | macro | Daily Treasury General Account operating-cash balance + net draw/build (reserve injection/drain) read |
 | `get_fx_snapshot()` | yfinance (delayed) | macro | DXY + major FX pairs with 1d/5d changes (advisory) |
 | `get_macro_indicators` aliases extended | `fred.MACRO_SERIES` | macro | liquidity (tga/reverse_repo/repo/fed_balance_sheet/effr/sofr), commodities (wti/gold/natgas/copper), global rates (ecb_rate/boj_rate) |
+| `get_dark_pool_flow(ticker, weeks=?)` | FINRA ATS weekly (OTC Transparency, keyless) | market | Weekly off-exchange share/trade/notional flow per issue (as-of + staleness-gated) |
+| `get_short_sale_volume(ticker, days=?)` | FINRA Reg SHO daily (keyless) | market | Daily short-sale volume (% short-sale of volume), keyless variant of get_short_volume |
 | `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
