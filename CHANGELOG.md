@@ -33,6 +33,20 @@ Breaking changes within the 0.x line are called out explicitly.
      exact 0.1·σ·√(Q/V) value.
   Each fix carries a regression test pinning the canonical closed form;
   full-suite green.
+- **Agent wiring: every audited calculation reaches its analyst via a tool +
+  prompt** — verified the calc→tool→agent-binding→prompt chain for all 17
+  audited calculations; closed the 5 that had no agent-tool surface:
+  `bsm_equity_surface` → **`get_bsm_option_quote`** (market), 
+  `long_short_precision` + `purged_cpcv_splits` (+ `rank_ic`/`icir`) →
+  **`get_signal_quality`** (market), `cap_and_redistribute` →
+  **`get_constituent_cap_weights`** (fundamentals). Also restored 3 audit
+  calcs that were graph-ToolNode-only but never in the LLM's bound list:
+  `black76` → `get_options_iv_read`, `taylor_rule` → `get_taylor_read`,
+  `alpha158_subset` → `get_factor_profile` — now bound in the market
+  analyst's `tools = [...]` (bind_tools) list with prompt guidance. Every
+  new/restored tool carries a prompt line (enforced by
+  `test_calc_agent_wiring`); Alpaca paper-trading surfaces excluded by
+  design.
 - **Quant-formula audit pass 2 (13 remaining divergences)** — the 13 lower-
   severity divergences from the same audit, each with a regression test:
   1. **Modified VaR** (`strategies/size.py`): Cornish-Fisher now uses EXCESS

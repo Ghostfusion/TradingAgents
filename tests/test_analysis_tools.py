@@ -1885,3 +1885,45 @@ def test_indicator_tools_bound_to_market_analyst():
     src = inspect.getsource(ma)
     assert "get_extended_indicators" in src
     assert "get_candlestick_patterns" in src
+
+
+def test_signal_quality_computes_metrics():
+    """New agent tool: rank IC / ICIR / long-short precision / CPCV paths."""
+    sig = list(range(60))
+    fwd = [i * 0.001 for i in range(60)]
+    out = T.get_signal_quality.invoke({"signal": sig, "forward_returns": fwd})
+    assert "rank_ic: 1.0000" in out
+    assert "long_short_precision" in out
+    assert "CPCV train/test paths" in out
+    # short input degrades cleanly
+    assert "n/a" in T.get_signal_quality.invoke(
+        {"signal": [0.1, 0.2], "forward_returns": [0.0, 0.0]}
+    )
+
+
+def test_bsm_option_quote_renders_model_quote():
+    """New agent tool: BSM spot-surface price + greeks."""
+    out = T.get_bsm_option_quote.invoke(
+        {"spot": 100.0, "strike": 105.0, "t_years": 0.5, "vol": 0.3,
+         "option_type": "call", "r": 0.04, "q": 0.02}
+    )
+    assert "BSM option quote" in out
+    assert "price: 6.7120" in out and "charm: -0.1416" in out
+    assert "advisory - not a market price" in out
+    assert "unavailable" in T.get_bsm_option_quote.invoke(
+        {"spot": -1.0, "strike": 105.0, "t_years": 0.5, "vol": 0.3}
+    )
+
+
+def test_constituent_cap_weights_exact_ceiling():
+    """New agent tool: exact-ceiling cap + degenerate-flag note."""
+    w = [0.060, 0.050, 0.040, 0.030] + [0.02] * 7 + [0.01] * 68
+    out = T.get_constituent_cap_weights.invoke({"weights": w})
+    assert "ceiling 3.5% exact" in out
+    assert "3.5000%" in out
+    assert "2.1098%" in out  # sub-cap names absorbed the excess
+    # all-violator book flags the degenerate fallback
+    out2 = T.get_constituent_cap_weights.invoke(
+        {"weights": [0.06, 0.04, 0.02]}
+    )
+    assert "ceiling not enforceable" in out2

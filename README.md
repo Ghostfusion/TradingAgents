@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-06] **Agent wiring: all audited calcs agent-usable via tools + prompts** — closed the 5 audit calcs with no agent surface: `bsm_equity_surface` → `get_bsm_option_quote`, `long_short_precision`/`purged_cpcv_splits` → `get_signal_quality`, `cap_and_redistribute` → `get_constituent_cap_weights`; each bound + prompt-guided (Alpaca paper surfaces excluded). See CHANGELOG.
 - [2026-09-06] **Quant-formula audit pass 2** — 13 remaining divergences from the web-verified audit corrected: modified VaR (excess kurtosis), capital-income exact ceiling cap, downside deviation /N, Black-76 rho `-T·V`, BSM charm sign + dividend term, Zmijewski CA/CL, Alpha158 returns sign, canonical CHOP choppiness, Qlib precision, combinatorial CPCV, Wilder-RMA RSI/stochRSI, Taylor r*=2% (1993), GEX sign convention. All pinned by regression tests. See CHANGELOG.
 - [2026-09-06] **Sector rotation screen + EODHD breadth** — constituent breadth/EW-CW/setups now run off the EODHD full-US universe (major-exchange filtered, budget-capped, per-sector n shown). See CHANGELOG.
 - [2026-09-06] **Sector rotation screen** — sector-first screener tool (regime/RS/quadrant/pullback-divergence/dispersion + breadth/EW-CW/setups), LLM-facing, after-cost-validated context-only. See CHANGELOG.

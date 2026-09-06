@@ -1326,6 +1326,41 @@ def get_allocation(
 
 
 @tool
+def get_constituent_cap_weights(
+    weights: Annotated[list, "list of raw weights summing to 1.0 (e.g. MV shares)"],
+    cap: Annotated[float, "soft single-constituent cap (fraction), default 0.03"] = 0.03,
+    ceiling: Annotated[float, "exact ceiling (fraction), default 0.035"] = 0.035,
+) -> str:
+    """Exact-ceiling constituent capping with pro-rata redistribution.
+
+    Applies the two-threshold rule (soft cap / ceiling): names above the
+    CEILING are trimmed to it, the excess is redistributed pro-rata to names
+    strictly below the soft cap, iterating until the ceiling is exact. A
+    capped name is frozen at the ceiling (never pushed back above it by
+    renormalization). Degenerate fallback (no eligible uncapped name, e.g. a
+    tiny book) renormalizes the trimmed vector and is flagged. Use before any
+    'index-style cap / concentration limit' allocation claim.
+    """
+    try:
+        from tradingagents.strategies.capital_income import cap_and_redistribute
+
+        w = cap_and_redistribute(list(weights or []), float(cap), float(ceiling))
+        if not w:
+            return "constituent cap unavailable: no weights"
+        lines = ["## Constituent caps", ""]
+        for i, x in enumerate(w):
+            lines.append(f"- name {i + 1}: {x:.4%}")
+        lines.append("")
+        if max(w) > float(ceiling) * (1.0 + 1e-9):
+            lines.append("ceiling not enforceable (degenerate fallback applied)")
+        else:
+            lines.append(f"ceiling {float(ceiling):.1%} exact; total {sum(w):.2%}")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"constituent cap unavailable: {exc}"
+
+
+@tool
 def get_regime_components(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
@@ -6390,6 +6425,98 @@ def get_regime_gate_read(
         )
     except Exception as exc:
         return f"regime gate read unavailable for {ticker}: {exc}"
+
+@tool
+def get_signal_quality(
+    signal: Annotated[list, "predicted/signal series aligned 1:1 with forward_returns"],
+    forward_returns: Annotated[list, "realized forward returns aligned 1:1 with signal"],
+    quantile: Annotated[float, "long-short precision quantile, default 0.8"] = 0.8,
+) -> str:
+    """Signal quality read: rank IC, ICIR, long-short precision + CPCV paths.
+
+    Computes the deterministic validation metrics a factor forecast should be
+    judged by: Spearman rank IC (signal ranks vs forward-return ranks), ICIR
+    (mean/std of IC), Qlib long-short precision (top-quantile sign hit rate)
+    and a combinatorial-CPCV robustness note (number of train/test paths for
+    a 5-split evaluation — many paths = less luck). Use before any 'this
+    signal predicts well / has edge' claim; advisory, never a gate.
+    """
+    try:
+        from tradingagents.strategies.evaluate import purged_cpcv_splits
+        from tradingagents.strategies.signal_analysis import (
+            icir,
+            long_short_precision,
+            rank_ic,
+        )
+
+        ic = rank_ic(list(signal or []), list(forward_returns or []))
+        icr = icir(list(signal or []), list(forward_returns or []))
+        prec = long_short_precision(
+            list(signal or []), list(forward_returns or []), float(quantile)
+        )
+        n = len(list(signal or []))
+        paths = 0
+        if n >= 40:
+            try:
+                paths = sum(1 for _ in purged_cpcv_splits(n, 5, embargo=1))
+            except Exception:
+                paths = 0
+        lines = ["## Signal quality", ""]
+        lines.append(f"- rank_ic: {ic:.4f}" if ic is not None else "- rank_ic: n/a")
+        lines.append(f"- icir: {icr:.4f}" if icr is not None else "- icir: n/a")
+        lines.append(f"- long_short_precision ({float(quantile):.0%}): {prec:.4f}"
+                     if prec is not None else f"- long_short_precision ({float(quantile):.0%}): n/a")
+        if paths:
+            lines.append(f"- CPCV train/test paths (5-split, 1d embargo): {paths}")
+        lines.append("")
+        lines.append("computed, advisory - never a gate")
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"signal quality unavailable: {exc}"
+
+
+@tool
+def get_bsm_option_quote(
+    spot: Annotated[float, "current spot price"],
+    strike: Annotated[float, "option strike"],
+    t_years: Annotated[float, "years to expiry"],
+    vol: Annotated[float, "implied volatility (fraction)"],
+    option_type: Annotated[str, "'call' or 'put'"] = "call",
+    r: Annotated[float, "risk-free rate (fraction), default 0.0"] = 0.0,
+    q: Annotated[float, "dividend yield (fraction), default 0.0"] = 0.0,
+) -> str:
+    """Black-Scholes-Merton equity-option quote (spot space): price + Greeks.
+
+    Direct BSM pricing from S, K, T, r, q, sigma (C = S·e^{−qT}·N(d1) −
+    K·e^{−rT}·N(d2)): price, delta, gamma, vega, theta, rho, vanna, vomma,
+    charm (sign + dividend term per the audit fix). Use for a model quote
+    when the chain does not quote the exact strike/expiry asked about.
+    Advisory — a model number, not a market quote.
+    """
+    try:
+        from tradingagents.strategies.options_math import bsm_equity_surface
+
+        g = bsm_equity_surface(
+            float(spot), float(strike), float(t_years),
+            float(r), float(q), float(vol), str(option_type),
+        )
+        if g["price"] is None:
+            return (f"bsm quote unavailable for {spot}/{strike}: "
+                    "invalid inputs (spot/strike/T/vol must be positive)")
+        lines = [
+            "## BSM option quote",
+            f"- {option_type} {strike} @ {t_years * 365:.0f}d (S={spot}, vol={vol:.1%})",
+            f"- price: {g['price']:.4f}",
+            f"- delta: {g['delta']:.4f} gamma: {g['gamma']:.6f} vega: {g['vega']:.4f}",
+            f"- theta: {g['theta']:.4f} rho: {g['rho']:.4f}",
+            f"- vanna: {g['vanna']:.4f} vomma: {g['vomma']:.4f} charm: {g['charm']:.4f}",
+            "",
+            "BSM model quote, advisory - not a market price",
+        ]
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"bsm quote unavailable: {exc}"
+
 
 @tool
 def get_factor_profile(

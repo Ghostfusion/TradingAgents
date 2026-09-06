@@ -5,6 +5,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_book_correlation,
     get_book_depth_read,
     get_book_tail_risk,
+    get_bsm_option_quote,
     get_candlestick_patterns,
     get_capital_flow,
     get_capm_risk,
@@ -26,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_exit_plan,
     get_expected_move,
     get_extended_indicators,
+    get_factor_profile,
     get_gamma_profile,
     get_gap_type,
     get_garch_volatility,
@@ -52,6 +54,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_opex_read,
     get_option_breakeven,
     get_options_chain,
+    get_options_iv_read,
     get_options_surface,
     get_order_imbalance,
     get_orderflow_read,
@@ -83,6 +86,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_short_interest,
     get_short_sale_volume,
     get_short_volume,
+    get_signal_quality,
     get_skill_read,
     get_sofr_curve,
     get_stock_data,
@@ -92,6 +96,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_swing_set,
     get_tail_decomposition,
     get_tail_risk,
+    get_taylor_read,
     get_technical_factors,
     get_top_movers,
     get_trade_expectancy,
@@ -227,6 +232,11 @@ def create_market_analyst(llm):
             get_ts_momentum_weights,
             get_pair_trade_signal,
             get_merton_distance,
+            get_signal_quality,
+            get_bsm_option_quote,
+            get_options_iv_read,
+            get_taylor_read,
+            get_factor_profile,
         ]
 
         system_message = (
@@ -298,6 +308,9 @@ You also have decision-grounding tools:
 - get_earnings_quality(net_income, ocf, total_assets, fcf?, capex?, eps_growth?, fcf_growth?) - the earnings-quality verdict (cash conversion, accruals, FCF vs EPS divergence).
 - get_hrp_alloc(ticker, returns_by_name) - Hierarchical Risk Parity book weights (robust under noisy covariance, no matrix inversion; more conservative returns). Use before any 'HRP / hierarchical risk / robust book allocation' claim.
 - get_momentum_12_1(ticker) - the canonical 12-1 momentum (skips the last month's short-term reversal). Use before any '11-month momentum / 12-1 factor' claim.
+- get_taylor_read(current_date) - the Taylor-rule implied policy rate (classic 1993 r* = 2%) and the actual-vs-rule deviation. Use before any 'Fed is tight/loose / policy rate should be X / rate-cut or hike odds' claim; the deviation sign tells whether policy sits restrictively (positive) or accommodatively (negative) vs the rule.
+- get_options_iv_read(ticker, current_date?) - ATM-IV expected move, put:call OI concentration, put-skew and the volatility risk premium from the machine option chain. Use before any 'options price a X% move / puts are rich / vol is cheap' claim; renders n/a without a chain.
+- get_factor_profile(ticker) - the computed Alpha158-style 16-factor profile (momentum/reversal/vol/value composite, gated by enable_factor_profile). Use before any 'factor-based edge / quant-factor reading' claim; returns explicit unavailable when the config gate is off.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_option_breakeven(long_strike, long_premium, short_strike?, spot?, short_ttm_days?, delta?, days_to_earnings?, days_to_ex_div?) - the option-position breakeven + PMCC discipline read. Use it before any 'breakeven / the sold call sits above cost / option-rent' claim.
 - get_gamma_profile(ticker) - the dealer-gamma regime (short = momentum/cascade, long = mean-reversion) + call/put walls from the options chain. Use it before any 'options flow / structural wall / pinning' claim — advisory market-structure context, never a price law.
@@ -306,6 +319,8 @@ You also have decision-grounding tools:
 - get_parity_screen(ticker, cost_bps=...) - put-call parity / conversion-reversal only screen across the chain. Use before any 'options are mispriced / an arbitrage exists' claim; a flag is a screen, not a trade. (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
+- get_signal_quality(signal, forward_returns, quantile=0.8) - the deterministic validation read for any forecast you reuse: Spearman rank IC, ICIR, Qlib long-short precision (top-quantile sign hit rate) and a combinatorial-CPCV path count. Ground any 'this signal/score predicts well' or 'this edge survives out-of-sample' claim in it (or its explicit n/a).
+- get_bsm_option_quote(spot, strike, t_years, vol, option_type, r=0.0, q=0.0) - direct Black-Scholes-Merton price + Greeks (incl. charm with the dividend term) for an equity option when the chain does not quote your exact strike/expiry. Advisory model quote, never a market price - label it as such in any answer.
 - get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?) - the CPPI floor-protected risky exposure (m * max(P - floor, 0)) + vol-targeting scale (target/expected, capped 3x) for a book - use before any 'run the book at X% risk / lever the cushion' claim; advisory overlay, risk gates stay authoritative.
 - get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...) - the Almgren-Chriss optimal execution trajectory (or TWAP/VWAP/POV benchmarks) for a size: E[IS] + var(IS) + per-interval trades. Use before any 'how do we scale into/out of this' claim - advisory scheduling, never an order.
 - get_lottery_factors(ticker) - the lottery-tilt screen (MAX = biggest single-day return in the month; IVOL = idiosyncratic vol). High MAX/IVOL = over-priced right-tail, EXPECTED to underperform (Bali 2011; cross-market confirmed) - use before any 'high-octane / the big up-days justify the risk' claim; a quality penalty, not a momentum endorsement.
