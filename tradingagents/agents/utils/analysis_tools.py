@@ -2519,14 +2519,22 @@ def get_sector_rotation_screen(
                     f" {e}=top" for e in top_parents if e in cons
                 )
                 _stats = members_map.get("stats", {})
+                # per-sector classified counts (the universe stats line) -
+                # makes the small-n caveat visible instead of buried
+                _per_sector = " ".join(
+                    f"{e}:{len(v)}" for e, v in sorted(members_map.items())
+                    if e != "stats" and v
+                )
+                _kept_n = sum(1 for e in members_map if e != "stats" and e in cons)
                 if not _stats.get("n_bucketed", 0):
                     _line_note = (" (EODHD universe: no members classified - "
                                   "sector lookups failed; see per-vendor logs)")
                 elif _stats.get("dead"):
-                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} members; "
-                                  "classifier degraded early)")
+                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} classified "
+                                  f"({_per_sector}); classifier degraded early)")
                 else:
-                    _line_note = f" (EODHD universe: {_stats['n_bucketed']} members classified)"
+                    _line_note = (f" (EODHD universe: {_stats['n_bucketed']} classified "
+                                  f"({_per_sector}); {_kept_n} sectors kept with OHLCV)")
             except Exception as exc:  # noqa: BLE001 - advisory; degrade to curated
                 _line_note = f" (EODHD universe unavailable: {exc})"
                 cons = {}
