@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Wiring audit (2026-09-06)**: ran an AST-based prompt-coverage audit -
+  every analyst-bound `@tool` must be mentioned in that analyst's
+  `system_message`. Found + closed 28 real gaps (6 fundamentals, 16 market,
+  5 news, 1 sentiment). New gate `test_bound_tool_has_prompt_guidance` in
+  test_calc_agent_wiring.py.
 - **Industry depth (2026-09-06)**: `get_edgar_fulltext_search` (EFTS keyless;
   live 'major customer' 10-K hits), `get_patent_activity` (PatentsView free-key;
   new host unresolvable at build - honest degrade). 7 tests; wired + prompts +

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Changed
+- **Wiring audit: prompt guidance for every analyst-bound tool**.
+  New AST gates in `tests/test_calc_agent_wiring.py` catch (a) tools bound to
+  an analyst's tool list but never explained in its `system_message`, and (b)
+  the existing orphan-calc + unbound-tool gates. Closed 28 real gaps: added
+  'cite it before any X claim' guidance for 6 fundamentals tools (regime state,
+  kalman spread, position risk multiplier, Black-Litterman allocation,
+  dividends, Form-4 insider), 16 market tools (indicators, GARCH/vol
+  estimators, shift detection, mean-reversion quality, options surface, Merton
+  distance, earnings-quality verdict, tail decomposition, universe membership,
+  regime/risk-multiplier, stock/crypto data, Alpaca snapshot, cost models,
+  momentum scan, debate-claims verdict), 5 news tools (earnings catalyst,
+  insider transactions, GDELT sentiment, market breadth, IPOs), and news
+  grounding in the sentiment analyst.
 ### Fixed
 - **Vendor outage hardening** (option 1 from the no-data audit;
   `docs/developer/03-dataflow-vendors.md`): the four flow-critical categories

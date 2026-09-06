@@ -14,6 +14,7 @@ reviewed, not silent.
 """
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -218,6 +219,104 @@ def test_tool_bound_to_agent_surface(case):
         "ToolNode lists / risk-tool loop / analyst files) - the agents can "
         "never call it. Bind it to a ToolNode or the risk loop, or "
         "whitelist it in TOOL_LEGACY_BINDING with a reason."
+    )
+
+
+# ---------------------------------------------------------------------------
+# prompt-guidance gate: every @tool bound to an analyst's tool list must be
+# mentioned in that analyst's system_message (or _build_system_message), so
+# the LLM knows WHEN the tool applies. This closes the "bound but never
+# explained" gap - a tool in the list an LLM never triggers is dead weight,
+# and the risk-loop binds tools by name with the loop's own guidance.
+# ---------------------------------------------------------------------------
+
+
+def _system_message_strings(path: Path) -> str:
+    """Concatenated prompt text from ``system_message = (...+...)`` assignments
+    and ``_build_system_message`` f-string returns (AST-safe, paren-safe)."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
+        return ""
+    vals = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "system_message":
+                    vals.append(node.value)
+        if isinstance(node, ast.FunctionDef) and node.name == "_build_system_message":
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Return) and isinstance(sub.value, ast.JoinedStr):
+                    vals.append(sub.value)
+    out = []
+
+    def collect(v):
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            out.append(v.value)
+        elif isinstance(v, ast.JoinedStr):
+            for x in v.values:
+                if isinstance(x, ast.Constant):
+                    out.append(x.value)
+        elif isinstance(v, ast.BinOp):
+            collect(v.left)
+            collect(v.right)
+        elif isinstance(v, ast.Tuple):
+            for e in v.elts:
+                collect(e)
+
+    for v in vals:
+        collect(v)
+    return "\n".join(out)
+
+
+def _tool_list_names(path: Path) -> set[str]:
+    """Names appearing in the file's indented tool-list assignments (the same
+    heuristic the binding gate uses for the tool list)."""
+    txt = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        ast.parse(txt)
+    except (OSError, SyntaxError):
+        return set()
+    clean = re.sub(r"#.*$", "", txt, flags=re.M)
+    return {m.group(1) for m in re.finditer(r"^\s+([A-Za-z_]\w*),?\s*$", clean, re.M)}
+
+
+def _imported_names(path: Path) -> set[str]:
+    txt = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        tree = ast.parse(txt)
+    except (OSError, SyntaxError):
+        return set()
+    return {a.asname or a.name for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) for a in node.names}
+
+
+def _tool_names_set() -> set[str]:
+    names: set[str] = set()
+    for f in (REPO / "tradingagents" / "agents" / "utils").glob("*_tools.py"):
+        names |= set(_tool_names(f))
+    return names
+
+
+PROMPT_CASES: list[tuple[str, str, str]] = []
+for f in sorted((REPO / "tradingagents" / "agents" / "analysts").rglob("*.py")):
+    prompt = _system_message_strings(f)
+    listed = _tool_list_names(f)
+    imported = _imported_names(f)
+    for name in sorted(listed & imported & _tool_names_set()):
+        if re.search(r"\b" + re.escape(name) + r"\b", prompt):
+            continue
+        PROMPT_CASES.append((f"{f.parent.name}/{f.name}:{name}", name, f.name))
+
+
+
+@pytest.mark.parametrize("case", PROMPT_CASES, ids=[c[0] for c in PROMPT_CASES])
+def test_bound_tool_has_prompt_guidance(case):
+    key, name, analyst = case
+    assert False, (
+        f"@tool {key} is in {analyst}'s tool list but is never mentioned in its "
+        "system_message - the LLM has no guidance for when to call it. Add a "
+        "'cite it before any X claim' line for this tool to that analyst's prompt."
     )
 
 
