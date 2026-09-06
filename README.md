@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-06] **Macro depth** — TGA liquidity (Treasury Fiscal Data), FX snapshot (DXY + majors), FRED liquidity/commodity/global-rate aliases; wired to the news analyst. See CHANGELOG.
 - [2026-09-06] **Fundamentals depth** — earnings-call transcripts (FMP free), congressional stock trades (House/Senate watchers), SEC EDGAR XBRL financial history; all wired to the fundamentals analyst. See CHANGELOG.
 - [2026-09-05] **Quant-formula Phase 6** - lottery-tilt (MAX/IVOL), Almgren-Chriss execution schedule + TWAP/VWAP/POV, CPPI + vol-target overlay — all advisory, wired to the market analyst. See CHANGELOG.
 - [2026-09-05] **Quant-formula implementation (P1-P5)** - speed/zomma Greeks + vol-surface shape + parity screen; Cornish-Fisher VaR, Kappa/LPM, Burke/Martin/Pain, ruin + optimal f; variance ratio + CUSUM/EWMA + entropy features; Ohlson/Zmijewski + Dechow-Dichev; Taylor rule. All advisory, wired to the market/news analysts with prompts. See the research doc.

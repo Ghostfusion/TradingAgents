@@ -9,6 +9,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_earnings_event_read,
     get_economic_calendar,
     get_fed_watch,
+    get_fx_snapshot,
     get_gdelt_sentiment,
     get_global_news,
     get_insider_transactions,
@@ -26,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_prediction_markets,
     get_sec_filings,
     get_taylor_read,
+    get_tga_balance,
 )
 
 
@@ -44,6 +46,8 @@ def create_news_analyst(llm):
             get_news_sentiment_series,
             get_global_news,
             get_macro_indicators,
+            get_tga_balance,
+            get_fx_snapshot,
             get_prediction_markets,
             get_earnings_calendar,
             get_sec_filings,
@@ -71,6 +75,7 @@ def create_news_analyst(llm):
             + "get_beat_miss_sizing(side, catalyst) - the deterministic position multiplier implied by a beat/miss side (with the catalyst scale). Use its multiplier when the market will size an event-window position, not a guess. "
             + "You also have macro-risk-off tools: get_credit_spread_read(current_date) returns the FRED ICE BofA HY/CCC/BB OAS credit-cycle band (low/moderate/high/severe) + 0..1 de-risk scale + implied 1y default probability - cite it (or its explicit 'unavailable') before any 'credit stress / risk-off / debt market' claim; get_news_sentiment(ticker, start_date, end_date) returns the daily news-sentiment series from the news_sentiment chain. "
             + "get_taylor_read(policy_rate, inflation, output_gap?) - the Taylor-rule implied policy rate + actual-vs-rule deviation (tight/easy/neutral stance); cite it before any 'the Fed is restrictive / accommodative / rates are off the rule' claim. get_economic_calendar / get_fed_watch give the scheduled-events and rate-probability context. "
+            + " You also have liquidity / FX / commodity depth: `get_tga_balance()` returns the daily Treasury General Account operating-cash balance (a falling TGA = reserve injection into the banking system, rising = drain) - cite it before any 'system liquidity / bank reserves / Treasury issuance' claim; `get_fx_snapshot()` returns the DXY + major FX pairs with 1d/5d changes (delayed, advisory) - cite it before any 'USD strength / currency move' claim; and `get_macro_indicators` has extra aliases beyond the default set: 'tga' (WDTGAL), 'reverse_repo' (RRPONTSYD), 'repo' (RPONTSYD), 'fed_balance_sheet' (WALCL), 'effr', 'sofr', 'wti', 'gold', 'natgas', 'copper', 'ecb_rate' (ECBDFR), 'boj_rate' - use them before any 'commodity price / global policy-rate / money-market rate' claim. "
             + "You also have get_news_relevance_read(title, ticker, source_url, snippet) - the deterministic 0-100 relevance score + admission verdict for any news item; use it to rank the highest-signal articles instead of judging by headline alone. "
             + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."

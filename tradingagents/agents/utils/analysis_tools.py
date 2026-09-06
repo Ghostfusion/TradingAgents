@@ -6411,6 +6411,33 @@ def get_earnings_transcript(
 
 
 @tool
+def get_tga_balance(
+    days: Annotated[int, "number of recent daily records to show (default 12)"] = 12,
+) -> str:
+    """US Treasury General Account (TGA) operating-cash balance (keyless).
+
+    Pulls the official Daily Treasury Statement from the Treasury Fiscal Data
+    API: latest daily TGA balance + a net draw/build read over the window. A
+    falling TGA injects reserves into the banking system (supportive for
+    risk), a rising TGA drains them. Use before any 'system liquidity / bank
+    reserves / Treasury issuance / repo-market' claim; purely advisory.
+    """
+    return route_to_vendor("get_tga_balance", days=days)
+
+
+@tool
+def get_fx_snapshot() -> str:
+    """FX snapshot: DXY + major pairs with 1d/5d changes (delayed, advisory).
+
+    Returns the latest levels for the US dollar index and the major FX pairs
+    (EUR/USD, USD/JPY, GBP/USD, USD/CNH, AUD/USD) via yfinance. Use before any
+    'USD strength / EUR-weakness / currency move' claim; delayed data, never a
+    gate.
+    """
+    return route_to_vendor("get_fx_snapshot")
+
+
+@tool
 def get_topk_drop_plan(
     scores: Annotated[dict, "name -> score"],
     topk: Annotated[int, "target book size (names to hold)"] = 10,
@@ -6688,6 +6715,8 @@ __all__ = [
     "get_financial_history",
     "get_congress_trades",
     "get_earnings_transcript",
+    "get_tga_balance",
+    "get_fx_snapshot",
     "get_execution_schedule",
     "get_risk_overlay",
     "get_topk_drop_plan",

@@ -45,6 +45,7 @@ from .finnhub import (
     get_news_finnhub,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .fx import get_fx_snapshot
 from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
 from .market_router import (
     caliber_consistency,
@@ -109,6 +110,7 @@ from .tiingo import (
     get_income_statement_tiingo,
     get_stock_data_tiingo,
 )
+from .treasury_fiscal import get_tga_balance
 from .twelve_data import (
     get_stock_data_twelve_data,
 )
@@ -183,9 +185,16 @@ TOOLS_CATEGORIES = {
         "tools": ["get_news_sentiment"],
     },
     "macro_data": {
-        "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
+        "description": "Macroeconomic indicators (rates, inflation, labor, growth, liquidity)",
         "tools": [
             "get_macro_indicators",
+        ],
+    },
+    "macro_liquidity": {
+        "description": "Macro liquidity & FX (TGA operating cash + DXY/major pairs)",
+        "tools": [
+            "get_tga_balance",
+            "get_fx_snapshot",
         ],
     },
     "prediction_markets": {
@@ -343,6 +352,7 @@ OPTIONAL_CATEGORIES = {
     "fundamental_data",
     "news_data",
     "macro_data",
+    "macro_liquidity",
     "prediction_markets",
     "analyst_ratings",
     "earnings_calendar",
@@ -477,6 +487,13 @@ VENDOR_METHODS = {
         "fred": get_fred_macro_data,
         "massive": get_macro_indicators_massive,
         "moomoo": get_macro_indicators_moomoo,
+    },
+    # macro liquidity (Treasury Fiscal Data, keyless) + FX (yfinance, free)
+    "get_tga_balance": {
+        "treasury_fiscal": get_tga_balance,
+    },
+    "get_fx_snapshot": {
+        "fx": get_fx_snapshot,
     },
     # prediction_markets
     "get_prediction_markets": {

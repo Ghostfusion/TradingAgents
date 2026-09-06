@@ -81,6 +81,34 @@ MACRO_SERIES = {
     "consumer_sentiment": "UMCSENT",
     "housing_starts": "HOUST",
     "retail_sales": "RSAFS",
+    # System liquidity (Fed balance sheet, TGA, repo/RRP, overnight rates)
+    "tga": "WDTGAL",
+    "treasury_general_account": "WDTGAL",
+    "tga_week_avg": "WTREGEN",
+    "reverse_repo": "RRPONTSYD",
+    "on_rrp": "RRPONTSYD",
+    "reverse_repo_balance": "RRPONTSYD",
+    "repo": "RPONTSYD",
+    "on_repo": "RPONTSYD",
+    "fed_balance_sheet": "WALCL",
+    "fed_total_assets": "WALCL",
+    "effr": "EFFR",
+    "sofr": "SOFR",
+    # Commodities (daily / spot)
+    "wti": "DCOILWTICO",
+    "oil": "DCOILWTICO",
+    "crude_oil": "DCOILWTICO",
+    "gold": "GOLDAMGBD228NLBM",
+    "gold_spot": "GOLDAMGBD228NLBM",
+    "natgas": "DHHNGSP",
+    "henry_hub": "DHHNGSP",
+    "natural_gas": "DHHNGSP",
+    "copper": "PCOPPUSDM",
+    # Global central-bank policy rates (OECD / ECB-sourced; no reliable PBOC series)
+    "ecb_rate": "ECBDFR",
+    "ecb_deposit_rate": "ECBDFR",
+    "boj_rate": "IRSTCB01JPM156N",
+    "japan_policy_rate": "IRSTCB01JPM156N",
 }
 
 

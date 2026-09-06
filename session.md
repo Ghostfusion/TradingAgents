@@ -53,6 +53,10 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Macro-strategist depth (2026-09-06)**: FRED aliases (liquidity /
+  commodities / ECB+BOJ rates), `get_tga_balance` (Treasury Fiscal keyless;
+  live 2026-09-02 944.4B matches FRED WDTGAL), `get_fx_snapshot` (yfinance
+  DXY+majors; live EUR/USD 1.1621 etc.). 22 tests; wired + prompts + gate green.
 - **Fundamentals-analyst depth (2026-09-06)**: `get_earnings_transcript` (FMP
   free), `get_congress_trades` (keyless watchers; live AAPL/MSFT/NVDA
   smokes), `get_financial_history` (EDGAR XBRL; live 8y AAPL table correct;

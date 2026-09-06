@@ -582,6 +582,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_earnings_transcript(ticker)` | FMP Earnings Transcript API (free tier) | fundamentals | Latest earnings-call transcript: date/quarter + (when served) excerpt — quote only from returned text |
 | `get_congress_trades(ticker)` | House/Senate Stock Watcher mirrors (keyless) | fundamentals | Congressional open-market stock trades: net buys/sells + samples per chamber |
 | `get_financial_history(ticker, years=?)` | SEC EDGAR XBRL companyconcept (keyless) | fundamentals | Annual 10-K financial history (~10-15y; pre-XBRL years n/a) |
+| `get_tga_balance(days=?)` | US Treasury Fiscal Data API (keyless) | macro | Daily Treasury General Account operating-cash balance + net draw/build (reserve injection/drain) read |
+| `get_fx_snapshot()` | yfinance (delayed) | macro | DXY + major FX pairs with 1d/5d changes (advisory) |
+| `get_macro_indicators` aliases extended | `fred.MACRO_SERIES` | macro | liquidity (tga/reverse_repo/repo/fed_balance_sheet/effr/sofr), commodities (wti/gold/natgas/copper), global rates (ecb_rate/boj_rate) |
 | `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
