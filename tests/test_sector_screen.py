@@ -309,6 +309,40 @@ def test_constituent_universe_early_bail_on_dead_classifier():
     assert calls["n"] <= 14  # bailed after max(6, budget//3)=13 dead lookups
 
 
+def test_breadth_gate_blocks_small_samples():
+    from tradingagents.strategies.sector_screener import breadth_with_gate
+    small = breadth_with_gate({"pct": 33.3, "n": 3, "above": 1, "window": 50}, min_n=20)
+    assert small["pct"] is None and small["small_sample"] is True
+    assert "sample 3 < 20" in small["reason"]
+    ok = breadth_with_gate({"pct": 60.0, "n": 30, "above": 18, "window": 50}, min_n=20)
+    assert ok["pct"] == 60.0 and ok["small_sample"] is False
+    assert breadth_with_gate(None, min_n=20)["pct"] is None
+
+
+def test_leadership_ratio_ewcw_deterministic():
+    from tradingagents.strategies.sector_screener import leadership_ratio_ewcw
+    cw = [100.0 * (1.0003 ** i) for i in range(120)]           # mild cap uptrend
+    ew_strong = [100.0 * (1.0012 ** i) for i in range(120)]    # stronger EW
+    ew_weak = [100.0 * (1.0001 ** i) for i in range(120)]      # lagging EW
+    up = leadership_ratio_ewcw(cw, ew_strong)
+    assert up["ratio"] is not None
+    assert up["label"] == "broadening"                     # ratio above own SMA
+    assert up["spread_pct"] is not None
+    down = leadership_ratio_ewcw(cw, ew_weak)
+    assert down["label"] in ("narrowing", "flat")
+    # immune to price level: scaling BOTH series equally leaves the ratio
+    up2 = leadership_ratio_ewcw([c * 1000 for c in cw], [c * 1000 for c in ew_strong])
+    assert abs(up["ratio"] - up2["ratio"]) < 1e-6
+    # None-safe
+    assert leadership_ratio_ewcw([], [])["ratio"] is None
+
+
+def test_ew_cw_etfs_map_complete():
+    import tradingagents.strategies.sector_screener as sc
+    from tradingagents.strategies.sector_rank import SPDR_SECTORS
+    assert set(sc.EW_CW_ETFS) == set(SPDR_SECTORS)  # every cap sector has an RSP* EW
+
+
 def test_eodhd_breadth_composition(monkeypatch):
     from tradingagents.strategies import sector_screener as sc
     # a fake member map drives constituent_screens (the tool's post-bucket path)

@@ -2401,7 +2401,9 @@ def get_sector_rotation_screen(
     sectors held green), and the cross-sectional dispersion trend (rising =
     rotation regime). With ``enable_breadth`` also fetches the curated
     constituents of the top sectors and renders breadth (%-above-50d SMA),
-    the EW/CW leadership ratio (cap >> EW = narrow mega-cap rally) and the
+    breadth gated on sample size (n < 20 renders n/a, never a noisy %), the
+    EW/CW leadership ratio against the REAL equal-weight sector index (RSP*)
+    normalized to its own 50d SMA (broadening/narrowing + spread), and the
     Setup-A (high-tight shelf) / Setup-B (first pullback to a rising 20d EMA)
     states. Use instead of raw rank reads before any 'sector is rotating /
     leadership shifting / early rotation' claim. None-safe: a missing series
@@ -2478,7 +2480,11 @@ def get_sector_rotation_screen(
             try:
                 from tradingagents.dataflows.eodhd import get_exchange_symbols_eodhd
                 from tradingagents.dataflows.yfinance_sector import fetch_sector
-                from tradingagents.strategies.sector_screener import constituent_universe
+                from tradingagents.strategies.sector_screener import (
+                    breadth_with_gate,
+                    constituent_universe,
+                    leadership_ratio_ewcw,
+                )
 
                 _MAJOR_FX = ("NYSE", "NASDAQ", "AMEX", "NYSEMKT")
                 # the EODHD list covers every US exchange incl. OTC microcaps
@@ -2561,18 +2567,35 @@ def get_sector_rotation_screen(
                 if members:
                     cons[parent] = members
         if cons:
+            from tradingagents.strategies.sector_screener import EW_CW_ETFS
             cs = constituent_screens(closes_map, cons, top_n=3)
             lines.append("")
-            lines.append("### Constituent screens (breadth / EW-CW leadership / setups)" + _line_note + _top_note)
+            lines.append("### Constituent screens (breadth / setups)" + _line_note + _top_note)
             for parent, blk in cs.items():
-                b = blk["breadth"]
-                lr = blk["leadership"]
+                # breadth is gated: sample < 20 renders n/a (not a breadth
+                # read) so the small-n noise can't drive a sector verdict
+                b = breadth_with_gate(blk["breadth"], min_n=20)
+                pct = b.get("pct")
                 lines.append(
-                    f"- {parent}: breadth {b.get('pct') if b.get('pct') is not None else 'n/a'}% "
-                    f"({b.get('above', 0)}/{b.get('n', 0)} above 50d SMA) | EW/CW "
-                    f"{lr if lr is not None else 'n/a'} (cw) "
-                    f"{'narrow mega-cap rally' if lr is not None and lr < 0.95 else ('broadening participation' if lr is not None else '')}"
+                    f"- {parent}: breadth {f'{pct}%' if pct is not None else 'n/a'} "
+                    f"({b.get('above', 0)}/{b.get('n', 0)} above 50d SMA)"
+                    + (f" - {b['reason']}" if b.get("small_sample") and b.get("n") else "")
                 )
+                # EW/CW is the REAL equal-weight index (RSP*) vs the cap ETF,
+                # normalized against its own 50d SMA - a separate line, never
+                # merged into the breadth verdict. n/a when RSP* doesn't resolve.
+                ew_etf = EW_CW_ETFS.get(parent)
+                if ew_etf:
+                    ew_closes = _ohlcv(ew_etf).get("closes") or []
+                    cw_closes = (closes_map or {}).get(parent) or []
+                    lr = leadership_ratio_ewcw(cw_closes, ew_closes, sma_w=50)
+                    if lr.get("ratio") is not None:
+                        lines.append(
+                            f"  EW/CW {parent}/{ew_etf}: ratio {lr['ratio']} vs own 50d "
+                            f"{lr['ratio_sma']} -> {lr['label']} ({lr['spread_pct']:+.1f}% vs baseline)"
+                        )
+                    else:
+                        lines.append(f"  EW/CW {parent}/{ew_etf}: n/a (RSP* series unresolved)")
                 for row in blk["setups"]:
                     a, bb = row["setup_a"], row["setup_b"]
                     a_state = (a or {}).get("state", "none")

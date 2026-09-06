@@ -26,6 +26,25 @@ from .sector_rank import (
     rank_sectors_multifactor,
 )
 
+# Canonical cap-weight -> equal-weight sector ETF pairs (Invesco RSP-linked
+# sector ETFs, current tickers as of 2026-06). These are the REAL S&P-500
+# equal-weight sector indices, so EW/CW reads are sample-independent and
+# comparable across sectors (the fix for the micro-sample ratio).
+EW_CW_ETFS: dict[str, str] = {
+    "XLK": "RSPT",
+    "XLF": "RSPF",
+    "XLV": "RSPH",
+    "XLY": "RSPD",
+    "XLI": "RSPN",
+    "XLB": "RSPM",
+    "XLE": "RSPG",
+    "XLU": "RSPU",
+    "XLC": "RSPC",
+    "XLRE": "RSPR",
+    "XLP": "RSPS",
+}
+
+
 # Sector screen defaults (design doc §5).
 _REQUIRE_BARS = 65
 _DEFAULT_TOP_N = 5
@@ -489,6 +508,59 @@ def constituent_universe(
     return buckets
 
 
+def breadth_with_gate(breadth: dict | None, min_n: int = 20) -> dict:
+    """Apply the denominator-integrity gate to a breadth read.
+
+    n < min_n -> the breadth % is NOT a real breadth measure (a 3-ticker
+    sample cannot represent a sector); render it n/a with the reason instead
+    of presenting a noisy percentage. n=0 (no series) stays n/a.
+    """
+    if not breadth:
+        return {"pct": None, "n": 0, "above": 0, "small_sample": True, "min_n": min_n}
+    n = breadth.get("n", 0)
+    if n and n < min_n:
+        return {**breadth, "pct": None, "small_sample": True, "min_n": min_n,
+                "reason": f"sample {n} < {min_n} (not a breadth read)"}
+    return {**breadth, "small_sample": False, "min_n": min_n}
+
+
+def leadership_ratio_ewcw(cw_closes: list, ew_closes: list, *, sma_w: int = 50) -> dict:
+    """EW/CW leadership ratio vs its OWN moving average (the standard fix).
+
+    ``ratio`` = (1+ew_total_ret)/(1+cw_total_ret) over the shared window —
+    unitless and immune to nominal share-price levels (return ratios, so
+    RSPT/XLK price levels cancel). Broadening = the ratio is ABOVE its own
+    ``sma_w`` average (relative spread expanding); narrowing = below.
+    None-safe: any missing/insufficient series returns all-None fields.
+    """
+    n = min(len(cw_closes or []), len(ew_closes or []))
+    if n < 2:
+        return {"ratio": None, "ratio_sma": None, "spread_pct": None, "label": None}
+    c = cw_closes[-n:]
+    e = ew_closes[-n:]
+    cw_ret = c[-1] / c[0] - 1.0
+    ew_ret = e[-1] / e[0] - 1.0
+    if cw_ret <= -1 or ew_ret <= -1 or c[0] <= 0 or e[0] <= 0:
+        return {"ratio": None, "ratio_sma": None, "spread_pct": None, "label": None}
+    ratio = (1.0 + ew_ret) / (1.0 + cw_ret)
+    # per-bar ratio series over the shared window (for the own-SMA baseline)
+    rser = []
+    for i in range(1, n):
+        cw_i = c[i] / c[i - 1] - 1.0
+        ew_i = e[i] / e[i - 1] - 1.0
+        if cw_i > -1 and ew_i > -1:
+            rser.append((1.0 + ew_i) / (1.0 + cw_i))
+    if len(rser) < 2:
+        return {"ratio": round(ratio, 4), "ratio_sma": None,
+                "spread_pct": None, "label": None}
+    k = min(sma_w, len(rser))
+    sma = sum(rser[-k:]) / k
+    spread = (ratio / sma - 1.0) * 100 if sma else 0.0
+    return {"ratio": round(ratio, 4), "ratio_sma": round(sma, 4),
+            "spread_pct": round(spread, 2),
+            "label": "broadening" if ratio > sma else ("narrowing" if ratio < sma else "flat")}
+
+
 def backtest_rotation(
     closes_map: dict,
     bench_closes: list,
@@ -564,6 +636,8 @@ __all__ = [
     "sector_screen",
     "constituent_screens",
     "constituent_universe",
+    "breadth_with_gate",
+    "leadership_ratio_ewcw",
     "backtest_rotation",
 ]
 

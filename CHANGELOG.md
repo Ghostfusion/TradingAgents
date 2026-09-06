@@ -50,6 +50,20 @@ Breaking changes within the 0.x line are called out explicitly.
   inflate FCF. Tests: consensus-render assertions + capex red-flag/sign
   cases; wiring gate green; ruff clean.
 - **Quant-engine v2 audit** (pre-agent-wiring calculation check): (1) DuPont driver was `argmax |factor|` (= always the biggest leg — mislabeled a normal-leverage firm "leverage-led" and a loss-making firm "equity_multiplier-driven") → replaced with log-DuPont attribution vs the neutral 1.0 benchmark (margin/turnover/leverage/mixed labels; non-positive margin always the story); (2) scenario DCF silently coerced `g_base=0.0` to 3% → respected now; added the design-promised market price → band (below bear / bear-base / base-bull / above bull) + per-scenario margin of safety (and `-0.0` fcf_scale cleanup); (3) earnings-quality returned `LOW` on no inputs (dead `n/a` branch) → level now None (n/a) when nothing is usable, and the render says "concern" so HIGH can't be read as "high quality". Wired the trio into the fundamentals analyst (import + tool list + prompt) — the graph ToolNode already had them. Tests `test_quant_engine_v2.py` (19) + `test_analysis_tools.py` renders (7); wiring gate green; ruff clean.
+### Fixed
+- **Sector rotation screen: breadth gate + real EW/CW index (review fix)** -
+  structural-review fixes: (1) breadth is now **denominator-gated** (sample
+  < 20 renders n/a 'not a breadth read' instead of a noisy % from 1-3
+  tickers); (2) the EW/CW ratio now uses the **real Invesco RSP* equal-weight
+  sector index** per sector (`EW_CW_ETFS`: RSPT/RSPF/RSPH/RSPD/RSPN/RSPM/
+  RSPG/RSPU/RSPC/RSPR/RSPS, current 2026-06 tickers) instead of the
+  micro-sample reconstruction, **normalized against its own 50d SMA**
+  (broadening/narrowing + spread% vs baseline) - unitless return ratio,
+  immune to share-price levels; (3) breadth and EW/CW are now **separate
+  lines** - a sector can never be called 'broadening' from a 1-ticker sample.
+  Live: XLK/RSPT narrowing -53.5% (megacap concentration), XLC/RSPC +3.7%
+  broadening, all breadth n/a sample<20. Tests: gate, price-level immunity,
+  map completeness (20 screen tests green).
 ### Added
 - **Sector rotation screen: EODHD constituent universe for breadth** -
   the breadth/EW-CW/setup layer can now be driven by the EODHD full-US

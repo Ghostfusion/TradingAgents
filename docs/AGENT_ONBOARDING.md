@@ -22,6 +22,19 @@ a fresh agent must follow them without being reminded:
    a `@tool` bound to the relevant analyst (see the no-fabrication contract in
    `docs/api_reference.md` §6.4) - a pure function that never reaches the
    agent tool loops is incomplete work.
+1b. **Every code change: check calc -> tool -> prompt wiring** - ALL code
+   changes (not just new calculators) must check whether the calculation can
+   be wired into a `@tool` AND its prompt guidance added to the corresponding
+   agent(s). The wiring chain is: `strategies/*` calculator -> `@tool` in
+   `agents/utils/*_tools.py` -> tool list + import + `__all__` in
+   `agent_utils.py` -> the analyst/agent that owns the claim -> a
+   "cite it before any X claim" line in that agent's `system_message` ->
+   the graph ToolNode list for that agent. Every hop must be checked and
+   landed when the change produces a usable computed read; the gates in
+   `tests/test_calc_agent_wiring.py` (test_public_calc_reachable_or_whitelisted,
+   test_tool_bound_to_agent_surface, test_bound_tool_has_prompt_guidance)
+   enforce the chain automatically - run them before finishing and add the
+   prompt line whenever a new bound tool appears.
 2. **Keep every doc true** - whenever code/behavior changes, update the
    relevant section(s) of the docs in `docs/` (api_reference.md,
    howto_end_to_end.md, AGENT_ONBOARDING.md gotchas/changelog) AND `README.md`

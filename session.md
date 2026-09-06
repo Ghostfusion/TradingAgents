@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Sector rotation screen: review fixes (2026-09-06)** - breadth
+  denominator gate (n<20 -> n/a), EW/CW rebuilt on the real RSP*
+  equal-weight sector index (canonical tickers) vs its own 50d SMA,
+  breadth/EW-CW split into separate lines. Live: XLK/RSPT -53.5% narrowing,
+  XLF corrected to narrowing -1.8%. 20 tests.
 - **Sector rotation screen: EODHD breadth (2026-09-06)** - wired the
   EODHD full-US symbol list into the breadth layer: sector_group_of with
   sub-industry aliases (yfinance granularity), major-exchange filter,
