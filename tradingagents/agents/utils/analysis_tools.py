@@ -84,6 +84,19 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
                 volumes.append(float(parts[5]))
             except ValueError:
                 continue
+        # Some vendors (e.g. EODHD) return rows NEWEST-first; every consumer
+        # in this module treats ``closes[-1]`` as the latest bar, so normalize
+        # to ASCENDING date order (oldest first) after parsing. Without this
+        # the 'current price' was the OLDEST row - a 220-off-day stale close
+        # (the ABNB $128.56 incident: last row was 2025-10-21).
+        if len(dates) > 1:
+            order = sorted(range(len(dates)), key=lambda i: dates[i])
+            dates = [dates[i] for i in order]
+            opens = [opens[i] for i in order]
+            highs = [highs[i] for i in order]
+            lows = [lows[i] for i in order]
+            closes = [closes[i] for i in order]
+            volumes = [volumes[i] for i in order]
         result = {
             "dates": dates,
             "closes": closes,

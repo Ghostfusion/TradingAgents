@@ -14,13 +14,16 @@ from tradingagents.agents.utils import analysis_tools as T, value_dip_tools as V
 def _ohlcv_csv(closes, vols, start="2026-01-01", dates_daily=True):
     rows = ["Date,Open,High,Low,Close,Volume"]
     for i, (c, v) in enumerate(zip(closes, vols, strict=False)):
+        # Monotone business-day dates so the analysis_tools._ohlcv order
+        # normalization (ascending sort) does not collapse duplicate dates.
+        day = (i // 21 + 1) % 12 + 1
         if dates_daily:
             rows.append(
-                f"{start[:-2]}{i % 28 + 1:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}"
+                f"{start[:-2]}{day:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}"
             )
         else:
             rows.append(
-                f"2026-07-{i % 28 + 1:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}"
+                f"2026-07-{day:02d},{c + 0.1:.2f},{c + 2:.2f},{c - 2:.2f},{c:.2f},{v}"
             )
     return "\n".join(rows) + "\n"
 
@@ -250,9 +253,18 @@ def test_vcp_tool_reports_state():
     closes = _uptrend()
     vols = [5_000_000] * len(closes)
     vols = vols[:-8] + [1_500_000] * 8
+    from tradingagents.dataflows.schema import VendorResult
+
+    csv = _ohlcv_csv(closes, vols)
+
+    def typed(method, *a, **k):
+        if method == "get_stock_data":
+            return VendorResult(results=csv, provider="test")
+        return VendorResult(results="NO_DATA_AVAILABLE", error_kind="NoMarketDataError")
+
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}, vols=vols),
+        "tradingagents.dataflows.interface.route_to_vendor_typed",
+        side_effect=typed,
     ):
         out = T.get_volatility_contraction.invoke({"ticker": "AAPL"})
     assert "vcp AAPL:" in out
