@@ -1350,8 +1350,11 @@ def get_regime_components(
         windows = [closes[i - window : i] for i in range(window, len(closes) + 1, window)]
         vol_pct = vol_percentile(windows or [closes], current_window=window)
         trend = trend_strength(closes, sma_window=min(200, max(2, len(closes) // 2)))
-        chop = choppiness(closes, window=14)
-        label = regime_label(vol_pct, trend, chop)
+        # CHOP runs 0-100 (low = trend); threshold 30 sits on the classic
+        # 30/60 rule of thumb (trending < 30, ranging > 60)
+        chop = choppiness(
+            closes, highs=data.get("highs"), lows=data.get("lows"), window=14)
+        label = regime_label(vol_pct, trend, chop, chop_threshold=30.0)
     except Exception as exc:  # noqa: BLE001
         return f"regime components unavailable for {ticker}: {exc}"
     return f"regime {ticker}: vol_pct={vol_pct:.2f} trend={trend:.4f} chop={chop:.2f} label={label}"

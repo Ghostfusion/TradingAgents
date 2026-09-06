@@ -122,7 +122,10 @@ def modified_var(returns: list[float], alpha: float = 0.05,
     z_CF = z + (z^2 - 1)*S/6 + (z^3 - 3z)*K/24 - (2z^3 - 5z)*S^2/36; VaR =
     -(mu + z_CF * sigma) over the horizon. More accurate than Gaussian VaR for
     skewed/leptokurtic returns (the standard practice between historical and
-    EVT VaR). Returns a positive loss magnitude (None on <5 obs / zero sigma).
+    EVT VaR). K is the EXCESS kurtosis (normal = 0) - the raw standardized
+    kurtosis (normal = 3) adds a spurious tail adjustment that does not vanish
+    for mesokurtic series. Returns a positive loss magnitude (None on <5 obs /
+    zero sigma).
     """
     vals = [float(r) for r in returns if r is not None]
     if len(vals) < 5:
@@ -138,7 +141,9 @@ def modified_var(returns: list[float], alpha: float = 0.05,
 
     z = NormalDist().inv_cdf(float(alpha))
     s = skewness(vals) or 0.0
-    k = kurtosis(vals) or 0.0
+    # evaluate.kurtosis returns the standardized kurtosis (normal = 3);
+    # Cornish-Fisher uses EXCESS kurtosis (normal = 0).
+    k = (kurtosis(vals) or 0.0) - 3.0
     z_cf = z + (z * z - 1.0) * s / 6.0 + (z * z * z - 3.0 * z) * k / 24.0 \
         - (2.0 * z * z * z - 5.0 * z) * s * s / 36.0
     return -(mu + z_cf * sig)

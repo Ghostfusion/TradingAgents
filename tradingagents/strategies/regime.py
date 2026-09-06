@@ -78,15 +78,40 @@ def trend_strength(close: list[float], sma_window: int = 200) -> float:
     return (close[-1] - sma) / sma
 
 
-def choppiness(close: list[float], window: int = 14) -> float:
-    """0-1 proxy for trend vs range: high when price wanders (std of ln closes)."""
+def choppiness(close: list[float], highs: list | None = None,
+               lows: list | None = None, window: int = 14) -> float:
+    """Canonical Choppiness Index (Dreiss 1990s), 0-100 scale.
+
+    CHOP = 100 * log10(sum(ATR_i, n) / (HH(n) - LL(n))) / log10(n). High =
+    ranging/choppy, low = trending. Requires OHLC; when only closes are given
+    (no high/low) falls back to the 0-1 log-return-dispersion proxy so callers
+    that only carry closes still get a bounded regime read. The old behavior
+    (std of log returns on the 0-1 scale) was NOT the CHOP index and inverted
+    the semantics (high = volatile instead of ranging).
+    """
+    n = max(2, int(window))
+    h = [float(x) for x in (highs or []) if x is not None]
+    lo = [float(x) for x in (lows or []) if x is not None]
+    c = [float(x) for x in close if x is not None]
+    if len(c) >= n + 1 and len(h) >= n and len(lo) >= n:
+        # true-range sum over the last n bars
+        tr_sum = 0.0
+        for i in range(len(c) - n, len(c)):
+            hi, lw, prev_c = h[i], lo[i], c[i - 1]
+            tr_sum += max(hi - lw, abs(hi - prev_c), abs(lw - prev_c))
+        hi_hi = max(h[-n:])
+        lo_lo = min(lo[-n:])
+        rng = hi_hi - lo_lo
+        if rng > 0 and tr_sum > 0:
+            return float(100.0 * math.log10(tr_sum / rng) / math.log10(n))
+    # fallback: 0-1 log-return dispersion proxy (close-only series)
     logrets = []
-    prev = close[0]
-    for p in close[1:]:
-        if prev:
-            logrets.append(math.log(max(p, 1e-9) / max(prev, 1e-9)))
+    prev = c[0] if c else None
+    for p in c[1:]:
+        if prev and prev > 0 and p > 0:
+            logrets.append(math.log(p / prev))
         prev = p
-    sample = logrets[-window:]
+    sample = logrets[-n:]
     if len(sample) < 3:
         return 0.5
     return float(pstdev(sample) or 0.5)

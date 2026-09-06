@@ -200,9 +200,13 @@ def test_black76_full_greeks_present_and_signed():
     for k in ("price", "delta", "gamma", "vega", "theta", "rho", "vanna",
               "vomma", "charm"):
         assert g[k] is not None
-    assert g["rho"] > 0
+    assert g["price"] > 0
+    # Black-76 futures-form rho = -T*V (rate enters only via the discount)
     gp = options_math.black76(100, 100, 0.5, 0.25, "put", r=0.02)
-    assert gp["rho"] < 0
+    assert gp["price"] > 0
+    assert g["rho"] < 0 and gp["rho"] < 0
+    assert g["rho"] == pytest.approx(-g["price"] * 0.5)
+    assert gp["rho"] == pytest.approx(-gp["price"] * 0.5)
     for k in ("gamma", "vega"):
         assert g[k] == gp[k]  # same for call/put
 

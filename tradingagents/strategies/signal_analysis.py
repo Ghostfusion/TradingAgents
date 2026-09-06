@@ -137,18 +137,20 @@ def long_short_return(r_long: float, r_short: float) -> tuple[float, float]:
 
 
 def long_short_precision(predicted: list, realized: list, quantile: float = 0.8) -> float | None:
-    """Of the top ``quantile`` by predicted, the share also in the top
-    ``quantile`` by realized outcome (Qlib long-short precision)."""
+    """Qlib long-short precision: of the top ``quantile`` by predicted return,
+    the share whose realized return is positive (long picks win). Mirrors
+    ``Qlib.calc_long_short_prec`` (sign-direction hit rate, by date); the old
+    top-quantile set-overlap variant was not comparable to Qlib's metric.
+    """
     p, r = _clean_pair(predicted, realized)
     if len(p) < 5:
         return None
-    p_cut = sorted(p)[int(math.ceil((1.0 - quantile) * len(p))) - 1]
-    r_cut = sorted(r)[int(math.ceil((1.0 - quantile) * len(r))) - 1]
-    pred_top = [pi for pi, ri in zip(p, r, strict=True) if pi >= p_cut]
-    hit = [1 for pi, ri in zip(p, r, strict=True) if pi >= p_cut and ri >= r_cut]
+    cut = int(math.ceil((1.0 - quantile) * len(p)))  # threshold rank
+    p_cut = sorted(p)[max(0, cut - 1)]
+    pred_top = [ri for pi, ri in zip(p, r, strict=True) if pi >= p_cut]
     if not pred_top:
         return None
-    return len(hit) / len(pred_top)
+    return sum(1.0 for ri in pred_top if ri > 0.0) / len(pred_top)
 
 
 def pred_autocorr(signal: list, lag: int = 1) -> float | None:

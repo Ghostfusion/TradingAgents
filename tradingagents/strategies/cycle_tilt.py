@@ -88,15 +88,17 @@ def cycle_tilt(pmi: float | None, spread10_2: float | None, hy_spread: float | N
 
 def taylor_rule(
     policy_rate, inflation, output_gap=None,
-    r_star=0.005, inflation_target=0.02,
+    r_star=0.02, inflation_target=0.02,
     inflation_weight=0.5, output_weight=0.5,
 ):
     """Classic Taylor (1993) rule implied nominal policy rate.
 
-    i = r* + pi + w_pi*(pi - pi*) + w_y*(y - y*) with r* neutral real rate
-    (0.5%), pi inflation, pi* target (2%), y-y* output gap (default 0).
-    Returns the implied nominal policy rate (fraction) or None on missing
-    policy_rate/inflation.
+    i = r* + pi + w_pi*(pi - pi*) + w_y*(y - y*) with r* the neutral real
+    rate (2.0% per Taylor 1993), pi inflation, pi* target (2%), y-y* output
+    gap (default 0). (The prior default r*=0.5% tracked modern Laubach-
+    Williams style estimates but diverged from the canonical 1993 rule by
+    ~1.5pp.) Returns the implied nominal policy rate (fraction) or None on
+    missing policy_rate/inflation.
     """
     try:
         float(policy_rate)

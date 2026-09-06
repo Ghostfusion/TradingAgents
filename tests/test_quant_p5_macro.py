@@ -12,11 +12,12 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def test_taylor_rule_implied_simple_case():
-    # i = r* + pi + 0.5*(pi - pi*) = 0.005 + 0.03 + 0.5*0.01 = 0.04
+    # i = r* + pi + 0.5*(pi - pi*) = 0.02 + 0.03 + 0.5*0.01 = 0.055
+    # (classic Taylor 1993 neutral real rate 2%; old default 0.5% removed)
     from tradingagents.strategies.cycle_tilt import taylor_rule
 
     implied = taylor_rule(policy_rate=0.05, inflation=0.03, output_gap=0.0)
-    assert implied == pytest.approx(0.04)
+    assert implied == pytest.approx(0.055)
 
 
 def test_taylor_rule_output_gap_raises_rate():
@@ -39,9 +40,9 @@ def test_taylor_deviation_signs():
 def test_macro_stance_combines_phase_and_taylor():
     st = macro_stance(52, 0.4, 3.0, 0.05, 0.03, 0.0)
     assert st["phase"] == "mid"
-    assert st["taylor_implied"] == pytest.approx(0.04)
-    assert st["deviation"] == pytest.approx(0.01)
-    assert st["stance"] == "tight"
+    assert st["taylor_implied"] == pytest.approx(0.055)  # r* = 2% (1993)
+    assert st["deviation"] == pytest.approx(-0.005)
+    assert st["stance"] in ("easy", "neutral")  # -50bp sits on the stance band
     assert "Technology" in st["tilt"]
 
 

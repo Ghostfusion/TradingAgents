@@ -349,7 +349,11 @@ _ALPHA158_SUBSET = [
 
 
 def _returns(closes: list) -> list[float | None]:
-    """Daily close-to-close returns aligned 1:1 with closes (index 0 = None)."""
+    """Daily close-to-close returns aligned 1:1 with closes (index 0 = None).
+
+    r_t = c_t/c_{t-1} - 1 (positive when the price rose; the old prev/c - 1
+    was sign-inverted, swapping the up/down volume-volatility features).
+    """
     out: list[float | None] = []
     prev: float | None = None
     for c in closes:
@@ -357,7 +361,7 @@ def _returns(closes: list) -> list[float | None]:
             out.append(None)
             prev = None
             continue
-        out.append(prev / c - 1.0 if prev else None)
+        out.append(c / prev - 1.0 if prev else None)
         prev = float(c)
     return out
 

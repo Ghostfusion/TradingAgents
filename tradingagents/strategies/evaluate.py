@@ -167,33 +167,36 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
 
 
 def purged_cpcv_splits(n: int, n_splits: int = 5, embargo: int = 0):
-    """Combinatorial purged cross-validation (CPCV) fold indices (W2-2).
+    """Naive-Combinatorial purged cross-validation (CPCV) fold indices (W2-2).
 
-    Yields (train_idx, test_idx) lists for ``n_splits`` groups. Each test
-    group is one contiguous block; the train set is ALL other groups with a
-    ``embargo``-bar purge gap around the test block (so nearby overlapping
-    labels never leak into training). Combinatorial => a factor must survive
-    on MANY train/test cuts, not one lucky split.
+    Yields (train_idx, test_idx) for every (test-group, train-complement)
+    combination: for each test group g, the train set is each NON-EMPTY
+    subset of the remaining groups (both orders -- groups before and after g),
+    with the ``embargo``-bar purge gap around the test block applied to the
+    train members. This gives C(N-1, k) paths per test group (not one lucky
+    k-fold cut), matching Lopez de Prado's combinatorial CPCV: a factor must
+    survive on MANY train/test cuts. Degenerates to plain k-fold when
+    ``n_splits <= 2`` (only the full-complement cut exists).
     """
     if n <= 0 or n_splits <= 1:
         return
     size = max(1, n // n_splits)
     groups = [list(range(g * size, min(n, (g + 1) * size))) for g in range(n_splits)]
     groups = [g for g in groups if g]
-    for g in range(len(groups)):
-        test = groups[g]
-        purged = set()
+    for g, test in enumerate(groups):
+        others = [grp for i, grp in enumerate(groups) if i != g]
         lo = min(test) - embargo if embargo else min(test)
         hi = max(test) + 1 + embargo if embargo else max(test) + 1
-        for other_i, other in enumerate(groups):
-            if other_i == g:
-                continue
-            for idx in other:
-                if lo <= idx < hi:
-                    purged.add(idx)
-        train = [idx for gg in (groups[:g] + groups[g+1:]) for idx in gg if idx not in purged]
-        if train and test:
-            yield list(train), list(test)
+        # iterate over all non-empty subsets of the other groups (both orders)
+        m = len(others)
+        for mask in range(1, 1 << m):
+            chosen = []
+            for i, grp in enumerate(others):
+                if mask & (1 << i):
+                    chosen.extend(grp)
+            train = [idx for idx in chosen if not (lo <= idx < hi)]
+            if train:
+                yield list(train), list(test)
 
 
 def cpcv_overfit_mask(ipcs: list[float], oopcs: list[float],

@@ -30,7 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-09-06] **Quant-formula audit fixes** — independent web-verified pass over ~468 formula blocks; corrected risk-parity weights (was collapsing to a single-name book), Beneish M-Score DEPI/LVGI arithmetic, DCF terminal-value anchoring (intrinsic values ~7-10% low), and square-root market-impact vol units (~100x understated). Regression tests pin the canonical closed forms. See CHANGELOG.
+- [2026-09-06] **Quant-formula audit pass 2** — 13 remaining divergences from the web-verified audit corrected: modified VaR (excess kurtosis), capital-income exact ceiling cap, downside deviation /N, Black-76 rho `-T·V`, BSM charm sign + dividend term, Zmijewski CA/CL, Alpha158 returns sign, canonical CHOP choppiness, Qlib precision, combinatorial CPCV, Wilder-RMA RSI/stochRSI, Taylor r*=2% (1993), GEX sign convention. All pinned by regression tests. See CHANGELOG.
 - [2026-09-06] **Sector rotation screen + EODHD breadth** — constituent breadth/EW-CW/setups now run off the EODHD full-US universe (major-exchange filtered, budget-capped, per-sector n shown). See CHANGELOG.
 - [2026-09-06] **Sector rotation screen** — sector-first screener tool (regime/RS/quadrant/pullback-divergence/dispersion + breadth/EW-CW/setups), LLM-facing, after-cost-validated context-only. See CHANGELOG.
 - [2026-09-06] **Industry depth** — SEC EDGAR full-text search (keyless; customer-concentration footnotes, peer 10-Ks) + USPTO PatentsView patent activity (free key); wired to the fundamentals analyst. See CHANGELOG.

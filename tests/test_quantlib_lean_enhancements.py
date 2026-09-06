@@ -268,7 +268,10 @@ def test_downside_measures():
     d = rate_utils.downside_measures([0.01, -0.02, 0.03, -0.04], 0.0)
     assert d["shortfall_prob"] == pytest.approx(0.5)
     assert d["avg_shortfall"] == pytest.approx(0.03)
-    assert d["downside_deviation"] == pytest.approx(math.sqrt((0.02 ** 2 + 0.04 ** 2) / 2))
+    # canonical downside deviation divides by ALL observations (4), matching
+    # evaluate.downside_deviation; the old /shortfall-count form (2) inflated
+    # the measure by sqrt(2) for symmetric returns
+    assert d["downside_deviation"] == pytest.approx(math.sqrt((0.02 ** 2 + 0.04 ** 2) / 4))
 
 
 # --------------------------------------------------------------------------

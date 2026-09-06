@@ -26,7 +26,11 @@ class TestCpcv:
         for train, test in purged_cpcv_splits(n, n_splits=5):
             assert max(test) < n and min(train) >= 0
             covered.update(test)
+            seen += 1
         assert len(covered) == n  # every index tested in some fold
+        # combinatorial: 5 one-out groups, each with the 15 non-empty subsets
+        # of the other 4 groups (both orders) => 5*15 = 75 (k-fold gave 5)
+        assert seen == 5 * 15
 
     def test_train_excludes_test_with_embargo(self):
         for train, test in purged_cpcv_splits(50, n_splits=5, embargo=2):

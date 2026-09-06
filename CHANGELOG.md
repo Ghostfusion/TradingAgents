@@ -33,6 +33,43 @@ Breaking changes within the 0.x line are called out explicitly.
      exact 0.1·σ·√(Q/V) value.
   Each fix carries a regression test pinning the canonical closed form;
   full-suite green.
+- **Quant-formula audit pass 2 (13 remaining divergences)** — the 13 lower-
+  severity divergences from the same audit, each with a regression test:
+  1. **Modified VaR** (`strategies/size.py`): Cornish-Fisher now uses EXCESS
+     kurtosis (γ₄−3, normal = 0) instead of the raw standardized kurtosis,
+     removing the spurious ~0.7σ tail adjustment at 99% on normal series.
+  2. **Capital-income capping** (`strategies/capital_income.py`):
+     `cap_and_redistribute` now enforces the documented two-threshold rule
+     (3% soft cap / 3.5% exact ceiling): excess redistributed pro-rata to
+     names below the soft cap, capped names frozen at the ceiling. The old
+     whole-vector renormalization pushed capped names back above 3.5%.
+  3. **Downside deviation / semi-deviation** (`strategies/rate_utils.py`):
+     divided by ALL observations (canonical, consistent with
+     `evaluate.downside_deviation`) instead of the shortfall count (was
+     inflated ~√2 on symmetric returns).
+  4. **Black-76 rho** (`strategies/options_math.py`): futures-form `−T·V`
+     (was BSM spot-form, wrong sign for ITM calls).
+  5. **BSM charm** (`strategies/options_math.py`): sign fixed + the dividend
+     term `q·e^{−qT}·N(d1)` added; finite-difference verified.
+  6. **Zmijewski X-score** (`strategies/normalized.py`): liquidity term uses
+     the canonical current ratio CA/CL (was inverted CL/CA).
+  7. **Alpha158 `_returns`** (`strategies/factor_expressions.py`): sign-fixed
+     to `c/prev − 1` (was `prev/c − 1`, swapping the up/down-vol features).
+  8. **Choppiness** (`strategies/regime.py`): now the canonical CHOP index
+     (0-100, ATR/range ratio; OHLC); close-only series keep a bounded
+     0-1 proxy. Regime threshold retuned to the CHOP 30 trending band.
+  9. **Long-short precision** (`strategies/signal_analysis.py`): Qlib
+     sign-direction hit rate (was top-quantile set overlap).
+  10. **CPCV** (`strategies/evaluate.py`): now Naive-Combinatorial CPCV —
+     every (test-group, train-complement) subset, 5×15 paths for 5 groups
+     (was single k-fold cut); embargo preserved.
+  11. **RSI family** (`strategies/swing.py`, `technical_factors.py`):
+     `swing.rsi` + `stoch_rsi` now use Wilder RMA smoothing (was Cutler's
+     simple-sum RSI mislabeled "Wilder"); `rsi2` unchanged (n=2 collapse).
+  12. **Taylor rule r\*** (`strategies/cycle_tilt.py`): default neutral real
+     rate 0.5% → classic Taylor (1993) 2.0%.
+  13. **GEX sign** (`strategies/derivatives_gamma.py`): call OI → + dealer
+     gamma, put OI → − (mainstream SpotGamma convention; was inverted).
 
 ### Changed
 - **Wiring audit: prompt guidance for every analyst-bound tool**.

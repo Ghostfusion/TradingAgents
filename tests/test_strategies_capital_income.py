@@ -73,20 +73,33 @@ def test_equal_weights():
 
 
 def test_cap_and_redistribute():
-    # Standard full capping: cap each name at ceiling (3.5%) then renormalize
-    # to sum 1, so a small name keeps its relative smallness.
+    # Normalized to sum 1 this 3-name book is [0.5, 0.33, 0.17] - EVERY name
+    # sits above the 3.5% ceiling, so no name is below the 3% soft cap to
+    # absorb the excess: degenerate fallback -> trimmed vector renormalized.
     out = cap_and_redistribute([0.06, 0.04, 0.02])
-    # 0.06, 0.04 -> 0.035, 0.02 stays 0.02; renormalized by /0.09
-    assert out[0] == pytest.approx(0.035 / 0.09, rel=1e-3)
-    assert out[1] == pytest.approx(0.035 / 0.09, rel=1e-3)
-    assert out[2] == pytest.approx(0.02 / 0.09, rel=1e-3)
+    assert out == pytest.approx([1 / 3, 1 / 3, 1 / 3], rel=1e-3)
     assert sum(out) == pytest.approx(1.0, rel=1e-3)
-    # After full-capping renormalization, weights can exceed the ceiling
-    # (scaled up to refill the removed excess) - that's standard behavior.
     assert all(0 <= x <= 1.0 for x in out)
-    # Names already at/under the cap are preserved proportionally.
+    # degenerate: every name above the soft cap -> no eligible absorber, so the
+    # trimmed vector is renormalized (ceiling not enforceable on a tiny book)
     assert cap_and_redistribute([0.03, 0.03]) == pytest.approx([0.5, 0.5])
     assert cap_and_redistribute([]) == []
+
+
+def test_cap_and_redistribute_exact_ceiling_with_eligible_names():
+    """Regression (audit): with uncapped names available the ceiling must be
+    EXACT - a trimmed name is frozen at 3.5% and never pushed back above it by
+    renormalization (the old whole-vector renormalize sent raw 4% -> 3.518%)."""
+    # sum-1 book: three violators + seven 2% + sixty-eight 1% names (eligible)
+    weights = [0.06, 0.05, 0.04, 0.03] + [0.02] * 7 + [0.01] * 68
+    assert sum(weights) == pytest.approx(1.0)
+    out = cap_and_redistribute(weights)
+    assert all(x <= 0.035 + 1e-9 for x in out)  # exact ceiling, never above
+    assert out[0] == pytest.approx(0.035) and out[1] == pytest.approx(0.035)
+    assert out[2] == pytest.approx(0.035)
+    assert sum(out) == pytest.approx(1.0, rel=1e-3)
+    # uncapped names absorbed the excess pro-rata (above their raw 1%/2%)
+    assert out[-1] > 0.01 and out[4] > 0.02
 
 
 def test_apply_top_n():

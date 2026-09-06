@@ -278,31 +278,22 @@ def stoch_rsi(closes: list, n: int = 14) -> dict:
     """StochRSI = (RSI - min RSI) / (max RSI - min RSI) over the window.
 
     Smoother, more sensitive oversold read than plain RSI: StochRSI < 0.2
-    oversold, > 0.8 overbought. None when history insufficient.
+    oversold, > 0.8 overbought. None when history insufficient. Uses the
+    Wilder RSI series (swing.rsi with RMA smoothing) and the standard
+    n=14 min/max window (the old per-window simple-sum RSI was Cutler's).
     """
-    if len(closes) < n + 2:
+    from tradingagents.strategies.swing import rsi as _rsi_wilder
+
+    if len(closes) < 3 * n + 1:
         return {"stochrsi": None, "oversold": None, "overbought": None}
     rsi_valid = []
-    for i in range(n, len(closes)):
-        seg = closes[i - n : i + 1]
-        gains = losses = 0.0
-        for j in range(1, len(seg)):
-            d = seg[j] - seg[j - 1]
-            if d >= 0:
-                gains += d
-            else:
-                losses -= d
-        if gains + losses == 0:
-            r = 50.0
-        elif losses == 0:
-            r = 100.0
-        else:
-            rs = gains / losses
-            r = 100.0 - 100.0 / (1.0 + rs)
-        rsi_valid.append(r)
-    if len(rsi_valid) < n + 1:
+    for i in range(3 * n, len(closes)):
+        r = _rsi_wilder(closes[: i + 1], n)
+        if r is not None:
+            rsi_valid.append(r)
+    if len(rsi_valid) < n:
         return {"stochrsi": None, "oversold": None, "overbought": None}
-    window = rsi_valid[-(n + 1) :]
+    window = rsi_valid[-n:]
     mn, mx = min(window), max(window)
     if mx == mn:
         return {"stochrsi": 0.5, "oversold": False, "overbought": False}

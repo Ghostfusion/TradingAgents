@@ -37,16 +37,31 @@ def _ema_last(series: list, n: int) -> float | None:
 
 
 def rsi(closes: list, n: int = 14) -> float | None:
-    """Wilder-style RSI(14) over the daily closes (vanilla smoothing)."""
+    """Wilder RSI(14) over the daily closes (RMA smoothing).
+
+    Uses the canonical Wilder recurrence: seed avg gain/loss = SMA of the
+    first n changes, then avg_t = (avg_{t-1}*(n-1) + chg_t)/n. Requires
+    ~3n bars for the smoothing to converge (the old sum-over-last-n-window
+    was Cutler's RSI, which dropped Wilder's memory of past moves); falls
+    back to the last-n simple ratio when history is short.
+    """
     if len(closes) < n + 1:
         return None
-    gains = losses = 0.0
-    for i in range(1, n + 1):
-        diff = closes[-i] - closes[-i - 1]
-        if diff >= 0:
-            gains += diff
-        else:
-            losses -= diff
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    if len(deltas) >= 3 * n:
+        # Wilder RMA with SMA seed over the FIRST n changes
+        seed = deltas[:n]
+        avg_g = sum(max(d, 0.0) for d in seed) / n
+        avg_l = sum(max(-d, 0.0) for d in seed) / n
+        for d in deltas[n:]:
+            avg_g = (avg_g * (n - 1) + max(d, 0.0)) / n
+            avg_l = (avg_l * (n - 1) + max(-d, 0.0)) / n
+        gains, losses = avg_g, avg_l
+    else:
+        # short history fallback: simple sum over the last n changes
+        window = deltas[-n:]
+        gains = sum(max(d, 0.0) for d in window)
+        losses = sum(max(-d, 0.0) for d in window)
     if gains + losses == 0:
         return 50.0
     rs = gains / losses if losses > 0 else float("inf")

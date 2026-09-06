@@ -62,8 +62,12 @@ def black76(forward: float, strike: float, t: float, vol: float,
     delta = disc * _ncdf(d1) if call else disc * (_ncdf(d1) - 1.0)
     # theta in price units per year (per unit notional).
     theta = -disc * (F * _npdf(d1) * sig) / (2.0 * math.sqrt(T)) if T > 0 else None
-    # rho (rate sensitivity). In the BSM forward convention rho = K*T*e^{-rT}*N(+-d2).
-    rho = (K * T * disc * _ncdf(d2)) if call else (-K * T * disc * _ncdf(-d2))
+    # rho (rate sensitivity). Black-76 futures form: the forward F is fixed,
+    # rate enters only through the discount, so rho = -T*V (both calls and
+    # puts; negative for a long option). The BSM spot-space form
+    # (+/-K*T*e^{-rT}*N(+-d2)) does not apply to the Black model and had the
+    # wrong sign for ITM calls.
+    rho = (-T * price) if (T > 0 and price is not None) else None
     # Second-order Greeks: vanna (dDelta/dSigma), vomma/volga (d^2V/dSigma^2),
     # charm (dDelta/dT). BSM closed forms with the forward substitution
     # (S->F, q->r in the standard equity formulation; verified against the
@@ -342,9 +346,14 @@ def bsm_equity_surface(
     rho = (K * T * ert * _ncdf(d2)) if call else (-K * T * ert * _ncdf(-d2))
     vanna = eqt * _npdf(d1) * (0.0 - d2) / sig  # dDelta/dSigma, equity form
     vomma = vega * d1 * d2 / sig
-    charm = eqt * _npdf(d1) * (
-        -2.0 * (rf - qy) * T + d2 * sig * math.sqrt(T)
-    ) / (2.0 * T * sig * math.sqrt(T)) * -1.0
+    # Charm = dDelta/dt (calendar time; time-to-maturity shrinks as t grows):
+    #   phi-term  e^{-qT}*phi(d1)*[d2*sig*sqrt(T) - 2(r-q)T]/(2T*sig*sqrt(T))
+    #   + dividend term  q*e^{-qT}*N(d1)  (call) / q*e^{-qT}*(N(d1)-1) (put)
+    # (the old code sign-flipped the phi-term and dropped the dividend leg;
+    #  verified by finite difference against Delta(T +/- eps)).
+    chu = d2 * sig * math.sqrt(T) - 2.0 * (rf - qy) * T
+    charm_phi = eqt * _npdf(d1) * chu / (2.0 * T * sig * math.sqrt(T))
+    charm = charm_phi + (qy * eqt * _ncdf(d1) if call else qy * eqt * (_ncdf(d1) - 1.0))
     return {
         "price": price,
         "delta": delta,

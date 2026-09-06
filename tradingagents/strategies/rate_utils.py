@@ -162,16 +162,20 @@ def downside_measures(returns: list, target: float = 0.0) -> dict:
     tgt = float(target)
     n = len(vals)
     mean = sum(vals) / n
-    # semi-variance about the mean (observations below mean)
+    # semi-variance about the mean: mean of squared below-mean deviations,
+    # divided by ALL observations (consistent with evaluate.downside_deviation
+    # and the Investopedia definition; dividing by the shortfall count only
+    # inflated the deviation by ~sqrt(2) for symmetric returns)
     below_mean = [v for v in vals if v < mean]
     if len(below_mean) >= 2:
-        sv = sum((v - mean) ** 2 for v in below_mean) * n / (n - 1) / len(below_mean)
+        sv = sum((v - mean) ** 2 for v in below_mean) / n
         out["semi_deviation"] = math.sqrt(max(sv, 0.0))
-    # downside deviation about the target
+    # downside deviation about the target: mean of squared shortfalls over ALL
+    # observations (canonical; the old /len(below_t) inflated the measure)
     below_t = [v for v in vals if v < tgt]
     if below_t:
         out["downside_deviation"] = math.sqrt(
-            sum((tgt - v) ** 2 for v in below_t) / len(below_t))
+            sum((tgt - v) ** 2 for v in below_t) / n)
         out["shortfall_prob"] = len(below_t) / n
         out["avg_shortfall"] = sum(tgt - v for v in below_t) / len(below_t)
         if len(below_t) >= 2:

@@ -817,7 +817,7 @@ def test_gamma_profile_renders_regime(monkeypatch):
         rows.append({"strike": k, "iv": 0.3, "oi": 50.0, "side": "put"})
     monkeypatch.setattr(T, "_options_chain_rows_lambda", lambda t: (rows, 100.0, 0.0833))
     out = T.get_gamma_profile.invoke({"ticker": "AAPL"})
-    assert "gamma regime: short" in out  # call-dominated -> short
+    assert "gamma regime: long" in out  # call-dominated -> long (mainstream GEX)
     assert "call wall" in out and "put wall" in out
     assert "heuristic" in out
 

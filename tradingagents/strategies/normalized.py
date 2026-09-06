@@ -172,7 +172,8 @@ def zmijewski_score(
 ) -> dict:
     """Zmijewski (1984) X-score — probit distress.
 
-    ``X = -4.336 - 4.513*ROA + 5.679*TLTA - 0.004*CLCA``; cutoff 0 (X > 0 =
+    ``X = -4.336 - 4.513*ROA + 5.679*TLTA - 0.004*CACL`` where CACL is the
+    CURRENT RATIO CA/CL (canonical published form); cutoff 0 (X > 0 =
     distress / higher bankruptcy risk). None-safe like the rest.
     """
     ni = _fnum(net_income)
@@ -184,8 +185,10 @@ def zmijewski_score(
         return {"score": None, "verdict": None}
     roa = ni / ta
     tlta = tl / ta
-    clca = cl / ca if (cl is not None and ca and ca > 0) else 0.0
-    x = -4.336 - 4.513 * roa + 5.679 * tlta - 0.004 * clca
+    # canonical liquidity term is the current ratio CA/CL with a -0.004
+    # coefficient (the old CL/CA inverted the (weak) liquidity direction)
+    cacl = ca / cl if (ca is not None and cl and cl > 0) else 0.0
+    x = -4.336 - 4.513 * roa + 5.679 * tlta - 0.004 * cacl
     verdict = "distress" if x > 0 else "healthy"
     return {"score": round(x, 4), "verdict": verdict}
 

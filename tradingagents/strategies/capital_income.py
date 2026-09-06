@@ -130,29 +130,46 @@ def cap_and_redistribute(
     cap: float = CLASS_CAP,
     ceiling: float = CLASS_MAX,
 ) -> list[float]:
-    """Constituent cap with pro-rata renormalization (standard full capping).
+    """Constituent cap with pro-rata redistribution to uncapped names.
 
-    (1) cap every name at the CEILING (3.5%); (2) renormalize the whole
-    vector so the total returns to 1. This is the MSCI/S&P-style full capping:
-    a name below the cap keeps its relative proportional share (scaled), the
-    cap is exact, and no excess is ever stranded (the doc's ``w_i = w_raw +
-    d_i`` for uncapped names maps to this renormalized share). All inputs are
-    expected to already sum to 1 (raw MV or equal weights); the function
-    renormalizes regardless. ``cap`` is reserved for the two-threshold rule
-    (3%/3.5%) but the implementation applies a single exact ceiling.
+    Fixes the documented two-threshold rule (3% soft cap / 3.5% ceiling):
+    (1) normalize to sum 1; (2) trim every name above the CEILING down to the
+    ceiling; (3) redistribute the excess pro-rata to the UNCAPPPED names
+    (weight strictly below the soft cap) only; (4) iterate until no excess
+    remains. A capped name is frozen at the ceiling and never receives
+    redistribution, so the ceiling is exact — the old whole-vector
+    renormalization pushed capped names back above 3.5% (e.g. raw 4.0% ->
+    3.518%). Degenerate fallback (no name below the soft cap can absorb the
+    excess, e.g. tiny universes): renormalize the trimmed vector so the
+    output still sums to 1 (the ceiling is then not enforceable).
     """
     if not weights:
         return []
     w = [float(x) for x in weights]
-    ceiling = float(max(ceiling, cap))
-    # The raw weights (MV or equal) sum to 1. Cap each name at the ceiling
-    # against the RAW weight, then renormalize so small names keep their
-    # relative smallness (the doc's w_i = w_raw + d_i behavior).
-    capped = [min(x, ceiling) for x in w]
-    total = sum(capped)
+    ceiling = max(float(ceiling), float(cap))
+    cap = float(cap)
+    total = sum(w)
     if total <= 0:
         return [0.0] * len(w)
-    return [round(x / total, 6) for x in capped]
+    w = [x / total for x in w]
+    for _ in range(200):
+        excess = sum(max(x - ceiling, 0.0) for x in w)
+        if excess <= 1e-12:
+            break
+        trimmed = [min(x, ceiling) for x in w]
+        eligible = [i for i, x in enumerate(trimmed) if x < cap]
+        share = sum(trimmed[i] for i in eligible)
+        if not eligible or share <= 0:
+            # no uncapped name can absorb the excess: degenerate fallback,
+            # renormalize the trimmed vector (ceiling not enforceable)
+            total = sum(trimmed)
+            w = [x / total for x in trimmed] if total > 0 else trimmed
+            break
+        nw = list(trimmed)
+        for i in eligible:
+            nw[i] += excess * (trimmed[i] / share)
+        w = nw
+    return [round(x, 6) for x in w]
 
 
 def apply_top_n(yields: list[float | None], n: int = 50) -> list[int]:

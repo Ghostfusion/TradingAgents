@@ -38,12 +38,30 @@ def test_rule_labels():
     assert regime_label(0.9, 0.05, 0.1) == "high_vol"
     assert regime_label(0.1, 0.05, 0.1).startswith("bull")
     assert regime_label(0.1, -0.05, 0.1).startswith("bear")
-    assert regime_label(0.5, 0.0, 0.9) == "neutral"
+    assert regime_label(0.5, 0.0, 90.0) == "neutral"  # CHOP scale 0-100
 
 
-def test_choppiness_bounds():
+def test_choppiness_close_only_fallback_bounds():
+    # close-only input -> the 0-1 dispersion proxy fallback stays bounded
     c = choppiness(_uptrend())
     assert 0.0 <= c <= 1.0
+
+
+def test_choppiness_ohlc_trend_is_low():
+    """Canonical CHOP (0-100): a monotone uptrend is LOW CHOP (trending),
+    a tight range-highs/lows series is HIGH CHOP (ranging)."""
+    highs = [100.0 + 1.0 * i for i in range(30)]
+    lows = [99.0 + 1.0 * i for i in range(30)]
+    closes = [99.5 + 1.0 * i for i in range(30)]
+    c = choppiness(closes, highs=highs, lows=lows, window=14)
+    assert 0.0 <= c <= 100.0
+    assert c < 40.0  # monotone trend -> low CHOP (not the old 0-1 std)
+    # a wide, tight-range oscillation (noisy but bounded) reads high CHOP-ish
+    ch = [100.0 + (10.0 if i % 2 else -10.0) for i in range(30)]
+    lh = [95.0 + (10.0 if i % 2 else -10.0) for i in range(30)]
+    ll = [90.0 + (10.0 if i % 2 else -10.0) for i in range(30)]
+    c2 = choppiness(ch, highs=lh, lows=ll, window=14)
+    assert c2 > c
 
 def _trend_closes(n=260, base=100.0, step=0.05):
     """Monotone uptrend close series (low vol, above SMA200)."""

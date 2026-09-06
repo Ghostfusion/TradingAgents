@@ -23,21 +23,21 @@ def _rows(call_oi=100.0, put_oi=100.0, spot=100.0, strikes=(90.0, 110.0)):
 
 
 def test_gex_walls_and_regime_call_dominated():
-    # Heavier call OI -> negative dealer gamma (short) + call wall at the
-    # higher call concentration.
+    # Heavier call OI -> POSITIVE dealer gamma (long) + call wall at the
+    # higher call concentration (mainstream SpotGamma-style convention).
     rows, spot, T = _rows(call_oi=200.0, put_oi=50.0)
     prof = gex_per_strike(rows, spot, T)
-    assert prof["net_gamma"] < 0
-    assert prof["gamma_regime"] == "short"
+    assert prof["net_gamma"] > 0
+    assert prof["gamma_regime"] == "long"
     assert prof["call_wall"] is not None
     assert prof["put_wall"] is not None
 
 
-def test_gex_regime_put_dominated_long():
+def test_gex_regime_put_dominated_short():
     rows, spot, T = _rows(call_oi=50.0, put_oi=200.0)
     prof = gex_per_strike(rows, spot, T)
-    assert prof["net_gamma"] > 0
-    assert prof["gamma_regime"] == "long"
+    assert prof["net_gamma"] < 0
+    assert prof["gamma_regime"] == "short"
 
 
 def test_gex_wall_prefers_high_oi_strike():

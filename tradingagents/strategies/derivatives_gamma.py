@@ -57,10 +57,11 @@ def gex_per_strike(
     ``rows``: [{strike, iv, oi, side}] (side "call"/"put"). Returns the
     profile dict with per-strike contributions + the aggregate walls:
       {strikes, call_wall, put_wall, net_gamma_sign})
-    Call gamma contributes POSITIVE dealer gamma; put gamma NEGATIVE
-    (dealers short puts = long gamma when the public buys puts is handled by
-    sign: put-side contributes negative since public put-buying = dealer
-    short-put long-gamma... sign convention documented below).
+    Mainstream GEX convention (SpotGamma-style): the dealer is assumed short
+    the option the public is long, so call OI contributes POSITIVE dealer
+    gamma (dealers short calls = long gamma — hedge by buying strength,
+    dampening moves) and put OI contributes NEGATIVE (dealers short puts =
+    short gamma — amplifying moves). The old code had this inverted.
     """
     contributions: dict[str, list] = {"call": [], "put": []}
     total = 0.0
@@ -74,11 +75,9 @@ def gex_per_strike(
         if g is None:
             continue
         side = (r.get("side") or "call").lower()
-        # Sign convention (anonymous OI assumption): public CALL OI => dealers
-        # short calls => NEGATIVE dealer gamma (hedgers chase: momentum/cascade);
-        # public PUT OI => dealers short puts => POSITIVE dealer gamma (hedgers
-        # fade: mean-reversion). Walls use |signed| concentration.
-        sign = -1.0 if side == "call" else +1.0
+        # Mainstream sign: call OI => + dealer gamma, put OI => - dealer gamma
+        # (dealers are short the public's options; see docstring).
+        sign = +1.0 if side == "call" else -1.0
         signed = sign * g
         contributions.setdefault(side, []).append(
             {"strike": float(strike), "gamma": round(g, 2), "signed": round(signed, 2)}
