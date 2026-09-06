@@ -58,14 +58,18 @@ py -3.12 -m backend.main
 ```
 
 Open **http://127.0.0.1:8000** in your browser. Log in with the admin
-username/password from `trading_web/.env` (or `data/admin_credentials.txt` if
-you never set one).
+username/password from `trading_web/data/admin_credentials.txt` (created on
+first run; see §6).
 
 Then you can click:
 - **Run batch** → type some tickers (like `AAPL NVDA`) and hit go
 - **Screener** → find cheap good companies (the "value" mode)
 - **Reports** → read the report cards
 - **Audit** → who did what
+
+Some newer tools (a **sector-rotation screen**, earnings-call transcripts,
+congressional-trade and dark-pool-flow reads) are advisory and live inside the
+robot reports only — they aren't shown as separate buttons in the web app yet.
 
 Buttons queue up real work — watch the **Jobs** table go from
 `queued → running → done`.
@@ -152,15 +156,18 @@ greed decide.
 ## 6. The magic environment thing (.env)
 
 Secret keys live in a file called `.env` (it's invisible to git, on purpose).
-To make the app read your login from it:
+The app auto-reads `.env` for **API keys and settings** (`TRADINGAGENTS_*`
+variables; see `.env.example` in `trading_web/`).
+
+The **website login** is a separate thing: on first run the web app creates
+`trading_web/data/admin_credentials.txt` with your admin username/password.
+Open that file (or `trading_web/.env`) and use those credentials to log in —
+the admin account does not come from a `.env.admin_field`; it's that file.
 
 ```bash
 cd /d/Users/vince/PycharmProjects/TradingNew/trading_web
 py -3.12 -m backend.main   # starts the site
 ```
-
-That's it — the app auto-reads `.env`. Put the admin user/pass there and
-you're done (see `.env.example`).
 
 ---
 
@@ -181,11 +188,11 @@ you're done (see `.env.example`).
 | --- | --- |
 | `No module named pytest/pandas` | You used `python`. Use **`py -3.12`**. |
 | "no prior report found" | You ran the pre-market review without a report first. Run a batch, then review. |
-| Site won't start, port 8000 busy | `set TRADAGENTS_WEB_PORT=8001` (CMD) and restart. |
+| Site won't start, port 8000 busy | `set TRADINGAGENTS_WEB_PORT=8001` (CMD) and restart. |
 | catalyst scale stays 1 | No event coming soon — that's normal (not a bug). |
 | M column says `n/a` | Statements missing a year-ago period. Normal for some stocks. |
 | Everything slow | The next-day checks fetch real data. Give it a minute — timer will save you anyway. |
-| Forgot the admin password | Delete `trading_web/data/web.db` and restart — it makes a fresh admin. |
+| Forgot the admin password | Look in `trading_web/data/admin_credentials.txt` (created on first run with your login). If it's missing, re-create it — the web app reads that file for the admin account, it does **not** make a fresh one from `web.db`. |
 
 ---
 
