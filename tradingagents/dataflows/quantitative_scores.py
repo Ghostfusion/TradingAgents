@@ -77,6 +77,12 @@ def _sub(a, b):
     return a - b
 
 
+def _add(a, b):
+    if a is None or b is None:
+        return None
+    return a + b
+
+
 def _cogs(m):
     """COGS with the cost-of-revenue fallback."""
     return _num(m.get("cogs")) or _num(m.get("cost_of_revenue"))
@@ -137,7 +143,9 @@ def beneish_m_score(fin):
     sgi = _ratio(rev, rev_p)
     dep = _num(fin.get("depreciation"))
     dep_p = _num(_prv(fin.get("depreciation")))
-    depi = _ratio(_ratio(dep_p, _sub(ppe_p, dep_p)), _ratio(dep, _sub(ppe, dep)))
+    # Canonical DEPI (Beneish 1999): [Dep_t-1/(PPE_t-1 + Dep_t-1)] /
+    # [Dep_t/(PPE_t + Dep_t)] - the denominators are SUMS, not differences.
+    depi = _ratio(_ratio(dep_p, _add(ppe_p, dep_p)), _ratio(dep, _add(ppe, dep)))
     sga = _num(fin.get("sga"))
     sga_p = _num(_prv(fin.get("sga")))
     sgai = _ratio(_ratio(sga, rev), _ratio(sga_p, rev_p))
@@ -145,7 +153,9 @@ def beneish_m_score(fin):
     ltd = _num(fin.get("total_debt"))
     cl_p = _num(_prv(fin.get("current_liabilities")))
     ltd_p = _num(_prv(fin.get("total_debt")))
-    lvgi = _ratio(_ratio(_sub(cl, ltd), ta), _ratio(_sub(cl_p, ltd_p), ta_p))
+    # Canonical LVGI (Beneish 1999): [(CL + LTD)/TA]_t / [(CL + LTD)/TA]_t-1
+    # - leverage ADDS long-term debt to current liabilities.
+    lvgi = _ratio(_ratio(_add(cl, ltd), ta), _ratio(_add(cl_p, ltd_p), ta_p))
     ni = _num(fin.get("net_income"))
     cfo = _num(fin.get("operating_cashflow"))
     tata = _ratio(_sub(ni, cfo), ta)

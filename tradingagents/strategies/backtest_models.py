@@ -83,7 +83,8 @@ def square_root_impact(notional_usd: float, adv_usd: float | None,
     """
     if not adv_usd or adv_usd <= 0 or notional_usd <= 0:
         return None
-    sig = (vol_pct or 0.20) / 100.0
+    # vol_pct is a percent (e.g. 20.0 = 20%); convert to a FRACTION: 0.20.
+    sig = (vol_pct or 20.0) / 100.0
     partic = notional_usd / adv_usd
     k = 0.1
     impact = k * sig * (partic ** 0.5)

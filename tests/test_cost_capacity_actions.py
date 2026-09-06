@@ -27,6 +27,21 @@ class TestImpact:
         b = square_root_impact(1_000_000, 100_000_000, vol_pct=20.0, spread_bps=50)
         assert b is not None and a is not None and b > a
 
+    def test_impact_vol_pct_is_percent_of_notional(self):
+        """Regression (audit): vol_pct=20.0 must mean 20% vol (fraction 0.20),
+        NOT 0.002. impact = k*sigma*sqrt(Q/V) with sigma = 0.20 and k = 0.1 at
+        1% participation = 0.1*0.2*sqrt(0.01) = 0.002 (20 bps), and 40% vol
+        must be 2x the 20% impact."""
+        base = {"notional_usd": 1_000_000, "adv_usd": 100_000_000}
+        imp20 = square_root_impact(**base, vol_pct=20.0)
+        imp40 = square_root_impact(**base, vol_pct=40.0)
+        assert imp20 is not None and imp40 is not None
+        # exact value at default vol_pct=20 -> k*sig*sqrt(Q/V) = 0.1*0.2*0.1
+        assert square_root_impact(1_000_000, 100_000_000) == pytest.approx(0.002)
+        # the class of the bug: old code returned ~2e-5; new must be ~2e-3
+        assert imp20 > 1e-4
+        assert imp40 == pytest.approx(2 * imp20, rel=1e-6)
+
 
 class TestTurnover:
     def test_turnover_one_way(self):

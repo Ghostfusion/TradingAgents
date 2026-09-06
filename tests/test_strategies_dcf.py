@@ -47,6 +47,35 @@ class TestComputeDcf:
         r = compute_dcf([100.0], rf=0.04, beta=1.0, erp=0.0, growth=0.05, shares=100.0)
         assert r is None  # wacc=0.04, g=0.05 >= 0.04
 
+    def test_terminal_value_anchored_to_projected_year_n(self):
+        """Regression (audit): the Gordon terminal value must be anchored to
+        the LAST PROJECTED year's FCF (F0*(1+g)^years), not the base-year FCF.
+        Anchoring to the base silently dropped (1+g)^years from the TV
+        numerator and understated intrinsic value by ~7-10%. Pinning the TV
+        against the closed-form value."""
+        fcf = [100.0] * 5
+        rf, beta, erp, g, years, shares = 0.04, 1.0, 0.06, 0.025, 5, 100.0
+        r = compute_dcf(
+            fcf, rf=rf, beta=beta, erp=erp, growth=g, years=years,
+            shares=shares, cash=0.0, debt=0.0,
+        )
+        assert r is not None
+        wacc = 0.10
+        # closed forms: PV of the 5 explicit years, discounting the year-t
+        # cash flow by year t (t=1..5) — matching the implemented PV convention.
+        pv_sum = sum(100.0 * (1 + g) ** t / (1 + wacc) ** t for t in range(1, years + 1))
+        # TV anchored to F5 = F0*(1+g)^5, then discounted back 5 years.
+        tv = 100.0 * (1 + g) ** years * (1 + g) / (wacc - g)
+        pv_tv = tv / (1 + wacc) ** years
+        # output is rounded to 2dp; compare with penny tolerance vs the closed forms
+        assert r["pv_tv"] == pytest.approx(pv_tv, abs=0.01)
+        assert r["price"] == pytest.approx((pv_sum + pv_tv) / shares, abs=0.01)
+
+    def test_discount_and_growth_helpers(self):
+        assert discount_factor(0.10, 0) == 1.0
+        assert [round(x, 2) for x in project_fcf(100.0, 0.10, years=3)] == [110.0, 121.0, 133.1]
+        assert terminal_value_gordon(100.0, 0.10, 0.03) == pytest.approx(1471.4286, rel=1e-2)
+
     def test_terminal_dominates_breakdown(self):
         f = [100.0] * 5
         r = compute_dcf(
@@ -74,8 +103,3 @@ class TestComputeDcf:
         assert r is not None and r_peak is not None
         assert r["fcf_latest"] == pytest.approx(110.0)
         assert r["price"] < r_peak["price"]
-
-    def test_discount_and_growth_helpers(self):
-        assert discount_factor(0.10, 0) == 1.0
-        assert [round(x, 2) for x in project_fcf(100.0, 0.10, years=3)] == [110.0, 121.0, 133.1]
-        assert terminal_value_gordon(100.0, 0.10, 0.03) == pytest.approx(1471.4286, rel=1e-2)

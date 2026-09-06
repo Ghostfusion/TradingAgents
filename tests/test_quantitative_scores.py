@@ -46,6 +46,77 @@ def test_beneish(fin):
     assert -6.0 < m < -1.0
 
 
+def test_beneish_depi_uses_ppe_plus_depreciation():
+    """Regression (audit): DEPI denominators are (PPE + Dep), NOT (PPE - Dep).
+    dep overstating PPE by +20 with all else flat must RAISE depi (good-for-
+    manipulator index), not lower it."""
+    fin = {
+        "revenue": {"current": 1000.0, "prior": 1000.0},
+        "net_receivables": {"current": 150.0, "prior": 150.0},
+        "cogs": {"current": 600.0, "prior": 600.0},
+        "sga": {"current": 100.0, "prior": 100.0},
+        "depreciation": {"current": 60.0, "prior": 60.0},
+        "current_assets": {"current": 500.0, "prior": 500.0},
+        "ppem": {"current": 400.0, "prior": 400.0},
+        "marketable_securities": {"current": 20.0, "prior": 20.0},
+        "total_assets": {"current": 1500.0, "prior": 1500.0},
+        "current_liabilities": {"current": 300.0, "prior": 300.0},
+        "total_debt": {"current": 200.0, "prior": 200.0},
+        "operating_cashflow": 150.0,
+        "net_income": 100.0,
+    }
+    m = beneish_m_score(fin)
+    fin_big = dict(fin)
+    fin_big["ppem"] = {"current": 420.0, "prior": 400.0}
+    m_big = beneish_m_score(fin_big)
+    # canonical DEPI = [60/(400+60)] / [60/(420+60)] = 1.043478
+    # AQI also moves (PPE is in the AQI non-current-asset slice):
+    #   AQI = [1-(TA-CA-PPE-Sec)/TA]_t / [1-(...)_t-1]
+    #       = [1-560/1500]/[1-580/1500] = 1.021739
+    # old (broken) DEPI = [60/(400-60)]/[60/(420-60)] = 1.05882 changes the
+    # depi delta, so the pinned total discriminates the canonical (+) form.
+    depi = 1.0434782608695652
+    aqi = 1.0217391304347827
+    assert m_big is not None
+    assert m_big - m == pytest.approx(
+        0.115 * (depi - 1.0) + 0.404 * (aqi - 1.0), abs=1e-6
+    )
+
+
+def test_beneish_lvgi_adds_longterm_debt():
+    """Regression (audit): LVGI numerator is (CL + LTD), NOT (CL - LTD). A
+    capital-heavy firm (LTD > CL) must yield a POSITIVE LVGI ratio, and with
+    the canonical -0.327 coefficient, M must FALL as leverage grows. The old
+    (CL - LTD) form computed a negative leverage ratio whose sign flip pushed
+    M the wrong way."""
+    fin = {
+        "revenue": {"current": 1000.0, "prior": 1000.0},
+        "net_receivables": {"current": 150.0, "prior": 150.0},
+        "cogs": {"current": 600.0, "prior": 600.0},
+        "sga": {"current": 100.0, "prior": 100.0},
+        "depreciation": {"current": 60.0, "prior": 60.0},
+        "current_assets": {"current": 500.0, "prior": 500.0},
+        "ppem": {"current": 400.0, "prior": 400.0},
+        "marketable_securities": {"current": 20.0, "prior": 20.0},
+        "total_assets": {"current": 1500.0, "prior": 1500.0},
+        "current_liabilities": {"current": 100.0, "prior": 100.0},
+        "total_debt": {"current": 500.0, "prior": 500.0},
+        "operating_cashflow": 150.0,
+        "net_income": 100.0,
+    }
+    m = beneish_m_score(fin)
+    fin2 = dict(fin)
+    fin2["total_debt"] = {"current": 700.0, "prior": 500.0}
+    m2 = beneish_m_score(fin2)
+    assert m is not None and m2 is not None
+    # canonical LVGI_t = (100+700)/1500 = 0.5333 vs flat 1.0 in the base year
+    lvgi = (100 + 700) / 1500.0 / ((100 + 500) / 1500.0)
+    assert lvgi == pytest.approx(1.3333, abs=1e-3)
+    # M delta = -0.327*(lvgi - 1); old (CL - LTD) form gave lvgi = 1.5 -> a
+    # materially different delta, so this pins the canonical (CL + LTD) form.
+    assert m2 - m == pytest.approx(-0.327 * (lvgi - 1.0), abs=1e-6)
+
+
 def test_altman(fin):
     z = altman_z_score(fin)
     assert z is not None

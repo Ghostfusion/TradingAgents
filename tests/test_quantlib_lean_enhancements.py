@@ -283,6 +283,34 @@ def test_risk_parity_equal_variance_equal_weights():
     assert abs(w["A"] - 0.5) < 0.05 and abs(w["B"] - 0.5) < 0.05
 
 
+def test_risk_parity_correlated_three_name_equal_risk_contribution():
+    """Regression (audit): the old cov^-1·(1/RC) update collapsed to a
+    degenerate single-name book on a correlated 3-name universe. Risk parity
+    must keep every name in the book and equalize marginal risk contributions
+    w_i*(Σw)_i."""
+    cov = [[0.10, 0.08, 0.05], [0.08, 0.16, 0.06], [0.05, 0.06, 0.035]]
+    # Expose via the same path the function uses: reconstructs cov from the
+    # return series is delicate, so build an explicit cov map instead.
+    import numpy as np
+    from numpy.random import default_rng
+
+    rng = default_rng(7)
+    L = np.linalg.cholesky(np.array(cov))
+    m = rng.standard_normal((600, 3)) @ L.T
+    data = {"A": m[:, 0].tolist(), "B": m[:, 1].tolist(), "C": m[:, 2].tolist()}
+    out = portfolio_optimizer.risk_parity_weights(data)
+    w = out["weights"]
+    assert out["note"].startswith("risk-parity")
+    # all names remain invested
+    assert all(w[k] > 0.01 for k in data)
+    # marginal risk contributions w_i*(Sigma w)_i are near-equal
+    rc = []
+    for i, k in enumerate(data):
+        sw = sum(cov[i][j] * w[list(data)[j]] for j in range(3))
+        rc.append(w[k] * sw)
+    assert max(rc) / min(rc) < 1.5
+
+
 def test_min_variance_downs_high_vol():
     random.seed(3)
     lo = [random.gauss(0, 0.001) for _ in range(300)]

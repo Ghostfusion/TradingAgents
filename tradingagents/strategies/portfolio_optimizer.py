@@ -84,9 +84,13 @@ def risk_parity_weights(returns_by_name: dict, lower: float = 0.0,
                         max_iter: int = 2000) -> dict:
     """Risk-parity weights: equalize each name's marginal risk contribution.
 
-    Iterative Spinu-style update w ← cov^{-1} b / (R·diag) normalized, where
-    b = 1/RC_i and RC_i is the i-th marginal risk contribution. Degrades to
-    equal-weight on a singular/degenerate covariance.
+    Fixed-point iteration on the risk-parity condition w_i ∝ b/(Σw)_i with
+    equal risk budgets b (the classic Bielecki/Spinu update
+    w ← normalize(b ⊘ (Σw))), which converges to w_i(Σw)_i = const - i.e.
+    equal marginal risk contribution. (The previous update, cov⁻¹·b with
+    b = 1/RC_i, does not converge and collapsed to a degenerate single-name
+    book on correlated inputs.) Degrades to equal-weight on a
+    singular/degenerate covariance.
     """
     m = _covariance_matrix(returns_by_name)
     if m is None:
@@ -96,15 +100,12 @@ def risk_parity_weights(returns_by_name: dict, lower: float = 0.0,
     cov = m["cov"]
     n = len(names)
     w = [1.0 / n] * n
+    budget = 1.0 / n  # equal risk budgets; scale is washed out by normalize
+    converged = False
     for _ in range(max_iter):
-        rc = [sum(cov[i][j] * w[j] for j in range(n)) * w[i] for i in range(n)]
-        b = [1.0 / rc[i] if rc[i] > 0 else 0.0 for i in range(n)]
-        try:
-            inv = _invert(cov)
-            nw = [sum(inv[i][j] * b[j] for j in range(n)) for i in range(n)]
-        except Exception:  # noqa: BLE001 - singular; degrade
-            w, note = _degrade_equal(names)
-            return {"weights": w, "note": note}
+        # Portfolio variance sensitivities: (Σw)_i.
+        sw = [sum(cov[i][j] * w[j] for j in range(n)) for i in range(n)]
+        nw = [budget / sw[i] if sw[i] > 0 else 0.0 for i in range(n)]
         nw = _normalize(nw)
         if nw is None:
             break
@@ -115,8 +116,12 @@ def risk_parity_weights(returns_by_name: dict, lower: float = 0.0,
             nw = [x / s for x in nw]
         if all(abs(nw[i] - w[i]) < tol for i in range(n)):
             w = nw
+            converged = True
             break
         w = nw
+    if not converged:
+        w, _ = _degrade_equal(names)
+        return {"weights": w, "note": "equal-weight (risk-parity did not converge)"}
     return {"weights": {names[i]: w[i] for i in range(n)}, "note": "risk-parity"}
 
 

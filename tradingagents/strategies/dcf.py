@@ -113,7 +113,11 @@ def compute_dcf(
     pv_sum = sum(
         fcf * discount_factor(wacc, t + 1) for t, fcf in enumerate(proj)
     )
-    tv = terminal_value_gordon(latest, wacc, growth)
+    # Gordon terminal value is anchored to the LAST PROJECTED year's FCF
+    # (F_n = F_0 (1+g)^years), then discounted back from year N. Anchoring to
+    # the base-year FCF silently dropped the (1+g)^years growth inside the TV
+    # numerator and understated intrinsic value by ~7-10%.
+    tv = terminal_value_gordon(proj[-1], wacc, growth)
     if tv == float("inf"):
         return None
     pv_tv = tv * discount_factor(wacc, years)

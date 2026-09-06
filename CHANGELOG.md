@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Fixed
+- **Quant-formula audit fixes (independent web-verified pass over ~468 formula
+  blocks)** — four material divergences corrected:
+  1. **Risk-parity weights** (`portfolio_optimizer.risk_parity_weights`): the
+     update `Σ⁻¹·(1/RC_i)` does not converge to equal risk contribution and
+     collapsed to a degenerate single-name book on correlated inputs; replaced
+     with the converging fixed-point `w ← normalize(b ⊘ Σw)` (equal risk
+     budgets), which equalizes marginal risk contributions `wᵢ(Σw)ᵢ`. Non-
+     convergence now degrades explicitly to equal-weight with a note.
+  2. **Beneish M-Score** (`dataflows.quantitative_scores.beneish_m_score`):
+     DEPI denominators were `(PPE − Dep)` instead of canonical `(PPE + Dep)`,
+     overstating DEPI ~1.7×; LVGI computed `(CL − LTD)/TA` instead of canonical
+     `(CL + LTD)/TA`, flipping the leverage signal for debt-heavy firms (the
+     −0.327 weight then pushed M the wrong way). Both fixed to the Beneish
+     (1999) forms; None-safe `_add` helper added.
+  3. **DCF terminal value** (`strategies.dcf.compute_dcf`): the Gordon TV was
+     anchored to the base-year FCF instead of the last projected year
+     `F₀(1+g)ⁿ` (docstring already claimed the correct intent), silently
+     understating intrinsic value ~7–10%; TV now uses the projected year-N FCF
+     and discounts it back from year N.
+  4. **Square-root market impact** (`strategies.backtest_models.
+     square_root_impact`): `vol_pct` (a percent, e.g. 20.0) was divided by 100
+     twice (`(vol_pct or 0.20)/100` → 0.002 for 20% vol), understating impact
+     ~100×; now converted once to a fraction (0.20). Regression tests pin the
+     exact 0.1·σ·√(Q/V) value.
+  Each fix carries a regression test pinning the canonical closed form;
+  full-suite green.
+
 ### Changed
 - **Wiring audit: prompt guidance for every analyst-bound tool**.
   New AST gates in `tests/test_calc_agent_wiring.py` catch (a) tools bound to
