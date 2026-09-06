@@ -20,6 +20,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_dupont_read,
     get_earnings_quality_verdict,
     get_event_pnl_response,
+    get_execution_schedule,
     get_exit_check,
     get_exit_plan,
     get_expected_move,
@@ -35,6 +36,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_liquidation_days,
     get_liquidity_risk,
     get_live_price_sanity,
+    get_lottery_factors,
     get_macd_divergence,
     get_market_movers,
     get_market_snapshot,
@@ -67,6 +69,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_relative_rotation,
     get_relative_strength,
     get_risk_gate,
+    get_risk_overlay,
     get_risk_parity_alloc,
     get_scaleout_plan,
     get_scenario_dcf,
@@ -165,6 +168,9 @@ def create_market_analyst(llm):
             get_news_sentiment_series,
             get_sentiment_lead_lag,
             get_strategy_quality,
+            get_lottery_factors,
+            get_execution_schedule,
+            get_risk_overlay,
             get_tail_risk,
             get_credit_spread_read,
             get_bollinger_pct_b,
@@ -293,6 +299,9 @@ You also have decision-grounding tools:
 - get_parity_screen(ticker, cost_bps=...) - put-call parity / conversion-reversal only screen across the chain. Use before any 'options are mispriced / an arbitrage exists' claim; a flag is a screen, not a trade. (1m + 3m) and where this ticker's sector stands (top3/tracking/unknown). Use it before any 'sector is leading / rotating' or 'trade with the sector tailwind' claim.
 - get_cycle_tilt(current_date) - the business-cycle phase (early/mid/late/recession) from PMI + yield curve + credit spreads and the advisory sector tilt. Use it before any 'cyclicals should lead / defensives favored / regime rotation' claim.
 - get_strategy_quality(ticker, returns=...) - net CAGR, annualized vol, Sharpe and max drawdown over the price-derived (or provided) return series. Use before any 'this is a high-quality / risk-adjusted strategy' claim.
+- get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?) - the CPPI floor-protected risky exposure (m * max(P - floor, 0)) + vol-targeting scale (target/expected, capped 3x) for a book - use before any 'run the book at X% risk / lever the cushion' claim; advisory overlay, risk gates stay authoritative.
+- get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...) - the Almgren-Chriss optimal execution trajectory (or TWAP/VWAP/POV benchmarks) for a size: E[IS] + var(IS) + per-interval trades. Use before any 'how do we scale into/out of this' claim - advisory scheduling, never an order.
+- get_lottery_factors(ticker) - the lottery-tilt screen (MAX = biggest single-day return in the month; IVOL = idiosyncratic vol). High MAX/IVOL = over-priced right-tail, EXPECTED to underperform (Bali 2011; cross-market confirmed) - use before any 'high-octane / the big up-days justify the risk' claim; a quality penalty, not a momentum endorsement.
 - get_tail_risk(ticker, alpha=...) - the historical VaR / CVaR tail-loss budget and a -10% uniform stress loss. Use it before any position-sizing/tail-risk claim in a risk-off regime.
 - get_session_discipline(ticker, peak_pnl=..., current_pnl=...) - the deterministic intraday walk-away read: 50% giveback from session peak, max-daily-loss breach, past the 10:00 ET optimal window, and the nearest psych levels around the current price. Use it before any 'sell into strength / take the day off / giveback' claim when trading intraday momentum.
 - get_credit_spread_read(current_date) - the FRED ICE BofA HY/CCC/BB option-adjusted spreads and the deterministic credit-cycle band (low/moderate/high/severe) + de-risk scale. Use it before any 'credit stress / risk-off / debt markets / HYG-vs-TLT' claim; the CCC spread is the leading risk-off sentinel (degrades to 'unavailable' when FRED_API_KEY is unset).

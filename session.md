@@ -53,6 +53,11 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Quant-formula Phase 6 implemented**: lottery factors (MAX/IVOL,
+  `get_lottery_factors`), Almgren-Chriss + TWAP/VWAP/POV
+  (`get_execution_schedule`), CPPI + vol-target (`get_risk_overlay`). 20 new
+  tests; wiring gate green; live smokes (AC schedule E[IS]=3.13; CPPI 60%+
+  vol-target 0.75). Ruff clean.
 - **Quant-formula P1-P5 implemented** (user: implement phases 1-5, wire all agents incl. prompts): P1 speed/zomma + vol-surface shape + parity screen (market); P2 modified-VaR/Kappa-LPM/Burke-Martin-Pain/gain-to-pain/ruin-optimal-f (sizing+tail+strategy-quality+downside); P3 variance-ratio + CUSUM/EWMA (calib-anchored) + entropy (MR-quality + get_shift_detection); P4 Ohlson/Zmijewski + DD-AQ (analyst verdict + earnings quality); P5 Taylor rule (news). 54 new tests; wiring gate green; ruff clean. Docs: research doc + api_reference + CHANGELOG + README.
 - **Vendor outage hardening** (user option 1 from the no-data audit): added
   core_stock_apis / technical_indicators / fundamental_data / news_data to

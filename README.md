@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-05] **Quant-formula Phase 6** - lottery-tilt (MAX/IVOL), Almgren-Chriss execution schedule + TWAP/VWAP/POV, CPPI + vol-target overlay — all advisory, wired to the market analyst. See CHANGELOG.
 - [2026-09-05] **Quant-formula implementation (P1-P5)** - speed/zomma Greeks + vol-surface shape + parity screen; Cornish-Fisher VaR, Kappa/LPM, Burke/Martin/Pain, ruin + optimal f; variance ratio + CUSUM/EWMA + entropy features; Ohlson/Zmijewski + Dechow-Dichev; Taylor rule. All advisory, wired to the market/news analysts with prompts. See the research doc.
 - [2026-09-05] **Vendor outage hardening** - a total vendor-chain failure on the flow-critical categories (prices, indicators, statements, news) now degrades to a `DATA_UNAVAILABLE` sentinel instead of aborting the run; per-vendor failures stay logged.
 - [2026-09-05] **Earnings quality wired to the consensus verdict** - `get_earnings_quality(ticker, date)` is now a provider-fed read: it fetches net income / operating cash flow / total assets / capex and returns the consensus concern level (cash conversion, accrual ratio, FCF=OCF-|capex|, negative-FCF red flag) plus the forensic trap. Capex handling is sign-robust; the old ad-hoc 6%/2% accrual band is superseded.

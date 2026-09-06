@@ -576,6 +576,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_parity_screen(ticker, cost_bps=5)` | `strategies.options_surface.parity_violation` | market | put-call parity / conversion-reversal screen (a screen, not a trade) |
 | `get_shift_detection(ticker, kind=mean)` | `strategies.regime.cusum` + `ewma_control` + `strategies.complexity` | market | CUSUM/EWMA online shift detection + LZ complexity (complements the batch HMM) |
 | `get_taylor_read(policy_rate, inflation, output_gap?)` | `strategies.cycle_tilt.taylor_rule` | news | Taylor-rule implied policy rate + actual-vs-rule deviation (tight/easy/neutral stance) |
+| `get_lottery_factors(ticker)` | `strategies.lottery` | market | MAX (largest single-day return in the month) + IVOL (idiosyncratic vol) lottery-tilt screen — high = expected underperformance (quality penalty) |
+| `get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...)` | `strategies.execution_schedule` | market | Almgren-Chriss optimal trajectory + TWAP/VWAP/POV benchmarks (E[IS]/var(IS), per-interval trades) |
+| `get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?)` | `strategies.portfolio.cppi_exposure` + `size.volatility_target_scale` | market | CPPI floor-protected risky exposure + vol-targeting scale (advisory overlay) |
 | `get_gap_type(ticker)` | `market_session.gap_type` | market | common/breakaway/runaway/exhaustion + fill stats |
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |

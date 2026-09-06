@@ -6211,6 +6211,155 @@ def get_factor_profile(
 
 
 @tool
+def get_lottery_factors(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """Lottery-tilt screen (Bali 2011 + later cross-market confirmations):
+    MAX = largest single-day return over the trailing month; IVOL =
+    idiosyncratic (residual) vol vs the market benchmark, falling back to
+    total vol when no benchmark is available. High MAX/IVOL flag an
+    over-priced skew -> expected underperformance (the lottery anomaly).
+    Use before any 'this name is a high-octane momentum winner / the big
+    up-days justify the risk' claim — high lottery tilt is a quality
+    penalty, not a momentum endorsement. Advisory; never a gate.
+    """
+    try:
+        from tradingagents.strategies.lottery import lottery_verdict
+    except Exception as exc:  # noqa: BLE001
+        return f"lottery factors unavailable for {ticker}: {exc}"
+    ohlcv = _ohlcv(ticker, days=420)
+    closes = ohlcv.get("closes") or []
+    if len(closes) < 30:
+        return f"lottery factors unavailable for {ticker}: need >= 30 bars"
+    returns = _daily_returns(closes)
+    market = None
+    try:
+        bench = _ohlcv("SPY", days=420).get("closes") or []
+        if len(bench) == len(closes):
+            market = [bench[i] / bench[i - 1] - 1.0 for i in range(1, len(bench))]
+            market = market[:len(returns)] if len(market) >= len(returns) else market
+    except Exception:  # noqa: BLE001 - advisory benchmark
+        market = None
+    v = lottery_verdict(closes, returns, market_returns=market)
+    lines = [f"## Lottery Factors — {ticker}", ""]
+    lines.append(f"- MAX (trailing month): {v['max']:.2%}" if v["max"] is not None
+                 else "- MAX: n/a")
+    lines.append(f"- high MAX: {v['max_volatile']}" if v["max_volatile"] is not None else "- high MAX: n/a")
+    lines.append(f"- IVOL ({v['ivol_kind']}): {v['ivol']:.0%}" if v["ivol"] is not None and v["ivol_kind"]
+                 else "- IVOL: n/a")
+    lines.append(f"- verdict: {v['verdict']}")
+    lines.append(f"- note: {v['note']}")
+    lines.append("")
+    lines.append("Interpretation: MAX/IVOL are cross-sectional predictors — a "
+                 "lottery-tilt name (over-priced right-tail) is EXPECTED to "
+                 "underperform, not outperform. Weigh it as a quality penalty.")
+    return "\n".join(lines)
+
+
+@tool
+def get_execution_schedule(
+    notional: Annotated[float, "total shares to trade (or dollar notional / price)"],
+    intervals: Annotated[int, "number of trading intervals (e.g. 10 = 10 days)"] = 10,
+    volatility: Annotated[float | None, "per-interval return vol (fraction)"] = None,
+    temp_impact: Annotated[float | None, "temporary impact coefficient eta"] = None,
+    risk_aversion: Annotated[float | None, "Almgren-Chriss risk aversion lambda"] = None,
+    method: Annotated[str, "algorithm: almgren-chriss (default) | twap | vwap | pov"] = "almgren-chriss",
+    target_volume: Annotated[float | None, "per-interval volume (POV) or expected volume profile (VWAP)"] = None,
+) -> str:
+    """Execution schedule for a size (Almgren-Chriss optimal trajectory, or
+    TWAP/VWAP/POV benchmarks). AC minimizes expected shortfall + risk penalty
+    (front-loaded hyperbolic path); TWAP is uniform; VWAP volume-weighted;
+    POV trades a participation fraction of each interval's volume. Use before
+    any 'how do we actually scale into/out of this size' claim — the trader's
+    risk gates size the position, this only schedules the execution (advisory,
+    never an order). None-safe: missing cost inputs -> the TWAP fallback.
+    """
+    try:
+        from tradingagents.strategies.execution_schedule import (
+            almgren_chriss,
+            pov_schedule,
+            twap_schedule,
+            vwap_schedule,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"execution schedule unavailable: {exc}"
+    m = str(method or "almgren-chriss").lower()
+    if m == "twap":
+        r = twap_schedule(notional, intervals)
+    elif m == "vwap":
+        profile = []
+        tv = target_volume
+        if tv and tv > 0:
+            profile = [tv] * intervals
+        r = vwap_schedule(notional, profile) if profile else twap_schedule(notional, intervals)
+    elif m == "pov":
+        r = pov_schedule(notional, target_volume or 0.0, participation=0.10)
+    else:
+        sig = volatility if volatility is not None else 0.02
+        eta = temp_impact if temp_impact is not None else 1e-6
+        lam = risk_aversion if risk_aversion is not None else 1e-6
+        r = almgren_chriss(notional, intervals, sig, eta, lam)
+        if not r["schedule"]:
+            r = twap_schedule(notional, intervals)
+    if not r["schedule"]:
+        return "execution schedule: n/a (need notional > 0 + valid parameters)"
+    steps = []
+    for t, x, v in r["schedule"][:6]:
+        steps.append(f"t{t}: trade {v:,.0f} (remain {x:,.0f})")
+    if len(r["schedule"]) > 6:
+        steps.append(f"... {len(r['schedule']) - 6} more intervals")
+    extra = ""
+    if m == "almgren-chriss" or m == "twap" or m == "vwap":
+        if r.get("e_is") is not None:
+            extra = f" E[IS]={r['e_is']:,.2f} var(IS)={r['var_is']:,.2f}"
+        if r.get("kappa") is not None:
+            extra += f" kappa={r['kappa']}"
+    elif m == "pov":
+        extra = f" participation=10% n={r['n']}"
+    return f"execution schedule ({m}): " + "; ".join(steps) + extra
+
+
+@tool
+def get_risk_overlay(
+    portfolio_value: Annotated[float, "current portfolio value (dollar)"],
+    floor: Annotated[float | None, "CPPI floor (dollar); omit for vol-target only"] = None,
+    expected_vol: Annotated[float | None, "expected annualized portfolio vol (fraction)"] = None,
+    target_vol: Annotated[float, "target annualized vol (fraction)"] = 0.15,
+    multiplier: Annotated[float, "CPPI multiplier"] = 3.0,
+) -> str:
+    """Risk overlay for a book: CPPI floor-protected exposure + volatility
+    targeting. CPPI = multiplier * max(P - floor, 0) into the risky sleeve
+    (0 when P <= floor). Vol-target scale = target_vol / expected_vol (capped
+    at 3x). Use before any 'position the book at X% risk / lever the cushion'
+    claim — advisory overlay; the repo's risk gates remain authoritative.
+    """
+    try:
+        from tradingagents.strategies.portfolio import cppi_exposure
+    except Exception as exc:  # noqa: BLE001
+        return f"risk overlay unavailable: {exc}"
+    cppi = None
+    if floor is not None and floor >= 0:
+        cppi = cppi_exposure(portfolio_value, floor, multiplier)
+    vt = None
+    if expected_vol is not None and expected_vol > 0:
+        vt = max(0.0, min(target_vol / expected_vol, 3.0))
+    lines = [f"## Risk Overlay — book PV {portfolio_value:,.0f}", ""]
+    if cppi is not None:
+        lines.append(f"- CPPI: risky {cppi:,.0f} ({(cppi / portfolio_value * 100):.0f}% of PV) "
+                     f"floor {floor:,.0f} m={multiplier:g}; safe {portfolio_value - cppi:,.0f}")
+    else:
+        lines.append("- CPPI: n/a (no floor given)")
+    if vt is not None:
+        lines.append(f"- vol-target scale: {vt:.2f} (target {target_vol:.0%} / est {expected_vol:.0%})")
+    else:
+        lines.append("- vol-target scale: n/a (no expected vol)")
+    lines.append("")
+    lines.append("Advisory overlay only — the risk-governor / position-sizing "
+                 "gates stay authoritative.")
+    return "\n".join(lines)
+
+
+@tool
 def get_topk_drop_plan(
     scores: Annotated[dict, "name -> score"],
     topk: Annotated[int, "target book size (names to hold)"] = 10,
@@ -6484,6 +6633,9 @@ __all__ = [
     "screen_equities",
     "get_market_movers",
     "get_factor_profile",
+    "get_lottery_factors",
+    "get_execution_schedule",
+    "get_risk_overlay",
     "get_topk_drop_plan",
     "get_enhanced_index_tilt",
     "get_skill_read",

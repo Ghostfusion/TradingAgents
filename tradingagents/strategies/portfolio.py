@@ -320,7 +320,32 @@ __all__ = [
     "weight_hhi",
     "weight_entropy",
     "kelly_weights",
+    "cppi_exposure",
 ]
+
+
+def cppi_exposure(portfolio_value: float, floor: float,
+                  multiplier: float = 3.0) -> float | None:
+    """CPPI risky exposure = multiplier * max(portfolio_value - floor, 0).
+
+    The cushion ``C = P - F`` is levered by ``m`` into the risky allocation
+    (the rest sits in the safe asset); when P <= F the risky exposure drops to
+    0 (floor-protected). Returns the risky dollar amount (clamped to
+    ``portfolio_value`` so no >100% exposure), or None on bad inputs. Advisory
+    overlay — the repo's risk gates remain authoritative.
+    """
+    try:
+        P = float(portfolio_value)
+        F = float(floor)
+        m = float(multiplier)
+    except (TypeError, ValueError):
+        return None
+    if P <= 0 or F < 0 or m <= 0:
+        return None
+    cushion = P - F
+    if cushion <= 0:
+        return 0.0
+    return min(m * cushion, P)
 
 
 def _worst_correlated(returns_by_name: dict, names: list[str]) -> str | None:
