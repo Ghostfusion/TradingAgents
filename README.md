@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-06] **Industry depth** — SEC EDGAR full-text search (keyless; customer-concentration footnotes, peer 10-Ks) + USPTO PatentsView patent activity (free key); wired to the fundamentals analyst. See CHANGELOG.
 - [2026-09-06] **Order-flow depth** — FINRA ATS dark-pool flow + Reg SHO short-sale volume (official, keyless, as-of-gated); wired to the market analyst. See CHANGELOG.
 - [2026-09-06] **Macro depth** — TGA liquidity (Treasury Fiscal Data), FX snapshot (DXY + majors), FRED liquidity/commodity/global-rate aliases; wired to the news analyst. See CHANGELOG.
 - [2026-09-06] **Fundamentals depth** — earnings-call transcripts (FMP free), congressional stock trades (House/Senate watchers), SEC EDGAR XBRL financial history; all wired to the fundamentals analyst. See CHANGELOG.

@@ -53,6 +53,10 @@ Also this session:
   (exit-accounting P1, collateral lock P2, fill-latency P3, executor-ledger
   spec P4, async notifier P5); explicit non-goals keep the no-execution /
   math-decides mandates. No code changed.
+- **Industry depth (2026-09-06)**: `get_edgar_fulltext_search` (EFTS keyless;
+  live 'major customer' 10-K hits), `get_patent_activity` (PatentsView free-key;
+  new host unresolvable at build - honest degrade). 7 tests; wired + prompts +
+  gate green.
 - **Order-flow depth (2026-09-06)**: `get_dark_pool_flow` (FINRA ATS weekly,
   keyless; public tier frozen at 2023-11 - honest as-of + staleness gate),
   `get_short_sale_volume` (FINRA Reg SHO daily; served date 2026-01-06,

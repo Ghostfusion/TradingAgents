@@ -93,13 +93,14 @@ from .moomoo import (
     get_stock_data_moomoo,
 )
 from .newsapi import get_global_news_newsapi, get_news_newsapi
+from .patentsview import get_patent_activity
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .schema import VendorResult
 from .screener import (
     get_market_movers as get_market_movers_yfinance,
     screen_equities as screen_equities_yfinance,
 )
-from .sec_edgar import get_financial_history, get_sec_filings
+from .sec_edgar import get_edgar_fulltext_search, get_financial_history, get_sec_filings
 from .stockdata import (
     get_news_stockdata,
     get_stock_data_stockdata,
@@ -223,10 +224,17 @@ TOOLS_CATEGORIES = {
         ],
     },
     "sec_filings": {
-        "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G) + XBRL financial history",
+        "description": "SEC EDGAR filings (8-K, 10-K/Q, S-1/3, 13D/G), XBRL history, and full-text search",
         "tools": [
             "get_sec_filings",
             "get_financial_history",
+            "get_edgar_fulltext_search",
+        ],
+    },
+    "patents": {
+        "description": "USPTO PatentsView patent activity (free key)",
+        "tools": [
+            "get_patent_activity",
         ],
     },
     "earnings_transcripts": {
@@ -372,6 +380,7 @@ OPTIONAL_CATEGORIES = {
     "options_data",
     "sec_filings",
     "short_interest",
+    "patents",
     "short_sale_volume",
     "dark_pool_flow",
     "earnings_transcripts",
@@ -619,6 +628,12 @@ VENDOR_METHODS = {
     # financial history (SEC EDGAR XBRL companyconcept, keyless)
     "get_financial_history": {
         "sec_edgar": get_financial_history,
+    },
+    "get_edgar_fulltext_search": {
+        "sec_edgar": get_edgar_fulltext_search,
+    },
+    "get_patent_activity": {
+        "patentsview": get_patent_activity,
     },
 }
 

@@ -6471,6 +6471,39 @@ def get_dark_pool_flow(
 
 
 @tool
+def get_edgar_fulltext_search(
+    query: Annotated[str, "phrase/term to search across SEC filing text"],
+    forms: Annotated[str | None, "comma-separated form filter (e.g. '10-K', '10-K,10-Q')"] = None,
+    date_range: Annotated[str | None, "relative window (e.g. '1y', '2y', '5y')"] = "5y",
+    limit: Annotated[int, "max hits to render"] = 8,
+) -> str:
+    """SEC EDGAR full-text search (free, keyless).
+
+    Searches the full text of filings (10-K/10-Q/8-K/...) for a phrase and
+    returns top hits with form, filing date, and filer. Use for the
+    customer/supplier-concentration footnote ('major customer'), peer 10-K
+    mentions, and thematic scans — quote specifics only after checking the
+    actual filing. Advisory; amd advisory never a gate.
+    """
+    return route_to_vendor("get_edgar_fulltext_search", query, forms, date_range, limit)
+
+
+@tool
+def get_patent_activity(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """USPTO PatentsView patent activity for a ticker (free key).
+
+    Returns annual granted-patent counts + recent patent titles for the
+    company's assignee name (name-based match; subsidiaries/abbreviations may
+    be missed). Requires a free PATENTSVIEW_API_KEY config. Use before any
+    'innovation / technology moat / patent strength' claim — an advisory
+    innovation gauge, never a gate.
+    """
+    return route_to_vendor("get_patent_activity", ticker)
+
+
+@tool
 def get_topk_drop_plan(
     scores: Annotated[dict, "name -> score"],
     topk: Annotated[int, "target book size (names to hold)"] = 10,
@@ -6752,6 +6785,8 @@ __all__ = [
     "get_fx_snapshot",
     "get_short_sale_volume",
     "get_dark_pool_flow",
+    "get_edgar_fulltext_search",
+    "get_patent_activity",
     "get_execution_schedule",
     "get_risk_overlay",
     "get_topk_drop_plan",

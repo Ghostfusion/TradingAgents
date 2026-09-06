@@ -20,6 +20,7 @@ _PROVIDER_CREDENTIAL_KEYS: dict[str, tuple[str, ...]] = {
     "massive": ("massive_api_key",),
     "fmp": ("fmp_api_key",),
     "eodhd": ("eodhd_api_key",),
+    "patentsview": ("patentsview_api_key",),
     "alpha_vantage": ("alpha_vantage_api_key",),
     "fred": ("fred_api_key",),
     "alpaca": ("alpaca_api_key_id", "alpaca_api_secret"),

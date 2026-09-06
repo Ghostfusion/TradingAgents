@@ -268,3 +268,58 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
                  "statements (get_income_statement etc.) remain the current-period source.")
     return "\n".join(lines)
 
+_EFTS_URL = "https://efts.sec.gov/LATEST/search-index"
+
+
+def get_edgar_fulltext_search(query: str, forms: str | None = None,
+                              date_range: str = "5y", limit: int = 8) -> str:
+    """EDGAR full-text search (SEC efts.sec.gov, free, keyless).
+
+    Searches the full text of SEC filings (10-K/10-Q/8-K/...) for a phrase and
+    returns the top hits with form type, filing date and filer. Use for
+    customer/supplier-concentration footnotes ("major customer"), peer 10-K
+    mentions, and thematic scans. Keyless (descriptive UA only, per SEC fair
+    access). Returns an explicit 'unavailable' message on any failure; a
+    zero-hit search renders an honest 'no matching filings'.
+
+    Args:
+        query: phrase or term to match in filing text (e.g. '"major customer"').
+        forms: optional comma-separated form filter (e.g. "10-K", "10-K,10-Q").
+        date_range: optional relative window passed to EFTS (e.g. "1y", "5y").
+        limit: max hits to render (default 8).
+    """
+    import urllib.parse as _up
+
+    params = {"q": query}
+    if forms:
+        params["forms"] = forms
+    if date_range:
+        params["dateRange"] = date_range
+    url = _EFTS_URL + "?" + _up.urlencode(params)
+    try:
+        data = _json_get(url)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("EDGAR full-text search failed for %r: %s", query, exc)
+        return f"EDGAR full-text search unavailable: {exc}"
+    if not isinstance(data, dict):
+        return "EDGAR full-text search unavailable: unexpected payload"
+    hits = data.get("hits", {}).get("hits") or []
+    total = (data.get("hits", {}).get("total") or {}).get("value")
+    lines = [f"## EDGAR full-text search — {query!r}", ""]
+    if not hits:
+        lines.append("No matching filings (refine the phrase / forms / date range; "
+                     "EFTS covers filings since 2001).")
+    for h in hits[:limit]:
+        src = h.get("_source", {})
+        names = ", ".join(src.get("display_names") or []) or "?"
+        form = src.get("form", "?")
+        filed = src.get("file_date", "?")
+        lines.append(f"- {filed} {form} — {names} (ADSH {src.get('adsh', '?')})")
+    if total is not None:
+        lines.append("")
+        lines.append(f"Total matches: {total}")
+    lines.append("")
+    lines.append("Source: SEC EDGAR Full-Text Search (efts.sec.gov, keyless; filings since 2001). "
+                 "Advisory — verify context in the actual filing before quoting.")
+    return "\n".join(lines)
+

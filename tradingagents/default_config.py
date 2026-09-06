@@ -52,6 +52,7 @@ _ENV_OVERRIDES = {
     "STOCKDATA_API_KEY": "stockdata_api_key",
     "NEWSAPI_API_KEY": "newsapi_api_key",
     "BENZINGA_API_KEY": "benzinga_api_key",
+    "TRADINGAGENTS_PATENTSVIEW_API_KEY": "patentsview_api_key",
     "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
     "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
@@ -493,6 +494,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         "eodhd_api_key": None,  # EODHD daily OHLCV (eodhd.py)
         "massive_api_key": None,  # Massive.com US data (massive.py)
+        "patentsview_api_key": None,  # USPTO PatentsView (free key, patentsview.py)
         "tiingo_api_key": None,  # Tiingo market data (tiingo.py)
         "twelve_data_api_key": None,  # Twelve Data (twelve_data.py): 800 credits/day free
         "stockdata_api_key": None,  # StockData.org (stockdata.py): 100 requests/day free
