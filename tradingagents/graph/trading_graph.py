@@ -509,6 +509,13 @@ class TradingAgentsGraph:
         return {
             "market": ToolNode(
                 [
+                    # Per-call error containment (B1): a single failing tool in a
+                    # multi-call round must not abort the whole round and drop its
+                    # sibling results. handle_tool_errors=True turns EVERY call's
+                    # exception into a paired error ToolMessage (id preserved), so
+                    # the model still sees the successful siblings' data. Without
+                    # it langgraph's default re-raises non-invocation errors and
+                    # the entire round's outputs are orphaned/lost (2026-09-07).
                     # Core stock data tools
                     get_stock_data,
                     # Technical indicators
@@ -659,14 +666,16 @@ class TradingAgentsGraph:
                     get_pair_risk,
                     get_no_trade_guard_band,
                     get_trade_excursions,
-                ]
+                ],
+                handle_tool_errors=True,
             ),
             "social": ToolNode(
                 [
                     # News tools for social media analysis
                     get_news,
                     get_massive_news,
-                ]
+                ],
+                handle_tool_errors=True,
             ),
             "news": ToolNode(
                 [
@@ -701,7 +710,8 @@ class TradingAgentsGraph:
                     get_credit_spread_read,
                     # W3-8 prompt-injection hardening (ingested news/social).
                     get_prompt_injection_read,
-                ]
+                ],
+                handle_tool_errors=True,
             ),
             "fundamentals": ToolNode(
                 [
@@ -760,7 +770,8 @@ class TradingAgentsGraph:
                     get_allocation_black_litterman,
                     get_position_risk_multiplier,
                     get_kelly_alloc,
-                ]
+                ],
+                handle_tool_errors=True,
             ),
         }
 

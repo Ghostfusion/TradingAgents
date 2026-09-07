@@ -102,6 +102,34 @@ class TestNullishFloatCoercion:
         )
         assert d.price_target is None
 
+    def test_pm_nullish_risk_cap_string_coerces_to_none(self):
+        """A reasoning model under output pressure fills the OPTIONAL Literal
+        fields (risk_cap / consensus / data_quality) with the JSON STRING
+        'null' instead of the JSON null; that string must coerce to None or
+        the whole PortfolioDecision fails pydantic (Literal error) and the PM
+        reverts to free text (2026-09-07 run)."""
+        for field in ("risk_cap", "consensus", "data_quality"):
+            for sentinel in ("null", "None", "N/A", "", "unknown"):
+                d = PortfolioDecision(
+                    rating=PortfolioRating.OVERWEIGHT,
+                    executive_summary="s",
+                    investment_thesis="t",
+                    **{field: sentinel},
+                )
+                assert getattr(d, field) is None, f"{field}={sentinel!r} -> {getattr(d, field)!r}"
+                assert d.risk_cap is None or d.risk_cap == "Hold"
+
+    def test_pm_risk_cap_real_value_preserved(self):
+        """A genuine Literal value must pass through untouched (only nullish
+        strings are coerced)."""
+        d = PortfolioDecision(
+            rating=PortfolioRating.OVERWEIGHT,
+            executive_summary="s",
+            investment_thesis="t",
+            risk_cap="Hold",
+        )
+        assert d.risk_cap == "Hold"
+
 
 @pytest.mark.unit
 class TestRenderResearchPlan:

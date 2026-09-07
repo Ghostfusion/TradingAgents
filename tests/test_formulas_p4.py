@@ -6,6 +6,7 @@ import pytest
 
 from tradingagents.strategies.config_robustness import config_robustness
 from tradingagents.strategies.debate_capability import (
+    ModelCapability,
     assess_model_capability,
     can_serve_role,
     capability_gate,
@@ -160,6 +161,36 @@ def test_capability_gate_floor_checks():
     # A tiny-context judge fails the structured floor.
     weak = {"judge": assess_model_capability("brandnew", "x", context_window=8000)}
     assert capability_gate(weak, require=True)
+
+
+def test_risk_roles_have_capability_floors():
+    """The startup matrix must judge the risk debators (aggressive/
+    conservative/neutral), not warn 'unknown role' for them: they were being
+    ASSESSED in trading_graph but ROLE_FLOORS had no entry, so every run
+    printed a vacuous 'cannot be served: unknown role' line. They run a tool
+    loop (bind_tools) but emit prose, so their floor is tool-binding, not
+    structured output."""
+    # A provider with tool support serves them (OpenAI/OpenRouter known).
+    for role in ("aggressive", "conservative", "neutral"):
+        ok, reasons = can_serve_role(assess_model_capability("openai"), role)
+        assert ok, f"{role}: {reasons}"
+    # A provider WITHOUT tool binding fails the risk floor (they need tools).
+    no_tools = ModelCapability(provider="puretext", model="x", tool_binding_support=False)
+    for role in ("aggressive", "conservative", "neutral"):
+        ok, reasons = can_serve_role(no_tools, role)
+        assert not ok, f"{role} should need tool binding"
+        assert any("tool" in r for r in reasons), f"{role}: {reasons}"
+    # The gate over all 6 roles must NOT report 'unknown role' for any of them.
+    caps = {
+        "bull": assess_model_capability("openai"),
+        "bear": assess_model_capability("openai"),
+        "judge": assess_model_capability("deepseek"),
+        "aggressive": assess_model_capability("openai"),
+        "conservative": assess_model_capability("openrouter"),
+        "neutral": assess_model_capability("openai"),
+    }
+    errs = capability_gate(caps, require=True)
+    assert not any("unknown role" in e for e in errs), errs
 
 
 def test_can_serve_role_rejects_unknown():

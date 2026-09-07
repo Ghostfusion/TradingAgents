@@ -24,6 +24,14 @@ ROLE_FLOORS = {
     "bull": {"context_window": 32_000, "structured": False, "tools": False},
     "bear": {"context_window": 32_000, "structured": False, "tools": False},
     "judge": {"context_window": 16_000, "structured": True, "tools": False},
+    # Risk debators (aggressive/conservative/neutral) run a TOOL LOOP
+    # (risk_tool_loop.run_tool_loop -> llm.bind_tools) to ground their risk
+    # figures before writing prose, so tool binding is required; they emit
+    # free-text arguments (not a structured schema), so structured output is
+    # not a floor. Same evidence context as the research debators.
+    "aggressive": {"context_window": 32_000, "structured": False, "tools": True},
+    "conservative": {"context_window": 32_000, "structured": False, "tools": True},
+    "neutral": {"context_window": 32_000, "structured": False, "tools": True},
 }
 _KNOWN_STRUCTURED = {"openai", "anthropic", "google", "azure", "deepseek", "openrouter", "glm", "qwen", "mistral", "minimax"}
 _KNOWN_TOOLS = {"openai", "anthropic", "google", "azure", "deepseek", "openrouter", "ollama", "groq", "nvidia", "qwen", "glm", "minimax", "mistral"}

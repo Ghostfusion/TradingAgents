@@ -36,6 +36,22 @@ def _coerce_optional_float(value):
     return value
 
 
+def _coerce_optional_literal_none(value):
+    """Coerce a null-ish STRING (the model emits JSON string ``"null"``) to a
+    real ``None`` for optional ``Literal[...] | None`` fields.
+
+    A reasoning model under output pressure sometimes fills an optional
+    Literal field with the JSON string ``"null"`` instead of the JSON null,
+    which pydantic (correctly) rejects against ``Literal["Hold"]`` etc. — the
+    whole structured result then fails and the agent reverts to free text
+    (observed: Portfolio Manager ``risk_cap`` 2026-09-07 run). Map such
+    strings to ``None`` before validation so the field stays optional.
+    """
+    if isinstance(value, str) and value.strip().lower() in _NULLISH_FLOAT:
+        return None
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Shared rating types
 # ---------------------------------------------------------------------------
@@ -281,6 +297,11 @@ class PortfolioDecision(BaseModel):
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    @field_validator("risk_cap", "consensus", "data_quality", mode="before")
+    @classmethod
+    def _nullish_literal_to_none(cls, v):
+        return _coerce_optional_literal_none(v)
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:

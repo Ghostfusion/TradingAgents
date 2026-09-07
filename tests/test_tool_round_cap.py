@@ -588,3 +588,71 @@ def test_production_setup_research_risk_chain_edges_are_wired():
     for risk in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
         assert "Portfolio Manager" in targets(risk), f"{risk} missing PM target"
     assert targets("Portfolio Manager") == {"__end__"}
+
+
+@tool
+def _ok_tool(symbol: str) -> str:
+    """A well-behaved tool (paired with a sibling that raises)."""
+    return f"DATA:{symbol}"
+
+
+@tool
+def _boom_tool(symbol: str) -> str:
+    """A tool whose execution raises (simulates moomoo/Massive/fmp vendor churn)."""
+    raise RuntimeError("vendor down")
+
+
+def test_toolnode_handle_errors_keeps_sibling_call_when_one_raises():
+    """B1 round containment: a single failing tool in a multi-call assistant
+    round must NOT abort the round and drop its sibling's result.
+
+    Regression (2026-09-07): langgraph's DEFAULT ToolNode error handling
+    re-raises non-invocation exceptions during the multi-call executor.map, so
+    one raising tool lost the ENTIRE round's ToolMessages (the sibling's data
+    was dropped AND the failing id became an orphan -> strict backends 400 'no
+    tool output found'). With handle_tool_errors=True every call gets a paired
+    ToolMessage (the success as data, the failure as an error message), so the
+    model still sees the sibling result and no id is left unpaired.
+    """
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.prebuilt import ToolNode
+
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    # Analysts build ToolNodes with handle_tool_errors=True (B1).
+    tool_node = ToolNode([_ok_tool, _boom_tool], handle_tool_errors=True)
+
+    def analyst(state):
+        # Emit ONE multi-call turn (a good tool + a raising tool).
+        calls = [
+            {"name": "_ok_tool", "args": {"symbol": "TSM"}, "id": "good-1", "type": "tool_call"},
+            {"name": "_boom_tool", "args": {"symbol": "TSM"}, "id": "boom-1", "type": "tool_call"},
+        ]
+        return {"messages": [AIMessage(content="", tool_calls=calls)]}
+
+    def done(state):
+        return {"market_report": "END"}
+
+    workflow = StateGraph(AgentState)
+    workflow.add_node("Analyst", analyst)
+    workflow.add_node("tools_market", tool_node)
+    workflow.add_node("Done", done)
+    workflow.add_edge(START, "Analyst")
+    workflow.add_edge("Analyst", "tools_market")
+    workflow.add_edge("tools_market", "Done")
+    workflow.add_edge("Done", END)
+    graph = workflow.compile()
+
+    final = graph.invoke({"messages": [HumanMessage(content="TSM")]})
+
+    tool_msgs = [m for m in final["messages"] if isinstance(m, ToolMessage)]
+    tool_ids = {m.tool_call_id for m in tool_msgs}
+    # BOTH calls paired: the ok sibling produced data, the boom sibling an error.
+    assert "good-1" in tool_ids, f"sibling result dropped: {tool_ids}"
+    assert "boom-1" in tool_ids, f"failing call orphaned: {tool_ids}"
+    by_id = {m.tool_call_id: m for m in tool_msgs}
+    assert "DATA:TSM" in str(by_id["good-1"].content)
+    assert "unavailable" in str(by_id["boom-1"].content).lower() or "error" in str(
+        by_id["boom-1"].content
+    ).lower()
+    assert final["market_report"] == "END"  # round did NOT abort the graph
