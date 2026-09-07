@@ -2466,7 +2466,9 @@ def get_sector_rotation_screen(
         SPDR_SECTORS,
     )
     from tradingagents.strategies.sector_screener import (
+        breadth_with_gate,
         constituent_screens,
+        leadership_ratio_ewcw,
         sector_screen,
     )
 
@@ -2532,10 +2534,6 @@ def get_sector_rotation_screen(
             # samples - the denominator is now the whole sector.
             try:
                 from tradingagents.dataflows.sp500_universe import fetch_sp500_universe
-                from tradingagents.strategies.sector_screener import (
-                    breadth_with_gate,
-                    leadership_ratio_ewcw,
-                )
 
                 uni = fetch_sp500_universe()  # disk-cached weekly
                 if not uni or not uni.get("rows"):
@@ -2593,6 +2591,7 @@ def get_sector_rotation_screen(
                 cons = {}
         else:
             _line_note = ""
+            _top_note = ""
             parent_of = {etf: INDUSTRY_ETFS[etf][0] for etf in SECTOR_CONSTITUENTS}
             groups_by_parent: dict[str, list[str]] = {}
             for grp in SECTOR_CONSTITUENTS:

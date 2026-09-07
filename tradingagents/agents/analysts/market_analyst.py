@@ -120,7 +120,7 @@ from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 
 
-def create_market_analyst(llm):
+def create_market_analyst(llm, backup_llm=None):
 
     def market_analyst_node(state):
         current_date = state["trade_date"]
@@ -403,7 +403,19 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
         chain = prompt | llm.bind_tools(tools)
 
-        # Tool-round cap turn: the router sent us back because the last
+        # Backup model (TRADINGAGENTS_BACKUP_LLM): same prompt + tool surface,
+        # different model. Used for the truncation-continuation retry so a
+        # model that keeps cutting at the output cap is not re-paid for the
+        # repair. None-safe: no backup configured -> the retry stays on the
+        # same chain (legacy behavior).
+        backup_chain = None
+        if backup_llm is not None and backup_llm is not llm:
+            try:
+                backup_chain = prompt | backup_llm.bind_tools(tools)
+            except Exception:  # noqa: BLE001 - degrade to same-model continuation
+                backup_chain = None
+
+        # Tool-round cap turn: the router sent us back because the
         # message still carries tool_calls after MAX_TOOL_ROUNDS. Do not
         # re-invoke the model for more tools - strip the dangling tool_calls
         # and run one terminal prose turn so the report is never empty and
@@ -414,7 +426,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg)
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain)
             return {
                 "messages": [_CapAIMessage(content=_report, id="market-cap-report")],
                 "market_report": _report,
@@ -434,7 +446,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 retry_chain_if_truncated,
             )
 
-            report = retry_chain_if_truncated(chain, state["messages"], report)
+            report = retry_chain_if_truncated(chain, state["messages"], report, backup_chain=backup_chain)
             # A model can answer a tool loop with a bare status turn instead of
             # the report (no tool_calls -> the router takes it as final). Ask it
             # once to deliver the report from the gathered evidence.
@@ -445,7 +457,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result)
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain)
 
         return {
             "messages": [result],

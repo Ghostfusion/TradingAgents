@@ -342,6 +342,49 @@ class TradingAgentsGraph:
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
 
+        # Backup LLM (TRADINGAGENTS_BACKUP_LLM): a second model used ONLY for
+        # the truncation-continuation retry - when a response is cut at the
+        # output cap, the continuation runs on this model instead of re-paying
+        # the one that keeps truncating. Spec format: "provider:model" (e.g.
+        # "openrouter:deepseek/deepseek-chat") or a bare model id that uses
+        # the primary provider. Empty/unset -> no backup, same-model
+        # continuations (legacy behavior).
+        self.backup_thinking_llm = None
+        _backup_spec = str(self.config.get("backup_llm") or "").strip()
+        if _backup_spec:
+            _backup_provider = self.config.get("llm_provider", "")
+            _backup_model = _backup_spec
+            if ":" in _backup_spec:
+                _bp, _bm = _backup_spec.split(":", 1)
+                _backup_provider, _backup_model = _bp.strip(), _bm.strip()
+            try:
+                _backup_kwargs = dict(self._get_provider_kwargs(_backup_provider))
+                _backup_cap = (
+                    self.config.get("max_output_tokens_quick")
+                    or self.config.get("max_output_tokens")
+                )
+                if _backup_cap:
+                    _backup_kwargs["max_tokens"] = int(_backup_cap)
+                _backup_client = create_llm_client(
+                    provider=_backup_provider,
+                    model=_backup_model,
+                    base_url=self.config.get("backend_url"),
+                    **_backup_kwargs,
+                )
+                self.backup_thinking_llm = _backup_client.get_llm()
+                print(
+                    f"[backup-llm] truncation continuation will retry on "
+                    f"{_backup_provider}:{_backup_model}",
+                    file=sys.stderr,
+                )
+            except Exception as exc:  # noqa: BLE001 - advisory; degrade to same-model
+                print(
+                    f"[backup-llm] unavailable ({exc}); truncation retries stay "
+                    "on the primary model",
+                    file=sys.stderr,
+                )
+                self.backup_thinking_llm = None
+
         # Per-role structured-debate LLMs (opt-in enable_debate): research
         # (bull/bear/judge) and risk (aggressive/conservative) resolve from
         # the debate_*_model config keys ("family:id") through
@@ -398,6 +441,7 @@ class TradingAgentsGraph:
             analyst_concurrency=self.config.get("analyst_concurrency", 1),
             config=self.config,
             debate_llms=self.debate_llms,
+            backup_llm=self.backup_thinking_llm,
         )
 
         self.propagator = Propagator(
@@ -419,10 +463,16 @@ class TradingAgentsGraph:
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 
-    def _get_provider_kwargs(self) -> dict[str, Any]:
-        """Get provider-specific kwargs for LLM client creation."""
+    def _get_provider_kwargs(self, provider: str | None = None) -> dict[str, Any]:
+        """Get provider-specific kwargs for LLM client creation.
+
+        ``provider`` overrides the config's ``llm_provider`` so the backup
+        client (TRADINGAGENTS_BACKUP_LLM) gets ITS provider's knobs, not the
+        primary's (a google thinking_level must never ride an anthropic
+        backup model).
+        """
         kwargs = {}
-        provider = self.config.get("llm_provider", "").lower()
+        provider = (provider or self.config.get("llm_provider", "")).lower()
 
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")

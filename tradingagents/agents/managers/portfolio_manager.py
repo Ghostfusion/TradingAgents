@@ -23,7 +23,7 @@ from tradingagents.agents.utils.structured import (
 )
 
 
-def create_portfolio_manager(llm, fallback_llm=None):
+def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
 
     def portfolio_manager_node(state) -> dict:
@@ -245,6 +245,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             "Portfolio Manager",
             result_hook=_result_hook,
             fallback_llm=fallback_llm,
+            backup_llm=backup_llm,
         )
 
         new_risk_debate_state = {

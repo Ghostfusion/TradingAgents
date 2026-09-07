@@ -90,7 +90,8 @@ def _continuation_prompt(truncated: str) -> str:
     )
 
 
-def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str) -> str:
+def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str,
+                        backup_llm: Any | None = None) -> str:
     """Re-invoke the LLM when the response was cut at the output cap.
 
     ``max_tokens`` is a ceiling, not a floor — the model writes what it wants
@@ -98,13 +99,26 @@ def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str) -> str:
     (``_looks_truncated``) and re-invoke with a continuation prompt, merging
     the continuation into the full text. Up to ``_MAX_TRUNCATION_RETRIES``
     attempts; each is one extra LLM call, only when a cut was detected.
+
+    ``backup_llm`` (optional): once a cut is detected, the continuation retries
+    run on this model instead of the truncated one (``TRADINGAGENTS_BACKUP_LLM``
+    in the graph) — the flaky model that hit the cap is not re-paid for the
+    repair. A default of None keeps today's same-model behavior; the swap is
+    skipped when the backup is the same object.
     """
     full = response_text or ""
     for _ in range(_MAX_TRUNCATION_RETRIES):
         if not _looks_truncated(full):
             break
+        retry_llm = plain_llm
+        if backup_llm is not None and backup_llm is not plain_llm:
+            retry_llm = backup_llm
+            logger.info(
+                "truncated response detected; continuing on backup model %r",
+                _model_name(backup_llm) or backup_llm,
+            )
         try:
-            cont = plain_llm.invoke(_continuation_prompt(full))
+            cont = retry_llm.invoke(_continuation_prompt(full))
             cont_text = cont.content if hasattr(cont, "content") else str(cont)
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("truncation continuation failed: %s", exc)
@@ -306,22 +320,31 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
     return text
 
 
-def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str) -> str:
+def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
+                             backup_chain: Any | None = None) -> str:
     """Re-invoke a tool-calling chain when its final content was cut.
 
     The analyst nodes run ``chain = prompt | llm.bind_tools(tools)`` and take
     ``result.content`` when no tool calls remain. If that content was cut at
     the output cap, re-invoke the chain with a continuation message so the
     model finishes the report (it may call more tools if it needs data).
+
+    ``backup_chain`` (optional): same shape as ``chain`` but bound to the
+    backup model (``TRADINGAGENTS_BACKUP_LLM``); the continuation retries run
+    on it instead of the truncated chain. A default of None keeps today's
+    same-model behavior; the swap is skipped when backup == chain.
     """
     full = response_text or ""
     for _ in range(_MAX_TRUNCATION_RETRIES):
         if not _looks_truncated(full):
             break
+        cont_chain = chain
+        if backup_chain is not None and backup_chain is not chain:
+            cont_chain = backup_chain
         try:
             from langchain_core.messages import HumanMessage
 
-            cont = chain.invoke([*messages, HumanMessage(content=_continuation_prompt(full))])
+            cont = cont_chain.invoke([*messages, HumanMessage(content=_continuation_prompt(full))])
             cont_text = cont.content if hasattr(cont, "content") else str(cont)
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("chain truncation continuation failed: %s", exc)
@@ -332,17 +355,21 @@ def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str) -> s
     return full
 
 
-def retry_llm_if_truncated(llm: Any, prompt: Any, response_text: str) -> str:
+def retry_llm_if_truncated(llm: Any, prompt: Any, response_text: str,
+                           backup_llm: Any | None = None) -> str:
     """Re-invoke a plain LLM when its response was cut at the output cap.
 
     The researchers / risk debators call ``llm.invoke(prompt)`` directly and
-    wrap the content in a speaker prefix. This retries the raw content with a
+    wrap the content in a speaker tag. This retries the raw content with a
     continuation prompt and merges, so the debate argument is not truncated.
+    ``backup_llm`` (optional) reroutes the continuation onto the backup model
+    (see ``_retry_if_truncated``).
     """
-    return _retry_if_truncated(llm, prompt, response_text)
+    return _retry_if_truncated(llm, prompt, response_text, backup_llm=backup_llm)
 
 
-def finalize_messages(chain: Any, messages: Any, result: Any) -> str:
+def finalize_messages(chain: Any, messages: Any, result: Any,
+                      backup_chain: Any | None = None) -> str:
     """Force a terminal report turn when an analyst hit its tool-round cap.
 
     The analyst routers force back to the analyst node after
@@ -352,6 +379,10 @@ def finalize_messages(chain: Any, messages: Any, result: Any) -> str:
     model writes the report from what it has - never an empty string, never an
     invented value. Degrades to the current turn's content on any failure so
     the pipeline never blocks.
+
+    ``backup_chain`` (optional): the cap-forced terminal turn's truncation
+    continuation runs on this chain (backup model) - see
+    ``retry_chain_if_truncated``.
     """
     if not getattr(result, "tool_calls", None):
         # No cap turn: normal path unchanged.
@@ -371,7 +402,7 @@ def finalize_messages(chain: Any, messages: Any, result: Any) -> str:
         final = chain.invoke(cleaned_msgs)
         text = final.content if hasattr(final, "content") else str(final)
         if text and text.strip():
-            return _retry_if_truncated(chain, cleaned_msgs, text)
+            return _retry_if_truncated(chain, cleaned_msgs, text, backup_llm=backup_chain)
         return text
     except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-run
         logger.warning("final-report turn after tool cap failed: %s", exc)
@@ -404,6 +435,7 @@ def invoke_structured_or_freetext(
     agent_name: str,
     result_hook: Callable[[Any], None] | None = None,
     fallback_llm: Any | None = None,
+    backup_llm: Any | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -411,6 +443,9 @@ def invoke_structured_or_freetext(
     invocations, a list of message dicts for chat models that take that
     shape). The same value is forwarded to the free-text path so the
     fallback sees the same input the structured call did.
+
+    ``backup_llm`` (optional): cut-at-cap continuation runs on this model
+    instead of the truncated one (see ``_retry_if_truncated``).
     """
     if structured_llm is not None:
         try:
@@ -429,7 +464,7 @@ def invoke_structured_or_freetext(
             # marker would catch it. Merge a continuation exactly like the
             # free-text path (no-op when the render is complete — the extra
             # _looks_truncated check costs nothing).
-            return _retry_if_truncated(plain_llm, prompt, rendered)
+            return _retry_if_truncated(plain_llm, prompt, rendered, backup_llm=backup_llm)
         except Exception as exc:
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
@@ -440,7 +475,7 @@ def invoke_structured_or_freetext(
     response = plain_llm.invoke(prompt)
     response_text = response.content if hasattr(response, "content") else str(response)
     # Enforce completeness: cut-at-cap -> continuation merge.
-    response_text = _retry_if_truncated(plain_llm, prompt, response_text)
+    response_text = _retry_if_truncated(plain_llm, prompt, response_text, backup_llm=backup_llm)
     # Harden: a bare header/stub is not a usable decision. Regenerate once;
     # if still degenerate, return an explicit 'unavailable' notice so a
     # structured-output miss can never silently produce an empty decision.

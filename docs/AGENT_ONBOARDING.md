@@ -319,6 +319,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-06 `(working tree)` - Backup LLM for truncation-continuation
+  retries: `TRADINGAGENTS_BACKUP_LLM` (`.env`, `backup_llm` config,
+  `provider:model` or bare model on the primary provider). When ANY LLM
+  response is cut at the output cap, the continuation retry runs on the backup
+  model instead of re-paying the one that truncated; empty = same-model
+  (legacy). One backup client resolved in `trading_graph` (its own provider's
+  kwargs + quick-tier output budget) and threaded via `GraphSetup` into every
+  analyst chain (`retry_chain_if_truncated` + cap `finalize_messages`),
+  plain researcher/risk-debator (`retry_llm_if_truncated` / `run_tool_loop`),
+  and structured manager/trader/sentiment/independent-stance
+  (`invoke_structured_or_freetext`) path. See CHANGELOG.
+- 2026-09-06 `(working tree)` - Sector-rotation screen curated-breadth crash
+  fix: `get_sector_rotation_screen`'s curated branch referenced `_top_note`
+  before assignment (UnboundLocalError — the nxpi batch death) and the shared
+  breadth block used `breadth_with_gate`/`leadership_ratio_ewcw` imported only
+  inside the eodhd branch; both fixed, regression-tested. See CHANGELOG.
 - 2026-09-03 `(working tree)` - PM node persists structured `pm_decision`
   (post-guardrail, model_dump json) -> research_decision.json carries real
   rating/data_quality on new runs; legacy nulls fail closed.

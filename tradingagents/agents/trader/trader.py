@@ -19,7 +19,7 @@ from tradingagents.agents.utils.structured import (
 )
 
 
-def create_trader(llm):
+def create_trader(llm, backup_llm=None):
     structured_llm = bind_structured(llm, TraderProposal, "Trader")
 
     def trader_node(state, name):
@@ -64,6 +64,7 @@ def create_trader(llm):
             messages,
             render_trader_proposal,
             "Trader",
+            backup_llm=backup_llm,
         )
 
         # Post-proposal computed verification pass (Phase-5 audit wiring): the

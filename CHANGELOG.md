@@ -6,7 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+### Added
+- **Backup LLM for truncation-continuation retries** (`TRADINGAGENTS_BACKUP_LLM`
+  in `.env`, config key `backup_llm`): when ANY LLM response is cut at the
+  output cap, the continuation retry now runs on the configured backup model
+  instead of re-paying the model that kept truncating. Spec format
+  `provider:model` (e.g. `openrouter:deepseek/deepseek-chat`) or a bare model
+  id using `TRADINGAGENTS_LLM_PROVIDER`; empty = same-model continuations
+  (legacy behavior, bit-identical). Wired through every truncation path:
+  analyst chain reports (`retry_chain_if_truncated` + cap-forced
+  `finalize_messages`), plain researchers / risk debators
+  (`retry_llm_if_truncated`), and the structured managers / trader / sentiment
+  / independent-stance `invoke_structured_or_freetext`; the graph resolves one
+  backup client (`provider:model` spec, quick-tier output budget, its own
+  provider's kwargs) and threads it into `GraphSetup`. Tests:
+  `test_truncation_retry.py` +8 backup-swap cases (plain / chain / structured /
+  free-text / same-object guard / bounded-give-up / failure-degrade /
+  complete-no-touch) + `test_env_overrides.py` env mapping + graph wiring
+  (backup built when set, absent when unset). See CHANGELOG / api_reference.
 ### Fixed
+- **Sector-rotation screen curated-breadth crash** (`get_sector_rotation_screen`):
+  the curated-industry branch referenced `_top_note` before assignment
+  (`UnboundLocalError`) and the shared constituent block referenced
+  `breadth_with_gate` / `leadership_ratio_ewcw` imported only inside the eodhd
+  branch — the nxpi batch 2026-09-06 died on the first one. `_top_note` is now
+  initialized in the curated branch and the breadth imports are hoisted to the
+  function top. Regression test
+  `test_sector_rotation_curated_breadth_does_not_crash` renders the constituent
+  screens through the exact curated path.
 - **Quant-formula audit fixes (independent web-verified pass over ~468 formula
   blocks)** — four material divergences corrected:
   1. **Risk-parity weights** (`portfolio_optimizer.risk_parity_weights`): the

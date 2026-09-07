@@ -6,7 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_aggressive_debator(llm):
+def create_aggressive_debator(llm, backup_llm=None):
     def aggressive_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
         history = risk_debate_state.get("history", "")
@@ -55,8 +55,8 @@ Engage actively by addressing any specific concerns raised, refuting the weaknes
         )
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS, max_rounds=2)  # bound runtime: 2 tool rounds per debate turn
-        content = retry_llm_if_truncated(llm, prompt, content)
+        content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS, max_rounds=2, backup_llm=backup_llm)  # bound runtime: 2 tool rounds per debate turn
+        content = retry_llm_if_truncated(llm, prompt, content, backup_llm=backup_llm)
         argument = f"Aggressive Analyst: {content}"
 
         new_risk_debate_state = {

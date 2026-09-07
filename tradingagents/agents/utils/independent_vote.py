@@ -114,7 +114,7 @@ computed values or stating 'unavailable'.
     return prompt
 
 
-def _sample_stance(structured_llm, plain_llm, prompt: str) -> dict:
+def _sample_stance(structured_llm, plain_llm, prompt: str, backup_llm=None) -> dict:
     """One role's stance: structured call with a result hook; free-text fallback.
 
     Returns a dict ``{rating, confidence, strength, reason}`` where
@@ -139,6 +139,7 @@ def _sample_stance(structured_llm, plain_llm, prompt: str) -> dict:
         render_stance,
         "independent stance",
         result_hook=hook,
+        backup_llm=backup_llm,
     )
     if "stance" in holder:
         return holder["stance"]
@@ -152,7 +153,7 @@ def _sample_stance(structured_llm, plain_llm, prompt: str) -> dict:
     }
 
 
-def create_independent_stance_node(roles, llm):
+def create_independent_stance_node(roles, llm, backup_llm=None):
     """Return a graph node sampling one independent stance per role.
 
     ``roles`` must be all risk roles (aggressive/conservative/neutral) or all
@@ -177,7 +178,10 @@ def create_independent_stance_node(roles, llm):
         stances: dict = {}
         for role in selected:
             stances[role] = _sample_stance(
-                structured_llm, plain_llm=llm, prompt=build_stance_prompt(role, state)
+                structured_llm,
+                plain_llm=llm,
+                prompt=build_stance_prompt(role, state),
+                backup_llm=backup_llm,
             )
 
         out: dict = {}

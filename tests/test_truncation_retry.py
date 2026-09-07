@@ -139,3 +139,159 @@ def test_invoke_structured_or_freetext_retries_truncated_free_text():
     out = invoke_structured_or_freetext(None, llm, "prompt", lambda r: r, "test")
     assert "and the conclusion is clear. Done." in out
     assert llm.invoke.call_count == 2
+
+
+# --- backup LLM (TRADINGAGENTS_BACKUP_LLM) swap on truncation ---------------
+
+
+def test_retry_if_truncated_uses_backup_llm():
+    """A cut response is continued on the BACKUP model, not the one that cut."""
+    llm = mock.MagicMock()
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content=" and the backup finished. Done.")
+    out = structured._retry_if_truncated(llm, "prompt", _truncated_text(), backup_llm=backup)
+    assert "the regime is" in out  # original tail preserved
+    assert "and the backup finished. Done." in out  # backup continuation merged
+    assert structured._looks_truncated(out) is False
+    backup.invoke.assert_called_once()
+    llm.invoke.assert_not_called()  # the truncated model is never re-paid
+
+
+def test_retry_if_truncated_backup_same_object_no_swap():
+    """backup == plain_llm must not double-invoke (identity guard)."""
+    llm = mock.MagicMock()
+    llm.invoke.return_value = mock.MagicMock(content=" and the trend is clearly down. Done.")
+    out = structured._retry_if_truncated(llm, "prompt", _truncated_text(), backup_llm=llm)
+    assert "and the trend is clearly down. Done." in out
+    assert llm.invoke.call_count == 1
+
+
+def test_retry_if_truncated_backup_also_truncated_gives_up():
+    """Backup continuation ALSO cut -> bounded retries on the backup, then stop."""
+    llm = mock.MagicMock()
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="still cut off mid")
+    out = structured._retry_if_truncated(llm, "prompt", _truncated_text(), backup_llm=backup)
+    assert backup.invoke.call_count == structured._MAX_TRUNCATION_RETRIES
+    assert llm.invoke.call_count == 0
+    assert "still cut off mid" in out
+
+
+def test_retry_if_truncated_backup_failure_degrades():
+    """A failing backup degrades to the original text, never raises."""
+    llm = mock.MagicMock()
+    backup = mock.MagicMock()
+    backup.invoke.side_effect = RuntimeError("backup provider down")
+    out = structured._retry_if_truncated(llm, "prompt", _truncated_text(), backup_llm=backup)
+    assert out == _truncated_text()
+
+
+def test_retry_if_truncated_backup_unused_when_complete():
+    """A complete response never touches the backup (no extra call)."""
+    llm = mock.MagicMock()
+    backup = mock.MagicMock()
+    out = structured._retry_if_truncated(llm, "prompt", _complete_text(), backup_llm=backup)
+    assert out == _complete_text()
+    backup.invoke.assert_not_called()
+    llm.invoke.assert_not_called()
+
+
+def test_retry_chain_if_truncated_uses_backup_chain():
+    """The analyst-chain path runs the continuation on the backup chain."""
+    chain = mock.MagicMock()
+    backup_chain = mock.MagicMock()
+    backup_chain.invoke.return_value = mock.MagicMock(content=" and the backup setup is confirmed. End.")
+    msgs = [mock.MagicMock()]
+    out = structured.retry_chain_if_truncated(
+        chain, msgs, _truncated_text(), backup_chain=backup_chain
+    )
+    assert "and the backup setup is confirmed. End." in out
+    backup_chain.invoke.assert_called_once()
+    chain.invoke.assert_not_called()
+
+
+def test_invoke_structured_or_freetext_uses_backup_on_free_text_cut():
+    """The free-text path forwards backup_llm to the truncation retry."""
+    llm = mock.MagicMock()
+    llm.invoke.side_effect = [mock.MagicMock(content=_truncated_text())]
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content=" and the backup concludes. Done.")
+    out = structured.invoke_structured_or_freetext(
+        None, llm, "prompt", lambda r: r, "test", backup_llm=backup
+    )
+    assert "and the backup concludes. Done." in out
+    assert llm.invoke.call_count == 1  # only the original cut call
+    backup.invoke.assert_called_once()
+
+
+def test_invoke_structured_or_freetext_uses_backup_on_structured_render_cut():
+    """A structured render cut mid-sentence continues on the backup model."""
+    structured_llm = mock.MagicMock()
+    structured_llm.invoke.return_value = object()
+    plain_llm = mock.MagicMock()
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content=" and the backup finishes the render. Done.")
+    out = structured.invoke_structured_or_freetext(
+        structured_llm,
+        plain_llm,
+        "prompt",
+        render=lambda _: _truncated_text(),
+        agent_name="PM",
+        backup_llm=backup,
+    )
+    assert "and the backup finishes the render. Done." in out
+    assert plain_llm.invoke.call_count == 0  # never re-paid
+    backup.invoke.assert_called_once()
+
+
+def _fake_llm_client(seen):
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            seen.append(k)
+
+        def get_llm(self):
+            return mock.MagicMock()
+
+    return _FakeClient
+
+
+def test_graph_builds_backup_llm_from_config(monkeypatch):
+    """TradingAgentsGraph resolves backup_llm into a backup client and threads
+    it into GraphSetup so every node's truncation retry can swap models."""
+    seen = []
+    monkeypatch.setattr(
+        "tradingagents.graph.trading_graph.create_llm_client",
+        _fake_llm_client(seen),
+    )
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    cfg = dict(DEFAULT_CONFIG)
+    cfg["backup_llm"] = "openrouter:deepseek/deepseek-chat"
+    ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+    assert ta.backup_thinking_llm is not None
+    assert ta.graph_setup.backup_llm is ta.backup_thinking_llm
+    # 3 clients: deep + quick + backup; the backup carries the spec model.
+    models = [k.get("model", "") for k in seen]
+    assert any("deepseek-chat" in str(m) for m in models), f"backup model missing: {models}"
+
+
+def test_graph_no_backup_when_unset(monkeypatch):
+    """No TRADINGAGENTS_BACKUP_LLM -> no backup client, legacy behavior."""
+    seen = []
+    monkeypatch.setattr(
+        "tradingagents.graph.trading_graph.create_llm_client",
+        _fake_llm_client(seen),
+    )
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    cfg = dict(DEFAULT_CONFIG)
+    cfg["backup_llm"] = ""
+    ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+    assert ta.backup_thinking_llm is None
+    assert ta.graph_setup.backup_llm is None
+    # No client is ever created for a backup spec (deep/quick + debate roles
+    # are all the clients this environment's config produces).
+    models = [k.get("model", "") for k in seen]
+    assert all("backup" not in str(m) for m in models)

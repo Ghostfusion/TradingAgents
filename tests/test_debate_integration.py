@@ -306,8 +306,10 @@ class TestRoleLlmWiring:
         cfg = dict(DEFAULT_CONFIG)
         cfg["enable_debate"] = False
         ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
-        # Only the 2 base clients (quick/deep) are created; no role clients.
-        assert len(seen) <= 2, f"role clients created while disabled: {seen}"
+        # Only the 2 base clients (quick/deep) + the optional backup client
+        # (TRADINGAGENTS_BACKUP_LLM, when configured) are created; no debate
+        # role clients.
+        assert len(seen) <= 3, f"role clients created while disabled: {seen}"
         assert ta.graph_setup.debate_llms == {}
 
 

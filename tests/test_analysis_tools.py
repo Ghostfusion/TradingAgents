@@ -54,6 +54,32 @@ def test_position_sizing_formula():
     assert "6.0%" in out and "kelly=24.00%" in out and "risk_budget=20.0%" in out
 
 
+def test_sector_rotation_curated_breadth_does_not_crash(monkeypatch):
+    """Regression: the curated-industry breadth branch referenced ``_top_note``
+    before assignment (UnboundLocalError) whenever it found constituents — the
+    nxpi batch 2026-09-06 died on get_sector_rotation_screen. The curated
+    branch must initialize ``_top_note`` exactly like the eodhd branch."""
+    def _ohlcv_for(ticker):
+        phase = sum(ord(c) for c in ticker) % 20
+        closes = [100.0 + 0.5 * i + 8.0 * math.sin(i / 6 + phase) for i in range(260)]
+        return {
+            "closes": closes,
+            "opens": closes,
+            "highs": [c + 0.5 for c in closes],
+            "lows": [c - 0.5 for c in closes],
+            "volumes": [1_000_000.0] * 260,
+        }
+
+    monkeypatch.setattr(T, "_ohlcv", _ohlcv_for)
+    out = T.get_sector_rotation_screen.func(
+        enable_breadth=True, top_n=5, constituent_universe="curated"
+    )
+    assert "Sector Rotation Screen" in out
+    # The curated branch completed (its constituent-screens block rendered) —
+    # this is the exact path that raised UnboundLocalError before the fix.
+    assert "### Constituent screens" in out
+
+
 def test_position_sizing_zero_stop_rejects():
     out = T.get_position_sizing.invoke({"confidence": 0.6, "stop_dist_pct": 0.0})
     assert "stop_dist_pct must be > 0" in out

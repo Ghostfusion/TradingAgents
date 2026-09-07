@@ -6,7 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_bull_researcher(llm):
+def create_bull_researcher(llm, backup_llm=None):
     def bull_node(state) -> dict:
         investment_debate_state = state["investment_debate_state"]
         history = investment_debate_state.get("history", "")
@@ -56,7 +56,7 @@ Use this information to deliver a compelling bull argument, refute the bear's co
 
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content = retry_llm_if_truncated(llm, prompt, response.content)
+        content = retry_llm_if_truncated(llm, prompt, response.content, backup_llm=backup_llm)
         if not (content or "").strip():
             # A degenerate empty response would render as a bare "Bull
             # Analyst:" marker and starve the debate. Retry once with a

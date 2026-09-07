@@ -49,13 +49,16 @@ def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
-def create_sentiment_analyst(llm):
+def create_sentiment_analyst(llm, backup_llm=None):
     """Create a sentiment analyst node for the trading graph.
 
     Pre-fetches news + StockTwits + Reddit data, injects them into the
     prompt as structured blocks, and produces a deterministic sentiment
     report via structured output (with a free-text fallback for providers
     that do not support it).
+
+    ``backup_llm`` (optional): the cut-at-cap continuation retry runs on this
+    model instead of the truncated one (TRADINGAGENTS_BACKUP_LLM).
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
@@ -145,6 +148,7 @@ def create_sentiment_analyst(llm):
             render_sentiment_report,
             "Sentiment Analyst",
             result_hook=_sentiment_hook if computed else None,
+            backup_llm=backup_llm,
         )
         if computed and "Computed Sentiment" not in report_text:
             report_text = report_text.rstrip() + "\n\n" + computed_sentiment_line(computed)

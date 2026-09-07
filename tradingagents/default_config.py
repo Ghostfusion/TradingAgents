@@ -197,6 +197,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_OUTPUT_TOKENS": "max_output_tokens",
     "TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK": "max_output_tokens_quick",
     "TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP": "max_output_tokens_deep",
+    # Backup LLM for truncation-continuation retries: "provider:model" (or a
+    # bare model id using the primary provider). When a response is cut at the
+    # output cap, the continuation runs on this model instead of re-paying the
+    # one that keeps truncating. Empty = same-model continuations (legacy).
+    "TRADINGAGENTS_BACKUP_LLM": "backup_llm",
     # Value Dip + Swing hybrid (Strategies/Value_Dip_swing*.md): gate for the
     # screener --scan value-dip mode; the analyst @tools stay bound regardless.
     "TRADINGAGENTS_ENABLE_VALUE_DIP": "enable_value_dip",
@@ -350,6 +355,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "max_output_tokens": 8000,
         "max_output_tokens_quick": 8000,
         "max_output_tokens_deep": 2500,
+        # Backup model for truncation-continuation retries (see env map above).
+        # Empty = off: a cut response is continued by the same model that cut it.
+        "backup_llm": "",
         # Provider-specific thinking configuration
         "google_thinking_level": None,  # "high", "minimal", etc.
         "openai_reasoning_effort": None,  # "medium", "high", "low"

@@ -53,7 +53,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_fundamentals_analyst(llm):
+def create_fundamentals_analyst(llm, backup_llm=None):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
@@ -150,6 +150,15 @@ def create_fundamentals_analyst(llm):
 
         chain = prompt | llm.bind_tools(tools)
 
+        # Backup model (TRADINGAGENTS_BACKUP_LLM): same prompt + tool surface,
+        # different model, used for truncation-continuation retries only.
+        backup_chain = None
+        if backup_llm is not None and backup_llm is not llm:
+            try:
+                backup_chain = prompt | backup_llm.bind_tools(tools)
+            except Exception:  # noqa: BLE001 - degrade to same-model continuation
+                backup_chain = None
+
         # Tool-round cap turn: the router sent us back because the last
         # message still carries tool_calls after MAX_TOOL_ROUNDS. Do not
         # re-invoke the model for more tools - strip the dangling tool_calls
@@ -161,7 +170,7 @@ def create_fundamentals_analyst(llm):
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg)
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain)
             return {
                 "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
                 "fundamentals_report": _report,
@@ -178,7 +187,7 @@ def create_fundamentals_analyst(llm):
                 retry_chain_if_truncated,
             )
 
-            report = retry_chain_if_truncated(chain, state["messages"], report)
+            report = retry_chain_if_truncated(chain, state["messages"], report, backup_chain=backup_chain)
             # A model can answer a tool loop with a bare status turn instead of
             # the report (no tool_calls -> the router takes it as final,
             # e.g. the 217-byte fundamentals stub on NVDA 2026-09-02). Ask it
@@ -190,7 +199,7 @@ def create_fundamentals_analyst(llm):
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result)
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain)
 
         return {
             "messages": [result],

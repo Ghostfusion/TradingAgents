@@ -243,7 +243,7 @@ def test_risk_aggressive_opening_markers():
 
     captured: dict = {}
 
-    def _tool_loop(llm, prompt, tools, max_rounds=2):
+    def _tool_loop(llm, prompt, tools, max_rounds=2, backup_llm=None):
         captured["prompt"] = str(prompt)
         return "argument", []
 

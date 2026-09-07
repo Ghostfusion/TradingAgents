@@ -114,6 +114,7 @@ in `batch.py`).
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 8000; the fallback for both tiers |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
+| `TRADINGAGENTS_BACKUP_LLM` | `backup_llm` | backup model for truncation-continuation retries: `provider:model` (or a bare model id using `TRADINGAGENTS_LLM_PROVIDER`). When ANY LLM response is cut at the output cap, the continuation retry runs on this model instead of re-paying the one that truncated. Empty = same-model continuations (legacy behavior) |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
 | `TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST` | `value_dip_require_catalyst` | strict: value-dip needs re-rating evidence |
 | `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | strict: block dip entries in high-vol/fast-downtrend/catalyst windows |

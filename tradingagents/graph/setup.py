@@ -132,6 +132,7 @@ class GraphSetup:
         analyst_concurrency: int = 1,
         config: dict | None = None,
         debate_llms: dict | None = None,
+        backup_llm: Any | None = None,
     ):
         """Initialize with required components.
 
@@ -148,12 +149,19 @@ class GraphSetup:
         ``resolve_role_llm`` when ``enable_debate``; the structured debate
         nodes use them so ``debate_*_model`` config keys take effect. Empty /
         absent falls back to quick (bull/bear) / deep (judge).
+
+        ``backup_llm``: resolved from ``config["backup_llm"]``
+        (TRADINGAGENTS_BACKUP_LLM). Threaded into every node's
+        truncation-continuation retry so a model that keeps cutting at the
+        output cap is not re-paid for the repair. None keeps same-model
+        continuations (legacy behavior).
         """
         config = config or {}
         self.config = config
         self.debate_llms = debate_llms or {}
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
+        self.backup_llm = backup_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
         self.analyst_concurrency = int(analyst_concurrency or 1)
@@ -171,34 +179,36 @@ class GraphSetup:
         plan = build_analyst_execution_plan(selected_analysts)
 
         analyst_factories = {
-            "market": lambda: create_market_analyst(self.quick_thinking_llm),
-            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
-            "news": lambda: create_news_analyst(self.quick_thinking_llm),
-            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+            "market": lambda: create_market_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
+            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
+            "news": lambda: create_news_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
+            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
         }
 
         # Create researcher and manager nodes
-        bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
-        bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
+        bull_researcher_node = create_bull_researcher(self.quick_thinking_llm, backup_llm=self.backup_llm)
+        bear_researcher_node = create_bear_researcher(self.quick_thinking_llm, backup_llm=self.backup_llm)
         research_manager_node = create_research_manager(self.deep_thinking_llm,
-                                               fallback_llm=self.quick_thinking_llm)
-        trader_node = create_trader(self.quick_thinking_llm)
+                                               fallback_llm=self.quick_thinking_llm,
+                                               backup_llm=self.backup_llm)
+        trader_node = create_trader(self.quick_thinking_llm, backup_llm=self.backup_llm)
         # Option-A hybrid: ONE independent pre-debate stance per role, sampled
         # with no transcript / opponent responses; the debates below stay the
         # risk-surfacing layer. Nodes no-op when enable_independent_vote is off.
         independent_researcher_node = create_independent_stance_node(
-            ("bull", "bear"), self.quick_thinking_llm
+            ("bull", "bear"), self.quick_thinking_llm, backup_llm=self.backup_llm
         )
         independent_risk_node = create_independent_stance_node(
-            ("aggressive", "conservative", "neutral"), self.quick_thinking_llm
+            ("aggressive", "conservative", "neutral"), self.quick_thinking_llm, backup_llm=self.backup_llm
         )
 
         # Create risk analysis nodes
-        aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
-        neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
-        conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
+        aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm, backup_llm=self.backup_llm)
+        neutral_analyst = create_neutral_debator(self.quick_thinking_llm, backup_llm=self.backup_llm)
+        conservative_analyst = create_conservative_debator(self.quick_thinking_llm, backup_llm=self.backup_llm)
         portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm,
-                                                  fallback_llm=self.quick_thinking_llm)
+                                                  fallback_llm=self.quick_thinking_llm,
+                                                  backup_llm=self.backup_llm)
 
         # Create workflow
         workflow = StateGraph(AgentState)

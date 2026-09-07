@@ -17,6 +17,8 @@ and the loop continues - it never raises and never fabricates.
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from tradingagents.graph.conditional_logic import MAX_TOOL_ROUNDS
@@ -165,6 +167,7 @@ def run_tool_loop(
     *,
     system_text: str | None = None,
     max_rounds: int | None = None,
+    backup_llm: Any | None = None,
 ) -> tuple[str, list[str]]:
     """Run a tool-calling loop inside the calling node.
 
@@ -176,12 +179,14 @@ def run_tool_loop(
             directive is used when omitted.
         max_rounds: tool-call rounds allowed; defaults to
             ``conditional_logic.MAX_TOOL_ROUNDS``.
+        backup_llm: optional backup model; the cap-forced terminal turn's
+            truncation continuation runs on it (see
+            ``structured.finalize_messages``).
 
     Returns:
         ``(final_prose, transcript)`` — the model's last non-tool-calling
         answer (or the cap-forced terminal prose), plus a compact list of
-        ``tool(args) -> first-line`` strings for callers that want to carry
-        the findings into a structured invocation.
+        ``tool(args) -> first-line`` strings for debugging.
     """
     _build_lists()
     rounds = int(max_rounds or MAX_TOOL_ROUNDS)
@@ -227,7 +232,13 @@ def run_tool_loop(
         # stripped, one final LLM call) so the loop always terminates.
         from tradingagents.agents.utils.structured import finalize_messages
 
-        text = finalize_messages(chain, messages, result)
+        backup_chain = None
+        if backup_llm is not None and backup_llm is not llm:
+            try:
+                backup_chain = backup_llm.bind_tools(tools)
+            except Exception:  # noqa: BLE001 - provider without tool binding
+                backup_chain = None
+        text = finalize_messages(chain, messages, result, backup_chain=backup_chain)
     else:
         text = result.content if hasattr(result, "content") else str(result)
     return str(text or ""), transcript

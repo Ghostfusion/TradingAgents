@@ -6,7 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_bear_researcher(llm):
+def create_bear_researcher(llm, backup_llm=None):
     def bear_node(state) -> dict:
         investment_debate_state = state["investment_debate_state"]
         history = investment_debate_state.get("history", "")
@@ -58,7 +58,7 @@ Use this information to deliver a compelling bear argument, refute the bull's cl
 
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content = retry_llm_if_truncated(llm, prompt, response.content)
+        content = retry_llm_if_truncated(llm, prompt, response.content, backup_llm=backup_llm)
         if not (content or "").strip():
             try:
                 retry = llm.invoke(

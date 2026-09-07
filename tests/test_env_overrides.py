@@ -44,6 +44,17 @@ def test_string_overrides(monkeypatch):
     assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
 
 
+def test_backup_llm_override(monkeypatch):
+    """TRADINGAGENTS_BACKUP_LLM maps to the backup_llm config key; unset -> ''."""
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_BACKUP_LLM="openrouter:deepseek/deepseek-chat",
+    )
+    assert dc.DEFAULT_CONFIG["backup_llm"] == "openrouter:deepseek/deepseek-chat"
+    dc2 = _reload_with_env(monkeypatch)
+    assert dc2.DEFAULT_CONFIG["backup_llm"] == ""
+
+
 def test_int_coercion(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
