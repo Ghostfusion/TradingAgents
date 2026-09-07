@@ -30,6 +30,25 @@ Breaking changes within the 0.x line are called out explicitly.
   fallback / repair swap / no-backup same-model) + `test_env_overrides.py` env
   mapping + graph wiring (backup built when set, absent when unset). See
   CHANGELOG / api_reference.
+- **Debate-judge ensemble** (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`, default 1,
+  set to 3): the L2 judge runs N times over the SAME transcript and the per-alias
+  side scores aggregate (mean-of-means), with `judge_agreement` + `judge_flip`
+  written into the debate state so a borderline judge flip is an EXPLICIT
+  uncertainty signal instead of a silent swing. `structured.invoke_structured_turn`
+  now returns a `mode` ("structured"/"plain"/"repair"); the judge + debater turns
+  record `judge_structured_fallback` / per-role `_structured_fallback` when a
+  turn fell back to free text (reporting + PM see reduced reliability). The
+  RM/PM decision matrix gains a deterministic **field-level consensus** block
+  (stance / allocation / judge-score spread) so convergence is measured on the
+  typed fields, not just the headline label. New `scripts/repro_check.py` runs a
+  symbol N times and prints verdict agreement + config hash for reproducibility
+  measurement. Tests: `test_debate_risk_parity.py` (ensemble aggregate + flip /
+  fallback flag / consensus lines) + `test_debate_integration.py` (mode contract).
+  — A 2×3 TSM reproducibility probe: baseline verdicts (Underweight, Underweight,
+  Overweight) vs the ensemble+temp=0.1+judge-luna config (Hold, Overweight, Hold):
+  both 2/3 self-agreement — temperature/judge/ensemble=3 reduced but did NOT
+  eliminate the borderline flip (judge flips persist even at temp 0.1, per the
+  reproducibility literature); the ensemble-N / threshold are the next lever.
 ### Fixed
 - **Reasoning-model output-budget starvation** (`TRADINGAGENTS_OPENROUTER_REASONING_EFFORT`
   in `.env`, config `openrouter_reasoning_effort`): a reasoning model

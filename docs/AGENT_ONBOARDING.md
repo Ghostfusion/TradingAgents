@@ -319,6 +319,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-07 `(working tree)` - Debate reproducibility toolkit: judge ensemble
+  (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`) + `judge_agreement`/`judge_flip` in
+  debate state, structured-fallback reliability flags (`judge_structured_fallback`,
+  per-role `_structured_fallback`) via the new `invoke_structured_turn` `mode`
+  return, field-level consensus in the RM/PM matrix, and `scripts/repro_check.py`.
+  Configured ensemble=3 / temp=0.1 / judge=gpt-5.6-luna. A 2×3 TSM probe: both
+  old & new config 2/3 self-agreement — flips reduced, not eliminated. See CHANGELOG.
 - 2026-09-07 `(working tree)` - Reasoning-budget bound for OpenRouter models:
   `TRADINGAGENTS_OPENROUTER_REASONING_EFFORT` (`low|medium|high`, off by
   default) forwards `reasoning: {effort}` for the openrouter provider so a
