@@ -141,6 +141,31 @@ into the report; it cannot change the fact that a tool was/wasn't called.
   a curated `fundamentals` subset of ~12-15 highest-signal tools, with
   `ALL` opt-in.
 
+### 3.5 Timeout behavior: new capability vs. today's hang-forever
+
+**Verified current behavior (2026-09-07):** tool execution has *no timeout
+at all*. `ToolExecutor.run` (`risk_tool_loop.py:143-153`) calls
+`fn.invoke(...)` synchronously with no deadline wrapper; a grep for
+`timeout`/`ToolExecutor` across `tradingagents/agents/utils` returns no
+matches (the only timeouts in the codebase are LLM-provider request
+configs, not tool calls); the moomoo tools (`moomoo_extra_tools.py`) are
+thin wrappers over `route_to_vendor(...)` with no connect/request deadline
+of their own. A single hung tool call (moomoo OpenD connection stalls)
+therefore blocks the analyst node thread *indefinitely*; the graph's
+`recursion_limit` bounds iterations, not wall-clock time.
+
+**The design's change:** `analyst_forced_tools_timeout_s` (default 30)
+gives the gatherer a *better-than-today* deadline — each tool runs in a
+bounded worker, `future.result(timeout_s)` marks a `timeout` leaf, and the
+gather proceeds without that value.
+
+**Deliberate non-goal in this design:** actually killing a wedged thread.
+Python cannot preempt a thread stuck in C or blocking I/O, so a hung
+moomoo call drains in the background even after the timeout marks it. True
+termination is a separate improvement (per-tool process/worker-pool with
+OS-level kill, or a signal-free cancellable executor), tracked as its own
+deferred item — not silently bundled into the gatherer.
+
 ## 5. Interaction with today's code (what would change)
 
 1. **`tradingagents/graph/setup.py` + `analyst_execution.py`** — optional
@@ -174,6 +199,12 @@ into the report; it cannot change the fact that a tool was/wasn't called.
    OUT of the forced set — curate per analyst.
 5. **No change to the PM gate**: the gate (judge flip / fallback) stays
    orthogonal; it reads the debate state, not the tool set.
+6. **Timeout improves on today but cannot kill wedged threads** — today
+   there is *no* tool timeout (§3.5); the gatherer adds a
+   `future.result(timeout_s)` deadline that records `timeout` and proceeds,
+   but a thread stuck in C/blocking I/O drains in the background. True
+   termination is deferred (separate worker-pool/OS-kill item), not
+   promised here.
 
 ## 7. Concrete next-step implementation plan (if approved)
 
