@@ -99,17 +99,30 @@ def _repair(
 
 
 def invoke_structured_turn(
-    structured_llm, plain_llm, prompt: str, schema: type[T]
+    structured_llm, plain_llm, prompt: str, schema: type[T],
+    backup_llm=None,
 ) -> tuple[T | None, str | None]:
     """Primary structured call with render fallback to the repair loop.
 
+    ``backup_llm`` (optional, TRADINGAGENTS_BACKUP_LLM): once the PRIMARY
+    attempt fails (structured call raised / content unparseable — e.g. a
+    max_tokens cut), the fallback invoke AND the bounded repair run on the
+    backup model instead of re-paying the one that failed. When
+    ``structured_llm`` is None (provider lacks structured output) the plain
+    invoke is the primary attempt and stays on ``plain_llm``; only the
+    repair (a retry after a failed parse) swaps to the backup.
+
     Returns ``(model, error)``; ``error`` is None on success.
     """
+    retry_llm = plain_llm
     if structured_llm is not None:
         try:
             result = structured_llm.invoke(prompt)
         except Exception as e:  # noqa: BLE001
             logger.warning("structured debate invoke failed, falling back: %s", e)
+            # The structured call was the primary attempt; the fallback is a
+            # RETRY -> run it on the backup model when configured.
+            retry_llm = backup_llm or plain_llm
         else:
             if isinstance(result, BaseModel):
                 return cast(T, result), None
@@ -117,9 +130,11 @@ def invoke_structured_turn(
                 model, err = parse_and_validate(result.content, schema)
                 if model is not None:
                     return model, None
+                # Parsed-but-invalid content (e.g. cut mid-JSON): retry on backup.
+                retry_llm = backup_llm or plain_llm
     # Dual-mode fallback: plain LLM + bounded repair.
     try:
-        resp = plain_llm.invoke(prompt)
+        resp = retry_llm.invoke(prompt)
     except Exception as e:  # noqa: BLE001
         return None, f"plain invoke failed: {e}"
     text = resp.content if hasattr(resp, "content") else str(resp)
@@ -128,7 +143,8 @@ def invoke_structured_turn(
         return model, None
     if err is None:
         err = "no JSON block found"
-    return _repair(plain_llm, prompt, schema, max_repairs=1)
+    # The repair is always a retry after a failed parse -> backup when set.
+    return _repair(backup_llm or retry_llm, prompt, schema, max_repairs=1)
 
 
 __all__ = [

@@ -161,7 +161,7 @@ class TestRiskTurnChannels:
 
         import tradingagents.agents.researchers.structured_debate as sd_mod
 
-        def _fake_invoke(structured_llm, plain_llm, prompt, schema):
+        def _fake_invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             return _Payload(), None
 
         monkeypatch = pytest.MonkeyPatch()
@@ -299,7 +299,7 @@ class TestBoundedContextPhases:
                 raise RuntimeError("no real call")
 
         class _FakeJudge:
-            def __init__(self, judge_llm, section="research", cfg=None):
+            def __init__(self, judge_llm, section="research", cfg=None, backup_llm=None):
                 pass
 
             def __call__(self, state):
@@ -429,7 +429,7 @@ class TestBoundedContextPhases:
         emits the dim map on this route)."""
         import tradingagents.agents.arbiters.debate_judge as dj_mod
 
-        def _invoke(structured_llm, plain_llm, prompt, schema):
+        def _invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             class _R:
                 dimension_scores = {}
                 judge_model_id = ""
@@ -542,7 +542,7 @@ class TestBoundedContextPhases:
 
         calls = {"n": 0}
 
-        def _invoke(structured_llm, plain_llm, prompt, schema):
+        def _invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             calls["n"] += 1
             # always returns an empty-dims rubric (deepseek shape miss)
             return _RubricEmpty(), None
@@ -585,7 +585,7 @@ class TestBoundedContextPhases:
 
         import tradingagents.agents.arbiters.debate_judge as dj_mod
 
-        def _fail_structured(structured_llm, plain_llm, prompt, schema):
+        def _fail_structured(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             return None, "validation error: round_index"
 
         monkeypatch = pytest.MonkeyPatch()
@@ -632,7 +632,7 @@ class TestBoundedContextPhases:
 
         import tradingagents.agents.arbiters.debate_judge as dj_mod
 
-        def _fake_invoke(structured_llm, plain_llm, prompt, schema):
+        def _fake_invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             calls.append({"prompt": prompt})
             return _Rubric(), None
 
@@ -849,7 +849,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research", cfg=None):
+            def __init__(self, llm, section="research", cfg=None, backup_llm=None):
                 pass
 
             def __call__(self, state):
@@ -885,7 +885,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research", cfg=None):
+            def __init__(self, llm, section="research", cfg=None, backup_llm=None):
                 pass
 
             def __call__(self, state):
@@ -919,7 +919,7 @@ class TestDegradedTurnNeverCrashes:
         called = {"n": 0}
 
         class _Judge:
-            def __init__(self, llm, section="research", cfg=None):
+            def __init__(self, llm, section="research", cfg=None, backup_llm=None):
                 pass
 
             def __call__(self, state):

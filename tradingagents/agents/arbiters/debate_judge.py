@@ -155,7 +155,8 @@ def _rubric_dimension_dict(rubric) -> dict:
     return legacy if isinstance(legacy, dict) else {}
 
 
-def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None = None):
+def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None = None,
+                        backup_llm=None):
     """Graph node factory for the L2 judge.
 
     ``judge_llm`` is the resolved judge model (deep tier by default). The
@@ -164,6 +165,10 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
     adapter, and writes per-side aggregate scores + the rubric into the
     section's channel (``debate_state`` for research, ``structured_risk_state``
     for risk).
+
+    ``backup_llm`` (optional, TRADINGAGENTS_BACKUP_LLM): a failed/cut judge
+    invoke falls back + repairs on this model instead of re-paying the judge
+    model (see ``invoke_structured_turn``).
     """
     channel = SECTION_CHANNEL[section]
     roles = SECTION_ROLES[section]
@@ -254,7 +259,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
             judge_text = prompt + f"\n\nScore ONLY {cand['alias']}."
             rubric, err = invoke_structured_turn(
                 structured_llm, judge_llm, judge_text,
-                L2JudgeDimensionedRubric,
+                L2JudgeDimensionedRubric, backup_llm=backup_llm,
             )
             if rubric is not None and not _rubric_dimension_dict(rubric):
                 # Empty dimension_scores (115549 regression): deepseek json_mode
@@ -273,7 +278,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 )
                 rubric2, err2 = invoke_structured_turn(
                     structured_llm, judge_llm, directed,
-                    L2JudgeDimensionedRubric,
+                    L2JudgeDimensionedRubric, backup_llm=backup_llm,
                 )
                 if rubric2 is not None and _rubric_dimension_dict(rubric2):
                     rubric = rubric2
@@ -288,7 +293,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 )
                 rubric, err2 = invoke_structured_turn(
                     structured_llm, judge_llm, judge_text,
-                    L2JudgeDimensionedRubric,
+                    L2JudgeDimensionedRubric, backup_llm=backup_llm,
                 )
                 if rubric is None:
                     err = err2 or err

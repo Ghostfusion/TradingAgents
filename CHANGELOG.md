@@ -16,14 +16,20 @@ Breaking changes within the 0.x line are called out explicitly.
   (legacy behavior, bit-identical). Wired through every truncation path:
   analyst chain reports (`retry_chain_if_truncated` + cap-forced
   `finalize_messages`), plain researchers / risk debators
-  (`retry_llm_if_truncated`), and the structured managers / trader / sentiment
-  / independent-stance `invoke_structured_or_freetext`; the graph resolves one
-  backup client (`provider:model` spec, quick-tier output budget, its own
-  provider's kwargs) and threads it into `GraphSetup`. Tests:
+  (`retry_llm_if_truncated`), the structured managers / trader / sentiment /
+  independent-stance `invoke_structured_or_freetext`, AND the structured
+  debate turns + L2 judge (`invoke_structured_turn`: a structured call that
+  raised or returned unparseable content — e.g. a max_tokens cut mid-JSON —
+  falls back AND repairs on the backup; the plain invoke stays primary when
+  the provider lacks structured output). The graph resolves one backup client
+  (`provider:model` spec, quick-tier output budget, its own provider's
+  kwargs) and threads it into `GraphSetup` + every SD node. Tests:
   `test_truncation_retry.py` +8 backup-swap cases (plain / chain / structured /
   free-text / same-object guard / bounded-give-up / failure-degrade /
-  complete-no-touch) + `test_env_overrides.py` env mapping + graph wiring
-  (backup built when set, absent when unset). See CHANGELOG / api_reference.
+  complete-no-touch) + `test_debate_integration.py` +3 (structured-failure
+  fallback / repair swap / no-backup same-model) + `test_env_overrides.py` env
+  mapping + graph wiring (backup built when set, absent when unset). See
+  CHANGELOG / api_reference.
 ### Fixed
 - **Sector-rotation screen curated-breadth crash** (`get_sector_rotation_screen`):
   the curated-industry branch referenced `_top_note` before assignment

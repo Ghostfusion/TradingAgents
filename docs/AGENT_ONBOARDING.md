@@ -328,8 +328,10 @@ has changed before); never assume an endpoint works — the SDK's
   kwargs + quick-tier output budget) and threaded via `GraphSetup` into every
   analyst chain (`retry_chain_if_truncated` + cap `finalize_messages`),
   plain researcher/risk-debator (`retry_llm_if_truncated` / `run_tool_loop`),
-  and structured manager/trader/sentiment/independent-stance
-  (`invoke_structured_or_freetext`) path. See CHANGELOG.
+  structured manager/trader/sentiment/independent-stance
+  (`invoke_structured_or_freetext`), AND the structured debate turns + L2
+  judge (`invoke_structured_turn`: a cut/unparseable structured call falls
+  back + repairs on the backup). See CHANGELOG.
 - 2026-09-06 `(working tree)` - Sector-rotation screen curated-breadth crash
   fix: `get_sector_rotation_screen`'s curated branch referenced `_top_note`
   before assignment (UnboundLocalError — the nxpi batch death) and the shared

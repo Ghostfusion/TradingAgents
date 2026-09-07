@@ -356,6 +356,7 @@ def create_debater_turn(
     ground_truth: Callable,
     section: str | None = None,
     cfg: dict | None = None,
+    backup_llm=None,
 ) -> Callable:
     """Node factory: one structured debater turn (dual-mode adapter).
 
@@ -378,7 +379,9 @@ def create_debater_turn(
         round_records = list(ds.get(ROUND_RECORDS) or [])
         inv = dict(state.get(prose_channel) or {})
         prompt = build_turn_prompt(state, role, role.upper())
-        payload, err = invoke_structured_turn(structured_llm, llm, prompt, schema)
+        payload, err = invoke_structured_turn(
+            structured_llm, llm, prompt, schema, backup_llm=backup_llm
+        )
         if payload is None and err and "json" in str(err).lower() and structured_llm is not None:
             # JSON-mode 400 guard: if the provider REJECTED response_format
             # json_object (OpenRouter historically drops it), retry ONCE with
@@ -390,7 +393,9 @@ def create_debater_turn(
             )
             plain = bind_structured(llm, schema, f"{role.title()} Debater")
             if plain is not None:
-                payload2, err2 = invoke_structured_turn(plain, llm, prompt, schema)
+                payload2, err2 = invoke_structured_turn(
+                    plain, llm, prompt, schema, backup_llm=backup_llm
+                )
                 if payload2 is not None:
                     payload, err = payload2, None
                 else:
@@ -782,7 +787,8 @@ def _baseline_fallback_reason(reason: str) -> bool:
 
 
 def create_debate_finalize(
-    judge_llm, cfg: dict | None = None, section: str = "research"
+    judge_llm, cfg: dict | None = None, section: str = "research",
+    backup_llm=None,
 ) -> Callable:
     """Node factory: L2 judge call + verdict + baseline reweight.
 
@@ -798,7 +804,9 @@ def create_debate_finalize(
     from tradingagents.agents.arbiters.debate_judge import create_debate_judge
 
     channel = SECTION_CHANNEL[section]
-    judge_node = create_debate_judge(judge_llm, section=section, cfg=cfg)
+    judge_node = create_debate_judge(
+        judge_llm, section=section, cfg=cfg, backup_llm=backup_llm
+    )
 
     def finalize_node(state: dict) -> dict:
         ds = dict(state.get(channel) or {})

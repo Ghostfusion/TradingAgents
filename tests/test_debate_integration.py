@@ -28,6 +28,7 @@ from tradingagents.agents.utils.debate_roles import (
     role_tools,
 )
 from tradingagents.agents.utils.debate_structured import (
+    invoke_structured_turn,
     parse_and_validate,
     parse_markdown_fence,
 )
@@ -180,6 +181,65 @@ class TestDualModeAdapter:
         m, err = parse_and_validate('{"round_index": 99}', DebaterTurnPayload)
         assert m is None
         assert "validation error" in err
+
+    def test_invoke_structured_turn_uses_backup_on_structured_failure(self):
+        """A structured call that raises (e.g. max_tokens cut) falls back to
+        the BACKUP model, not the model that failed (TRADINGAGENTS_BACKUP_LLM)."""
+        from unittest import mock
+
+        structured_llm = mock.MagicMock()
+        structured_llm.invoke.side_effect = RuntimeError("length limit was reached")
+        plain_llm = mock.MagicMock()
+        backup = mock.MagicMock()
+        backup.invoke.return_value = mock.MagicMock(
+            content='{"round_index": 1, "stance": "BULL", "core_thesis": "t", '
+                    '"quantitative_claims": [], "recommended_allocation_pct": 5.0}'
+        )
+        m, err = invoke_structured_turn(
+            structured_llm, plain_llm, "prompt", DebaterTurnPayload, backup_llm=backup
+        )
+        assert m is not None, err
+        assert m.round_index == 1
+        backup.invoke.assert_called_once()
+        plain_llm.invoke.assert_not_called()  # the failed model is never re-paid
+
+    def test_invoke_structured_turn_uses_backup_on_repair(self):
+        """When the fallback content does not parse, the bounded repair runs
+        on the backup model."""
+        from unittest import mock
+
+        plain_llm = mock.MagicMock()
+        plain_llm.invoke.return_value = mock.MagicMock(content="cut off mid-jso")
+        backup = mock.MagicMock()
+        backup.invoke.return_value = mock.MagicMock(
+            content='{"round_index": 2, "stance": "BEAR", "core_thesis": "r", '
+                    '"quantitative_claims": [], "recommended_allocation_pct": 2.0}'
+        )
+        # structured_llm None -> plain invoke is the PRIMARY attempt (stays on
+        # plain_llm); the repair (a retry) swaps to the backup.
+        m, err = invoke_structured_turn(
+            None, plain_llm, "prompt", DebaterTurnPayload, backup_llm=backup
+        )
+        assert m is not None, err
+        assert m.stance == "BEAR"
+        assert plain_llm.invoke.call_count == 1  # primary attempt only
+        backup.invoke.assert_called_once()  # repair on the backup
+
+    def test_invoke_structured_turn_no_backup_keeps_same_model(self):
+        """No backup configured -> the repair stays on the plain LLM (legacy)."""
+        from unittest import mock
+
+        plain_llm = mock.MagicMock()
+        plain_llm.invoke.side_effect = [
+            mock.MagicMock(content="cut off mid-jso"),
+            mock.MagicMock(
+                content='{"round_index": 1, "stance": "BULL", "core_thesis": "t", '
+                        '"quantitative_claims": [], "recommended_allocation_pct": 5.0}'
+            ),
+        ]
+        m, err = invoke_structured_turn(None, plain_llm, "prompt", DebaterTurnPayload)
+        assert m is not None, err
+        assert plain_llm.invoke.call_count == 2  # primary + repair, same model
 
 
 class TestJudgeAnonymization:

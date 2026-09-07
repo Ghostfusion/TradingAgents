@@ -271,13 +271,15 @@ class GraphSetup:
             workflow.add_node(
                 "SD Bull",
                 create_debater_turn(
-                    "bull", bull_llm, ground_truth=ground_truth_from_state, cfg=self.config
+                    "bull", bull_llm, ground_truth=ground_truth_from_state, cfg=self.config,
+                    backup_llm=self.backup_llm,
                 ),
             )
             workflow.add_node(
                 "SD Bear",
                 create_debater_turn(
-                    "bear", bear_llm, ground_truth=ground_truth_from_state, cfg=self.config
+                    "bear", bear_llm, ground_truth=ground_truth_from_state, cfg=self.config,
+                    backup_llm=self.backup_llm,
                 ),
             )
             workflow.add_node(
@@ -286,7 +288,7 @@ class GraphSetup:
             )
             workflow.add_node(
                 "SD Finalize",
-                create_debate_finalize(judge_llm, self.config),
+                create_debate_finalize(judge_llm, self.config, backup_llm=self.backup_llm),
             )
             # Structured RISK debate (direction.md parity): the three debators
             # emit grounded RiskDebaterTurnPayload turns, L1 verifies, and the
@@ -297,6 +299,7 @@ class GraphSetup:
                 create_debater_turn(
                     "aggressive", risk_aggr_llm,
                     ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
+                    backup_llm=self.backup_llm,
                 ),
             )
             workflow.add_node(
@@ -304,6 +307,7 @@ class GraphSetup:
                 create_debater_turn(
                     "conservative", risk_conserv_llm,
                     ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
+                    backup_llm=self.backup_llm,
                 ),
             )
             workflow.add_node(
@@ -311,6 +315,7 @@ class GraphSetup:
                 create_debater_turn(
                     "neutral", neutral_llm,
                     ground_truth=ground_truth_from_state, section="risk", cfg=self.config,
+                    backup_llm=self.backup_llm,
                 ),
             )
             workflow.add_node(
@@ -321,7 +326,9 @@ class GraphSetup:
             )
             workflow.add_node(
                 "SD Risk Finalize",
-                create_debate_finalize(judge_llm, self.config, section="risk"),
+                create_debate_finalize(
+                    judge_llm, self.config, section="risk", backup_llm=self.backup_llm
+                ),
             )
         else:
             # Register no-op placeholders so the conditional-edge targets below
