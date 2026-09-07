@@ -245,6 +245,119 @@ def test_finalize_messages_empty_turn_emits_unavailable_when_still_empty():
     assert chain2.invoke.call_count == 2
 
 
+def test_finalize_messages_strips_unfulfilled_tool_calls_before_backup_retry():
+    """An earlier multi-call turn left half-executed must not reach the backup
+    chain: a strict backend (OpenAI/Azure via OpenRouter) 400s a history with
+    an unfulfilled tool call (\"No tool output found for function call <id>\",
+    TSM 2026-09-07). finalize_messages must strip the orphan, keep the
+    fulfilled call, and still return the backup's report."""
+    from unittest import mock
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    msgs = [
+        HumanMessage(content="TSM"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "get_stock_data", "args": {"ticker": "TSM"}, "id": "c-multi-1", "type": "tool_call"},
+                {"name": "get_fundamentals", "args": {"ticker": "TSM"}, "id": "c-multi-2", "type": "tool_call"},
+            ],
+        ),
+        ToolMessage(content="CLOSE 428.91", tool_call_id="c-multi-1", name="get_stock_data"),
+        _tool_ai(),  # cap-forced dangling last turn
+    ]
+    result = _tool_ai()
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(content="")
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="Final market report from backup.")
+
+    out = finalize_messages(chain, msgs, result, backup_chain=backup)
+
+    assert out == "Final market report from backup."
+    assert chain.invoke.call_count == 1
+    assert backup.invoke.call_count == 1
+    # The backup saw a clean history: the multi-call turn keeps only the
+    # fulfilled call; the orphaned c-multi-2 was stripped.
+    sent = backup.invoke.call_args[0][0]
+    ai_turns = [m for m in sent if getattr(m, "tool_calls", None)]
+    assert len(ai_turns) == 1, "cap tail stripped + orphan merged into one cleaned turn"
+    kept_ids = [tc["id"] for tc in ai_turns[0].tool_calls]
+    assert kept_ids == ["c-multi-1"]
+    assert "c-multi-2" not in kept_ids
+    assert isinstance(sent[-1], HumanMessage)
+
+
+def test_finalize_messages_deorphans_same_chain_when_no_backup():
+    """Without a backup, the same-chain retry must also be de-orphaned
+    (symmetry with the backup path): the recovered report still arrives."""
+    from unittest import mock
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    msgs = [
+        HumanMessage(content="TSM"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "get_stock_data", "args": {"ticker": "TSM"}, "id": "o1", "type": "tool_call"},
+                {"name": "get_sentiment", "args": {"ticker": "TSM"}, "id": "o2", "type": "tool_call"},
+            ],
+        ),
+        ToolMessage(content="DATA", tool_call_id="o1", name="get_stock_data"),
+        _tool_ai(),
+    ]
+    chain = mock.MagicMock()
+    chain.invoke.side_effect = [
+        mock.MagicMock(content=""),
+        mock.MagicMock(content="recovered report."),
+    ]
+    out = finalize_messages(chain, msgs, _tool_ai())
+    assert out == "recovered report."
+    assert chain.invoke.call_count == 2
+    second = chain.invoke.call_args_list[1][0][0]
+    ai_turns = [m for m in second if getattr(m, "tool_calls", None)]
+    assert len(ai_turns) == 1
+    kept_ids = [tc["id"] for tc in ai_turns[0].tool_calls]
+    assert kept_ids == ["o1"]
+
+
+def test_finalize_messages_clean_history_passes_through_unchanged():
+    """A history with no unfulfilled tool calls must reach the backup chain
+    with the SAME tool_calls intact (de-orphan is a no-op on clean input)."""
+    from unittest import mock
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    msgs = [
+        HumanMessage(content="TSM"),
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "get_stock_data", "args": {"ticker": "TSM"}, "id": "p1", "type": "tool_call"}],
+        ),
+        ToolMessage(content="DATA", tool_call_id="p1", name="get_stock_data"),
+        _tool_ai(),
+    ]
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="clean report.")
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(content="")
+
+    out = finalize_messages(chain, msgs, _tool_ai(), backup_chain=backup)
+    assert out == "clean report."
+    sent = backup.invoke.call_args[0][0]
+    ai_turns = [m for m in sent if getattr(m, "tool_calls", None)]
+    kept_ids = [tc["id"] for tc in ai_turns[0].tool_calls]
+    assert kept_ids == ["p1"], "clean call passed through untouched"
+
+
 # ---------------------------------------------------------------------------
 # Analyst node wiring: cap turn produces a non-empty report
 # ---------------------------------------------------------------------------

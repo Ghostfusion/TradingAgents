@@ -31,7 +31,20 @@ Breaking changes within the 0.x line are called out explicitly.
   mapping + graph wiring (backup built when set, absent when unset). See
   CHANGELOG / api_reference.
 ### Fixed
-- **Stale-basis trade-plan reference price from unsorted vendor closes**
+- **Tool-not-found 400 on the cap-forced report retry** (`structured`): a
+  strict tool-calling backend (OpenAI / Azure via the OpenRouter relay)
+  hard-400s a conversation that contains an unfulfilled tool call — "No
+  tool output found for function call <id>" — which the analyst tool loop
+  leaves when one assistant reply requests several tools but only the first
+  executes. This killed the backup-model retry of empty cap-forced reports
+  (TSM 2026-09-07), degrading every such section to the unavailable notice.
+  New `_deorphan_tool_calls` strips unfulfilled calls (never fabricating a
+  result) before ANY chain re-invoke: `finalize_messages` (terminal turn +
+  truncation continuation + backup empty-retry) and
+  `retry_chain_if_truncated` / `retry_chain_if_stub`. Regression tests:
+  `test_tool_round_cap.py` +3 (backup de-orphan / same-chain de-orphan /
+  clean-pass-through).
+
   (`graph.trading_graph._try_fetch_closes`): a vendor returning OHLCV rows
   NEWEST-first (EODHD) left `closes[-1]` as the OLDEST close, so every
   consumer of `closes[-1]` as 'the latest close' read a stale value — the

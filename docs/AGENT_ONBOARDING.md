@@ -319,7 +319,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-- 2026-09-07 `(working tree)` - Stale-basis trade-plan reference price:
+- 2026-09-07 `(working tree)` - Tool-not-found 400 on the cap-forced report
+  retry: `structured._deorphan_tool_calls` strips unfulfilled tool calls
+  before ANY chain re-invoke (`finalize_messages`, `retry_chain_if_truncated`,
+  `retry_chain_if_stub`) so the strict OpenAI/Azure backup no longer 400s
+  (TSM 2026-09-07: "No tool output found for function call"). Regression
+  tests +3. See CHANGELOG.
+
   `graph.trading_graph._try_fetch_closes` now normalizes vendor OHLCV to
   ASCENDING date order (a NEWEST-first vendor left `closes[-1]` as the
   OLDEST close — TSM 2026-09-07 trade-plan card used 288.88 vs the verified

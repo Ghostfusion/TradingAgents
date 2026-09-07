@@ -30,7 +30,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-09-07] **Stale-basis trade-plan price fix** — `_try_fetch_closes` now
+- [2026-09-07] **Tool-not-found 400 fixed on report retries** — the analyst
+  cap-forced retry (and truncation/stub chain continuations) now strip
+  unfulfilled tool calls from the history before re-invoking, so a strict
+  OpenAI/Azure backend no longer 400s ("No tool output found for function
+  call") and the backup-model recovery of empty reports actually lands.
+  See CHANGELOG.
+ — `_try_fetch_closes` now
   re-sorts vendor OHLCV to ascending order, so `closes[-1]` is the LATEST
   close, never an OLDEST stale row. The TSM 2026-09-07 trade-plan card had
   pinned reference price 288.88 (oldest EODHD row) against the verified

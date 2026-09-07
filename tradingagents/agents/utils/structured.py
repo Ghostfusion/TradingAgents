@@ -314,7 +314,8 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
         try:
             from langchain_core.messages import HumanMessage
 
-            cont = chain.invoke([*messages, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
+            history = _deorphan_tool_calls(messages)
+            cont = chain.invoke([*history, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
             text = cont.content if hasattr(cont, "content") else str(cont)
         except Exception as exc:  # noqa: BLE001 - failed retry degrades
             logger.warning("%s: chain stub-completion retry failed: %s", agent_name, exc)
@@ -332,6 +333,54 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
             "stands; re-run to regenerate the full report."
         )
     return text
+
+
+def _deorphan_tool_calls(messages: list) -> list:
+    """Return the conversation with every assistant tool call fulfilled.
+
+    Strict tool-calling backends (OpenAI / Azure through the OpenRouter
+    relay) hard-400 a request whose history contains an assistant turn with
+    a ``tool_calls`` entry that has no matching tool output — "No tool
+    output found for function call <id>" (observed on the cap-forced
+    final-report retry, TSM 2026-09-07). The analyst tool loop can leave
+    exactly that in ``messages``: one assistant reply may request several
+    tools while the loop executes only the first (the rest never get a
+    ToolMessage), or the tool-round cap forces the terminal turn before a
+    reply's calls land. Strip the unfulfilled calls from that turn — never
+    fabricate a result — so the history is valid for any model. Turns
+    without orphaned calls pass through untouched (same objects).
+
+    Callers keep the returned list; if no call was stripped the original
+    objects are returned so retries stay byte-identical.
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    fulfilled = {
+        tm.tool_call_id
+        for tm in messages
+        if isinstance(tm, ToolMessage) and tm.tool_call_id
+    }
+    out: list = []
+    changed = False
+    for m in messages:
+        calls = list(getattr(m, "tool_calls", None) or [])
+        if not calls:
+            out.append(m)
+            continue
+        kept = [c for c in calls if (c.get("id") or "") in fulfilled]
+        if len(kept) == len(calls):
+            out.append(m)
+            continue
+        changed = True
+        out.append(
+            AIMessage(
+                content=m.content or "",
+                id=m.id,
+                name=m.name,
+                tool_calls=kept,
+            )
+        )
+    return out if changed else messages
 
 
 def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
@@ -358,7 +407,11 @@ def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
         try:
             from langchain_core.messages import HumanMessage
 
-            cont = cont_chain.invoke([*messages, HumanMessage(content=_continuation_prompt(full))])
+            # A strict backend 400s a history with an unfulfilled tool call;
+            # strip orphans before the continuation re-invoke (same guard as
+            # ``_deorphan_tool_calls`` in ``finalize_messages``).
+            history = _deorphan_tool_calls(messages)
+            cont = cont_chain.invoke([*history, HumanMessage(content=_continuation_prompt(full))])
             cont_text = cont.content if hasattr(cont, "content") else str(cont)
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("chain truncation continuation failed: %s", exc)
@@ -413,6 +466,13 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
             name=getattr(last, "name", None),
         )
         cleaned_msgs = [*messages[:-1], cleaned_tail]
+        # A strict backend (OpenAI/Azure via OpenRouter) 400s a history that
+        # carries an unfulfilled tool call ("No tool output found for function
+        # call <id>"). The tool loop can leave earlier multi-call turns
+        # half-executed, so de-orphan BEFORE any re-invoke: the terminal turn,
+        # its truncation continuation AND the backup empty-retry all see a
+        # valid history (regression: TSM 2026-09-07 cap retry).
+        cleaned_msgs = _deorphan_tool_calls(cleaned_msgs)
         final = chain.invoke(cleaned_msgs)
         text = final.content if hasattr(final, "content") else str(final)
         if text and text.strip():
