@@ -30,7 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-09-06] **Backup LLM for truncation-continuation retries** — new `TRADINGAGENTS_BACKUP_LLM` (`.env`, `provider:model`): when ANY LLM response is cut at the output cap, the continuation retry runs on the configured backup model instead of re-paying the one that kept truncating. Threaded through every analyst/reporter/manager/debater truncation path INCLUDING the structured debate turns + L2 judge (a cut structured call falls back and repairs on the backup); empty = same-model continuations (legacy). See CHANGELOG.
+- [2026-09-07] **Empty cap-forced analyst reports retried on the backup LLM** — 
+  when the `MAX_TOOL_ROUNDS` terminal turn returns empty content (a reasoning
+  model burned its output budget on hidden reasoning), the analyst is now
+  re-asked once on the backup chain (or same chain) with a completion
+  directive, and only if still empty emits an explicit `**Report unavailable**`
+  notice — never a silent "" that landed as a bare report-unavailable
+  placeholder (QCOM fundamentals + NXPI market 2026-09-07). See CHANGELOG.
+ — new `TRADINGAGENTS_BACKUP_LLM` (`.env`, `provider:model`): when ANY LLM response is cut at the output cap, the continuation retry runs on the configured backup model instead of re-paying the one that kept truncating. Threaded through every analyst/reporter/manager/debater truncation path INCLUDING the structured debate turns + L2 judge (a cut structured call falls back and repairs on the backup); empty = same-model continuations (legacy). See CHANGELOG.
 - [2026-09-06] **Sector-rotation curated-breadth crash fix** — `get_sector_rotation_screen`'s curated-industry branch referenced `_top_note` (UnboundLocalError, the nxpi 2026-09-06 batch death) and the shared breadth block referenced imports scoped only to the eodhd branch; both fixed + regression-tested. See CHANGELOG.
 - [2026-09-06] **Agent wiring: all audited calcs agent-usable via tools + prompts** — closed the 5 audit calcs with no agent surface: `bsm_equity_surface` → `get_bsm_option_quote`, `long_short_precision`/`purged_cpcv_splits` → `get_signal_quality`, `cap_and_redistribute` → `get_constituent_cap_weights`; each bound + prompt-guided (Alpaca paper surfaces excluded). See CHANGELOG.
 - [2026-09-06] **Quant-formula audit pass 2** — 13 remaining divergences from the web-verified audit corrected: modified VaR (excess kurtosis), capital-income exact ceiling cap, downside deviation /N, Black-76 rho `-T·V`, BSM charm sign + dividend term, Zmijewski CA/CL, Alpha158 returns sign, canonical CHOP choppiness, Qlib precision, combinatorial CPCV, Wilder-RMA RSI/stochRSI, Taylor r*=2% (1993), GEX sign convention. All pinned by regression tests. See CHANGELOG.

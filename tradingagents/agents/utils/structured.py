@@ -261,6 +261,20 @@ _STUB_CHAIN_COMPLETION_PROMPT = (
     "announce further tool calls - deliver the report."
 )
 
+# Directive for the cap-forced terminal turn when it came back EMPTY (no text at
+# all — e.g. a reasoning model burned its whole output budget on hidden
+# reasoning and emitted no content). Ask the model (prefer the backup when
+# configured) to write the complete report from the tool evidence already
+# gathered, never another empty/status turn.
+_EMPTY_CAP_PROMPT = (
+    "Your previous response was empty - no report text was produced. "
+    "Re-read the tool evidence you have gathered and write the COMPLETE "
+    "analysis report now: verdict, signal-by-signal evidence with exact "
+    "computed numbers, risks, and a clear stance. Cite only values you "
+    "actually retrieved; state 'unavailable' where none exist. Do not "
+    "announce further tool calls - deliver the report."
+)
+
 
 def _looks_report_stub(text: str) -> bool:
     """Is an analyst report a degenerate stub (no report substance)?
@@ -403,7 +417,37 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         text = final.content if hasattr(final, "content") else str(final)
         if text and text.strip():
             return _retry_if_truncated(chain, cleaned_msgs, text, backup_llm=backup_chain)
-        return text
+        # Cap-forced terminal turn came back empty: no usable report text.
+        # Retry ONCE on the backup chain (when configured, else the same chain),
+        # then emit an explicit unavailable notice if still empty - never a
+        # silent "" that downstream would render as a bare report-unavailable
+        # placeholder (QCOM fundamentals / NXPI market 2026-09-07).
+        from langchain_core.messages import HumanMessage
+
+        cont_chain = chain
+        if backup_chain is not None and backup_chain is not chain:
+            cont_chain = backup_chain
+            logger.info(
+                "cap-forced terminal turn returned empty; retrying on backup model %r",
+                _model_name(backup_chain) or backup_chain,
+            )
+        retry_msgs = [*cleaned_msgs, HumanMessage(content=_EMPTY_CAP_PROMPT)]
+        try:
+            resp = cont_chain.invoke(retry_msgs)
+            nxt = resp.content if hasattr(resp, "content") else str(resp)
+            if nxt and nxt.strip():
+                return _retry_if_truncated(cont_chain, retry_msgs, nxt)
+        except Exception as exc:  # noqa: BLE001 - degrade, never raise
+            logger.warning("final-report empty retry after tool cap failed: %s", exc)
+        logger.warning(
+            "cap-forced final report turn returned empty; emitting unavailable notice"
+        )
+        return (
+            "**Report unavailable** - the analyst's cap-forced terminal turn"
+            " returned empty content (the model burned its output budget before"
+            " writing). The prior tool evidence stands; re-run to regenerate the"
+            " report."
+        )
     except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-run
         logger.warning("final-report turn after tool cap failed: %s", exc)
         return result.content if hasattr(result, "content") else str(result)

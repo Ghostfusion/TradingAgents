@@ -161,6 +161,90 @@ def test_finalize_messages_merges_truncated_terminal_turn():
     assert chain2.invoke.call_count == 2
 
 
+def test_finalize_messages_empty_turn_retries_on_backup_chain():
+    """A cap-forced terminal turn that returns empty content must be re-asked
+    ONCE on the backup chain (which carries the tool evidence), not silently
+    passed through as \"\" (the QCOM fundamentals / NXPI market 2026-09-07
+    pathology: the reasoning model burned its output budget)."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import (
+        finalize_messages,
+    )
+
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(content="")
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="Final market report from backup.")
+
+    out = finalize_messages(chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(), backup_chain=backup)
+    assert out == "Final market report from backup."
+    assert chain.invoke.call_count == 1
+    assert backup.invoke.call_count == 1
+    # The retry message history carries the tool evidence regardless of chain.
+    retry_msgs = backup.invoke.call_args[0][0]
+    assert isinstance(retry_msgs[-1], HumanMessage)
+    assert "was empty" in retry_msgs[-1].content
+    assert len(retry_msgs) > len(_msgs(MAX_TOOL_ROUNDS - 1, tail="tools"))
+
+
+def test_finalize_messages_empty_turn_no_backup_retries_same_chain():
+    """Without a backup chain, they empty cap turn is re-asked once on the
+    same chain, then an explicit unavailable notice is emitted if still empty."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import (
+        _EMPTY_CAP_PROMPT,
+        finalize_messages,
+    )
+
+    chain = mock.MagicMock()
+    chain.invoke.side_effect = [
+        mock.MagicMock(content=""),
+        mock.MagicMock(content="recovered report."),
+    ]
+
+    out = finalize_messages(chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai())
+    assert out == "recovered report."
+    assert chain.invoke.call_count ==  2
+    # the retry appended the completion directive (never an empty-passthrough).
+    retry_msgs = chain.invoke.call_args_list[1][0][0]
+    assert isinstance(retry_msgs[-1], HumanMessage)
+    assert "was empty" in retry_msgs[-1].content
+    assert "empty" in _EMPTY_CAP_PROMPT
+
+
+def test_finalize_messages_empty_turn_emits_unavailable_when_still_empty():
+    """If the backup (or same chain) also returns empty, they function emits
+    an explicit \"**Report unavailable**\" notice - never a silent \"\" that would
+    land as a bare report-unavailable placeholder in the report tree."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(content="")
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="")
+
+    out = finalize_messages(chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(), backup_chain=backup)
+    assert out.startswith("**Report unavailable**")
+    assert "**Report unavailable**" in out
+    assert chain.invoke.call_count == 1
+    assert backup.invoke.call_count == 1
+
+    # Without a backup the same chain gets the retry and still degrades cleanly.
+
+    chain2 = mock.MagicMock()
+    chain2.invoke.side_effect = [
+        mock.MagicMock(content=""),
+        mock.MagicMock(content=""),
+    ]
+    out2 = finalize_messages(chain2, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai())
+    assert out2.startswith("**Report unavailable**")
+    assert chain2.invoke.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # Analyst node wiring: cap turn produces a non-empty report
 # ---------------------------------------------------------------------------

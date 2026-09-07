@@ -31,7 +31,18 @@ Breaking changes within the 0.x line are called out explicitly.
   mapping + graph wiring (backup built when set, absent when unset). See
   CHANGELOG / api_reference.
 ### Fixed
-- **Sector-rotation screen curated-breadth crash** (`get_sector_rotation_screen`):
+- **Empty cap-forced analyst reports retried on the backup LLM**
+  (`structured.finalize_messages`): when the MAX_TOOL_ROUNDS terminal turn
+  returns empty content (a reasoning model like `deepseek-v4-flash` burned
+  its output budget on hidden reasoning — QCOM fundamentals + NXPI
+  market lands 2026-09-07 fell through as a bare "report unavailable"
+  placeholder), the analyst is re-asked ONCE — on the configured backup
+  chain when set, else the same chain — with the completion directive, 
+  and only if that still returns empty does it emit an explicit
+  `**Report unavailable**` notice (never a silent empty string). Regression
+  tests: `test_tool_round_cap.py` +3 (backup-retry / same-chain retry /
+  unavailable notice).
+ (`get_sector_rotation_screen`):
   the curated-industry branch referenced `_top_note` before assignment
   (`UnboundLocalError`) and the shared constituent block referenced
   `breadth_with_gate` / `leadership_ratio_ewcw` imported only inside the eodhd

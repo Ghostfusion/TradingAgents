@@ -319,7 +319,14 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-- 2026-09-06 `(working tree)` - Backup LLM for truncation-continuation
+- 2026-09-07 `(working tree)` - Empty cap-forced analyst reports retried
+  on the backup LLM: when the `MAX_TOOL_ROUNDS` terminal turn returns
+  empty content (reasoning model burned its output budget), the analyst
+  is re-asked ONCE (backup chain when set, else same chain) with the
+  completion directive, then emits an explicit `**Report unavailable**`
+  notice if still empty - never a silent "" bare placeholder (QCOM
+  fundamentals + NXPI market 2026-09-07). See CHANGELOG.
+
   retries: `TRADINGAGENTS_BACKUP_LLM` (`.env`, `backup_llm` config,
   `provider:model` or bare model on the primary provider). When ANY LLM
   response is cut at the output cap, the continuation retry runs on the backup
