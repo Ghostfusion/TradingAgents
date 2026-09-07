@@ -179,3 +179,49 @@ def test_invalid_dict_raises(monkeypatch):
         importlib.reload(default_config_module)
     monkeypatch.delenv("TRADINGAGENTS_RISK_BASKET_WEIGHTS", raising=False)
     importlib.reload(default_config_module)
+
+
+def test_output_token_caps_override_low_launcher_env(monkeypatch):
+    """A launcher that exports LOW max_output_tokens (e.g. 8000/8000/4000) must
+    NOT starve report turns: tradingagents.__init__ reloads .env with
+    override=True for the three cap keys so the repo's declared values win."""
+    import subprocess
+    import sys
+
+    import tradingagents  # noqa: F401  (registers the __init__ override)
+
+    # Run a fresh interpreter with LOW caps pre-injected + locked cwd, like the
+    # batch launcher, and confirm the module raises them from .env.
+    code = (
+        "import os;"
+        "import tradingagents;"
+        "from tradingagents.default_config import DEFAULT_CONFIG;"
+        "print(DEFAULT_CONFIG['max_output_tokens']);"
+        "print(DEFAULT_CONFIG['max_output_tokens_quick']);"
+        "print(DEFAULT_CONFIG['max_output_tokens_deep']);"
+        "print(os.environ.get('TRADINGAGENTS_MAX_OUTPUT_TOKENS'));"
+        "print(os.environ.get('TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK'));"
+        "print(os.environ.get('TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP'))"
+    )
+    env = {
+        **dict(__import__("os").environ),
+        "TRADINGAGENTS_MAX_OUTPUT_TOKENS": "8000",
+        "TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK": "8000",
+        "TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP": "4000",
+    }
+    env.pop("PYTHONPATH", None)
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=__file__.rsplit("tests", 1)[0],
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    # effective config: raised above the injected 8000/8000/4000
+    assert int(lines[0]) >= 8000, lines
+    quick, deep = int(lines[1]), int(lines[2])
+    assert quick >= 8000 and deep >= 4000, lines
+    # the env vars themselves were raised too (so llm clients see them)
+    assert int(lines[3]) >= 8000 and int(lines[4]) >= 8000 and int(lines[5]) >= 4000, lines
