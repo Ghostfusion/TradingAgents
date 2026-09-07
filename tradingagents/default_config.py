@@ -188,6 +188,14 @@ _ENV_OVERRIDES = {
     # Opt-in analyst parallelism: >1 runs the analyst teams concurrently
     # (each in its own thread with isolated messages). Multiplies LLM/data load.
     "TRADINGAGENTS_ANALYST_CONCURRENCY": "analyst_concurrency",
+    # Forced-tool evidence gathering (map-reduce, design docs/design_mapreduce_forced_tool_gathering.md):
+    # comma list (or ALL) of tools the analyst MUST have invoked before its report
+    # turn; the runtime gathers them deterministically and the analyst reduces
+    # from the merged evidence. Empty = current LLM-selected tool path (default).
+    "TRADINGAGENTS_ANALYST_FORCED_TOOLS": "analyst_forced_tools",
+    "TRADINGAGENTS_ANALYST_FORCED_TOOLS_MAX_PARALLEL": "analyst_forced_tools_max_parallel",
+    "TRADINGAGENTS_ANALYST_FORCED_TOOLS_TIMEOUT_S": "analyst_forced_tools_timeout_s",
+    "TRADINGAGENTS_ANALYST_FORCED_TOOLS_SUMMARY_WINDOW": "analyst_forced_tools_summary_window",
     # OpenRouter provider routing: comma-separated provider slugs to always skip
     # (e.g. slow/unreliable endpoints). Sent as provider.ignore in the request
     # body via extra_body. Empty = no restriction.
@@ -441,6 +449,18 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Analyst-team execution: 1 = sequential (default); >1 = concurrent
         # threads (opt-in — multiplies LLM/provider load and free-tier quota burn).
         "analyst_concurrency": 1,
+        # Forced-tool evidence gathering (map-reduce): empty list = the analyst
+        # LLM keeps selecting tools (legacy path, bit-identical). When set, the
+        # runtime gathers the listed tools deterministically BEFORE the analyst
+        # run and the analyst reduces from the merged evidence. ``max_parallel``
+        # bounds the gather worker pool; ``timeout_s`` marks a tool ``timeout``
+        # leaf and proceeds (a wedged thread cannot be preempted in Python -
+        # see design doc §3.5/TRACKED-1); ``summary_window`` truncates each
+        # tool's content fed to the reduce prompt.
+        "analyst_forced_tools": [],
+        "analyst_forced_tools_max_parallel": 1,
+        "analyst_forced_tools_timeout_s": 30,
+        "analyst_forced_tools_summary_window": 12000,
         # News / data fetching parameters
         # Increase for longer lookback strategies or to broaden macro coverage;
         # decrease to reduce token usage in agent prompts.
@@ -903,8 +923,12 @@ def validate_config(config: dict) -> list[str]:
         "debate_stop_consecutive",
         "debate_regen_max",
         "debate_divergence_cap_rounds",
+        "analyst_forced_tools_timeout_s",
+        "analyst_forced_tools_summary_window",
     ):
         positive(key, allow_zero=True)
+    # Gatherer concurrency must be >= 1 (0 would execute no tools).
+    positive("analyst_forced_tools_max_parallel")
     # Monotonic HWM tiers: soft cannot exceed hard.
     soft = config.get("risk_hwm_soft_pct")
     hard = config.get("risk_hwm_hard_pct")

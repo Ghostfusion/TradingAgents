@@ -225,3 +225,65 @@ def test_output_token_caps_override_low_launcher_env(monkeypatch):
     assert quick >= 8000 and deep >= 4000, lines
     # the env vars themselves were raised too (so llm clients see them)
     assert int(lines[3]) >= 8000 and int(lines[4]) >= 8000 and int(lines[5]) >= 4000, lines
+
+
+def test_forced_tools_default_off(monkeypatch):
+    """Unset forced-tool vars keep the legacy LLM-selected path (empty list)."""
+    dc = _reload_with_env(monkeypatch)
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools"] == []
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_max_parallel"] == 1
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_timeout_s"] == 30
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_summary_window"] == 12000
+
+
+def test_forced_tools_overrides(monkeypatch):
+    """Comma list coerces to a list; ints coerce to ints."""
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_ANALYST_FORCED_TOOLS="get_fundamentals,get_financial_ratios",
+        TRADINGAGENTS_ANALYST_FORCED_TOOLS_MAX_PARALLEL="2",
+        TRADINGAGENTS_ANALYST_FORCED_TOOLS_TIMEOUT_S="15",
+        TRADINGAGENTS_ANALYST_FORCED_TOOLS_SUMMARY_WINDOW="4000",
+    )
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools"] == [
+        "get_fundamentals",
+        "get_financial_ratios",
+    ]
+    assert isinstance(dc.DEFAULT_CONFIG["analyst_forced_tools"], list)
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_max_parallel"] == 2
+    assert isinstance(dc.DEFAULT_CONFIG["analyst_forced_tools_max_parallel"], int)
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_timeout_s"] == 15
+    assert isinstance(dc.DEFAULT_CONFIG["analyst_forced_tools_timeout_s"], int)
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools_summary_window"] == 4000
+
+
+def test_forced_tools_all_literal(monkeypatch):
+    """'ALL' passes through as a single-element list (gatherer expands it)."""
+    dc = _reload_with_env(
+        monkeypatch, TRADINGAGENTS_ANALYST_FORCED_TOOLS="ALL"
+    )
+    assert dc.DEFAULT_CONFIG["analyst_forced_tools"] == ["ALL"]
+
+
+def test_forced_tools_invalid_max_parallel_raises(monkeypatch):
+    """Non-numeric max_parallel fails loudly, like the other int knobs."""
+    monkeypatch.setenv("TRADINGAGENTS_ANALYST_FORCED_TOOLS_MAX_PARALLEL", "two")
+    with pytest.raises(ValueError):
+        importlib.reload(default_config_module)
+
+
+def test_forced_tools_validation_ranges():
+    """validate_config catches non-positive gatherer knobs."""
+    dc = importlib.reload(default_config_module)
+    violations = dc.validate_config(
+        {
+            "analyst_forced_tools": ["get_fundamentals"],
+            "analyst_forced_tools_max_parallel": 0,
+            "analyst_forced_tools_timeout_s": 0,
+            "analyst_forced_tools_summary_window": 0,
+        }
+    )
+    assert any("analyst_forced_tools_max_parallel" in v for v in violations)
+    # timeout/summary_window allow zero = "off"; concurrency does not.
+    assert not any("analyst_forced_tools_timeout_s" in v for v in violations)
+    assert not any("analyst_forced_tools_summary_window" in v for v in violations)
