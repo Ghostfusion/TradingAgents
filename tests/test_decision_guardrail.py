@@ -127,5 +127,40 @@ class TestConfidenceCap:
         assert dg.cap_pm_confidence(None, "stale") == (None, None)
 
 
+class TestJudgeReliabilityConfidenceGate:
+    """D1/D2 PM gate — a risk-debate judge that flipped or fell back must
+    cap the PM's confidence (never raise) so a borderline/unreliable judge
+    can't ride a high-conviction decision."""
+
+    def test_clean_judge_passes(self):
+        assert dg.cap_pm_confidence_on_judge(
+            0.9, judge_agreement=1.0, judge_flip=False, judge_structured_fallback=False
+        ) == (0.9, None)
+
+    def test_flip_caps(self):
+        conf, reason = dg.cap_pm_confidence_on_judge(0.9, judge_flip=True)
+        assert conf == pytest.approx(0.5) and reason is not None
+        assert "flipped" in reason
+
+    def test_low_agreement_caps(self):
+        conf, reason = dg.cap_pm_confidence_on_judge(0.8, judge_agreement=0.67)
+        assert conf == pytest.approx(0.5) and reason is not None
+
+    def test_fallback_caps(self):
+        conf, reason = dg.cap_pm_confidence_on_judge(0.8, judge_structured_fallback=True)
+        assert conf == pytest.approx(0.5) and reason is not None
+        assert "fallback" in reason
+
+    def test_below_new_cap_unchanged(self):
+        assert dg.cap_pm_confidence_on_judge(0.4, judge_flip=True) == (0.4, None)
+
+    def test_none_confidence(self):
+        assert dg.cap_pm_confidence_on_judge(None, judge_flip=True) == (None, None)
+
+    def test_never_raises_on_clean_with_missing_fields(self):
+        # Missing judge fields (legacy state) must not trigger a cap.
+        assert dg.cap_pm_confidence_on_judge(0.9) == (0.9, None)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -180,6 +180,53 @@ def cap_pm_confidence(confidence: float | None, data_quality: str | None,
     return cap, f"confidence capped at {cap:.2f}: data quality is {data_quality}"
 
 
+def cap_pm_confidence_on_judge(
+    confidence: float | None,
+    judge_agreement: float | None = None,
+    judge_flip: bool | None = None,
+    judge_structured_fallback: bool | None = None,
+    cap: float = 0.5,
+    min_agreement: float = 1.0,
+) -> tuple[float | None, str | None]:
+    """Gate PM confidence on the risk-debate judge's reliability (D1/D2).
+
+    A debate judge that FLIPPED its winner across the ensemble runs
+    (``judge_flip`` True, i.e. ``judge_agreement < 1.0``) or fell back to
+    free-text/repair (``judge_structured_fallback``) is a reduced-reliability
+    signal: the same evidence produced different judge verdicts, so the PM's
+    conviction must be capped. Returns ``(capped_confidence, reason)`` — the
+    confidence is capped at ``cap`` (never raised) when either gate trips;
+    unchanged otherwise. Never raises; None confidence passes through.
+
+    Deterministic, advisory (like ``cap_pm_confidence``) — it softens the PM
+    decision, never zeroes it and never fabricates an override.
+    """
+    if confidence is None:
+        return confidence, None
+    flip = bool(judge_flip)
+    low_agreement = (
+        judge_agreement is not None
+        and (judge_agreement - min_agreement) < -1e-9
+    )
+    fallback = bool(judge_structured_fallback)
+    if not (flip or low_agreement or fallback):
+        return confidence, None
+    try:
+        c = float(confidence)
+    except (TypeError, ValueError):
+        return confidence, None
+    if c <= cap:
+        return confidence, None
+    causes = []
+    if flip:
+        causes.append(f"judge flipped across ensemble (agreement {judge_agreement if judge_agreement is not None else '?'})")
+    elif low_agreement:
+        causes.append(f"judge agreement {judge_agreement}")
+    if fallback:
+        causes.append("judge used free-text fallback")
+    return cap, f"confidence capped at {cap:.2f}: {'; '.join(causes) or 'judge unreliable'}"
+
+
 __all__ = [
     "RATING_ORDER",
     "SCORE_BANDS",
@@ -188,4 +235,5 @@ __all__ = [
     "validate_score_action_agreement",
     "stabilize_decision",
     "cap_pm_confidence",
+    "cap_pm_confidence_on_judge",
 ]

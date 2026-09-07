@@ -31,13 +31,16 @@
 
 ## News
 - [2026-09-07] **Debate reproducibility toolkit** — judge ensemble
-  (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`), structured-fallback reliability
-  flags, field-level consensus in the RM/PM matrix, and `scripts/repro_check.py`
-  (run N times, report verdict agreement). Applied config: ensemble=3, temp=0.1,
-  judge→gpt-5.6-luna. A 2×3 TSM probe showed both old and new config yield 2/3
-  self-agreement (Underweight/Underweight/Overweight → Hold/Overweight/Hold) —
-  the flips are reduced but not eliminated; further N / threshold tuning is the
-  next lever. See CHANGELOG.
+  (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`, now 5), structured-fallback reliability
+  flags, field-level consensus in the RM/PM matrix, a deterministic **PM
+  confidence gate** (judge flip / low agreement / free-text fallback caps the
+  PM's confidence and injects a "judge reliability" prompt line), and
+  `scripts/repro_check.py` (run N times, report verdict agreement). Applied
+  config: ensemble=5, temp=0.1, judge→gpt-5.6-luna. A 2×3 TSM probe showed both
+  old and new config yield 2/3 self-agreement (Underweight/Underweight/Overweight
+  → Hold/Overweight/Hold) — the flips are reduced but not eliminated; the PM
+  gate now makes a flip DEGRADE confidence instead of silently swinging the
+  verdict. See CHANGELOG.
 - [2026-09-07] **Reasoning-budget bound for OpenRouter models** — new
   `TRADINGAGENTS_OPENROUTER_REASONING_EFFORT` (`.env`, `low|medium|high`, off
   by default): a reasoning model (deepseek-v4-flash) that burns its WHOLE

@@ -48,7 +48,14 @@ Breaking changes within the 0.x line are called out explicitly.
   Overweight) vs the ensemble+temp=0.1+judge-luna config (Hold, Overweight, Hold):
   both 2/3 self-agreement — temperature/judge/ensemble=3 reduced but did NOT
   eliminate the borderline flip (judge flips persist even at temp 0.1, per the
-  reproducibility literature); the ensemble-N / threshold are the next lever.
+  reproducibility literature). Follow-up: `TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE=5`
+  and a deterministic **PM confidence gate** (`decision_guardrail.cap_pm_confidence_on_judge`):
+  when the risk-debate judge flipped / agreement<1.0 / used free-text fallback,
+  the PM's confidence is capped (default 0.5, never raised) with a recorded
+  reason, and the PM prompt carries a "Risk-debate judge reliability" line so
+  the model holds down conviction on an unreliable judge — so a borderline
+  judge flip now DEGRADES the decision's confidence rather than silently
+  swinging it. Tests `test_decision_guardrail.py` +7 + `test_structured_agent_prompts.py` +2.
 ### Fixed
 - **Reasoning-model output-budget starvation** (`TRADINGAGENTS_OPENROUTER_REASONING_EFFORT`
   in `.env`, config `openrouter_reasoning_effort`): a reasoning model

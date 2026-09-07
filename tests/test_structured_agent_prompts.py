@@ -92,6 +92,78 @@ def test_portfolio_manager_prompt_injects_computed_decision_context():
     assert "Trade plan card: NVDA" in text
 
 
+@pytest.mark.unit
+def test_pm_prompt_surfaces_judge_reliability_when_flip_or_fallback():
+    """D1/D2 gate — when the risk-debate judge flipped across the ensemble or
+    used a free-text fallback, the PM prompt must carry the reliability line
+    (soft signal) so the model lowers confidence on an unreliable judge."""
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    captured = {}
+    llm = _capturing_llm(
+        captured,
+        PortfolioDecision(
+            rating=PortfolioRating.OVERWEIGHT, executive_summary="x", investment_thesis="y"
+        ),
+    )
+    risk = {
+        "history": "h", "aggressive_history": "a", "conservative_history": "c",
+        "neutral_history": "n", "current_aggressive_response": "",
+        "current_conservative_response": "", "current_neutral_response": "",
+        "latest_speaker": "Neutral", "count": 1,
+    }
+    create_portfolio_manager(llm)({
+        "company_of_interest": "NVDA",
+        "risk_debate_state": risk,
+        "investment_plan": "plan",
+        "trader_investment_plan": "trader plan",
+        "structured_risk_state": {
+            "judge_agreement": 0.9,
+            "judge_flip": True,
+            "judge_structured_fallback": True,
+        },
+    })
+    text = _prompt_text(captured["prompt"])
+    assert "Risk-debate judge reliability" in text
+    assert "judge FLIPPED" in text
+    assert "free-text/repair fallback" in text
+    assert "Lower your confidence" in text
+
+
+@pytest.mark.unit
+def test_pm_prompt_omits_reliability_line_on_clean_judge():
+    """A clean, agreeing judge (no flip, no fallback) must NOT inject the
+    reliability warning into the PM prompt."""
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    captured = {}
+    llm = _capturing_llm(
+        captured,
+        PortfolioDecision(
+            rating=PortfolioRating.HOLD, executive_summary="x", investment_thesis="y"
+        ),
+    )
+    risk = {
+        "history": "h", "aggressive_history": "", "conservative_history": "",
+        "neutral_history": "", "current_aggressive_response": "",
+        "current_conservative_response": "", "current_neutral_response": "",
+        "latest_speaker": "Neutral", "count": 1,
+    }
+    create_portfolio_manager(llm)({
+        "company_of_interest": "NVDA",
+        "risk_debate_state": risk,
+        "investment_plan": "plan",
+        "trader_investment_plan": "trader plan",
+        "structured_risk_state": {
+            "judge_agreement": 1.0,
+            "judge_flip": False,
+            "judge_structured_fallback": False,
+        },
+    })
+    text = _prompt_text(captured["prompt"])
+    assert "Risk-debate judge reliability" not in text
+
+
 
 
 @pytest.mark.unit

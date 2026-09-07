@@ -146,6 +146,31 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
             else "  (no structured risk debate rounds)"
         )
 
+        # D1/D2 judge-reliability (soft prompt signal): when the risk-debate
+        # judge flipped its winner across ensemble runs or used a free-text/
+        # repair fallback, tell the PM to hold down its confidence rather than
+        # letting a borderline/unreliable judge ride high.
+        _reliability_bits = []
+        _judge_flip = bool(rds.get("judge_flip"))
+        _judge_fb = bool(rds.get("judge_structured_fallback"))
+        _judge_agr = rds.get("judge_agreement")
+        if _judge_flip or _judge_fb or (_judge_agr is not None and _judge_agr < 1.0):
+            if _judge_flip:
+                _reliability_bits.append("judge FLIPPED across ensemble runs")
+            if _judge_agr is not None and _judge_agr < 1.0:
+                _reliability_bits.append(f"judge agreement={_judge_agr}")
+            if _judge_fb:
+                _reliability_bits.append("judge used free-text/repair fallback")
+        if _reliability_bits:
+            judge_reliability_line = (
+                "**Risk-debate judge reliability** (deterministic): "
+                + "; ".join(_reliability_bits)
+                + ". Lower your confidence if the judge disagreed or fell back "
+                "to free text — do not let a borderline/unreliable judge ride high.\n\n"
+            )
+        else:
+            judge_reliability_line = ""
+
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
@@ -169,6 +194,7 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
 
 {risk_judge_block}
 
+{judge_reliability_line}
 {cvar_line}{liq_line}{consensus_line}
 **Computed decision context (deterministic, advisory - ground your final
 decision in these numbers, never invent your own):**
@@ -197,6 +223,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
                 from tradingagents.dataflows.config import get_config
                 from tradingagents.strategies.decision_guardrail import (
                     cap_pm_confidence,
+                    cap_pm_confidence_on_judge,
                     stabilize_decision,
                     validate_score_action_agreement,
                 )
@@ -222,6 +249,23 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
                 conf, _ = cap_pm_confidence(result.confidence, result.data_quality)
                 if conf != result.confidence:
                     result.confidence = conf
+                # D1/D2 judge-reliability gate: if the risk-debate judge
+                # flipped its winner across the ensemble runs or used a
+                # free-text/repair fallback, cap the PM's confidence — the
+                # same evidence produced divergent judge verdicts, so the
+                # conviction must not ride high on an unreliable read.
+                conf, _jreason = cap_pm_confidence_on_judge(
+                    result.confidence,
+                    judge_agreement=rds.get("judge_agreement"),
+                    judge_flip=rds.get("judge_flip"),
+                    judge_structured_fallback=rds.get("judge_structured_fallback"),
+                )
+                if conf != result.confidence:
+                    result.confidence = conf
+                    result.guardrail_reason = (
+                        (result.guardrail_reason + "; " if result.guardrail_reason else "")
+                        + (_jreason or "confidence capped: judge unreliable")
+                    )
                 # score<->rating agreement advisory note (no score field yet ->
                 # recorded when a 0-100 score is present in future iterations)
                 validate_score_action_agreement(rating, None)  # no-op today
