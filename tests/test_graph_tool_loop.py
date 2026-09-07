@@ -214,3 +214,38 @@ def test_apply_overlays_noops_on_short_closes(monkeypatch, caplog, mock_llm_clie
     assert "strategy overlays skipped for SKHY: 37 close bars (< 60 required)" in caplog.text
     assert "position contract skipped" not in caplog.text
     assert "risk governor skipped" not in caplog.text
+
+
+@pytest.mark.unit
+def test_try_fetch_closes_normalizes_newest_first_vendor_rows(monkeypatch):
+    """A vendor that returns OHLCV rows NEWEST-first must not leak an OLDEST
+    close as ``closes[-1]`` (the "latest close" every consumer reads: the
+    trade-plan reference price, basket return mixes, regime reads).
+
+    Regression: the TSM 2026-09-07 run built its trade-plan card off
+    ``closes[-1] = 288.88`` — the OLDEST row EODHD returned, because
+    ``_try_fetch_closes`` never re-sorted (the tool-level ``_ohlcv`` did, after
+    the ABNB $128.56 incident) — so the analyst's "288.88 trade card" collided
+    with the verified 428.91 bar.
+    """
+    import tradingagents.dataflows.interface as iface
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    # EODHD-style newest-first CSV (Date,Open,High,Low,Close,Volume).
+    csv_blocks = "\r\n".join(
+        [
+            "Date,Open,High,Low,Close,Volume",
+            "2026-09-04,421.88,429.82,419.42,428.91,12276300",
+            "2026-09-03,413.29,417.29,407.82,417.01,7827800",
+            "2026-09-02,413.2,416.5,411.27,415.5,6301000",
+            "2026-09-01,405.0,410.0,400.0,402.5,5000000",
+        ]
+    )
+    monkeypatch.setattr(
+        iface, "route_to_vendor", lambda *a, **k: csv_blocks
+    )
+    ta = object.__new__(TradingAgentsGraph)  # skip heavy __init__; method is stateless
+    closes = ta._try_fetch_closes("tsm", days=320)
+    # Ascending order: oldest date first, so closes[-1] is the LATEST close.
+    assert closes == [402.5, 415.5, 417.01, 428.91]
+    assert closes[-1] == 428.91  # the verified bar - never 288.88/the oldest row

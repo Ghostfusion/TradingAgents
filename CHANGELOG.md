@@ -31,7 +31,19 @@ Breaking changes within the 0.x line are called out explicitly.
   mapping + graph wiring (backup built when set, absent when unset). See
   CHANGELOG / api_reference.
 ### Fixed
-- **Empty cap-forced analyst reports retried on the backup LLM**
+- **Stale-basis trade-plan reference price from unsorted vendor closes**
+  (`graph.trading_graph._try_fetch_closes`): a vendor returning OHLCV rows
+  NEWEST-first (EODHD) left `closes[-1]` as the OLDEST close, so every
+  consumer of `closes[-1]` as 'the latest close' read a stale value — the
+  TSM 2026-09-07 trade-plan card pinned a reference price of 288.88 that
+  collided with the verified 428.91 bar (bull/bear/Trader/PM flagged an
+  'unresolved reference price'; the same stale basis surfaced in
+  `get_bollinger_pct_b`/`get_opening_range`/`get_support_structure`).
+  The helper now normalizes the vendor output to ASCENDING date order,
+  mirroring `analysis_tools._ohlcv` (which had the same ABNB $128.56
+  incident). Regression test: `test_graph_tool_loop.py`
+  `test_try_fetch_closes_normalizes_newest_first_vendor_rows`.
+
   (`structured.finalize_messages`): when the MAX_TOOL_ROUNDS terminal turn
   returns empty content (a reasoning model like `deepseek-v4-flash` burned
   its output budget on hidden reasoning — QCOM fundamentals + NXPI

@@ -30,7 +30,12 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-09-07] **Empty cap-forced analyst reports retried on the backup LLM** — 
+- [2026-09-07] **Stale-basis trade-plan price fix** — `_try_fetch_closes` now
+  re-sorts vendor OHLCV to ascending order, so `closes[-1]` is the LATEST
+  close, never an OLDEST stale row. The TSM 2026-09-07 trade-plan card had
+  pinned reference price 288.88 (oldest EODHD row) against the verified
+  428.91 bar; the trade-plan card now reads 428.91. See CHANGELOG.
+ — 
   when the `MAX_TOOL_ROUNDS` terminal turn returns empty content (a reasoning
   model burned its output budget on hidden reasoning), the analyst is now
   re-asked once on the backup chain (or same chain) with a completion

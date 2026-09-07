@@ -1595,7 +1595,7 @@ class TradingAgentsGraph:
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         out = route_to_vendor("get_stock_data", ticker, start, end) or ""
-        closes = []
+        rows: list[tuple[str, float]] = []
         for line in out.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or line.lower().startswith("date,"):
@@ -1603,8 +1603,16 @@ class TradingAgentsGraph:
             parts = line.split(",")
             if len(parts) >= 5:
                 with contextlib.suppress(ValueError):
-                    closes.append(float(parts[4]))
-        return closes
+                    rows.append((parts[0].strip(), float(parts[4])))
+        # Some vendors (e.g. EODHD) return rows NEWEST-first; every consumer of
+        # this series treats ``closes[-1]`` as the latest close (the trade-plan
+        # reference price, basket return mixes, regime reads ...), so normalize
+        # to ASCENDING date order after parsing. Same fix as analysis_tools._ohlcv
+        # (the ABNB $128.56 / TSM 288.88 stale-close incidents: closes[-1] was the
+        # OLDEST row). ISO dates sort lexicographically.
+        if len(rows) > 1:
+            rows.sort(key=lambda r: r[0])
+        return [close for _, close in rows]
 
     def _log_returns_from_closes(self, closes) -> list:
         """Daily log-return series from closes (skips non-positive steps)."""

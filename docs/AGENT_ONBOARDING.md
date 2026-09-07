@@ -319,7 +319,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-- 2026-09-07 `(working tree)` - Empty cap-forced analyst reports retried
+- 2026-09-07 `(working tree)` - Stale-basis trade-plan reference price:
+  `graph.trading_graph._try_fetch_closes` now normalizes vendor OHLCV to
+  ASCENDING date order (a NEWEST-first vendor left `closes[-1]` as the
+  OLDEST close — TSM 2026-09-07 trade-plan card used 288.88 vs the verified
+  428.91 bar). Mirrors `analysis_tools._ohlcv`; regression-tested. See
+  CHANGELOG.
+
   on the backup LLM: when the `MAX_TOOL_ROUNDS` terminal turn returns
   empty content (reasoning model burned its output budget), the analyst
   is re-asked ONCE (backup chain when set, else same chain) with the
