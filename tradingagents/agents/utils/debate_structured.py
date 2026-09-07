@@ -101,7 +101,7 @@ def _repair(
 def invoke_structured_turn(
     structured_llm, plain_llm, prompt: str, schema: type[T],
     backup_llm=None,
-) -> tuple[T | None, str | None]:
+) -> tuple[T | None, str | None, str]:
     """Primary structured call with render fallback to the repair loop.
 
     ``backup_llm`` (optional, TRADINGAGENTS_BACKUP_LLM): once the PRIMARY
@@ -112,7 +112,12 @@ def invoke_structured_turn(
     invoke is the primary attempt and stays on ``plain_llm``; only the
     repair (a retry after a failed parse) swaps to the backup.
 
-    Returns ``(model, error)``; ``error`` is None on success.
+    Returns ``(model, error, mode)``; ``error`` is None on success and
+    ``mode`` is ``"structured"`` (the provider's structured-output API
+    returned a valid model), ``"plain"`` (free-text + JSON parse succeeded,
+    i.e. a STRUCTURED FALLBACK — the D2 reliability flag) or ``"repair"``
+    (bounded repair loop produced the model). ``mode=="plain"/"repair"`` is a
+    reliability warning: the deterministic structured path was not honored.
     """
     retry_llm = plain_llm
     if structured_llm is not None:
@@ -125,26 +130,29 @@ def invoke_structured_turn(
             retry_llm = backup_llm or plain_llm
         else:
             if isinstance(result, BaseModel):
-                return cast(T, result), None
+                return cast(T, result), None, "structured"
             if hasattr(result, "content") and isinstance(result.content, str):
                 model, err = parse_and_validate(result.content, schema)
                 if model is not None:
-                    return model, None
+                    return model, None, "structured"
                 # Parsed-but-invalid content (e.g. cut mid-JSON): retry on backup.
                 retry_llm = backup_llm or plain_llm
     # Dual-mode fallback: plain LLM + bounded repair.
     try:
         resp = retry_llm.invoke(prompt)
     except Exception as e:  # noqa: BLE001
-        return None, f"plain invoke failed: {e}"
+        return None, f"plain invoke failed: {e}", "plain"
     text = resp.content if hasattr(resp, "content") else str(resp)
     model, err = parse_and_validate(text, schema)
     if model is not None:
-        return model, None
+        return model, None, "plain"
     if err is None:
         err = "no JSON block found"
     # The repair is always a retry after a failed parse -> backup when set.
-    return _repair(backup_llm or retry_llm, prompt, schema, max_repairs=1)
+    repaired, rerr = _repair(backup_llm or retry_llm, prompt, schema, max_repairs=1)
+    if repaired is not None:
+        return repaired, None, "repair"
+    return None, rerr or err, "repair"
 
 
 __all__ = [

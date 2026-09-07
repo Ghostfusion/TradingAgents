@@ -379,9 +379,10 @@ def create_debater_turn(
         round_records = list(ds.get(ROUND_RECORDS) or [])
         inv = dict(state.get(prose_channel) or {})
         prompt = build_turn_prompt(state, role, role.upper())
-        payload, err = invoke_structured_turn(
+        payload, err, _turn_mode = invoke_structured_turn(
             structured_llm, llm, prompt, schema, backup_llm=backup_llm
         )
+        _turn_fallback = _turn_mode != 'structured'
         if payload is None and err and "json" in str(err).lower() and structured_llm is not None:
             # JSON-mode 400 guard: if the provider REJECTED response_format
             # json_object (OpenRouter historically drops it), retry ONCE with
@@ -393,9 +394,11 @@ def create_debater_turn(
             )
             plain = bind_structured(llm, schema, f"{role.title()} Debater")
             if plain is not None:
-                payload2, err2 = invoke_structured_turn(
+                payload2, err2, _plain_mode = invoke_structured_turn(
                     plain, llm, prompt, schema, backup_llm=backup_llm
                 )
+                if _plain_mode != 'structured':
+                    _turn_fallback = True
                 if payload2 is not None:
                     payload, err = payload2, None
                 else:
@@ -441,6 +444,11 @@ def create_debater_turn(
         # has no attribute 'get' the first time the L2 judge ran on a live
         # round (regression: judge never ran before the judge-skip fix).
         payload_dict = payload.model_dump()
+        # D2: tag the stored round payload with whether THIS debater turn
+        # fell back to free-text/repair (mode != structured). Reporting /
+        # the judge can read it as a reliability signal; raw models never
+        # carry the key so newer schemas stay parse-compatible.
+        payload_dict["_structured_fallback"] = bool(_turn_fallback)
         if pending == role and round_records:
             round_records[-1][role] = payload_dict
         else:
@@ -719,6 +727,18 @@ def render_judge_evidence(ds: dict) -> str:
         ra = getattr(rubric, "rationale", "") or ""
         if ra:
             lines.append(f"- rationale: {ra}")
+    # D1/D2 reliability: ensemble size + agreement + any free-text fallback.
+    if ds.get("judge_agreement") is not None:
+        lines.append(
+            f"- judge ensemble: n={ds.get('judge_ensemble', '-')} "
+            f"agreement={ds.get('judge_agreement')} "
+            f"flip={bool(ds.get('judge_flip'))}"
+        )
+    if ds.get("judge_structured_fallback"):
+        lines.append(
+            "- ⚠ judge used free-text/repair fallback (structured output was "
+            "not honored) — reliability reduced"
+        )
     if not lines:
         return ""
     return (
@@ -766,9 +786,48 @@ def render_consumer_debate_matrix(ds: dict, roles: Sequence[str]) -> str:
             f"| {role} | {stance} | {thesis} | {l1_pct} | {j_mean} | {alloc}% |"
         )
     table = (
-        "| Role | Stance | Core Thesis | L1 Valid % | Judge Score (0-10) | "
-        "Rec Alloc |\n|---|---|---|---|---|---|\n" + "\n".join(rows)
-    )
+    "| Role | Stance | Core Thesis | L1 Valid % | Judge Score (0-10) | "
+    "Rec Alloc |\n|---|---|---|---|---|---|\n" + "\n".join(rows)
+)
+    # D3: field-level consensus — convergence on the TYPED fields the verdict
+    # rests on, not just the headline label. Same values -> "x/N agree";
+    # different -> "disagree (<values>)". Machine-comparable, so a split is
+    # explicit (a decisive PM can then weight per-field agreement).
+    consensus_lines: list[str] = []
+    stances = [
+        str((_last_role_payload(r) or {}).get("stance", "")).strip()
+        for r in roles
+    ]
+    valid_stances = [s for s in stances if s]
+    if valid_stances:
+        top = max(set(valid_stances), key=valid_stances.count)
+        consensus_lines.append(
+            f"- stance field consensus: {valid_stances.count(top)}/{len(valid_stances)} "
+            f"agree on {top or '-'} {('(unanimous)' if len(set(valid_stances)) == 1 else '')}"
+        )
+    allocs = [
+        (_last_role_payload(r) or {}).get("recommended_allocation_pct")
+        for r in roles
+    ]
+    allocs_num = [a for a in allocs if isinstance(a, (int, float))]
+    if len(allocs_num) >= 2:
+        spread = max(allocs_num) - min(allocs_num)
+        consensus_lines.append(
+            f"- allocation consensus: n={len(allocs_num)} "
+            f"min={min(allocs_num)}% max={max(allocs_num)}% "
+            f"spread={spread:.1f}pp {'(tight)' if spread <= 2.5 else '(split)'}"
+        )
+    j_means = [
+        ((judge.get(f"Candidate_{chr(ord('X') + i)}")) or {}).get("mean")
+        for i in range(len(roles))
+    ]
+    j_means = [m for m in j_means if m is not None]
+    if j_means:
+        consensus_lines.append(
+            f"- judge score spread: min={min(j_means):.2f} max={max(j_means):.2f}"
+        )
+    if consensus_lines:
+        table += "\n\n**Field-level consensus (deterministic):**\n" + "\n".join(consensus_lines)
     return table
 
 

@@ -236,140 +236,216 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 f"unverified={counts['unverified']} abstain={counts['abstain']}"
             )
         l1_scorecard = "\n".join(sc_lines) or "(no claims verified)"
-        side_scores = {}
-        rubrics = []
-        for i, cand in enumerate(candidates):
-            # Preceding opponent = the role BEFORE this candidate (last
-            # non-degraded payload); round-1 candidate has none.
-            prev_role = roles[i - 1] if i > 0 else None
-            opponent = None
-            if prev_role:
-                for rec in reversed(round_records):
-                    p = rec.get(prev_role)
-                    if isinstance(p, dict) and not _degraded(p):
-                        opponent = anonymize_and_rotate({prev_role: p}, [prev_role])[0]
-                        break
-            judge_round = latest_round_by_role.get(roles[i], len(round_records))
-            prompt = _build_judge_candidate_prompt(
-                judge_round,
-                cand,
-                opponent,
-                l1_scorecard,
-            )
-            judge_text = prompt + f"\n\nScore ONLY {cand['alias']}."
-            rubric, err = invoke_structured_turn(
-                structured_llm, judge_llm, judge_text,
-                L2JudgeDimensionedRubric, backup_llm=backup_llm,
-            )
-            if rubric is not None and not _rubric_dimension_dict(rubric):
-                # Empty dimension_scores (115549 regression): deepseek json_mode
-                # returned a VALID object that omitted the dimension keys, which
-                # Pydantic accepts via default_factory={} -> silent mean 0.0.
-                # Treat like a failed invoke: directed retry naming the exact
-                # four dimensions, else honest UNAVAILABLE (never misleading 0.0).
-                logger.warning(
-                    "debate judge empty dimension_scores for %s; directed retry",
-                    cand["alias"],
+        def _score_all() -> tuple:
+            side_scores = {}
+            rubrics = []
+            _fallback = False
+            for i, cand in enumerate(candidates):
+                # Preceding opponent = the role BEFORE this candidate (last
+                # non-degraded payload); round-1 candidate has none.
+                prev_role = roles[i - 1] if i > 0 else None
+                opponent = None
+                if prev_role:
+                    for rec in reversed(round_records):
+                        p = rec.get(prev_role)
+                        if isinstance(p, dict) and not _degraded(p):
+                            opponent = anonymize_and_rotate({prev_role: p}, [prev_role])[0]
+                            break
+                judge_round = latest_round_by_role.get(roles[i], len(round_records))
+                prompt = _build_judge_candidate_prompt(
+                    judge_round,
+                    cand,
+                    opponent,
+                    l1_scorecard,
                 )
-                directed = judge_text + (
-                    "\n\nScore ONLY on these EXACT four dimensions (each 0..10): "
-                    "empirical_grounding, downside_tail_risk_weight, "
-                    "catalyst_clarity, assumption_sensitivity."
-                )
-                rubric2, err2 = invoke_structured_turn(
-                    structured_llm, judge_llm, directed,
-                    L2JudgeDimensionedRubric, backup_llm=backup_llm,
-                )
-                if rubric2 is not None and _rubric_dimension_dict(rubric2):
-                    rubric = rubric2
-                else:
-                    rubric = None
-                    err = err2 or f"empty dimension_scores ({err})"
-            if rubric is None:
-                # Retry ONCE (deepseek lands valid JSON on a 2nd attempt; a
-                # one-shot failure must not zero a side).
-                logger.warning(
-                    "debate judge 1st attempt failed for %s: %s; retrying", cand["alias"], err
-                )
-                rubric, err2 = invoke_structured_turn(
+                judge_text = prompt + f"\n\nScore ONLY {cand['alias']}."
+                rubric, err, _rmode = invoke_structured_turn(
                     structured_llm, judge_llm, judge_text,
                     L2JudgeDimensionedRubric, backup_llm=backup_llm,
                 )
-                if rubric is None:
-                    err = err2 or err
-            if rubric is None:
-                logger.warning("debate judge unavailable for %s: %s", cand["alias"], err)
-                # A vs B: judge-unavailable is NOT score 0.0 — write null so
-                # the RM/PM (and report) know the judge did not run.
-                side_scores[cand["alias"]] = {
-                    "mean": None, "unavailable": True, "scores": {},
-                    "reason": f"judge unavailable: {err}",
-                }
-                continue
-            dims = _rubric_dimension_dict(rubric)
-            vals = list(dims.values())
-            if not vals:
-                # Fallback (prose-scores heuristic): neither deepseek nor luna
-                # emits the enum-keyed dimension map reliably on this
-                # OpenRouter route (both came back empty after directed
-                # retry). Degrade DETERMINISTICALLY instead of UNAVAILABLE:
-                # 1) parse per-dimension numbers from the judge's rationale
-                # (the model still narrates scores when json_object drops the
-                # map), 2) else use rebuttal_effectiveness (0..10) as the
-                # single coherent proxy.
-                from tradingagents.agents.schemas import JudgeDimension
-
-                rationale = str(getattr(rubric, "rationale", "") or "")
-                fallback_vals = []
-                fallback_dims = {}
-                for dim in JudgeDimension:
-                    label = dim.value
-                    import re as _re
-                    m = _re.search(rf"{label}[^0-9]*([0-9]+(?:\.[0-9]+)?)", rationale, _re.IGNORECASE)
-                    if m:
-                        try:
-                            fallback_vals.append(float(m.group(1)))
-                            fallback_dims[dim.value] = float(m.group(1))
-                        except (TypeError, ValueError):
-                            continue
-                if not fallback_vals:
-                    reff = getattr(rubric, "rebuttal_effectiveness", 0.0)
-                    if isinstance(reff, (int, float)) and reff > 0:
-                        fallback_vals = [float(reff)]
-                        fallback_dims = {
-                            "rebuttal_effectiveness_proxy": float(reff)
-                        }
-                if fallback_vals:
+                if _rmode != 'structured':
+                    _fallback = True
+                if rubric is not None and not _rubric_dimension_dict(rubric):
+                    # Empty dimension_scores (115549 regression): deepseek json_mode
+                    # returned a VALID object that omitted the dimension keys, which
+                    # Pydantic accepts via default_factory={} -> silent mean 0.0.
+                    # Treat like a failed invoke: directed retry naming the exact
+                    # four dimensions, else honest UNAVAILABLE (never misleading 0.0).
                     logger.warning(
-                        "debate judge empty dimension_scores for %s; used prose-score fallback (%s)",
-                        cand["alias"], fallback_dims,
+                        "debate judge empty dimension_scores for %s; directed retry",
+                        cand["alias"],
                     )
-                    side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
-                        "mean": round(sum(fallback_vals) / len(fallback_vals), 4),
-                        "scores": fallback_dims,
-                        "fallback": True,
+                    directed = judge_text + (
+                        "\n\nScore ONLY on these EXACT four dimensions (each 0..10): "
+                        "empirical_grounding, downside_tail_risk_weight, "
+                        "catalyst_clarity, assumption_sensitivity."
+                    )
+                    rubric2, err2, _dmode = invoke_structured_turn(
+                        structured_llm, judge_llm, directed,
+                        L2JudgeDimensionedRubric, backup_llm=backup_llm,
+                    )
+                    if _dmode != 'structured':
+                        _fallback = True
+                    if rubric2 is not None and _rubric_dimension_dict(rubric2):
+                        rubric = rubric2
+                    else:
+                        rubric = None
+                        err = err2 or f"empty dimension_scores ({err})"
+                if rubric is None:
+                    # Retry ONCE (deepseek lands valid JSON on a 2nd attempt; a
+                    # one-shot failure must not zero a side).
+                    logger.warning(
+                        "debate judge 1st attempt failed for %s: %s; retrying", cand["alias"], err
+                    )
+                    rubric, err2, _rmode2 = invoke_structured_turn(
+                        structured_llm, judge_llm, judge_text,
+                        L2JudgeDimensionedRubric, backup_llm=backup_llm,
+                    )
+                    if _rmode2 != 'structured':
+                        _fallback = True
+                    if rubric is None:
+                        err = err2 or err
+                if rubric is None:
+                    logger.warning("debate judge unavailable for %s: %s", cand["alias"], err)
+                    # A vs B: judge-unavailable is NOT score 0.0 — write null so
+                    # the RM/PM (and report) know the judge did not run.
+                    side_scores[cand["alias"]] = {
+                        "mean": None, "unavailable": True, "scores": {},
+                        "reason": f"judge unavailable: {err}",
                     }
                     continue
-                # Final gate: no dimensions AND no prose/rebuttal signal ->
-                # honest UNAVAILABLE, never silent 0.0.
-                logger.warning(
-                    "debate judge returned empty dimension_scores for %s (after retries); marking unavailable",
-                    cand["alias"],
-                )
-                side_scores[cand["alias"]] = {
-                    "mean": None, "unavailable": True, "scores": {},
-                    "reason": "empty dimension_scores after directed retry",
+                dims = _rubric_dimension_dict(rubric)
+                vals = list(dims.values())
+                if not vals:
+                    # Fallback (prose-scores heuristic): neither deepseek nor luna
+                    # emits the enum-keyed dimension map reliably on this
+                    # OpenRouter route (both came back empty after directed
+                    # retry). Degrade DETERMINISTICALLY instead of UNAVAILABLE:
+                    # 1) parse per-dimension numbers from the judge's rationale
+                    # (the model still narrates scores when json_object drops the
+                    # map), 2) else use rebuttal_effectiveness (0..10) as the
+                    # single coherent proxy.
+                    from tradingagents.agents.schemas import JudgeDimension
+
+                    rationale = str(getattr(rubric, "rationale", "") or "")
+                    fallback_vals = []
+                    fallback_dims = {}
+                    for dim in JudgeDimension:
+                        label = dim.value
+                        import re as _re
+                        m = _re.search(rf"{label}[^0-9]*([0-9]+(?:\.[0-9]+)?)", rationale, _re.IGNORECASE)
+                        if m:
+                            try:
+                                fallback_vals.append(float(m.group(1)))
+                                fallback_dims[dim.value] = float(m.group(1))
+                            except (TypeError, ValueError):
+                                continue
+                    if not fallback_vals:
+                        reff = getattr(rubric, "rebuttal_effectiveness", 0.0)
+                        if isinstance(reff, (int, float)) and reff > 0:
+                            fallback_vals = [float(reff)]
+                            fallback_dims = {
+                                "rebuttal_effectiveness_proxy": float(reff)
+                            }
+                    if fallback_vals:
+                        logger.warning(
+                            "debate judge empty dimension_scores for %s; used prose-score fallback (%s)",
+                            cand["alias"], fallback_dims,
+                        )
+                        side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
+                            "mean": round(sum(fallback_vals) / len(fallback_vals), 4),
+                            "scores": fallback_dims,
+                            "fallback": True,
+                        }
+                        continue
+                    # Final gate: no dimensions AND no prose/rebuttal signal ->
+                    # honest UNAVAILABLE, never silent 0.0.
+                    logger.warning(
+                        "debate judge returned empty dimension_scores for %s (after retries); marking unavailable",
+                        cand["alias"],
+                    )
+                    side_scores[cand["alias"]] = {
+                        "mean": None, "unavailable": True, "scores": {},
+                        "reason": "empty dimension_scores after directed retry",
+                    }
+                    continue
+                rubrics.append(rubric)
+                side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
+                    "mean": round(sum(vals) / len(vals), 4) if vals else 0.0,
+                    "scores": {k.value if hasattr(k, "value") else str(k): v for k, v in dims.items()},
                 }
-                continue
-            rubrics.append(rubric)
-            side_scores[rubric.evaluated_agent_alias or cand["alias"]] = {
-                "mean": round(sum(vals) / len(vals), 4) if vals else 0.0,
-                "scores": {k.value if hasattr(k, "value") else str(k): v for k, v in dims.items()},
-            }
+            return side_scores, rubrics, _fallback
+
+        # D1: judge ensemble. Score the same transcript `debate_judge_ensemble`
+        # times, aggregate deterministically so one borderline judge flip no
+        # longer swings the verdict. judge_scores[alias] keeps its mean shape;
+        # we add ensemble_n / spread + judge_agreement / judge_flip for reports.
+        _ensemble = max(1, int((cfg or {}).get('debate_judge_ensemble') or 1))
+        _per_run = [_score_all() for _ in range(_ensemble)]
+        _run_scores = [r[0] for r in _per_run]
+        _run_rubrics = [r[1] for r in _per_run]
+        # D2: any ensemble member that fell back to free text / repair is a
+        # reliability signal -> flag it for the report & run_card.
+        judge_structured_fallback = any(r[2] for r in _per_run)
+        # Always-available empties so the tail's new_state never hits an
+        # UnboundLocalError even when every run failed/rejected.
+        side_scores: dict = {}
+        rubrics: list = []
+
+        def _mean_of(run: dict) -> dict:
+            return {a: float(e['mean']) for a, e in (run or {}).items()
+                    if isinstance(e, dict) and e.get('mean') is not None}
+
+        per_alias: dict[str, list[float]] = {}
+        for _run in _run_scores:
+            for _alias, _m in _mean_of(_run).items():
+                per_alias.setdefault(_alias, []).append(_m)
+        if per_alias:
+            for _alias, _means in per_alias.items():
+                _n = len(_means)
+                # Preserve the first successful run's per-alias extras (e.g.
+                # fallback=True from the prose-score path) so downstream
+                # consumers/tests still see them.
+                _first = (next((e for e in _run_scores if isinstance(e, dict) and _alias in e), {}) or {}).get(_alias) or {}
+                _extra = {k: v for k, v in _first.items() if k not in ('mean', 'scores')}
+                _scores = dict(_first.get('scores') or {}) if isinstance(_first, dict) else {}
+                side_scores[_alias] = {
+                    'mean': round(sum(_means) / _n, 4),
+                    'ensemble_n': _n,
+                    'ensemble_spread': round(max(_means) - min(_means), 4) if _n > 1 else 0.0,
+                    'scores': _scores,
+                    **_extra,
+                }
+        # candidates that never scored in ANY run -> honest unavailable
+        for _cand in candidates:
+            _a = _cand.get('alias')
+            if _a not in side_scores:
+                side_scores[_a] = {'mean': None, 'unavailable': True, 'scores': {}, 'reason': 'judge unavailable across ensemble'}
+        # Representative rubric list: first successful run (same candidates).
+        rubrics = _run_rubrics[0] if _run_rubrics else []
+        # winner by aggregate mean
+        _winner = max(
+            (a for a, e in side_scores.items() if isinstance(e, dict) and e.get('mean') is not None),
+            key=lambda a_: side_scores[a_]['mean'], default=None,
+        )
+        _agree = 0
+        if _winner is not None:
+            for _run in _run_scores:
+                _rm = _mean_of(_run)
+                if _winner in _rm and _rm and max(_rm, key=_rm.get) == _winner:
+                    _agree += 1
+        judge_agreement = round(_agree / len(_run_scores), 4) if _run_scores else None
+        judge_flip = bool(_run_scores and judge_agreement is not None and judge_agreement < 1.0)
+
+
         new_state = {
             **debate_state,
             "judge_scores": side_scores,
             "judge_rubrics": rubrics,
+            "judge_agreement": judge_agreement,
+            "judge_flip": judge_flip,
+            "judge_structured_fallback": judge_structured_fallback,
+            "judge_ensemble": _ensemble,
         }
         return {channel: new_state}
 

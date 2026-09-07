@@ -195,13 +195,14 @@ class TestDualModeAdapter:
             content='{"round_index": 1, "stance": "BULL", "core_thesis": "t", '
                     '"quantitative_claims": [], "recommended_allocation_pct": 5.0}'
         )
-        m, err = invoke_structured_turn(
+        m, err, mode = invoke_structured_turn(
             structured_llm, plain_llm, "prompt", DebaterTurnPayload, backup_llm=backup
         )
         assert m is not None, err
         assert m.round_index == 1
         backup.invoke.assert_called_once()
         plain_llm.invoke.assert_not_called()  # the failed model is never re-paid
+        assert mode == "plain"  # the structured call failed -> fell back (D2 reliability flag)
 
     def test_invoke_structured_turn_uses_backup_on_repair(self):
         """When the fallback content does not parse, the bounded repair runs
@@ -217,13 +218,14 @@ class TestDualModeAdapter:
         )
         # structured_llm None -> plain invoke is the PRIMARY attempt (stays on
         # plain_llm); the repair (a retry) swaps to the backup.
-        m, err = invoke_structured_turn(
+        m, err, mode = invoke_structured_turn(
             None, plain_llm, "prompt", DebaterTurnPayload, backup_llm=backup
         )
         assert m is not None, err
         assert m.stance == "BEAR"
         assert plain_llm.invoke.call_count == 1  # primary attempt only
         backup.invoke.assert_called_once()  # repair on the backup
+        assert mode == "repair"
 
     def test_invoke_structured_turn_no_backup_keeps_same_model(self):
         """No backup configured -> the repair stays on the plain LLM (legacy)."""
@@ -237,9 +239,10 @@ class TestDualModeAdapter:
                         '"quantitative_claims": [], "recommended_allocation_pct": 5.0}'
             ),
         ]
-        m, err = invoke_structured_turn(None, plain_llm, "prompt", DebaterTurnPayload)
+        m, err, mode = invoke_structured_turn(None, plain_llm, "prompt", DebaterTurnPayload)
         assert m is not None, err
         assert plain_llm.invoke.call_count == 2  # primary + repair, same model
+        assert mode == "repair"
 
 
 class TestJudgeAnonymization:

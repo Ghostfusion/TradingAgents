@@ -162,7 +162,7 @@ class TestRiskTurnChannels:
         import tradingagents.agents.researchers.structured_debate as sd_mod
 
         def _fake_invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
-            return _Payload(), None
+            return _Payload(), None, 'structured'
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(sd_mod, "invoke_structured_turn", _fake_invoke)
@@ -343,6 +343,11 @@ class TestBoundedContextPhases:
         assert "100%" in m and "50%" in m
         assert "8.2" in m and "6.5" in m
         assert "| 8.0% |" in m and "| 2.0% |" in m
+        # D3: field-level consensus lines (typed fields, not just the label).
+        assert "Field-level consensus" in m
+        assert "stance field consensus" in m and "agree" in m
+        assert "allocation consensus" in m and "spread=6.0pp" in m
+        assert "judge score spread" in m and "6.50" in m
 
     def test_risk_stance_coerced_from_research_labels(self):
         """The shared 1-shot can leak BULL/BEAR into a risk payload; the
@@ -439,7 +444,7 @@ class TestBoundedContextPhases:
                 rebuttal_effectiveness = 9.0
                 rationale = ("empirical_grounding: 8, downside_tail_risk_weight: 6, "
                              "catalyst_clarity: 7, assumption_sensitivity: 5")
-            return _R(), None
+            return _R(), None, 'structured'
 
         class _L:
             def with_structured_output(self, schema, **kw):
@@ -462,6 +467,190 @@ class TestBoundedContextPhases:
         assert x["mean"] == 6.5, x          # (8+6+7+5)/4
         assert x.get("fallback") is True
         assert x["scores"]["empirical_grounding"] == 8.0
+
+    def test_judge_ensemble_aggregates_means_and_agreement(self):
+        """D1 — debate_judge_ensemble: the judge runs N times over the same
+        transcript; side_scores aggregate the per-run means, and
+        judge_agreement/judge_flip expose run-to-run winner disagreement so a
+        single borderline judge flip no longer silently swings the verdict."""
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+
+        # Run 1: X=7.0 (>Y) ; Run 2: Y=8.0 (>X) — a flip on the winner.
+        _calls = {"n": 0}
+
+        def _invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
+            _calls["n"] += 1
+            run = 1 if _calls["n"] <= 1 else 2
+            class _R:
+                judge_model_id = ""
+                round_evaluated = 1
+                evaluated_agent_alias = "Candidate_X"
+                entrenchment_detected = False
+                rebuttal_effectiveness = 9.0
+                rationale = "empirical_grounding: 8, downside_tail_risk_weight: 6, catalyst_clarity: 7, assumption_sensitivity: 5"
+
+            class _Y(_R):
+                evaluated_agent_alias = "Candidate_Y"
+
+            if "Candidate_Y" in prompt and "X" not in prompt.split("Score ONLY")[1].strip():
+                r = _Y()
+                r.dimension_scores = {
+                    "empirical_grounding": 8.0,
+                    "downside_tail_risk_weight": 8.0,
+                    "catalyst_clarity": 8.0,
+                    "assumption_sensitivity": 8.0,
+                }
+                return r, None, 'structured'
+            r = _R()
+            # Run 1 X scores high (7.25), Run 2 X scores low (5.0) -> flip vs Y.
+            if run == 1:
+                r.dimension_scores = {
+                    "empirical_grounding": 8.0, "downside_tail_risk_weight": 8.0,
+                    "catalyst_clarity": 7.0, "assumption_sensitivity": 6.0,
+                }
+            else:
+                r.dimension_scores = {
+                    "empirical_grounding": 6.0, "downside_tail_risk_weight": 4.0,
+                    "catalyst_clarity": 5.0, "assumption_sensitivity": 5.0,
+                }
+            return r, None, 'structured'
+
+        class _L:
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _invoke)
+        try:
+            node = dj_mod.create_debate_judge(_L(), section="research", cfg={"debate_judge_ensemble": 2})
+            out = node({"debate_state": {"round_records": [
+                {"bull": {"stance": "BULL", "core_thesis": "t", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 10}},
+                {"bear": {"stance": "BEAR", "core_thesis": "r", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 2}},
+            ]}})
+
+            d = out["debate_state"]
+            x = d["judge_scores"]["Candidate_X"]
+            y = d["judge_scores"]["Candidate_Y"]
+            # X: (8+8+7+6)/4=7.25 run1, (6+4+5+5)/4=5.0 run2 -> mean 6.125; Y=8 both runs.
+            assert x["mean"] == 6.125, x
+            assert x["ensemble_n"] == 2
+            assert y["mean"] == 8.0, y
+            # Winner = Y (8.0) in both runs -> agreement 1.0 despite X's variance.
+            assert d.get("judge_agreement") == 1.0
+            assert d.get("judge_flip") is False
+
+            # ensemble=1 default path: no flip flag.
+            node1 = dj_mod.create_debate_judge(_L(), section="research", cfg={})
+            out1 = node1({"debate_state": {"round_records": [
+                {"bull": {"stance": "BULL", "core_thesis": "t", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 10}},
+            ]}})
+            d1 = out1["debate_state"]
+            assert d1["judge_scores"]["Candidate_X"]["ensemble_n"] == 1
+            assert d1["judge_flip"] is False
+        finally:
+            monkeypatch.undo()
+
+    def test_judge_structured_fallback_flag_surfaced(self):
+        """D2 — when ANY judge invoke falls back to free-text/repair (mode !=
+        structured), the node must surface judge_structured_fallback=True so
+        the report/PM know reliability is reduced (a structured-output
+        failure on a truncation-prone reasoning model is a real signal, not
+        something to swallow)."""
+        import tradingagents.agents.arbiters.debate_judge as dj_mod
+
+        def _invoke_plain(structured_llm, plain_llm, prompt, schema, backup_llm=None):
+            # Judge produces a rubric via the PLAIN/free-text path (fallback).
+            class _R:
+                dimension_scores = {
+                    "empirical_grounding": 8.0,
+                    "downside_tail_risk_weight": 8.0,
+                    "catalyst_clarity": 8.0,
+                    "assumption_sensitivity": 8.0,
+                }
+                judge_model_id = ""
+                round_evaluated = 1
+                evaluated_agent_alias = "Candidate_X"
+                entrenchment_detected = False
+                rebuttal_effectiveness = 9.0
+                rationale = "empirical_grounding: 8, downside_tail_risk_weight: 8, catalyst_clarity: 8, assumption_sensitivity: 8"
+            return _R(), None, "plain"
+
+        class _L:
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(dj_mod, "invoke_structured_turn", _invoke_plain)
+        try:
+            node = dj_mod.create_debate_judge(_L(), section="research", cfg={})
+            out = node({"debate_state": {"round_records": [
+                {"bull": {"stance": "BULL", "core_thesis": "t", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 10}},
+                {"bear": {"stance": "BEAR", "core_thesis": "r", "quantitative_claims": [],
+                          "risk_factors": [], "recommended_allocation_pct": 2}},
+            ]}})
+            d = out["debate_state"]
+            assert d.get("judge_structured_fallback") is True
+            # The entry still scores correctly (fallback did not zero it).
+            x = d["judge_scores"]["Candidate_X"]
+            assert x["mean"] == 8.0, x
+        finally:
+            monkeypatch.undo()
+
+    def test_debater_turn_tags_structured_fallback_on_round_record(self):
+        """D2 — a debater turn that falls back to free-text must tag the
+        stored round payload with _structured_fallback=True (reporting reads
+        it as a per-role reliability signal; successful turns tag False)."""
+        import tradingagents.agents.researchers.structured_debate as sd_mod
+        from tradingagents.agents.researchers.structured_debate import create_debater_turn
+
+        class _Payload:
+            core_thesis = "t"
+            stance = "BULL"
+            recommended_allocation_pct = 5.0
+            quantitative_claims = []
+            risk_factors = []
+
+            def model_dump(self):
+                return {"stance": "BULL", "core_thesis": "t", "recommended_allocation_pct": 5.0}
+
+        calls = []
+
+        def _fake(structured_llm, plain_llm, prompt, schema, backup_llm=None):
+            calls.append(prompt)
+            return _Payload(), None, "plain"
+
+        class _L:
+            def with_structured_output(self, schema, **kw):
+                return object()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", _fake)
+        try:
+            node = create_debater_turn("bull", _L(), ground_truth=lambda s: {}, section="research")
+            out = node({"debate_state": {}, "investment_debate_state": {}})
+        finally:
+            monkeypatch.undo()
+
+        rr = out["debate_state"]["round_records"]
+        assert rr[-1]["bull"].get("_structured_fallback") is True
+        # A structured-mode turn tags False.
+        def _structured(structured_llm, plain_llm, prompt, schema, backup_llm=None):
+            return _Payload(), None, "structured"
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", _structured)
+        try:
+            node = create_debater_turn("bear", _L(), ground_truth=lambda s: {}, section="research")
+            out2 = node({"debate_state": {"round_records": [{"bull": {"stance": "B"}}], "last_side": "bull"},
+                         "investment_debate_state": {}})
+        finally:
+            monkeypatch.undo()
+        rr2 = out2["debate_state"]["round_records"]
+        assert rr2[-1]["bear"].get("_structured_fallback") is False
 
     def test_humanized_keys_resolve_via_alias_map(self):
         """Registry-key mismatch fix: debaters humanize the Key Index labels
@@ -545,7 +734,7 @@ class TestBoundedContextPhases:
         def _invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             calls["n"] += 1
             # always returns an empty-dims rubric (deepseek shape miss)
-            return _RubricEmpty(), None
+            return _RubricEmpty(), None, 'structured'
 
         class _L:
             def with_structured_output(self, schema, **kw):
@@ -586,7 +775,7 @@ class TestBoundedContextPhases:
         import tradingagents.agents.arbiters.debate_judge as dj_mod
 
         def _fail_structured(structured_llm, plain_llm, prompt, schema, backup_llm=None):
-            return None, "validation error: round_index"
+            return None, "validation error: round_index", "plain"
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(dj_mod, "invoke_structured_turn", _fail_structured)
@@ -634,7 +823,7 @@ class TestBoundedContextPhases:
 
         def _fake_invoke(structured_llm, plain_llm, prompt, schema, backup_llm=None):
             calls.append({"prompt": prompt})
-            return _Rubric(), None
+            return _Rubric(), None, 'structured'
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(dj_mod, "invoke_structured_turn", _fake_invoke)
@@ -770,7 +959,7 @@ class TestDegradedTurnNeverCrashes:
             "bear", _L(), ground_truth=lambda s: {}, section="research"
         )
         monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "provider boom"))
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "provider boom", "plain"))
         try:
             out = node({
                 "debate_state": {"round_records": [{"bull": {"core_thesis": "b"}}]},
@@ -798,7 +987,7 @@ class TestDegradedTurnNeverCrashes:
             "neutral", _L(), ground_truth=lambda s: {}, section="risk"
         )
         monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "bad json"))
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "bad json", "plain"))
         try:
             out = node({
                 "structured_risk_state": {},
@@ -959,7 +1148,7 @@ class TestDegradedTurnNeverCrashes:
             "bull", _L(), ground_truth=lambda s: {}, section="research"
         )
         monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "x"))
+        monkeypatch.setattr(sd_mod, "invoke_structured_turn", lambda *a, **k: (None, "x", "plain"))
         try:
             out = node({
                 "debate_state": {
