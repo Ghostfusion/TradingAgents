@@ -358,6 +358,38 @@ def test_finalize_messages_clean_history_passes_through_unchanged():
     assert kept_ids == ["p1"], "clean call passed through untouched"
 
 
+def test_deorphan_logs_stripped_call_ids(caplog):
+    """When _deorphan_tool_calls actually strips an unfulfilled call it must
+    log the offending ids so the real orphan mechanism (id reuse / relay
+    id-mangling / single-output-of-multi-call) is visible in production, not
+    silently swallowed."""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from tradingagents.agents.utils.structured import _deorphan_tool_calls
+
+    msgs = [
+        HumanMessage(content="TSM"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "get_stock_data", "args": {"ticker": "TSM"}, "id": "k1", "type": "tool_call"},
+                {"name": "get_sentiment", "args": {"ticker": "TSM"}, "id": "k2", "type": "tool_call"},
+            ],
+        ),
+        ToolMessage(content="DATA", tool_call_id="k1", name="get_stock_data"),
+    ]
+    with caplog.at_level("WARNING", logger="tradingagents.agents.utils.structured"):
+        out = _deorphan_tool_calls(msgs)
+
+    # The orphaned k2 was stripped; k1 kept.
+    ai_turn = [m for m in out if getattr(m, "tool_calls", None)][0]
+    assert [tc["id"] for tc in ai_turn.tool_calls] == ["k1"]
+    # The diagnostic names the stripped call and the turn index.
+    assert "de-orphaning 1 unfulfilled tool call(s) at message[1]" in caplog.text
+    assert "'k2'" in caplog.text
+    assert "no tool output" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Analyst node wiring: cap turn produces a non-empty report
 # ---------------------------------------------------------------------------

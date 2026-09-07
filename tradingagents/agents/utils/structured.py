@@ -352,6 +352,11 @@ def _deorphan_tool_calls(messages: list) -> list:
 
     Callers keep the returned list; if no call was stripped the original
     objects are returned so retries stay byte-identical.
+
+    When a call IS stripped, logs the offending call ids — the agent-turn
+    index and the ids actually kept — so a production hit reveals the real
+    orphan mechanism (id reuse / relay id-mangling / single-output-of-multi-
+    call), not just a swallowed defect.
     """
     from langchain_core.messages import AIMessage, ToolMessage
 
@@ -362,7 +367,7 @@ def _deorphan_tool_calls(messages: list) -> list:
     }
     out: list = []
     changed = False
-    for m in messages:
+    for idx, m in enumerate(messages):
         calls = list(getattr(m, "tool_calls", None) or [])
         if not calls:
             out.append(m)
@@ -372,6 +377,19 @@ def _deorphan_tool_calls(messages: list) -> list:
             out.append(m)
             continue
         changed = True
+        stripped = [c for c in calls if (c.get("id") or "") not in fulfilled]
+        logger.warning(
+            "de-orphaning %d unfulfilled tool call(s) at message[%d] "
+            "(kept=%s stripped=%s): "
+            "%s",
+            len(stripped), idx, [c.get("id") for c in kept],
+            [c.get("id") for c in stripped],
+            "; ".join(
+                f"call {c.get('id')!r} (tool {c.get('name')!r}) has no tool "
+                f"output in the history"
+                for c in stripped
+            ),
+        )
         out.append(
             AIMessage(
                 content=m.content or "",
