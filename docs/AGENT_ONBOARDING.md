@@ -319,6 +319,12 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-07 `(working tree)` - Reasoning-budget bound for OpenRouter models:
+  `TRADINGAGENTS_OPENROUTER_REASONING_EFFORT` (`low|medium|high`, off by
+  default) forwards `reasoning: {effort}` for the openrouter provider so a
+  reasoning model (deepseek-v4-flash) that burns its WHOLE max_tokens on
+  hidden reasoning (completion==reasoning==4000, empty report / JSON-parse
+  fail) keeps output budget for the report/JSON. See CHANGELOG.
 - 2026-09-07 `(working tree)` - Tool-not-found 400 on the cap-forced report
   retry: `structured._deorphan_tool_calls` strips unfulfilled tool calls
   before ANY chain re-invoke (`finalize_messages`, `retry_chain_if_truncated`,

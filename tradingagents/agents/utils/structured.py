@@ -165,7 +165,7 @@ def _stub_completion_prompt(original: Any) -> str:
         "recommendation, position action, and reasoning. Cite only computed "
         "values you were given; state 'unavailable' where none exist. Do not "
         "echo the instructions back.\n\n"
-        "INSTRUCTIONS + EVIDENCE:\n" + text[:4000]
+        "INSTRUCTIONS + EVIDENCE:\n" + text[:8000]
     )
 
 

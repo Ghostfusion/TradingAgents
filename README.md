@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-07] **Reasoning-budget bound for OpenRouter models** — new
+  `TRADINGAGENTS_OPENROUTER_REASONING_EFFORT` (`.env`, `low|medium|high`, off
+  by default): a reasoning model (deepseek-v4-flash) that burns its WHOLE
+  max_tokens on hidden reasoning now gets its hidden-reasoning effort capped
+  below the output budget, so the cap-forced final report turn / structured
+  debate JSON always has output room instead of returning empty / failing
+  JSON-parse (the 2026-09-07 empty-report + free-text-revert defect). Sent
+  only for the OpenRouter provider. See CHANGELOG.
 - [2026-09-07] **Tool-not-found 400 fixed on report retries** — the analyst
   cap-forced retry (and truncation/stub chain continuations) now strip
   unfulfilled tool calls from the history before re-invoking, so a strict

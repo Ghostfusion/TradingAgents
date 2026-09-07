@@ -191,6 +191,7 @@ _ENV_OVERRIDES = {
     # OpenRouter provider routing: comma-separated provider slugs to always skip
     # (e.g. slow/unreliable endpoints). Sent as provider.ignore in the request
     # body via extra_body. Empty = no restriction.
+    "TRADINGAGENTS_OPENROUTER_REASONING_EFFORT": "openrouter_reasoning_effort",
     "TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS": "openrouter_ignore_providers",
     # Per-role max output tokens (cap; most-information-but-not-overflow).
     # quick/global is applied to analysts + debaters + trader; deep to RM/PM.
@@ -345,6 +346,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # unreliable endpoints). Sent as provider.ignore via extra_body. Empty
         # list = downstream of OpenRouter's own defaults.
         "openrouter_ignore_providers": [],
+        # Reasoning-effort bound for OpenRouter reasoning models (e.g.
+        # deepseek-*): sent as ``reasoning: {effort: ...}`` in the request
+        # body so a model cannot burn its WHOLE max_tokens on hidden reasoning
+        # (observed: completion_tokens==reasoning_tokens==4000 at the debate
+        # cap -> the report turn returns empty / JSON never parses). Empty =
+        # use the provider's default effort (no bound).
+        "openrouter_reasoning_effort": "",
         # Per-role max output tokens (hard ceiling via max_tokens when the
         # provider accepts it). Basis: measured max outputs in this repo
         # (analysts ~5k, RM 1.9k, trader .7k, PM 1.4k) + ~20% headroom, well
@@ -352,9 +360,9 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # quick/global = analysts + debaters + trader (8000 - raised from 6000
         # after 2026-08-27 WDC reports truncated mid-sentence at the 6000 cap),
         # deep = RM + PM (2500).
-        "max_output_tokens": 8000,
-        "max_output_tokens_quick": 8000,
-        "max_output_tokens_deep": 2500,
+        "max_output_tokens": 16000,
+        "max_output_tokens_quick": 16000,
+        "max_output_tokens_deep": 8000,
         # Backup model for truncation-continuation retries (see env map above).
         # Empty = off: a cut response is continued by the same model that cut it.
         "backup_llm": "",
@@ -407,7 +415,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # (deepseek-v4) counts its hidden reasoning inside this budget — 2500
         # truncated mid-JSON -> degraded turns. 4000 leaves reasoning headroom
         # while the list bounds still cap the payload.
-        "debate_max_output_tokens": 4000,
+        "debate_max_output_tokens": 16000,
         # Sampling temperature for debate roles (low = less formatting drift;
         # 0.1 recommended, None = provider default). See direction.md /
         # deepseek JSON-enforcement notes.

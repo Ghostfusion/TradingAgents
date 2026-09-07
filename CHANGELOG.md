@@ -31,6 +31,17 @@ Breaking changes within the 0.x line are called out explicitly.
   mapping + graph wiring (backup built when set, absent when unset). See
   CHANGELOG / api_reference.
 ### Fixed
+- **Reasoning-model output-budget starvation** (`TRADINGAGENTS_OPENROUTER_REASONING_EFFORT`
+  in `.env`, config `openrouter_reasoning_effort`): a reasoning model
+  (deepseek-v4-flash via OpenRouter) spends its WHOLE `max_tokens` on hidden
+  reasoning — observed `completion_tokens==reasoning_tokens==4000`, "length
+  limit was reached" — so the cap-forced final report turn returns empty and
+  the structured-debate judge JSON never parses (both fall back to free text,
+  TSM 2026-09-07). The knob forwards `reasoning: {effort: low|medium|high}`
+  in the request body for the OpenRouter provider only, so the model's
+  reasoning burn stays BELOW the output budget and the report/JSON always has
+  room. Off by default (provider default effort). Tests:
+  `test_llm_client_timeout.py` +3 (forward / unset-omitted / native-not-affected).
 - **Tool-not-found 400 on the cap-forced report retry** (`structured`): a
   strict tool-calling backend (OpenAI / Azure via the OpenRouter relay)
   hard-400s a conversation that contains an unfulfilled tool call — "No

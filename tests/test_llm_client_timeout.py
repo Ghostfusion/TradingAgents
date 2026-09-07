@@ -90,3 +90,77 @@ class TestAnthropicTimeout:
             model="claude-sonnet-4-6", api_key="x", default_request_timeout=90
         ).get_llm()
         assert captured["kwargs"].get("default_request_timeout") == 90
+
+
+@pytest.mark.unit
+class TestOpenRouterReasoningEffort:
+    """B2 — bound the hidden-reasoning burn on OpenRouter reasoning models.
+
+    A reasoning model (deepseek-v4-flash) spends its WHOLE max_tokens budget
+    on hidden reasoning (observed completion_tokens==reasoning_tokens==4000,
+    "length limit was reached") so the cap-forced report turn / structured
+    debate JSON returns empty. The configured reasoning effort (low) must be
+    forwarded as ``extra_body.reasoning.effort`` for the openrouter provider
+    only, and omitted for native providers.
+    """
+
+    def _capture(self, monkeypatch):
+        captured: dict = {}
+
+        def _fake(**kwargs):
+            captured.setdefault("kwargs", kwargs)
+            return object()
+
+        monkeypatch.setattr(omod, "NormalizedChatOpenAI", _fake)
+        monkeypatch.setitem(
+            omod.OPENAI_COMPATIBLE_PROVIDERS, "openrouter",
+            omod.ProviderSpec(chat_class=_fake),
+        )
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        return captured
+
+    def test_openrouter_forwards_reasoning_effort(self, monkeypatch):
+        from tradingagents.dataflows.config import set_config
+
+        set_config({"openrouter_reasoning_effort": "low"})
+        try:
+            captured = self._capture(monkeypatch)
+            omod.OpenAIClient(
+                model="deepseek/deepseek-v4-flash-0731", provider="openrouter", api_key="x"
+            ).get_llm()
+            extra = captured["kwargs"].get("extra_body", {})
+            assert extra.get("reasoning", {}).get("effort") == "low"
+        finally:
+            set_config({"openrouter_reasoning_effort": ""})
+
+    def test_openrouter_no_effort_when_unset(self, monkeypatch):
+        from tradingagents.dataflows.config import set_config
+
+        set_config({"openrouter_reasoning_effort": ""})
+        try:
+            captured = self._capture(monkeypatch)
+            omod.OpenAIClient(
+                model="deepseek/deepseek-v4-flash-0731", provider="openrouter", api_key="x"
+            ).get_llm()
+            extra = captured["kwargs"].get("extra_body", {})
+            assert not extra.get("reasoning", {}).get("effort")
+        finally:
+            set_config({"openrouter_reasoning_effort": ""})
+
+    def test_native_provider_not_affected(self, monkeypatch):
+        # The bound is only read inside the openrouter branch.
+        captured: dict = {}
+
+        def _fake(**kwargs):
+            captured.setdefault("kwargs", kwargs)
+            return object()
+
+        monkeypatch.setattr(omod, "NormalizedChatOpenAI", _fake)
+        monkeypatch.setitem(
+            omod.OPENAI_COMPATIBLE_PROVIDERS, "openai",
+            omod.ProviderSpec(chat_class=_fake, use_responses_api=True),
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        omod.OpenAIClient(model="gpt-4o-mini", api_key="x").get_llm()
+        extra = captured["kwargs"].get("extra_body", {})
+        assert not extra.get("reasoning", {}).get("effort")

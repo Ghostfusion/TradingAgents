@@ -353,8 +353,36 @@ class OpenAIClient(BaseLLMClient):
             llm_kwargs.setdefault("extra_body", {})
             llm_kwargs["extra_body"]["provider"] = {"ignore": ignore}
 
+        # OpenRouter reasoning-effort bound (TRADINGAGENTS_OPENROUTER_REASONING_
+        # EFFORT): sent as ``reasoning: {"effort": ...}`` in the request body so
+        # a reasoning model (deepseek-v4-flash etc.) cannot burn its WHOLE
+        # max_tokens budget on hidden reasoning — the observed
+        # completion_tokens==reasoning_tokens==4000 "length limit was reached"
+        # that empties the cap-forced report turn. Only forwarded for the
+        # openrouter provider (OpenRouter's field), never for a native provider.
+        if self.provider == "openrouter":
+            effort = self._openrouter_reasoning_effort()
+            if effort:
+                llm_kwargs.setdefault("extra_body", {})
+                llm_kwargs["extra_body"].setdefault("reasoning", {})["effort"] = effort
+
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)
+
+    def _openrouter_reasoning_effort(self) -> str:
+        """Configured OpenRouter reasoning-effort bound, or ''.
+
+        Read from the ``openrouter_reasoning_effort`` config key (env
+        TRADINGAGENTS_OPENROUTER_REASONING_EFFORT). '' = provider default
+        (no bound).
+        """
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - advisory; degrade to no bound
+            cfg = {}
+        return str(cfg.get("openrouter_reasoning_effort") or "").strip()
 
     def _openrouter_ignore(self):
         """Provider slugs to skip for OpenRouter, from config/env, or None.
