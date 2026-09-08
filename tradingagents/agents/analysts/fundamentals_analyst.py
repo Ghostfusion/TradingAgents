@@ -53,7 +53,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_fundamentals_analyst(llm, backup_llm=None):
+def create_fundamentals_analyst(llm, backup_llm=None, config=None):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
@@ -107,6 +107,16 @@ def create_fundamentals_analyst(llm, backup_llm=None):
             get_position_risk_multiplier,
         ]
 
+        # Forced-tool evidence (map-reduce): when analyst_forced_tools is set,
+        # gather the fixed tool set once (skipped on tool-loop re-entries via
+        # the state key) and reduce from the rendered block instead of the
+        # LLM-selected subset. see docs/design_mapreduce_forced_tool_gathering.md.
+        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+
+        evidence_block, tool_evidence = gather_for_analyst_node(
+            state, "fundamentals", tools, config
+        )
+
         system_message = (
             "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
@@ -137,13 +147,14 @@ def create_fundamentals_analyst(llm, backup_llm=None):
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
-                    "{system_message}",
+                    "{system_message}\n{evidence_block}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
 
         prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(evidence_block=evidence_block)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
@@ -174,6 +185,7 @@ def create_fundamentals_analyst(llm, backup_llm=None):
             return {
                 "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
                 "fundamentals_report": _report,
+                "tool_evidence": tool_evidence,
             }
 
         result = chain.invoke(state["messages"])
@@ -204,6 +216,7 @@ def create_fundamentals_analyst(llm, backup_llm=None):
         return {
             "messages": [result],
             "fundamentals_report": report,
+            "tool_evidence": tool_evidence,
         }
 
     return fundamentals_analyst_node

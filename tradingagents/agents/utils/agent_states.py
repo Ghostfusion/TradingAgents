@@ -99,3 +99,10 @@ class AgentState(MessagesState):
     computed_independent_vote: Annotated[
         str, "Deterministic agreement/consensus summary from the independent stances"
     ]
+    # Forced-tool evidence (map-reduce, design docs/design_mapreduce_forced_tool_gathering.md):
+    # per-analyst-key list of ToolEvidenceLeaf dicts gathered deterministically
+    # when ``analyst_forced_tools`` is set; the analyst node reduces from the
+    # rendered block. Absent when the legacy LLM-selected tool path runs.
+    tool_evidence: Annotated[
+        dict, "Analyst-key → list of ToolEvidenceLeaf dicts (deterministic gather)"
+    ]

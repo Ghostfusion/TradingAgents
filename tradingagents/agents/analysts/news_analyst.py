@@ -31,7 +31,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-def create_news_analyst(llm, backup_llm=None):
+def create_news_analyst(llm, backup_llm=None, config=None):
     def news_analyst_node(state):
         current_date = state["trade_date"]
         asset_type = state.get("asset_type", "stock")
@@ -65,6 +65,14 @@ def create_news_analyst(llm, backup_llm=None):
             get_credit_spread_read,
         ]
 
+        # Forced-tool evidence (map-reduce): gather deterministically once
+        # when analyst_forced_tools is set; skipped on tool-loop re-entries.
+        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+
+        evidence_block, tool_evidence = gather_for_analyst_node(
+            state, "news", tools, config
+        )
+
         system_message = (
             f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve'), get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events), get_earnings_calendar(ticker, curr_date) for the upcoming earnings date and last reported EPS surprise (a major single-day catalyst), and get_sec_filings(ticker) for recent SEC filings (8-K material events, 10-K/Q reports, S-1/S-3 capital raises, SC 13D/G stake disclosures) as hard event-risk signals beyond headlines — when SEC EDGAR is unavailable it automatically falls back to Massive's Form-4 insider-activity data and the result says so, so you can tell the difference. get_massive_news(ticker, start_date, end_date) also returns news but with per-article structured sentiment (positive/negative/neutral) and sentiment reasoning from Massive.com — use it alongside get_news when you need a computed sentiment label rather than raw headlines. "
             + "You also have scheduled-catalyst and regime tools: economic calendar, fed watch, market breadth, and earnings-catalyst - size the catalyst risk of an incoming print. "
@@ -95,13 +103,14 @@ def create_news_analyst(llm, backup_llm=None):
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
-                    "{system_message}",
+                    "{system_message}\n{evidence_block}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
 
         prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(evidence_block=evidence_block)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
@@ -132,6 +141,7 @@ def create_news_analyst(llm, backup_llm=None):
             return {
                 "messages": [_CapAIMessage(content=_report, id="news-cap-report")],
                 "news_report": _report,
+                "tool_evidence": tool_evidence,
             }
 
         result = chain.invoke(state["messages"])
@@ -161,6 +171,7 @@ def create_news_analyst(llm, backup_llm=None):
         return {
             "messages": [result],
             "news_report": report,
+            "tool_evidence": tool_evidence,
         }
 
     return news_analyst_node

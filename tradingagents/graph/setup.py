@@ -179,10 +179,10 @@ class GraphSetup:
         plan = build_analyst_execution_plan(selected_analysts)
 
         analyst_factories = {
-            "market": lambda: create_market_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
-            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
-            "news": lambda: create_news_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
-            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm),
+            "market": lambda: create_market_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm, config=self.config),
+            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm, config=self.config),
+            "news": lambda: create_news_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm, config=self.config),
+            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm, backup_llm=self.backup_llm, config=self.config),
         }
 
         # Create researcher and manager nodes

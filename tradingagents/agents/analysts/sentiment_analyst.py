@@ -49,7 +49,7 @@ def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
-def create_sentiment_analyst(llm, backup_llm=None):
+def create_sentiment_analyst(llm, backup_llm=None, config=None):
     """Create a sentiment analyst node for the trading graph.
 
     Pre-fetches news + StockTwits + Reddit data, injects them into the
@@ -59,6 +59,11 @@ def create_sentiment_analyst(llm, backup_llm=None):
 
     ``backup_llm`` (optional): the cut-at-cap continuation retry runs on this
     model instead of the truncated one (TRADINGAGENTS_BACKUP_LLM).
+
+    ``config`` (optional, unused here): the forced-tool gather is a no-op for
+    this analyst — it pre-fetches a FIXED source set into the prompt (already
+    deterministic in composition), so there is no tool-selection variance to
+    remove. The parameter keeps the four factory signatures uniform.
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 

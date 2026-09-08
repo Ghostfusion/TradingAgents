@@ -120,7 +120,7 @@ from tradingagents.agents.utils.alpaca_tools import get_market_snapshot_alpaca
 from tradingagents.agents.utils.momentum_tools import get_momentum_scan
 
 
-def create_market_analyst(llm, backup_llm=None):
+def create_market_analyst(llm, backup_llm=None, config=None):
 
     def market_analyst_node(state):
         current_date = state["trade_date"]
@@ -238,6 +238,14 @@ def create_market_analyst(llm, backup_llm=None):
             get_taylor_read,
             get_factor_profile,
         ]
+
+        # Forced-tool evidence (map-reduce): gather deterministically once
+        # when analyst_forced_tools is set; skipped on tool-loop re-entries.
+        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+
+        evidence_block, tool_evidence = gather_for_analyst_node(
+            state, "market", tools, config
+        )
 
         system_message = (
             """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
@@ -390,13 +398,14 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
-                    "{system_message}",
+                    "{system_message}\n{evidence_block}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
 
         prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(evidence_block=evidence_block)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
@@ -430,6 +439,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             return {
                 "messages": [_CapAIMessage(content=_report, id="market-cap-report")],
                 "market_report": _report,
+                "tool_evidence": tool_evidence,
             }
 
         result = chain.invoke(state["messages"])
@@ -462,6 +472,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         return {
             "messages": [result],
             "market_report": report,
+            "tool_evidence": tool_evidence,
         }
 
     return market_analyst_node
