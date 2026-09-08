@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from tradingagents.agents.analysts import sentiment_analyst as sentiment_mod
 from tradingagents.agents.analysts.sentiment_analyst import create_sentiment_analyst
 from tradingagents.agents.managers.research_manager import create_research_manager
 from tradingagents.agents.schemas import (
@@ -603,3 +604,75 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+    def test_journals_prefetch_into_tool_evidence(self, monkeypatch):
+        """Regression (QCOM 2026-09-07): the sentiment analyst consumed
+        news/StockTwits/Reddit + a computed score but persisted none of it, so
+        "13 Bull vs 1 Bear" and "velocity -0.82 vs 0.78" could not be verified
+        post-run. The node must journal its fixed source set under
+        tool_evidence['sentiment'] in the same leaf shape as forced-tool
+        leaves (so --evidence diff/grounding sees them)."""
+        from types import SimpleNamespace
+
+        from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
+
+        monkeypatch.setattr(
+            sentiment_mod, "get_news",
+            SimpleNamespace(func=lambda t, s, e: "## QCOM News\nheadline #1"),
+        )
+        monkeypatch.setattr(
+            sentiment_mod, "fetch_stocktwits_messages",
+            lambda t, limit=30, start_date=None, end_date=None:
+                "13 Bullish, 1 Bearish, 7 no-label",
+        )
+        monkeypatch.setattr(
+            sentiment_mod, "fetch_reddit_posts",
+            lambda t, start_date=None, end_date=None: "### Reddit\nno posts",
+        )
+        captured = {}
+        out = create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+        leaves = out[TOOL_EVIDENCE_KEY]["sentiment"]
+        names = [leaf["tool"] for leaf in leaves]
+        assert names == [
+            "news_headlines",
+            "stocktwits_messages",
+            "reddit_posts",
+            "sentiment_computed",
+        ]
+        assert [leaf["status"] for leaf in leaves[:3]] == ["ok", "ok", "ok"]
+        # conftest mocks compute_social_scores -> None, so the computed leaf
+        # truthfully reports no_data (exactly what the analyst saw).
+        assert leaves[3]["status"] == "no_data"
+        # Fixed composition + args_hash like a gatherer leaf.
+        assert leaves[0]["args"]["ticker"] == "NVDA"
+        assert leaves[1]["args"]["limit"] == 30
+        assert len(leaves[1]["args_hash"]) == 12
+
+    def test_journal_respects_summary_window_truncation(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
+        from tradingagents.dataflows.config import set_config
+
+        set_config({"analyst_forced_tools_summary_window": 12})
+        long = "X" * 500
+        monkeypatch.setattr(sentiment_mod, "get_news", SimpleNamespace(func=lambda t, s, e: long))
+        monkeypatch.setattr(
+            sentiment_mod, "fetch_stocktwits_messages",
+            lambda t, limit=30, start_date=None, end_date=None: "short",
+        )
+        monkeypatch.setattr(
+            sentiment_mod, "fetch_reddit_posts",
+            lambda t, start_date=None, end_date=None: "none",
+        )
+        captured = {}
+        out = create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+        leaves = out[TOOL_EVIDENCE_KEY]["sentiment"]
+        # _truncate appends a "[truncated at N chars]" marker; the source is
+        # cut to the window before it.
+        assert "...[truncated at 12 chars]" in leaves[0]["content"]
+        assert "ok" in [leaf["status"] for leaf in leaves]

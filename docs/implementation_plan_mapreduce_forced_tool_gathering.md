@@ -15,7 +15,11 @@ synthesizes from the merged evidence. Judge/PM/debate untouched. **Off by
 default** — the current LLM-selected path remains the default.
 
 **In scope:** the 4 information analysts (market / fundamentals / news /
-sentiment).
+sentiment). The sentiment analyst is exempt from the forced *tool* gather
+(no tool binding; it pre-fetches a fixed news/StockTwits/Reddit source set),
+but it journals that pre-fetch + the deterministic computed score into
+`tool_evidence['sentiment']` as normal-shaped leaves, so post-run figure
+grounding/--evidence diffing covers it too.
 
 **Deferred (tracked elsewhere, see §Tracked):** risk debaters + Trader
 (own, plan-dependent) and true hung-thread termination.

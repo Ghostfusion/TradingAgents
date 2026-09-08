@@ -3550,3 +3550,12 @@ PRs from late 2025 also landed here.
   `tool_evidence.json` (tolerance-based: rounded copies of tool values
   pass, digit-garble like 303.9-vs-903.9 fires). Advisory tripwire; the
   prompt rule is the primary guard.
+
+### Added
+- **Sentiment analyst journals its pre-fetch into `tool_evidence.json`**:
+  the news / StockTwits / Reddit blocks and the deterministic computed score
+  are persisted as normal-shaped `sentiment:*` leaves (same args_hash +
+  truncation as forced-tool leaves), closing the post-hoc verification gap
+  that made the QCOM 2026-09-07 sentiment tallies ("13 Bull vs 1 Bear",
+  "velocity -0.82 vs 0.78") uncheckable — `repro_check --evidence` now
+  grounds sentiment figures against what the analyst actually saw.

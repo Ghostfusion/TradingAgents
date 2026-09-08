@@ -215,6 +215,33 @@ def gather_evidence(
     return [leaves[name] for name in resolved if name in leaves]
 
 
+def make_evidence_leaf(
+    tool: str,
+    content: str,
+    args: dict | None = None,
+    status: str = "ok",
+    summary_window: int | None = None,
+) -> dict:
+    """Persist-shape evidence dict for a non-tool, deterministic source.
+
+    Same shape/hash/truncation as a gatherer leaf, so ``tool_evidence.json``
+    and ``repro_check --evidence`` treat externally journaled inputs (e.g.
+    the sentiment analyst's pre-fetched news / StockTwits / Reddit blocks)
+    identically to forced-tool leaves. ``status``: ok | error | no_data |
+    timeout.
+    """
+    return _leaf_as_dict(
+        _leaf(
+            tool,
+            args,
+            status,
+            content,
+            time.monotonic(),
+            summary_window if summary_window is not None else 12000,
+        )
+    )
+
+
 def _leaf(
     name: str,
     args: dict,

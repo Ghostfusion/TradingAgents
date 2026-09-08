@@ -49,6 +49,15 @@ def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
+def _prefetch_status(content: str) -> str:
+    """Status of a pre-fetched block: "no_data" when the fetcher returned an
+    empty or explicit-unavailable placeholder, else "ok"."""
+    c = (content or "").strip()
+    if not c or "unavailable" in c.lower():
+        return "no_data"
+    return "ok"
+
+
 def create_sentiment_analyst(llm, backup_llm=None, config=None):
     """Create a sentiment analyst node for the trading graph.
 
@@ -123,21 +132,93 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
 
         # Deterministic sentiment (score + surprise velocity) injected into the
         # report when enable_sentiment is on - numbers the LLM can't alter.
-        computed = None
+        cfg = None
         try:
             from tradingagents.dataflows.config import get_config
 
-            if get_config().get("enable_sentiment"):
+            cfg = get_config()
+        except Exception:
+            cfg = None
+
+        computed = None
+        if cfg is not None and cfg.get("enable_sentiment"):
+            try:
                 from tradingagents.strategies.sentiment import (
                     compute_social_scores,
                     computed_sentiment_line,
                 )
 
                 computed = compute_social_scores(
-                    ticker, cache_dir=get_config().get("data_cache_dir"), limit=30
+                    ticker, cache_dir=cfg.get("data_cache_dir"), limit=30
                 )
+            except Exception:
+                computed = None
+
+        # Journal the pre-fetched source set (news / StockTwits / Reddit) and
+        # the deterministic sentiment compute into state["tool_evidence"]
+        # under "sentiment", so tool_evidence.json records exactly what this
+        # analyst reduced from — closing the post-hoc verification gap that
+        # made the QCOM 2026-09-07 sentiment tallies ("13 Bull vs 1 Bear",
+        # velocity -0.82 vs -0.78) uncheckable after the run.
+        from tradingagents.agents.utils.evidence_gather import (
+            TOOL_EVIDENCE_KEY,
+            make_evidence_leaf,
+        )
+
+        _window = 12000
+        try:
+            _window = int((cfg or {}).get("analyst_forced_tools_summary_window") or _window)
         except Exception:
-            computed = None
+            _window = 12000
+        sentiment_leaves = [
+            make_evidence_leaf(
+                "news_headlines",
+                news_block,
+                args={"ticker": ticker, "start_date": start_date, "end_date": end_date},
+                status=_prefetch_status(news_block),
+                summary_window=_window,
+            ),
+            make_evidence_leaf(
+                "stocktwits_messages",
+                stocktwits_block,
+                args={
+                    "ticker": ticker,
+                    "limit": 30,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+                status=_prefetch_status(stocktwits_block),
+                summary_window=_window,
+            ),
+            make_evidence_leaf(
+                "reddit_posts",
+                reddit_block,
+                args={"ticker": ticker, "start_date": start_date, "end_date": end_date},
+                status=_prefetch_status(reddit_block),
+                summary_window=_window,
+            ),
+        ]
+        if computed is not None:
+            sentiment_leaves.append(
+                make_evidence_leaf(
+                    "sentiment_computed",
+                    computed_sentiment_line(computed),
+                    status="ok",
+                    summary_window=_window,
+                )
+            )
+        else:
+            sentiment_leaves.append(
+                make_evidence_leaf(
+                    "sentiment_computed",
+                    "computed sentiment unavailable (enable_sentiment off or "
+                    "StockTwits fetch failed)",
+                    status="no_data",
+                    summary_window=_window,
+                )
+            )
+        evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})
+        evidence["sentiment"] = sentiment_leaves
 
         def _sentiment_hook(report):
             if computed is None:
@@ -161,6 +242,7 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
+            "tool_evidence": evidence,
         }
 
     return sentiment_analyst_node
