@@ -27,6 +27,15 @@ from tradingagents.dataflows.interface import route_to_vendor
 # ---------------------------------------------------------------------------
 
 
+def _load_ohlcv_df(ticker: str) -> object:
+    """Fetch the verified OHLCV frame (test seam; prod uses load_ohlcv)."""
+    from datetime import datetime
+
+    from tradingagents.dataflows.stockstats_utils import load_ohlcv
+
+    return load_ohlcv(ticker, datetime.now().strftime("%Y-%m-%d"))
+
+
 def _scale_note(ticker: str, closes: list) -> str:
     """Price-scale/staleness advisory vs the run's verified close."""
     from tradingagents.agents.utils.price_consistency import ohlcv_scale_warning
@@ -36,34 +45,33 @@ def _scale_note(ticker: str, closes: list) -> str:
 
 
 def _ohlcv(ticker: str, days: int = 320) -> dict:
-    """Daily OHLCV via the vendor chain (Date,Open,High,Low,Close,Volume rows).
+    """Daily OHLCV via the verified-snapshot source (date-aware, look-ahead-safe).
 
     Returns {"dates", "closes", "highs", "lows", "volumes", "opens"} (all
-    empty on failure).
+    empty on failure). Uses ``stockstats_utils.load_ohlcv`` — the same
+    date-aware, look-ahead-filtered source as the verified market snapshot —
+    so value-dip / support / bollinger tools compute on the same day's prices
+    as the verified close (N21: the old vendor chain lagged a session or
+    returned a ~2x-scale series, e.g. MSTR 284.92 vs verified 136.68).
     """
     try:
-        from datetime import datetime, timedelta
-
-        end = datetime.now().strftime("%Y-%m-%d")
-        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        out = route_to_vendor("get_stock_data", ticker, start, end) or ""
-        dates, closes, opens, highs, lows, volumes = [], [], [], [], [], []
-        for line in out.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or line.lower().startswith("date,"):
-                continue
-            parts = line.split(",")
-            if len(parts) < 6:
-                continue
-            try:
-                dates.append(parts[0].strip())
-                opens.append(float(parts[1]))
-                highs.append(float(parts[2]))
-                lows.append(float(parts[3]))
-                closes.append(float(parts[4]))
-                volumes.append(float(parts[5]))
-            except ValueError:
-                continue
+        _df = _load_ohlcv_df(ticker)
+        if _df is None or _df.empty:
+            raise ValueError("no rows")
+        dates = [str(x)[:10] for x in _df["Date"].tolist()]
+        closes = [float(x) for x in _df["Close"].tolist()]
+        opens = [float(x) for x in _df["Open"].tolist()]
+        highs = [float(x) for x in _df["High"].tolist()]
+        lows = [float(x) for x in _df["Low"].tolist()]
+        volumes = [float(x) for x in _df["Volume"].tolist()]
+        if days and len(closes) > days:
+            tail = len(closes) - int(days)
+            dates = dates[tail:]
+            opens = opens[tail:]
+            highs = highs[tail:]
+            lows = lows[tail:]
+            closes = closes[tail:]
+            volumes = volumes[tail:]
         return {
             "dates": dates,
             "closes": closes,

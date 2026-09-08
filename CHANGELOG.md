@@ -3675,3 +3675,20 @@ PRs from late 2025 also landed here.
   the revenue current/prior pair (ground truth); without a pair, a >100%
   claimed YoY is treated as percent-scaled (1.88 -> 1.88%). The earlier
   |v|>3.0-only guard let the 100x artifact through for values under 300%.
+
+### Fixed
+- **`_ohlcv` aligned to the verified-snapshot source (N21 — root cause of the
+  price-scale warnings)**: both `analysis_tools._ohlcv` and
+  `value_dip_tools._ohlcv` now read from `stockstats_utils.load_ohlcv` — the
+  SAME date-aware, look-ahead-filtered source the verified market snapshot
+  uses — instead of the vendor-chain CSV that lagged a session or returned a
+  corrupted ~2x-scale series (MSTR 2026-09-08: tools at 284.92 / 142.80 vs
+  verified 136.68; INTU 2026-09-08: 332.70 vs 314.12). Fixes the stale close
+  at the root: the 8 setup tools now compute on the same day's price as the
+  verified close, so actionable stops/targets/levels are no longer built on
+  yesterday's (or a corrupted) series, and the PRICE-SCALE WARNING advisory
+  (6960a03) now correctly stays silent when the sources agree. Also fixed the
+  column mapping (load_ohlcv df is `Date,Close,High,Low,Open,Volume`).
+- **Test seam `_load_ohlcv_df`** added to both tool modules so the OHLCV
+  loader is patchable without bypassing the verified source; the impacted
+  `test_analysis_tools.py` data-mocks converted to produce DataFrames.

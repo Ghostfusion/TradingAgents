@@ -43,6 +43,15 @@ def _clear_ohlcv_cache() -> None:
     _RUN_OHLCV_CACHE.clear()
 
 
+def _load_ohlcv_df(ticker: str) -> object:
+    """Fetch the verified OHLCV frame (test seam; prod uses load_ohlcv)."""
+    from datetime import datetime
+
+    from tradingagents.dataflows.stockstats_utils import load_ohlcv
+
+    return load_ohlcv(ticker, datetime.now().strftime("%Y-%m-%d"))
+
+
 def _scale_note(ticker: str, closes: list) -> str:
     """Price-scale/staleness advisory vs the run's verified close.
 
@@ -71,30 +80,31 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
         return cached
     absence: dict | None = None
     try:
-        from datetime import datetime, timedelta
-
-        from tradingagents.dataflows.interface import route_to_vendor_typed
-
-        end = datetime.now().strftime("%Y-%m-%d")
-        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        vr = route_to_vendor_typed("get_stock_data", ticker, start, end)
-        out = (vr.results or "") if isinstance(vr.results, str) else ""
-        if vr.error_kind is not None:
-            absence = vr.absence
+        # N21: use the SAME date-aware, look-ahead-filtered source the verified
+        # market snapshot uses (load_ohlcv) so every OHLCV-based tool computes
+        # on the same day's prices as the verified close — closing the
+        # stale-session / corrupted-scale gap (INTU 2026-09-08; the
+        # 2026-09-08 batch showed the old vendor chain lagging a session or
+        # returning a ~2x-scale series like MSTR's ~285 vs verified 136.68).
+        _df = _load_ohlcv_df(ticker)
+        if _df is None or _df.empty:
+            raise ValueError("no rows")
+        out = _df.to_csv(index=False)
         dates, closes, opens, highs, lows, volumes = [], [], [], [], [], []
         for line in out.splitlines():
             line = line.strip()
-            if not line or line.startswith("#") or line.lower().startswith("date,"):
+            if not line or line.startswith("#"):
                 continue
             parts = line.split(",")
-            if len(parts) < 6:
+            if len(parts) < 6 or line.lower().startswith("date,"):
                 continue
             try:
+                # load_ohlcv df columns: Date,Close,High,Low,Open,Volume
                 dates.append(parts[0].strip())
-                opens.append(float(parts[1]))
+                closes.append(float(parts[1]))
                 highs.append(float(parts[2]))
                 lows.append(float(parts[3]))
-                closes.append(float(parts[4]))
+                opens.append(float(parts[4]))
                 volumes.append(float(parts[5]))
             except ValueError:
                 continue
@@ -111,6 +121,15 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             lows = [lows[i] for i in order]
             closes = [closes[i] for i in order]
             volumes = [volumes[i] for i in order]
+        # Honor the requested history length (days) like the old vendor path.
+        if days and len(closes) > days:
+            tail = len(closes) - int(days)
+            dates = dates[tail:]
+            opens = opens[tail:]
+            highs = highs[tail:]
+            lows = lows[tail:]
+            closes = closes[tail:]
+            volumes = volumes[tail:]
         result = {
             "dates": dates,
             "closes": closes,

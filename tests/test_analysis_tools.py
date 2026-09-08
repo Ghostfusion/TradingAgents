@@ -5,8 +5,11 @@ The emphasis is on the honest-degradation contract: exact numbers when data
 exists, explicit 'unavailable' text (never a fabricated figure) otherwise.
 """
 
+import io
 import math
 from unittest import mock
+
+import pandas as pd
 
 from tradingagents.agents.utils import analysis_tools as T, value_dip_tools as V
 
@@ -43,6 +46,19 @@ def _route(closes_map, vols=5_000_000):
 
     return route
 
+
+
+def _ohlcv_df(closes_map, vols=5_000_000):
+    """Return a DataFrame for each ticker (the verified-source shape the
+    _load_ohlcv_df seam now returns) instead of a CSV string."""
+
+    def load(ticker):
+        if ticker not in closes_map:
+            return None
+        csv = _ohlcv_csv(closes_map[ticker], [vols] * len(closes_map[ticker]))
+        return pd.read_csv(io.StringIO(csv))
+
+    return load
 
 # ---------------------------------------------------------------------------
 # get_position_sizing (pure)
@@ -120,8 +136,8 @@ def test_risk_gate_cvar_budget():
 def test_swing_set_returns_computed_read():
     closes = _uptrend()
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes, "SPY": [200.0] * len(closes)}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes, "SPY": [200.0] * len(closes)}),
     ):
         out = T.get_swing_set.invoke({"ticker": "AAPL"})
     assert "swing set AAPL:" in out
@@ -131,8 +147,8 @@ def test_swing_set_returns_computed_read():
 
 def test_swing_set_insufficient_history():
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": [100.0] * 30}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": [100.0] * 30}),
     ):
         out = T.get_swing_set.invoke({"ticker": "AAPL"})
     assert "fewer than 200 daily bars" in out
@@ -158,8 +174,8 @@ def test_relative_strength_verdict_present():
     )
     mkt = [200.0 + 0.001 * i for i in range(260)]
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes, "SPY": mkt}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes, "SPY": mkt}),
     ):
         out = T.get_relative_strength.invoke({"ticker": "AAPL"})
     assert "relative_strength AAPL:" in out
@@ -169,8 +185,8 @@ def test_relative_strength_verdict_present():
 def test_relative_strength_no_benchmark():
     closes = _uptrend()
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_relative_strength.invoke({"ticker": "AAPL"})
     assert "unavailable" in out.lower()  # benchmark missing -> honest unknown
@@ -252,8 +268,8 @@ def test_earnings_event_read_no_surprise():
 def test_regime_read_returns_computed():
     closes = _uptrend()
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_regime_read.invoke({"ticker": "AAPL"})
     assert "regime AAPL:" in out
@@ -262,8 +278,8 @@ def test_regime_read_returns_computed():
 
 def test_regime_read_insufficient_history():
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": [100.0] * 30}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": [100.0] * 30}),
     ):
         out = T.get_regime_read.invoke({"ticker": "AAPL"})
     assert "fewer than 60 daily bars" in out
@@ -299,8 +315,8 @@ def test_vcp_tool_reports_state():
 
 def test_vcp_insufficient_history():
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": [100.0] * 40}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": [100.0] * 40}),
     ):
         out = T.get_volatility_contraction.invoke({"ticker": "AAPL"})
     assert "fewer than 90 daily bars" in out
@@ -1753,8 +1769,8 @@ def test_technical_factors_computes_all_reads():
     Supertrend/volume-profile in one call (shares the run-level OHLCV cache)."""
     closes = _uptrend(260)
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_technical_factors.invoke({"ticker": "AAPL"})
     assert "technical factors AAPL" in out
@@ -1765,8 +1781,8 @@ def test_technical_factors_computes_all_reads():
 
 def test_technical_factors_insufficient_history():
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": [100.0] * 20}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": [100.0] * 20}),
     ):
         out = T.get_technical_factors.invoke({"ticker": "AAPL"})
     assert "fewer than 30 bars" in out
@@ -1776,8 +1792,8 @@ def test_book_tail_risk_computes():
     """get_book_tail_risk wraps portfolio CVaR + correlated stress + drawdown."""
     closes = _uptrend(260)
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
     assert "book tail risk AAPL" in out
@@ -1801,8 +1817,8 @@ def test_liquidation_days_computes(monkeypatch):
         "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: 1e8
     )
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_liquidation_days.invoke({"ticker": "AAPL"})
     assert "liquidation days AAPL" in out
@@ -1811,8 +1827,8 @@ def test_liquidation_days_computes(monkeypatch):
 
 def test_liquidation_days_missing_adv():
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": [100.0] * 5}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": [100.0] * 5}),
     ):
         out = T.get_liquidation_days.invoke({"ticker": "AAPL"})
     assert "unavailable" in out.lower()
@@ -1822,8 +1838,8 @@ def test_premarket_review_confirm_when_no_deltas():
     """No quote -> CONFIRM (never fabricate a REVISE/REJECT)."""
     closes = _uptrend(260)
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_premarket_review.invoke({"ticker": "AAPL"})
     assert "premarket review AAPL" in out
@@ -1835,8 +1851,8 @@ def test_premarket_review_rejects_through_stop():
     realized). Requires entry_price to infer the long/short direction."""
     closes = _uptrend(260)
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({"AAPL": closes}),
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
     ):
         out = T.get_premarket_review.invoke(
             {
@@ -1856,13 +1872,16 @@ def test_ohlcv_cache_serves_one_fetch_per_ticker():
     T._clear_ohlcv_cache()
     calls = []
 
-    def route(method, *a, **k):
-        if method == "get_stock_data":
-            calls.append(a[0])
-            return _ohlcv_csv([100.0 + i for i in range(60)], [5_000_000] * 60)
-        return "NO_DATA_AVAILABLE"
+    def load(ticker):
+        calls.append(ticker)
+        return _ohlcv_df({}) and None if False else _load_ohlcv_df_for([100.0 + i for i in range(60)])
 
-    with mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=route):
+    def _load_ohlcv_df_for(closes):
+        csv = _ohlcv_csv(closes, [5_000_000] * 60)
+        import io
+        return pd.read_csv(io.StringIO(csv))
+
+    with mock.patch("tradingagents.agents.utils.analysis_tools._load_ohlcv_df", side_effect=load):
         T._ohlcv("AAPL")
         T._ohlcv("AAPL")
         T._ohlcv("AAPL", days=60)
