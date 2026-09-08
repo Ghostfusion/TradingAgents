@@ -3692,3 +3692,28 @@ PRs from late 2025 also landed here.
 - **Test seam `_load_ohlcv_df`** added to both tool modules so the OHLCV
   loader is patchable without bypassing the verified source; the impacted
   `test_analysis_tools.py` data-mocks converted to produce DataFrames.
+
+### Added (advisory LLM report verifier — design docs/design_report_verification_llm.md)
+- **LLM report-verification pass**: `tradingagents/agents/utils/report_verifier.py`
+  checks every analyst report (1_analysts/*.md) against its `tool_evidence.json`
+  leaves and returns per-claim verdicts (`GROUNDED | UNSUPPORTED | CONTRADICTED`)
+  + a report-level `PASS/FLAG/UNKNOWN`. It is the qualitative layer the
+  deterministic `--evidence` numeric cross-check (`scripts/repro_check.py`)
+  cannot provide (causal wording, "never called" phrasing). Advisory: never
+  edits reports, never blocks delivery; a provider failure degrades the
+  affected report to UNKNOWN (never raises mid-run).
+- **Numeric anchoring** (`_anchor_claims`): after the LLM, each claim's decimal
+  figures are reconciled against the evidence leaf decimals with the SAME
+  <=0.5% tolerance as `repro_check._matches`, so the two gates never disagree
+  "about the same number" — a claim the numeric layer would ground is never
+  left UNSUPPORTED, and a CONTRADICTED whose figures ARE in evidence drops to
+  UNSUPPORTED (no false numeric contradiction).
+- **CLI** `scripts/report_verify.py --report-dir <tree> [--model X --provider Y
+  --max-calls N]`: offline post-run check, writes `verify_flags.json`, exit 0 =
+  all PASS/UNKNOWN, 1 = any FLAG, 2 = missing dir.
+- **batch `--verify`**: after each completed symbol, runs the verifier and
+  writes `verify_flags.json` (mirrors `_batch_pre_market_check`; best-effort,
+  never fails the symbol).
+- **Config/`.env.example`**: `TRADINGAGENTS_VERIFY_MODEL` (empty = quick tier)
+  and `TRADINGAGENTS_VERIFY_MAX_CALLS` (default 12 per report tree; excess
+  stems degrade to UNKNOWN).

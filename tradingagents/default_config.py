@@ -349,6 +349,16 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # symbol (which tools the LLM actually invoked, incl. the model-pool
         # ~40 that are never auto-gathered). Empty = "<data_cache_dir>/tool_calls".
         "tool_call_log_dir": os.getenv("TRADINGAGENTS_TOOL_CALL_LOG_DIR", ""),
+        # Advisory LLM report-verification pass (batch --verify / scripts/
+        # report_verify.py): model for the grounded claim verifier. Empty =
+        # the quick tier (quick_think_llm). Pass adds no tool-calling, only
+        # structured JSON verdicts; cost is ~20-40k input tokens per report.
+        "report_verify_model": os.getenv("TRADINGAGENTS_VERIFY_MODEL", ""),
+        # Hard ceiling on verifier LLM calls per report tree (one call per
+        # analyst report present; degrades remaining stems to UNKNOWN).
+        "report_verify_max_calls": int(
+            os.getenv("TRADINGAGENTS_VERIFY_MAX_CALLS", "12") or "12"
+        ),
         "memory_log_path": os.getenv(
             "TRADINGAGENTS_MEMORY_LOG_PATH",
             os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md"),

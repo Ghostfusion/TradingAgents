@@ -345,6 +345,18 @@ def main() -> int:
         "fred/polymarket fallbacks) or yfinance (pure-yfinance stack). "
         "default keeps the .env / DEFAULT_CONFIG chains. (default: default)",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "After each completed symbol, run the advisory LLM report "
+            "verification pass (see scripts/report_verify.py): each analyst "
+            "report is checked against tool_evidence.json (GROUNDED / "
+            "UNSUPPORTED / CONTRADICTED) and verify_flags.json is written "
+            "into the report tree. Deterministic numeric anchoring shares "
+            "repro_check --evidence tolerance. Never blocks delivery."
+        ),
+    )
     args = parser.parse_args()
     if args.probe:
         probe_path = (
@@ -405,6 +417,11 @@ def main() -> int:
                 # a gap re-anchor (that is the pre-open standalone script).
                 if DEFAULT_CONFIG.get("enable_pre_market_review"):
                     _batch_pre_market_check(sym, report_dir, args.date)
+                # Advisory LLM report-verification pass (--verify): checks each
+                # analyst report against its tool_evidence leaves; writes
+                # verify_flags.json. Never fails the symbol.
+                if args.verify:
+                    _batch_report_verify(sym, report_dir)
                 # Append one JSON line per completed symbol (thread-safe enough
                 # here since the main thread is the only writer).
                 with open(summary_path, "a", encoding="utf-8") as f:
@@ -507,10 +524,37 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
         print(f"[pre-market] review skipped for {symbol}: {exc}")
 
 
+def _batch_report_verify(symbol: str, report_dir) -> None:
+    """Advisory LLM report-verification pass for one batch symbol (--verify).
+
+    Runs right after ``save_reports`` like ``_batch_pre_market_check``:
+    each analyst report (1_analysts/*.md) is checked against the report
+    tree's tool_evidence.json leaves by the grounded verifier; the verdict
+    JSON (GROUNDED / UNSUPPORTED / CONTRADICTED per claim) is written to
+    verify_flags.json next to the report. Concurrent-safe (only the batch
+    writer touches it) and best-effort: any failure logs and never fails
+    the symbol. The numeric anchor shares repro_check --evidence tolerance.
+    """
+    try:
+        from tradingagents.agents.utils.report_verifier import verify_report_dir
+
+        payload = verify_report_dir(report_dir)
+        out = Path(report_dir) / "verify_flags.json"
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        flagged = sum(
+            1
+            for e in (payload.get("verification") or {}).values()
+            if e.get("overall") == "FLAG"
+        )
+        print(f"[verify] {symbol}: {flagged} FLAG report(s) -> {out}")
+    except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
+        print(f"[verify] report-verify skipped for {symbol}: {exc}")
+
+
 # True only when this module is the real process entry point (not imported by
-# tests or another runner). Guards the moomoo shutdown-block hard-exit so
-# in-process callers return/raise normally (regression: an unconditional
-# os._exit killed pytest).
+# tests or another runner).  The moomoo shutdown-block hard-exit so in-process
+# callers return/raise normally (regression: an unconditional os._exit killed
+# pytest).
 _CLI_ENTRY = False
 
 

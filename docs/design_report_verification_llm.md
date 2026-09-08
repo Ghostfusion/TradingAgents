@@ -1,8 +1,10 @@
 # Design: LLM report verification against tool evidence
 
-Status: **PARKED** (design + research done, no implementation; user decision on 2026-09-08).
-Reopen trigger: recurrence of report claims ungrounded in `tool_evidence.json`,
-or agreement that the deterministic `--evidence` check is insufficient.
+Status: **IMPLEMENTED 2026-09-08** (all phases shipped; sizing go/no-go passed).
+Parts below marked [x] shipped, [ ] deferred.
+Reopen trigger: report claims ungrounded in `tool_evidence.json`, OR the
+open A/B of `openrouter:web_search` vs Anthropic native search for the
+verifier's spot-check affordance.
 
 ## Problem
 
@@ -88,14 +90,26 @@ host-executed server-side tools** exist and remove the blocker:
   second pass for qualitative claims, costed per report roughly 20–40k
   input tokens (report + evidence JSON).
 
-## Reopen checklist
+## Reopen checklist (state 2026-09-08)
 
-- [ ] Re-verify OpenRouter server-tools spec (docs may 403 again; `.md` + llms.txt).
-- [ ] Decide verifier model (`claude-*` fastest; deeper `claude-*` if qualitative rigor needed).
-- [ ] **For Claude-through-OpenRouter: A/B `openrouter:web_search` vs passthrough
-      Anthropic native web search on the same spot-check queries** — measure
-      citation/result quality for financial claims (different backends/format;
-      do not assume). Backend choice (Exa vs Firecrawl) rides on the same test.
-- [ ] Prototype on one batch round: run one pass deterministically + one LLM
-      pass on the same report, diff the FLAG sets to size the delta.
-- [ ] If delta ≈ 0 → keep deterministic-only; if > 0 → wire as a scheduled post-run gate.
+- [x] Prototype on a batch round (MSTR batch6 tree): deterministic + LLM passes
+      on the same report, flag-set diff. **Result: GO** — LLM added 28 flags
+      over the 26 numeric suspects; real catch classes include the sentiment
+      "4.0/10 vs computed +0.08" divergence and headline/macro quotes; only 1
+      false positive in 189 claims (anchor downgrades that class).
+- [x] Wire as a post-run gate: `batch --verify` writes `verify_flags.json`
+      (advisory; exit 1 on any FLAG via `scripts/report_verify.py`).
+- [ ] Verifier model: resolved to the repo's quick tier by default
+      (`TRADINGAGENTS_VERIFY_MODEL` overrides); running a deeper model is an
+      env change, not code.
+- [ ] **Open A/B: `openrouter:web_search` vs Anthropic native search for the
+      verifier's spot-check affordance** — currently the verifier has NO web
+      affordance (evidence-only by design, matching the deterministic layer).
+      If a claims class needs a live source (`NO_LEAF_CATEGORY`), run the A/B
+      (citation quality) and wire it explicitly. Backend choice (Exa vs
+      Firecrawl) rides on the same test.
+- [ ] Truncation follow-up: fundamentals flags partly trace to leaf truncation
+      (summary_window); the flag is correct (persisted evidence genuinely lacks
+      the figure) but a per-tool window bump is worth trialing for
+      get_income_statement / get_balance_sheet if fundamentals false-positive
+      rate becomes noisy.
