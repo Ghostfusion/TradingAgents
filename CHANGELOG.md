@@ -3658,3 +3658,12 @@ PRs from late 2025 also landed here.
   "within the verified day's range [...] (stale-print tolerance +-X%)" so the
   band is not misread as a ±5% band around the live price (INTU 2026-09-08:
   the "[313.13, 327.00] ±5%" label implied ±5% around 314.12, which it is not).
+
+### Fixed
+- **`get_credit_spread_read` default-probability 100x error**
+  (`analysis_tools.py`): `hazard_from_spread` / `default_probability` expect a
+  DECIMAL spread, but the tool passed the FRED percentage (2.68 = 2.68%)
+  — producing hazard 4.467 (446.7%) and implied 1y PD 98.9% instead of
+  ~4.4% (INTU 2026-09-08 news.md). The tool now converts `hy / 100` before
+  computing; a "moderate" credit read no longer renders an absurd 98.9%
+  default probability.

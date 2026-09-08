@@ -2114,3 +2114,21 @@ def test_drawdown_measures_labeled_distinct():
     assert "52w_distance(drawdown vs 52-wk high)" in src
     assert "drawdown(book realized)" in src
     assert "max_dd(backtest)" in src
+
+
+def test_credit_default_prob_decimal_conversion(monkeypatch):
+    """Regression (INTU 2026-09-08): hazard_from_spread expects a DECIMAL
+    spread but the tool passed the percentage (2.68 -> hazard 4.467, PD 98.9%
+    instead of ~4.4%). The tool must convert % -> decimal before computing."""
+    import tradingagents.strategies.credit_spread as cs
+
+    res = {"level": "moderate", "scale": 0.85, "reasons": ["hy_oas=2.68% (low)"]}
+    monkeypatch.setattr(cs, "credit_stress_level", lambda *a, **k: res)
+    monkeypatch.setattr("tradingagents.agents.utils.analysis_tools._fred_latest_pct", lambda payload: 2.68)
+
+    out = T.get_credit_spread_read.invoke({"current_date": "2026-09-08"})
+    # Correct: 2.68% / (1-0.40) = 4.47% hazard; PD ~ 1-e^-0.0447 ~ 4.4%.
+    assert "implied 1y default prob (HY, RR=0.40): 4.4%" in out
+    assert "hazard 0.045" in out
+    # The broken 98.9% is gone.
+    assert "98.9%" not in out

@@ -3313,9 +3313,13 @@ def get_credit_spread_read(
     for r in res["reasons"]:
         lines.append(f"  {r}")
     # Implied default probability from the HY spread (RR = 0.40 assumption).
+    # hazard_from_spread / default_probability expect a DECIMAL spread, but hy
+    # here is a percentage (2.68 = 2.68%) - passing it raw yields hazard 4.467
+    # (446.7%) and PD 98.9% instead of ~4.4% (INTU 2026-09-08). Convert.
     if hy is not None:
-        lam = hazard_from_spread(hy, 0.40)
-        pd = default_probability(hy, 1.0, 0.40)
+        hy_dec = hy / 100.0
+        lam = hazard_from_spread(hy_dec, 0.40)
+        pd = default_probability(hy_dec, 1.0, 0.40)
         if lam is not None and pd is not None:
             lines.append(
                 f"  implied 1y default prob (HY, RR=0.40): {pd:.1%} "
