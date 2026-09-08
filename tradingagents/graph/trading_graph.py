@@ -496,6 +496,14 @@ class TradingAgentsGraph:
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
 
+        # Anti-repetition sampling controls are cross-provider: forward them
+        # whenever set, float() for env strings ("0.9") like temperature. Each
+        # client only forwards what its SDK supports.
+        for key in ("top_p", "frequency_penalty", "presence_penalty"):
+            v = self.config.get(key)
+            if v is not None and v != "":
+                kwargs[key] = float(v)
+
         # SDK retry budget is cross-provider. Forward it only when explicitly set
         # so each provider keeps its own default (usually 2) otherwise (#1091).
         max_retries = self.config.get("llm_max_retries")

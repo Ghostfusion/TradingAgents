@@ -44,6 +44,56 @@ NO_EXTERNAL_TOOLS = (
 # when the previous response was detected as truncated).
 _MAX_TRUNCATION_RETRIES = 2
 
+# Repetition-loop guard (degenerate generation that pads toward max_tokens):
+# a run of >= these identical full lines is treated as an autoregressive
+# attractor loop and trimmed BEFORE the continuation prompt so the loop is
+# never fed back as context.
+_REPETITION_MIN_REPS = 3
+_REPETITION_MIN_LINE = 8
+
+
+def _repetition_loop_cut(text: str) -> tuple[str, bool]:
+    """Trim a degenerately-repeating block from ``text``; return (text, flag).
+
+    The max_tokens-padding failure mode is the model emitting the same block
+    over and over until the cap. This detects a run of ``>= _REPETITION_MIN_REPS``
+    identical, non-trivial consecutive full lines — the unambiguous signature
+    of such a loop — and trims ``text`` at the FIRST occurrence, so the
+    continuation prompt receives a clean prefix and the loop is never re-fed.
+
+    Conservative on purpose: only exact duplicate consecutive lines (legitimate
+    repeated section headers/table rows with different bodies are untouched),
+    only runs of >= 3, only lines of real length. Returns ``(text, False)``
+    unchanged otherwise.
+    """
+    t = (text or "")
+    lines = t.splitlines()
+    n = len(lines)
+    if n < _REPETITION_MIN_REPS:
+        return t, False
+    start = 0
+    while start < n:
+        line = lines[start]
+        if len(line.strip()) < _REPETITION_MIN_LINE:
+            start += 1
+            continue
+        end = start
+        while end + 1 < n and lines[end + 1] == line:
+            end += 1
+        run = end - start + 1
+        if run >= _REPETITION_MIN_REPS:
+            prefix = "\n".join(lines[:start]).rstrip()
+            logger.warning(
+                "repetition loop detected: line repeated %d times (len %d); "
+                "trimming %d chars before continuation",
+                run,
+                len(line),
+                len(t) - len(prefix),
+            )
+            return prefix, True
+        start = end + 1
+    return t, False
+
 
 def _looks_truncated(text: str) -> bool:
     """Heuristic: does an LLM report end mid-sentence (max_tokens cut)?
@@ -110,6 +160,7 @@ def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str,
     for _ in range(_MAX_TRUNCATION_RETRIES):
         if not _looks_truncated(full):
             break
+        full, _looped = _repetition_loop_cut(full)
         retry_llm = plain_llm
         if backup_llm is not None and backup_llm is not plain_llm:
             retry_llm = backup_llm
@@ -419,6 +470,7 @@ def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
     for _ in range(_MAX_TRUNCATION_RETRIES):
         if not _looks_truncated(full):
             break
+        full, _looped = _repetition_loop_cut(full)
         cont_chain = chain
         if backup_chain is not None and backup_chain is not chain:
             cont_chain = backup_chain

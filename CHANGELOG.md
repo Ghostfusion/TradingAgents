@@ -3582,3 +3582,18 @@ PRs from late 2025 also landed here.
   model-pool tools did the LLM actually invoke" post-run
   (unanswerable from tool_evidence.json, which only lists what was
   gathered). Advisory — never raises, never blocks the graph.
+
+### Added
+- **Anti-repetition sampling controls** (`top_p` / `frequency_penalty` /
+  `presence_penalty`, env `TRADINGAGENTS_TOP_P` /
+  `TRADINGAGENTS_FREQUENCY_PENALTY` / `TRADINGAGENTS_PRESENCE_PENALTY`):
+  cross-provider loop-escape levers forwarded to every client that supports
+  them (OpenAI-compatible all three; Anthropic/Gemini top_p only). Default
+  None = provider default, so run-to-run reproducibility is preserved unless
+  a run opts in (recommended: top_p 0.85-0.95, freq/presence 0.2-0.5).
+  Range-validated (top_p in [0,1]; penalties in [-2,2]).
+- **Repetition-loop guard in the truncation-retry path** (`structured.py`):
+  before a continuation prompt, a run of >= 3 identical consecutive lines
+  (the max_tokens-padding attractor loop) is trimmed to its first occurrence
+  so the loop is never re-fed as context. Conservative: only exact duplicate
+  full lines; legitimate repeated structure untouched.

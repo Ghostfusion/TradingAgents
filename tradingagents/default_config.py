@@ -42,6 +42,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CHECKPOINT_ENABLED": "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER": "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE": "temperature",
+    "TRADINGAGENTS_TOP_P": "top_p",
+    "TRADINGAGENTS_FREQUENCY_PENALTY": "frequency_penalty",
+    "TRADINGAGENTS_PRESENCE_PENALTY": "presence_penalty",
     "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
@@ -397,6 +400,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # variation on models that honor it; reasoning models largely ignore it
         # and no setting makes LLM output bit-identical across runs (see README).
         "temperature": None,
+        # Anti-repetition sampling controls (nucleus top_p + frequency/presence
+        # penalties), forwarded to every provider that supports them when set.
+        # Default None = provider default, so run-to-run reproducibility is
+        # preserved unless a run opts in. Recommended loop-escape values from
+        # the repetition-degeneration analysis: top_p 0.85-0.95,
+        # frequency_penalty 0.2-0.5, presence_penalty 0.2-0.5.
+        "top_p": None,
+        "frequency_penalty": None,
+        "presence_penalty": None,
         # SDK retry budget forwarded to every provider chat client. None leaves each
         # provider/SDK at its own default (usually 2). Raise it to ride out bursty
         # 429 throttling on rate-limited deployments instead of aborting a run (#1091).
@@ -909,8 +921,13 @@ def validate_config(config: dict) -> list[str]:
         "debate_reweight_to_baseline",
         "debate_entrench_thresh",
         "debate_divergence_min",
+        "top_p",
     ):
         frac(key)
+    # Sampling penalties may be negative (OpenAI range is -2..2): bounded
+    # separately so a typo (e.g. 20 instead of 0.2) fails loudly.
+    frac("frequency_penalty", lo=-2.0, hi=2.0)
+    frac("presence_penalty", lo=-2.0, hi=2.0)
 
     # debate_scoring_weights: three weights summing to ~1, each in [0,1].
     dw = config.get("debate_scoring_weights")
