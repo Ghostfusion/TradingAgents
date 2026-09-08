@@ -102,3 +102,24 @@ class TestSurvivorship:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class TestFillProbabilityImport:
+    """Regression: get_cost_models used a missing 'fill_probability' import
+    (the real function is limit_fill_probability); force-calling it via the
+    deterministic gatherer surfaced the ImportError on every NVDA run
+    (2026-09-07). The fill-probability branch must work end-to-end."""
+
+    def test_cost_models_fill_probability_works(self):
+        from tradingagents.agents.utils.analysis_tools import get_cost_models
+
+        out = get_cost_models.invoke({"distance_to_limit_pct": 0.02})
+        assert "fill_probability" in out
+        assert "0.49" in out
+
+
+    def test_cost_models_returns_guide_when_no_inputs(self):
+        from tradingagents.agents.utils.analysis_tools import get_cost_models
+
+        out = get_cost_models.invoke({})
+        assert "unavailable" in out or "cost model read" in out

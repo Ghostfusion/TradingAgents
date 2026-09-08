@@ -6988,7 +6988,7 @@ def get_cost_models(
     from tradingagents.strategies.backtest_models import (
         borrow_cost,
         capacity_pct,
-        fill_probability,
+        limit_fill_probability as fill_probability,
         quote_adjust,
         square_root_impact,
     )
