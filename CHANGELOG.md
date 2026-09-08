@@ -3524,3 +3524,15 @@ PRs from late 2025 also landed here.
 [0.2.0]: https://github.com/TauricResearch/TradingAgents/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/TauricResearch/TradingAgents/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/TauricResearch/TradingAgents/releases/tag/v0.1.0
+
+### Fixed
+- **`get_support_structure` / `get_value_dip_setup` now render the `sma200`
+  basis** next to `distance_to_sma200`, so the support distance is anchored
+  to its own computed reference value instead of being spliced with a
+  different source's 200-day average (QCOM report 2026-09-07 flagged a
+  +0.2% distance claim that was actually +0.54% against the printed avg).
+- **EPS YoY degenerate-base guard** (`statement_parsing.sane_eps_yoy`, used
+  by `get_decline_driver_check` and the analyst-verdict screen): a vendor
+  YoY beyond +/-300%, or one whose prior-year EPS base is below $0.01, is a
+  denominator artifact, not a decline signal — it now returns n/a instead
+  of emitting nonsensical figures like "-2280% EPS YoY" (QCOM 2026-09-07).

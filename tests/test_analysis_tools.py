@@ -1435,6 +1435,65 @@ def test_support_structure_requires_history(monkeypatch):
     assert "unavailable" in out.lower() or "need 200+ closes" in out
 
 
+def test_support_structure_renders_sma200_basis(monkeypatch):
+    """Regression (QCOM 2026-09-07): the tool printed distance_to_sma200
+    (0.2%) without its sma200 basis, so the analyst spliced a foreign
+    200-day average onto it. The rendered line must carry both."""
+    closes, highs, lows, vols = _vdip_dip_trigger()
+    closes = closes + [x + 5 for x in range(60)]  # ≥ 205 bars
+    lows2 = lows + lows[:60]
+    highs2 = highs + highs[:60]
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": closes,
+            "lows": lows2,
+            "highs": highs2,
+            "volumes": vols + [1e6] * 60,
+            "opens": closes,
+        },
+    )
+    out = V.get_support_structure.invoke({"ticker": "AAPL"})
+    assert "sma200=" in out
+    assert "distance_to_sma200=" in out
+    assert out.split("sma200=")[1].split(" ")[0] not in ("", "n/a")
+
+
+def test_decline_driver_suppresses_degenerate_eps_yoy(monkeypatch):
+    """Regression (QCOM 2026-09-07): EPS YoY -2280% is a denominator
+    artifact (prior-year EPS base near $0), not a real 'severe earnings
+    decline'. The tool must not emit it as a flag."""
+    fin = {
+        "market_cap": 1e11,
+        "total_equity": 1e9,
+        "net_income": 150e6,
+        "total_debt": 300e6,
+        "current_assets": 800e6,
+        "current_liabilities": 300e6,
+        "eps": {"current": 0.75, "prior": 0.0},
+        "eps_yoy": -22.8,  # vendor artifact: -2280%
+    }
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {
+            "closes": _vdip_closes(),
+            "lows": _vdip_closes(),
+            "highs": [c + 1 for c in _vdip_closes()],
+            "volumes": [1e6] * len(_vdip_closes()),
+            "opens": _vdip_closes(),
+        },
+    )
+    monkeypatch.setattr(V, "_trap_level_from_fin", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_accrual_from_fin", lambda *a, **k: None)
+    out = V.get_decline_driver_check.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "severe earnings decline" not in out
+    assert "verdict=" in out
+
+
 def test_decline_driver_reports_verdict(monkeypatch):
     fin = {
         "market_cap": 1e11,

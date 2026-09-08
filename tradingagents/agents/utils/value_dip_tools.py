@@ -574,7 +574,8 @@ def get_value_dip_setup(
     sup = rows.get("support") or {}
     if sup:
         lines.append(
-            f"  support: {sup.get('verdict')} dist_base={_txt_pct(sup.get('distance_to_base_pct'))} "
+            f"  support: {sup.get('verdict')} sma200={sup.get('sma200')} "
+            f"dist_base={_txt_pct(sup.get('distance_to_base_pct'))} "
             f"dist_sma200={_txt_pct(sup.get('distance_to_sma200_pct'))}"
         )
     rg = rows.get("regime_gate") or {}
@@ -761,6 +762,7 @@ def get_support_structure(
     return (
         f"support structure {ticker}: verdict={sp['verdict']} "
         f"price={sp.get('price')} base_low={sp.get('base_low')} "
+        f"sma200={sp.get('sma200')} "
         f"distance_to_base={_txt_pct(sp.get('distance_to_base_pct'))} "
         f"distance_to_sma200={_txt_pct(sp.get('distance_to_sma200_pct'))}"
     )
@@ -813,7 +815,12 @@ def get_decline_driver_check(
     te = _latest(fin.get("total_equity"))
     ne = _latest(fin.get("net_income"))
     roe = (float(ne) / float(te)) if (ne is not None and te) else None
-    eps_yoy = _latest(fin.get("eps_yoy"))
+    try:
+        from tradingagents.dataflows.statement_parsing import sane_eps_yoy
+
+        eps_yoy = sane_eps_yoy(fin)
+    except Exception:  # noqa: BLE001
+        eps_yoy = None
     try:
         accrual_ = _accrual_from_fin(fin, ticker, current_date)
     except Exception:  # noqa: BLE001

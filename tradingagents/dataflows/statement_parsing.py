@@ -562,6 +562,26 @@ def _prior(v):
     return v.get("prior") if isinstance(v, dict) else None
 
 
+def sane_eps_yoy(fin: dict) -> float | None:
+    """EPS YoY (fraction) with a degenerate-base guard.
+
+    A |YoY| beyond +/-300% is almost always a denominator artifact (the
+    prior-year EPS base was near $0), not an economic signal - e.g. the
+    -2280% figure the decline-driver tool raised on QCOM 2026-09-07.
+    Trust the vendor ratio only when it is within that bound; otherwise
+    recompute from the current/prior EPS pair and return None (n/a) when
+    no safe base exists. Never returns a meaningless magnitude.
+    """
+    v = _latest(fin.get("eps_yoy"))
+    if v is not None and abs(v) <= 3.0:
+        return v
+    cur = _latest(fin.get("eps"))
+    prior = _prior(fin.get("eps"))
+    if cur is None or prior is None or prior == 0 or abs(prior) < 0.01:
+        return None
+    return (cur - prior) / prior
+
+
 def _ratio_num(n, d):
     """n/d guarded: None when either side missing or the denominator is 0."""
     if n is None or d is None:
@@ -786,7 +806,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "net_net": net_net,
         "trap": trap,
         "roe": round(roe, 4) if roe is not None else None,
-        "eps_yoy": _latest(fin.get("eps_yoy")),
+        "eps_yoy": sane_eps_yoy(fin),
         "revenue_yoy": _latest(fin.get("revenue_yoy")),
         "sector": fin.get("sector"),
     }
