@@ -3643,3 +3643,18 @@ PRs from late 2025 also landed here.
   6.44B == 6.44B) is visible instead of silently duplicated.
 - **`get_ratios` uses a dynamic default date** instead of the hardcoded
   "2026-08-24" (stale quarter could shift current ratio / D/E).
+
+### Fixed
+- **`get_composite_rank` surfaces its ranked peer sample** (`peers_ranked:
+  <tickers>`) so the "vs N peers" count is auditable against the actual
+  tickers (INTU 2026-09-08: "vs 4 peers" while the report listed 10 company
+  peers — the two samples come from different sources and are now visible).
+- **Distinct labels for the three drawdown measures**: regime `52w_distance`
+  is now `52w_distance(drawdown vs 52-wk high)`, `get_book_tail_risk` reads
+  `drawdown(book realized)`, `get_strategy_quality` reads `max_dd(backtest)`
+  — the unlabeled trio (INTU 2026-09-08: -51.32% / 62.68% / 68.41%) can no
+  longer be silently conflated.
+- **`live_price_sanity` INSIDE wording clarified**: it reports
+  "within the verified day's range [...] (stale-print tolerance +-X%)" so the
+  band is not misread as a ±5% band around the live price (INTU 2026-09-08:
+  the "[313.13, 327.00] ±5%" label implied ±5% around 314.12, which it is not).

@@ -733,7 +733,7 @@ def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
 def test_strategy_quality_explicit_returns():
     out = T.get_strategy_quality.invoke({"ticker": "AAPL", "returns": [0.01] * 50, "cost_bps": 0})
     assert "strategy quality AAPL" in out
-    assert "net_cagr=" in out and "sharpe=" in out and "max_dd=" in out
+    assert "net_cagr=" in out and "sharpe=" in out and "max_dd(backtest)=" in out
 
 
 def test_strategy_quality_derives_returns_from_ohlcv(monkeypatch):
@@ -1782,7 +1782,7 @@ def test_book_tail_risk_computes():
         out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
     assert "book tail risk AAPL" in out
     assert "portfolio_cvar=" in out and "correlated_stress_-10pct=" in out
-    assert "drawdown=" in out and "drawdown_gate=" in out
+    assert "drawdown(book realized)=" in out and "drawdown_gate=" in out
 
 
 def test_book_tail_risk_no_series():
@@ -2072,3 +2072,45 @@ def test_sentiment_lead_lag_strongest_corr_spans_both_metrics(monkeypatch):
     # Strongest is the pearson 0.278 at lag +6, not the spearman 0.206.
     assert "strongest |corr|: 0.278" in out
     assert "pearson" in out and "lag +6" in out
+
+
+def test_composite_rank_lists_ranked_peers(monkeypatch):
+    """Regression (INTU 2026-09-08): the report listed 10 company peers while
+    the composite said 'vs 4 peers'. The tool must surface WHICH tickers it
+    actually ranked so the sample is auditable."""
+    import tradingagents.strategies.factors as factors_mod
+
+    def fake_composite(factors, weights=None):
+        out = {}
+        for i, t in enumerate(sorted(factors)):
+            out[t] = 1.0 - i * 0.1
+        return out
+
+    monkeypatch.setattr(factors_mod, "composite_score", fake_composite)
+    monkeypatch.setattr(factors_mod, "momentum", lambda closes: 0.1)
+    monkeypatch.setattr(factors_mod, "high_distance", lambda closes: 0.05)
+    monkeypatch.setattr(
+        T, "_ohlcv",
+        lambda t, days=320: {"closes": [100.0] * 64, "highs": [], "lows": []},
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.finnhub.get_company_peers_finnhub",
+        lambda t: ["PLTR", "CRM", "APP", "ADBE", "CDNS", "SNPS", "DDOG", "MSTR", "ADSK", "ROP"],
+    )
+    out = T.get_composite_rank.invoke({"ticker": "INTU"})
+    assert "peers_ranked:" in out
+    assert "INTU" not in out.split("peers_ranked:")[1].split(",")[0]  # ticker excluded
+    assert "PLTR" in out or "CRM" in out
+
+
+def test_drawdown_measures_labeled_distinct():
+    """Regression (INTU 2026-09-08): three unlabeled 'drawdown' numbers
+    (regime 52w, book realized, strategy backtest) could be conflated. Each
+    tool's output must carry a distinct label."""
+    from pathlib import Path
+
+    from tradingagents.agents.utils import analysis_tools as _T
+    src = Path(_T.__file__).read_text(encoding='utf-8')
+    assert "52w_distance(drawdown vs 52-wk high)" in src
+    assert "drawdown(book realized)" in src
+    assert "max_dd(backtest)" in src

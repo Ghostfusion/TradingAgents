@@ -701,7 +701,7 @@ def get_regime_read(
             f"regime {ticker}: regime={ov.get('regime')} "
             f"position_scale={ov.get('position_scale')} "
             f"momentum_60d={_txt(ov.get('momentum60'))} "
-            f"52w_distance={_txt(ov.get('high_distance'))} "
+            f"52w_distance(drawdown vs 52-wk high)={_txt(ov.get('high_distance'))} "
             f"context: {ov.get('context')}"
         )
     except Exception as exc:  # noqa: BLE001
@@ -2788,7 +2788,7 @@ def get_strategy_quality(
         )
     return (
         f"strategy quality {ticker}: net_cagr={cg:.2%} vol={vol:.2%} "
-        f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd={mdd:.2%} "
+        f"sharpe={shr:.2f} sortino={so_txt} psr={psr_txt} max_dd(backtest)={mdd:.2%} "
         f"calmar={_f(cal)} ulcer={_f(ul)} burke={_f(bk)} martin={_f(mr)} pain={_f(pr)} "
         f"gain_to_pain={_f(g2p)} tail_ratio={_f(tr)} "
         f"info_ratio={_f(ir)} tracking_err={_f(te)} treynor={_f(trn)} "
@@ -3157,9 +3157,12 @@ def get_composite_rank(
     scores = composite_score(factors_by_ticker, weights)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:6]
     peers_str = "; ".join(f"{t}={v:.0%}" for t, v in ranked)
+    peer_names = sorted(k for k in scores if k != ticker)
+    peers_list_str = ", ".join(peer_names) if peer_names else "n/a"
     return (
         f"composite rank {ticker}: score={scores[ticker]:.2%} "
-        f"(vs {len(scores) - 1} peers); {peers_str}"
+        f"(vs {len(scores) - 1} peers); {peers_str} | "
+        f"peers_ranked: {peers_list_str}"
     )
 
 
@@ -4078,7 +4081,7 @@ def get_book_tail_risk(
         return (
             f"book tail risk {ticker}: portfolio_cvar={pcvar_s} "
             f"correlated_stress_-10pct={stress_s} "
-            f"drawdown={dd_s} drawdown_gate={gate_s} (True=block new risk)"
+            f"drawdown(book realized)={dd_s} drawdown_gate={gate_s} (True=block new risk)"
         )
     except Exception as exc:  # noqa: BLE001
         return f"book tail risk unavailable for {ticker}: {exc}"

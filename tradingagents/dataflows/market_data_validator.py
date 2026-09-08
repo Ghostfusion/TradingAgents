@@ -91,7 +91,7 @@ def live_price_sanity(live_price: float | None, day_low: float | None,
             f"reconcile as a true print"
         )
     if lo_buf <= lv <= hi_buf:
-        return f"live price sanity: INSIDE verified bar ({lv:.2f} within [{low:.2f},{high:.2f}] +-{buffer_pct:.0%})"
+        return f"live price sanity: INSIDE verified bar ({lv:.2f} within the verified day's range [{low:.2f},{high:.2f}]; stale-print tolerance +-{buffer_pct:.0%})"
     return (
         f"live price sanity: OUTSIDE verified bar - live {lv:.2f} vs "
         f"verified [{low:.2f},{high:.2f}] (buffer {buffer_pct:.0%}); "
