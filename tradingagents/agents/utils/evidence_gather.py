@@ -271,12 +271,7 @@ def gather_for_analyst_node(
     if not names:
         return "", existing
 
-    context = {
-        "ticker": state.get("company_of_interest", ""),
-        "current_date": state.get("trade_date", ""),
-        # Some tools declare ``curr_date`` instead of ``current_date``.
-        "curr_date": state.get("trade_date", ""),
-    }
+    context = _evidence_context(state)
     leaves = gather_evidence(
         by_name,
         names,
@@ -382,6 +377,41 @@ def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
     result = tool_node(sub_state)
     real_msgs = list((result or {}).get("messages", []))
     return {"messages": [*outputs, *real_msgs]}
+
+
+def _evidence_context(state: dict) -> dict:
+    """Deterministic args bag for forced tools, derived from the run state.
+
+    In addition to ticker/date aliases, provides the date-window keys that
+    data tools declare (``symbol``, ``start_date``, ``end_date``,
+    ``look_back_days``) so window tools are invoked with real (not empty)
+    args and return data, not validation errors. The window is a rolling
+    30 calendar days ending at the trade date (matches the codebase's common
+    ``look_back_days=30`` default). When the trade date does not parse as
+    ``YYYY-MM-DD``, the window keys are omitted so each tool falls back to
+    its own defaults instead of erroring on a bad date.
+    """
+    ticker = str(state.get("company_of_interest") or "")
+    trade_date = str(state.get("trade_date") or "")
+    context: dict = {
+        "ticker": ticker,
+        "current_date": trade_date,
+        # Some tools declare ``curr_date`` instead of ``current_date``.
+        "curr_date": trade_date,
+    }
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+
+        d = _dt.strptime(trade_date, "%Y-%m-%d").date()
+        context["symbol"] = ticker
+        context["start_date"] = (d - _td(days=29)).isoformat()
+        context["end_date"] = trade_date
+        context["look_back_days"] = 30
+    except (TypeError, ValueError):
+        # Unparseable/absent trade date: leave the window keys out; tools with
+        # their own defaults still gather.
+        pass
+    return context
 
 
 def format_evidence_block(leaves) -> str:

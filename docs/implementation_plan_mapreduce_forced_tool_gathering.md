@@ -45,6 +45,16 @@ Applied in code: `TRADINGAGENTS_ANALYST_FORCED_TOOLS=ALL` (local `.env`),
 `evidence_gather.make_short_circuit_tool_node` (re-request → short-circuit),
 wired from `tradingagents/graph/trading_graph.py::_create_tool_nodes`.
 
+Gather-args extension (2026-09-07): the deterministic arg bag now carries the
+date-window keys too — `symbol`, `start_date`, `end_date`,
+`look_back_days` (rolling 30 calendar days on the trade date) — so data tools
+that declare a window (`get_stock_data`, `get_news`, `get_massive_news`,
+`get_news_sentiment`, `get_short_volume`, `get_verified_market_snapshot`, …)
+return real data instead of a missing-arg `error` leaf. Pure-compute tools
+(`get_scenario_dcf`, `get_allocation*`, `get_kalman_spread`, …) still need
+model-supplied inputs and stay recorded `error`/`unavailable` — never
+fabricated.
+
 ---
 
 ## Phase 0 — Config surface

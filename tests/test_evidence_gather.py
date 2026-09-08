@@ -265,3 +265,67 @@ def test_short_circuit_passthrough_without_evidence():
     )
     assert calls["n"] == 1  # legacy path: underlying node ran unchanged
     assert out["messages"][0].tool_call_id == "c1"
+
+
+def test_evidence_context_includes_window_keys():
+    """Window tools get real rolling dates (symbol/start/end/look_back_days)."""
+    from tradingagents.agents.utils.evidence_gather import _evidence_context
+
+    ctx = _evidence_context(
+        {"company_of_interest": "TSM", "trade_date": "2026-09-07"}
+    )
+    assert ctx["symbol"] == "TSM"
+    assert ctx["end_date"] == "2026-09-07"
+    assert ctx["start_date"] == "2026-08-09"
+    assert ctx["look_back_days"] == 30
+    assert ctx["ticker"] == "TSM"
+    assert ctx["current_date"] == "2026-09-07"
+    assert ctx["curr_date"] == "2026-09-07"
+
+
+def test_evidence_context_omits_window_keys_on_bad_date():
+    """An unparseable trade date drops the window keys (tools keep defaults)."""
+    from tradingagents.agents.utils.evidence_gather import _evidence_context
+
+    ctx = _evidence_context({"company_of_interest": "TSM", "trade_date": "not-a-date"})
+    assert "start_date" not in ctx
+    assert "end_date" not in ctx
+    assert "look_back_days" not in ctx
+    assert ctx["ticker"] == "TSM"
+
+
+def test_gather_passes_window_args_to_declared_tools():
+    """A tool declaring symbol/start/end receives them; undected keys are ignored."""
+    from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+
+    seen = {}
+
+    @tool
+    def get_stock_data(symbol: str, start_date: str, end_date: str) -> str:
+        """Fake OHLCV surface (declares only the window keys)."""
+        seen.update(symbol=symbol, start_date=start_date, end_date=end_date)
+        return f"ohlcv {symbol} {start_date}..{end_date}"
+
+    monkeypatch = None  # patched via module attribute below
+    # Simulate the analyst node's bound tools list with the fake tool.
+    node_state = {
+        "company_of_interest": "TSM",
+        "trade_date": "2026-09-07",
+        "instrument_context": "",
+        "messages": [],
+    }
+    # gather_for_analyst_node reads config analyst_forced_tools from config arg
+    cfg = {
+        "analyst_forced_tools": ["get_stock_data"],
+        "analyst_forced_tools_timeout_s": 5,
+        "analyst_forced_tools_max_parallel": 1,
+        "analyst_forced_tools_summary_window": 12000,
+    }
+    block, evidence = gather_for_analyst_node(
+        {**node_state, "tool_evidence": {}}, "market", [get_stock_data], cfg
+    )
+    assert seen.get("symbol") == "TSM"
+    assert seen.get("start_date") == "2026-08-09"
+    assert seen.get("end_date") == "2026-09-07"
+    assert block != ""
+    assert "ohlcv" in block
