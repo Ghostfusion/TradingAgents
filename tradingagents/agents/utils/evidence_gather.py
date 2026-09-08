@@ -236,11 +236,73 @@ def _leaf(
     )
 
 
-def format_evidence_block(leaves: list[ToolEvidenceLeaf]) -> str:
+def gather_for_analyst_node(
+    state: dict,
+    analyst_key: str,
+    tools: list,
+    config: dict | None = None,
+) -> tuple[str, dict]:
+    """Gather forced evidence once per analyst run; return (block, evidence).
+
+    Call at the top of the analyst node. When ``analyst_forced_tools`` is
+    unset (empty list), returns ``("", existing)`` untouched — the legacy
+    LLM-selected path. When set, resolves the forced names from the node's
+    bound tools, gathers them deterministically (context = the run's ticker /
+    date), stores the leaves under ``analyst_key`` in the state's
+    ``tool_evidence`` dict, and returns the rendered reduce block. A later
+    re-entry (tool-loop return / cap turn) finds the key already set and
+    skips the gather — the fix composition is what matters, not a re-fetch.
+    """
+    existing: dict = dict(state.get(TOOL_EVIDENCE_KEY) or {})
+    forced = (config or {}).get("analyst_forced_tools") or []
+    if not forced:
+        return "", existing
+
+    if analyst_key in existing:
+        return format_evidence_block(existing[analyst_key]), existing
+
+    by_name = {t.name: t for t in tools}
+    # The config is one GLOBAL list serving all four analysts; a name missing
+    # from THIS node is expected (it belongs to a sibling analyst), so pass
+    # the union as "registered" to suppress per-node "unknown tool" noise and
+    # filter down to THIS analyst's names in config order.
+    parsed = parse_forced_spec(forced, set(by_name) | set(forced))
+    names = list(by_name) if ALL_LITERAL in forced else [n for n in parsed if n in by_name]
+    if not names:
+        return "", existing
+
+    context = {
+        "ticker": state.get("company_of_interest", ""),
+        "current_date": state.get("trade_date", ""),
+        # Some tools declare ``curr_date`` instead of ``current_date``.
+        "curr_date": state.get("trade_date", ""),
+    }
+    leaves = gather_evidence(
+        by_name,
+        names,
+        context=context,
+        timeout_s=float(config.get("analyst_forced_tools_timeout_s") or 30),
+        max_parallel=int(config.get("analyst_forced_tools_max_parallel") or 1),
+        summary_window=int(config.get("analyst_forced_tools_summary_window") or 12000),
+    )
+    updated = {**existing, analyst_key: [leaf.__dict__ for leaf in leaves]}
+    return format_evidence_block(leaves), updated
+
+
+def _leaf_as_dict(leaf) -> dict:
+    """Normalize a ToolEvidenceLeaf or its persisted dict form."""
+    if isinstance(leaf, ToolEvidenceLeaf):
+        return leaf.__dict__
+    return dict(leaf or {})
+
+
+def format_evidence_block(leaves) -> str:
     """Render the deterministic block the analyst reduces from (design §3.3).
 
-    Failed / empty / timed-out leaves are printed explicitly ``unavailable``
-    so the analyst can state them rather than silently losing the signal.
+    Accepts ``ToolEvidenceLeaf`` objects or their dict form (as read back
+    from state on a re-entry). Failed / empty / timed-out leaves are printed
+    explicitly ``unavailable`` so the analyst can state them rather than
+    silently losing the signal.
     """
     if not leaves:
         return ""
@@ -251,18 +313,21 @@ def format_evidence_block(leaves: list[ToolEvidenceLeaf]) -> str:
         "other tool to fill gaps, but do not re-request these.",
     ]
     for leaf in leaves:
-        args = json.dumps(leaf.args, sort_keys=True) if leaf.args else ""
+        d = _leaf_as_dict(leaf)
+        tool = str(d.get("tool") or "?")
+        status = str(d.get("status") or "ok")
+        content = str(d.get("content") or "")
+        args = d.get("args") or {}
+        args_str = json.dumps(args, sort_keys=True) if args else ""
         status_marker = {
             "ok": "ok",
             "error": "error",
             "no_data": "no_data",
             "timeout": "timeout",
-        }.get(leaf.status, leaf.status)
-        lines.append(f"\n### {leaf.tool} [{status_marker}]" + (f" args={args}" if args else ""))
-        if leaf.status == "timeout":
-            lines.append(f"unavailable: {leaf.content}")
-        elif leaf.status in ("error", "no_data"):
-            lines.append(f"unavailable: {leaf.content}")
+        }.get(status, status)
+        lines.append(f"\n### {tool} [{status_marker}]" + (f" args={args_str}" if args_str else ""))
+        if status in ("timeout", "error", "no_data"):
+            lines.append(f"unavailable: {content}")
         else:
-            lines.append(str(leaf.content))
+            lines.append(content)
     return "\n".join(lines)

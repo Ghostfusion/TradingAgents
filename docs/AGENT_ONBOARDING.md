@@ -319,11 +319,15 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-- 2026-09-07 `(working tree)` - Map-reduce forced tool gathering design:
-  `docs/design_mapreduce_forced_tool_gathering.md` (research + design only, no
-  code) — deterministic fan-out of the analyst tool set in code + the analyst
-  as reducer, so the evidence base per run is the same composition; addresses
-  the analyst-side root cause of the 2/3 reproducibility probe.
+- 2026-09-07 `(working tree)` - Map-reduce forced tool gathering DESIGN + IMPLEMENTATION:
+  design `docs/design_mapreduce_forced_tool_gathering.md`; plan
+  `docs/implementation_plan_mapreduce_forced_tool_gathering.md`; code
+  `tradingagents/agents/utils/evidence_gather.py` + state key `tool_evidence`
+  + 4 analyst node wiring (market/fundamentals/news; sentiment is exempt —
+  its 3 sources are already pre-fetched deterministically) + `repro_check
+  --evidence` + `tool_evidence.json` persistence. Config:
+  `TRADINGAGENTS_ANALYST_FORCED_TOOLS*` (off by default = legacy path).
+  Addresses the analyst-side root cause of the 2/3 reproducibility probe.
 - 2026-09-07 `(working tree)` - Debate reproducibility toolkit: judge ensemble
   (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`) + `judge_agreement`/`judge_flip` in
   debate state, structured-fallback reliability flags (`judge_structured_fallback`,

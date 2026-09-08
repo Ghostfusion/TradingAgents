@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Deterministic forced-tool evidence gathering** (map-reduce; design
+  `docs/design_mapreduce_forced_tool_gathering.md`, plan
+  `docs/implementation_plan_mapreduce_forced_tool_gathering.md`): when
+  `TRADINGAGENTS_ANALYST_FORCED_TOOLS` is set, the runtime gathers that fixed
+  tool set deterministically (the "map") before the analyst runs and the
+  analyst *reduces* from the merged evidence block — so the analyst's report
+  input is fixed in *composition* (which tools were asked) instead of the
+  LLM-selected subset. Addresses the analyst-side root cause of run-to-run
+  verdict flips (the 2/3 TSM probe). Config: `analyst_forced_tools`,
+  `analyst_forced_tools_max_parallel`, `analyst_forced_tools_timeout_s`,
+  `analyst_forced_tools_summary_window`. Defaults off — the legacy
+  LLM-selected path is bit-identical when unset. Per-tool deadline (default
+  30s) records a `timeout` leaf and proceeds (today there is no tool
+  deadline at all); a wedged thread drains in the background (Python can't
+  preempt it — see design §3.5/tracked TRACKED-1). Evidence is persisted to
+  `tool_evidence.json` per run and diffed by `repro_check --evidence` so
+  "did every run see the same tools" is answerable from the report tree.
+  Scope: the 4 information analysts (market/fundamentals/news/sentiment);
+  risk debaters + Trader are a tracked Phase-5 follow-up.
 - **Backup LLM for truncation-continuation retries** (`TRADINGAGENTS_BACKUP_LLM`
   in `.env`, config key `backup_llm`): when ANY LLM response is cut at the
   output cap, the continuation retry now runs on the configured backup model
