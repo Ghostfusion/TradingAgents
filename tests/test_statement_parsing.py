@@ -212,3 +212,26 @@ def test_screen_ticker_uses_sane_revenue_yoy():
     assert row["revenue_yoy"] is not None
     assert abs(row["revenue_yoy"]) <= 3.0
     assert row["revenue_yoy"] == pytest.approx((331.8e9 - 281.7e9) / 281.7e9)
+
+
+def test_sane_revenue_yoy_percent_scaled_resolves_via_pair():
+    """Regression (QCOM 2026-09-08): a percent-scaled vendor revenue_yoy of
+    1.88 (rendered 188%) vs the true +1.88%. The pair recompute must win over
+    the artifact, even though |1.88| <= 3.0."""
+    fin = {
+        "revenue_yoy": 1.88,
+        "revenue": {"current": 44.07e9, "prior": 43.25e9},
+    }
+    # True YoY = (44.07-43.25)/43.25 = 1.9%
+    out = sp.sane_revenue_yoy(fin)
+    assert out == pytest.approx(0.01895, rel=0.02)
+    assert out < 0.03  # not 1.88
+
+
+def test_sane_revenue_yoy_percent_scaled_without_pair():
+    """No revenue pair to arbitrate -> a >100% claimed YoY is treated as
+    percent-scaled (1.88 == 1.88%)."""
+    assert sp.sane_revenue_yoy({"revenue_yoy": 1.88}) == pytest.approx(0.0188)
+    # A sane vendor value in the plausible band (0.4 = 40% growth, no pair)
+    # passes through unchanged.
+    assert sp.sane_revenue_yoy({"revenue_yoy": 0.4}) == pytest.approx(0.4)

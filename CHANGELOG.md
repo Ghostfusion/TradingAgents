@@ -3667,3 +3667,11 @@ PRs from late 2025 also landed here.
   ~4.4% (INTU 2026-09-08 news.md). The tool now converts `hy / 100` before
   computing; a "moderate" credit read no longer renders an absurd 98.9%
   default probability.
+
+### Fixed
+- **`sane_revenue_yoy` percent-scaled guard** (`statement_parsing.py`): a
+  vendor `revenue_yoy` in (0.3, 3.0] that is percent-scaled (e.g. 1.88 = the
+  QCOM 2026-09-08 patch — rendered 188% vs the true +1.9%) now resolves via
+  the revenue current/prior pair (ground truth); without a pair, a >100%
+  claimed YoY is treated as percent-scaled (1.88 -> 1.88%). The earlier
+  |v|>3.0-only guard let the 100x artifact through for values under 300%.

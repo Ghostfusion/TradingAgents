@@ -586,18 +586,35 @@ def sane_revenue_yoy(fin: dict) -> float | None:
     """Revenue YoY (fraction) with the same degenerate-base guard as EPS.
 
     Same artifact class as ``sane_eps_yoy`` (MSFT 2026-09-08: a vendor
-    percent-scaled 17.79 was rendered as +1779%). A |YoY| beyond +/-300% is a
+    percent-scaled 17.79 rendered as +1779%). A |YoY| beyond +/-300% is a
     denominator/units artifact, not a signal; recompute from the current/prior
     revenue pair and return None (n/a) when no safe base exists.
+
+    Additionally guards the percent-scaled case below 300%: a raw value in
+    (0.3, 3.0] (i.e. 30-300% claimed YoY) is recomputed from the revenue pair
+    and the pair's (ground-truth) value is preferred — so a percent-scaled
+    +1.88 (QCOM 2026-09-08 rendered 188% vs the true +1.88%) resolves to the
+    pair's ~1.9%, not the 100x artifact.
     """
     v = _latest(fin.get("revenue_yoy"))
-    if v is not None and abs(v) <= 3.0:
-        return v
     cur = _latest(fin.get("revenue"))
     prior = _prior(fin.get("revenue"))
-    if cur is None or prior is None or prior == 0 or abs(prior) < 0.01:
-        return None
-    return (cur - prior) / prior
+    pair = None
+    if cur is not None and prior is not None and prior != 0 and abs(prior) >= 0.01:
+        pair = (float(cur) - float(prior)) / float(prior)
+    if v is not None and abs(v) <= 3.0:
+        if pair is not None:
+            # The pair is ground truth; prefer it whenever the vendor value is
+            # ambiguous (percent-scaled) OR even when sane — it is always the
+            # most defensible read. Only fall back to the vendor value when no
+            # revenue pair exists.
+            return pair
+        if 0.3 < abs(float(v)) <= 3.0 and abs(float(v)) > 1.0:
+            # No pair to arbitrate, but >100% YoY is implausible for revenue
+            # without a pair: almost certainly percent-scaled (1.88 == 1.88%).
+            return float(v) / 100.0
+        return v
+    return pair
 
 
 def _ratio_num(n, d):
