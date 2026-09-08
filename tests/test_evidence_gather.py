@@ -14,9 +14,12 @@ from time import monotonic
 from langchain_core.tools import tool
 
 from tradingagents.agents.utils.evidence_gather import (
+    MODEL_POOL_HEADER,
+    MODEL_POOL_KEY,
     TOOL_EVIDENCE_KEY,
     format_evidence_block,
     gather_evidence,
+    gather_for_analyst_node,
     make_short_circuit_tool_node,
     parse_forced_spec,
 )
@@ -328,3 +331,101 @@ def test_gather_passes_window_args_to_declared_tools():
     assert seen.get("end_date") == "2026-09-07"
     assert block != ""
     assert "ohlcv" in block
+
+
+@tool
+def get_bsm_quote_fake(spot: float, strike: float, t_years: float, vol: float) -> str:
+    """Fake options-quote tool: all args are model-supplied (not in context)."""
+    return "fake bsm"
+
+
+def test_classify_splits_model_pool_by_required_args():
+    """A tool with a required arg the context can't supply -> model pool."""
+    from tradingagents.agents.utils.evidence_gather import classify_tool_pools
+
+    gather, model = classify_tool_pools([get_financials, get_bsm_quote_fake])
+    assert "get_financials" in gather
+    assert "get_bsm_quote_fake" in model
+
+
+def test_all_gathers_only_gather_pool(caplog):
+    """ALL force-gathers the auto pool; model-pool tools are never attempted."""
+    cfg = {
+        "analyst_forced_tools": ["ALL"],
+        "analyst_forced_tools_timeout_s": 5,
+        "analyst_forced_tools_max_parallel": 1,
+        "analyst_forced_tools_summary_window": 12000,
+    }
+    block, evidence = gather_for_analyst_node(
+        {"company_of_interest": "TSM", "trade_date": "2026-09-07", "messages": [], "tool_evidence": {}},
+        "market",
+        [get_financials, get_bsm_quote_fake],
+        cfg,
+    )
+    # Only the auto tool gathered; the model-pool tool is listed, not attempted.
+    assert [leaf["tool"] for leaf in evidence["market"]] == ["get_financials"]
+    assert evidence[MODEL_POOL_KEY]["market"] == ["get_bsm_quote_fake"]
+    assert "get_financials" in block
+    assert MODEL_POOL_HEADER in block
+    assert "get_bsm_quote_fake" in block
+
+
+def test_explicit_model_name_skipped_with_warning(caplog):
+    """A forced name in the model pool is skipped (never error-attempted)."""
+    from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+
+    cfg = {
+        "analyst_forced_tools": ["get_bsm_quote_fake", "get_financials"],
+        "analyst_forced_tools_timeout_s": 5,
+        "analyst_forced_tools_max_parallel": 1,
+        "analyst_forced_tools_summary_window": 12000,
+    }
+    block, evidence = gather_for_analyst_node(
+        {"company_of_interest": "TSM", "trade_date": "2026-09-07", "messages": [], "tool_evidence": {}},
+        "market",
+        [get_financials, get_bsm_quote_fake],
+        cfg,
+    )
+    assert [leaf["tool"] for leaf in evidence["market"]] == ["get_financials"]
+    assert any("model pool" in r.getMessage() for r in caplog.records)
+
+
+def test_model_supplied_override_moves_gather_tool_into_model():
+    """analyst_tools_model_supplied escape hatch FORCE-moves a name to model pool."""
+    from tradingagents.agents.utils.evidence_gather import (
+        MODEL_POOL_KEY,
+        gather_for_analyst_node,
+    )
+
+    cfg = {
+        "analyst_forced_tools": ["ALL"],
+        "analyst_tools_model_supplied": ["get_financials"],
+        "analyst_forced_tools_timeout_s": 5,
+        "analyst_forced_tools_max_parallel": 1,
+        "analyst_forced_tools_summary_window": 12000,
+    }
+    _, evidence = gather_for_analyst_node(
+        {"company_of_interest": "TSM", "trade_date": "2026-09-07", "messages": [], "tool_evidence": {}},
+        "market",
+        [get_financials, get_bsm_quote_fake],
+        cfg,
+    )
+    assert evidence[MODEL_POOL_KEY]["market"] == ["get_bsm_quote_fake", "get_financials"]
+
+
+def test_short_circuit_passes_through_model_pool_calls():
+    """A model-pool call executes for real (not short-circuited)."""
+    calls = {"n": 0}
+    fake_node = _fake_tool_node(get_financials, calls)
+    wrapped = make_short_circuit_tool_node(fake_node, "market")
+    out = wrapped(
+        {
+            TOOL_EVIDENCE_KEY: {
+                "market": [{"tool": "get_financials", "status": "ok", "args": {}, "args_hash": "x"}],
+                MODEL_POOL_KEY: {"market": ["get_bsm_quote_fake"]},
+            },
+            **_ai_tool_calls({"name": "get_bsm_quote_fake", "args": {}, "id": "c-m"}),
+        }
+    )
+    assert calls["n"] == 1  # model-pool call reached the underlying ToolNode
+    assert out["messages"][0].tool_call_id == "c-m"

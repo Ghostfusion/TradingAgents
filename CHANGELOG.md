@@ -26,6 +26,17 @@ Breaking changes within the 0.x line are called out explicitly.
   "did every run see the same tools" is answerable from the report tree.
   Scope: the 4 information analysts (market/fundamentals/news/sentiment);
   risk debaters + Trader are a tracked Phase-5 follow-up.
+- **Tool pools: gather-pool vs model-pool** (same feature, refined): tools
+  whose required args the deterministic context can supply (140 of 180
+  registered) are forced-gathered as before; tools needing a
+  model-supplied input (40: options quotes, scenario DCF, allocation,
+  macro-indicator slugs, etc.) are never auto-attempted — they stay bound
+  to the LLM, which owns their inputs, and are listed in the evidence block
+  under "Model-supplied tools" so the split is visible. Classification is
+  signature-derived at runtime (a future tool needing a model input lands
+  in the model pool automatically); `TRADINGAGENTS_ANALYST_TOOLS_MODEL_SUPPLIED`
+  is an escape hatch to force extra names into the model pool. Short-circuit
+  blocks only gathered (gather-pool) tools; model-pool calls execute for real.
 - **Backup LLM for truncation-continuation retries** (`TRADINGAGENTS_BACKUP_LLM`
   in `.env`, config key `backup_llm`): when ANY LLM response is cut at the
   output cap, the continuation retry now runs on the configured backup model

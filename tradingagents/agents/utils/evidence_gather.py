@@ -236,6 +236,63 @@ def _leaf(
     )
 
 
+# Arg keys the deterministic gather context can supply. A tool with a required
+# arg outside this set needs a model-supplied input -> it belongs to the model
+# pool, not the gather pool.
+CONTEXT_ARG_KEYS = frozenset(
+    {"ticker", "symbol", "current_date", "curr_date", "start_date", "end_date", "look_back_days"}
+)
+
+# Reserved key in the tool_evidence state dict carrying the per-analyst
+# model-pool name lists (persisted for the --evidence G/M split).
+MODEL_POOL_KEY = "_model_pool"
+
+MODEL_POOL_HEADER = (
+    "## Model-supplied tools (not pre-gathered — call them with your own "
+    "inputs if needed)"
+)
+
+
+def classify_tool_pools(
+    tools,
+    context_keys=CONTEXT_ARG_KEYS,
+    forced_model=(),
+) -> tuple[list[str], list[str]]:
+    """Classify bound tools into (gather_pool, model_pool).
+
+    The gather (auto) pool = every tool whose required args are all covered
+    by the deterministic context. The model pool = every tool that requires an
+    arg the context cannot supply (e.g. ``get_bsm_option_quote`` needs
+    spot/strike/t_years/vol; ``get_macro_indicators`` needs ``indicator``),
+    plus any name in ``forced_model`` (the analyst_tools_model_supplied
+    override). Classified from each tool's own schema, so a FUTURE tool that
+    needs a model input lands in the model pool automatically — no
+    maintained list to go stale.
+    """
+    forced = set(forced_model or ())
+    gather: list[str] = []
+    model: list[str] = []
+    for t in tools:
+        name = getattr(t, "name", None)
+        if not name:
+            continue
+        args = getattr(t, "args", None) or {}
+        required = [k for k, meta in args.items() if "default" not in meta]
+        if name in forced or any(k not in context_keys for k in required):
+            model.append(name)
+        else:
+            gather.append(name)
+    return gather, sorted(model)
+
+
+def _render_evidence(leaves, model_names) -> str:
+    """Evidence block + the model-pool hint (the analyst reduce sees both)."""
+    block = format_evidence_block(leaves)
+    if model_names:
+        block += "\n\n" + MODEL_POOL_HEADER + "\n" + ", ".join(sorted(model_names))
+    return block
+
+
 def gather_for_analyst_node(
     state: dict,
     analyst_key: str,
@@ -247,29 +304,58 @@ def gather_for_analyst_node(
     Call at the top of the analyst node. When ``analyst_forced_tools`` is
     unset (empty list), returns ``("", existing)`` untouched — the legacy
     LLM-selected path. When set, resolves the forced names from the node's
-    bound tools, gathers them deterministically (context = the run's ticker /
-    date), stores the leaves under ``analyst_key`` in the state's
-    ``tool_evidence`` dict, and returns the rendered reduce block. A later
-    re-entry (tool-loop return / cap turn) finds the key already set and
-    skips the gather — the fix composition is what matters, not a re-fetch.
+    bound tools and gathers the GATHER-POOL subset deterministically (context
+    = the run's ticker / date / window). Model-pool tools (required args the
+    context cannot supply) are NEVER auto-attempted: they stay bound to the
+    LLM, which owns their inputs — an explicit forced name in the model pool
+    is skipped with a warning. Evidence leaves are stored under
+    ``analyst_key`` and the model-pool names under ``MODEL_POOL_KEY`` in the
+    state's ``tool_evidence`` dict; the rendered block is returned for the
+    reduce prompt. A re-entry finds the key already set and skips the gather.
     """
     existing: dict = dict(state.get(TOOL_EVIDENCE_KEY) or {})
     forced = (config or {}).get("analyst_forced_tools") or []
     if not forced:
         return "", existing
 
+    pool = (existing.get(MODEL_POOL_KEY) or {}).get(analyst_key) or []
     if analyst_key in existing:
-        return format_evidence_block(existing[analyst_key]), existing
+        return _render_evidence(existing[analyst_key], pool), existing
 
     by_name = {t.name: t for t in tools}
-    # The config is one GLOBAL list serving all four analysts; a name missing
-    # from THIS node is expected (it belongs to a sibling analyst), so pass
-    # the union as "registered" to suppress per-node "unknown tool" noise and
-    # filter down to THIS analyst's names in config order.
-    parsed = parse_forced_spec(forced, set(by_name) | set(forced))
-    names = list(by_name) if ALL_LITERAL in forced else [n for n in parsed if n in by_name]
+    gather_names, model_names = classify_tool_pools(
+        by_name.values(),
+        forced_model=(config or {}).get("analyst_tools_model_supplied") or [],
+    )
+    model_set = set(model_names)
+
+    if ALL_LITERAL in forced:
+        # Force-gather EVERY auto-gatherable tool; the model pool is never
+        # auto-attempted (its inputs are the model's, not ours to invent).
+        names = gather_names
+    else:
+        # The config is one GLOBAL list serving all four analysts; a name
+        # missing from THIS node is expected (it belongs to a sibling), so
+        # pass the union as "registered" to suppress unknown-tool noise.
+        parsed = parse_forced_spec(forced, set(by_name) | set(forced))
+        names = []
+        for n in parsed:
+            if n in model_set:
+                logger.warning(
+                    "forced-tool %r needs model-supplied inputs (model pool) - "
+                    "skipping the gather; the agent LLM controls it",
+                    n,
+                )
+            elif n in by_name:
+                names.append(n)
+
     if not names:
-        return "", existing
+        # The pool hint is still worth persisting so the split is visible.
+        updated = {**existing}
+        pools = dict(existing.get(MODEL_POOL_KEY) or {})
+        pools[analyst_key] = model_names
+        updated[MODEL_POOL_KEY] = pools
+        return "", updated
 
     context = _evidence_context(state)
     leaves = gather_evidence(
@@ -281,7 +367,10 @@ def gather_for_analyst_node(
         summary_window=int(config.get("analyst_forced_tools_summary_window") or 12000),
     )
     updated = {**existing, analyst_key: [leaf.__dict__ for leaf in leaves]}
-    return format_evidence_block(leaves), updated
+    pools = dict(existing.get(MODEL_POOL_KEY) or {})
+    pools[analyst_key] = model_names
+    updated[MODEL_POOL_KEY] = pools
+    return _render_evidence(leaves, model_names), updated
 
 
 def _leaf_as_dict(leaf) -> dict:

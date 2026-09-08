@@ -196,6 +196,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ANALYST_FORCED_TOOLS_MAX_PARALLEL": "analyst_forced_tools_max_parallel",
     "TRADINGAGENTS_ANALYST_FORCED_TOOLS_TIMEOUT_S": "analyst_forced_tools_timeout_s",
     "TRADINGAGENTS_ANALYST_FORCED_TOOLS_SUMMARY_WINDOW": "analyst_forced_tools_summary_window",
+    # Tools to keep in the MODEL pool even when their args look satisfied by
+    # the gather context (escape hatch: names the user considers model-judgment).
+    "TRADINGAGENTS_ANALYST_TOOLS_MODEL_SUPPLIED": "analyst_tools_model_supplied",
     # OpenRouter provider routing: comma-separated provider slugs to always skip
     # (e.g. slow/unreliable endpoints). Sent as provider.ignore in the request
     # body via extra_body. Empty = no restriction.
@@ -461,6 +464,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "analyst_forced_tools_max_parallel": 1,
         "analyst_forced_tools_timeout_s": 30,
         "analyst_forced_tools_summary_window": 12000,
+        # Model-pool override: names FORCE-moved to the LLM-controlled pool
+        # (never auto-gathered) even when the signature would auto-classify
+        # them. Empty = purely signature-derived classification.
+        "analyst_tools_model_supplied": [],
         # News / data fetching parameters
         # Increase for longer lookback strategies or to broaden macro coverage;
         # decrease to reduce token usage in agent prompts.

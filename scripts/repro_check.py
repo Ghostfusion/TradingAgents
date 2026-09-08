@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 
 from batch import analyze
+from tradingagents.agents.utils.evidence_gather import MODEL_POOL_KEY
 
 _CONFIG_HASH_CACHE: dict = {}
 
@@ -86,14 +87,25 @@ def _print_evidence_diff(report_dirs) -> None:
     from collections import Counter as _C
 
     rows: dict[str, list] = {}
+    pools: dict[str, set] = {}
     for run_i, ev in enumerate(evidence):
         if ev is None:
             continue
-        for analyst_key, leaves in (ev or {}).items():
-            for leaf in leaves:
+        for analyst_key, payload in (ev or {}).items():
+            if analyst_key.startswith("_"):
+                # Metadata key (e.g. _model_pool); not a leaf list.
+                continue
+            for leaf in payload:
                 key = f"{analyst_key}:{leaf['tool']}"
                 row = rows.setdefault(key, [None] * len(evidence))
                 row[run_i] = leaf.get("status")
+        for analyst_key, names in (ev.get(MODEL_POOL_KEY) or {}).items():
+            pools.setdefault(analyst_key, set()).update(names)
+
+    if pools:
+        print("\nMODEL-pool (not gathered; the agent LLM controls these):")
+        for analyst_key in sorted(pools):
+            print(f"  {analyst_key}: " + ", ".join(sorted(pools[analyst_key])))
 
     if not rows:
         print("evidence files exist but are empty.")

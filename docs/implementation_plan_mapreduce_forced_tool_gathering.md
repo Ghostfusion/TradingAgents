@@ -55,6 +55,18 @@ return real data instead of a missing-arg `error` leaf. Pure-compute tools
 model-supplied inputs and stay recorded `error`/`unavailable` — never
 fabricated.
 
+Tool pools (2026-09-07, user directive): tools are split at runtime by their
+OWN schema into a **gather pool** (every required arg covered by the context;
+~140 of 180) — force-gathered + short-circuited as above — and a **model
+pool** (any required arg the context can't supply, e.g. `spot/strike` on
+`get_bsm_option_quote`, `indicator` on `get_macro_indicators`, plus the
+`TRADINGAGENTS_ANALYST_TOOLS_MODEL_SUPPLIED` escape hatch). Model-pool tools
+are NEVER auto-attempted; they stay bound to the LLM, which owns their
+inputs, and an explicit forced name in the model pool is skipped with one
+warning. Classification is signature-derived so a FUTURE tool needing a
+model input lands in the model pool automatically; the split is persisted
+(`_model_pool` in `tool_evidence.json`) and shown by `repro_check --evidence`.
+
 ---
 
 ## Phase 0 — Config surface
