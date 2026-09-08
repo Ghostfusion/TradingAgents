@@ -1,8 +1,10 @@
 """Hermetic tests for the forced-tool evidence gatherer (map side).
 
 The gatherer must be deterministic in *composition* (which tools ran, in
-spec order), never raise on a failing/slow tool, and mark ``timeout``
-without blocking the caller. These tests use no network, no real tools.
+request order), never registered on a failing/slow tool, and mark ``timeout``
+without blocking the caller. These tests use no network, no live tools.
+Also covers the short-circuit wrapper (already-gathered tools never re-invoke
+the vendor on the analyst's gap-fill loop).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from tradingagents.agents.utils.evidence_gather import (
     TOOL_EVIDENCE_KEY,
     format_evidence_block,
     gather_evidence,
+    make_short_circuit_tool_node,
     parse_forced_spec,
 )
 
@@ -175,3 +178,90 @@ def test_format_block_renders_headers_and_failures():
 
 def test_format_block_empty():
     assert format_evidence_block([]) == ""
+
+
+def _ai_tool_calls(*calls):
+    """Build a bare state whose last message carries the given tool calls."""
+    from langchain_core.messages import AIMessage
+
+    return {"messages": [AIMessage(content="", tool_calls=list(calls))]}
+
+
+def _fake_tool_node(real_tool, calls):
+    """Fake langgraph ToolNode callable; records invocations it performed."""
+    from langchain_core.messages import ToolMessage
+
+    def node(state):
+        calls["n"] += 1
+        msgs = list(state["messages"])
+        last = msgs[-1]
+        out = []
+        for c in (getattr(last, "tool_calls", None) or []):
+            name = c.get("name", "")
+            args = c.get("args", {})
+            content = (
+                real_tool.invoke(dict(args))
+                if name == real_tool.name
+                else f"ran:{name}"
+            )
+            out.append(
+                ToolMessage(content=content, tool_call_id=c.get("id", ""), name=name)
+            )
+        return {"messages": out}
+
+    return node
+
+
+def test_short_circuit_gathered_tool_not_reinvoked():
+    calls = {"n": 0}
+    wrapped = make_short_circuit_tool_node(_fake_tool_node(get_financials, calls), "fundamentals")
+    out = wrapped(
+        {
+            TOOL_EVIDENCE_KEY: {
+                "fundamentals": [
+                    {"tool": "get_financials", "status": "ok", "content": "data", "args_hash": "x"}
+                ]
+            },
+            **_ai_tool_calls({"name": "get_financials", "args": {"ticker": "TSM"}, "id": "c1"}),
+        }
+    )
+    assert calls["n"] == 0  # underlying ToolNode never ran
+    msg = out["messages"][0]
+    assert msg.tool_call_id == "c1"
+    assert msg.name == "get_financials"
+    assert "already gathered" in msg.content
+
+
+def test_short_circuit_delegates_ungathered_tool():
+    calls = {"n": 0}
+    wrapped = make_short_circuit_tool_node(_fake_tool_node(get_financials, calls), "market")
+    out = wrapped(
+        {
+            TOOL_EVIDENCE_KEY: {
+                "market": [
+                    {"tool": "get_pe_metrics", "status": "ok", "args": {}, "args_hash": "y"}
+                ]
+            },
+            **_ai_tool_calls(
+                {"name": "get_pe_metrics", "args": {"ticker": "TSM"}, "id": "c1"},
+                {"name": "get_financials", "args": {"ticker": "TSM"}, "id": "c2"},
+            ),
+        }
+    )
+    assert calls["n"] == 1  # c2 ran through the underlying node
+    by_id = {m.tool_call_id: m for m in out["messages"]}
+    assert "already gathered" in by_id["c1"].content
+    assert by_id["c2"].content == get_financials.invoke({"ticker": "TSM"})
+
+
+def test_short_circuit_passthrough_without_evidence():
+    calls = {"n": 0}
+    wrapped = make_short_circuit_tool_node(_fake_tool_node(get_financials, calls), "fundamentals")
+    out = wrapped(
+        {
+            TOOL_EVIDENCE_KEY: {},
+            **_ai_tool_calls({"name": "get_financials", "args": {"ticker": "TSM"}, "id": "c1"}),
+        }
+    )
+    assert calls["n"] == 1  # legacy path: underlying node ran unchanged
+    assert out["messages"][0].tool_call_id == "c1"

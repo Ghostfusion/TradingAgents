@@ -505,8 +505,13 @@ class TradingAgentsGraph:
         return kwargs
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:
-        """Create tool nodes for different data sources using abstract methods."""
-        return {
+        """Create tool nodes for different data sources using abstract methods.
+
+        Each node is wrapped so tools already gathered deterministically
+        (forced-tool evidence) short-circuit instead of re-hitting the vendor
+        (user directive; see evidence_gather.make_short_circuit_tool_node).
+        """
+        nodes: dict[str, ToolNode] = {
             "market": ToolNode(
                 [
                     # Per-call error containment (B1): a single failing tool in a
@@ -773,6 +778,14 @@ class TradingAgentsGraph:
                 ],
                 handle_tool_errors=True,
             ),
+        }
+        from tradingagents.agents.utils.evidence_gather import (
+            make_short_circuit_tool_node,
+        )
+
+        return {
+            key: make_short_circuit_tool_node(node, key)
+            for key, node in nodes.items()
         }
 
     def _resolve_benchmark(self, ticker: str) -> str:

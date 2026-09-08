@@ -296,6 +296,94 @@ def _leaf_as_dict(leaf) -> dict:
     return dict(leaf or {})
 
 
+def make_short_circuit_tool_node(tool_node, analyst_key: str):
+    """Wrap an analyst ToolNode so already-gathered tools never re-run.
+
+    User directive (docs/implementation_plan_mapreduce_forced_tool_gathering.md
+    "Operating philosophy"): feed every registered tool's evidence to the LLM
+    once, deterministically, and never re-request the same info — the model's
+    gap-fill loop must NOT re-invoke a tool that the gatherer already ran.
+
+    The wrapper inspects the last assistant message's tool calls: a call whose
+    name is in the analyst's gathered evidence set is answered with a
+    ToolMessage pointing back to the ``## Tool Evidence`` block (no vendor
+    hit); anything NOT gathered (possible only when a partial list is
+    configured, since ``ALL`` covers the whole registry) is delegated to the
+    underlying node. Off-path when no evidence exists (legacy default) → the
+    node behaves exactly as before.
+    """
+    if not callable(tool_node):
+        # Not a real ToolNode (e.g. a non-callable test double): no way to
+        # short-circuit, so leave it untouched.
+        return tool_node
+
+    def wrapper(state):
+        return short_circuit_tool_calls(tool_node, analyst_key, state)
+
+    return wrapper
+
+
+def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
+    """Execute the wrapper logic (see ``make_short_circuit_tool_node``)."""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    messages = list(state.get("messages") or [])
+    if not messages:
+        return tool_node(state)
+
+    last = messages[-1]
+    calls = getattr(last, "tool_calls", None) or []
+    if not calls:
+        return tool_node(state)
+
+    evidence = (state.get(TOOL_EVIDENCE_KEY) or {}).get(analyst_key) or []
+    gathered: dict[str, str] = {}
+    for leaf in evidence:
+        d = _leaf_as_dict(leaf)
+        tool_name = str(d.get("tool") or "")
+        if tool_name:
+            gathered[tool_name] = str(d.get("status") or "ok")
+
+    outputs: list = []
+    remaining: list = []
+    for call in calls:
+        name = str((call or {}).get("name") or "")
+        if name in gathered:
+            status = gathered[name]
+            outputs.append(
+                ToolMessage(
+                    content=(
+                        f"[forced-tool evidence already gathered] {name} "
+                        f"(status={status}) was gathered deterministically before this "
+                        "run - see its entry in the '## Tool Evidence (deterministic - "
+                        "all invoked)' block of the system prompt. Do not re-fetch; "
+                        "write the report from that evidence."
+                    ),
+                    tool_call_id=str((call or {}).get("id") or ""),
+                    name=name,
+                )
+            )
+        else:
+            remaining.append(call)
+
+    if not remaining:
+        return {"messages": outputs}
+    if not outputs:
+        # nothing gathered on this turn - plain passthrough.
+        return tool_node(state)
+
+    # Mixed: short the gathered ones, delegate the rest in one underlying call.
+    filtered_last = AIMessage(
+        content=getattr(last, "content", ""),
+        tool_calls=list(remaining),
+        id=getattr(last, "id", None),
+    )
+    sub_state = {**state, "messages": [*messages[:-1], filtered_last]}
+    result = tool_node(sub_state)
+    real_msgs = list((result or {}).get("messages", []))
+    return {"messages": [*outputs, *real_msgs]}
+
+
 def format_evidence_block(leaves) -> str:
     """Render the deterministic block the analyst reduces from (design §3.3).
 
