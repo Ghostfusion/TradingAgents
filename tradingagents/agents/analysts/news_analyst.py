@@ -88,6 +88,14 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             + " Flow and event tools: `get_earnings_catalyst(ticker, current_date)` returns the moomoo earnings-catalyst event (print time + implied move) - pair it with `get_catalyst_scale` when sizing an incoming print; `get_insider_transactions(ticker, start_date, end_date)` returns the windowed insider-transaction flow - cite it before any 'insider buying/selling this week' claim; `get_gdelt_sentiment(ticker)` returns the GDELT aggregate news-sentiment view for the ticker - use it as a cross-check on `get_news_sentiment_series`; `get_market_breadth(ticker)` returns the market-breadth/participation read - cite it before any 'broad or narrow participation' claim; `get_ipos()` returns the upcoming IPO calendar - use it before any 'new-listing / IPO-flow' claim. "
             + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
+            + " HARD CITATION RULE for figures: copy every number you cite VERBATIM"
+            " from a tool output (the §Tool Evidence block above or from a tool"
+            " you call in this session) - exact digits, never retyped or"
+            " reformatted. When you must state a derived percentage or level,"
+            " compute it from verbatim-copied inputs. If two tools disagree on"
+            " the same quantity (e.g. two ATRs, two 200-day averages, two"
+            " moves), quote BOTH with their tool names and flag the conflict -"
+            " never splice, substitute, or reconcile silently."
             + get_language_instruction() + get_output_budget("analyst")
         )
 

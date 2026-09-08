@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from batch import analyze
@@ -126,6 +127,70 @@ def _print_evidence_diff(report_dirs) -> None:
             print("  ", key, status_counts[key])
     else:
         print("\nall tool statuses identical across runs (composition + status stable)")
+
+    _figure_cross_check(report_dirs, evidence)
+
+
+_DEC_RE = re.compile(r"\d+\.\d+")
+
+
+def _float_tokens(text: str) -> set:
+    """Distinct decimal numbers in ``text`` (the figures that carry signal;
+    bare integers are too noisy for a cheap grounding check)."""
+    out = set()
+    for m in _DEC_RE.finditer(text):
+        try:
+            out.add(float(m.group()))
+        except ValueError:
+            continue
+    return out
+
+
+def _matches(flt: float, refs: set) -> bool:
+    """Roughly same value as some evidence figure (<=0.5% relative)."""
+    for ref in refs:
+        denom = max(abs(ref), abs(flt), 1e-9)
+        if abs(flt - ref) / denom <= 0.005:
+            return True
+    return False
+
+
+def _figure_cross_check(report_dirs: list, evidence: list) -> None:
+    """Advisory figure-grounding check: decimal numbers in each analyst
+    report that have no matching value in the run's tool evidence are
+    candidates for the copy-garble class seen on QCOM 2026-09-07 news.md
+    ('303.9 -> 944B' for the TGA draw, '0.51%' for 10.51%, '7.6%' for 7.4%).
+    Heuristic: tolerance-matched, so same-number different-formatting passes;
+    integer deltas (e.g. '-5%' vs '-4%') are not covered - the analyst
+    prompt's verbatim-citation rule is the primary guard, this is the cheap
+    tripwire."""
+    print("\n=== analyst-report figure cross-check (verbatim grounding) ===")
+    for run_i, d in enumerate(report_dirs):
+        ev = evidence[run_i]
+        if ev is None:
+            continue
+        ev_dec: set = set()
+        for analyst_key, payload in (ev or {}).items():
+            if analyst_key.startswith("_"):
+                continue
+            for leaf in payload:
+                ev_dec |= _float_tokens(str(leaf.get("content") or ""))
+        md_dir = Path(d) / "1_analysts"
+        if not md_dir.exists():
+            print(f"  run{run_i + 1}: no 1_analysts/ dir, skipped")
+            continue
+        for md in sorted(md_dir.glob("*.md")):
+            text = md.read_text(encoding="utf-8", errors="ignore")
+            suspect = sorted(f for f in _float_tokens(text) if not _matches(f, ev_dec))
+            if suspect:
+                shown = ", ".join(f"{v:.6g}" for v in suspect[:25])
+                print(
+                    f"  run{run_i + 1} {md.stem}: {len(suspect)} figure(s) with no "
+                    f"matching tool-output value: {shown}" + (" …" if len(suspect) > 25 else "")
+                )
+            else:
+                print(f"  run{run_i + 1} {md.stem}: all decimal figures grounded in tool output")
+    print("  (heuristic: ±0.5% tolerance; integers/pool-tool figures are not covered)")
 
 
 def main() -> int:

@@ -518,6 +518,12 @@ def format_evidence_block(leaves) -> str:
         "All of the following tools were invoked deterministically BEFORE your "
         "analysis. Ground your report in this evidence; you may still call any "
         "other tool to fill gaps, but do not re-request these.",
+        "HARD CITATION RULE for figures: copy every figure VERBATIM from the "
+        "tool output above - exact digits and units, never retyped or "
+        "reformatted. When you must state a derived percentage or level, "
+        "compute it from verbatim-copied inputs. If two tools disagree on the "
+        "same quantity, quote BOTH with their tool names and say they "
+        "conflict; never splice, substitute, or silently reconcile.",
     ]
     for leaf in leaves:
         d = _leaf_as_dict(leaf)

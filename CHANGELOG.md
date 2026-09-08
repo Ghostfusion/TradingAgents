@@ -3536,3 +3536,17 @@ PRs from late 2025 also landed here.
   YoY beyond +/-300%, or one whose prior-year EPS base is below $0.01, is a
   denominator artifact, not a decline signal — it now returns n/a instead
   of emitting nonsensical figures like "-2280% EPS YoY" (QCOM 2026-09-07).
+
+### Added
+- **Verbatim-citation rule for analyst figures** (market + news system
+  prompts and the shared §Tool Evidence block): every figure must be copied
+  verbatim from a tool output - never retyped, reformatted, or spliced -
+  and when two tools disagree on the same quantity the analyst must quote
+  both with tool names instead of reconciling silently. Addresses the QCOM
+  2026-09-07 report-garble class (TGA "303.9->944B" for 903.9, "CCC 0.51%"
+  for 10.51, an ATR from one tool spliced onto another tool's stop).
+- **`repro_check --evidence` analyst-figure cross-check**: flags decimal
+  numbers in each analyst report that have no matching value in the run's
+  `tool_evidence.json` (tolerance-based: rounded copies of tool values
+  pass, digit-garble like 303.9-vs-903.9 fires). Advisory tripwire; the
+  prompt rule is the primary guard.

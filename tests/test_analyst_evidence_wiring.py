@@ -11,8 +11,16 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
-from tradingagents.agents.analysts import fundamentals_analyst as fundamentals_mod
-from tradingagents.agents.utils.evidence_gather import EVIDENCE_SECTION_HEADER, TOOL_EVIDENCE_KEY
+from tradingagents.agents.analysts import (
+    fundamentals_analyst as fundamentals_mod,
+    market_analyst as market_mod,
+    news_analyst as news_mod,
+)
+from tradingagents.agents.utils.evidence_gather import (
+    EVIDENCE_SECTION_HEADER,
+    TOOL_EVIDENCE_KEY,
+    format_evidence_block,
+)
 
 _FORCED_CONFIG = {
     "analyst_forced_tools": ["get_basic_financials"],
@@ -142,6 +150,36 @@ def test_analyst_without_forced_config_is_unchanged(monkeypatch):
     assert out["fundamentals_report"] == "plain report"
     sys = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
     assert EVIDENCE_SECTION_HEADER not in sys
+
+
+def test_market_and_news_prompts_carry_verbatim_citation_rule():
+    """Regression (QCOM 2026-09-07 news.md/market.md): analysts re-typed and
+    spliced figures from different tools ('TGA 303.9->944B' for 903.9,
+    'CCC 0.51%' for 10.51, a 5.97 ATR onto a stop built from 5.1243). The
+    rendered prompt must carry the hard verbatim-citation + conflict-quote
+    rule so numbers are copied, never retyped or spliced."""
+    captured: list = []
+    market_mod.create_market_analyst(_FakeLLM(["m"], captured), config=None)(_base_state())
+    sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
+    assert "HARD CITATION RULE" in sys_text
+    assert "quote BOTH with their tool names" in sys_text
+
+    captured = []
+    news_mod.create_news_analyst(_FakeLLM(["n"], captured), config=None)(_base_state())
+    sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
+    assert "HARD CITATION RULE" in sys_text
+    assert "never splice, substitute, or reconcile silently" in sys_text
+
+
+def test_evidence_block_render_carries_citation_rule():
+    """The shared §Tool Evidence block (all evidence-fed analysts) states the
+    same verbatim-copy / conflict-quote rule above the leaves."""
+    block = format_evidence_block(
+        [{"tool": "get_news", "status": "ok", "content": "octopus", "args": {}}]
+    )
+    assert "HARD CITATION RULE" in block
+    assert "quote BOTH with their tool names" in block
+    assert "octopus" in block
 
 
 def _base_state():
