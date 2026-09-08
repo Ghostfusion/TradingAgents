@@ -306,7 +306,6 @@ def test_gather_passes_window_args_to_declared_tools():
         seen.update(symbol=symbol, start_date=start_date, end_date=end_date)
         return f"ohlcv {symbol} {start_date}..{end_date}"
 
-    monkeypatch = None  # patched via module attribute below
     # Simulate the analyst node's bound tools list with the fake tool.
     node_state = {
         "company_of_interest": "TSM",
