@@ -3597,3 +3597,25 @@ PRs from late 2025 also landed here.
   (the max_tokens-padding attractor loop) is trimmed to its first occurrence
   so the loop is never re-fed as context. Conservative: only exact duplicate
   full lines; legitimate repeated structure untouched.
+
+### Fixed
+- **`get_analyst_verdict` / `screen_ticker` `revenue_yoy` degenerate guard**
+  (`statement_parsing.sane_revenue_yoy`): a vendor revenue-YoY beyond +/-300%
+  (or with no safe base) is a units/denominator artifact, not a signal
+  (MSFT 2026-09-08: +1779% vs the true +17.79%); it now recomputes from the
+  revenue pair or renders n/a - same class as the existing `eps_yoy` guard.
+- **`compute_ratios` plausibility + subset-invariant guards**
+  (`strategies/ratios.py`): current assets/liabilities can never exceed total
+  assets/liabilities (mis-parse produced current 3.74 vs true 1.23 on MSFT
+  2026-09-08 -> ratio now nulled); D/E above 10x and dividend yield above 25%
+  are units/scaling artifacts, not balance-sheet reads -> n/a. The exact
+  MSFT-current-cap (3,659,011,981,312) formula itself was already correct.
+- **yfinance fundamentals formatter guards** (`dataflows/y_finance.py`): a
+  >25% dividend yield (0.73 = 73% - percent-scaled input) is re-normalized
+  to 0.73%; a D/E > 10 renders an explicit "n/a (implausible vendor value
+  > 10)" so a unit-scaled 29.118 never reaches the analyst as a real
+  leverage read.
+- **Combining-diacritic sanitizer in `_finalize_section`**
+  (`reporting.py`): stray U+0300-U+036F marks the LLM emits before
+  dates/numbers (13x in MSFT market.md 2026-09-08) are stripped before
+  any section is persisted, so markdown renders clean.

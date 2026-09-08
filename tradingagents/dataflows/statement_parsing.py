@@ -582,6 +582,24 @@ def sane_eps_yoy(fin: dict) -> float | None:
     return (cur - prior) / prior
 
 
+def sane_revenue_yoy(fin: dict) -> float | None:
+    """Revenue YoY (fraction) with the same degenerate-base guard as EPS.
+
+    Same artifact class as ``sane_eps_yoy`` (MSFT 2026-09-08: a vendor
+    percent-scaled 17.79 was rendered as +1779%). A |YoY| beyond +/-300% is a
+    denominator/units artifact, not a signal; recompute from the current/prior
+    revenue pair and return None (n/a) when no safe base exists.
+    """
+    v = _latest(fin.get("revenue_yoy"))
+    if v is not None and abs(v) <= 3.0:
+        return v
+    cur = _latest(fin.get("revenue"))
+    prior = _prior(fin.get("revenue"))
+    if cur is None or prior is None or prior == 0 or abs(prior) < 0.01:
+        return None
+    return (cur - prior) / prior
+
+
 def _ratio_num(n, d):
     """n/d guarded: None when either side missing or the denominator is 0."""
     if n is None or d is None:
@@ -807,7 +825,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "trap": trap,
         "roe": round(roe, 4) if roe is not None else None,
         "eps_yoy": sane_eps_yoy(fin),
-        "revenue_yoy": _latest(fin.get("revenue_yoy")),
+        "revenue_yoy": sane_revenue_yoy(fin),
         "sector": fin.get("sector"),
     }
 

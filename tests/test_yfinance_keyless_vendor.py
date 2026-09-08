@@ -105,5 +105,32 @@ class KeylessYFinanceTests(unittest.TestCase):
         self.assertIn("mean: 178.00", out)
 
 
+class TestFundamentalsFormattingGuards(unittest.TestCase):
+    """Regression (MSFT 2026-09-08): dividend yield 0.73 rendered as 73.00%
+    (percent-scaled input) and D/E 29.118 vs the true 0.13 (units artifact).
+    The formatter must re-normalize a >25% yield and never emit an
+    implausible D/E."""
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_dividend_yield_percent_scaled_is_normalized(self, mock_yf, _):
+        info = {"longName": "TestCorp", "dividendYield": 0.73}
+        mock_yf.Ticker.return_value = _Ticker()
+        mock_yf.Ticker.return_value.info = info
+        out = y_finance.get_fundamentals("TST")
+        self.assertIn("Dividend Yield: 0.73%", out)
+        self.assertNotIn("73.00%", out)
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_debt_to_equity_implausible_is_flagged(self, mock_yf, _):
+        info = {"longName": "TestCorp", "debtToEquity": 29.118, "dividendYield": 0.0073}
+        mock_yf.Ticker.return_value = _Ticker()
+        mock_yf.Ticker.return_value.info = info
+        out = y_finance.get_fundamentals("TST")
+        self.assertIn("Debt to Equity: n/a (implausible vendor value > 10)", out)
+        self.assertIn("Dividend Yield: 0.73%", out)
+
+
 if __name__ == "__main__":
     unittest.main()

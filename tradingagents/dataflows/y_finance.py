@@ -330,7 +330,20 @@ def get_fundamentals(
             if value is None:
                 continue
             if label in _PCT_FIELDS:
-                lines.append(f"{label}: {float(value) * 100:.2f}%")
+                y = float(value)
+                # yfinance's dividendYield is normally a fraction (0.0073 =
+                # 0.73%), but some symbols return it percent-scaled (0.73).
+                # A yield above 25% is implausible for any normal equity, so
+                # treat it as percent-scaled and re-normalize (MSFT 2026-09-08
+                # rendered 73.00% from a 0.73 input).
+                if label == "Dividend Yield" and y > 0.25:
+                    y = y / 100.0
+                lines.append(f"{label}: {y * 100:.2f}%")
+            elif label == "Debt to Equity" and float(value) > 10:
+                # A D/E above 10 is a units/scaling artifact, not a real
+                # leverage ratio (MSFT 2026-09-08: 29.118 vs the true 0.13).
+                # Never emit an implausible number; say so instead.
+                lines.append(f"{label}: n/a (implausible vendor value > 10)")
             else:
                 lines.append(f"{label}: {value}")
 

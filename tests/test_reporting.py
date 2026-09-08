@@ -242,6 +242,20 @@ def test_finalize_section_roundtrip():
     assert "Section truncated" in out
 
 
+def test_finalize_section_strips_combining_marks():
+    """Regression (MSFT market.md 2026-09-08): the LLM emitted stray
+    combining diaeresis (U+0308) before dates/numbers 13 times. The section
+    finalizer must strip combining diacritical marks so they never corrupt
+    the rendered markdown."""
+    from tradingagents.reporting import _finalize_section
+
+    dirty = "price rose from 499.80 (2026-09-04) to" + "\u0308" + " 498.44"
+    out = _finalize_section(dirty + " and the trend is intact")
+    assert "\u0308" not in out
+    assert " 498.44" in out  # content preserved, combining mark gone
+    assert "and the trend is intact" in out
+
+
 def test_risk_gate_renders_tranche_worst_case(tmp_path):
     """When the tranche fold ran, the report surfaces the peak-deployed and
     capital-at-risk measures the gate sized/throttled against."""

@@ -138,7 +138,14 @@ def _finalize_section(text: str) -> str:
     ``_shift_down`` demotion in the consolidated report unchanged and tells
     the reader the mid-sentence ending is an LLM-layer cap, not a file bug.
     """
-    if not text or not _looks_truncated(text):
+    if not text:
+        return text
+    # Strip stray combining diacritical marks (U+0300-U+036F) the LLM
+    # sometimes emits before dates/numbers (observed 13x in MSFT market.md
+    # 2026-09-08, e.g. "on  ̈2026-09-08"). They are generation garbage, never
+    # in tool output, and corrupt the rendered markdown.
+    text = "".join(ch for ch in text if not "\u0300" <= ch <= "\u036f")
+    if not _looks_truncated(text):
         return text
     return text.rstrip() + _TRUNCATION_MARKER
 

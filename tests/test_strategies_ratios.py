@@ -22,6 +22,7 @@ def _fin(**over):
         "net_income": 80e6,
         "total_equity": 500e6,
         "total_assets": 800e6,
+        "total_liabilities": 400e6,
         "operating_cashflow": 90e6,
         "capex": 30e6,
         "current_assets": 300e6,
@@ -102,3 +103,30 @@ def test_render_ratios_n_a_for_missing():
     txt = render_ratios(compute_ratios(_fin(inventory=None)))
     assert "Quick: n/a" in txt
     assert "P/E: 12.50" in txt
+
+
+def test_current_ratio_subset_invariant_guard():
+    """Regression (MSFT 2026-09-08): a mis-parsed current_assets (~=total
+    assets) produced current 3.74 vs the true 1.23. A current-asset value
+    exceeding total assets violates the balance-sheet subset invariant -
+    null the ratio instead of emitting a wrong number."""
+    r = compute_ratios(_fin(total_assets=200e6, total_liabilities=400e6))  # CA(300) > TA(200)
+    assert r["current"] is None
+    assert r["quick"] is None
+    r2 = compute_ratios(_fin(total_liabilities=100e6))
+    assert r2["current"] is None
+    r3 = compute_ratios(_fin())
+    assert r3["current"] == pytest.approx(300e6 / 150e6)
+
+
+def test_debt_equity_and_dividend_yield_plausibility_guards():
+    """A D/E above 10x or a dividend yield above 25% is a units/scaling
+    artifact (MSFT 2026-09-08: D/E 29.118 vs true 0.13; yield 73% vs 0.71%),
+    not a real balance-sheet read - render n/a instead of the artifact."""
+    r = compute_ratios(_fin(total_debt=8000e6, total_equity=100e6))  # 80x
+    assert r["debt_to_equity"] is None
+    r2 = compute_ratios(_fin(dividends_paid=2000e6, market_cap=1000e6))  # 200%
+    assert r2["dividend_yield"] is None
+    r3 = compute_ratios(_fin())
+    assert r3["debt_to_equity"] == pytest.approx(0.4)
+    assert r3["dividend_yield"] == pytest.approx(0.02)

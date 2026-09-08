@@ -88,6 +88,7 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
     ni = _num(fin.get("net_income"))
     te = _num(fin.get("total_equity"))
     ta = _num(fin.get("total_assets"))
+    tl = _num(fin.get("total_liabilities"))
     ocf = _num(fin.get("operating_cashflow"))
     capex = _num(fin.get("capex"))
     ca = _num(fin.get("current_assets"))
@@ -96,6 +97,20 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
     divs = _num(fin.get("dividends_paid"))
 
     ev = _add(mc, _sub(debt, cash)) if (mc is not None) else None
+
+    # Balance-sheet subset invariant: current assets/liabilities can never
+    # exceed total assets/liabilities. A violation means the canonical parse
+    # picked the wrong row (observed on MSFT 2026-09-08: a current ratio of
+    # 3.74 vs the true 1.23 when current_assets was mis-parsed) — null the
+    # ratio rather than emit a wrong number.
+    ca_ok = ca is not None and ta is not None and ca <= ta
+    cl_ok = cl is not None and tl is not None and cl <= tl
+    current = _ratio(ca, cl) if ca_ok and cl_ok else None
+    quick = (
+        _ratio(_sub(ca, inv), cl)
+        if (ca_ok and cl_ok and inv is not None)
+        else None
+    )
 
     ebitda = _add(op, dep) if (op is not None or dep is not None) else None
     # capex/dividends are expenditures: some vendors report them as a negative
@@ -119,11 +134,15 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
         "price_to_free_cash_flow": _ratio(mc, fcf),
         "return_on_equity": _ratio(ni, te),
         "return_on_assets": _ratio(ni, ta),
-        "debt_to_equity": _ratio(debt, te),
-        "current": _ratio(ca, cl),
-        "quick": _ratio(_sub(ca, inv), cl) if (ca is not None and cl is not None and inv is not None) else None,
-        "cash_ratio": _ratio(cash, cl),
-        "dividend_yield": _ratio(divs_abs, mc) if (divs_abs is not None and mc) else None,
+        "debt_to_equity": (_ratio(debt, te) if te and _ratio(debt, te) is not None and _ratio(debt, te) <= 10 else None),
+        "current": current,
+        "quick": quick,
+        "cash_ratio": _ratio(cash, cl) if cl_ok else None,
+        "dividend_yield": (
+            _ratio(divs_abs, mc)
+            if (divs_abs is not None and mc and _ratio(divs_abs, mc) is not None and _ratio(divs_abs, mc) <= 0.25)
+            else None
+        ),
         "free_cash_flow": fcf,
         "market_cap": mc,
     }

@@ -183,3 +183,32 @@ def test_screen_ticker_computes_piotroski_f_score():
     assert score is not None
     assert 0 <= score <= 9
     assert score > 0  # previously n/a because the ratio inputs were missing
+
+
+def test_sane_revenue_yoy_guards_degenerate_base():
+    """Regression (MSFT 2026-09-08): a vendor revenue_yoy of 17.79 (percent-
+    scaled) rendered as +1779%. The guard must return n/a for |YoY| > 300%
+    and fall back to the revenue pair when that base is safe."""
+    assert sp.sane_revenue_yoy({"revenue_yoy": 17.79, "revenue": {"current": 331.8e9, "prior": 281.7e9}}) \
+        == pytest.approx((331.8e9 - 281.7e9) / 281.7e9)
+    assert sp.sane_revenue_yoy({"revenue_yoy": 17.79}) is None
+    assert sp.sane_revenue_yoy({"revenue_yoy": 0.1779}) == pytest.approx(0.1779)
+
+
+def test_screen_ticker_uses_sane_revenue_yoy():
+    fin = {
+        "revenue_yoy": 17.79,
+        "revenue": {"current": 331.8e9, "prior": 281.7e9},
+        "eps_yoy": 0.317,
+        "eps": {"current": 4.81, "prior": 3.65},
+        "market_cap": 3.6e12,
+        "total_assets": 758e9,
+        "total_liabilities": 316e9,
+        "current_assets": 207.7e9,
+        "total_equity": 442e9,
+        "net_income": 133.7e9,
+    }
+    row = sp.screen_ticker("MSFT", fin)
+    assert row["revenue_yoy"] is not None
+    assert abs(row["revenue_yoy"]) <= 3.0
+    assert row["revenue_yoy"] == pytest.approx((331.8e9 - 281.7e9) / 281.7e9)
