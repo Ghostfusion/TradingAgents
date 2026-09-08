@@ -481,3 +481,28 @@ def test_genuine_truncation_marked_before_disclosure(tmp_path):
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     assert "Section truncated at the LLM output cap" in decision
     assert decision.index("Section truncated") < decision.index("### Decision disclosure")
+
+
+def test_tool_evidence_persisted_when_present(tmp_path):
+    """The deterministic gatherer's evidence is persisted next to the card so
+    repro_check --evidence can diff per-run tool composition (analyst-side
+    reproducibility). Absent when the gatherer did not run."""
+    from tradingagents.reporting import _write_tool_evidence
+
+    ev = {
+        "fundamentals": [
+            {"tool": "get_basic_financials", "status": "ok", "args_hash": "ab12cd34ef56"},
+        ]
+    }
+    _write_tool_evidence({"tool_evidence": ev}, "TSM", tmp_path)
+    out = (tmp_path / "tool_evidence.json").read_text(encoding="utf-8")
+    assert '"get_basic_financials"' in out
+    assert '"ok"' in out
+
+
+def test_tool_evidence_skipped_when_empty(tmp_path):
+    from tradingagents.reporting import _write_tool_evidence
+
+    _write_tool_evidence({"tool_evidence": {}}, "TSM", tmp_path)
+    _write_tool_evidence({}, "TSM", tmp_path)
+    assert not (tmp_path / "tool_evidence.json").exists()

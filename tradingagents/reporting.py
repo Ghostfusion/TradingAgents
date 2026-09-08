@@ -467,6 +467,27 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     )
 
 
+def _write_tool_evidence(final_state: dict, ticker: str, save_path):
+    """Persist per-analyst forced-tool evidence for reproducibility diffing.
+
+    Writes ``tool_evidence.json`` (analyst-key → list of tool/status/args_hash
+    leaves) when the deterministic gatherer ran (``state["tool_evidence"]``
+    non-empty). Consumed by ``scripts/repro_check.py --evidence`` to answer
+    "did every run receive the same tool composition" — the analyst-side
+    reproducibility question the report tree could not answer before.
+    Advisory; a failure here never breaks the report tree.
+    """
+    evidence = final_state.get("tool_evidence")
+    if not evidence:
+        return
+    # Only persisted leaves carry tool/status/ts/args_hash; strip nothing else.
+    import json as _rj
+
+    (Path(save_path) / "tool_evidence.json").write_text(
+        _rj.dumps(evidence, indent=2, sort_keys=True, default=str), encoding="utf-8"
+    )
+
+
 def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict | None" = None) -> "Path | None":
     """Append one alpha-ledger row next to research_decision.json (default off).
 
@@ -1005,6 +1026,8 @@ def write_report_tree(
             write_research_decision(final_state, ticker, save_path)
         with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
             write_alpha_ledger(final_state, ticker, save_path, cfg)
+        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+            _write_tool_evidence(final_state, ticker, save_path)
     except Exception:  # noqa: BLE001 - card is advisory
         pass
     return save_path / "complete_report.md"

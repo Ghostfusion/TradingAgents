@@ -57,6 +57,65 @@ def _config_hash() -> str:
     return h
 
 
+def _print_evidence_diff(report_dirs) -> None:
+    """Print per-run forced-tool evidence + a cross-run composition/status diff.
+
+    Reads ``tool_evidence.json`` from each run's report tree (persisted by
+    ``tradingagents.reporting`` when the deterministic gatherer ran). When the
+    config has no forced tools the file is absent everywhere — say so so the
+    user knows the check needs ``analyst_forced_tools`` set.
+    """
+    evidence: list[dict] = []
+    for d in report_dirs:
+        p = Path(d) / "tool_evidence.json"
+        if p.exists():
+            with open(p, encoding="utf-8") as fh:
+                evidence.append(json.load(fh))
+        else:
+            evidence.append(None)
+
+    print("\n=== forced-tool evidence diff ===")
+    if all(e is None for e in evidence):
+        print("no tool_evidence.json in any run — analyst_forced_tools is off;")
+        print("set it to diff the per-run tool composition.")
+        return
+    if any(e is None for e in evidence):
+        print("WARNING: some runs have evidence, some don't — config changed mid-check?")
+
+    # Build tool → {status: str, statuses per run} across analysts.
+    from collections import Counter as _C
+
+    rows: dict[str, list] = {}
+    for run_i, ev in enumerate(evidence):
+        if ev is None:
+            continue
+        for analyst_key, leaves in (ev or {}).items():
+            for leaf in leaves:
+                key = f"{analyst_key}:{leaf['tool']}"
+                row = rows.setdefault(key, [None] * len(evidence))
+                row[run_i] = leaf.get("status")
+
+    if not rows:
+        print("evidence files exist but are empty.")
+        return
+
+    status_counts = {k: _C(r for r in v if r) for k, v in rows.items()}
+    print(f"{'tool':<52} " + " ".join(f"run{i + 1}" for i in range(len(evidence))))
+    differing = []
+    for key in sorted(rows):
+        statuses = rows[key]
+        cells = [f"{s or '-':>6}" for s in statuses]
+        print(f"{key:<52} " + " ".join(cells))
+        if len(_C(s for s in statuses if s)) > 1:
+            differing.append(key)
+    if differing:
+        print("\nDIFFERING STATUS ACROSS RUNS:")
+        for key in differing:
+            print("  ", key, status_counts[key])
+    else:
+        print("\nall tool statuses identical across runs (composition + status stable)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbol", required=True)
@@ -65,6 +124,15 @@ def main() -> int:
     parser.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
     parser.add_argument("--analysts", nargs="+", default=["market", "social", "news", "fundamentals"])
     parser.add_argument("--depth", default="deep")
+    parser.add_argument(
+        "--evidence",
+        action="store_true",
+        help=(
+            "print the per-run forced-tool evidence (tool_evidence.json) and a "
+            "cross-run composition/status diff, so 'did every run see the same "
+            "tool set' is answerable from the saved reports"
+        ),
+    )
     args = parser.parse_args()
 
     from batch import DEPTH_LEVELS
@@ -75,6 +143,7 @@ def main() -> int:
     print(f"repro-check {args.symbol} x{args.runs} @ config_hash={cfg_hash}")
 
     results = []
+    report_dirs: list[str] = []
     for i in range(args.runs):
         symbol, decision, report_dir, wall, rating = analyze(
             args.symbol,
@@ -83,10 +152,14 @@ def main() -> int:
             depth,
         )
         results.append(rating)
+        report_dirs.append(report_dir)
         print(f"  run {i + 1}: rating={rating} | decision={decision!r} | {wall}s | {report_dir}")
         with open(Path(report_dir) / "run_card.json", encoding="utf-8") as fh:
             run_card = json.load(fh)
         print(f"    run_card config_hash={run_card.get('config_hash')}")
+
+    if args.evidence:
+        _print_evidence_diff(report_dirs)
 
     from collections import Counter as _C
 
