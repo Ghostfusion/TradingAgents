@@ -55,6 +55,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_PATENTSVIEW_API_KEY": "patentsview_api_key",
     "TRADINGAGENTS_ENABLE_MASSIVE_FLAT": "enable_massive_flat",
     "TRADINGAGENTS_MASSIVE_FLAT_DIR": "massive_flat_dir",
+    "TRADINGAGENTS_TOOL_CALL_LOG_DIR": "tool_call_log_dir",
     "TRADINGAGENTS_ALPACA_API_KEY_ID": "alpaca_api_key_id",
     "TRADINGAGENTS_ALPACA_API_SECRET": "alpaca_api_secret",
     "TRADINGAGENTS_ENABLE_ALPACA": "enable_alpaca",
@@ -341,6 +342,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # completion to this directory so the lost output is recoverable for
         # diagnosis. Empty = "<data_cache_dir>/llm_failures" (default on).
         "llm_failure_journal_dir": os.getenv("TRADINGAGENTS_LLM_FAILURE_JOURNAL_DIR", ""),
+        # Per-analyst tool-call log: JSONL rows of every model tool call per
+        # symbol (which tools the LLM actually invoked, incl. the model-pool
+        # ~40 that are never auto-gathered). Empty = "<data_cache_dir>/tool_calls".
+        "tool_call_log_dir": os.getenv("TRADINGAGENTS_TOOL_CALL_LOG_DIR", ""),
         "memory_log_path": os.getenv(
             "TRADINGAGENTS_MEMORY_LOG_PATH",
             os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md"),

@@ -429,3 +429,67 @@ def test_short_circuit_passes_through_model_pool_calls():
     )
     assert calls["n"] == 1  # model-pool call reached the underlying ToolNode
     assert out["messages"][0].tool_call_id == "c-m"
+
+
+# --------------------------------------------------------------------------
+# Per-analyst tool-call log (which of the model-pool tools the LLM invoked)
+# --------------------------------------------------------------------------
+
+
+def test_tool_call_log_records_short_and_executed(monkeypatch):
+    """Regression (QCOM 2026-09-07): nothing persisted which model-pool tools
+    the LLM actually called. The short-circuit wrapper must log every model
+    tool call per analyst (executed + short_circuit) with pool classification."""
+    from tradingagents.agents.utils import tool_call_log as TCL
+
+    recorded: list = []
+    monkeypatch.setattr(
+        TCL,
+        "log_tool_call",
+        lambda *a, **k: recorded.append({"analyst": a[0], "tool": a[1], "event": a[2], **k}),
+    )
+    calls = {"n": 0}
+    wrapped = make_short_circuit_tool_node(_fake_tool_node(get_financials, calls), "market")
+    wrapped(
+        {
+            TOOL_EVIDENCE_KEY: {
+                "market": [{"tool": "get_financials", "status": "ok", "args": {}, "args_hash": "x"}],
+                MODEL_POOL_KEY: {"market": ["get_bsm_quote_fake", "get_pe_metrics"]},
+            },
+            "company_of_interest": "TSM",
+            "trade_date": "2026-09-07",
+            **_ai_tool_calls(
+                {"name": "get_financials", "args": {"ticker": "TSM"}, "id": "c-g"},     # gathered -> short_circuit
+                {"name": "get_bsm_quote_fake", "args": {}, "id": "c-p"},                # model pool -> executed
+                {"name": "get_boom", "args": {}, "id": "c-x"},                        # not pooled, not gathered -> executed
+            ),
+        }
+    )
+    # Underlying node ran the two non-short-circuited calls.
+    assert calls["n"] == 1
+    # Two log lines: short_circuit for get_financials, executed for the pool + boom.
+    by_tool = {r["tool"]: r for r in recorded}
+    assert set(by_tool) == {"get_financials", "get_bsm_quote_fake", "get_boom"}
+    assert by_tool["get_financials"]["event"] == "short_circuit"
+    assert by_tool["get_financials"]["in_model_pool"] is False
+    assert by_tool["get_bsm_quote_fake"]["event"] == "executed"
+    assert by_tool["get_bsm_quote_fake"]["in_model_pool"] is True
+    assert by_tool["get_boom"]["event"] == "executed"
+    assert by_tool["get_boom"]["in_model_pool"] is False
+    assert all(r["analyst"] == "market" for r in recorded)
+    assert all((r.get("state") or {}).get("company_of_interest") == "TSM" for r in recorded)
+
+
+def test_tool_call_log_dir_resolution(monkeypatch):
+    from pathlib import Path
+
+    from tradingagents.agents.utils import tool_call_log as _log
+
+    # Default = <data_cache_dir>/tool_calls
+    assert _log._log_dir({"data_cache_dir": "C:/cache", "tool_call_log_dir": ""}) \
+        == Path("C:/cache") / "tool_calls"
+    # Explicit override wins
+    assert _log._log_dir({"data_cache_dir": "C:/cache", "tool_call_log_dir": "D:/logs/tc"}) \
+        == Path("D:/logs/tc")
+    # No cache dir and no override -> None (no write)
+    assert _log._log_dir({}) is None

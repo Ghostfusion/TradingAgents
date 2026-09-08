@@ -455,12 +455,28 @@ def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
         if tool_name:
             gathered[tool_name] = str(d.get("status") or "ok")
 
+    # Analyst's model-pool names (bound to the LLM; not auto-gathered), so the
+    # tool-call log can mark which invoked tools were pool-controlled.
+    from tradingagents.agents.utils.tool_call_log import log_tool_call
+
+    model_pool: set = set(
+        ((state.get(TOOL_EVIDENCE_KEY) or {}).get(MODEL_POOL_KEY) or {}).get(analyst_key) or []
+    )
+
     outputs: list = []
     remaining: list = []
     for call in calls:
         name = str((call or {}).get("name") or "")
         if name in gathered:
             status = gathered[name]
+            log_tool_call(
+                analyst_key,
+                name,
+                "short_circuit",
+                args=(call or {}).get("args"),
+                state=state,
+                in_model_pool=name in model_pool,
+            )
             outputs.append(
                 ToolMessage(
                     content=(
@@ -479,6 +495,19 @@ def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
 
     if not remaining:
         return {"messages": outputs}
+
+    # Record every tool the LLM actually invoked and will execute against the
+    # vendor (the model-pool / gap-fill calls) before delegating.
+    for call in remaining:
+        log_tool_call(
+            analyst_key,
+            str((call or {}).get("name") or ""),
+            "executed",
+            args=(call or {}).get("args"),
+            state=state,
+            in_model_pool=str((call or {}).get("name") or "") in model_pool,
+        )
+
     if not outputs:
         # nothing gathered on this turn - plain passthrough.
         return tool_node(state)

@@ -3571,3 +3571,14 @@ PRs from late 2025 also landed here.
   Regression (EIX 2026-09-07): a 9.3k-reasoning-token debate turn was cut at
   the length limit and only the usage line survived; now the full completion
   (prompt-independent) is recoverable.
+
+### Added
+- **Per-analyst tool-call log** (`tradingagents/agents/utils/tool_call_log.py`,
+  wired into the short-circuit wrapper): one JSONL row per model tool call,
+  appended to `<data_cache_dir>/tool_calls/<SYMBOL>_tool_calls.jsonl`
+  (config `tool_call_log_dir`, env `TRADINGAGENTS_TOOL_CALL_LOG_DIR`). Each
+  row: ts, symbol, trade_date, analyst, tool, event (`executed` vs
+  `short_circuit`), `in_model_pool`, args. Answers "which of the ~40
+  model-pool tools did the LLM actually invoke" post-run
+  (unanswerable from tool_evidence.json, which only lists what was
+  gathered). Advisory — never raises, never blocks the graph.
