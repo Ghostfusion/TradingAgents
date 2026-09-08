@@ -335,6 +335,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "data_cache_dir": os.getenv(
             "TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")
         ),
+        # When a structured-LLM invoke fails with the provider's raw response
+        # attached (e.g. openai LengthFinishReasonError carrying the full
+        # ChatCompletion incl. hidden reasoning tokens), journal that
+        # completion to this directory so the lost output is recoverable for
+        # diagnosis. Empty = "<data_cache_dir>/llm_failures" (default on).
+        "llm_failure_journal_dir": os.getenv("TRADINGAGENTS_LLM_FAILURE_JOURNAL_DIR", ""),
         "memory_log_path": os.getenv(
             "TRADINGAGENTS_MEMORY_LOG_PATH",
             os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md"),

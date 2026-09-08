@@ -124,6 +124,11 @@ def invoke_structured_turn(
         try:
             result = structured_llm.invoke(prompt)
         except Exception as e:  # noqa: BLE001
+            from tradingagents.agents.utils.llm_failure_journal import (
+                journal_llm_failure,
+            )
+
+            journal_llm_failure("debate/structured_turn", e)
             logger.warning("structured debate invoke failed, falling back: %s", e)
             # The structured call was the primary attempt; the fallback is a
             # RETRY -> run it on the backup model when configured.

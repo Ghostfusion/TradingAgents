@@ -588,6 +588,11 @@ def invoke_structured_or_freetext(
             # _looks_truncated check costs nothing).
             return _retry_if_truncated(plain_llm, prompt, rendered, backup_llm=backup_llm)
         except Exception as exc:
+            from tradingagents.agents.utils.llm_failure_journal import (
+                journal_llm_failure,
+            )
+
+            journal_llm_failure(f"structured/{agent_name}", exc)
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
                 agent_name,

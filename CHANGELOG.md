@@ -3559,3 +3559,15 @@ PRs from late 2025 also landed here.
   that made the QCOM 2026-09-07 sentiment tallies ("13 Bull vs 1 Bear",
   "velocity -0.82 vs 0.78") uncheckable — `repro_check --evidence` now
   grounds sentiment figures against what the analyst actually saw.
+
+### Added
+- **LLM-failure journal** (`tradingagents/agents/utils/llm_failure_journal.py`):
+  when a structured-LLM invoke fails with the provider's raw response
+  attached (e.g. openai `LengthFinishReasonError` carrying the full
+  `ChatCompletion` incl. hidden reasoning tokens), the graph snapshots that
+  completion to `<data_cache_dir>/llm_failures/` (or
+  `TRADINGAGENTS_LLM_FAILURE_JOURNAL_DIR`). Wired into both structured-
+  invoke fallback sites. Advisory — never raises, never breaks the fallback.
+  Regression (EIX 2026-09-07): a 9.3k-reasoning-token debate turn was cut at
+  the length limit and only the usage line survived; now the full completion
+  (prompt-independent) is recoverable.
