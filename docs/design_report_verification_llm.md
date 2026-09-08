@@ -49,13 +49,28 @@ host-executed server-side tools** exist and remove the blocker:
 - `tools: [{"type": "openrouter:web_search"}]` (and `openrouter:web_fetch`,
   `openrouter:mcp__…`) are passed to the API and **executed by OpenRouter**, not
   the client. Works with **any tool-calling model** — no per-vendor tool bridge.
+- Tool taxonomy (3 buckets):
+  - **Server tools** — model decides to call, OpenRouter executes, 0-to-N times
+    per request: `openrouter:web_search`, `openrouter:web_fetch` (full page
+    content from a surfaced URL), `openrouter:datetime`,
+    `openrouter:image_generation`, `openrouter:bash` (sandboxed shell; on
+    OpenRouter this one is Anthropic-Messages-API-only).
+  - **Plugins** — always run once automatically (e.g. PDF parsing).
+  - **User-defined tools** — model suggests, the caller's own app executes.
+- Search backend: **Exa by default**, with **Firecrawl as a configurable
+  alternative** (bring your own key). This matters for result "shape" and
+  citation quality, not just cost.
 - Spec fetch path: `openrouter.ai/docs/guides/features/server-tools.md` and
-  `.../server-tools/web-search.md` — the rendered pages 403 on direct fetch;
-  the `.md` variants and `openrouter.ai/llms.txt` both returned content.
+  `.../web-search.md` — the rendered pages 403 on direct fetch; the `.md`
+  variants and `openrouter.ai/llms.txt` both returned content.
 - Live `/api/v1/models` hit verified the `.env` API key is valid for these calls.
-- So the verifier model could be `claude-*` via OpenRouter with
-  `openrouter:web_search` available for spot-check claims that need a live
-  source (e.g. "latest earnings date"), matching the search-analyst behavior.
+- **Claude-routing caveat** (open question for our verifier): when routing to
+  Claude through OpenRouter, two options exist — OpenRouter's normalized
+  `openrouter:web_search`, or **passing Anthropic's native web search tool
+  directly** (OpenRouter proxies to the Claude Messages API). Different
+  backends + different result/citation formats; whichever gives better
+  citation/result quality for financial-data validation needs to be measured,
+  not assumed.
 
 ## Shape
 
@@ -77,5 +92,10 @@ host-executed server-side tools** exist and remove the blocker:
 
 - [ ] Re-verify OpenRouter server-tools spec (docs may 403 again; `.md` + llms.txt).
 - [ ] Decide verifier model (`claude-*` fastest; deeper `claude-*` if qualitative rigor needed).
-- [ ] Prototype on one batch round: run `--evidence` + LLM pass on the same report, diff the FLAG sets to size the delta.
+- [ ] **For Claude-through-OpenRouter: A/B `openrouter:web_search` vs passthrough
+      Anthropic native web search on the same spot-check queries** — measure
+      citation/result quality for financial claims (different backends/format;
+      do not assume). Backend choice (Exa vs Firecrawl) rides on the same test.
+- [ ] Prototype on one batch round: run one pass deterministically + one LLM
+      pass on the same report, diff the FLAG sets to size the delta.
 - [ ] If delta ≈ 0 → keep deterministic-only; if > 0 → wire as a scheduled post-run gate.
