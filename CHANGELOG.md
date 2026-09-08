@@ -3717,3 +3717,24 @@ PRs from late 2025 also landed here.
 - **Config/`.env.example`**: `TRADINGAGENTS_VERIFY_MODEL` (empty = quick tier)
   and `TRADINGAGENTS_VERIFY_MAX_CALLS` (default 12 per report tree; excess
   stems degrade to UNKNOWN).
+
+### Fixed (report-verifier loop findings, first full pass over MSTR batch6)
+- **Unit-scale-blind figure matching** (verifier + `repro_check --evidence`):
+  `_matches` now treats raw tool floats and human units as equivalent
+  (report `122.4M` matches leaf `122368000.0`, `8.22B` vs `8219628000.0`).
+  Deterministic fundamentals suspects on the MSTR tree: 20 -> 0. Canonical
+  implementation now lives in `report_verifier._matches`; `repro_check` imports
+  it so the two gates share tolerance AND unit handling.
+- **Digest hid evidence from the verifier**: `_evidence_digest` capped leaves at
+  200 chars, hiding the income-statement revenue row (~4.4k in) and producing
+  false "no leaf evidence: truncated" flags. Default is now full-leaf (the
+  gatherer already caps at summary_window=12000).
+- **Sentiment prompt mandated a fabricated 0-10 score**: `overall_score` was
+  produced from nothing (MSTR: "Mildly Bearish 4.0/10" vs deterministic
+  computed +0.08). The pipeline now computes deterministic sentiment BEFORE
+  the prompt, injects `Deterministic computed sentiment` into the system
+  message, and instructs the LLM to anchor the 0-10 verdict as
+  `5 + 5 * computed_score` within ±0.5, never contradicting it. The verifier
+  now cross-checks the saved report's score against the computed leaf.
+- **CLI**: `scripts/report_verify.py --stem <X>` for single-stem / parallel
+  per-stem verification (each stem its own bounded job).

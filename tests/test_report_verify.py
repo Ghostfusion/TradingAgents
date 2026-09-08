@@ -83,12 +83,48 @@ def test_matches_tolerance():
     assert not rv._matches(3.14, {3.2})  # 2% off -> outside
 
 
-def test_evidence_digest_caps_long_content():
+def test_matches_unit_scale_equivalence():
+    # Report cites human units, leaf stores raw tool floats (MSTR 2026-09-08).
+    assert rv._matches(122.4, {122368000.0})  # M vs raw
+    assert rv._matches(8.22, {8219628000.0})  # B vs raw
+    assert rv._matches(17.436, {17435832000.0})  # B vs raw, other direction
+    assert not rv._matches(8.22, {8.5})  # 3.4% off, no clean unit step
+
+
+def test_anchor_grounds_unit_scaled_claims():
+    v = rv.ReportVerification(
+        report="fundamentals",
+        claims=[
+            rv.VerifierClaim(
+                claim="Revenue $122.4M; total assets $52.56B",
+                status="UNSUPPORTED",
+                reason="llm said no leaf",
+            )
+        ],
+        overall="FLAG",
+    )
+    a = rv._anchor_claims(v, {122368000.0, 52562592000.0})
+    assert a.claims[0].status == "GROUNDED"
+    assert a.overall == "PASS"
+
+
+def test_evidence_digest_caps_long_content_only_when_explicit():
     long = "x" * 500
     leaf = [{"tool": "t", "status": "ok", "content": long}]
+    capped = rv._evidence_digest({"fundamentals": leaf}, "fundamentals", cap_chars=100)
+    assert "[truncated]" in capped
+    assert len(capped) < 400
+
+
+def test_evidence_digest_default_does_not_hide_leaf_content():
+    # The verifier must see the whole leaf (gatherer already caps at 12000):
+    # a per-leaf digest cap hid income-statement revenue and produced false
+    # "no leaf evidence" flags on MSTR 2026-09-08.
+    body = "Total Revenue,122368000.0,124300000.0,122988000.0"
+    leaf = [{"tool": "get_income_statement", "status": "ok", "content": body}]
     digest = rv._evidence_digest({"fundamentals": leaf}, "fundamentals")
-    assert "[truncated]" in digest
-    assert len(digest) < 400
+    assert "122368000.0" in digest
+    assert "[truncated]" not in digest
 
 
 def test_evidence_digest_empty():
@@ -148,6 +184,33 @@ def test_anchor_downgrades_contradicted_with_matching_figures_to_unsupported():
 # ---------------------------------------------------------------------------
 # Parse + orchestration (mocked LLM)
 # ---------------------------------------------------------------------------
+
+
+def test_sentiment_prompt_binds_verdict_to_computed_score():
+    from tradingagents.agents.analysts.sentiment_analyst import _build_system_message
+
+    msg = _build_system_message(
+        ticker="MSTR",
+        start_date="2026-09-01",
+        end_date="2026-09-08",
+        news_block="",
+        stocktwits_block="",
+        reddit_block="",
+        computed_line="computed_score=+0.08",
+    )
+    assert "computed_score" in msg  # deterministic value reaches the model
+    assert "5 + 5 * computed_score" in msg  # 0-10 anchor rule
+    assert "never contradict" in msg
+    # Without a computed line the block is absent (legacy silent path).
+    plain = _build_system_message(
+        ticker="MSTR",
+        start_date="2026-09-01",
+        end_date="2026-09-08",
+        news_block="",
+        stocktwits_block="",
+        reddit_block="",
+    )
+    assert "### Deterministic computed sentiment" not in plain
 
 
 def test_parse_verdict_json():

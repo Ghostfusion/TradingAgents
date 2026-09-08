@@ -36,9 +36,18 @@ logger = logging.getLogger(__name__)
 # Analyst report stems this pass covers (1_analysts/ in each report tree).
 REPORT_STEMS = ("fundamentals", "market", "news", "sentiment")
 
-# Shared with scripts/repro_check.py — keep the tolerance identical so the
-# two passes never disagree about "same value".
+# Canonical figure-matching helpers, shared with scripts/repro_check.py (which
+# imports these) so the numeric anchor and the deterministic cross-check use
+# the SAME tolerance and unit handling — they can never disagree about
+# "same value".
 _DEC_RE = re.compile(r"\d+\.\d+")
+
+# Unit-magnitude equivalence: evidence leaves store raw tool floats
+# (e.g. 122368000.0) while reports cite human units (122.4M). A figure
+# matches when the raw pair is within tolerance OR differs by a clean unit
+# step (K/M/B/T) — the MSTR 2026-09-08 batch flagged every unit-reformatted
+# figure as UNSUPPORTED before this.
+_UNIT_SCALES = (1.0, 1e3, 1e6, 1e9, 1e12)
 
 
 def _float_tokens(text: str) -> set:
@@ -54,11 +63,25 @@ def _float_tokens(text: str) -> set:
 
 
 def _matches(flt: float, refs: set) -> bool:
-    """Roughly same value as some evidence figure (<=0.5% relative)."""
+    """Roughly same value as some evidence figure, unit-aware.
+
+    Accepts a <=0.5% relative difference (the repro_check tolerance), OR an
+    exact K/M/B/T magnitude step (report says 122.4M, leaf stores 122368000.0).
+    """
     for ref in refs:
         denom = max(abs(ref), abs(flt), 1e-9)
         if abs(flt - ref) / denom <= 0.005:
             return True
+        # unit reformatting: same digits different scale (12.24 -> 122368000)
+        for scale in _UNIT_SCALES[1:]:
+            scaled = flt / scale
+            denom2 = max(abs(ref), abs(scaled), 1e-9)
+            if abs(scaled - ref) / denom2 <= 0.005:
+                return True
+            scaled = flt * scale
+            denom3 = max(abs(ref), abs(scaled), 1e-9)
+            if abs(scaled - ref) / denom3 <= 0.005:
+                return True
     return False
 
 
@@ -118,8 +141,16 @@ def _evidence_decimals(evidence: dict, analyst_key: str) -> set:
     return out
 
 
-def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int = 200) -> str:
-    """Compact consistent rendering of one analyst's evidence leaves."""
+def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = None) -> str:
+    """Compact per-stem rendering of one analyst's evidence leaves.
+
+    No extra truncation by default: the gatherer already caps each leaf at
+    ``summary_window`` (default 12000), so the digest shows exactly what the
+    analyst reduced from. A per-leaf cap WILL hide the cited figures — the
+    MSTR 2026-09-08 batch flagged the income-statement revenue as "no leaf
+    evidence" because an old 200-char digest cut to the column header; the
+    revenue row sits at the leaf's end (~4.4k chars in).
+    """
     leaves = evidence.get(analyst_key) or []
     lines: list[str] = []
     if isinstance(leaves, list):
@@ -325,16 +356,18 @@ def verify_report_dir(
     provider: str | None = None,
     base_url: str | None = None,
     max_calls: int | None = None,
+    stems: tuple[str, ...] | list[str] | None = None,
     llm_override: object | None = None,
 ) -> dict:
     """Verify every present analyst report in a report tree.
 
     Returns a JSON-serializable dict (the persisted ``report_verify.json``
-    shape): ``{"report_dir", "verify_model", "reports": {stem: {overall,
-    claims}}}``. ``llm_override`` exists for tests; production builds the
-    LLM from config (``TRADINGAGENTS_VERIFY_MODEL`` or the quick tier).
-    Never raises for a provider failure — the affected report degrades to
-    OVERALL UNKNOWN.
+    shape): ``{"report_dir", "verification": {stem: {overall, claims}}}``.
+    ``stems`` filters which reports run (passed for parallel per-stem
+    invocation or spot-checks); a narrow run's payload only holds those
+    stems. ``llm_override`` exists for tests; production builds the LLM from
+    config (``TRADINGAGENTS_VERIFY_MODEL`` or the quick tier). Never raises
+    for a provider failure — the affected report degrades to OVERALL UNKNOWN.
     """
     from tradingagents.agents.utils.structured import bind_structured
     from tradingagents.dataflows.config import get_config
@@ -373,7 +406,8 @@ def verify_report_dir(
 
     stem_succeeded = 0
     outcomes: dict[str, dict] = {}
-    for stem in REPORT_STEMS:
+    selected = tuple(stems) if stems else REPORT_STEMS
+    for stem in selected:
         if stem.startswith("_"):
             continue
         report_text = _load_report(Path(report_dir), stem)

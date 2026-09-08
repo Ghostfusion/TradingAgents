@@ -108,8 +108,10 @@ host-executed server-side tools** exist and remove the blocker:
       If a claims class needs a live source (`NO_LEAF_CATEGORY`), run the A/B
       (citation quality) and wire it explicitly. Backend choice (Exa vs
       Firecrawl) rides on the same test.
-- [ ] Truncation follow-up: fundamentals flags partly trace to leaf truncation
-      (summary_window); the flag is correct (persisted evidence genuinely lacks
-      the figure) but a per-tool window bump is worth trialing for
-      get_income_statement / get_balance_sheet if fundamentals false-positive
-      rate becomes noisy.
+- [x] Truncation follow-up: CLOSED. The "no leaf evidence: truncated" flags
+      traced to the verifier's own digest capping leaves at 200 chars (the
+      income-statement revenue row sits ~4.4k chars in). Digest now passes the
+      full gathered leaf (gatherer already caps at summary_window=12000). Also
+      closed the unit-scale false-flag class: `_matches` is now magnitude-aware
+      (report 122.4M vs leaf 122368000.0 match; canonical impl shared by
+      repro_check). Deterministic suspects on the MSTR tree: 20 -> 0.

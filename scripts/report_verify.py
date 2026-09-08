@@ -51,6 +51,11 @@ def main() -> int:
         default=12,
         help="Max LLM calls (one per analyst report) before degrade (default: 12).",
     )
+    parser.add_argument(
+        "--stem",
+        choices=list(REPORT_STEMS),
+        help="Run a single analyst report stem (default: all present).",
+    )
     args = parser.parse_args()
 
     report_dir = args.report_dir
@@ -63,6 +68,7 @@ def main() -> int:
         model=args.model,
         provider=args.provider,
         max_calls=args.max_calls,
+        stems=(args.stem,) if args.stem else None,
     )
     out = _write_out(report_dir, payload)
 

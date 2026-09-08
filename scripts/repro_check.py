@@ -131,28 +131,12 @@ def _print_evidence_diff(report_dirs) -> None:
     _figure_cross_check(report_dirs, evidence)
 
 
+# Figure-matching is canonical in tradingagents.agents.utils.report_verifier
+# (scale-aware: raw tool floats like 122368000.0 match a report's 122.4M) so
+# the deterministic cross-check and the LLM-verifier anchor never disagree.
+from tradingagents.agents.utils.report_verifier import _float_tokens, _matches  # noqa: E402
+
 _DEC_RE = re.compile(r"\d+\.\d+")
-
-
-def _float_tokens(text: str) -> set:
-    """Distinct decimal numbers in ``text`` (the figures that carry signal;
-    bare integers are too noisy for a cheap grounding check)."""
-    out = set()
-    for m in _DEC_RE.finditer(text):
-        try:
-            out.add(float(m.group()))
-        except ValueError:
-            continue
-    return out
-
-
-def _matches(flt: float, refs: set) -> bool:
-    """Roughly same value as some evidence figure (<=0.5% relative)."""
-    for ref in refs:
-        denom = max(abs(ref), abs(flt), 1e-9)
-        if abs(flt - ref) / denom <= 0.005:
-            return True
-    return False
 
 
 def _figure_cross_check(report_dirs: list, evidence: list) -> None:

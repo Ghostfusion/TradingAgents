@@ -95,6 +95,36 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             ticker, start_date=start_date, end_date=end_date
         )
 
+        # Deterministic sentiment computed BEFORE the prompt is built so the
+        # model sees the value and can bind overall_score to it. Previously
+        # the compute ran after message formatting and only reached the report
+        # post-hoc — the model then invented a 0-10 score contradicting the
+        # computed signal (MSTR 2026-09-08: "Mildly Bearish (4.0/10)" vs
+        # deterministic +0.08; the report verifier caught the class).
+        cfg = None
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config()
+        except Exception:
+            cfg = None
+        computed = None
+        if cfg is not None and cfg.get("enable_sentiment"):
+            try:
+                from tradingagents.strategies.sentiment import (
+                    compute_social_scores,
+                    computed_sentiment_line,
+                )
+
+                computed = compute_social_scores(
+                    ticker, cache_dir=cfg.get("data_cache_dir"), limit=30
+                )
+            except Exception:
+                computed = None
+        computed_line = (
+            computed_sentiment_line(computed) if computed is not None else ""
+        )
+
         system_message = _build_system_message(
             ticker=ticker,
             start_date=start_date,
@@ -102,6 +132,7 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
+            computed_line=computed_line,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -129,30 +160,6 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
         # and free-text paths receive the same input. No bind_tools — the
         # data is already in the prompt.
         formatted_messages = prompt.format_messages(messages=state["messages"])
-
-        # Deterministic sentiment (score + surprise velocity) injected into the
-        # report when enable_sentiment is on - numbers the LLM can't alter.
-        cfg = None
-        try:
-            from tradingagents.dataflows.config import get_config
-
-            cfg = get_config()
-        except Exception:
-            cfg = None
-
-        computed = None
-        if cfg is not None and cfg.get("enable_sentiment"):
-            try:
-                from tradingagents.strategies.sentiment import (
-                    compute_social_scores,
-                    computed_sentiment_line,
-                )
-
-                computed = compute_social_scores(
-                    ticker, cache_dir=cfg.get("data_cache_dir"), limit=30
-                )
-            except Exception:
-                computed = None
 
         # Journal the pre-fetched source set (news / StockTwits / Reddit) and
         # the deterministic sentiment compute into state["tool_evidence"]
@@ -256,9 +263,19 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    computed_line: str = "",
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
+    computed_block = (
+        "### Deterministic computed sentiment (pre-computed by the pipeline; "
+        "numbers the LLM must not contradict)\n\n"
+        f"{computed_line}\n\n"
+        if computed_line
+        else ""
+    )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+
+{computed_block}
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -306,7 +323,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 Fill the following fields:
 
 - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
-- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
+- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band. When the Deterministic computed sentiment block above is present, anchor it there: map computed_score in [-1, 1] to the 0-10 scale as `5 + 5 * computed_score` and keep your score within ±0.5 of that anchor — never contradict a computed value (the report verifier cross-checks the saved report against the tool evidence).
 - **confidence**: low / medium / high, based on data quality and sample size.
 - **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
