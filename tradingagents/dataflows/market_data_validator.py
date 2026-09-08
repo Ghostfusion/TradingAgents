@@ -126,6 +126,16 @@ def build_verified_market_snapshot(
     window = max(1, min(int(look_back_days), 30))
     recent = df.tail(window)
 
+    # Record the verified latest close so OHLCV-based tools (swing/support/
+    # candlestick/etc.) can append a scale/staleness warning when their own
+    # series disagrees with this authoritative level (INTU 2026-09-08).
+    try:
+        from tradingagents.agents.utils.price_consistency import set_verified_close
+
+        set_verified_close(symbol, latest.get("Close"))
+    except Exception:  # noqa: BLE001 - advisory, never break the snapshot
+        pass
+
     lines = [
         f"## Verified market data snapshot for {symbol.upper()}",
         "",

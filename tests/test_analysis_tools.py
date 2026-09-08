@@ -2012,3 +2012,63 @@ def test_constituent_cap_weights_exact_ceiling():
         {"weights": [0.06, 0.04, 0.02]}
     )
     assert "ceiling not enforceable" in out2
+
+
+# --------------------------------------------------------------------------
+# Price-scale / staleness advisory (INTU 2026-09-08 stale-close contamination)
+# --------------------------------------------------------------------------
+
+
+def test_scale_note_warns_on_stale_close(monkeypatch):
+    """An OHLCV tool whose latest close differs from the verified close must
+    append a PRICE-SCALE WARNING so actionable levels are not trusted."""
+    from tradingagents.agents.utils.price_consistency import set_verified_close
+
+    set_verified_close("INTU", 314.12)
+    note = T._scale_note("INTU", [410.0, 332.70])  # stale 9/4 close
+    assert "PRICE-SCALE WARNING" in note
+    assert "UNRELIABLE" in note
+    set_verified_close("INTU", None)  # keep no cache for other tests
+    from tradingagents.agents.utils.price_consistency import clear_verified_close_cache
+
+    clear_verified_close_cache()
+
+
+def test_scale_note_empty_when_agreeing(monkeypatch):
+    from tradingagents.agents.utils.price_consistency import (
+        clear_verified_close_cache,
+        set_verified_close,
+    )
+
+    set_verified_close("INTU", 314.12)
+    assert T._scale_note("INTU", [300.0, 314.12]) == ""
+    clear_verified_close_cache()
+
+
+def test_sentiment_lead_lag_strongest_corr_spans_both_metrics(monkeypatch):
+    """Regression (INTU 2026-09-08): the tool reported 'strongest |corr| 0.206'
+    while a pearson -0.278 existed at another lag (|0.278| > 0.206) because
+    only spearman was scanned. The strongest-|corr| must span both metrics and
+    report lag + metric."""
+    import tradingagents.strategies.sentiment_research as sr_mod
+
+    rows = [
+        {"lag_days": -6, "pearson_corr": 0.10, "pearson_pval": 0.3,
+         "spearman_corr": 0.20, "spearman_pval": 0.3, "sample_size": 50},
+        {"lag_days": 6, "pearson_corr": -0.278, "pearson_pval": 0.001,
+         "spearman_corr": 0.206, "spearman_pval": 0.02, "sample_size": 50},
+    ]
+    monkeypatch.setattr(sr_mod, "sentiment_lead_lag", lambda *a, **k: rows)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.eodhd._sentiment_points_eodhd",
+        lambda *a, **k: [{"date": "2026-09-01", "score": 0.5}] * 40,
+    )
+    monkeypatch.setattr(
+        T, "_ohlcv",
+        lambda *a, **k: {"closes": [100.0] * 40, "dates": ["2026-09-01"] * 40,
+                          "highs": [], "lows": [], "volumes": [], "opens": []},
+    )
+    out = T.get_sentiment_lead_lag.invoke({"ticker": "TST"})
+    # Strongest is the pearson 0.278 at lag +6, not the spearman 0.206.
+    assert "strongest |corr|: 0.278" in out
+    assert "pearson" in out and "lag +6" in out

@@ -3619,3 +3619,27 @@ PRs from late 2025 also landed here.
   (`reporting.py`): stray U+0300-U+036F marks the LLM emits before
   dates/numbers (13x in MSFT market.md 2026-09-08) are stripped before
   any section is persisted, so markdown renders clean.
+
+### Fixed
+- **Price-scale/staleness guard** (new `agents/utils/price_consistency.py`,
+  wired into 8 OHLCV tools: swing_set / swing_exits / post_close /
+  session_discipline / candlestick / bollinger_pct_b / support_structure /
+  macd_divergence): the verified-market snapshot now records its authoritative
+  close per run, and any setup tool whose own series' close disagrees (>1%)
+  appends a PRICE-SCALE WARNING ("UNRELIABLE") to its output — so a stale or
+  wrongly-scaled OHLCV (INTU 2026-09-08: setup tools anchored to the 9/4
+  close 332.70 / a ~677-scale series while verified was 314.12) can never
+  silently produce actionable stops/targets/psych levels off the wrong price.
+- **`get_sentiment_lead_lag` strongest-|corr| spans both metrics**: it now
+  scans pearson AND spearman and reports lag + metric (INTU 2026-09-08
+  claimed 0.206 while a pearson -0.278 was larger).
+- **Net-debt sign cross-check** (`y_finance._net_debt_note`): when a yfinance
+  balance-sheet's own cash+STI exceeds total debt but the vendor "Net Debt"
+  row is positive (INTU 2026-09-08: 8.44B cash vs 6.9B debt, "Net Debt"
+  1.48B), the output appends a NET CASH correction note so the analyst never
+  quotes a positive debt position that contradicts the sheet.
+- **yfinance fundamentals OCF field**: "Operating Cash Flow" now rendered
+  separately from "Free Cash Flow", so FCF==OCF aliasing (INTU 2026-09-08:
+  6.44B == 6.44B) is visible instead of silently duplicated.
+- **`get_ratios` uses a dynamic default date** instead of the hardcoded
+  "2026-08-24" (stale quarter could shift current ratio / D/E).

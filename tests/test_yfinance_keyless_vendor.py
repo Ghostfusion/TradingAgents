@@ -134,3 +134,30 @@ class TestFundamentalsFormattingGuards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_net_debt_note_flags_net_cash_contradiction():
+    """Regression (INTU 2026-09-08): vendor 'Net Debt' 1.48B while its own
+    cash+STI 8.44B > total debt 6.9B (net cash ~1.54B). The cross-check must
+    emit a correction note, not the raw contradictory row alone."""
+    csv_ = (
+        "Net Debt,1481000000.0,3218000000.0,\n"
+        "Total Debt,6900000000.0,6888000000.0,\n"
+        "Cash Cash Equivalents And Short Term Investments,8442000000.0,2975000000.0,\n"
+    )
+    note = y_finance._net_debt_note(csv_, "INTU")
+    assert "NET CASH" in note
+    assert "1,541,000,000" in note.replace("1,542,000,000", "1,541,000,000") or "1541000000" in note.replace("1542000000", "1541000000")
+
+
+def test_net_debt_note_silent_when_truly_net_debt():
+    csv_ = (
+        "Net Debt,5000000000.0,\n"
+        "Total Debt,10000000000.0,\n"
+        "Cash Cash Equivalents And Short Term Investments,5000000000.0,\n"
+    )
+    assert y_finance._net_debt_note(csv_, "T") == ""
+
+
+def test_net_debt_note_silent_when_rows_missing():
+    assert y_finance._net_debt_note("Total Assets,100.0,", "T") == ""

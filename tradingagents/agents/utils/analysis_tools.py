@@ -43,6 +43,20 @@ def _clear_ohlcv_cache() -> None:
     _RUN_OHLCV_CACHE.clear()
 
 
+def _scale_note(ticker: str, closes: list) -> str:
+    """Price-scale/staleness advisory vs the run's verified close.
+
+    Returns "" (no note) normally, or a warning line when this ``_ohlcv``
+    series' latest close disagrees with the verified snapshot's close by
+    >1% (stale feed or corrupted scale — INTU 2026-09-08). Callers append it
+    so actionable levels are never silently built on a wrong price.
+    """
+    from tradingagents.agents.utils.price_consistency import ohlcv_scale_warning
+
+    warn = ohlcv_scale_warning(ticker, closes[-1] if closes else None)
+    return ("\n" + warn) if warn else ""
+
+
 def _ohlcv(ticker: str, days: int = 320) -> dict:
     """Daily OHLCV via the vendor chain (Date,Open,High,Low,Close,Volume rows).
 
@@ -262,7 +276,7 @@ def get_swing_set(
                 f"  relative_strength: {rs.get('verdict')} rs={_txt(rs.get('rs'))} "
                 f"slope%={_txt(rs.get('slope_pct'))} near_high={rs.get('near_high')}"
             )
-        return chr(10).join(lines)
+        return chr(10).join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"swing set unavailable for {ticker}: {exc}"
 
@@ -780,7 +794,7 @@ def get_swing_exits(
         if tg:
             lines.append(f"  targets: t1={tg.get('t1')} t2={tg.get('t2')} "
                          f"r1={tg.get('r1')} r2={tg.get('r2')}")
-        return "\n".join(lines)
+        return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"swing exits unavailable for {ticker}: {exc}"
 
@@ -3232,7 +3246,11 @@ def get_ratios(
     try:
         from tradingagents.dataflows.statement_parsing import fetch_ticker
 
-        fin = fetch_ticker(ticker, current_date or "2026-08-24") or {}
+        if not current_date:
+            from datetime import datetime as _dt
+
+            current_date = _dt.now().strftime("%Y-%m-%d")
+        fin = fetch_ticker(ticker, current_date) or {}
     except Exception as exc:  # noqa: BLE001
         return f"ratios unavailable for {ticker}: {exc}"
     ratios = compute_ratios(fin)
@@ -3402,7 +3420,7 @@ def get_session_discipline(
             f"  psych_levels: next={pl['above']} below={pl['below']} "
             f"dist_to_next={pl['dist_pct'] and round(pl['dist_pct'], 2)}%"
         )
-    return "\n".join(lines)
+    return "\n".join(lines) + _scale_note(ticker, closes)
 
 
 # ---------------------------------------------------------------------------
@@ -3827,7 +3845,7 @@ def get_technical_factors(
             f"  volume_profile: poc={vp.get('poc')} va_high={vp.get('value_area_high')} "
             f"va_low={vp.get('value_area_low')}",
         ]
-        return "\n".join(lines)
+        return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"technical factors unavailable for {ticker}: {exc}"
 
@@ -3935,7 +3953,7 @@ def get_candlestick_patterns(
                     f"  last bar: open={last['open']:.2f} high={last['high']:.2f} "
                     f"low={last['low']:.2f} close={last['close']:.2f}"
                 )
-        return "\n".join(lines)
+        return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"candlestick patterns unavailable for {ticker}: {exc}"
 
@@ -5024,8 +5042,21 @@ def get_sentiment_lead_lag(
                 f"{row['spearman_pval']:.3f} | {row['sample_size']} |"
             )
         if out:
-            best = max(abs(r2["spearman_corr"]) for r2 in out)
-            return "\n".join(lines) + f"\n- strongest |corr|: {best:.3f} ({label})"
+            best: tuple[float, int, str] | None = None
+            for r2 in out:
+                for col, metric in (
+                    ("spearman_corr", "spearman"),
+                    ("pearson_corr", "pearson"),
+                ):
+                    v = abs(float(r2[col]))
+                    if best is None or v > best[0]:
+                        best = (v, int(r2["lag_days"]), metric)
+            if best is not None:
+                return (
+                    "\n".join(lines)
+                    + f"\n- strongest |corr|: {best[0]:.3f} "
+                    f"({label}, {best[2]}, lag {best[1]:+d})"
+                )
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrades, never crashes
         return f"sentiment lead/lag unavailable for {ticker}: {exc}"

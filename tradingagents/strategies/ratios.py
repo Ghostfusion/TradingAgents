@@ -99,12 +99,14 @@ def compute_ratios(fin: dict, price: float | None = None) -> dict:
     ev = _add(mc, _sub(debt, cash)) if (mc is not None) else None
 
     # Balance-sheet subset invariant: current assets/liabilities can never
-    # exceed total assets/liabilities. A violation means the canonical parse
-    # picked the wrong row (observed on MSFT 2026-09-08: a current ratio of
-    # 3.74 vs the true 1.23 when current_assets was mis-parsed) — null the
-    # ratio rather than emit a wrong number.
-    ca_ok = ca is not None and ta is not None and ca <= ta
-    cl_ok = cl is not None and tl is not None and cl <= tl
+    # exceed total assets/liabilities. A *proven* violation (both values
+    # present and current > total) means the canonical parse picked the wrong
+    # row (observed on MSFT 2026-09-08: a current ratio of 3.74 vs the true
+    # 1.23 when current_assets was mis-parsed) — null the ratio rather than
+    # emit a wrong number. Missing totals (None) cannot prove a violation, so
+    # the ratio still computes from what is available.
+    ca_ok = ca is not None and (ta is None or ca <= ta)
+    cl_ok = cl is not None and (tl is None or cl <= tl)
     current = _ratio(ca, cl) if ca_ok and cl_ok else None
     quick = (
         _ratio(_sub(ca, inv), cl)

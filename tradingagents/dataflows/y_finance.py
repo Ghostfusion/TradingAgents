@@ -312,6 +312,7 @@ def get_fundamentals(
             ("Debt to Equity", info.get("debtToEquity")),
             ("Current Ratio", info.get("currentRatio")),
             ("Book Value", info.get("bookValue")),
+            ("Operating Cash Flow", info.get("operatingCashflows")),
             ("Free Cash Flow", info.get("freeCashflow")),
         ]
 
@@ -370,6 +371,52 @@ def get_fundamentals(
         raise
 
 
+def _net_debt_note(csv_string: str, ticker: str) -> str:
+    """Cross-check a yfinance balance-sheet CSV's ``Net Debt`` row against its
+    own ``Total Debt`` and ``Cash (incl. STI)`` rows, and return a correction
+    note when the sign is internally inconsistent.
+
+    yfinance's ``Net Debt`` row often uses cash-only (or excludes short-term
+    investments), so a company that is genuinely NET CASH (cash+STI > total
+    debt) can be reported with a positive "Net Debt" — the INTU 2026-09-08
+    case (vendor Net Debt 1.48B while its own cash+STI 8.44B > debt 6.9B).
+    Advisory: returns "" when the rows aren't all present or the sign is
+    consistent; never raises.
+
+    """
+
+    def _latest_num(label_frag: str) -> float | None:
+        for ln in csv_string.splitlines():
+            if not ln.startswith("#") and label_frag in ln:
+                cells = ln.split(",")
+                for c in cells[1:]:
+                    c = c.strip()
+                    if c:
+                        try:
+                            return float(c)
+                        except ValueError:
+                            continue
+                break
+        return None
+
+    nd = _latest_num("Net Debt")
+    debt = _latest_num("Total Debt")
+    cash_sti = _latest_num("Cash Cash Equivalents And Short Term Investments")
+    if None in (nd, debt, cash_sti):
+        return ""
+    if nd is None or debt is None or cash_sti is None:
+        return ""
+    if cash_sti <= debt:
+        return ""  # genuinely net debt; vendor sign fine
+    net_cash = cash_sti - debt
+    return (
+        f"\n# NOTE: vendor 'Net Debt' ({nd:,.2f}) is net-CASH when cross-checked: "
+        f"cash + ST investments ({cash_sti:,.2f}) exceed total debt ({debt:,.2f}) "
+        f"by {net_cash:,.2f}. Treat this company as NET CASH; do not quote the "
+        f"vendor Net Debt row as a positive debt position."
+    )
+
+
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
@@ -397,7 +444,7 @@ def get_balance_sheet(
         header = f"# Balance Sheet data for {canonical} ({freq})\n"
         header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + csv_string
+        return header + csv_string + _net_debt_note(csv_string, ticker)
 
     except NoMarketDataError:
         raise

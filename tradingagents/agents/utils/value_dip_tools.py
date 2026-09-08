@@ -27,6 +27,14 @@ from tradingagents.dataflows.interface import route_to_vendor
 # ---------------------------------------------------------------------------
 
 
+def _scale_note(ticker: str, closes: list) -> str:
+    """Price-scale/staleness advisory vs the run's verified close."""
+    from tradingagents.agents.utils.price_consistency import ohlcv_scale_warning
+
+    warn = ohlcv_scale_warning(ticker, closes[-1] if closes else None)
+    return ("\n" + warn) if warn else ""
+
+
 def _ohlcv(ticker: str, days: int = 320) -> dict:
     """Daily OHLCV via the vendor chain (Date,Open,High,Low,Close,Volume rows).
 
@@ -219,7 +227,7 @@ def get_bollinger_pct_b(
     return (
         f"bollinger %b {ticker}: {bb['pct_b']:.2%} ({zone}); "
         f"price={bb['price']:.2f} lower={bb['lower']:.2f} upper={bb['upper']:.2f} mid={bb['mid']:.2f}"
-    )
+    ) + _scale_note(ticker, closes)
 
 
 @tool
@@ -692,7 +700,7 @@ def get_macd_divergence(
     return (
         f"macd divergence {ticker}: verdict={m['verdict']} bullish={m['bullish']} "
         f"price_lows={m.get('price_lows')} macd_hist_lows={m.get('macd_hist_lows')} "
-        + (f"({rsi_note})" if rsi_note else "")
+        + (f"({rsi_note})" if rsi_note else "") + _scale_note(ticker, closes)
     )
 
 
@@ -765,7 +773,7 @@ def get_support_structure(
         f"sma200={sp.get('sma200')} "
         f"distance_to_base={_txt_pct(sp.get('distance_to_base_pct'))} "
         f"distance_to_sma200={_txt_pct(sp.get('distance_to_sma200_pct'))}"
-    )
+    ) + _scale_note(ticker, closes)
 
 
 @tool
