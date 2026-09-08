@@ -27,6 +27,24 @@ timeout, concurrency knob) writing one reducer-backed state key — not
 LangGraph `Send` fan-out. One node = one barrier = simple reduce; `Send`
 adds topology/checkpointer coupling for zero determinism gain.
 
+## Operating philosophy (user directive, 2026-09-07)
+
+1. **Feed as much registered-tool information to the LLM as possible** so it
+   can make accurate decisions. `ALL` (every tool each analyst registers) is
+   the intended operating mode; curated subsets are a lighter opt-in.
+2. **Reduce vendor and LLM calls** — never request the same information over
+   and over. Each tool is gathered at most once per analyst per run (cached
+   on the state key), and the short-circuit tool node answers any repeated
+   model request with "already provided in the Tool Evidence block" instead
+   of re-hitting the vendor.
+3. **Heavy local compute is acceptable** — the gather runs on the user's own
+   hardware; the budget concern is vendor/LLM quota, not CPU.
+
+Applied in code: `TRADINGAGENTS_ANALYST_FORCED_TOOLS=ALL` (local `.env`),
+`evidence_gather.gather_for_analyst_node` (gather-once caching),
+`evidence_gather.make_short_circuit_tool_node` (re-request → short-circuit),
+wired from `tradingagents/graph/trading_graph.py::_create_tool_nodes`.
+
 ---
 
 ## Phase 0 — Config surface
