@@ -185,7 +185,7 @@ tradingagents/
 │                          #   openrouter/deepseek/qwen/glm/minimax/ollama/openai_compatible)
 ├── default_config.py      # DEFAULT_CONFIG + TRADINGAGENTS_* env overrides
 └── reporting.py           # report-tree writer (heading hierarchy + auto TOC)
-scripts/                   # value_screener.py, rebuild_complete_report.py, risk_report.py, ...
+scripts/                   # value_screener.py, rebuild_complete_report.py, risk_report.py, report_verify.py (LLM report verification vs tool_evidence), ...
 batch.py                   # headless concurrent runner (--vendor), memory logs
 pipeline.py               # B2: screen -> composite rank -> top-N -> batch (moomoo-first)
 main.py                    # minimal Python API demo

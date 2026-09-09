@@ -1092,7 +1092,7 @@ python batch.py --symbols NVDA MSFT AAPL 0700.HK --date 2026-07-22 --workers 4
 python batch.py --symbols NVDA --depth deep --analysts market news
 ```
 
-Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`.
+Options: `--symbols` (required), `--date` (default today), `--workers` (default 3), `--depth` (`shallow`/`medium`/`deep`, default `deep`), `--analysts` (default all four teams), `--verify` (advisory LLM report-verification pass after each symbol — each analyst report is checked against its `tool_evidence.json` leaves and `verify_flags.json` is written into the report tree; never blocks delivery). Each symbol gets its own memory log (`~/.tradingagents/memory/<TICKER>.md`), reports land in `./reports/<TICKER>_<timestamp>/`, and a per-run summary is appended to `./reports/batch_summary_<timestamp>.jsonl`. Configuration (provider, models, API key) is inherited from `.env`. To run the verifier manually against an existing tree: `py -3.12 scripts/report_verify.py --report-dir reports/<TICKER>_<timestamp>`.
 
 </td></tr>
 </table>

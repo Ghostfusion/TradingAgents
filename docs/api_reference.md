@@ -23,6 +23,8 @@ in `batch.py`).
 | `TRADINGAGENTS_LLM_PROVIDER` | `llm_provider` |
 | `TRADINGAGENTS_DEEP_THINK_LLM` | `deep_think_llm` |
 | `TRADINGAGENTS_QUICK_THINK_LLM` | `quick_think_llm` |
+| `TRADINGAGENTS_VERIFY_MODEL` | `report_verify_model` | advisory LLM report-verifier model (empty = quick tier); see `scripts/report_verify.py` |
+| `TRADINGAGENTS_VERIFY_MAX_CALLS` | `report_verify_max_calls` | verifier LLM calls per report tree (default 12) |
 | `TRADINGAGENTS_LLM_BACKEND_URL` | `backend_url` |
 | `TRADINGAGENTS_OUTPUT_LANGUAGE` | `output_language` |
 | `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `max_debate_rounds` |
@@ -767,7 +769,8 @@ preserves `Risk Gate (computed)` blocks.
 - batch.py: `--symbols` (required) `--date` `--workers` (1-4 default=capped,
   via `batch.effective_workers`; `TRADINGAGENTS_MAX_WORKERS` raises the cap)
   `--depth` (shallow|medium|deep) `--analysts` (market|social|news|fundamentals)
-  `--vendor` (default|moomoo|yfinance|eodhd).
+  `--vendor` (default|moomoo|yfinance|eodhd) `--verify` (advisory LLM
+  report-verification pass post-run -> `verify_flags.json` in each report tree).
 - pipeline.py: `--universe` (tickers|top-losers|heat-proxy|top-movers-massive)
   `--file` `--top` `--limit` `--market` `--movers-count` `--min-mcap`
   `--price-min` `--pe-max` `--workers` (capped via `batch.effective_workers`)

@@ -18,7 +18,9 @@ py -3.12 batch.py --symbols AAPL MSFT 0700.HK BTC-USD --date 2026-08-19 \
 Flags: `--symbols` (required) `--date` `--workers` (1 = default capped
 under moomoo connection limits) `--depth` (shallow/medium/deep -> 1/3/5
   risk-rounds; the bull/bear researchers always run once) `--analysts`
-  `--vendor` (default|moomoo|yfinance).
+  `--vendor` (default|moomoo|yfinance) `--verify` (advisory LLM
+  report-verification pass -> `verify_flags.json`; standalone:
+  `scripts/report_verify.py --report-dir <tree>`).
 
 Each symbol gets its own memory file + report folder
 `reports/<SYMBOL>_<YYYYMMDD_HHMMSS>/`; a `batch_summary_<ts>.jsonl` is appended.
