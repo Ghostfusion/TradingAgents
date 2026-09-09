@@ -206,6 +206,7 @@ from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 from tradingagents.agents.utils.value_dip_tools import (
     get_balance_sheet_health,
     get_bollinger_pct_b,
+    get_capex_quality,
     get_decline_driver_check,
     get_fcf_yield,
     get_macd_divergence,
@@ -404,6 +405,7 @@ __all__ = [
     "get_tranche_plan",
     "get_trade_expectancy",
     "get_fcf_yield",
+    "get_capex_quality",
     "get_valuation_z_score",
     "get_value_dip_setup",
     "get_balance_sheet_health",

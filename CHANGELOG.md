@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **CapEx-allocation read (advisory, deterministic)** - `strategies/capex_quality.py`
+  + `get_capex_quality` (fundamentals tool loop): separates PRODUCTIVE
+  investment from OVERINVESTMENT / DISTRESS for high-capex names - CapEx
+  intensity z (vs the name's own history), funding cover OCF/CapEx, CapEx-vs-
+  revenue 5y CAGR elasticity, incremental ROIC (3y lag, dNOPAT /
+  dInvestedCapital) + economic spread vs WACC, CapEx ROI 3y, payback 3y,
+  FCF-recovery gap (to a 3% target yield), a 5-regime label (HARVEST /
+  PRODUCTIVE / PRODUCTIVE_INVESTMENT / INVESTMENT_WATCH / OVERINVESTMENT /
+  DISTRESS), a 0-100 quality score and advisory valuation penalty. NEVER a
+  hard gate; n/a on missing rows; composite renormalizes over measured
+  components. Adjudication artifact of the AMZN 2026-09-09 report-review
+  loop (rule 8: a negative trailing FCF is reinvestment, not automatically
+  value destruction). Tests: `tests/test_capex_quality.py` (8: regimes,
+  None-safety, hermetic tool render).
 - **FCF value-floor / DCF now anchor on trailing-12M FCF, not latest ANNUAL
   FYxx** - `get_fcf_yield`, `get_value_dip_setup`, `get_dcf_valuation` and the
   scenario-DCF input path all fed the latest annual *free cash flow* into the

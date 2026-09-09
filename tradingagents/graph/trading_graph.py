@@ -206,6 +206,7 @@ from tradingagents.agents.utils.quant_adds_tools import (
 from tradingagents.agents.utils.value_dip_tools import (
     get_balance_sheet_health,
     get_bollinger_pct_b,
+    get_capex_quality,
     get_decline_driver_check,
     get_fcf_yield,
     get_macd_divergence,
@@ -769,6 +770,7 @@ class TradingAgentsGraph:
                     get_composite_rank,
                     # Value Dip + Swing hybrid (deterministic, computed signals).
                     get_fcf_yield,
+                    get_capex_quality,
                     get_valuation_z_score,
                     get_value_dip_setup,
                     get_balance_sheet_health,

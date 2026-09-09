@@ -471,6 +471,151 @@ def get_fcf_yield(
     )
 
 
+def _annual_statement_series(ticker: str, current_date: str) -> dict:
+    """Annual statement series (oldest->newest, None gaps) for the CapEx read.
+
+    Builds aligned per-year arrays from the annual cashflow / income /
+    balance payloads via ``_markdown_period_tables`` (moomoo annual). Every
+    unavailable row degrades to None - never fabricated.
+    """
+    from tradingagents.dataflows.statement_parsing import (
+        _markdown_period_tables,
+        _period_year,
+    )
+
+    per_year: dict[int, dict] = {}
+
+    def _absorb(method: str, extract):
+        try:
+            payload = route_to_vendor(method, ticker, "annual", current_date) or ""
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            tables = _markdown_period_tables(payload)
+        except Exception:  # noqa: BLE001
+            return
+        for label, rows in tables:
+            y = _period_year(label)
+            if y < 0:
+                continue
+            cell = per_year.setdefault(y, {})
+            for key, value in extract(rows).items():
+                if key not in cell:
+                    cell[key] = value
+
+    def _row(rows: dict, *names: str) -> float | None:
+        for label, value in rows.items():
+            low = str(label).lower()
+            if any(n in low for n in names):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    _absorb("get_cashflow", lambda rows: {
+        "ocf": _row(rows, "operating cash flow", "cash flow from operating"),
+        "capex": abs(_row(rows, "capital expenditure", "purchase of property")) if _row(rows, "capital expenditure", "purchase of property") is not None else None,
+        "d_a": _row(rows, "depreciation amortization depletion", "depreciation and amortization"),
+    })
+    _absorb("get_income_statement", lambda rows: {
+        "rev": _row(rows, "total revenue", "operating revenue", "revenue"),
+        "ebit": _row(rows, "operating income", "operating profit"),
+        "tax_rate": _row(rows, "tax rate for calcs"),
+    })
+    _absorb("get_balance_sheet", lambda rows: {
+        "debt": _row(rows, "total debt"),
+        "equity": _row(rows, "stockholders equity", "total equity gross minority interest"),
+        "cash": _row(rows, "cash and cash equivalents"),
+    })
+
+    years = sorted(per_year)
+    if len(years) < 2:
+        return {}
+    out: dict[str, list] = {
+        "revenue": [], "ocf": [], "capex": [], "nopat": [], "d_a": [],
+        "invested_capital": [],
+    }
+    for y in years:
+        c = per_year[y]
+        out["revenue"].append(c.get("rev"))
+        out["ocf"].append(c.get("ocf"))
+        out["capex"].append(c.get("capex"))
+        out["d_a"].append(c.get("d_a"))
+        ebit, tax = c.get("ebit"), c.get("tax_rate")
+        out["nopat"].append(ebit * (1.0 - tax) if (ebit is not None and tax is not None) else None)
+        debt, equity, cash = c.get("debt"), c.get("equity"), c.get("cash")
+        if debt is not None and equity is not None and cash is not None:
+            out["invested_capital"].append(debt + equity - cash)
+        else:
+            out["invested_capital"].append(None)
+    return out
+
+
+@tool
+def get_capex_quality(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """Capital-allocation / CapEx-quality read (advisory, deterministic).
+
+    Distinguishes PRODUCTIVE investment from OVERINVESTMENT / DISTRESS for a
+    high-capex name: CapEx intensity (z vs the name's own history), funding
+    cover (OCF / CapEx), CapEx-vs-revenue 5y CAGR elasticity, incremental
+    ROIC (3y lag, dNOPAT / dInvestedCapital) and its economic spread vs WACC,
+    CapEx ROI 3y, payback, FCF-recovery gap to a target yield, a 5-regime
+    label and a 0-100 quality score + advisory valuation penalty. NEVER a
+    hard gate - use it to decide whether a negative FCF is reinvestment
+    (regime PRODUCTIVE_INVESTMENT) or value destruction (OVERINVESTMENT /
+    DISTRESS) before any 'FCF is bad' claim. n/a fields when the annual
+    series is too short or a row is missing.
+    """
+    try:
+        from tradingagents.strategies.capex_quality import capex_quality_read
+    except Exception as exc:  # noqa: BLE001
+        return f"capex quality unavailable for {ticker}: {exc}"
+    try:
+        fin = _canonical_financials(ticker, current_date)
+        mc = _latest(fin.get("market_cap"))
+    except Exception:  # noqa: BLE001
+        mc = None
+    series = _annual_statement_series(ticker, current_date)
+    if not series or not any(v for v in series.get("ocf", []) if v is not None):
+        return f"capex quality unavailable for {ticker}: no usable annual statement series."
+    try:
+        out = capex_quality_read(
+            series["revenue"], series["ocf"], series["capex"], series["nopat"],
+            invested_capital=series["invested_capital"], deprec_amort=series["d_a"],
+            market_cap=mc,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"capex quality unavailable for {ticker}: {exc}"
+    if out.get("fcf") is None and out.get("regime") == "n/a":
+        return f"capex quality unavailable for {ticker}: no measurable FCF / regime."
+
+    def _pct(v: float | None) -> str:
+        return f"{v:.2%}" if v is not None else "n/a"
+
+    def _x(v: float | None) -> str:
+        return f"{v:.2f}x" if v is not None else "n/a"
+
+    def _b(v: float | None) -> str:
+        return f"${v / 1e9:.2f}B" if v is not None else "n/a"
+
+    lines = [f"capex quality {ticker}: regime={out['regime']} score={out['score']} "
+             f"penalty={out['penalty_points']}"]
+    lines.append(f"  FCF={_b(out['fcf'])} FCF_yield={_pct(out['fcf_yield'])}")
+    lines.append(f"  CapEx/Revenue={_pct(out['cap_rev'])} funding={_x(out['funding'])} "
+                 f"cap_z={out['cap_z']}")
+    lines.append(f"  CapEx CAGR5={_pct(out['cap_cagr5'])} Rev CAGR5={_pct(out['rev_cagr5'])} "
+                 f"elasticity={_x(out['elasticity'])}")
+    pb = (f"payback3y={out['payback_3y']:.1f}y" if out["payback_3y"] is not None else "payback3y=n/a")
+    lines.append(f"  incr_ROIC={_pct(out['incr_roic'])} spread={_pct(out['spread'])} "
+                 f"(WACC {_pct(out['wacc'])}) CapEx_ROI3y={_pct(out['cap_roi_3y'])} {pb}")
+    lines.append(f"  FCF_recovery_gap={_b(out['fcf_recovery'])} (to 3% yield)")
+    return "\n".join(lines)
+
+
 @tool
 def get_valuation_z_score(
     ticker: Annotated[str, "ticker symbol"],
