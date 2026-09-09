@@ -3738,3 +3738,15 @@ PRs from late 2025 also landed here.
   now cross-checks the saved report's score against the computed leaf.
 - **CLI**: `scripts/report_verify.py --stem <X>` for single-stem / parallel
   per-stem verification (each stem its own bounded job).
+
+### Fixed (adopted from upstream TradingAgents 0.4.0 #1170)
+- **Silent-Hold → REVIEW sentinel** (`tradingagents/agents/utils/rating.py):
+  an unparseable rating (garbled `Rating: <value>` label — non-tier word,
+  fullwidth-colon label, or non-word value like `Rating：⭐⭐⭐`) previously
+  degraded to a tradeable Hold; it now returns the `REVIEW_SENTINEL`
+  ("REVIEW") so a broken PM decision can never be acted on as Hold. Only the
+  tradeable-tier fallback is hardened: callers with an explicit non-tradeable
+  default (`"n/a"`) keep it, and ordinary prose that merely mentions "rating"
+  without a colon-separated value is untouched. `SignalProcessor` surfaces
+  REVIEW too. See docs/review_parent_tauricradingagents.md (review-only, the
+  one adoptable item).

@@ -27,5 +27,7 @@ class SignalProcessor:
         self.quick_thinking_llm = quick_thinking_llm
 
     def process_signal(self, full_signal: str) -> str:
-        """Return one of Buy / Overweight / Hold / Underweight / Sell."""
+        """Return one of Buy / Overweight / Hold / Underweight / Sell, or
+        REVIEW when the PM rating is unparseable (never a silent tradeable
+        Hold — upstream 0.4.0 #1170)."""
         return parse_rating(full_signal)

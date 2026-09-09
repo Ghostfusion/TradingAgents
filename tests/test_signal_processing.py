@@ -60,6 +60,38 @@ class TestParseRating:
         for r in RATINGS_5_TIER:
             assert parse_rating(f"Rating: {r}") == r
 
+    def test_garbled_rating_surfaces_review_not_hold(self):
+        # Upstream TradingAgents 0.4.0 #1170: an unparseable PM rating (e.g.
+        # fullwidth-colon label with a non-tier value) must surface REVIEW
+        # rather than silently degrade to a tradeable Hold.
+        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
+
+        assert parse_rating("Rating：⭐⭐⭐\n待人工审阅") == REVIEW_SENTINEL
+        assert parse_rating("**Rating**: Mekanell\nPosition: trim.") == REVIEW_SENTINEL
+        # A genuine 5-tier value still parses through the same fullwidth label.
+        assert parse_rating("Rating：Hold\nDetails.") == "Hold"
+        # A word-only mention of "rating" in ordinary prose is NOT a garbled
+        # rating label (no colon-separated value): stay with the default.
+        assert parse_rating("The report offers no rating here.") == "Hold"
+
+    def test_garbled_with_non_tradeable_default_stays_default(self):
+        # Callers that already pass a non-tradeable fallback keep it; REVIEW is
+        # only needed to protect a tradeable-tier fallback.
+        assert parse_rating("Rating：⭐⭐⭐", default="n/a") == "n/a"
+
+    def test_garbled_with_custom_tradeable_default_hardened(self):
+        # Even an explicit tradeable default is hardened: garbage never
+        # coerces to a tier the caller would act on.
+        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
+
+        assert parse_rating("Rating：maybe", default="Underweight") == REVIEW_SENTINEL
+
+    def test_signal_processor_surfaces_review(self):
+        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
+
+        md = "**Rating**: pending confirmation\nDecision: await clearance."
+        assert SignalProcessor().process_signal(md) == REVIEW_SENTINEL
+
 
 # ---------------------------------------------------------------------------
 # SignalProcessor: thin adapter over the heuristic
