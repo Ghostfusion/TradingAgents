@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Fix VRP double-percent render (ARM 2026-09-09 review-loop)** -
+  `get_options_iv_read` rendered `volatility_risk_premium`'s PERCENTAGE-POINTS
+  value with a "%" format, multiplying by 100 twice: ARM (ATM IV 67.97% - RV
+  ~50.4%) = +17.63pp printed as "+1763%". Now renders "VRP (ATM IV - realized
+  vol): +17.63pp (percentage points)". `volatility_risk_premium` itself
+  (pure, returns pp) is unchanged - tests pin its API; regression test added
+  for the tool render (hermetic yfinance chain, asserts pp + sane <100
+  magnitude).
 - **DCF WACC decomposition + gather-time D/E reconcile (ARM 2026-09-09 loop)** -
   (a) `get_dcf_valuation` now exposes `rf=` / `beta=` / `erp=` with
   "wacc = CAPM rf + beta*erp" so an extreme WACC (ARM 24.23% on beta 3.89) is

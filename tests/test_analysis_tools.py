@@ -7,6 +7,7 @@ exists, explicit 'unavailable' text (never a fabricated figure) otherwise.
 
 import io
 import math
+from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
@@ -1020,9 +1021,54 @@ def test_option_breakeven_partial_renders_na():
 
 
 def test_option_breakeven_never_aborts():
-    # Negative (invalid) floats are schema-valid but math-None -> n/a render.
+    # Invalid floats are schema-valid but math-None -> n/a render.
     out = T.get_option_breakeven.invoke({"long_strike": -1.0, "long_premium": -1.0})
     assert "long breakeven = n/a" in out
+
+
+def test_options_iv_read_vrp_renders_pp_not_percent(monkeypatch):
+    """ARM 2026-09-09 review-loop bug: volatility_risk_premium returns
+    PERCENTAGE POINTS, but the render formatted it with '%' - multiplying by
+    100 twice (ARM IV 67.97% - RV ~50.4% = +17.63pp showed as +1763%). The
+    render must say 'pp (percentage points)', never double-percent."""
+    import pandas as _pd
+    import yfinance as _yf
+
+    # Hermetic yfinance chain: spot ~ 100, ATM IV 0.32, puts slightly richer.
+    calls = _pd.DataFrame({
+        "strike": [105.0, 115.0, 125.0],
+        "impliedVolatility": [0.32, 0.30, 0.28],
+        "openInterest": [100, 50, 20],
+        "bid": [1.0, 0.5, 0.2], "ask": [1.2, 0.6, 0.3], "lastPrice": [1.1, 0.55, 0.25],
+    })
+    puts = _pd.DataFrame({
+        "strike": [95.0, 85.0, 75.0],
+        "impliedVolatility": [0.34, 0.36, 0.38],
+        "openInterest": [120, 60, 30],
+        "bid": [1.0, 0.5, 0.2], "ask": [1.2, 0.6, 0.3], "lastPrice": [1.1, 0.55, 0.25],
+    })
+
+    class _FakeTk:
+        options = ["260918", "260930", "261209"]
+        def option_chain(self, expiry):
+            return SimpleNamespace(calls=calls, puts=puts)
+
+    n = 120
+    closes = [100.0 + 0.02 * i for i in range(n)]  # small steady drift -> low RV
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker, days=320: {
+        "dates": [f"2026-01-{i % 28 + 1:02d}" for i in range(n)],
+        "closes": closes, "opens": closes,
+        "highs": [c + 0.1 for c in closes], "lows": [c - 0.1 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    })
+    monkeypatch.setattr(_yf, "Ticker", lambda t: _FakeTk())
+    out = T.get_options_iv_read.invoke({"ticker": "ARMT"})
+    assert "VRP (ATM IV - realized vol): +" in out
+    assert "pp (percentage points)" in out
+    # ATM IV 0.32, RV tiny (~0.02) -> VRP ≈ +30.0pp, nowhere near +3000.
+    vrp_line = next(ln for ln in out.splitlines() if "VRP" in ln)
+    val = vrp_line.split(":")[-1].strip().split("pp")[0]  # "+32.00"
+    assert float(val) < 100.0
 
 
 def test_cycle_tilt_renders_phase(monkeypatch):

@@ -4623,7 +4623,10 @@ def get_options_iv_read(
             lines.append(f"- expected move ({int(T*365)}d): 1-sigma {em['ten_d_move_pct']:.1f}%")
         lines.append(f"- put:call OI: {poi:.2f}" if poi is not None else "- put:call OI: n/a")
         lines.append(f"- put-skew (OTM P - OTM C)/ATM: {skew:+.3f}" if skew is not None else "- put-skew: n/a")
-        lines.append(f"- VRP (ATM IV - realized vol): {vrp:+.2%}" if vrp is not None else "- VRP: n/a")
+        # vrp is in PERCENTAGE POINTS (volatility_risk_premium returns
+        # (iv - rv) * 100). Rendering it with "%" multiplied by 100 again
+        # (ARM 2026-09-09: +17.63pp printed as +1763%). Render as pp.
+        lines.append(f"- VRP (ATM IV - realized vol): {vrp:+.2f}pp (percentage points)" if vrp is not None else "- VRP: n/a")
         lines.append("- IV percentile: n/a (no per-day IV history source)")
         if speed is not None and zomma is not None:
             lines.append(
