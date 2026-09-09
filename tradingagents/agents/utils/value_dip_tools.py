@@ -16,6 +16,7 @@ fundamentals node: get_fcf_yield / get_valuation_z_score / get_value_dip_setup).
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -330,6 +331,98 @@ def get_trade_expectancy(
 # Fundamentals analyst: FCF yield, valuation Z, the hybrid matrix
 # ---------------------------------------------------------------------------
 
+# Period tokens that announce a QUARTERLY payload ("Q1 2026", "2026-Q1"),
+# so an annual payload is never summed quarter-style by accident.
+_HAS_Q_MARK = re.compile(r"(?:^|[^A-Za-z0-9])(?:Q[1-4]|20[0-9]{2}-Q[1-4])", re.IGNORECASE)
+
+
+def _period_fcf_value(rows: dict) -> float | None:
+    """FCF for one period table: 'Free Cash Flow' row, else OCF - |capex|."""
+    for label, value in rows.items():
+        if "free cash flow" in str(label).lower():
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                break
+    op = cap = None
+    for label, value in rows.items():
+        low = str(label).lower()
+        if "operating cash flow" in low or "cash flow from operating" in low:
+            op = value
+        if "capital expenditure" in low or "purchase of property" in low:
+            cap = value
+    if op is not None and cap is not None:
+        try:
+            return float(op) - abs(float(cap))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _ttm_fcf_from_quarterly(payload: str) -> float | None:
+    """Trailing-12M FCF (sum of the newest 4 quarters) from a QUARTERLY
+    cashflow payload, else None (caller falls back to the annual anchor).
+
+    The value-floor tools / DCF anchor on the trailing-twelve-month window so
+    the latest quarter's sign actually lands (annual FYxx is silently stale in
+    a capex-accelerating quarter - e.g. AMZN: FY2025 annual FCF +$7.7B while
+    trailing-12M was -$2.5B). Only quarterly-shaped payloads are accepted.
+    """
+    if not payload or str(payload).startswith(("NO_DATA", "DATA_")):
+        return None
+    head = str(payload)[:600].lower()
+    if "quarterly" not in head and not _HAS_Q_MARK.search(head):
+        return None
+    try:
+        from tradingagents.dataflows.statement_parsing import _markdown_period_tables
+
+        tables = _markdown_period_tables(payload)
+    except Exception:  # noqa: BLE001
+        tables = []
+    if tables:
+        values = []
+        for _, rows in tables:
+            v = _period_fcf_value(rows)
+            if v is not None:
+                values.append(v)
+        if len(values) >= 4:
+            return float(sum(values[:4]))
+        return None
+    # CSV shape: per-date columns (newest first) -> sum the newest 4 FCF cells.
+    try:
+        from tradingagents.agents.utils.analysis_tools import _dcf_yf_rows
+
+        rows = _dcf_yf_rows(payload)
+    except Exception:  # noqa: BLE001
+        rows = {}
+    if not rows:
+        return None
+    fcf_row = None
+    for label, vals in rows.items():
+        if "free cash flow" in str(label).lower():
+            fcf_row = vals
+            break
+    if fcf_row is None:
+        op = cap = None
+        for label, vals in rows.items():
+            low = str(label).lower()
+            if "operating cash flow" in low or "cash flow from operating" in low:
+                op = vals
+            if "capital expenditure" in low or "purchase of property" in low:
+                cap = vals
+        if op and cap:
+            fcf_row = {
+                d: float(op.get(d, 0.0)) - abs(float(cap.get(d, 0.0))) for d in op
+            }
+    if not fcf_row:
+        return None
+    # _dcf_yf_rows dates sort lexicographically; the 4 newest are the trailing
+    # twelve months.
+    values = [float(fcf_row[d]) for d in sorted(fcf_row, reverse=True) if fcf_row[d] is not None]
+    if len(values) >= 4:
+        return float(sum(values[:4]))
+    return None
+
 
 @tool
 def get_fcf_yield(
@@ -349,10 +442,20 @@ def get_fcf_yield(
         return f"fcf yield unavailable for {ticker}: {exc}"
     fin = _canonical_financials(ticker, current_date)
     mc = _latest(fin.get("market_cap"))
+    fcf, basis = None, ""
     try:
-        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
-        fcf_series = _fcf_series_from_cashflow(cf_payload)
-        fcf = fcf_series[0] if fcf_series else None  # newest period first
+        # Prefer the trailing-12M FCF (sum of the newest 4 quarters) so the
+        # latest quarter's sign lands; fall back to the latest annual FCF when
+        # no quarterly payload exists.
+        q_payload = route_to_vendor("get_cashflow", ticker, "quarterly", current_date) or ""
+        ttm = _ttm_fcf_from_quarterly(q_payload)
+        if ttm is not None:
+            fcf, basis = ttm, "ttm"
+        else:
+            cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+            fcf_series = _fcf_series_from_cashflow(cf_payload)
+            fcf = fcf_series[0] if fcf_series else None  # newest period first
+            basis = "annual" if fcf is not None else None
     except Exception:  # noqa: BLE001
         fcf = None
     fy = fcf_yield(fcf, mc)
@@ -362,7 +465,10 @@ def get_fcf_yield(
             "market cap from the vendor chain."
         )
     band = "floor-pass" if fy >= 0.06 else "below-floor"
-    return f"fcf yield {ticker}: {fy:.2%} ({band}); fcf=${fcf:,.0f} market_cap=${mc:,.0f}"
+    return (
+        f"fcf yield {ticker}: {fy:.2%} ({band}); fcf=${fcf:,.0f} "
+        f"market_cap=${mc:,.0f} basis={basis}"
+    )
 
 
 @tool
@@ -459,9 +565,16 @@ def get_value_dip_setup(
         )
     mc = _latest(fin.get("market_cap"))
     try:
-        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
-        fcf_series = _fcf_series_from_cashflow(cf_payload)
-        fcf = fcf_series[0] if fcf_series else None  # newest period first
+        # Prefer trailing-12M FCF (sum of newest 4 quarters); fall back to the
+        # latest annual FCF when no quarterly payload exists.
+        q_payload = route_to_vendor("get_cashflow", ticker, "quarterly", current_date) or ""
+        ttm = _ttm_fcf_from_quarterly(q_payload)
+        if ttm is not None:
+            fcf = ttm
+        else:
+            cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+            fcf_series = _fcf_series_from_cashflow(cf_payload)
+            fcf = fcf_series[0] if fcf_series else None  # newest period first
     except Exception:  # noqa: BLE001
         fcf = None
     fy = fcf_yield(fcf, mc)

@@ -1738,10 +1738,27 @@ def get_dcf_valuation(
     except Exception as exc:  # noqa: BLE001
         return f"dcf unavailable for {ticker}: {exc}"
     try:
-        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
-        fcf = _dcf_fcf_series(cf_payload)
-        if not fcf:
-            return f"dcf unavailable for {ticker}: no usable free cash flow series."
+        # Prefer the trailing-12M FCF (sum of the newest 4 quarterly FCFs) so
+        # the DCF anchors on the CURRENT run rate, not the last fiscal year
+        # (annual FYxx is silently stale in a capex-accelerating quarter - e.g.
+        # AMZN: FY2025 annual FCF +$7.7B vs trailing-12M -$2.5B). When the
+        # quarterly series exists but is NOT positive, DCF degrades honestly
+        # ("no usable free cash flow") instead of silently reusing the stale
+        # positive annual value. Only when NO quarterly payload is available
+        # do we fall back to the annual series (legacy behavior).
+        q_payload = route_to_vendor("get_cashflow", ticker, "quarterly", current_date) or ""
+        from tradingagents.agents.utils.value_dip_tools import _ttm_fcf_from_quarterly
+
+        ttm = _ttm_fcf_from_quarterly(q_payload) if q_payload else None
+        if ttm is not None and ttm > 0:
+            fcf = [ttm]
+        elif ttm is not None:
+            return f"dcf unavailable for {ticker}: trailing-12M FCF is not positive ({ttm:,.0f}); use a normalized/forward-FCF model instead of a trailing perpetuity."
+        else:
+            cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+            fcf = _dcf_fcf_series(cf_payload)
+            if not fcf:
+                return f"dcf unavailable for {ticker}: no usable free cash flow series."
         rf = _dcf_rf(current_date)
         # Screener-grade canonical line items (fundamentals + balance sheet +
         # income statement + finnhub gap-fill), so market cap / shares resolve

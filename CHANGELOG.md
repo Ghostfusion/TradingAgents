@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **FCF value-floor / DCF now anchor on trailing-12M FCF, not latest ANNUAL
+  FYxx** - `get_fcf_yield`, `get_value_dip_setup`, `get_dcf_valuation` and the
+  scenario-DCF input path all fed the latest annual *free cash flow* into the
+  value floors, silently stale in a capex-accelerating quarter (AMZN case:
+  FY2025 annual +$7.7B vs trailing-12M -$2.5B; value-floor claimed
+  `fcf_positive=True` and DCF $1.56 off a positive stale anchor). New
+  `value_dip_tools._ttm_fcf_from_quarterly` sums the newest 4 quarterly FCFs
+  (moomoo quarterly markdown or quarterly-CSV, gated on a Q-token shape so an
+  annual payload is never summed quarter-style); positive TTM feeds the
+  floors/DCF, a NEGATIVE TTM degrades the DCF honestly ("use a
+  normalized/forward-FCF model") instead of recycling the stale positive
+  annual, and the render shows `basis=ttm` / `basis=annual`. Regression tests:
+  TTM preference, negative-TTM DCF degrade, annual fallback. Adjudicated from
+  the AMZN 2026-09-09 report-review loop (rule 8).
 - **Deterministic forced-tool evidence gathering** (map-reduce; design
   `docs/design_mapreduce_forced_tool_gathering.md`, plan
   `docs/implementation_plan_mapreduce_forced_tool_gathering.md`): when

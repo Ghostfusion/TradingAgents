@@ -773,6 +773,34 @@ def test_get_dcf_valuation_no_fcf_degrades(monkeypatch):
     assert "no usable free cash flow" in out
 
 
+def test_get_dcf_valuation_negative_ttm_degrades(monkeypatch):
+    """A NEGATIVE trailing-12M FCF must degrade the DCF (honest), not silently
+    fall back to the stale positive ANNUAL FCF: AMZN case (FY2025 +$7.7B vs
+    TTM -$2.5B) previously output a fair value off the wrong basis."""
+    def side(method, *a, **k):
+        if method == "get_cashflow":
+            return _qf_markdown([-18.171, 0.332, 0.43, 14.937])  # TTM = -2.472B
+        return "Beta: 1.35\nMarket Cap: 3000000000000"
+
+    _patch_dcf_vendors(monkeypatch, side)
+    out = T.get_dcf_valuation.invoke({"ticker": "AMZN", "current_date": "2026-09-09"})
+    assert "dcf unavailable" in out
+    assert "trailing-12M FCF is not positive" in out
+
+
+def test_get_dcf_valuation_positive_ttm_preferred(monkeypatch):
+    """A POSITIVE trailing-12M FCF feeds the DCF directly (no annual detour)."""
+    def side(method, *a, **k):
+        if method == "get_cashflow":
+            return _qf_markdown([10, 8, 9, 7])  # TTM = 34B
+        return "Beta: 1.35\nMarket Cap: 3000000000000"
+
+    _patch_dcf_vendors(monkeypatch, side)
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+    assert "dcf AAPL" in out
+    assert "fair_value=" in out
+
+
 # --------------------------------------------------------------------------
 # New decision-grounding tools (sector / quality / safety / composite / tail)
 # --------------------------------------------------------------------------
@@ -1336,6 +1364,65 @@ def test_fcf_yield_missing_data_degrades(monkeypatch):
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
     out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
+
+
+def _qf_markdown(fcfs_b):
+    """Quarterly-shaped moomoo cashflow markdown, newest period first."""
+    labels = ["Q3 2026", "Q2 2026", "Q1 2026", "Q4 2025", "Q3 2025"]
+    parts = ["## Cash Flow (quarterly)"]
+    for lab, f in zip(labels[: len(fcfs_b)], fcfs_b, strict=False):
+        parts += [
+            f"### {lab}  (FY 2026, currency: USD)",
+            "| Item | Value | YoY | QoQ |",
+            "| --- | --- | --- | --- |",
+            f"| Free Cash Flow | {f}B | -- | -- |",
+            "",
+        ]
+    return "\n".join(parts)
+
+
+def test_fcf_yield_uses_trailing_ttm_not_annual(monkeypatch):
+    """The value floor must anchor on the trailing-12M FCF (sum of the newest
+    4 quarters), not the latest ANNUAL fiscal-year FCF: an annual FYxx is
+    silently stale when the capex/OCF is swinging (AMZN FY2025 +$7.7B vs TTM
+    -$2.5B case). Quarter sum = -18.171+0.332+0.43+14.937 = -2.472B."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"market_cap": 2721e9},
+    )
+    monthly = lambda *a, **k: _qf_markdown([-18.171, 0.332, 0.43, 14.937])  # noqa: E731
+    monkeypatch.setattr(V, "route_to_vendor", monthly)
+    out = V.get_fcf_yield.invoke({"ticker": "AMZN", "current_date": "2026-09-09"})
+    assert "fcf yield AMZN" in out
+    assert "basis=ttm" in out
+    assert "-0.09%" in out  # -2.472B / 2.721T
+    # The stale annual anchor (+7.695B / 2.721T = +0.28%) must NOT appear.
+    assert "+0.28%" not in out
+
+
+def test_fcf_yield_positive_ttm_still_renders(monkeypatch):
+    """A positive trailing-12M FCF is used as-is; positive TTM => floor check."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"market_cap": 100e9},
+    )
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: _qf_markdown([10, 8, 9, 7]))
+    out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "basis=ttm" in out
+    assert "34.00%" in out  # (10+8+9+7)B / 100B
+
+
+def test_fcf_yield_falls_back_to_annual_basis(monkeypatch):
+    """When the quarterly payload is absent/not quarterly-shaped, the value
+    floor falls back to the latest annual FCF and says so."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d: {"market_cap": 100e9},
+    )
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: _vdip_fundamentals_markdown())
+    out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "basis=annual" in out
+    assert "10.00%" in out
 
 
 def test_valuation_z_score_computes(monkeypatch):
