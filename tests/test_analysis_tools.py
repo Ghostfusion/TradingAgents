@@ -1020,6 +1020,57 @@ def test_option_breakeven_partial_renders_na():
     assert "intrinsic" not in out
 
 
+def test_options_iv_read_oi_convention_disclosed(monkeypatch):
+    """SKHY 2026-09-09 review-loop: the IV-read tool reports put/call and
+    must disclose the reciprocal (call/put) + the convention note so it is
+    never compared to the chain's call/put as a conflicting fact."""
+    # Reuse the hermetic yfinance fake from the VRP test (same shape).
+    import pandas as _pd
+    import yfinance as _yf
+
+    calls = _pd.DataFrame({
+        "strike": [105.0, 115.0, 125.0],
+        "impliedVolatility": [0.32, 0.30, 0.28],
+        "openInterest": [100.0, 50.0, 20.0],
+        "bid": [1.0, 0.5, 0.2], "ask": [1.2, 0.6, 0.3], "lastPrice": [1.1, 0.55, 0.25],
+    })
+    puts = _pd.DataFrame({
+        "strike": [95.0, 85.0, 75.0],
+        "impliedVolatility": [0.34, 0.36, 0.38],
+        "openInterest": [120.0, 60.0, 30.0],
+        "bid": [1.0, 0.5, 0.2], "ask": [1.2, 0.6, 0.3], "lastPrice": [1.1, 0.55, 0.25],
+    })
+
+    class _FakeTk:
+        options = ["260918", "260930", "261209"]
+        def option_chain(self, expiry):
+            return SimpleNamespace(calls=calls, puts=puts)
+
+    n = 120
+    closes = [100.0 + 0.02 * i for i in range(n)]
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker, days=320: {
+        "dates": [f"2026-01-{i % 28 + 1:02d}" for i in range(n)],
+        "closes": closes, "opens": closes,
+        "highs": [c + 0.1 for c in closes], "lows": [c - 0.1 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    })
+    monkeypatch.setattr(_yf, "Ticker", lambda t: _FakeTk())
+    out = T.get_options_iv_read.invoke({"ticker": "SKHY"})
+    assert "put/call" in out
+    assert "call/put" in out
+    # put/call OI = 98,324/121,679 = 0.8081; reciprocal ~1.24 (the chain label).
+    assert "0.81" in out or "1.24" in out
+
+
+def test_put_call_oi_concentration_pure():
+    """Pure reciprocal of the chain convention: put/call of 98,324/121,679
+    = 0.808 (the chain's call/put = 1.24). The two tools are reciprocals."""
+    from tradingagents.strategies.options_surface import put_call_oi_concentration
+    r = put_call_oi_concentration(98_324.0, 121_679.0)
+    assert r and abs(r - 0.8081) < 1e-3
+    assert abs(1.0 / r - 1.2377) < 1e-3
+
+
 def test_option_breakeven_never_aborts():
     # Invalid floats are schema-valid but math-None -> n/a render.
     out = T.get_option_breakeven.invoke({"long_strike": -1.0, "long_premium": -1.0})

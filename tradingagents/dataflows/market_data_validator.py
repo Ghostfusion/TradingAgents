@@ -24,6 +24,23 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
     "macd", "macds", "macdh", "atr",
 )
 
+# Minimum observations every indicator needs BEFORE stockstats' rolling
+# window is a genuine statistic, not a truncated-mean fallback. On a short
+# history (e.g. SKHY ADR only 43 bars), stockstats silently returns a fallback
+# equal to the short-series mean for a 200-day SMA — a real value that must
+# never be read as a genuine 200-day average (reviewer: data-quality layer).
+# When ``len(df) < min`` the rendered value is flagged "(insufficient
+# history: N/MIN)".
+_INDICATOR_MIN_BARS: dict[str, int] = {
+    "close_10_ema": 10,
+    "close_50_sma": 50,
+    "close_200_sma": 200,
+    "rsi": 15,
+    "boll": 20, "boll_ub": 20, "boll_lb": 20,
+    "macd": 35, "macds": 35, "macdh": 35,
+    "atr": 15,
+}
+
 
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
@@ -113,11 +130,22 @@ def build_verified_market_snapshot(
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
+    n_rows = len(df)
     indicator_values: dict[str, str] = {}
     for name in selected:
         try:
             stock_df[name]  # triggers stockstats calculation
-            indicator_values[name] = _fmt(stock_df.iloc[-1][name])
+            val = _fmt(stock_df.iloc[-1][name])
+            # stockstats SILENTLY substitutes a truncated-window mean for a
+            # rolling indicator when the history is shorter than the window
+            # (SKHY ADR n=43: close_200_sma == close_50_sma == full-series
+            # mean). A 200-day SMA from 43 bars must be labeled as
+            # insufficient history, never read as a genuine 200-day average.
+            if val != "N/A":
+                min_bars = _INDICATOR_MIN_BARS.get(name)
+                if min_bars and n_rows < min_bars:
+                    val = f"{val} (insufficient history: {n_rows}/{min_bars})"
+            indicator_values[name] = val
         except Exception as exc:  # noqa: BLE001 — one bad indicator shouldn't sink the snapshot
             indicator_values[name] = f"N/A ({type(exc).__name__})"
 

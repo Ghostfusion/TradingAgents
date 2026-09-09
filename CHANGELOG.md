@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Data-quality annotations (SKHY 2026-09-09 review loop, P0)** -
+  (a) `build_verified_market_snapshot` now flags indicators whose history is
+  shorter than the methodology window: stockstats SILENTLY substituted a
+  truncated-window mean for a 200-SMA on 43 bars (identical to the 50-SMA,
+  i.e. a full-series mean) - the snapshot now renders
+  "(insufficient history: 43/200)" per indicator (10-EMA/50-SMA/200-SMA/
+  RSI/bands/MACD/ATR registry), so a fallback is never read as a genuine
+  long-window statistic; (b) options OI convention disclosure - the IV-read
+  tool (put/call) and the options-chain snapshot (call/put) now each print
+  the reciprocal + a convention note, killing the "1.24 vs 3.37" conflicting-
+  ratio class. Tests: insufficient-history annotation, IV-read convention +
+  reciprocal, pure put/call reciprocal.
 - **Fix overnight-gap mislabel (SKHY 2026-09-09 review loop)** -
   `gap_type` computed the gap as (close_t - close_t-1) - i.e. the DAY'S return
   labelled an "overnight gap" - because it proxied today's open with the

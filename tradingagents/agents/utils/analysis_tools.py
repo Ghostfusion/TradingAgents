@@ -4621,7 +4621,15 @@ def get_options_iv_read(
         lines.append(f"- ATM-IV: {atm_iv:.2%}")
         if em.get("ten_d_move_pct") is not None:
             lines.append(f"- expected move ({int(T*365)}d): 1-sigma {em['ten_d_move_pct']:.1f}%")
-        lines.append(f"- put:call OI: {poi:.2f}" if poi is not None else "- put:call OI: n/a")
+        lines.append(
+            f"- put:call OI: {poi:.2f} (put/call, ATM+OTM chain-wide; call/put "
+            f"{1.0 / poi:.2f})" if poi is not None else "- put:call OI: n/a"
+        )
+        lines.append(
+            "- OI ratio convention: THIS tool = put/call; the options-chain "
+            "snapshot tool reports call/put. The two are reciprocals of the "
+            "same OI universe - never quote one without its convention."
+        )
         lines.append(f"- put-skew (OTM P - OTM C)/ATM: {skew:+.3f}" if skew is not None else "- put-skew: n/a")
         # vrp is in PERCENTAGE POINTS (volatility_risk_premium returns
         # (iv - rv) * 100). Rendering it with "%" multiplied by 100 again

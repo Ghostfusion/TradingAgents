@@ -62,6 +62,27 @@ class TestVerifiedSnapshot:
         close_rows = [ln for ln in snap.splitlines() if ln.startswith("| 2026-")]
         assert 0 < len(close_rows) <= 30
 
+    def test_insufficient_history_indicator_annotated(self, monkeypatch):
+        """SKHY 2026-09-09 review-loop: a 43-bar history makes stockstats
+        silently return a truncated-window mean for the 200-SMA (same value
+        as the 50-SMA). The snapshot must annotate it
+        '(insufficient history: 43/200)', never present it as a genuine
+        200-day average."""
+        dates = pd.bdate_range("2026-07-01", periods=43)
+        closes = [100.0 + i for i in range(43)]
+        df = pd.DataFrame({
+            "Date": dates, "Open": closes, "High": [c + 1 for c in closes],
+            "Low": [c - 1 for c in closes], "Close": closes, "Volume": [1_000_000] * 43,
+        })
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: df)
+        snap = validator.build_verified_market_snapshot("SKHY", "2026-08-31")
+        assert "close_200_sma" in snap
+        assert "insufficient history: 43/200" in snap
+        # The 50-SMA has 43/50 bars -> also flagged; the 10-EMA (43 >= 10) is not.
+        assert "close_50_sma" in snap and "insufficient history: 43/50" in snap
+        ema_line = next(ln for ln in snap.splitlines() if "close_10_ema" in ln)
+        assert "insufficient" not in ema_line
+
     def test_atr_indicator_labeled_with_window(self, monkeypatch):
         # The snapshot's ATR comes from stockstats' default 14-period window;
         # it must be labeled atr(14) so a swing/tranche ATR(14) is not mistaken
