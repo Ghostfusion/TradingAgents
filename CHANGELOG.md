@@ -3778,3 +3778,18 @@ PRs from late 2025 also landed here.
   definition-level cross-source issues** — every figure exists in a leaf, so
   they are correctly-unflaggeable-by-value; they are now documented in the
   design doc rather than silently dropped (rule 8).
+
+### Added (composed portfolio>trade risk gate — market.md audit #2/#10)
+- **`get_composed_risk_gate(ticker, size_pct?, capital_at_risk_pct?, risk_cap_pct?,
+  liquidity_verdict?, weights=...)`**: the ONE-call risk verdict that composes
+  the portfolio gate (realized book drawdown from the weighted book, same
+  source as `get_book_tail_risk.drawdown_gate`) INTO the risk governor and
+  applies the precedence rule **portfolio gate > trade gate** — a blocked
+  portfolio drawdown REJECTs a position even when trade-level `risk_ok`
+  looks fine (the TJX 2026-09-08 conflict: drawdown_gate=True 23.21% book DD
+  vs risk_ok=True). The analyst no longer reconciles the two gates by hand.
+  Live proof on TJX: `verdict=REJECT precedence=portfolio-gate>trade-gate
+  portfolio_drawdown_block=23.21%`. Wired into the market analyst tool list +
+  prompt guidance (+ tests, incl. the disclosure path when book drawdown is
+  unavailable — never silently passes). Addresses the external review's
+  drawdown-precedence and integration-precedence points.

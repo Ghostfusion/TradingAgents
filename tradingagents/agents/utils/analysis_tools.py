@@ -4112,6 +4112,101 @@ def get_book_tail_risk(
 
 @tool
 
+def get_composed_risk_gate(
+    ticker: Annotated[str, "ticker symbol"],
+    size_pct: Annotated[
+        float | None, "proposed position size as a fraction, e.g. 0.03 (optional)"
+    ] = None,
+    capital_at_risk_pct: Annotated[
+        float | None, "worst-case capital at the hard stop under a tranche plan, as a fraction (optional)"
+    ] = None,
+    risk_cap_pct: Annotated[
+        float | None, "the capital-at-risk budget that bounds it, as a fraction (optional)"
+    ] = None,
+    liquidity_verdict: Annotated[
+        str | None, "LIQUID / CAUTION / ILLIQUID (optional; ILLIQUID REJECTs)"
+    ] = None,
+    weights: Annotated[
+        dict | None, "name -> weight map for the book (optional; defaults to the ticker alone)"
+    ] = None,
+) -> str:
+    """Composed portfolio-gate -> trade-gate risk verdict for a position.
+
+    Applies the desk preceden rule explicitly: PORTFOLIO gate (realized book
+    drawdown, halt, ILLIQUID) ALWAYS outranks the TRADE gate (size cap,
+    capital-at-risk) — a blocked portfolio gate REJECTs new risk regardless of
+    how good the individual trade looks (2.4R, tight stop, ok size all
+    irrelevant). It composes the book's realized drawdown from the weighted
+    book (the same ``drawdown_gate`` that get_book_tail_risk reports) INTO the
+    risk governor, so the analyst never has to reconcile two separate tools by
+    hand. Use before any 'risk_ok / drawdown_gate / can we open this risk'
+    claim on a proposed position.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.book_risk import (
+            drawdown_gate as _gate,
+            portfolio_drawdown as _pdd,
+        )
+        from tradingagents.strategies.risk_governor import govern
+    except Exception as exc:  # noqa: BLE001
+        return f"composed risk gate unavailable for {ticker}: {exc}"
+    try:
+        w = dict(weights or {})
+        if not w:
+            w = {ticker: 1.0}
+        returns_by_name = {}
+        for name in w:
+            closes = _ohlcv(name).get("closes") or []
+            rets = _daily_returns(closes)
+            if len(rets) >= 30:
+                returns_by_name[name] = rets
+        dd = None
+        if returns_by_name:
+            try:
+                dd = _pdd(w, returns_by_name)
+            except Exception:
+                dd = None
+        gate = _gate(dd) if dd is not None else None
+
+        verdict = govern(
+            size_pct,
+            get_config(),
+            drawdown_pct=dd,
+            capital_at_risk_pct=capital_at_risk_pct,
+            risk_cap_pct=risk_cap_pct,
+            liquidity_verdict=liquidity_verdict,
+        )
+        lines = []
+        # Precedence: portfolio drawdown gate > trade gate. If the book's
+        # realized drawdown already blocks new risk, that is final — even when
+        # govern() (trade limits) would have PASSed.
+        if gate:
+            lines.append(
+                f"composed risk gate {ticker}: verdict=REJECT "
+                f"precedence=portfolio-gate>trade-gate "
+                f"portfolio_drawdown_block={dd:.2%} "
+                f"detail=realized book drawdown exceeds the new-risk limit; "
+                f"trade-level risk (risk_ok) does not override"
+            )
+        else:
+            dd_s = f"{dd:.2%}" if dd is not None else "n/a"
+            lines.append(
+                f"composed risk gate {ticker}: verdict={verdict.get('verdict', 'PASS').upper()} "
+                f"precedence=portfolio-gate>trade-gate "
+                f"portfolio_drawdown={dd_s} gate_ok" + (f" trade_gate={verdict.get('verdict', 'PASS').upper()}" if size_pct is not None else "")
+            )
+        if verdict.get("reasons"):
+            lines.append("reasons: " + "; ".join(verdict["reasons"]))
+        if dd is None:
+            lines.append("(book drawdown unavailable — portfolio gate could not be evaluated)")
+        return chr(10).join(lines)
+    except Exception as exc:  # noqa: BLE001
+        return f"composed risk gate unavailable for {ticker}: {exc}"
+
+
+@tool
+
 def get_covariance_read(
     tickers: Annotated[str, "Comma-separated ticker list for the covariance matrix"],
 ) -> str:

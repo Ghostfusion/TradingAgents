@@ -128,6 +128,27 @@ def test_risk_gate_cvar_budget():
     assert "REJECT" in out or "cvar" in out.lower()
 
 
+def test_composed_risk_gate_portfolio_drawdown_overrides_trade(monkeypatch):
+    """The composed gate enforces PORTFOLIO gate > TRADE gate: a sustained
+    dip (large realized book drawdown) must REJECT even a small, otherwise-
+    fine trade size — the portfolio drawdown block outranks trade-level risk."""
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = T.get_composed_risk_gate.invoke({"ticker": "AAPL", "size_pct": 0.02})
+    assert "verdict=REJECT" in out
+    assert "portfolio-gate>trade-gate" in out
+    assert "portfolio_drawdown_block" in out
+
+
+def test_composed_risk_gate_discloses_lack_of_drawdown_data(monkeypatch):
+    """When the book drawdown can't be evaluated the tool says so (never
+    silently pretends the portfolio gate passed)."""
+    monkeypatch.setattr(
+        T, "_ohlcv", lambda ticker: {"closes": [100.0] * 5, "highs": [100.0] * 5, "lows": [100.0] * 5}
+    )
+    out = T.get_composed_risk_gate.invoke({"ticker": "AAPL"})
+    assert "drawdown unavailable" in out or "could not be evaluated" in out
+
+
 # ---------------------------------------------------------------------------
 # get_swing_set (needs the vendor chain)
 # ---------------------------------------------------------------------------

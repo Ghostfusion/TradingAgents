@@ -10,6 +10,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_capital_flow,
     get_capm_risk,
     get_clenow_momentum,
+    get_composed_risk_gate,
     get_cost_models,
     get_credit_spread_read,
     get_crypto_prices,
@@ -198,6 +199,7 @@ def create_market_analyst(llm, backup_llm=None, config=None):
             get_tail_decomposition,
             get_mean_reversion_quality,
             get_book_tail_risk,
+            get_composed_risk_gate,
             get_liquidation_days,
             get_premarket_review,
             get_expected_move,
@@ -339,6 +341,7 @@ You also have decision-grounding tools:
 - get_extended_indicators(ticker) - the extended trend/momentum/volume group: Ichimoku cloud (trend + support/resistance), CCI (overbought/oversold), ROC, momentum oscillator, TRIX, Force Index, accumulation/distribution (A-D), VPT (volume price trend), Chaikin Money Flow (buying/selling pressure) and anchored VWAP (cost basis). Use it before any 'Ichimoku cloud / CCI / ROC / TRIX / A-D / VPT / CMF / VWAP cost-basis' claim.
 - get_candlestick_patterns(ticker) - a scan of the most recent candles for common patterns: doji (indecision), hammer / shooting star (reversal), bullish/bearish engulfing and morning/evening star. Use it before any 'doji / hammer / engulfing / morning star / shooting star' price-structure claim.
 - get_book_tail_risk(ticker, weights=...) - the book-level tail: portfolio CVaR from a weighted return mix, the correlated -10% stress loss (a macro event moves every position at once), and the drawdown gate (True = new risk blocked). Use it before any 'book tail / correlated stress / drawdown gate' claim; complements get_tail_risk (single-name).
+- get_composed_risk_gate(ticker, size_pct?, capital_at_risk_pct?, risk_cap_pct?, liquidity_verdict?, weights=...) - the ONE-call composed risk verdict that applies the precedence rule PORTFOLIO gate > TRADE gate: it feeds the book's realized drawdown into the risk governor automatically, so a blocked portfolio drawdown gate REJECTs the position even when trade-level risk_ok looks fine. Use it before ANY 'can we open this risk / risk_ok / drawdown_gate vs size' claim - never reconcile drawdown_gate and risk_ok by hand.
 - get_liquidation_days(ticker, shares_to_liquidate=...) - days for the market to absorb a block at a 15% participation cap. Use it before any 'can the market absorb this block / unwind risk / days to liquidate' claim.
 |- get_premarket_review(ticker, prior_close=..., open_price=..., prior_stop=..., entry_price=...) - the deterministic pre-market CONFIRM / REVISE / REJECT arbiter from measured deltas (gap vs ATR, catalyst window, re-anchored tranche caps). Use it before any 'gap risk / re-anchor / pre-market review' claim on a held plan.
 |
