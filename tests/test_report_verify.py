@@ -304,9 +304,11 @@ def test_internal_conflict_atr_two_windows():
 
 def test_internal_conflict_peg_and_ttm_pe():
     """SKHY 2026-09-09 table-vs-body: 'fwd PEG 0.08' body 'PEG 2.08285' and
-    'TTM P/E 1.91' vs 'P/E 2.1822' must flag as THE-SAME-METRIC conflicts."""
-    t = "Valuation screens: P/E 27.10; TTM P/E 1.91; fwd PEG 0.08 ... "
-    t += "Finnhub TTM: P/E 2.1822, forward PEG 2.08285"
+    two TTM P/E figures must flag as THE-SAME-METRIC conflicts. (Bare 'P/E'
+    without a TTM qualifier is intentionally NOT merged - forward-vs-TTM P/E
+    in one report is normal, not a defect.)"""
+    t = "Valuation screens: TTM P/E 1.91; fwd PEG 0.08 ... "
+    t += "Finnhub: TTM P/E 2.1822, forward PEG 2.08285"
     out = rv._internal_conflicts(t)
     labels = {c.claim.split("'")[1] for c in out if c.status == "INTERNAL_CONFLICT"}
     assert "ttm p/e" in labels
