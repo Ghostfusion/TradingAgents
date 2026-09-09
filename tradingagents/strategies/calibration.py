@@ -87,6 +87,87 @@ def fit_buckets(entries: list[dict]) -> dict:
     return out
 
 
+def fit_buckets_by_regime(entries: list[dict]) -> dict:
+    """Partition calibration rows by ``regime`` (str) into per-regime buckets.
+
+    Returns ``{regime: fit_buckets(that regime's rows)}``. Rows without a
+    regime key go into ``"_all"`` (so a regime-less history still calibrates
+    the single-table path). Empty entries -> ``{}``.
+    """
+    out: dict = {}
+    by_regime: dict[str, list] = {}
+    for r in entries or []:
+        rg = str(r.get("regime") or "_all")
+        by_regime.setdefault(rg, []).append(r)
+    for rg, rows in by_regime.items():
+        out[rg] = fit_buckets(rows)
+    return out
+
+
+def calibrated_confidence_by_regime(
+    declared: float | None,
+    tables_by_regime: dict,
+    regime: str | None = None,
+    min_n: int = 5,
+    fallback_to_all: bool = True,
+) -> float | None:
+    """Map a declared confidence onto its regime's bucket win rate.
+
+    Prefers the regime-specific table; when the regime has no rows / not
+    enough stamps, falls back to ``"_all"`` (then identity). This is how the
+    field's "calibration differs by market regime" guidance is applied while
+    keeping a thin regime from being silently unconvered.
+    """
+    if declared is None:
+        return None
+    tables = tables_by_regime or {}
+    if regime is not None:
+        t = tables.get(str(regime))
+        mapped = calibrated_confidence(declared, t, min_n=min_n)
+        # Only use the regime result when it actually re-calibrated (i.e. the
+        # bucket had >= min_n stamps); else fall through to the global.
+        r_win = None
+        if t:
+            for (lo, hi), b in t.items():
+                if lo <= float(declared) < hi:
+                    r_win = b if b.get("n", 0) >= int(min_n) else None
+                    break
+        if r_win is not None and mapped is not None and mapped != float(declared):
+            return mapped
+    if fallback_to_all:
+        t_all = tables.get("_all") or {}
+        return calibrated_confidence(declared, t_all, min_n=min_n)
+    return calibrated_confidence(declared, tables.get("_all") or {}, min_n=min_n)
+
+
+def isotonic_calibrate(entries: list[dict]) -> object | None:
+    """Fit an isotonic-regression calibrator over ``{confidence, won}``.
+
+    Returns a scikit-learn ``IsotonicRegression`` object when scikit-learn is
+    importable and there are >= 2 rows; else None (callers degrade to the
+    bucket path). Lazy import keeps the plain-bucket pipeline hermetic.
+    """
+    try:
+        from sklearn.isotonic import IsotonicRegression
+    except Exception:  # noqa: BLE001 - sklearn optional
+        return None
+    rows = [
+        (float(r["confidence"]), float(bool(r["won"])))
+        for r in (entries or [])
+        if r.get("confidence") is not None and r.get("won") is not None
+    ]
+    if len(rows) < 2:
+        return None
+    xs = [r[0] for r in rows]
+    ys = [r[1] for r in rows]
+    try:
+        iso = IsotonicRegression(out_of_bounds="clip")
+        iso.fit(xs, ys)
+        return iso
+    except Exception:  # noqa: BLE001 - fit can fail for malformed data
+        return None
+
+
 def calibrated_confidence(declared: float | None, table: dict,
                           min_n: int = 5) -> float | None:
     """Map a declared confidence onto its bucket's realized win rate.
@@ -186,5 +267,6 @@ def scorecard(scored_rows: list[dict], agent_field: str = "agent") -> list[dict]
 
 
 __all__ = ["calibration_table", "scorecard", "_BINS", "fit_buckets",
-           "calibrated_confidence", "calibration_table_text",
-           "record_calibration_entry"]
+           "fit_buckets_by_regime", "calibrated_confidence",
+           "calibrated_confidence_by_regime", "isotonic_calibrate",
+           "calibration_table_text", "record_calibration_entry"]

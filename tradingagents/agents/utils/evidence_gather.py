@@ -647,4 +647,22 @@ def format_evidence_block(leaves) -> str:
             lines.append(f"unavailable: {content}")
         else:
             lines.append(content)
+    # Gather-time metric reconciliation (strategies/metric_reconcile.py): if
+    # the same metric appears in leaves from different tools/vendors at
+    # conflicting values, surface it HERE so the analyst sees the conflict
+    # before reducing (the TJX 2026-09-08 DCF-80.76-vs-80.60 class used to be
+    # caught only post-hoc by the verifier). Renders ONLY conflicted metrics;
+    # a consistent/vendor-single metric is silent.
+    try:
+        from tradingagents.strategies.metric_reconcile import reconcile_metrics, render_reconcile
+
+        leaf_dicts = [_leaf_as_dict(leaf) for leaf in leaves]
+        reconciled = reconcile_metrics(leaf_dicts)
+        reconcile_text = render_reconcile(reconciled)
+        if reconcile_text:
+            lines.append(
+                "\n### Metric reconciliation (deterministic - gather-time)\n" + reconcile_text
+            )
+    except Exception:  # noqa: BLE001 - advisory; never break the evidence block
+        pass
     return "\n".join(lines)

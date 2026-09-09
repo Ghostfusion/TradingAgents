@@ -3793,3 +3793,29 @@ PRs from late 2025 also landed here.
   prompt guidance (+ tests, incl. the disclosure path when book drawdown is
   unavailable — never silently passes). Addresses the external review's
   drawdown-precedence and integration-precedence points.
+
+### Added (quant decision-arbitration — 4 researched phases, all default-off/advisory)
+- **P1 Gather-time metric reconciliation** — `strategies/metric_reconcile.py`
+  (pure) groups the same metric from multiple tools into ONE canonical bucket
+  (e.g. get_fundamentals/get_ratios/get_basic_financials -> market_cap) and
+  tags conflicting values at INGEST; `format_evidence_block` appends a
+  "VALUES CONFLICT range=... vendors=[...]" line so the analyst sees the
+  conflict BEFORE reducing (moves the TJX DCF-80.76-vs-80.60 class from
+  post-hoc verifier detection to gather-time prevention). 8 tests.
+- **P2 Per-regime calibrated confidence** — `calibration.fit_buckets_by_regime`
+  + `calibrated_confidence_by_regime` (per-regime buckets, `_all` fallback) +
+  lazy `isotonic_calibrate`; PM `_calibrated_p` now takes the overlay's regime
+  label. 6 tests.
+- **P3 Weighted + thresholded consensus** — `consensus.weighted_consensus`
+  (per-analyst weights, equal=mean) + `should_hold(score, threshold)`; the PM
+  consensus line now reports weighted_stance + a HOLD note when below the
+  threshold. 7 tests.
+- **P4 Hard-gate precedence resolver** — `strategies/risk_hierarchy.py`
+  (kill > portfolio > trade > liquidity > regime > data, earliest REJECT
+  wins) + `kill_switch_state` emergency tier; `get_composed_risk_gate` now
+  resolves the FULL hierarchy (added halt/regime_veto params) and reports
+  `blocker=` + the precedence chain. 9 tests.
+- **Walk-forward calibration audit** — `scripts/calibration_walkforward.py`
+  (pure/offline): fits per-regime buckets IS, evaluates OOS reliability + ECE,
+  and shows the calibrated re-map; exit 0/1 by a 0.10 ECE bar. Hermetically
+  verified on a synthetic ledger.b

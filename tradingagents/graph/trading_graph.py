@@ -1286,8 +1286,12 @@ class TradingAgentsGraph:
                     if flow is not None:
                         flow_use = {"distribution_score": flow.get("distribution_score")}
                     agreement = self._agreement_from_state(final_state)
+                    regime_label = None
+                    if isinstance(overlay, dict) and overlay.get("regime"):
+                        regime_label = str(overlay.get("regime"))
                     calibrated_p = self._calibrated_p(
-                        str(final_state.get("final_trade_decision") or "")
+                        str(final_state.get("final_trade_decision") or ""),
+                        regime=regime_label,
                     )
                     tranche_read = self._tranche_risk_read(closes)
                     entry_price = None
@@ -2205,12 +2209,15 @@ class TradingAgentsGraph:
         except Exception:
             return None
 
-    def _calibrated_p(self, decision_text: str = "") -> "float | None":
+    def _calibrated_p(self, decision_text: str = "", regime: str | None = None) -> "float | None":
         """G2: return the calibrated win-probability for the decision's declared
         confidence. Reads calibration_ledger.jsonl (written at resolve time),
         buckets the historical confidence->win-rate, and returns
         ``calibrated_confidence`` (identity when the bucket has < min_n samples
-        or the ledger is empty). None when calibration is disabled.
+        or the ledger is empty). When ``regime`` is given, uses the regime-aware
+        calibration (``fit_buckets_by_regime`` / ``calibrated_confidence_by_regime``,
+        falling back to the ``_all`` table) so confidence is mapped per market
+        regime instead of globally. None when calibration is disabled.
         """
         if not self.config.get("enable_calibration"):
             return None
@@ -2229,7 +2236,9 @@ class TradingAgentsGraph:
                 return None
             from tradingagents.strategies.calibration import (
                 calibrated_confidence,
+                calibrated_confidence_by_regime,
                 fit_buckets,
+                fit_buckets_by_regime,
             )
 
             rows = []
@@ -2238,8 +2247,13 @@ class TradingAgentsGraph:
             for ln in cal_file.read_text(encoding="utf-8").splitlines():
                 if ln.strip():
                     rows.append(_json.loads(ln))
-            table = fit_buckets(rows)
             min_n = int(self.config.get("calibration_min_n", 5))
+            if regime:
+                tables = fit_buckets_by_regime(rows)
+                return calibrated_confidence_by_regime(
+                    declared, tables, regime=regime, min_n=min_n
+                )
+            table = fit_buckets(rows)
             return calibrated_confidence(declared, table, min_n=min_n)
         except Exception:
             return None

@@ -47,6 +47,8 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
                 from tradingagents.strategies.consensus import (
                     agreement_score,
                     consensus_from_score,
+                    should_hold,
+                    weighted_consensus,
                 )
                 stances = []
                 for key in ("aggressive_history", "conservative_history", "neutral_history"):
@@ -54,10 +56,25 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
                         if isinstance(chunk, str):
                             stances.append(parse_rating(chunk))
                 score = agreement_score(stances)
+                # Weighted stance + threshold-HOLD (advisory, deterministic):
+                # weight each risk-role stance equally by default (equal-weight
+                # consensus == agreement_score); when enable_calibration is on
+                # the caller can pass per-role calibration weights. Below the
+                # threshold a divided/weak book is HOLD, not a forced call.
+                stance, _ = weighted_consensus([(r, 1.0) for r in stances])
+                hold_note = (
+                    " Each of them is a STANCE that moves toward HOLD when the "
+                    "weighted stance is below threshold (a divided book is not a "
+                    "directional call)."
+                    if stance is not None and should_hold(stance)
+                    else ""
+                )
+                stance_s = f"{stance:.2f}" if stance is not None else "n/a"
                 consensus_line = (
                     f"**Computed risk-consensus** (deterministic): agreement={score:.2f} "
-                    f"label={consensus_from_score(score)} (n={len(stances)}) - set your "
-                    f"PortfolioDecision.consensus to this level, not a guess.\n\n"
+                    f"label={consensus_from_score(score)} weighted_stance={stance_s} "
+                    f"(n={len(stances)}) - set your PortfolioDecision.consensus to this "
+                    f"level, not a guess.{hold_note}\n\n"
                     if score is not None
                     else "\n"
                 )

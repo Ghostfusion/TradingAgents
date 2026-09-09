@@ -29,8 +29,46 @@ def consensus_from_score(score: float | None, high_at: float = 0.7) -> str:
     return "high" if score >= high_at else "low"
 
 
+def weighted_consensus(
+    rated_weights: list[tuple[str, float]],
+) -> tuple[float | None, float | None]:
+    """Weighted consensus stance: mean of (rating, weight) pairs.
+
+    ``rated_weights``: list of ``(rating, weight)`` — each analyst's 5-tier
+    rating and its arbitration weight (calibration-derived when calibration is
+    on, else 1.0 = equal-weight). Returns ``(weighted_stance, total_weight)``
+    where ``weighted_stance`` is in ``[-1, 1]`` (None when no valid rating).
+    Negative weights are clamped to 0 (a negative weight would invert a vote).
+    """
+    num = 0.0
+    den = 0.0
+    for rating, weight in rated_weights or []:
+        num_v = rating_to_number(rating)
+        if num_v is None:
+            continue
+        w = max(0.0, float(weight or 0.0))
+        num += num_v * w
+        den += w
+    if den <= 0:
+        return None, None
+    return num / den, den
+
+
+def should_hold(score: float | None, threshold: float = 0.25) -> bool:
+    """True when the (weighted) consensus magnitude is below threshold.
+
+    The field's "thresholded consensus": a weak/straddling signal is HOLD,
+    not a forced directional call. None (no consensus at all) -> hold.
+    """
+    if score is None:
+        return True
+    return abs(score) < threshold
+
+
 __all__ = [
     "rating_to_number",
     "agreement_score",
     "consensus_from_score",
+    "weighted_consensus",
+    "should_hold",
 ]

@@ -4115,7 +4115,7 @@ def get_book_tail_risk(
 def get_composed_risk_gate(
     ticker: Annotated[str, "ticker symbol"],
     size_pct: Annotated[
-        float | None, "proposed position size as a fraction, e.g. 0.03 (optional)"
+        float | None, "proposed position in a fraction, e.g. 0.03 (optional)"
     ] = None,
     capital_at_risk_pct: Annotated[
         float | None, "worst-case capital at the hard stop under a tranche plan, as a fraction (optional)"
@@ -4125,6 +4125,12 @@ def get_composed_risk_gate(
     ] = None,
     liquidity_verdict: Annotated[
         str | None, "LIQUID / CAUTION / ILLIQUID (optional; ILLIQUID REJECTs)"
+    ] = None,
+    halt: Annotated[
+        bool, "True when a risk halt / kill switch is active (highest-precedence REJECT)"
+    ] = False,
+    regime_veto: Annotated[
+        bool | None, "True when the regime forbids opening new risk (optional)"
     ] = None,
     weights: Annotated[
         dict | None, "name -> weight map for the book (optional; defaults to the ticker alone)"
@@ -4177,24 +4183,34 @@ def get_composed_risk_gate(
             risk_cap_pct=risk_cap_pct,
             liquidity_verdict=liquidity_verdict,
         )
-        lines = []
-        # Precedence: portfolio drawdown gate > trade gate. If the book's
-        # realized drawdown already blocks new risk, that is final — even when
-        # govern() (trade limits) would have PASSed.
-        if gate:
+        # Full desk hierarchy (strategies/risk_hierarchy.py): the composed tool
+        # resolves KILL > PORTFOLIO > TRADE > LIQUIDITY > REGIME in one call,
+        # earliest REJECT wins — so a report can never again present
+        # drawdown_gate=True next to risk_ok=True without an arbiter.
+        from tradingagents.strategies.risk_hierarchy import evaluate_hierarchy, render_hierarchy
+
+        trade_reject = verdict.get("verdict") == "REJECT"
+        illiquid = (liquidity_verdict or "").upper() == "ILLIQUID"
+        resolved = evaluate_hierarchy(
+            halt=halt,
+            drawdown_over=bool(gate),
+            trade_reject=trade_reject,
+            illiquid=illiquid,
+            regime_veto=regime_veto,
+        )
+        lines = [f"composed risk gate {ticker}: {render_hierarchy(resolved)}"]
+        dd_s = f"{dd:.2%}" if dd is not None else "n/a"
+        if resolved.get("blocker"):
             lines.append(
-                f"composed risk gate {ticker}: verdict=REJECT "
-                f"precedence=portfolio-gate>trade-gate "
-                f"portfolio_drawdown_block={dd:.2%} "
-                f"detail=realized book drawdown exceeds the new-risk limit; "
-                f"trade-level risk (risk_ok) does not override"
+                f"detail=realized book drawdown={dd_s} "
+                f"precedence=kill>portfolio>trade>liquidity>regime; "
+                f"blocked by {resolved['blocker']}; trade-level risk (risk_ok) "
+                f"does not override a higher gate"
             )
         else:
-            dd_s = f"{dd:.2%}" if dd is not None else "n/a"
             lines.append(
-                f"composed risk gate {ticker}: verdict={verdict.get('verdict', 'PASS').upper()} "
-                f"precedence=portfolio-gate>trade-gate "
-                f"portfolio_drawdown={dd_s} gate_ok" + (f" trade_gate={verdict.get('verdict', 'PASS').upper()}" if size_pct is not None else "")
+                f"detail=portfolio_drawdown={dd_s} gate_ok"
+                + (f" trade_gate={verdict.get('verdict', 'PASS').upper()}" if size_pct is not None else "")
             )
         if verdict.get("reasons"):
             lines.append("reasons: " + "; ".join(verdict["reasons"]))
