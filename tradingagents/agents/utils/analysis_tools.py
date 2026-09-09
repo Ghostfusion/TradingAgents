@@ -1794,6 +1794,8 @@ def get_dcf_valuation(
         f"ev={res['ev']:.2f} pv_explicit={res['pv_explicit']:.2f} "
         f"pv_terminal={res['pv_tv']:.2f} terminal_share={res['terminal_share']:.0%} "
         f"wacc={res['wacc']:.2%} g={res['growth']:.2%} "
+        f"rf={rf:.2%} beta={beta if beta is not None else 'n/a'} "
+        f"erp={erp:.2%} (wacc = CAPM rf + beta*erp) "
         f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
         f"share_basis={shares_basis or 'n/a'} "
         f"(provider-derived; growth/ERP are analyst overrides)"

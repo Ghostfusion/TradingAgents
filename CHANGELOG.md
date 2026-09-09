@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **DCF WACC decomposition + gather-time D/E reconcile (ARM 2026-09-09 loop)** -
+  (a) `get_dcf_valuation` now exposes `rf=` / `beta=` / `erp=` with
+  "wacc = CAPM rf + beta*erp" so an extreme WACC (ARM 24.23% on beta 3.89) is
+  auditable instead of a black-box output; (b) `metric_reconcile` gained a
+  debt/equity lane: get_fundamentals raw "Debt to Equity 5.62" vs get_ratios
+  computed 0.06 vs get_balance_sheet_health d_e=0.0552 now surfaces as a
+  gather-time VALUES CONFLICT (the ARM loop flagged the 5.62 as a likely bad
+  vendor field - debt 464M / equity 8.63B = 0.054). Tests:
+  `test_metric_reconcile` (extract_de_value shapes + reconcile flag).
 - **Verifier MISQUOTED status + adjudication sweep (AMZN 2026-09-09 loop items
   1+3)** - (1) the deterministic anchor now surfaces MISQUOTED when a claim's
   figures ARE in tool evidence but attached to the wrong label/context (LLM

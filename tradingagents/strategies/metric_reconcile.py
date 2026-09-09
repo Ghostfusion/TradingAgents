@@ -53,6 +53,33 @@ TOOL_METRIC_MAP: dict[str, str] = {
 # "120.33", "1,234.5", "12.3%", "$80.60").
 _NUM_RE = re.compile(r"-?\$?\s*([\d,]+(?:\.\d+)?)\s*(?:[%MBK])?", re.IGNORECASE)
 
+# Debt/equity extraction: D/E appears in different shapes across tools -
+# get_fundamentals "Debt to Equity: 5.62" (raw vendor), get_ratios "D/E: 0.06"
+# (computed), get_balance_sheet_health "d_e=0.0552". The ARM 2026-09-09 loop
+# flagged 5.62 vs 0.055 as a real conflict the one-value-per-tool extractor
+# cannot see (it grabs the FIRST number in the whole leaf, e.g. market cap).
+_DE_RE = re.compile(
+    r"(?:debt\s*to\s*equity|d\s*/\s*e|\bd_e\b|debt[-\s/]equity)"
+    r"[^\d-]{0,8}(-?[\d.,]+)",
+    re.IGNORECASE,
+)
+
+# Tools whose leaves carry a D/E figure (raw vendor / computed / health row).
+_DE_TOOLS = {"get_fundamentals", "get_ratios", "get_balance_sheet_health"}
+
+
+def extract_de_value(content: str) -> float | None:
+    """The D/E value in a leaf (None when absent / unparseable)."""
+    if not content:
+        return None
+    m = _DE_RE.search(content)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
 
 def extract_value(content: str) -> float | None:
     """First numeric-looking value in a leaf (None if none present)."""
@@ -90,12 +117,26 @@ def reconcile_metrics(
         if not isinstance(leaf, dict):
             continue
         tool = str(leaf.get("tool") or "")
+        content = str(leaf.get("content") or "")
+        # debt/equity: a leaf may carry BOTH the tool's primary metric and a
+        # D/E figure (get_fundamentals / get_ratios) - bucket the D/E value
+        # under its own metric so a raw-vs-computed conflict (ARM 5.62 vs
+        # 0.055) is surfaced, not hidden by the first-number extractor.
+        if tool in _DE_TOOLS:
+            de_v = extract_de_value(content)
+            if de_v is not None:
+                de_bucket = buckets.setdefault(
+                    "debt_to_equity",
+                    {"values": [], "span": None, "conflict": False, "vendors": []},
+                )
+                de_bucket["vendors"].append(tool)
+                de_bucket["values"].append(de_v)
         metric = metric_for_tool(tool)
         if not metric:
             continue
         bucket = buckets.setdefault(metric, {"values": [], "span": None, "conflict": False, "vendors": []})
         bucket["vendors"].append(tool)
-        v = extract_value(str(leaf.get("content") or ""))
+        v = extract_value(content)
         if v is not None:
             bucket["values"].append(v)
 
@@ -153,6 +194,7 @@ __all__ = [
     "TOOL_METRIC_MAP",
     "metric_for_tool",
     "extract_value",
+    "extract_de_value",
     "reconcile_metrics",
     "render_reconcile",
 ]
