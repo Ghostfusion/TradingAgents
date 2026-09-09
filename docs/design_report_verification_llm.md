@@ -115,3 +115,14 @@ host-executed server-side tools** exist and remove the blocker:
       closed the unit-scale false-flag class: `_matches` is now magnitude-aware
       (report 122.4M vs leaf 122368000.0 match; canonical impl shared by
       repro_check). Deterministic suspects on the MSTR tree: 20 -> 0.
+## Batch findings (2026-09-08 retail: WMT/COST/TJX/ROST — 16 stems, post-39d00ba)
+
+Adjudicated per working-agreement rule 8: 140 flags =
+26 CONTRADICTED (real report-side citation errors, leaves confirm; ROST mcap/
+EV/debt/QoQ, TJX BlackRock-date/insider/DCF/EPV, COST insider/implied-move,
+WMT consolidation-high/gates, LJX put-strike) + 62 no-leaf (scenario-DCF
+invoked-but-unjournaled = manufactured, and macro/prediction leaves absent
+because the news LLM did not call those model-pool tools) + 37 anchored-small
+(<=0.5% figure noise) + 15 other-derived. NO open code defect: journaling
+mechanics proven hermetic (short-circuit wraps every analyst node); the
+missing scenario-DCF leaf on ROST is a fabricated call, correctly flagged.
