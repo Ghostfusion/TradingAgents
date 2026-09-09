@@ -70,8 +70,21 @@ a fresh agent must follow them without being reminded:
    deciding and cite what it found. Decisions must be evidence-first, not
    remembered-from-training; if the search contradicts or doesn't cover the
    assumption, say so explicitly. (Applied this repo-wide: model choice for
-   the debate roles, JSON-mode enforcement, key-normalization strategy, etc.
+   the debate roles, provider selection enforcement, key-normalization strategy, etc.
    were all verified against current web guidance before landing.)
+8. **Report verifier → verify → fix the defects (permanent loop)** - after a
+   report-verifier run finishes (batch `--verify`, `scripts/report_verify.py`,
+   or the web Verify checkbox), the assistant MUST follow up on the flagged
+   results before moving on: (a) inspect each `verify_flags.json` /
+   per-stem flags, (b) adjudicate every UNSUPPORTED / CONTRADICTED claim
+   against the actual `tool_evidence.json` leaves — separating real defects
+   (analyst-side citation errors, tool-side bugs, evidence-coverage gaps) from
+   verifier noise — and (c) FIX every confirmed defect (code, prompt, evidence
+   persistence) with a regression test, then commit + push. The verifier is a
+   differentiator-detector, not a gate; its output is only useful when acted
+   on. Document confirmed-but-unfixed defects in the design doc's reopen
+   checklist (docs/design_report_verification_llm.md) rather than silently
+   dropping them.
 
 ---
 
