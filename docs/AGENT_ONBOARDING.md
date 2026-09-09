@@ -404,6 +404,13 @@ has changed before); never assume an endpoint works — the SDK's
 - 2026-09-02 `(working tree)` - remediation W1-5/W3-5/6/8 + W4-5/7/8: quant baseline, options depth, thesis matrix, injection detect, hybrid tier, notifier.
 - 2026-09-02 `(working tree)` - remediation W2-6..10: impact/turnover/capacity/borrow/corporate-action models + survivorship guard.
 - 2026-09-02 `(working tree)` - remediation W1-10/W2-11/W4-6/W1-11: regime-conditioned performance, stress grid, macro regime, ablation script.
+- 2026-09-08 `(working tree)` - IT subsector ETF universe + dual-benchmark RS:
+  `sector_rank.INDUSTRY_ETFS` extended with the IT subsector set (SOXX/IGV/
+  CIBR/SKYY/AIQ/BOTZ/DTCR/NXTG/IYW/FINX/XSD, parent XLK; VGT = benchmark,
+  excluded from the pool) so subsectors rank within IT; `get_sector_rank`
+  industry layer emits `rs2` (percentile vs VGT) alongside the SPY-relative
+  rank on the XLK pool ("strongest IT subsector" vs "beats the market", one
+  pass).
 - 2026-09-02 `(working tree)` - remediation W4 architecture: composite domain bundles, typed graph state, judge falsification grounding.
 - 2026-09-02 `(working tree)` - remediation W1-2/4/6/7: calibration, scorecard, benchmark hierarchy, stop-outcome feedback.
 - 2026-09-02 `(working tree)` - remediation W3 data integrity: quality score, disagreement flag, fundamentals-PIT invariant, falsification monitor.

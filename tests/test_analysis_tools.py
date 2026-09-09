@@ -131,12 +131,23 @@ def test_risk_gate_cvar_budget():
 def test_composed_risk_gate_portfolio_drawdown_overrides_trade(monkeypatch):
     """The composed gate enforces PORTFOLIO gate > TRADE gate: a sustained
     dip (large realized book drawdown) must REJECT even a small, otherwise-
-    fine trade size — the portfolio drawdown block outranks trade-level risk."""
+    fine trade size — the portfolio gate block outranks trade-level risk."""
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: _vdip_ohlcv())
     out = T.get_composed_risk_gate.invoke({"ticker": "AAPL", "size_pct": 0.02})
-    assert "verdict=REJECT" in out
-    assert "portfolio-gate>trade-gate" in out
-    assert "portfolio_drawdown_block" in out
+    assert "REJECT" in out
+    assert "blocked by portfolio" in out
+    assert "precedence=kill>portfolio>trade>liquidity>regime" in out
+
+
+def test_composed_risk_gate_kill_switch_highest(monkeypatch):
+    """A kill/halt input is the highest-precedence REJECT even when the book
+    drawdown would also reject — the hierarchy reports the kill blocker."""
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = T.get_composed_risk_gate.invoke(
+        {"ticker": "AAPL", "size_pct": 0.02, "halt": True}
+    )
+    assert "REJECT" in out
+    assert "blocked by kill_switch" in out
 
 
 def test_composed_risk_gate_discloses_lack_of_drawdown_data(monkeypatch):

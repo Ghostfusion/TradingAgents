@@ -148,7 +148,7 @@ but not exposed to the analysts. Each is a `@tool` wrapping an existing
 
 | Tool | Wraps | Bound to | Why it improves the decision |
 | --- | --- | --- | --- |
-| `get_sector_rank(ticker)` | `sector_rank.rank_sectors` + `sector_standing` | market | grounds any sector-rotation / sector-leadership claim in the 11-SPDR 1m/3m momentum ranking + the ticker's standing |
+| `get_sector_rank(ticker)` | `sector_rank.rank_sectors` + `sector_standing` | market | grounds any sector-rotation / sector-leadership claim in the 11-SPDR 1m/3m momentum ranking + the ticker's standing; P2 industry layer ranks the `INDUSTRY_ETFS` universe (incl. the IT subsector set: SOXX/IGV/CIBR/SKYY/AIQ/BOTZ/DTCR/NXTG/IYW/FINX/XSD, parent XLK; VGT benchmark excluded from the pool) and, on the XLK pool, emits dual-benchmark `rs2` (percentile vs VGT) alongside the SPY-relative rank |
 | `get_strategy_quality(ticker, returns?)` | `evaluate` (cagr/sharp/vol/max_dd) | market | a deterministic risk-adjusted quality read (net CAGR, Sharpe, max drawdown) instead of a guessed quality narrative |
 | `get_margin_of_safety(ticker, intrinsic)` | `normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic band cited before any undervaluation claim |
 | `get_composite_rank(ticker, factors?)` | `factors.composite_score` | fundamentals | cross-sectional value+momentum percentile vs industry peers (leader/laggard in the group) |
