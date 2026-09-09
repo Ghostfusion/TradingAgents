@@ -509,8 +509,11 @@ def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
         )
 
     if not outputs:
-        # nothing gathered on this turn - plain passthrough.
-        return tool_node(state)
+        # nothing gathered on this turn - plain passthrough. Still journal the
+        # executed model-pool results below so later verification can see them.
+        result = tool_node(state)
+        real_msgs = list((result or {}).get("messages", []))
+        return _journal_executed(state, analyst_key, remaining, real_msgs)
 
     # Mixed: short the gathered ones, delegate the rest in one underlying call.
     filtered_last = AIMessage(
@@ -521,7 +524,52 @@ def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
     sub_state = {**state, "messages": [*messages[:-1], filtered_last]}
     result = tool_node(sub_state)
     real_msgs = list((result or {}).get("messages", []))
-    return {"messages": [*outputs, *real_msgs]}
+    return _journal_executed(state, analyst_key, remaining, real_msgs, outputs=outputs)
+
+
+def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs: list, outputs: list | None = None) -> dict:
+    """Append LLM-executed (model-pool / gap-fill) tool results as evidence leaves.
+
+    The deterministic gatherer records the forced set into tool_evidence, but
+    tools the LLM calls itself (the model-pool ~40, e.g. get_macro_indicators,
+    get_prediction_markets) execute against the vendor and their results live
+    ONLY in the chat transcript — so the report verifier and repro_check see
+    "no leaf evidence" for anything those tools returned (the JPM/GS 2026-09-08
+    macro block was falsely flagged as unsupported). This appends a leaf per
+    executed tool, from the returned ToolMessage content, so the evidence block
+    covers EVERYTHING the analyst actually received. Advisory: never raises.
+    """
+    try:
+        # The final message list is the short-circuit replies + the results of
+        # the tools that actually executed (both are consumed by the graph).
+        out_msgs = list(outputs or []) + list(real_msgs)
+        if not real_msgs:
+            # Nothing executed; pass through exactly what the caller expects
+            # (the pure-short-circuit path returns only shorted ToolMessages).
+            return {"messages": out_msgs}
+        from langchain_core.messages import ToolMessage
+
+        new_leaves: list[dict] = []
+        for msg in real_msgs:
+            if not isinstance(msg, ToolMessage):
+                continue
+            name = str(getattr(msg, "name", "") or "")
+            content = str(getattr(msg, "content", "") or "")
+            if not name or not content.strip():
+                continue
+            if any(
+                str((c or {}).get("name") or "") == name for c in remaining
+            ):
+                new_leaves.append(make_evidence_leaf(name, content, status="ok"))
+        if not new_leaves:
+            return {"messages": out_msgs}
+        evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})
+        existing = list(evidence.get(analyst_key) or [])
+        existing.extend(new_leaves)
+        evidence[analyst_key] = existing
+        return {"messages": out_msgs, "tool_evidence": evidence}
+    except Exception:  # noqa: BLE001 - advisory, never break the tool loop
+        return {"messages": out_msgs}
 
 
 def _evidence_context(state: dict) -> dict:

@@ -429,6 +429,11 @@ def test_short_circuit_passes_through_model_pool_calls():
     )
     assert calls["n"] == 1  # model-pool call reached the underlying ToolNode
     assert out["messages"][0].tool_call_id == "c-m"
+    # Its result is journaled as an evidence leaf so report verification can
+    # see what the analyst actually received (macro/prediction gap on JPM/GS
+    # 2026-09-08 was unverifiable because model-pool results were transcript-only).
+    leaves = out.get("tool_evidence", {}).get("market")
+    assert leaves and any(l["tool"] == "get_financials" for l in leaves)
 
 
 # --------------------------------------------------------------------------
