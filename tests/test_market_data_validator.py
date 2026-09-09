@@ -62,6 +62,14 @@ class TestVerifiedSnapshot:
         close_rows = [ln for ln in snap.splitlines() if ln.startswith("| 2026-")]
         assert 0 < len(close_rows) <= 30
 
+    def test_atr_indicator_labeled_with_window(self, monkeypatch):
+        # The snapshot's ATR comes from stockstats' default 14-period window;
+        # it must be labeled atr(14) so a swing/tranche ATR(14) is not mistaken
+        # for a different window (AMZN 2026-09-09 review: ATR 6.47 vs 5.7079).
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
+        snap = validator.build_verified_market_snapshot("COF", "2026-05-20")
+        assert "| atr(14) |" in snap
+
     def test_provisional_note_when_latest_row_is_analysis_date(self, monkeypatch):
         # The AMZN 2026-09-09 adjudication: a run DURING the session must not
         # call the forming bar a settled close. When the latest row's date

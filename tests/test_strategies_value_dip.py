@@ -258,6 +258,50 @@ def test_setup_value_floor_or_semantics():
     assert setup2["rows"]["value_floor"]["pass"] is True
 
 
+def test_require_vdu_blocks_when_ladder_incomplete():
+    """require_vdu promotes the VDU ladder to a HARD execution gate: a flat /
+    non-trigger series (no dry-up + trigger + RVOL confirmation) must REJECT
+    the candidate even when the fundamental/technical rows all pass."""
+    closes = _dip_series()
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    vols = [1_000_000] * len(closes)
+    # Without require_vdu the setup passes on fundamentals/technicals.
+    setup_off = value_dip_setup(
+        closes, highs, lows, vols,
+        margin_of_safety=0.25, fcf_yield=0.08, val_z=-2.0, atr_value=0.5,
+    )
+    assert setup_off["candidate"] is True
+    # With require_vdu the incomplete VDU ladder blocks it.
+    setup_on = value_dip_setup(
+        closes, highs, lows, vols,
+        margin_of_safety=0.25, fcf_yield=0.08, val_z=-2.0, atr_value=0.5,
+        require_vdu=True,
+    )
+    assert setup_on["candidate"] is False
+    assert any("VDU hard gate blocked" in r for r in setup_on["reasons"])
+
+
+def test_require_vdu_passes_when_ladder_confirms():
+    """When the VDU ladder confirms (dry-up + trigger + RVOL + momentum), the
+    hard gate contributes a pass and never appends a VDU-block reason."""
+    closes, highs, lows, vols = _dip_trigger_series()
+    setup = value_dip_setup(
+        closes, highs, lows, vols,
+        margin_of_safety=0.25, fcf_yield=0.08, val_z=-2.0, atr_value=0.5,
+        require_vdu=True,
+    )
+    assert setup["rows"]["vdu"]["candidate"] is True
+    assert not any("VDU hard gate blocked" in r for r in setup["reasons"])
+
+
+def test_require_vdu_unknown_never_fails():
+    """An unknown VDU (no data) is ignored, not a hard fail - repo convention."""
+    setup = value_dip_setup([], [], [], [], require_vdu=True)
+    assert setup["candidate"] is False  # no data -> not a candidate
+    assert not any("VDU hard gate blocked" in r for r in setup["reasons"])
+
+
 # ---------------------------------------------------------------------------
 # Tranche risk fold (control computation for the governor)
 # ---------------------------------------------------------------------------

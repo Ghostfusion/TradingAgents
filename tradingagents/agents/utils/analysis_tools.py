@@ -268,7 +268,7 @@ def get_swing_set(
             lines.append(
                 f"  structure_stop: swing_low={_txt(stop.get('swing_low'))} "
                 f"stop={_txt(stop.get('stop'))} risk={_txt(stop.get('risk_pct'))} "
-                f"(1 ATR below swing low, ATR={_txt(stop.get('atr'))})"
+                f"(1 ATR(14) below swing low, ATR(14)={_txt(stop.get('atr'))})"
             )
         if tg.get("t1") is not None:
             lines.append(

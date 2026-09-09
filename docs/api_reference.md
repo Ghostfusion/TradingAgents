@@ -118,6 +118,7 @@ in `batch.py`).
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
 | `TRADINGAGENTS_BACKUP_LLM` | `backup_llm` | backup model for truncation-continuation retries: `provider:model` (or a bare model id using `TRADINGAGENTS_LLM_PROVIDER`). When ANY LLM response is cut at the output cap, the continuation retry runs on this model instead of re-paying the one that truncated. Empty = same-model continuations (legacy behavior) |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
+| `TRADINGAGENTS_VALUE_DIP_VDU_ENABLE` | `value_dip_vdu_enable` | strict: VDU ladder hard-gates entry (dry-up + trigger candle + RVOL>=1.3 + momentum confirmation); candidate=False -> no entry |
 | `TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST` | `value_dip_require_catalyst` | strict: value-dip needs re-rating evidence |
 | `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | strict: block dip entries in high-vol/fast-downtrend/catalyst windows |
 | `TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP` | `value_dip_regime_vol_cap` | vol_pct above this blocks MR entries (gate ON) |

@@ -123,6 +123,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_KNIFE_SCORE_WEIGHTS": "knife_score_weights",
     "TRADINGAGENTS_KNIFE_SCORE_BANDS": "knife_score_bands",
     "TRADINGAGENTS_VALUE_DIP_KNIFE_ENABLE": "value_dip_knife_enable",
+    "TRADINGAGENTS_VALUE_DIP_VDU_ENABLE": "value_dip_vdu_enable",
     "TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST": "value_dip_require_catalyst",
     "TRADINGAGENTS_VALUE_DIP_REGIME_GATE": "value_dip_regime_gate",
     "TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP": "value_dip_regime_vol_cap",
@@ -677,6 +678,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # All advisory rows are computed + injected into the decision agents
         # (Trader / PM / risk debators); nothing gates by default.
         "value_dip_require_catalyst": False,  # A2: re-rating evidence required
+        "value_dip_vdu_enable": False,  # VDU ladder hard-gates entry (dry-up + trigger + RVOL)
         "value_dip_knife_enable": False,  # knife guards enforce (advisory rows by default)
         "knife_composite_enable": False,  # composite K gates sizing (advisory default)
         "regime_state_enable": False,  # multi-axis regime factor gates sizing

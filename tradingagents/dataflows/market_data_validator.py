@@ -164,7 +164,10 @@ def build_verified_market_snapshot(
     lines += ["", "### Verified technical indicators (latest row)", "",
               "| Indicator | Value |", "|---|---:|"]
     for name, value in indicator_values.items():
-        lines.append(f"| {name} | {value} |")
+        # stockstats computes ATR with the default 14-period window; label it
+        # so a swing/tranche ATR(14) is not mistaken for a different window.
+        label = "atr(14)" if name == "atr" else name
+        lines.append(f"| {label} | {value} |")
 
     lines += ["", f"### Recent verified closes (last {len(recent)} rows)", "",
               "| Date | Close |", "|---|---:|"]

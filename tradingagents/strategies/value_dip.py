@@ -987,6 +987,7 @@ def value_dip_setup(
     roic: float | None = None,
     require_trend: bool = False,
     strict_vdu: bool = False,
+    require_vdu: bool = False,
     loose_technical: bool = False,
     min_closes_trend: int = 200,
     regime_gate: dict | None = None,
@@ -1422,6 +1423,15 @@ def value_dip_setup(
             measured_gates.append(
                 bool(support.get("verdict") in ("multi-month-base-support", "200-day-sma-support", "holding-above-base"))
             )
+    if require_vdu:
+        # Hard execution gate (reviewer #19): VDU = dry-up AND trigger candle
+        # (close above prior high) AND RVOL >= 1.3 AND momentum confirmation.
+        # A VDU candidate=False means NO entry even if an oscillator looks
+        # oversold. Measured-only: an unknown VDU (no data) never fails.
+        if vdu and vdu["candidate"] is not None:
+            measured_gates.append(bool(vdu["candidate"]))
+        if vdu and vdu.get("candidate") is False:
+            reasons.append("VDU hard gate blocked (no dry-up + trigger + RVOL confirmation)")
     return {
         "candidate": bool(all(measured_gates)),
         "reasons": reasons,

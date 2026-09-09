@@ -695,8 +695,11 @@ def get_value_dip_setup(
     Rows: value_floor (margin of safety >= 20% OR FCF yield >= 6%),
     technical_entry (RSI(14) <= 35 AND Bollinger %b <= 0.10),
     trade_risk (ATR stop <= 2% of price), exit_target (R:R >= 2.5 by
-    construction). candidate = all gates pass. Call before any 'value dip
-    setup / discounted entry with oversold timing' claim.
+    construction). candidate = all gates pass. With ``value_dip_vdu_enable``
+    on, the VDU ladder (dry-up + trigger candle + RVOL >= 1.3 + momentum
+    confirmation) is a HARD execution gate: candidate=False means no entry
+    even if an oscillator looks oversold. Call before any 'value dip setup /
+    discounted entry with oversold timing' claim.
     """
     try:
         from tradingagents.strategies.value_dip import fcf_yield, value_dip_setup
@@ -808,6 +811,11 @@ def get_value_dip_setup(
         require_knife=bool(
             (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
                 "value_dip_knife_enable"
+            )
+        ),
+        require_vdu=bool(
+            (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
+                "value_dip_vdu_enable"
             )
         ),
     )

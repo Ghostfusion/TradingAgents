@@ -175,6 +175,9 @@ def test_swing_set_returns_computed_read():
     assert "swing set AAPL:" in out
     assert "verdict=" in out and "trend:" in out and "rsi:" in out
     assert "structure_stop" in out or "targets" in out
+    # The ATR feeding the structure stop / targets must be labeled ATR(14)
+    # (AMZN 2026-09-09 review: ATR windows were confused).
+    assert "ATR(14)" in out
 
 
 def test_swing_set_insufficient_history():

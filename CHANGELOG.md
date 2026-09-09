@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **VDU hard execution gate + ATR(14) labeling (AMZN 2026-09-09 review #19/#14)** -
+  (a) `value_dip_setup` gained `require_vdu`: the Step-2 VDU ladder (volume
+  dry-up + trigger candle close-above-prior-high + RVOL >= 1.3 + momentum
+  confirmation) is promoted to a HARD gate - candidate=False means NO entry
+  even if an oscillator looks oversold; measured-only (unknown never fails),
+  wired from `TRADINGAGENTS_VALUE_DIP_VDU_ENABLE` / `value_dip_vdu_enable`
+  (default off, mirroring the knife/regime/catalyst gates). Tests:
+  `tests/test_strategies_value_dip.py` (require_vdu blocks-incomplete /
+  confirms / unknown-never-fails). (b) ATR window disclosure - the verified
+  market snapshot now labels its stockstats ATR as `atr(14)` and
+  `get_swing_set`'s structure-stop renders `1 ATR(14) below swing low,
+  ATR(14)=...` so the snapshot's ATR is never confused with a swing/tranche
+  ATR of another window (AMZN 6.47 vs 5.7079). Tests: `test_market_data_validator`
+  (atr(14) label), `test_analysis_tools` (swing_set ATR(14)).
 - **Market-report honesty fixes (AMZN 2026-09-09 review loop)** -
   (a) `build_verified_market_snapshot` now labels a row dated = the requested
   analysis date as a potentially FORMING bar (intraday run) and marks its
