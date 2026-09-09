@@ -763,6 +763,7 @@ preserves `Risk Gate (computed)` blocks.
 | `python scripts/action_report.py ...` | conditional action report (basket vs report verdicts vs live market) |
 | `python scripts/positions_to_basket.py ...` | combine broker position CSVs -> TRADINGAGENTS_RISK_BASKET_* weights (cash in the denominator; `--apply` rewrites .env) |
 | `python scripts/rebuild_complete_report.py reports/<dir>` | re-render TOC reports |
+| `python scripts/verify_sweep.py ...` | post-verifier adjudication workbench: condense a report tree's verify_flags.json into N confirmed (MISQUOTED/contradicted/internal-conflict) vs M suspect (unsupported) needing review; `--json` `--confirm-only` |
 | `python scripts/smoke_structured_output.py` | smoke structured output |
 | `python main.py` | minimal Python API demo |
 

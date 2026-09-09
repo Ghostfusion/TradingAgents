@@ -47,7 +47,12 @@ _DEC_RE = re.compile(r"\d+\.\d+")
 # matches when the raw pair is within tolerance OR differs by a clean unit
 # step (K/M/B/T) — the MSTR 2026-09-08 batch flagged every unit-reformatted
 # figure as UNSUPPORTED before this.
-_UNIT_SCALES = (1.0, 1e3, 1e6, 1e9, 1e12)
+_UNIT_SCALES = (1.0, 1e2, 1e3, 1e6, 1e9, 1e12)
+
+# A bare-integer figure that carries signal when expressed as a percent:
+# "A (92%)" vs an evidence leaf storing 0.92 as a fraction. Bare ints are
+# otherwise too noisy for grounding, so only percent-marked ints count.
+_PCT_INT_RE = re.compile(r"(?<![.\d])(\d+(?:\.\d+)?)\s*%")
 
 
 def _float_tokens(text: str) -> set:
@@ -57,6 +62,15 @@ def _float_tokens(text: str) -> set:
     for m in _DEC_RE.finditer(text):
         try:
             out.add(float(m.group()))
+        except ValueError:
+            continue
+    # Explicit percents written as bare integers ("92%") are signal, not
+    # noise - collect them so the anchor sees the composite-rank transposition
+    # class (report "A (92%)" vs a leaf storing 0.92 fraction) instead of
+    # silently missing integer figures.
+    for m in _PCT_INT_RE.finditer(text):
+        try:
+            out.add(float(m.group(1)))
         except ValueError:
             continue
     return out
@@ -94,14 +108,20 @@ class VerifierClaim(BaseModel):
     """One extracted claim + its grounding verdict."""
 
     claim: str = Field(description="The sentence/claim as written in the report.")
-    status: Literal["GROUNDED", "UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT"] = Field(
+    status: Literal[
+        "GROUNDED", "UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT"
+    ] = Field(
         ...,
         description=(
             "GROUNDED: the claim's specifics (figures, direction, state) are "
             "present in the evidence leaves; UNSUPPORTED: the claim asserts "
             "specifics the evidence does not contain; CONTRADICTED: evidence "
-            "contains an opposing value/state; INTERNAL_CONFLICT: the same "
-            "metric is asserted at conflicting values within this one report."
+            "contains an opposing value/state; MISQUOTED: the claim's figures "
+            "ARE present in the evidence but attached to the wrong label / "
+            "subject / context (e.g. a 92% and 58% transposed between two "
+            "peers) - the deterministic anchor detected the misuse rather than "
+            "silently grounding it; INTERNAL_CONFLICT: the same metric is "
+            "reported at conflicting values within this one report."
         ),
     )
     reason: str = Field(
@@ -118,8 +138,8 @@ class ReportVerification(BaseModel):
     overall: Literal["PASS", "FLAG", "UNKNOWN"] = Field(
         ...,
         description=(
-            "PASS = every claim grounded; FLAG = any UNSUPPORTED/CONTRADICTED; "
-            "UNKNOWN = verifier could not run."
+            "PASS = every claim grounded; FLAG = any UNSUPPORTED/CONTRADICTED/"
+            "MISQUOTED/INTERNAL_CONFLICT; UNKNOWN = verifier could not run."
         ),
     )
 
@@ -194,6 +214,11 @@ claim:
   exists to catch).
 - CONTRADICTED: the evidence contains an opposing value or state (e.g.
   claim says +8% EPS, evidence says -3%).
+- MISQUOTED: the figures you cite ARE in the evidence, but attached to the
+  wrong label / subject / context (e.g. a 92% and 58% belonging to different
+  peers are transposed; a T1 target is mislabeled). If the number matches a
+  leaf but the claim uses it wrongly (wrong metric, wrong sign attribution,
+  wrong entity), say MISQUOTED and name the correct mapping in `reason`.
 
 Rules:
 - Base every verdict on the evidence block ONLY. Do not use outside
@@ -226,9 +251,26 @@ def _build_prompt(report_name: str, report_text: str, digest: str) -> str:
 
 def _overall_from_claims(claims: list) -> Literal["PASS", "FLAG", "UNKNOWN"]:
     """Derive the report-level verdict from per-claim statuses."""
-    if any(c.get("status") in ("UNSUPPORTED", "CONTRADICTED") for c in claims):
+    if any(
+        c.get("status")
+        in ("UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT")
+        for c in claims
+    ):
         return "FLAG"
     return "PASS"
+
+
+# Cues in an LLM "UNSUPPORTED" reason that say "the figures exist but the
+# claim attaches them to the wrong thing" — the deterministic anchor must
+# surface these as MISQUOTED instead of silently grounding them (AMZN
+# 2026-09-09: composite_rank "swaps the 92% and 58% labels between A and e";
+# T1 265.03 vs the 265.97 the same report cites).
+_MISQUOTE_CUES = re.compile(
+    r"transpos|swap(s|ped|ping)?|attribut|belongs?|not the (metric|same|right)|"
+    r"actually (the|belongs)|revers|confus|mislabel|wrong (label|metric|name|"
+    r"entity|subject)|really (the|belongs)|the report (mixes|flips|confus)",
+    re.I,
+)
 
 
 def _parse_verdict(text: str, report_name: str) -> ReportVerification:
@@ -283,6 +325,21 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
     for c in verification.claims:
         decs = _float_tokens(c.claim)
         if c.status == "UNSUPPORTED" and decs and all(_matches(d, evidence_dec) for d in decs):
+            if _MISQUOTE_CUES.search(c.reason or ""):
+                # The figures exist but the LLM said the claim misuses them
+                # (wrong label / subject / transposition). Keep it highly
+                # visible instead of silently grounding a misuse.
+                anchored.append(
+                    VerifierClaim(
+                        claim=c.claim,
+                        status="MISQUOTED",
+                        reason=c.reason
+                        + " [anchored: figures ARE in tool evidence but the "
+                        "claim may attach them to the wrong label/context - "
+                        "verify attribution]",
+                    )
+                )
+                continue
             anchored.append(
                 VerifierClaim(
                     claim=c.claim,
@@ -307,7 +364,10 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
         return ReportVerification(report=verification.report, claims=anchored, overall="UNKNOWN")
     overall = (
         "FLAG"
-        if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in anchored)
+        if any(
+            c.status in ("UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT")
+            for c in anchored
+        )
         else "PASS"
     )
     return ReportVerification(report=verification.report, claims=anchored, overall=overall)
@@ -322,50 +382,74 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
 # GS/TJX 2026-09-08 batch: DCF fair value 80.76 vs 80.71, EPS 5.81 vs 4.79,
 # market cap 141.8B vs 145.3B, ROE 53.92 vs 59.77 — all "matched some leaf"
 # individually, so the per-claim anchor could not see the conflict).
-_INTERNAL_CONFLICT_METRICS: dict[str, re.Pattern] = {
-    "dcf fair value": re.compile(r"dcf\s*(?:fair\s*)?value", re.I),
-    "eps ttm": re.compile(r"\beps\s*(?:ttm)?\b", re.I),
-    "earnings power value": re.compile(r"earnings\s*power\s*value|epv", re.I),
-    "market cap": re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I),
-    "roe": re.compile(r"\broe\b|return\s*on\s*equity", re.I),
-    "debt/equity": re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I),
-    "200-day sma": re.compile(r"200[-\s]?day\s*(?:sma|ma|moving)", re.I),
-    "insider net": re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I),
-    "dividend yield": re.compile(r"dividend\s*yield", re.I),
-    "book value": re.compile(r"book\s*value|book\s*value/share|bvps", re.I),
+_INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
+    # Default tolerance 1%: vendor-consensus rounding (80.76 vs 80.75) is ONE
+    # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
+    "dcf fair value": (re.compile(r"dcf\s*(?:fair\s*)?value", re.I), 0.01),
+    "eps ttm": (re.compile(r"\beps\s*(?:ttm)?\b", re.I), 0.01),
+    "earnings power value": (re.compile(r"earnings\s*power\s*value|epv", re.I), 0.01),
+    "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
+    "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
+    "debt/equity": (re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I), 0.01),
+    "200-day sma": (re.compile(r"200[-\s]?day\s*(?:sma|ma|moving)", re.I), 0.01),
+    "insider net": (re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I), 0.01),
+    "dividend yield": (re.compile(r"dividend\s*yield", re.I), 0.01),
+    "book value": (re.compile(r"book\s*value|book\s*value/share|bvps", re.I), 0.01),
+    # AMZN 2026-09-09 review-loop metrics. EXACT/price-level metrics (T1/RSI/
+    # ATR/bands/surprise) use a tighter 0.5% so a real target mismatch (T1
+    # 265.03 vs 265.97, a 0.35% diff masked by the 1% bucket, or macdh -1.36
+    # vs -1.15) still flags.
+    "atr": (re.compile(r"\batr\b|average\s*true\s*range", re.I), 0.005),
+    # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
+    # real conflict, so level-type metrics use a 0.1% bucket.
+    "t1": (re.compile(r"\bT1\b|2R|2xR|T\s*1\s*(?:\(|2R)", re.I), 0.001),
+    "t2": (re.compile(r"\bT2\b|3R|3xR", re.I), 0.001),
+    "macd histogram": (re.compile(r"macd\s*h|macdh|histogram", re.I), 0.005),
+    "rvol": (re.compile(r"\brvol\b|relative\s*volume", re.I), 0.005),
+    "williams_r": (re.compile(r"williams", re.I), 0.005),
+    "stochastic": (re.compile(r"stoch", re.I), 0.005),
+    "rsi": (re.compile(r"\brsi\b|relative\s*strength\s*index", re.I), 0.005),
+    "aws growth": (re.compile(r"aws.{0,10}(?:growth|yoy)|yoy.{0,10}aws", re.I), 0.005),
+    "hy oas": (re.compile(r"hy[-\s]?oas|high\s*yield.{0,20}oas", re.I), 0.005),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
 # "$80.60", "79.78B", "5.7B". Used to extract the numeric value attached to a
 # metric. Returns (value, unit_multiplier) or None.
-_DOLLAR_RE = re.compile(r"\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
+_DOLLAR_RE = re.compile(r"(?<![\(\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
+
+# Extra scale: a *_window / (18) / 30d -style label can sit between a metric
+# label and its value; 1 line = up to 40 chars after the label.
+_METRIC_WINDOW = 40
 
 
 def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, float]]:
     """All ``(raw_value_str, numeric_value)`` occurrences for one metric label.
 
-    The value is read from the window immediately surrounding the metric
-    label (up to 24 chars each side) so a number belonging to a *different*
-    metric on the same line is not misattributed (e.g. "ROE 0.18 and EPS 2.41"
-    must not attach 2.41 to ROE). Dollar magnitudes are normalised to plain
-    units (79.78B -> 7.978e10) so 79.78B and 5.7B compare at one scale.
+    Considers EVERY match of the label on a line (not just the first) so a
+    same-line pair like "current ATR 6.47 ... structure stop uses ATR 5.7079"
+    yields both values (AMZN 2026-09-09 ATR-window conflict). The value is
+    read from the window after the label so a number belonging to a *different*
+    metric nearby is not misattributed (e.g. "ROE 0.18 and EPS 2.41" must not
+    attach 2.41 to ROE). Dollar magnitudes normalise to plain units
+    (79.78B -> 7.978e10) so 79.78B and 5.7B compare at one scale.
     """
     out: list[tuple[str, float]] = []
     for line in text.splitlines():
-        m = regex.search(line)
-        if not m:
-            continue
-        # Prefer the first number after the metric label (the metric's value).
-        tail = line[m.end():m.end() + 24]
-        for mnum in _DOLLAR_RE.finditer(tail):
-            num_s, unit = mnum.group(1), (mnum.group(2) or "")
-            try:
-                num = float(num_s)
-            except ValueError:
-                continue
-            mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(unit.upper(), 1.0)
-            out.append((tail[max(0, mnum.start() - 6):mnum.end()].strip(), num * mult))
-            break
+        for m in regex.finditer(line):
+            # Skip a label immediately followed by a parenthetical multiplier
+            # like "T1(2R)" — 2R is a reward multiple, not the metric's value.
+            tail = line[m.end():m.end() + _METRIC_WINDOW]
+            stripped = re.sub(r"^\([^)]*\)", "", tail.strip())
+            for mnum in _DOLLAR_RE.finditer(stripped):
+                num_s, unit = mnum.group(1), (mnum.group(2) or "")
+                try:
+                    num = float(num_s)
+                except ValueError:
+                    continue
+                mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(unit.upper(), 1.0)
+                out.append((stripped[max(0, mnum.start() - 6):mnum.end()].strip(), num * mult))
+                break
     return out
 
 
@@ -381,13 +465,13 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
     if not report_text:
         return []
     conflicts: list[VerifierClaim] = []
-    for label, regex in _INTERNAL_CONFLICT_METRICS.items():
+    for label, (regex, tol) in _INTERNAL_CONFLICT_METRICS.items():
         vals = _extract_metric_values(report_text, regex)
         # Group near-equal values; flag when >1 distinct cluster.
         distinct: list[tuple[float, str]] = []
         for raw, v in vals:
             bucket = next(
-                (b for b in distinct if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= 0.01),
+                (b for b in distinct if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= tol),
                 None,
             )
             if bucket is None:

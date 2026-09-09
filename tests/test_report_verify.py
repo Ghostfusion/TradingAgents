@@ -155,6 +155,28 @@ def test_anchor_grounds_unsupported_with_matching_figures():
     assert "anchored" in a.claims[0].reason
 
 
+def test_anchor_marks_misquoted_on_attribution_cue():
+    """AMZN 2026-09-09 composite_rank class: figures ARE in evidence but the
+    claim transposes them between labels. The anchor must surface MISQUOTED
+    (high visibility), not silently downgrade to GROUNDED."""
+    v = rv.ReportVerification(
+        report="market",
+        claims=[
+            rv.VerifierClaim(
+                claim="peers ranked ahead: A (92%), P (67%), e (58%), r (58%)",
+                status="UNSUPPORTED",
+                reason="the leaf assigns e=92%, P=67%, A=58% — the report "
+                "swaps the 92% and 58% labels between A and e",
+            )
+        ],
+        overall="FLAG",
+    )
+    a = rv._anchor_claims(v, {0.92, 0.67, 0.58})
+    assert a.claims[0].status == "MISQUOTED"
+    assert a.overall == "FLAG"
+    assert "wrong label" in a.claims[0].reason
+
+
 def test_anchor_keeps_unsupported_without_matching_figures():
     v = rv.ReportVerification(
         report="fundamentals",
@@ -270,6 +292,21 @@ def test_cost_models_import_reachable():
     from tradingagents.agents.utils import report_verifier as R2
 
     assert hasattr(R2, "internal_conflicts") or hasattr(R2, "_internal_conflicts")
+
+
+def test_internal_conflict_atr_two_windows():
+    """ATR 6.47 (snapshot) vs ATR 5.7079 (swing) in one report must flag —
+    the AMZN 2026-09-09 'ATR compressing' class that slipped before."""
+    t = "current ATR 6.47 ... structure stop uses ATR 5.7079"
+    out = rv._internal_conflicts(t)
+    assert any(c.status == "INTERNAL_CONFLICT" and "'atr'" in c.claim for c in out)
+
+
+def test_internal_conflict_t1_mislabel():
+    """T1 265.03 vs T1 265.97 in one report (>1% apart) must flag."""
+    t = "T1(2R ahead)=265.03 ... T1 = 265.97"
+    out = rv._internal_conflicts(t)
+    assert any("'t1'" in c.claim for c in out)
 
 
 def test_no_rating_signal_no_conflict():

@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Verifier MISQUOTED status + adjudication sweep (AMZN 2026-09-09 loop items
+  1+3)** - (1) the deterministic anchor now surfaces MISQUOTED when a claim's
+  figures ARE in tool evidence but attached to the wrong label/context (LLM
+  reason carries a transposition/attribution cue) instead of silently
+  re-grounding it - catching the AMZN composite-rank A/e swap class; the
+  internal-conflict metric set gained ATR/T1/T2/macdh/RVOL/Williams/stoch/RSI/
+  AWS-growth/HY-OAS with per-metric tolerances (exact price levels at 0.1% so
+  T1 265.03 vs 265.97 and ATR 6.47 vs 5.7079 flag); `_float_tokens` now
+  collects percent-int figures and unit scales include 1e2 so integer percents
+  match fraction leaves. (2) `scripts/verify_sweep.py`: post-verifier
+  confirmation workbench over existing verify_flags.json - surfaces N
+  CONFIRMED (MISQUOTED/CONTRADICTED/INTERNAL_CONFLICT, needs a fix) vs M
+  SUSPECT (UNSUPPORTED, needs adjudication) per tree, `--json`,
+  `--confirm-only`; exit 1 when any confirmed/suspect exists. Tests:
+  test_report_verify (MISQUOTED anchor, ATR/T1 conflicts, percent-matching),
+  test_verify_sweep (counts/absent/CLI ok).
 - **News-analyst macro citation hardening (AMZN 2026-09-09 review loop)** -
   uncited macro figures (10Y Treasury "9.78%"/"4.85%" vs actual ~4.78, RRP
   0.626B, "93% no Fed cut" Polymarket) had ZERO tool leaves - the analyst
