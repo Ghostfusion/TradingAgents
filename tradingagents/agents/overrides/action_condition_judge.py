@@ -25,7 +25,7 @@ from tradingagents.agents.utils.structured import (
 )
 
 
-def create_action_condition_judge(llm):
+def create_action_condition_judge(llm, backup_llm=None):
     """Return a callable judging one condition against a market snapshot.
 
     ``snapshot`` is a compact text block of measured numbers (price, SMA50 /
@@ -66,6 +66,7 @@ level, or ratio.
             prompt,
             render_action_condition_verdict,
             "Action-Condition Judge",
+            backup_llm=backup_llm,
         )
 
     return action_condition_judge

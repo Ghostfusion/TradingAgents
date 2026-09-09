@@ -20,7 +20,7 @@ from tradingagents.agents.utils.structured import (
 )
 
 
-def create_pre_market_reviewer(llm):
+def create_pre_market_reviewer(llm, backup_llm=None):
     """Return a self-contained callable reviewing a prior decision at the open.
 
     The reviewer is a pure prompt variant over the deep LLM: it reads the prior
@@ -65,6 +65,7 @@ Default to **CONFIRM** when the deltas do not change the plan.
             prompt,
             render_pre_market_verdict,
             "Pre-Market Reviewer",
+            backup_llm=backup_llm,
         )
 
     return pre_market_reviewer

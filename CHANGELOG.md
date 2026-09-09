@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Complete TRADINGAGENTS_BACKUP_LLM coverage (khy 2026-09-09 stall)** - the
+  report verifier, the `--verify` batch pass, the Action-Condition judge and
+  the Pre-Market reviewer did NOT plumb the backup LLM: their truncation
+  continuation retried on the SAME truncated model. `verify_report_dir` now
+  builds a backup client from `backup_llm`/`TRADINGAGENTS_BACKUP_LLM` and
+  forwards it into `invoke_structured_or_freetext`; both overrides accept
+  `backup_llm` and their scripts (`action_report.py --llm`,
+  `pre_market_review.py`) build it from config. Every LLM truncation path now
+  falls back to the configured backup model. Regression test:
+  `test_verify_report_dir_builds_backup_from_config`.
 - **Fix VRP double-percent render (ARM 2026-09-09 review-loop)** -
   `get_options_iv_read` rendered `volatility_risk_premium`'s PERCENTAGE-POINTS
   value with a "%" format, multiplying by 100 twice: ARM (ATM IV 67.97% - RV

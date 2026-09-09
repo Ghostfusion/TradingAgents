@@ -507,6 +507,7 @@ def verify_evidence_call(
     report_name: str,
     report_text: str,
     evidence: dict,
+    backup_llm: object | None = None,
 ) -> ReportVerification:
     """Run the LLM pass for one analyst report (structured-aware).
 
@@ -529,6 +530,7 @@ def verify_evidence_call(
         prompt,
         render=_render,
         agent_name=f"report_verify/{report_name}",
+        backup_llm=backup_llm,
     )
     return _parse_verdict(text, report_name)
 
@@ -542,12 +544,13 @@ def verify_report_dir(
     max_calls: int | None = None,
     stems: tuple[str, ...] | list[str] | None = None,
     llm_override: object | None = None,
+    backup_llm_override: object | None = None,
 ) -> dict:
     """Verify every present analyst report in a report tree.
 
     Returns a JSON-serializable dict (the persisted ``report_verify.json``
     shape): ``{"report_dir", "verification": {stem: {overall, claims}}}``.
-    ``stems`` filters which reports run (passed for parallel per-stem
+    ``stems`` filters which reports to run (passed for parallel per-stem
     invocation or spot-checks); a narrow run's payload only holds those
     stems. ``llm_override`` exists for tests; production builds the LLM from
     config (``TRADINGAGENTS_VERIFY_MODEL`` or the quick tier). Never raises
@@ -576,6 +579,31 @@ def verify_report_dir(
         llm = client.get_llm()
     else:
         llm = llm_override
+
+    # Truncation-continuation backup: TRADINGAGENTS_BACKUP_LLM (or the
+    # explicit override). The verifier's continuation retries must fall back
+    # to the backup model like every other LLM path, not re-pay the truncated
+    # quick/dirty tier (the khy 2026-09-09 stall surfaced a verifier that
+    # silently continued on the same model).
+    backup_llm = backup_llm_override
+    if backup_llm is None and not llm_override:
+        _backup_spec = str(cfg.get("backup_llm") or "").strip()
+        if _backup_spec:
+            try:
+                _bp = provider or str(cfg.get("llm_provider") or "")
+                _bm = _backup_spec
+                if ":" in _backup_spec:
+                    _bp, _bm = _backup_spec.split(":", 1)
+                    _bp, _bm = _bp.strip(), _bm.strip()
+                _bclient = create_llm_client(
+                    provider=_bp,
+                    model=_bm,
+                    base_url=base_url or cfg.get("backend_url"),
+                )
+                backup_llm = _bclient.get_llm()
+            except Exception as exc:  # noqa: BLE001 - advisory; degrade to same-model
+                logger.warning("report_verifier: backup LLM build failed: %s", exc)
+                backup_llm = None
 
     evidence_path = Path(report_dir) / "tool_evidence.json"
     if not evidence_path.exists():
@@ -611,6 +639,7 @@ def verify_report_dir(
                 stem,
                 report_text,
                 evidence,
+                backup_llm=backup_llm,
             )
         except Exception as exc:  # noqa: BLE001 — advisory: never raise mid-run
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)

@@ -365,6 +365,55 @@ def test_verify_report_dir_llm_override_no_budget_exceeded(tmp_path):
     assert "market" not in payload["verification"]
 
 
+def test_verify_report_dir_builds_backup_from_config(tmp_path, monkeypatch):
+    """The production LLM path (llm_override=None) must build a SECOND client
+    from config 'backup_llm' and pass it to the invoke as the truncation
+    continuation model - the khy 2026-09-09 stall made the verifier continue
+    truncation on the same truncated quick model."""
+    report_dir = _mk_report_dir(tmp_path)
+
+    class _BackupLLM:
+        pass
+
+    calls = {"backup_llm": None}
+
+    def _fake_client_factory(provider, model, base_url=None, **kw):  # noqa: ANN003
+        class _C:
+            def get_llm(self):
+                if model == "bk/model":
+                    return _BackupLLM()
+                return object()
+
+        return _C()
+
+    monkeypatch.setattr(
+        "tradingagents.llm_clients.create_llm_client",
+        _fake_client_factory,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {
+            "backup_llm": "openrouter:bk/model",
+            "llm_provider": "openrouter",
+            "report_verify_max_calls": 1,
+            "report_verify_model": "",
+            "quick_think_llm": "q",
+        },
+    )
+
+    def _spy_invoke(structured, plain, prompt, render, agent_name,
+                    fallback_llm=None, backup_llm=None, **kw):  # noqa: ANN002
+        calls["backup_llm"] = backup_llm
+        return '{"claims": [], "overall": "PASS"}'
+
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.structured.invoke_structured_or_freetext",
+        _spy_invoke,
+    )
+    rv.verify_report_dir(report_dir, max_calls=1)
+    assert isinstance(calls["backup_llm"], _BackupLLM)
+
+
 def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypatch):
     report_dir = _mk_report_dir(tmp_path)
 

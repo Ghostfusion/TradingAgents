@@ -378,7 +378,20 @@ def main(argv: list[str] | None = None) -> int:
                 model=DEFAULT_CONFIG["deep_think_llm"],
                 base_url=DEFAULT_CONFIG.get("backend_url"),
             )
-            reviewer = create_pre_market_reviewer(client.get_llm())
+            backup_llm = None
+            _bspec = str(DEFAULT_CONFIG.get("backup_llm") or "").strip()
+            if _bspec:
+                _bp, _bm = (DEFAULT_CONFIG["llm_provider"], _bspec)
+                if ":" in _bspec:
+                    _bp, _bm = _bspec.split(":", 1)
+                try:
+                    backup_llm = create_llm_client(
+                        provider=_bp.strip(), model=_bm.strip(),
+                        base_url=DEFAULT_CONFIG.get("backend_url"),
+                    ).get_llm()
+                except Exception:  # noqa: BLE001 - advisory; same-model continuation
+                    backup_llm = None
+            reviewer = create_pre_market_reviewer(client.get_llm(), backup_llm=backup_llm)
             reviewed = reviewer(decision_text, summary)
         except Exception as exc:  # noqa: BLE001 - deterministic verdict fallback
             print(f"[warn] reviewer LLM unavailable ({exc}); using deterministic verdict")
