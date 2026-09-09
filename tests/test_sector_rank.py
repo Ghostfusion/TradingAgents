@@ -215,6 +215,51 @@ def test_industry_etfs_have_parents_in_spdr():
         assert name
 
 
+def test_it_subsector_universe_present():
+    """The IT-subsector universe (review: one level below XLK) is registered
+    with the parent XLK so the subsectors rank within IT, never against the
+    sector ETF itself."""
+    for ticker in ("CIBR", "SKYY", "AIQ", "BOTZ", "DTCR", "NXTG", "IYW", "FINX", "XSD", "VGT"):
+        assert ticker in INDUSTRY_ETFS
+        assert INDUSTRY_ETFS[ticker][0] == "XLK"
+    # VGT is the IT benchmark, registered but never ranked inside the pool.
+    assert INDUSTRY_ETFS["VGT"][1] == "Broad IT (benchmark)"
+
+
+def test_industry_rank_excludes_vgt_from_pool():
+    """VGT is the benchmark, so it must never be ranked inside its own XLK
+    subsector pool (would be circular)."""
+    ind = {
+        "SOXX": _uptrend(step=0.9), "IGV": _uptrend(step=0.6),
+        "VGT": _uptrend(step=0.99),  # would otherwise dominate
+    }
+    r = rank_industry_group(ind, "XLK", _bench())
+    etfs = [x["etf"] for x in r["ranked"]]
+    assert "VGT" not in etfs
+    assert r["top3_3m"] == ["SOXX", "IGV"]
+
+
+def test_dual_benchmark_emits_rs2():
+    """rank_sectors_multifactor with a second benchmark emits per-row ``rs2``
+    (the IT-vs-VGT answer) WITHOUT re-ranking the SPY-relative ``rs``."""
+    cm = {"SOXX": _uptrend(step=0.9), "IGV": _uptrend(step=0.6)}
+    vgt = _uptrend(step=0.75)  # between SOXX and IGV
+    r = rank_sectors_multifactor(cm, bench_closes=_bench(), bench2_closes=vgt)
+    soxx = [x for x in r["ranked"] if x["etf"] == "SOXX"][0]
+    assert soxx.get("rs2") is not None  # vs VGT (stronger than VGT -> high)
+    assert 0.0 <= soxx["rs2"] <= 100.0
+    # rs (vs SPY) still the ranked factor
+    assert 0.0 <= soxx["rs"] <= 100.0
+
+
+def test_dual_benchmark_absent_is_none_no_rerank():
+    cm = {"SOXX": _uptrend(step=0.9), "IGV": _uptrend(step=0.6)}
+    r = rank_sectors_multifactor(cm, bench_closes=_bench())  # no bench2
+    for row in r["ranked"]:
+        assert row.get("rs2") is None
+    assert [x["etf"] for x in r["ranked"]] == ["SOXX", "IGV"]  # rank unchanged
+
+
 # ---------------------------------------------------------------------------
 # Sector-rotation P3: constituent breadth + EW/CW leadership
 # ---------------------------------------------------------------------------
@@ -304,3 +349,4 @@ def test_multifactor_quadrant_none_without_benchmark():
     r = rank_sectors_multifactor(cm, bench_closes=None)
     for row in r["ranked"]:
         assert row.get("quadrant") is None  # no RS axes -> no quadrant
+

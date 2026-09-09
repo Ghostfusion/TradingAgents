@@ -2418,16 +2418,38 @@ def get_sector_rank(
             for ietf in INDUSTRY_ETFS:
                 if not parent or INDUSTRY_ETFS[ietf][0] != parent:
                     continue
+                if ietf == "VGT":
+                    # VGT is the IT BENCHMARK, not a ranked subsector - it is
+                    # drawn as bench2 below, never ranked inside its own pool.
+                    continue
                 ic = _ohlcv(ietf).get("closes") or []
                 if len(ic) >= 65:
                     ind_closes[ietf] = ic
+            # Dual-benchmark on the IT industry pool: when the parent is XLK,
+            # also rank the subsectors against VGT (the IT benchmark) so the
+            # rs2 column answers "which IT subsector is strongest vs IT"
+            # separately from the SPY-relative rank. Ranks stay on bench (SPY).
+            bench2 = None
+            if parent == "XLK" and "VGT" in (closes_map or {}):
+                bench2 = closes_map["VGT"]
+            elif parent == "XLK":
+                vgt_c = _ohlcv("VGT").get("closes") or []
+                if len(vgt_c) >= 65:
+                    bench2 = vgt_c
             if parent and ind_closes:
-                ir = rank_industry_group(ind_closes, parent, bench_closes=bench)
+                ir = rank_industry_group(
+                    ind_closes, parent, bench_closes=bench, bench2_closes=bench2
+                )
                 top = next((r for r in ir.get("ranked", []) if r.get("rank") is not None), None)
                 if top is not None:
                     lines.append(
                         f"  industry {parent}: top={top['etf']} ({top['name']}) "
                         f"score={top.get('score') if top.get('score') is not None else 'n/a'}"
+                        + (
+                            f" rs2_vs_vgt={top.get('rs2')}"
+                            if top.get("rs2") is not None
+                            else ""
+                        )
                     )
         except Exception:  # noqa: BLE001 - advisory
             pass

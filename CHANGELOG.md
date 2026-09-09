@@ -3819,3 +3819,17 @@ PRs from late 2025 also landed here.
   (pure/offline): fits per-regime buckets IS, evaluates OOS reliability + ECE,
   and shows the calibrated re-map; exit 0/1 by a 0.10 ECE bar. Hermetically
   verified on a synthetic ledger.b
+
+### Added (IT subsector universe + dual-benchmark RS — sector-rotation one level down)
+- **IT subsector universe** in `sector_rank.INDUSTRY_ETFS` (parent XLK): CIBR
+  Cybersecurity, SKYY Cloud Computing, AIQ AI, BOTZ Robotics, DTCR Data
+  Center, NXTG Networking, IYW Tech Hardware, FINX FinTech, XSD Semis (equal-
+  weight), VGT Broad IT. Kept INSIDE XLK so the subsectors rank against each
+  other within the sector, never vs XLK. VGT is registered as the benchmark —
+  excluded from the ranked pool (never circular).
+- **Dual-benchmark RS** (`rank_sectors_multifactor` / `rank_industry_group`
+  new `bench2_closes`): emits a per-row `rs2` percentile vs a SECOND benchmark
+  (the IT pool uses VGT) WITHOUT re-ranking the SPY-relative `rs`. The
+  `get_sector_rank` tool now draws VGT as bench2 on the XLK industry pool and
+  reports `rs2_vs_vgt` on the top pick — answering "which IT subsector is
+  strongest vs IT" separately from "vs the market". Tests: 4 new.

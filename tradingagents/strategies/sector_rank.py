@@ -392,6 +392,7 @@ def rank_sectors_multifactor(
     closes_map: dict,
     bench_closes: list | None = None,
     *,
+    bench2_closes: list | None = None,
     min_bars: int = 65,
 ) -> dict:
     """Multi-factor SPDR sector rank (sector_rotation P1).
@@ -402,9 +403,16 @@ def rank_sectors_multifactor(
     126d blended with 1 - |MDD| 126d percentile). ``score`` = weighted sum
     (FACTOR_WEIGHTS, renormalized over the factors that actually computed).
 
+    ``bench2_closes`` (optional): a SECOND benchmark whose RS percentile is
+    emitted per-row as ``rs2`` without changing the rank. On the IT industry
+    pool this is VGT - so "which IT subsector is strongest vs the IT benchmark"
+    and "vs the market (SPY)" are both answerable from one pass. Advisory:
+    ``rs`` remains the ranked factor; ``rs2`` is informational.
+
     Result shape mirrors ``rank_sectors`` (ranked / top3_3m / top3_1m) so
-    ``sector_standing`` consumes it unchanged; each row carries the raw
-    factors + percentile subfactors + ``score`` + ``rank`` + ``accel``.
+    ``sector_standing`` consumes it unchanged; each row carries the
+    factors + percentile subfactors + ``score`` + ``rank`` + ``accel`` (+
+    optional ``rs2``).
     """
     rows = []
     for etf, closes in (closes_map or {}).items():
@@ -413,7 +421,8 @@ def rank_sectors_multifactor(
             row.update({"ret_1m": None, "ret_3m": None, "accel": None, "sma50": None,
                         "sharpe_126": None, "mdd_126": None, "trend_raw": None,
                         "momentum_raw": None, "rs_raw": None, "risk_raw": None,
-                        "rs_momentum": None, "quadrant": None, "score": None})
+                        "rs_momentum": None, "quadrant": None, "score": None,
+                        "rs2": None})
             rows.append(row)
             continue
         row["ret_1m"] = round(_momentum(closes, 21), 4) if _momentum(closes, 21) is not None else None
@@ -475,7 +484,22 @@ def rank_sectors_multifactor(
     for etf, r in row_by.items():
         r["rs"] = rs_pct.get(etf)
 
-    # rs momentum: acceleration of the RS ratio (63d vs 126d), percentile-
+    # rs vs the SECOND benchmark (e.g. VGT for the IT industry pool): the
+    # "which subsector is strongest vs the IT benchmark" answer, separate
+    # from the ranked ``rs`` (which is vs SPY). Informational; never re-ranks.
+    rs2_raw: dict[str, float] = {}
+    if bench2_closes:
+        for etf, r in row_by.items():
+            if r["ret_3m"] is None:
+                continue
+            v = _rs_ratio_return(closes_map[etf], bench2_closes, 63)
+            if v is not None:
+                rs2_raw[etf] = v
+    rs2_pct = _pct_rank(rs2_raw)
+    for etf, r in row_by.items():
+        r["rs2"] = rs2_pct.get(etf)
+
+    # rs momentum: acceleration of the RS vs (63d vs 126d), percentile-
     # ranked across the universe - the RRG timing axis, kept SEPARATE from the
     # rs level (RRG: RS-Ratio = ranking signal, RS-Momentum = timing signal).
     rsm_raw: dict[str, float] = {}
@@ -546,6 +570,20 @@ INDUSTRY_ETFS: dict[str, tuple] = {
     "XAR": ("XLI", "Aerospace & Defense"),
     "XOP": ("XLE", "Oil & Gas E&P"),
     "XRT": ("XLY", "Retail"),
+    # IT subsector universe (review: "one level below Information Technology"):
+    # kept INSIDE XLK so they are ranked against each other within the sector,
+    # never in the same pool as XLK (the sector itself). Practical taxonomy,
+    # not strict GICS - matches the ETF-category reality the analysis noted.
+    "CIBR": ("XLK", "Cybersecurity"),
+    "SKYY": ("XLK", "Cloud Computing"),
+    "AIQ": ("XLK", "Artificial Intelligence"),
+    "BOTZ": ("XLK", "Robotics & Automation"),
+    "DTCR": ("XLK", "Data Center / Digital Infra"),
+    "NXTG": ("XLK", "Networking / Connectivity"),
+    "IYW": ("XLK", "Technology Hardware"),
+    "FINX": ("XLK", "FinTech"),
+    "XSD": ("XLK", "Semiconductors (equal-weight)"),
+    "VGT": ("XLK", "Broad IT (benchmark)"),
 }
 
 
@@ -554,21 +592,27 @@ def rank_industry_group(
     parent_etf: str,
     bench_closes: list | None = None,
     *,
+    bench2_closes: list | None = None,
     min_bars: int = 65,
 ) -> dict:
     """Rank the industry ETFs whose parent is ``parent_etf`` (P2).
 
     Only ETFs listed in ``INDUSTRY_ETFS`` with that parent enter the pool;
     single-factor 3m momentum by default, multi-factor when ``bench_closes``
-    is provided (reuses the multifactor machinery). Returns the same shape as
+    is provided (reuses the multifactor machinery). ``bench2_closes`` (e.g.
+    VGT on the XLK industry pool) emits the per-row ``rs2`` (vs the IT
+    benchmark) without changing the rank. Returns the same shape as
     ``rank_sectors_multifactor`` (ranked / top3_3m / empty when none).
     """
     sub = {etf: closes for etf, closes in (closes_map or {}).items()
-           if etf in INDUSTRY_ETFS and INDUSTRY_ETFS[etf][0] == parent_etf}
+           if etf in INDUSTRY_ETFS and INDUSTRY_ETFS[etf][0] == parent_etf
+           and etf != "VGT"}  # VGT is the benchmark, never a ranked member
     if not sub:
         return {"ranked": [], "top3_3m": [], "top3_1m": [], "industry_of": parent_etf}
     if bench_closes:
-        ranking = rank_sectors_multifactor(sub, bench_closes=bench_closes, min_bars=min_bars)
+        ranking = rank_sectors_multifactor(
+            sub, bench_closes=bench_closes, bench2_closes=bench2_closes, min_bars=min_bars
+        )
         for r in ranking["ranked"]:
             if r["etf"] in INDUSTRY_ETFS:
                 r["name"] = INDUSTRY_ETFS[r["etf"]][1]
