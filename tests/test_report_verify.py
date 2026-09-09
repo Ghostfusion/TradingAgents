@@ -302,6 +302,17 @@ def test_internal_conflict_atr_two_windows():
     assert any(c.status == "INTERNAL_CONFLICT" and "'atr'" in c.claim for c in out)
 
 
+def test_internal_conflict_peg_and_ttm_pe():
+    """SKHY 2026-09-09 table-vs-body: 'fwd PEG 0.08' body 'PEG 2.08285' and
+    'TTM P/E 1.91' vs 'P/E 2.1822' must flag as THE-SAME-METRIC conflicts."""
+    t = "Valuation screens: P/E 27.10; TTM P/E 1.91; fwd PEG 0.08 ... "
+    t += "Finnhub TTM: P/E 2.1822, forward PEG 2.08285"
+    out = rv._internal_conflicts(t)
+    labels = {c.claim.split("'")[1] for c in out if c.status == "INTERNAL_CONFLICT"}
+    assert "ttm p/e" in labels
+    assert "forward peg" in labels
+
+
 def test_internal_conflict_t1_mislabel():
     """T1 265.03 vs T1 265.97 in one report (>1% apart) must flag."""
     t = "T1(2R ahead)=265.03 ... T1 = 265.97"

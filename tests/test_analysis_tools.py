@@ -1406,6 +1406,10 @@ def test_fcf_yield_computes(monkeypatch):
     out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "fcf yield AAPL" in out
     assert "10.00%" in out  # 10B / 100B
+    # The raw fcf/market_cap carry NO "$" prefix and say "raw vendor units" -
+    # a KRW reporter (SKHY 2026-09-09) must not be relabeled as USD.
+    assert "$" not in out.split("fcf yield")[1]
+    assert "raw vendor units" in out
 
 
 def test_fcf_yield_missing_data_degrades(monkeypatch):

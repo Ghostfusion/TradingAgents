@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **FCF-yield currency-neutral render + P/E/PEG conflict net (SKHY 2026-09-09
+  review loop)** - `get_fcf_yield` rendered vendor-raw values with a "$" prefix
+  even for non-USD reporters (SKHY KRW: a correctly-computed 7.77% yield got
+  prose'd as "$228.4B FCF / $26.3B mcap" - pure unit corruption). The render
+  now drops the "$" and labels "raw vendor units" so the analyst never
+  relabels KRW as USD; the verifier's internal-conflict metric set gained
+  `forward peg` + `ttm p/e` (SKHY table 'PEG 0.08' vs body '2.08285', 'P/E
+  1.91' vs '2.1822'). Tests: fcf-yield no-$ render, PEG/PE conflict.
 - **Complete TRADINGAGENTS_BACKUP_LLM coverage (khy 2026-09-09 stall)** - the
   report verifier, the `--verify` batch pass, the Action-Condition judge and
   the Pre-Market reviewer did NOT plumb the backup LLM: their truncation

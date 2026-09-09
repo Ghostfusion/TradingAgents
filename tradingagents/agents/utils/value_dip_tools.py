@@ -465,9 +465,13 @@ def get_fcf_yield(
             "market cap from the vendor chain."
         )
     band = "floor-pass" if fy >= 0.06 else "below-floor"
+    # No "$" on the raw values: a non-USD reporter (e.g. SKHY in KRW) renders
+    # vendor raw units; a "$" prefix invites the analyst to relabel them as
+    # USD (SKHY 2026-09-09: report prose'd 90.4T KRW as '$228.4B' and the mcap
+    # as '$26.3B' — unit corruption of a correctly-computed 7.77% yield).
     return (
-        f"fcf yield {ticker}: {fy:.2%} ({band}); fcf=${fcf:,.0f} "
-        f"market_cap=${mc:,.0f} basis={basis}"
+        f"fcf yield {ticker}: {fy:.2%} ({band}); fcf={fcf:,.0f} "
+        f"market_cap={mc:,.0f} (raw vendor units) basis={basis}"
     )
 
 

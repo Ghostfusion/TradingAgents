@@ -411,6 +411,8 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "rsi": (re.compile(r"\brsi\b|relative\s*strength\s*index", re.I), 0.005),
     "aws growth": (re.compile(r"aws.{0,10}(?:growth|yoy)|yoy.{0,10}aws", re.I), 0.005),
     "hy oas": (re.compile(r"hy[-\s]?oas|high\s*yield.{0,20}oas", re.I), 0.005),
+    "forward peg": (re.compile(r"peg|forward\s*p/e.{0,6}growth|price.{0,6}earnings.{0,6}growth", re.I), 0.005),
+    "ttm p/e": (re.compile(r"ttm\s*p/e|p/e\s*ttm|pe\s*ttm", re.I), 0.005),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
