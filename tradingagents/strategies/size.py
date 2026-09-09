@@ -59,6 +59,75 @@ def volatility_target_scale(
     return max(0.0, min(raw, 3.0))
 
 
+def composite_position_size(
+    *,
+    confidence: float,
+    odds: float = 1.0,
+    stop_dist_pct: float,
+    risk_per_trade: float = 0.01,
+    max_position_pct: float = 0.30,
+    kelly_fraction: float = 0.25,
+    annualized_vol: float | None = None,
+    target_vol: float = 0.15,
+    liquidity_scalar: float | None = None,
+    portfolio_action: str = "TRADE_ALLOWED",
+    uncertainty_discount: float | None = None,
+) -> dict:
+    """Composite position size: min(quarter-Kelly, risk/stop, cap) then scaled
+    by volatility, liquidity, an uncertainty discount, and clamped to 0 by any
+    portfolio action that blocks new risk (SKHY 2026-09-09 review #33).
+
+    Deterministic and None-safe:
+    - ``base = min(quarter_kelly, risk_per_trade / stop_dist, max_position_pct)``
+    - ``vol`` scale = target_vol / annualized_vol (clamped 0..3) when vol given.
+    - ``liquidity_scalar`` in [0, 1] (caller derives from participation/ADV).
+    - ``uncertainty_discount`` in [0, 1] (from insufficient-history hints).
+    - ``portfolio_action``: NO_TRADE / EXIT / NO_NEW_RISK / REDUCE / HOLD force
+      size to 0 (or, for REDUCE, 0 since we don't TRIM here). SCALE_DOWN halves.
+
+    Returns ``{recommended_pct, base, vol_scale, liquidity, uncertainty,
+    reasons}``. No inputs -> 0 with reason; never fabricated.
+    """
+    reasons: list[str] = []
+    action = str(portfolio_action or "TRADE_ALLOWED").upper()
+    if action in ("EXIT", "NO_TRADE", "NO_NEW_RISK", "REDUCE", "HOLD"):
+        return {
+            "recommended_pct": 0.0,
+            "base": 0.0, "vol_scale": 1.0, "liquidity": liquidity_scalar, "uncertainty": uncertainty_discount,
+            "reasons": [f"portfolio_action={action}: new risk blocked/clamped to 0"],
+        }
+    base = min(
+        position_size_kelly(confidence, odds, kelly_fraction, max_position_pct),
+        (risk_per_trade / stop_dist_pct) if stop_dist_pct and stop_dist_pct > 0 else max_position_pct,
+        max_position_pct,
+    )
+    base = max(0.0, min(base, max_position_pct))
+    vol_scale = 1.0
+    if annualized_vol is not None and annualized_vol > 0:
+        vol_scale = max(0.0, min(target_vol / annualized_vol, 3.0))
+        if vol_scale < 1.0:
+            reasons.append(f"vol scale {vol_scale:.2f}x (target_vol/annualized_vol)")
+    liq = 1.0 if liquidity_scalar is None else max(0.0, min(liquidity_scalar, 1.0))
+    if liq < 1.0:
+        reasons.append(f"liquidity {liq:.2f}")
+    unc = 1.0 if uncertainty_discount is None else max(0.0, min(uncertainty_discount, 1.0))
+    if unc < 1.0:
+        reasons.append(f"uncertainty discount {unc:.2f}")
+    size = base * vol_scale * liq * unc
+    if action == "SCALE_DOWN":
+        size *= 0.5
+        reasons.append("portfolio_action=SCALE_DOWN -> halve")
+    size = max(0.0, min(size, max_position_pct))
+    return {
+        "recommended_pct": round(size, 6),
+        "base": round(base, 6),
+        "vol_scale": round(vol_scale, 4),
+        "liquidity": liq,
+        "uncertainty": unc,
+        "reasons": reasons or ["no scale adjustments"],
+    }
+
+
 def atr(high: list[float], low: list[float], close: list[float], window: int = 14) -> float:
     """Average True Range over the window."""
     if not (len(high) == len(low) == len(close)) or len(high) < 2:
@@ -209,6 +278,7 @@ __all__ = [
     "stop_loss_atr",
     "cvar_budget",
     "position_size_with_risk",
+    "composite_position_size",
     "modified_var",
     "risk_of_ruin",
     "optimal_f",

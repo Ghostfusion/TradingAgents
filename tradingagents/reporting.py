@@ -357,6 +357,28 @@ def _risk_gate_block(final_state: dict) -> str:
     parts = ["### Risk Gate (computed)", ""]
     verdict = gate.get("verdict", "?")
     parts.append(f"Verdict: **{verdict}**")
+    # Security-signal / portfolio-action split: a bullish signal is never
+    # buried under a portfolio veto (SKHY 2026-09-09 review loop).
+    try:
+        from tradingagents.strategies.signal_action import signal_action_split
+
+        _pm = final_state.get("pm_decision") or {}
+        _rating = _pm.get("rating") if isinstance(_pm, dict) else None
+        _kill = bool((final_state.get("kill_switch_state") or {}).get("active", False))
+        _sp = signal_action_split(
+            str(_rating) if _rating else None,
+            gate_verdict=str(verdict),
+            gate_reasons=list(gate.get("reasons") or []),
+            kill_switch=_kill,
+        )
+        if _sp.get("security_signal"):
+            suffix = " (gated)" if _sp.get("gated") else ""
+            parts.append(
+                f"Security signal: **{_sp['security_signal']}** | "
+                f"Portfolio action: **{_sp['portfolio_action']}**{suffix}"
+            )
+    except Exception:  # noqa: BLE001 - advisory; never break the block
+        pass
     snap = final_state.get("risk_snapshot")
     if snap:
         parts.append(f"Snapshot: {snap}")
@@ -445,6 +467,23 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     rg_verdict = rg.get("verdict") if isinstance(rg, dict) else None
     rg_reasons = rg.get("reasons") or [] if isinstance(rg, dict) else []
 
+    # Security-signal / portfolio-action split (SKHY 2026-09-09 review loop).
+    # The PM's raw rating is the PRE-portfolio signal; the composed risk gate
+    # maps to the portfolio instruction. Advisory, additive-only; old trees
+    # parse fine.
+    try:
+        from tradingagents.strategies.signal_action import signal_action_split
+
+        _kill = bool((final_state.get("kill_switch_state") or {}).get("active", False))
+        _split = signal_action_split(
+            str(pm_rating) if pm_rating else None,
+            gate_verdict=rg_verdict,
+            gate_reasons=rg_reasons,
+            kill_switch=_kill,
+        )
+    except Exception:  # noqa: BLE001 - advisory; never break the artifact
+        _split = {"security_signal": None, "portfolio_action": None, "combined_action": None, "gated": False}
+
     doc = {
         "schema_version": 1,
         "ticker": str(ticker).upper(),
@@ -465,6 +504,10 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
         "invalidations": [],
         "guardrail_reason": pm_gr,
         "risk_gate": {"verdict": rg_verdict, "reasons": rg_reasons},
+        "security_signal": _split.get("security_signal"),
+        "portfolio_action": _split.get("portfolio_action"),
+        "combined_action": _split.get("combined_action"),
+        "gated": bool(_split.get("gated")),
         "disclosure": {"sources_used": [], "sources_empty": []},
     }
     body = _rj.dumps(doc, sort_keys=True, default=str)

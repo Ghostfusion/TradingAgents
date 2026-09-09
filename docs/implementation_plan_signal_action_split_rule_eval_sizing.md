@@ -1,6 +1,6 @@
 # Implementation Plan: security-signal/action split + rule evaluation + position-sizing composite
 
-Status: **PLAN** (no code change yet). Proposed from the 40-point external
+Status: **SHIPPED** (P1-P3 landed; advisory/default-off). Proposed from the 40-point external
 review of the SKHY market.md (evidence-first; the two already-shipped P0s —
 insufficient-history flagging and options OI convention disclosure, commits
 `2ac9d01`/`51e5b1b` — came out of the same review). Companion:

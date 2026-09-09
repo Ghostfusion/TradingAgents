@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Quant decision stack P1-P3 (SKHY 2026-09-09 review loop)** -
+  (P1) security-signal/portfolio-action split: `strategies/signal_action.py`
+  renders "Security signal: **BUY** | Portfolio action: **NO_NEW_RISK**
+  (gated)" in the Risk Gate block and adds `security_signal` /
+  `portfolio_action` / `combined_action` / `gated` to research_decision.json
+  (additive; the gate can downgrade but never upgrade a signal). (P2)
+  composite position sizing: `strategies/size.composite_position_size` +
+  `get_composite_sizing` tool - size = min(quarter-Kelly, risk/stop, cap) x
+  vol-scale x liquidity x uncertainty, clamped to 0 by any blocking portfolio
+  action and halved on SCALE_DOWN. (P3) per-rule forward-return evaluation:
+  `strategies/rule_eval.py` + `scripts/rule_eval.py` - measures fwd
+  1/5/10/20d return, hit rate, MAE/MFE, Sharpe, profit factor per rule with
+  an n>=30 INSUFFICIENT guard (live AMZN: rsi_oversold fwd5 +0.71% PF 1.37 /
+  macd_hist_rising fwd20 +1.39% PF 1.45 vs rsi_overbought fwd20 -1.31% PF
+  0.68 - the indicator set now has evidence). Tests:
+  `tests/test_signal_action_sizing_ruleeval.py` (12).
 - **Data-quality annotations (SKHY 2026-09-09 review loop, P0)** -
   (a) `build_verified_market_snapshot` now flags indicators whose history is
   shorter than the methodology window: stockstats SILENTLY substituted a

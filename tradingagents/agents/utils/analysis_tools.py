@@ -568,6 +568,50 @@ def get_position_sizing(
 
 
 @tool
+def get_composite_sizing(
+    confidence: Annotated[float, "win probability of the setup, 0..1"],
+    stop_dist_pct: Annotated[
+        float, "stop-loss distance from entry as a fraction, e.g. 0.05 for 5%"
+    ],
+    odds: Annotated[float, "win/loss payoff ratio (R:R), 1.0 default"] = 1.0,
+    risk_per_trade: Annotated[float, "account risk per trade, default 0.01"] = 0.01,
+    max_position_pct: Annotated[float, "hard cap on position fraction, default 0.30"] = 0.30,
+    annualized_vol: Annotated[float | None, "annualized realized vol (e.g. 1.17), if known"] = None,
+    target_vol: Annotated[float, "annualized target vol, default 0.15"] = 0.15,
+    liquidity_scalar: Annotated[float | None, "liquidity scalar 0..1, if known"] = None,
+    portfolio_action: Annotated[
+        str, "composed gate instruction: TRADE_ALLOWED | SCALE_DOWN | HOLD | NO_NEW_RISK | REDUCE | EXIT | NO_TRADE"
+    ] = "TRADE_ALLOWED",
+    uncertainty_discount: Annotated[float | None, "0..1 quality discount from insufficient-history hints"] = None,
+) -> str:
+    """Composite recommended position size (SKHY 2026-09-09 review #33).
+
+    size = min(quarter-Kelly, risk/stop, cap) * vol_scale * liquidity *
+    uncertainty, then clamped to 0 by any portfolio action that blocks new
+    risk (NO_TRADE/EXIT/NO_NEW_RISK/REDUCE/HOLD) or halved on SCALE_DOWN.
+    Gives ONE deterministic recommended_position_pct with per-factor reasons,
+    instead of a bare min(kelly, risk-budget) sizing call. Call before
+    proposing a concrete size; the composed risk gate stays the authority.
+    """
+    from tradingagents.strategies.size import composite_position_size
+
+    r = composite_position_size(
+        confidence=confidence, odds=odds, stop_dist_pct=stop_dist_pct,
+        risk_per_trade=risk_per_trade, max_position_pct=max_position_pct,
+        annualized_vol=annualized_vol, target_vol=target_vol,
+        liquidity_scalar=liquidity_scalar, portfolio_action=portfolio_action,
+        uncertainty_discount=uncertainty_discount,
+    )
+    reason = "; ".join(r["reasons"]) if r["reasons"] else "no scale adjustments"
+    return (
+        f"composite size: recommended_position_pct={r['recommended_pct']:.1%} "
+        f"(base={r['base']:.1%} vol_scale={r['vol_scale']:.2f}x "
+        f"liquidity={r['liquidity']:.2f} uncertainty={r['uncertainty']:.2f}); "
+        f"reasons: {reason}"
+    )
+
+
+@tool
 def get_risk_gate(
     size_pct: Annotated[
         float, "proposed position size as a fraction of capital, 0..1 (e.g. 0.10 = 10%)"
