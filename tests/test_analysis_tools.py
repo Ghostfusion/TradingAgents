@@ -1254,7 +1254,8 @@ def test_tranche_plan_computes_levels(monkeypatch):
     out = V.get_tranche_plan.invoke({"ticker": "AAPL"})
     assert "tranche plan AAPL" in out
     assert "P1=" in out and "P2=" in out and "P3=" in out
-    assert "stop=" in out and "avg_entry=" in out
+    assert "stop=" in out and "avg_entry(" in out
+    assert "size-weighted" in out  # avg_entry is weighted by the tranche weights, not a simple mean
     assert "blended_rr=" in out and "risk_ok=" in out
 
 

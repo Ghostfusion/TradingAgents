@@ -3765,3 +3765,16 @@ PRs from late 2025 also landed here.
 - **Working-agreement rule 8** (docs/AGENT_ONBOARDING.md): after every
   report-verifier run, verify flagged claims against tool_evidence leaves and
   fix confirmed defects.
+
+### Fixed (market.md audit of TJX 2026-09-08)
+- **`get_tranche_plan` avg_entry is size-weighted — now labeled**: the output
+  emits `avg_entry(size-weighted)=` instead of ambiguous `avg_entry=`. The
+  value was ALREADY correct (weights `[0.3,0.3,0.4]`, w×P = 125.57), but the
+  label let readers/below comprehension misread it as an equal-weighted mean
+  (simple avg of P1/P2/P3 = 125.88). Disclosing it removes the implied-error
+  confusion. Test contract updated to pin `size-weighted`.
+- **Market.md remaining conflicts (beta 0.13 vs 0.593, short 1.78% vs 48.1%
+  Reg-SHO, put-skew -39.0% vs skew-slope, credit 'moderate' vs 'low') are
+  definition-level cross-source issues** — every figure exists in a leaf, so
+  they are correctly-unflaggeable-by-value; they are now documented in the
+  design doc rather than silently dropped (rule 8).

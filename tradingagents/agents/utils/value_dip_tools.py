@@ -285,7 +285,8 @@ def get_tranche_plan(
     tg = plan["targets"]
     return (
         f"tranche plan {ticker}: P1={plan['p1']:.2f} P2={plan['p2']:.2f} "
-        f"P3={plan['p3']:.2f} stop={plan['stop']:.2f} avg_entry={plan['avg_entry']:.2f} "
+        f"P3={plan['p3']:.2f} stop={plan['stop']:.2f} "
+        f"avg_entry(size-weighted)={plan['avg_entry']:.2f} "
         f"risk/share={plan['risk_per_share']:.2f} shares={plan['total_shares']} "
         f"(w={plan['weights']} n={plan['shares']}) "
         f"capital_at_risk=${plan['capital_at_risk']:,.0f} vs max ${plan['max_dollar_risk']:,.0f} "
