@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **News-analyst macro citation hardening (AMZN 2026-09-09 review loop)** -
+  uncited macro figures (10Y Treasury "9.78%"/"4.85%" vs actual ~4.78, RRP
+  0.626B, "93% no Fed cut" Polymarket) had ZERO tool leaves - the analyst
+  recalled them instead of calling get_macro_indicators / get_prediction_markets
+  / get_tga_balance (all exist and were bound). The prompt now pins every macro
+  class to its tool (MACRO MUSTS) and forbids pasting a recalled macro figure;
+  regression test in `tests/test_news_analyst_prompt.py`. Verifier caught all
+  of these as UNSUPPORTED/anchored already (rule 8 loop).
 - **VDU hard execution gate + ATR(14) labeling (AMZN 2026-09-09 review #19/#14)** -
   (a) `value_dip_setup` gained `require_vdu`: the Step-2 VDU ladder (volume
   dry-up + trigger candle close-above-prior-high + RVOL >= 1.3 + momentum

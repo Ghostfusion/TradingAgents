@@ -23,3 +23,18 @@ def test_news_prompt_matches_get_news_signature():
     src = inspect.getsource(na)
     assert "get_news(ticker, start_date, end_date)" in src
     assert "get_news(query" not in src
+
+
+@pytest.mark.unit
+def test_news_prompt_macro_must_source_tools():
+    """Macro figures (Treasury yields / RRP / EFFR, market-implied odds, TGA)
+    must be sourced from the corresponding tools, never recalled from memory -
+    the AMZN 2026-09-09 review loop uncited a 10Y 9.78% (actual ~4.78), RRP
+    0.626B and Polymarket 93% with zero tool leaves. The prompt must pin every
+    macro class to its tool."""
+    src = inspect.getsource(na)
+    assert "MACRO MUSTS" in src
+    assert "MUST come from get_macro_indicators" in src
+    assert "MUST come from get_prediction_markets" in src
+    assert "MUST come from get_tga_balance" in src
+    assert "Never paste a recalled" in src

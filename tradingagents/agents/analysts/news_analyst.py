@@ -96,6 +96,15 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             " the same quantity (e.g. two ATRs, two 200-day averages, two"
             " moves), quote BOTH with their tool names and flag the conflict -"
             " never splice, substitute, or reconcile silently."
+            " MACRO MUSTS: Treasury yields, RRP/ON-RRP, EFFR and any FRED series"
+            " MUST come from get_macro_indicators(...,'10y_treasury'/'fed_funds_rate'/"
+            "'reverse_repo' or a raw FRED id); market-implied probabilities (Fed"
+            " cut, recession odds) MUST come from get_prediction_markets; TGA"
+            " MUST come from get_tga_balance. A macro number whose tool output is"
+            " absent (NO_DATA or never called) is NOT citable - say 'unavailable'"
+            " instead of quoting a recalled value (the 10Y-9.78%/4.85% and RRP 0.626B"
+            " AMZN 2026-09-09 flags were uncited macro). Never paste a recalled"
+            " macro figure into the report."
             + get_language_instruction() + get_output_budget("analyst")
         )
 
