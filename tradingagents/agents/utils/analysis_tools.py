@@ -3718,7 +3718,7 @@ def get_gap_type(
     try:
         from tradingagents.strategies.market_session import gap_type
 
-        r = gap_type(closes, data["highs"], data["lows"], data["volumes"])
+        r = gap_type(closes, data.get("opens"), data["highs"], data["lows"], data["volumes"])
         if r.get("type") is None:
             return f"gap type unavailable for {ticker}: insufficient data."
         return (

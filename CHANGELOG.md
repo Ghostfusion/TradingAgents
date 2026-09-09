@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Fix overnight-gap mislabel (SKHY 2026-09-09 review loop)** -
+  `gap_type` computed the gap as (close_t - close_t-1) - i.e. the DAY'S return
+  labelled an "overnight gap" - because it proxied today's open with the
+  close. SKHY: +7.32% session move was labeled an "exhaustion gap" when the
+  real open gap was ~+1%. `gap_type(closes, opens, highs, lows, volumes)`
+  now takes the real open series (tool passes it; close fallback only when
+  no opens exist) and `get_gap_type` renders the true open gap. Tests:
+  breakaway via real +2% open gap, SKHY regression (flat open + big close
+  move classifies common, never exhaustion).
 - **FCF-yield currency-neutral render + P/E/PEG conflict net (SKHY 2026-09-09
   review loop)** - `get_fcf_yield` rendered vendor-raw values with a "$" prefix
   even for non-USD reporters (SKHY KRW: a correctly-computed 7.77% yield got

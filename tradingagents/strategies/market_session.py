@@ -129,7 +129,7 @@ def opening_range(highs, lows, closes=None, n_minutes: int = 15) -> dict:
         }
 
 
-def gap_type(closes, highs, lows, volumes, n: int = 20) -> dict:
+def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
     """Classify the most recent overnight gap + estimate fill behavior.
 
     Gap = today's open vs yesterday's close. Types (Investopedia):
@@ -146,7 +146,12 @@ def gap_type(closes, highs, lows, volumes, n: int = 20) -> dict:
         return {"type": None, "gap_pct": None, "fill_probability": None, "days_to_fill": None}
     try:
         prev_close = float(closes[-2])
-        today_open = float(closes[-1])  # daily close proxy for the open
+        # The gap is today's OPEN vs yesterday's close. A close-proxy for the
+        # open silently turned the day's return into an "overnight gap" (SKHY
+        # 2026-09-09: +7.32% session move mislabeled an exhaustion gap). Use
+        # the real open when the caller passes it; only fall back to closes
+        # when no open series exists.
+        today_open = float(opens[-1]) if (opens and opens[-1] is not None) else float(closes[-1])
         if prev_close <= 0:
             return {"type": None, "gap_pct": None, "fill_probability": None, "days_to_fill": None}
         gap_pct = (today_open - prev_close) / prev_close

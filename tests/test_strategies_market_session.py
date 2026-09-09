@@ -156,28 +156,45 @@ def test_opening_range_insufficient():
 
 
 def test_gap_type_breakaway():
+    # A real OPEN gap (102.0 open vs 100.0 prev close = +2%) on 3x volume -> breakaway.
     closes = [100.0] * 25 + [103.0]
+    opens = [100.0] * 25 + [102.0]
     highs = [101.0] * 25 + [104.0]
     lows = [99.0] * 25 + [102.0]
     vols = [1_000_000.0] * 25 + [3_000_000.0]
-    r = ms.gap_type(closes, highs, lows, vols)
+    r = ms.gap_type(closes, opens, highs, lows, vols)
     assert r["type"] == "breakaway"
-    assert r["gap_pct"] is not None
+    assert r["gap_pct"] == round((102.0 - 100.0) / 100.0, 6)  # open-gap, not close-gap
     assert r["fill_probability"] is not None
+
+
+def test_gap_type_uses_real_open_not_close_proxy():
+    """SKHY 2026-09-09 review-loop bug: the gap must be (open_t - close_t-1),
+    NOT (close_t - close_t-1). A +7.32% session change must NOT be labeled an
+    overnight gap when the actual open was near-flat."""
+    closes = [100.0] * 25 + [107.3]
+    opens = [100.0] * 25 + [100.4]   # real open: +0.4% gap
+    highs = [101.0] * 25 + [108.0]
+    lows = [99.0] * 25 + [100.0]
+    vols = [1_000_000.0] * 26
+    r = ms.gap_type(closes, opens, highs, lows, vols)
+    assert r["type"] == "common"          # +0.4% gap, not exhaustion
+    assert abs(r["gap_pct"] - (100.4 - 100.0) / 100.0) < 1e-6
 
 
 def test_gap_type_common():
     closes = [100.0] * 25 + [100.5]
+    opens = [100.0] * 25 + [100.2]  # +0.2% open gap
     highs = [101.0] * 25 + [101.0]
     lows = [99.0] * 25 + [99.5]
     vols = [1_000_000.0] * 26
-    r = ms.gap_type(closes, highs, lows, vols)
+    r = ms.gap_type(closes, opens, highs, lows, vols)
     assert r["type"] == "common"
     assert r["fill_probability"] >= 0.5
 
 
 def test_gap_type_insufficient():
-    r = ms.gap_type([1, 2], [1, 2], [1, 2], [1, 2])
+    r = ms.gap_type([1, 2], [1, 2], [1, 2], [1, 2], [1, 2])
     assert r["type"] is None
 
 
