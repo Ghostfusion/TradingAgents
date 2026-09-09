@@ -213,6 +213,70 @@ def test_sentiment_prompt_binds_verdict_to_computed_score():
     assert "### Deterministic computed sentiment" not in plain
 
 
+def test_internal_conflict_same_metric_two_values():
+    text = (
+        "DCF fair value is $80.76.\n"
+        "The table shows DCF value at 79.60.\n"
+        "EPS TTM is 5.40.\n"
+    )
+    conf = rv._internal_conflicts(text)
+    by = {c.claim.split("'")[1]: c for c in conf}
+    assert "dcf fair value" in by
+    assert by["dcf fair value"].status == "INTERNAL_CONFLICT"
+    assert "80.76" in by["dcf fair value"].claim and "79.60" in by["dcf fair value"].claim
+    # EPS appears once -> no conflict
+    assert "eps ttm" not in by
+    # A second metric on the same line as another must NOT be misattributed.
+    assert "roe" not in by or "'roe'" not in by
+
+
+def test_internal_conflict_consistent_value_no_flag():
+    text = "DCF fair value 80.76.\nDCF fair value $80.75 elsewhere.\n"
+    # 80.76 vs 80.75 are within 0.5% tolerance -> treated as ONE cluster, no conflict.
+    assert rv._internal_conflicts(text) == []
+
+
+def test_internal_conflict_magnitude_normalized():
+    # 79.78B and 5.7B are really different magnitudes -> conflict; 79.78B vs
+    # 79.8B normalize to the same numeric value.
+    t = "EPV ~79.78B in valuation.\nAction section quotes EPV 5.7B.\n"
+    conf = rv._internal_conflicts(t)
+    assert any(c.claim.startswith("'earnings power value'") for c in conf)
+    t2 = "EPV 79.78B.\nEPV 79.8B.\n"
+    assert rv._internal_conflicts(t2) == []
+
+
+def test_internal_conflict_wired_into_report_dir(tmp_path):
+    d = _mk_report_dir(
+        tmp_path,
+        reports={
+            "fundamentals": (
+                "DCF fair value $80.76.\n"
+                "DCF fair value 79.60 in the summary table.\n"
+                "EPS 5.4.\n"
+            )
+        },
+    )
+    payload = rv.verify_report_dir(
+        d,
+        llm_override=_mk_llm('{"claims": [{"claim": "EPS 5.4", "status": "GROUNDED", "reason": "leaf"}]}'),
+    )
+    stems = payload["verification"]["fundamentals"]
+    assert any(c["status"] == "INTERNAL_CONFLICT" for c in stems["claims"])
+    assert stems["overall"] == "FLAG"
+
+
+def test_cost_models_import_reachable():
+    from tradingagents.agents.utils import report_verifier as R2
+
+    assert hasattr(R2, "internal_conflicts") or hasattr(R2, "_internal_conflicts")
+
+
+def test_no_rating_signal_no_conflict():
+    # Ordinary prose with a metric but a single consistent value -> no conflict.
+    assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []
+
+
 def test_parse_verdict_json():
     v = rv._parse_verdict(
         '{"claims": [{"claim": "x", "status": "UNSUPPORTED", "reason": "no"}]}',

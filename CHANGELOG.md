@@ -3750,3 +3750,18 @@ PRs from late 2025 also landed here.
   without a colon-separated value is untouched. `SignalProcessor` surfaces
   REVIEW too. See docs/review_parent_tauricradingagents.md (review-only, the
   one adoptable item).
+
+### Added (report verifier — internal-consistency pass)
+- **Cross-claim internal-conflict detection** (`report_verifier._internal_conflicts`):
+  the verifier previously checked each claim against the tool evidence
+  individually, so it could not see the same metric asserted at conflicting
+  values *within one report* (the TJX 2026-09-08 fundamentals.md: EPV $79.78B
+  vs $5.7B, ROE 62.17 vs 53.92, D/E 1.32 vs 1.3, insider net +145,976 vs
+  +175k, EPS 5.81 vs 4.79 — every figure "matched some leaf", so per-claim
+  anchoring missed the contradiction). Adds an `INTERNAL_CONFLICT` claim class
+  (new status) for same-metric/different-value across the report, value
+  normalised across K/M/B magnitudes, >1% divergence, values scoped to the
+  metric label (no cross-metric misattribution). Advisory, never rewrites.
+- **Working-agreement rule 8** (docs/AGENT_ONBOARDING.md): after every
+  report-verifier run, verify flagged claims against tool_evidence leaves and
+  fix confirmed defects.

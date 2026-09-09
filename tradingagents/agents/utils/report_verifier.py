@@ -94,13 +94,14 @@ class VerifierClaim(BaseModel):
     """One extracted claim + its grounding verdict."""
 
     claim: str = Field(description="The sentence/claim as written in the report.")
-    status: Literal["GROUNDED", "UNSUPPORTED", "CONTRADICTED"] = Field(
+    status: Literal["GROUNDED", "UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT"] = Field(
         ...,
         description=(
             "GROUNDED: the claim's specifics (figures, direction, state) are "
             "present in the evidence leaves; UNSUPPORTED: the claim asserts "
             "specifics the evidence does not contain; CONTRADICTED: evidence "
-            "contains an opposing value/state."
+            "contains an opposing value/state; INTERNAL_CONFLICT: the same "
+            "metric is asserted at conflicting values within this one report."
         ),
     )
     reason: str = Field(
@@ -306,10 +307,109 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
         return ReportVerification(report=verification.report, claims=anchored, overall="UNKNOWN")
     overall = (
         "FLAG"
-        if any(c.status in ("UNSUPPORTED", "CONTRADICTED") for c in anchored)
+        if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in anchored)
         else "PASS"
     )
     return ReportVerification(report=verification.report, claims=anchored, overall=overall)
+
+
+# ---------------------------------------------------------------------------
+# Internal-consistency (cross-claim) check — deterministic
+# ---------------------------------------------------------------------------
+
+# Metric label -> regex to locate its numeric value(s) in text. Covers the
+# load-bearing metrics the analyst may quote from multiple vendors (the JPM/
+# GS/TJX 2026-09-08 batch: DCF fair value 80.76 vs 80.71, EPS 5.81 vs 4.79,
+# market cap 141.8B vs 145.3B, ROE 53.92 vs 59.77 — all "matched some leaf"
+# individually, so the per-claim anchor could not see the conflict).
+_INTERNAL_CONFLICT_METRICS: dict[str, re.Pattern] = {
+    "dcf fair value": re.compile(r"dcf\s*(?:fair\s*)?value", re.I),
+    "eps ttm": re.compile(r"\beps\s*(?:ttm)?\b", re.I),
+    "earnings power value": re.compile(r"earnings\s*power\s*value|epv", re.I),
+    "market cap": re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I),
+    "roe": re.compile(r"\broe\b|return\s*on\s*equity", re.I),
+    "debt/equity": re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I),
+    "200-day sma": re.compile(r"200[-\s]?day\s*(?:sma|ma|moving)", re.I),
+    "insider net": re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I),
+    "dividend yield": re.compile(r"dividend\s*yield", re.I),
+    "book value": re.compile(r"book\s*value|book\s*value/share|bvps", re.I),
+}
+
+# A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
+# "$80.60", "79.78B", "5.7B". Used to extract the numeric value attached to a
+# metric. Returns (value, unit_multiplier) or None.
+_DOLLAR_RE = re.compile(r"\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
+
+
+def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, float]]:
+    """All ``(raw_value_str, numeric_value)`` occurrences for one metric label.
+
+    The value is read from the window immediately surrounding the metric
+    label (up to 24 chars each side) so a number belonging to a *different*
+    metric on the same line is not misattributed (e.g. "ROE 0.18 and EPS 2.41"
+    must not attach 2.41 to ROE). Dollar magnitudes are normalised to plain
+    units (79.78B -> 7.978e10) so 79.78B and 5.7B compare at one scale.
+    """
+    out: list[tuple[str, float]] = []
+    for line in text.splitlines():
+        m = regex.search(line)
+        if not m:
+            continue
+        # Prefer the first number after the metric label (the metric's value).
+        tail = line[m.end():m.end() + 24]
+        for mnum in _DOLLAR_RE.finditer(tail):
+            num_s, unit = mnum.group(1), (mnum.group(2) or "")
+            try:
+                num = float(num_s)
+            except ValueError:
+                continue
+            mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(unit.upper(), 1.0)
+            out.append((tail[max(0, mnum.start() - 6):mnum.end()].strip(), num * mult))
+            break
+    return out
+
+
+def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
+    """Find the same metric asserted at conflicting values within ONE report.
+
+    The per-claim anchor checks each claim against the tool evidence, so it
+    cannot see that claim A says "DCF 80.76" and claim B says "DCF 80.60" —
+    both individually "grounded in some leaf". This pass pairs occurrences of
+    the same metric label and flags materially different values (>1%
+    relative) as an INTERNAL_CONFLICT. Advisory; never rewrites.
+    """
+    if not report_text:
+        return []
+    conflicts: list[VerifierClaim] = []
+    for label, regex in _INTERNAL_CONFLICT_METRICS.items():
+        vals = _extract_metric_values(report_text, regex)
+        # Group near-equal values; flag when >1 distinct cluster.
+        distinct: list[tuple[float, str]] = []
+        for raw, v in vals:
+            bucket = next(
+                (b for b in distinct if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= 0.01),
+                None,
+            )
+            if bucket is None:
+                distinct.append((v, raw))
+            else:
+                # keep the first raw string for the group
+                pass
+        if len(distinct) >= 2:
+            shown = "; ".join(f"{raw}" for _, raw in distinct)
+            conflicts.append(
+                VerifierClaim(
+                    claim=f"'{label}' cited at conflicting values: {shown}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The same metric appears at different values in this report — "
+                        "likely quoted from different data tools/vendors and never "
+                        "reconciled. Resolve to one value (pick a vendor or average) "
+                        "before relying on the figure."
+                    ),
+                )
+            )
+    return conflicts
 
 
 # ---------------------------------------------------------------------------
@@ -432,9 +532,16 @@ def verify_report_dir(
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
+        conflicts = _internal_conflicts(report_text)
+        all_claims = anchored.claims + conflicts
+        overall = (
+            "FLAG"
+            if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
+            else anchored.overall
+        )
         outcomes[stem] = {
-            "overall": anchored.overall,
-            "claims": [c.model_dump() for c in anchored.claims],
+            "overall": overall,
+            "claims": [c.model_dump() for c in all_claims],
         }
         stem_succeeded += 1
 
