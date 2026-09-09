@@ -142,6 +142,16 @@ def build_verified_market_snapshot(
         f"- Requested analysis date: {curr_date}",
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",
+    ]
+    if str(latest["Date"])[:10] == str(curr_date):
+        lines.append(
+            "- NOTE: the latest row is dated = the requested analysis date - if that "
+            "session is still in progress (an intraday run), it is a FORMING bar and "
+            "its Close + all close-derived indicators (SMA/EMA/MACD/RSI/bands/ATR) "
+            "are PROVISIONAL until the session closes; treat any EOD-signal claim as "
+            "provisional, never a settled close."
+        )
+    lines += [
         "",
         "### Latest verified OHLCV row",
         "",

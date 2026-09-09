@@ -110,3 +110,79 @@ def test_mean_reversion_quality_tool_render(monkeypatch):
         _RUN_OHLCV_CACHE.clear()
 
 
+def test_mean_reversion_mixed_evidence_disclosed(monkeypatch):
+    """AMZN 2026-09-09 adjudication: an AR(1)-significant mean-reverting
+    verdict must disclose long-horizon counter-evidence (Hurst > 0.5 leans
+    persistence, VR > 1 leans momentum) instead of a clean 'dip entries
+    supported' read."""
+    import tradingagents.strategies.mean_reversion as mr
+    from tradingagents.agents.utils.analysis_tools import (
+        _RUN_OHLCV_CACHE,
+        get_mean_reversion_quality,
+    )
+
+    n = 120
+    closes = [100.0 + 0.05 * i for i in range(n)]  # trending level
+    dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
+    _RUN_OHLCV_CACHE[("AMZN", 320)] = {
+        "dates": dates,
+        "closes": closes,
+        "opens": closes,
+        "highs": [c + 1 for c in closes],
+        "lows": [c - 1 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    }
+    monkeypatch.setattr(mr, "mean_reversion_verdict", lambda use: {
+        "verdict": "mean-reverting", "half_life": 10.78, "phi": -0.0623, "n": 120,
+    })
+    monkeypatch.setattr(mr, "ar1_half_life", lambda use: 10.78)
+    monkeypatch.setattr(mr, "ou_half_life", lambda use: 10.78)
+    monkeypatch.setattr(mr, "hurst_exponent", lambda diffs: 0.6425)
+    monkeypatch.setattr(mr, "variance_ratio", lambda *a, **k: {"vr": 1.1828, "z": 1.6})
+    try:
+        out = get_mean_reversion_quality.invoke({"ticker": "AMZN"})
+        assert "verdict: mean-reverting" in out
+        assert "MIXED" in out
+        assert "leans persistence" in out
+        assert "leans momentum" in out
+        assert "require an explicit trigger" in out
+    finally:
+        _RUN_OHLCV_CACHE.clear()
+
+
+def test_mean_reversion_clean_when_no_counter_evidence(monkeypatch):
+    """With no Hurst/VR counter-signal the read stays the clean 'dip entries
+    supported' form (no regression for the un-mixed case)."""
+    import tradingagents.strategies.mean_reversion as mr
+    from tradingagents.agents.utils.analysis_tools import (
+        _RUN_OHLCV_CACHE,
+        get_mean_reversion_quality,
+    )
+
+    n = 120
+    closes = [100.0] * n
+    dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
+    _RUN_OHLCV_CACHE[("MSFTX", 320)] = {
+        "dates": dates,
+        "closes": closes,
+        "opens": closes,
+        "highs": [c + 1 for c in closes],
+        "lows": [c - 1 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    }
+    monkeypatch.setattr(mr, "mean_reversion_verdict", lambda use: {
+        "verdict": "mean-reverting", "half_life": 4.0, "phi": -0.15, "n": n,
+    })
+    monkeypatch.setattr(mr, "ar1_half_life", lambda use: 4.0)
+    monkeypatch.setattr(mr, "ou_half_life", lambda use: 4.0)
+    monkeypatch.setattr(mr, "hurst_exponent", lambda diffs: 0.40)
+    monkeypatch.setattr(mr, "variance_ratio", lambda *a, **k: {"vr": 0.90, "z": -1.1})
+    try:
+        out = get_mean_reversion_quality.invoke({"ticker": "MSFTX"})
+        assert "verdict: mean-reverting" in out
+        assert "MIXED" not in out
+        assert "dip entries supported" in out
+    finally:
+        _RUN_OHLCV_CACHE.clear()
+
+

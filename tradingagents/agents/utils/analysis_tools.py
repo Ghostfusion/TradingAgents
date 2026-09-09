@@ -5366,10 +5366,30 @@ def get_mean_reversion_quality(
         if hl_ou is not None:
             lines.append(f"- OU half-life: {hl_ou} days")
         if v["verdict"] == "mean-reverting":
-            lines.append(
-                "- read: dip entries supported by the measured mean-reversion "
-                f"(half-life {v['half_life']}d); sized to the reversion cadence"
-            )
+            # The AR(1) verdict can be statistically reverting while the
+            # long-horizon signatures (Hurst / variance ratio) lean the other
+            # way (AMZN 2026-09-09: half-life 10.78d but Hurst 0.6425 + VR 1.18
+            # are persistence/momentum). Disclose the mixed evidence instead of
+            # a clean "dip entries supported" read.
+            mixed = []
+            if hurst is not None and hurst > 0.55:
+                mixed.append(f"Hurst {hurst:.2f} leans persistence")
+            if vr is not None and vr["vr"] > 1 and vr.get("z") is not None and vr["z"] > 1.0:
+                mixed.append(f"VR {vr['vr']:.2f} (z={vr['z']:.2f}) leans momentum")
+            if mixed:
+                lines.append(
+                    "- read: measured mean reversion (half-life "
+                    f"{v['half_life']}d) but the evidence is MIXED - "
+                    + "; ".join(mixed)
+                    + "; require an explicit trigger/confirmation before "
+                    "fading, and size to the reversion cadence rather than "
+                    "treating this as a strong mean-reverting regime"
+                )
+            else:
+                lines.append(
+                    "- read: dip entries supported by the measured mean-reversion "
+                    f"(half-life {v['half_life']}d); sized to the reversion cadence"
+                )
         elif v["verdict"] == "trending":
             lines.append(
                 "- read: the series is TRENDING (phi >= 0); a pure mean-reversion "

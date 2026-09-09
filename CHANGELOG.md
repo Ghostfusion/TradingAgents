@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Market-report honesty fixes (AMZN 2026-09-09 review loop)** -
+  (a) `build_verified_market_snapshot` now labels a row dated = the requested
+  analysis date as a potentially FORMING bar (intraday run) and marks its
+  Close + close-derived indicators PROVISIONAL - never a settled close -
+  instead of presenting it as a "verified" EOD bar; (b) `get_mean_reversion_quality`
+  discloses MIXED evidence when the AR(1) verdict is mean-reverting but the
+  long-horizon signatures lean the other way (Hurst > 0.55 persistence and/or
+  a significant VR > 1 momentum) - AMZN half-life 10.78d but Hurst 0.6425 /
+  VR 1.18, so the read now says "require an explicit trigger/confirmation"
+  rather than a clean "dip entries supported". Regression tests:
+  `tests/test_market_data_validator.py` (provisional-note + settled control),
+  `tests/test_strategies_mean_reversion.py` (mixed + clean paths).
 - **CapEx-allocation read (advisory, deterministic)** - `strategies/capex_quality.py`
   + `get_capex_quality` (fundamentals tool loop): separates PRODUCTIVE
   investment from OVERINVESTMENT / DISTRESS for high-capex names - CapEx
