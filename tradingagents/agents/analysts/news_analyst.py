@@ -105,6 +105,12 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             " instead of quoting a recalled value (the 10Y-9.78%/4.85% and RRP 0.626B"
             " AMZN 2026-09-09 flags were uncited macro). Never paste a recalled"
             " macro figure into the report."
+            + " Summary-table figures must MATCH their body figures exactly"
+            " (same digits, same units/scales - never drop, substitute or"
+            " abbreviate a figure into a stale one. e.g. a Q2 AI-orders row"
+            " that the body states as $61B must show $61B in the table, not"
+            " the prior-quarter's $2B). DELL 2026-09-10 news.md lost the"
+            " $61B AI-orders figure in its summary row."
             + get_language_instruction() + get_output_budget("analyst")
         )
 

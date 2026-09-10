@@ -386,7 +386,14 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Default tolerance 1%: vendor-consensus rounding (80.76 vs 80.75) is ONE
     # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
     "dcf fair value": (re.compile(r"dcf\s*(?:fair\s*)?value", re.I), 0.01),
-    "eps ttm": (re.compile(r"\beps\s*(?:ttm)?\b", re.I), 0.01),
+    "eps ttm":(re.compile(r"\beps\s*(?:ttm)?\b", re.I), 0.01),
+        # DELL 2026-09-10 news.md: body quoted 'EPS actual 7.04' and the
+        # summary row 'EPS actual 7.00' (both labeled Finnhub, same quarter) —
+        # a 0.6% dual value. Level-type metrics use a 0.5% bucket.
+
+
+        "eps actual":(re.compile(r"\beps\s+actual\b", re.I), 0.005),
+        "eps estimate":(re.compile(r"\beps\s+actual\b.*?\best(?:imate)?\b", re.I), 0.002),
     "earnings power value": (re.compile(r"earnings\s*power\s*value|epv", re.I), 0.01),
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),

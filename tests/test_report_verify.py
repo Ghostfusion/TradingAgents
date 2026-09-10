@@ -322,6 +322,22 @@ def test_internal_conflict_t1_mislabel():
     assert any("'t1'" in c.claim for c in out)
 
 
+def test_internal_conflict_eps_actual_dual_values():
+    # DELL 2026-09-10 news.md: body 'EPS actual 7.04'vs summary
+    # 'EPS actual 7.00' (both Finnhub, same quarter) — 0.6% apart must flag.
+
+
+    t = "EPS actual **7.04** vs estimate **5.012**  ...  EPS actual **7.00** vs est **5.03**"
+    out = rv._internal_conflicts(t)
+    assert any("'eps actual'" in c.claim for c in out)
+    assert any("'eps estimate'" in c.claim for c in out)
+
+
+def test_internal_conflict_eps_single_value_clean():
+    t = "EPS actual **7.04** vs estimate **5.012** (Finnhub)"
+    assert rv._internal_conflicts(t) == []
+
+
 def test_internal_conflict_close_200_sma_dual_values():
     # DELL 2026-09-10 market.md: body 258.98 vs summary 238.98 ona
     # the SAME 'close_200_sma' label must flag (not hidden by the missing
