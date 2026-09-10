@@ -108,7 +108,7 @@ def margin_of_safety_bases(price: float, intrinsic: float | None) -> dict:
     p, iv = float(price), float(intrinsic)
     return {
         "fv_basis": (iv - p) / iv,
-        "price_basis": -(p / iv - 1.0),
+        "price_basis": (iv - p) / p,
         "price_to_intrinsic": p / iv,
     }
 

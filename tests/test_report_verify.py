@@ -551,6 +551,21 @@ def test_internal_conflict_diluted_eps_dual_values():
     assert any("'diluted eps'" in c.claim for c in out)
 
 
+def test_margin_of_safety_bases_distinct_conventions():
+    # MSFT 2026-09-10 review: (FV-P)/FV (-333.7%) vs (FV-P)/P (-76.9%) - the
+    # two bases must NOT collapse to the same number (regression: the first
+    # impl computed price_basis as -(P/IV - 1), which equals the FV basis).
+    from tradingagents.strategies.normalized import margin_of_safety_bases
+
+    b = margin_of_safety_bases(490.50, 113.09)
+    assert abs(b["fv_basis"] - (-3.3373)) < 0.01
+    assert abs(b["price_basis"] - (-0.7693)) < 0.01
+    assert abs(b["price_to_intrinsic"] - 4.337) < 0.02
+    assert b["fv_basis"] != b["price_basis"]
+    c = margin_of_safety_bases(80.0, 100.0)
+    assert abs(c["price_basis"] - 0.25) < 1e-9
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []
