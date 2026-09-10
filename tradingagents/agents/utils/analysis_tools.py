@@ -3480,6 +3480,153 @@ def get_risk_parity_alloc(
 # ---------------------------------------------------------------------------
 
 
+def _dcf_fcf_series_all(cashflow_payload):
+    """Time-ordered annual FCF series KEEPING negative years (cycle context).
+
+    Identical parsing to ``_dcf_fcf_series`` but without the positive-only
+    filter: the median-of-annual-FCF normalization (get_normalized_cycle_dcf)
+    needs trough years (e.g. MU FY2023 -$5.8B) to locate the mid-cycle center.
+    Returns chronological ``[float, ...]`` (oldest first), never empty when a
+    payload parses; a year with no FCF row is skipped.
+    """
+    if not cashflow_payload or str(cashflow_payload).lstrip().startswith(
+        ("NO_DATA", "DATA_DISABLED", "DATA_UNAVAILABLE")
+    ):
+        return []
+    try:
+        from tradingagents.dataflows.statement_parsing import (
+            _markdown_period_tables,
+            _period_year,
+        )
+
+        tables = _markdown_period_tables(cashflow_payload)
+    except Exception:  # noqa: BLE001
+        tables = []
+    by_year = {}
+    if tables:
+        for period, rows in tables:
+            fcf = None
+            for label, value in rows.items():
+                if "free cash flow" in str(label).lower():
+                    fcf = value
+                    break
+            if fcf is None:
+                op = cap = None
+                for label, value in rows.items():
+                    low = str(label).lower()
+                    if "operating cash flow" in low or "cash flow from operating" in low:
+                        op = value
+                    if "capital expenditure" in low or "purchase of property" in low:
+                        cap = value
+                if op is not None and cap is not None:
+                    try:
+                        fcf = float(op) - abs(float(cap))
+                    except (TypeError, ValueError):
+                        fcf = None
+            if fcf is not None:
+                try:
+                    by_year[_period_year(period)] = float(fcf)
+                except (TypeError, ValueError):
+                    continue
+    # yfinance-style CSV fallback (per-column dates -> one value per year).
+    if not by_year:
+        try:
+            from tradingagents.agents.utils.analysis_tools import _dcf_yf_rows as _r
+        except Exception:  # noqa: BLE001
+            _r = lambda p: {}
+        for label, vals in (_r(cashflow_payload) or {}).items():
+            low = str(label).lower()
+            if "free cash flow" not in low and "operating cash flow" not in low:
+                continue
+            for y, v in vals.items():
+                try:
+                    by_year[int(y)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+    if not by_year:
+        return []
+    return [v for _, v in sorted(by_year.items())]  # chronological, signs kept
+
+
+@tool
+def get_normalized_cycle_dcf(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+    wacc: Annotated[float | None, "discount rate as a fraction (default: rf + beta*erp from the DCF inputs)"] = None,
+    g: Annotated[float, "perpetual growth as a fraction (default 0.025)"] = 0.025,
+) -> str:
+    """Mid-cycle intrinsic value for a CYCLICAL reporter.
+
+    Anchors on the MEDIAN of the last ~5 annual free-cash flows (not the
+    run-rate TTM FCF) so a memory/HDD/NAND price peak or trough does not
+    dominate the fair value (MU/SNDK/WDC 2026-09 review loops: run-rate DCFs
+    made cyclical names look wildly over/under-valued at cycle extremes).
+    Perpetual-growth value = medianFCF * (1+g) / (wacc - g), per-share, then
+    reported against price with the FV-basis margin of safety.
+
+    Min/max/mean of the annual series are rendered so the analyst can see the
+    cycle span; degrades to "unavailable" when <3 annual FCF years exist or
+    shares/price cannot resolve.
+    """
+    try:
+        from tradingagents.strategies.cycle_dcf import (
+            normalized_cycle_fcf,
+            perpetuity_value,
+        )
+        from tradingagents.strategies.normalized import margin_of_safety_bases
+    except Exception as exc:  # noqa: BLE001
+        return f"normalized cycle dcf unavailable for {ticker}: {exc}"
+    try:
+        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+        series = _dcf_fcf_series_all(cf_payload)
+        if not series:
+            return f"normalized cycle dcf unavailable for {ticker}: no annual FCF series."
+        cyc = normalized_cycle_fcf(series[-8:])  # last ~8 fiscal years
+        if cyc["median"] is None:
+            return (
+                f"normalized cycle dcf unavailable for {ticker}: need >= "
+                f"3 annual FCF years (have {cyc['n']})."
+            )
+        from tradingagents.dataflows.statement_parsing import fetch_ticker
+
+        fin = fetch_ticker(ticker, current_date) or {}
+        market_cap = _dcf_market_cap(fin)
+        beta = _dcf_beta(fin)
+        rf = _dcf_rf(current_date)
+        if rf is None:
+            rf = 0.04
+        if wacc is None:
+            erp = 0.05
+            wacc = rf + (beta or 1.0) * erp
+        pv = perpetuity_value(cyc["median"], wacc, g)
+        if pv is None:
+            return f"normalized cycle dcf unavailable for {ticker}: wacc <= g."
+        shares, _ = _dcf_shares(fin, fin, market_cap, ticker)
+        if not shares:
+            return f"normalized cycle dcf unavailable for {ticker}: no shares outstanding."
+        per_share = pv / shares
+        closes = _ohlcv(ticker).get("closes") or []
+        price = closes[-1] if closes else None
+        if price is None:
+            return (
+                f"normalized cycle dcf {ticker}: fair value/share {per_share:,.2f} "
+                f"(no price to margin-of-safety)."
+            )
+        bases = margin_of_safety_bases(price, per_share)
+        mos = bases["fv_basis"]
+        band = "wide" if mos is not None and mos > 0.3 else ("modest" if mos is not None and mos > 0 else "negative")
+        return (
+            f"normalized cycle dcf {ticker}: fair_value/share={per_share:,.2f} "
+            f"(median-of-annual-FCF; wacc={wacc:.2%} g={g:.2%}); "
+            f"annual FCF median={cyc['median']:,.0f} min={cyc['min']:,.0f} "
+            f"max={cyc['max']:,.0f} mean={cyc['mean']:,.0f} n={cyc['n']}; "
+            f"MoS(fv-basis)={mos:.1%} ({band}) price={price:,.2f} "
+            f"price/fv={bases['price_to_intrinsic']:.2f}x"
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory degrade
+        return f"normalized cycle dcf unavailable for {ticker}: {exc}"
+
+
 @tool
 def get_margin_of_safety(
     ticker: Annotated[str, "ticker symbol"],
@@ -3496,7 +3643,10 @@ def get_margin_of_safety(
     intrinsic estimate.
     """
     try:
-        from tradingagents.strategies.normalized import margin_of_safety
+        from tradingagents.strategies.normalized import (
+            margin_of_safety,
+            margin_of_safety_bases,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"margin of safety unavailable for {ticker}: {exc}"
     closes = _ohlcv(ticker).get("closes") or []
@@ -3509,7 +3659,15 @@ def get_margin_of_safety(
     if mos is None:
         return f"margin of safety unavailable for {ticker}: unquantifiable."
     band = "wide" if mos > 0.3 else ("modest" if mos > 0 else "negative")
-    return f"margin of safety {ticker}: {mos:.1%} ({band}); price={price:.2f} intrinsic={intrinsic:.2f}"
+    bases = margin_of_safety_bases(price, float(intrinsic))
+    return (
+        f"margin of safety {ticker}: {mos:.1%} ({band}) FV-basis; "
+        f"price-basis {bases['price_basis']:.1%}; "
+        f"price/intrinsic {bases['price_to_intrinsic']:.2f}x; "
+        f"price={price:.2f} intrinsic={intrinsic:.2f}. "
+        "Conventions: FV-basis = (IV-P)/IV; price-basis = (IV-P)/P; "
+        "quote the basis with the number (MSFT 2026-09-10 review loop)."
+    )
 
 
 # ---------------------------------------------------------------------------

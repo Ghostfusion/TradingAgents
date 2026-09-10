@@ -978,6 +978,7 @@ def value_dip_setup(
     margin_of_safety: float | None = None,
     fcf_yield: float | None = None,
     val_z: float | None = None,
+    fcf_yield_floor: float | None = None,
     atr_value: float | None = None,
     min_closes: int = 20,
     debt_to_equity: float | None = None,
@@ -1062,7 +1063,7 @@ def value_dip_setup(
 
     value_floor = bool(
         (margin_of_safety is not None and margin_of_safety >= MOS_FLOOR)
-        or (fcf_yield is not None and fcf_yield >= FCFY_FLOOR)
+        or (fcf_yield is not None and fcf_yield >= (fcf_yield_floor if fcf_yield_floor is not None else FCFY_FLOOR))
     )
     if loose_technical:
         # Relaxed entry: either oversold signal suffices (screen harvest mode).
@@ -1288,7 +1289,7 @@ def value_dip_setup(
                 round(margin_of_safety, 4) if margin_of_safety is not None else None
             ),
             "fcf_yield": round(fcf_yield, 4) if fcf_yield is not None else None,
-            "thresholds": {"mos": MOS_FLOOR, "fcfy": FCFY_FLOOR},
+            "thresholds": {"mos": MOS_FLOOR, "fcfy": (fcf_yield_floor if fcf_yield_floor is not None else FCFY_FLOOR)},
         },
         "technical_entry": {
             "pass": technical_entry,

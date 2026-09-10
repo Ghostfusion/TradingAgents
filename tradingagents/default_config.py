@@ -240,6 +240,7 @@ _ENV_OVERRIDES = {
     # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
     # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
     # decline-driver / mechanics toolset instead of company statement tools.
+    "TRADINGAGENTS_FCF_YIELD_FLOOR": "fcf_yield_floor",
     "TRADINGAGENTS_ENABLE_ETF_ENGINE": "enable_etf_engine",
     # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
     # item 1): when on, the allocation plan down-weights names whose average
@@ -375,6 +376,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # LLM settings
         "llm_provider": "openai",
         "deep_think_llm": "gpt-5.5",
+        # Value-dip FCF-yield floor (fraction; default 6%). Strategy parameter, not a finance law
+        "fcf_yield_floor": 0.06,
         "quick_think_llm": "gpt-5.4-mini",
         # When None, each provider's client falls back to its own default endpoint
         # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).

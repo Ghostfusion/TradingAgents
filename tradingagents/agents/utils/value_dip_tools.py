@@ -464,7 +464,12 @@ def get_fcf_yield(
             f"fcf yield unavailable for {ticker}: need free cash flow and "
             "market cap from the vendor chain."
         )
-    band = "floor-pass" if fy >= 0.06 else "below-floor"
+    try:
+        from tradingagents.dataflows.config import get_config as _fl_gc
+        _floor = float(_fl_gc().get("fcf_yield_floor") or 0.06)
+    except Exception:  # noqa: BLE001
+        _floor = 0.06
+    band = "floor-pass" if fy >= _floor else "below-floor"
     # No "$" on the raw values: a non-USD reporter (e.g. SKHY in KRW) renders
     # vendor raw units; a "$" prefix invites the analyst to relabel them as
     # USD (SKHY 2026-09-09: report prose'd 90.4T KRW as '$228.4B' and the mcap
@@ -821,6 +826,11 @@ def get_value_dip_setup(
             (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
                 "value_dip_vdu_enable"
             )
+        ),
+        fcf_yield_floor=float(
+            (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
+                "fcf_yield_floor", 0.06
+            ) or 0.06
         ),
     )
     if not setup.get("rows"):

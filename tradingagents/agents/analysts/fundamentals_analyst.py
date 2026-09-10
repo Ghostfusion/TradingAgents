@@ -43,6 +43,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_kalman_spread,
     get_language_instruction,
     get_margin_of_safety,
+    get_normalized_cycle_dcf,
     get_output_budget,
     get_ownership_concentration,
     get_patent_activity,
@@ -159,6 +160,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             get_allocation,
             get_constituent_cap_weights,
             get_dcf_valuation,
+            get_normalized_cycle_dcf,
             get_scenario_dcf,
             get_dupont_read,
             get_earnings_quality_verdict,
@@ -220,6 +222,13 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements, and `get_analyst_ratings` to benchmark against the sell-side rating and price-target consensus."
             + " You also have quality and smart-money signals: `get_revenue_breakdown(ticker)` for the latest period's segment revenue mix and concentration (a shrinking core segment or heavy single-segment concentration are quality flags); `get_corporate_actions(ticker)` for dividend history and stock splits (consistent dividends signal return discipline); `get_smart_money(ticker)` for ARK fund institutional activity (arbitrary buys/sells); `get_institution_holdings(ticker)` for the institutional share of the float and its period-over-period change (13F-style accumulation/distribution); and `get_earnings_surprise_history(ticker)` for EPS surprise vs estimate per print, the day-of price reaction, and the option-implied move (a succession of beats supports the growth case, negative surprises flag quality risk). Weigh these as supporting signals, not one signal."
             + " You also have computed-analysis tools - ground your 'quality', 'value', 'accounting risk' and 'beat/miss' claims in them: `get_analyst_verdict(ticker, current_date)` returns the deterministic value screens (EY, EV/EBIT, Piotroski F, Beneish M, Altman Z, Net-Net), the collapsed trap-risk verdict with evidence, ROE and EPS/Revenue YoY - quote these numbers rather than re-deriving them; `get_earnings_surprise(ticker, current_date)` returns the standardized last-reported EPS surprise % and its side (beat/miss). `get_dcf_valuation(ticker, current_date, growth=..., erp=...)` returns a provider-sourced discounted-cash-flow fair value (EV, terminal-value share, WACC) - cite it (or its explicit 'unavailable') before any 'undervalued/overvalued on intrinsics' claim; it complements the multiple-based EY/EV-EBIT screens. `get_earnings_quality(ticker, current_date)` returns the Sloan accruals ratio ((net income - operating cash flow) / total assets) folded into the forensic trap verdict with the accrual as extra evidence - cite it (or its explicit 'unavailable') before any 'strong earnings quality / accrual-driven earnings / manipulation risk' claim. "
+            + " For CYCLICAL reporters (memory/NAND/HDD/storage - MU/SNDK/WDC/TSM),"
+            " call `get_normalized_cycle_dcf(ticker, current_date, wacc=...)`"
+            " (median-of-annual-FCF perpetuity, per share) alongside the run-rate"
+            " get_dcf_valuation - the run-rate DCF is distorted at a pricing peak"
+            " or trough, and the median-of-cycle anchor is independent; cite BOTH"
+            " when discussing a cyclical name's intrinsic value (the WDC"
+            " review loop asked for a normalized-cycle layer)."
             + " You also have three Finnhub-powered tools (free tier, key-gated): `get_basic_financials(ticker)` returns the metric block (EPS/revenue YoY growth, ROE/ROA, margins, payout, current ratio) - use it before any growth/quality metric claim; `get_insider_activity(ticker)` returns the net 12-month insider change + latest mspr (use before any net insider-buy/sell claim); `get_company_peers(ticker)` returns the comparable peer group for 'cheap vs peers / relative valuation' reasoning. "
             + " For a multi-name value book, `get_portfolio_weights(...)` computes cap-respecting value weights and `get_allocation(scores, sector_map, ...)` returns the final cap-respected allocation block with per-name weights and the min-names check - report the computed weights when proposing an allocation. When the cap must be EXACT with excess redistributed to the uncapped names (index-style constituent capping), use `get_constituent_cap_weights(weights, cap=0.03, ceiling=0.035)` instead - it returns the exact-ceiling capped vector (or flags the degenerate fallback when the ceiling is not enforceable)."
             + " For valuation-safety and cross-sectional standing: `get_margin_of_safety(ticker, intrinsic=...)` reports the (intrinsic - price) / intrinsic safety margin you must cite before any 'undervalued/overvalued' claim (pass ``intrinsic`` from get_dcf_valuation / your own fair-value estimate); `get_composite_rank(ticker)` ranks the ticker among its industry peers cross-sectionally by value+momentum factors (composite percentile 0-1) - cite its standing vs peers before any 'cheap relative to peers / leader in the group' claim."

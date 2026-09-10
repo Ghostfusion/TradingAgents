@@ -93,6 +93,26 @@ def margin_of_safety(price: float, intrinsic: float | None) -> float | None:
     return (intrinsic - price) / intrinsic
 
 
+def margin_of_safety_bases(price: float, intrinsic: float | None) -> dict:
+    """MoS under both denominator conventions + the price/intrinsic multiple.
+
+    ``fv_basis`` == (IV - P) / IV  (the project's conventional margin_of_safety;
+    how far below fair value the price is).
+    ``price_basis`` == (IV - P) / P (negative: the discount/premium relative to
+    the price; equals -(price/IV - 1)).
+    ``price_to_intrinsic`` == P / IV.
+    None-safe: returns None for any field when a denominator is unquantifiable.
+    """
+    if intrinsic is None or intrinsic <= 0 or price is None:
+        return {"fv_basis": None, "price_basis": None, "price_to_intrinsic": None}
+    p, iv = float(price), float(intrinsic)
+    return {
+        "fv_basis": (iv - p) / iv,
+        "price_basis": -(p / iv - 1.0),
+        "price_to_intrinsic": p / iv,
+    }
+
+
 def _fnum(v) -> float | None:
     """Coerce to float or None (None-safe)."""
     if v is None:

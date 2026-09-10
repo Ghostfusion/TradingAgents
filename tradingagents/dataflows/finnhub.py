@@ -232,13 +232,47 @@ def get_basic_financials_finnhub(symbol: str, curr_date: str | None = None) -> s
     return "\n".join(out)
 
 
+# Finnhub returns malformed/foreign-listing peer ids for some US names
+# (SNDK 2026-09-10: "3NDK", "3QP", "QPIQI", "INFQ" in the peer-review row).
+# Map known aliases back to the canonical US ticker and drop duplicates.
+_PEER_ALIASES = {
+    "3NDK": "SNDK", "3WDC": "WDC", "3QP": "HPQ", "3HPE": "HPE",
+    "3SMCI": "SMCI", "3IONQ": "IONQ", "3NTAP": "NTAP",
+    "QPIQI": "GPIQI", "QINFQ": "INFQ",
+}
+
+
+def _normalize_peer(p) -> str:
+    p = str(p).strip().upper()
+    if not p:
+        return ""
+    if p in _PEER_ALIASES:
+        return _PEER_ALIASES[p]
+    # Numeric-prefix junk like "3NDK" (a non-US listing code) -> letters only
+    # when that yields a clean ticker we already emit.
+    if len(p) > 1 and p[0].isdigit() and p[1:].isalnum():
+        core = p[1:]
+        if core.isalpha():
+            return core
+    return p
+
+
 def get_company_peers_finnhub(ticker: str) -> str:
-    """Finnhub peers (free tier) -> comma-separated comparable tickers."""
+    """Finnhub peers (comparable tickers) -> comma-separated canonical tickers."""
     finnhub_client = _client()
     peers = finnhub_client.company_peers(ticker) or []
     if not peers:
         raise NoMarketDataError(ticker, "no peer data returned")
-    return "Peers: " + ", ".join(str(p) for p in peers[:24])
+    canon, seen = [], set()
+    for p in peers[:24]:
+        n = _normalize_peer(p)
+        if not n or n == str(ticker).strip().upper() or n in seen:
+            continue
+        seen.add(n)
+        canon.append(n)
+    if not canon:
+        canon = [str(p) for p in peers[:24]]
+    return "Peers: " + ", ".join(canon)
 
 
 def get_insider_activity_finnhub(ticker: str, months: int = 12) -> str:

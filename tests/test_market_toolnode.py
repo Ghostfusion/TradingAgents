@@ -144,3 +144,23 @@ def test_sec_filings_massive_fallback_degrades_when_both_down(monkeypatch):
     out = mpt.get_sec_filings.invoke({"ticker": "EIX"})
     assert "unavailable" in out.lower()
     assert "fabricate" in out.lower()
+
+
+@pytest.mark.unit
+def test_fundamentals_toolnode_registers_cycle_dcf():
+    """WDC/MU/SNDK 2026-09 review-loop follow-up: the fundamentals analyst
+    prompts for get_normalized_cycle_dcf (median-of-annual-FCF intrinsic for
+    cyclical reporters) - the executor ToolNode must register it."""
+    nodes = TradingAgentsGraph._create_tool_nodes(None)
+    fund_tools = set(nodes["fundamentals"].tools_by_name)
+    assert "get_normalized_cycle_dcf" in fund_tools
+
+
+@pytest.mark.unit
+def test_news_toolnode_registers_share_buyback():
+    """SNDK 2026-09 review-loop follow-up: get_share_buyback_authorization
+    (balances insider selling vs corporate buybacks) must be executable by
+    the news ToolNode."""
+    nodes = TradingAgentsGraph._create_tool_nodes(None)
+    news_tools = set(nodes["news"].tools_by_name)
+    assert "get_share_buyback_authorization" in news_tools
