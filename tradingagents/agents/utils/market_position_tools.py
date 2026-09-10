@@ -1,9 +1,113 @@
 """Market-positioning and filing tools (free data sources)."""
+import re
 from typing import Annotated
 
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
+
+_REPURCHASE_KEY = re.compile(r"(?i)repurchase|buyback|treasury\s+stock")
+_SHARE_ROW = re.compile(r"(?i)ordinary\s*shares?\s*number|share\s*issued|shares?\s*outstanding")
+
+
+def _row_series(rows: "list[tuple[str, list[float]]]", key_re: re.Pattern) -> list[float]:
+    for key, values in rows:
+        if key_re.search(key):
+            return values
+    return []
+
+
+def _parse_statement_rows(text: str) -> "list[tuple[str, list[float]]]":
+    """CSV-style vendor rows -> [(key, [period values ...]), ...]."""
+    out = []
+    for line in text.splitlines():
+        parts = line.split(",")
+        if len(parts) < 2:
+            continue
+        key = parts[0].strip()
+        if not key:
+            continue
+        nums = []
+        for p in parts[1:]:
+            p = p.strip()
+            if not p:
+                continue
+            try:
+                nums.append(float(p.replace(",", "")))
+            except ValueError:
+                nums.append(0.0)
+        out.append((key, nums))
+    return out
+
+
+@tool
+def get_share_buyback_authorization(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """Share-repurchase activity from the vendor cash-flow/balance-sheet rows.
+
+    Reports (a) the trailing four-quarter repurchase spend and (b) the
+    trailing-four-quarter change in ordinary shares outstanding, when the
+    vendor statement exposes the rows (row names vary: repurchase / buyback /
+    treasury-stock rows on the cash-flow statement; ordinary-shares /
+    shares-issued on the balance sheet).
+
+    The REMAINING buyback AUTHORIZATION is a company-disclosure item (8-K /
+    management announcement) that vendor financial statements do NOT carry -
+    this tool never quotes a remaining-authorization number and states so
+    explicitly, so the analyst reports it as unavailable rather than guessing.
+
+    Use before any 'buybacks / share-purchase / capital-return' claim so the
+    insider-selling narrative is balanced against actual corporate repurchases.
+    """
+    try:
+        cf = route_to_vendor("get_cashflow", ticker, "quarterly", curr_date)
+        bs = route_to_vendor("get_balance_sheet", ticker, "quarterly", curr_date)
+    except Exception as exc:  # noqa: BLE001 - advisory tool, degrade
+        return f"share buyback data unavailable for {ticker}: {exc}"
+
+    rows_cf = _parse_statement_rows(cf or "") if cf else []
+    rows_bs = _parse_statement_rows(bs or "") if bs else []
+
+    repurch = _row_series(rows_cf, _REPURCHASE_KEY)
+    sh = _row_series(rows_bs, _SHARE_ROW)
+
+    lines = [f"## Share buyback / capital return — {ticker}"]
+    if repurch:
+        trailing = [v for v in repurch[:4] if v is not None]
+        if trailing:
+            total = sum(trailing)
+            vals = ", ".join(f"{v/1e6:,.0f}M" for v in trailing)
+            lines.append(
+                f"- Repurchase row (cash-flow, latest period first): {vals} "
+                f"=> trailing 4Q repurchase spend {total/1e6:,.0f}M "
+                "(vendor sign convention: negative = cash outflow)"
+            )
+        else:
+            lines.append("- Repurchase row present but no numeric quarters")
+    else:
+        lines.append("- No repurchase/buyback row in the vendor cash-flow statement.")
+
+    if sh:
+        nums = [v for v in sh[:5] if v is not None]
+        if len(nums) >= 2:
+            delta = nums[0] - nums[-1]
+            lines.append(
+                f"- Ordinary shares (latest {nums[0]:,.0f}): 4-quarter change "
+                f"{delta:,.0f} shares ({'' if delta <= 0 else '+'}{delta/1e6:,.1f}M)"
+            )
+        else:
+            lines.append(f"- Ordinary shares row: latest {nums[0]:,.0f} (series too short)")
+    else:
+        lines.append("- No ordinary-shares row in the vendor balance-sheet.")
+
+    lines.append(
+        "- Remaining buyback AUTHORIZATION: company-disclosure item (8-K / "
+        "management release) - NOT in the vendor statement feed; report as "
+        "unavailable unless the announcement text is quoted verbatim."
+    )
+    return "\n".join(lines)
 
 
 @tool

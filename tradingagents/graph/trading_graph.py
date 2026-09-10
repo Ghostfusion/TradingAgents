@@ -56,6 +56,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_prediction_markets,
     get_revenue_breakdown,
     get_sec_filings,
+    get_share_buyback_authorization,
     get_short_interest,
     get_short_sale_volume,
     get_short_volume,
@@ -710,6 +711,7 @@ class TradingAgentsGraph:
                     get_prediction_markets,
                     get_earnings_calendar,
                     get_sec_filings,
+                    get_share_buyback_authorization,
                     get_ipos,
                     # Scheduled catalysts + regime (moomoo; optional, degrades)
                     get_economic_calendar,
