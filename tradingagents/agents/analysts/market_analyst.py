@@ -396,6 +396,12 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             " their tool names and flag the conflict; never splice or silently"
             " reconcile them (a stop level belongs to one tool with its own"
             " ATR basis - do not mix two tools' ATRs in one claim)."
+            + " Label breakout/reference levels by their actual quote type:the"
+            " verified snapshot's Close and get_market_snapshot's Prev close are"
+            " CLOSES - never label a prior-session close as a 'high' (the"
+            " 'high' column owns 'high'; a 52-week-high leaf owns that label)."
+            " DELL 2026-09-10 market.md mislabeled the 09-09 close 535.25"
+            " as '09-09 high' while the snapshot's Prev close is the close."
             + get_language_instruction()
             + get_output_budget("analyst")
         )

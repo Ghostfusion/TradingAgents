@@ -9,6 +9,8 @@ Breaking changes within the 0.x line are called out explicitly.
 ### Added
 
 DELL fundamentals review-loop fixes (2026-09-10): negative-equity D/E gate fails-open fix; scenario-DCF dual-bear conflict metric; beat-streak identity (table or inline; words or digits).
+
+DELL market.md review-loop fixes (2026-09-10): close_200_sma dual-value flag (258.98 vs 238.98); ema20 trail dual-value flag (481.74 vs 503.74); T1 tolerance tightened to 0.05% (611.43 vs.611.85); ATR excludes dash-multiplier forms (1-ATR); market prompt pins close-vs-high label rule.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

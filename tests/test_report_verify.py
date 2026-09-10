@@ -322,6 +322,36 @@ def test_internal_conflict_t1_mislabel():
     assert any("'t1'" in c.claim for c in out)
 
 
+def test_internal_conflict_close_200_sma_dual_values():
+    # DELL 2026-09-10 market.md: body 258.98 vs summary 238.98 ona
+    # the SAME 'close_200_sma' label must flag (not hidden by the missing
+    # '200-day' prose form).
+    t = "close_200_sma (258.98) ... close_200_sma 238.98"
+    out = rv._internal_conflicts(t)
+    assert any("'200-day sma'" in c.claim for c in out)
+
+
+def test_internal_conflict_ema20_trail_dual_values():
+    # DELL 2026-09-10 market.md: body 'EMA20 trail 481.74' vs
+    # execution 'EMA20 503.74' — a $22 slip that must flag.
+
+    t = "chandelier 475.72, EMA20 trail 481.74 ... EMA20 503.74"
+    out = rv._internal_conflicts(t)
+    assert any("'ema20'" in c.claim for c in out)
+
+
+def test_internal_conflict_t1_transcription_slip():
+    # DELL 2026-09-10: tranche plan T1=611..85 (evidence); the body's
+    # 611.43 is a 0.07% slip — sub-0.1% so it used to pass.the
+    # tightened 0.05% bucket now flags it, but genuine integer rounding
+    # (611.85 vs  .,612.00) stays clean.
+
+    t = "T1 611.43 ... T1 611.85"
+    out = rv._internal_conflicts(t)
+    assert any("'t1'" in c.claim for c in out)
+    assert rv._internal_conflicts("T1 611.85 ... T1 612.00") == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

@@ -391,7 +391,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
     "debt/equity": (re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I), 0.01),
-    "200-day sma": (re.compile(r"200[-\s]?day\s*(?:sma|ma|moving)", re.I), 0.01),
+    "200-day sma":(re.compile(r"200[-\s]?day\s+sma|close_200_sma(?:\s*\(|\s*)", re.I),0.01),
     "insider net": (re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I), 0.01),
     "dividend yield": (re.compile(r"dividend\s*yield", re.I), 0.01),
     "book value": (re.compile(r"book\s*value|book\s*value/share|bvps", re.I), 0.01),
@@ -399,10 +399,11 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # ATR/bands/surprise) use a tighter 0.5% so a real target mismatch (T1
     # 265.03 vs 265.97, a 0.35% diff masked by the 1% bucket, or macdh -1.36
     # vs -1.15) still flags.
-    "atr": (re.compile(r"\batr\b|average\s*true\s*range", re.I), 0.005),
+    "ema20":(re.compile(r"\bema\s*20\b", re.I), 0.005),
+        "atr":(re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),0.005),
     # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
     # real conflict, so level-type metrics use a 0.1% bucket.
-    "t1": (re.compile(r"\bT1\b|2R|2xR|T\s*1\s*(?:\(|2R)", re.I), 0.001),
+    "t1": (re.compile(r"\bT1\b|2R|2xR|T\s*1\s*(?:\(|2R)", re.I), 0.0005),
     "t2": (re.compile(r"\bT2\b|3R|3xR", re.I), 0.001),
     "macd histogram": (re.compile(r"macd\s*h|macdh|histogram", re.I), 0.005),
     "rvol": (re.compile(r"\brvol\b|relative\s*volume", re.I), 0.005),
