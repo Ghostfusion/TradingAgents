@@ -566,6 +566,21 @@ def test_margin_of_safety_bases_distinct_conventions():
     assert abs(c["price_basis"] - 0.25) < 1e-9
 
 
+def test_expected_band_identity_flags_zero_dollar():
+    # MSFT 2026-09-10 market.md: expected move 6.6% rendered as "+-$0.00"
+    # instead of the vendor band [458, 523] - a fabrication-class slip.
+    t = "expected earnings move 6.6% (\u00b1$0.00 band), 20d realized 21.84%"
+    cs = rv._expected_band_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+
+
+def test_expected_band_identity_clean_when_real_band():
+    t = "expected earnings move 6.6%; band [458.04, 522.90]"
+    assert rv._expected_band_identity(t) == []
+    assert rv._expected_band_identity("expected move 6.6%") == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

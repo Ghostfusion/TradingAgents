@@ -429,7 +429,11 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             "  MACD is one canonical record: quote ONE value triple per timestamp"
             "  everywhere - body and summary table must match (WDC 2026-09-10 body"
             "  -9.32/+8.37 vs summary -0.32/+0.25 contradicted)."
-
+            "  EXPECTED-MOVE BAND: quote the vendor dollar band when the"
+            "  expected-move % is stated; if no band exists, write dollar"
+            "  band unavailable - NEVER write +/-$0.00 (impossible for a"
+            "  positive move at a nonzero price; MSFT 2026-09-10 wrote 6.6%"
+            "  as +/-$0.00 while the leaf gave [458, 523])."
             " DELL 2026-09-10 market.md mislabeled the 09-09 close 535.25"
             " as '09-09 high' while the snapshot's Prev close is the close."
             + get_language_instruction()

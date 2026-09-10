@@ -1146,6 +1146,34 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_BAND_ZERO = re.compile(r"[±–—-]\s*\$\s*0(?:\.00)?\b", re.I)
+
+
+def _expected_band_identity(report_text: str) -> list[VerifierClaim]:
+    """A stated expected-move % must carry a NONZERO dollar band.
+
+    MSFT 2026-09-10 market review loop: the report quoted an expected earnings
+    move of 6.6% but rendered the band as "+-$0.00" - at ~$490 a 6.6% move
+    implies a ~$32 band ([458, 523]), so a zero-dollar band is a fabrication
+    (the analyst dropped the vendor band and wrote $0.00). Any literal
+    "+-$0.00"-class band is flagged.
+    """
+    if not report_text:
+        return []
+    if not _BAND_ZERO.search(report_text):
+        return []
+    return [VerifierClaim(
+                claim="expected-move dollar band quoted as +/-$0.00 (impossible for a positive move)",
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "An expected-move percentage was rendered with a +/-$0.00 dollar "
+            "band - impossible for a positive move at a nonzero price "
+            "(MSFT 2026-09-10: 6.6% would be a ~$32 band; quote the vendor "
+            "band or write 'unavailable', never $0.00)."
+        ),
+    )]
+
+
 _BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
 _SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
 
@@ -1470,10 +1498,11 @@ def verify_report_dir(
         dividend_check = _dividend_yield_sanity(report_text)
         sma200 = _sma200_identity(report_text)
         fcf_slip = _fcf_unit_slip(report_text)
+        expected_band = _expected_band_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
