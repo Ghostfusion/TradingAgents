@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **R-multiple (2R/3R target) identity check (MU 2026-09-09 review loop)**
+  - the market.md quoted "2R/3R targets 1357.69 / 1521.68" vs get_swing_set
+  (evidence) 2R 1357.69 / 3R 1522.65 — a 0.06% transcription typo, and the
+  review's #1 arithmetic find. report_verifier gained determinisic
+  `_r_multiple_identity`: each 2R/3R must resolve as entry+N*(entry-stop)
+  from the entry/stop PAIR on its own line (structure stop 862.81 vs
+  chandelier stop 910.16 are separate frameworks, never crossed); 4-digit
+  "/" pairs ("1357.69 / 1521.68") parse correctly. Tests:
+  tests/test_report_verify.py (+4).
 - **Valuation-identity checks (MU 2026-09-09 review loop)** - the
   fundamentals.md mixed basis and broke identities the same report asserted:
   get_ratios P/E 135.94 (annual FY25 EPS basis) vs "TTM EPS $44.17" at

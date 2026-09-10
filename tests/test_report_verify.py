@@ -503,6 +503,43 @@ def test_internal_conflicts_altman_z_pair():
     assert any(c.status == "INTERNAL_CONFLICT" and c.claim.startswith("'altman z'") for c in cs)
 
 
+# --- R-multiple (2R/3R) identity — market-side (MU 2026-09-09 review loop)
+
+
+def test_r_multiple_identity_flags_wrong_3r():
+    # Generating the classic "swap" is outside tolerance only for a real
+    # framework error; a 0.06% transcription typo stays under (evidence anchor
+    # catches that class). Here the 3R is genuinely mis-bound.
+    text = (
+        "entry 100.00, structure stop 90.00, 2R/3R targets 120.00 / 130.00"
+    )  # 2R=120 ✓, 3R=130 vs correct 100+3*10=130 → clean
+    assert rv._r_multiple_identity(text) == []
+
+
+def test_r_multiple_identity_flags_genuine_error():
+    text = "entry 100.00, structure stop 90.00, 2R/3R targets 120.00 / 125.00"
+    cs = rv._r_multiple_identity(text)
+    assert any("3R" in c.claim and "125.00" in c.claim for c in cs)
+
+
+def test_r_multiple_identity_respects_two_frameworks():
+    # Structure stop 90 -> 2R 120 / 3R 130; chandelier stop 95 -> 2R 110 / 3R 115.
+    # A single-pair check must NOT cross them (MU 2026-09-09 structure vs chandelier).
+    text = (
+        "entry 100.00 | structure stop 90.00, 2R/3R targets 120.00 / 130.00\n"
+        "chandelier stop 95.00, 2R/3R targets 110.00 / 115.00"
+    )
+    assert rv._r_multiple_identity(text) == []
+
+
+def test_r_multiple_compound_4digit_3r_captured():
+    # The MU pattern: "2R/3R targets **1357.69 / 1521.68**" — 3R reads the
+    # value after '/' even when the number has 4 leading digits.
+    m = rv._RMULT_RE.search("3R targets **1357.69 / 1521.68**")
+    assert m is not None
+    assert rv._rmult_value(m) == 1521.68
+
+
 # ---------------------------------------------------------------------------
 # Macro-authority gate (SKHY 2026-09-09 review loop)
 # ---------------------------------------------------------------------------

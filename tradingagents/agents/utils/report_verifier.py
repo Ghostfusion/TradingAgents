@@ -699,12 +699,104 @@ def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
     return []
 
 
+# --- R-multiple (2R/3R target) identity — market-side. ---------------------
+# A swing framework should quote 2R/3R targets that satisfy
+#     targetN = entry + N * (entry - stop)
+# from the SAME entry/stop pair. The MU 2026-09-09 market.md quoted
+# "2R/3R targets 1357.69 / 1521.68" while get_swing_set (evidence) gives
+# entry 1027.77 / stop 862.81 / 2R 1357.6891 / 3R 1522.6486 — the quoted
+# 3R is a 0.06% offset typo (1521.68 vs 1522.65). Catch it deterministically.
+_ENTRY_RE = re.compile(r"(?i)\bentry\b[^0-9]{0,12}\$?\s*\**\s*([\d,]+\.\d+)")
+_STOP_RE = re.compile(r"(?i)\b(?:struct(?:ure)?\s*)?stop\b[^0-9]{0,12}\$?\s*\**\s*([\d,]+\.\d+)")
+# "2R" / "3R" / "T1(2R)" / "T2(3R)" label followed by its value(s). A swing
+# line often quotes a pair "2R/3R targets 1357.69 / 1521.68" — group 2 is the
+# label-specific value (the one after "/" for the 3R in a "A / B" pair).
+_RMULT_RE = re.compile(
+    r"\b(2R|3R|T1|T2)\b[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*([\d,]+\.\d+)(?:\s*/\s*([\d,]+\.\d+))?"
+)
+
+_RMULT_TOL = 0.002  # 0.2% — a real typo (0.06%) is far under; framework drift is not.
+
+
+def _rmult_value(m: re.Match) -> float | None:
+    """Choose the value belonging to this R-label, honoring a '/'-pair.
+
+    For "3R targets 1357.69 / 1521.68" the 3R value is 1521.68 (after '/').
+    """
+    label = m.group(1).upper()
+    first = m.group(2)
+    second = m.group(3)
+    if label in ("3R", "T2"):
+        # carry the "/"-separated partner when the 3R label precedes a pair
+        return float((second or first).replace(",", ""))
+    return float(first.replace(",", ""))
+
+
+def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
+    """2R/3R targets must equal entry+N*(entry-stop) for the SAME pair.
+
+    R-multiples are bound to the stop on their own line (each swing framework
+    quotes "stop S, 2R/3R targets A/B" together), so a report that legitimately
+    presents two frameworks — e.g. MU 2026-09-09 structure stop 862.81 ->
+    1357.69/1522.65 vs chandelier stop 910.16 -> 1262.99/1380.60 — is checked
+    pair-wise, not crossed. Falls back to the first stop in the report only
+    when a line has none.
+    """
+    if not report_text:
+        return []
+    en = _ENTRY_RE.search(report_text)
+    if not en:
+        return []
+    entry = float(en.group(1).replace(",", ""))
+    global_stop: float | None = None
+    gs = _STOP_RE.search(report_text)
+    if gs:
+        global_stop = float(gs.group(1).replace(",", ""))
+    out: list[VerifierClaim] = []
+    for line in report_text.splitlines():
+        rs = list(_RMULT_RE.finditer(line))
+        if not rs:
+            continue
+        ls = _STOP_RE.search(line)
+        if ls:
+            line_stop = float(ls.group(1).replace(",", ""))
+        elif global_stop is not None:
+            line_stop = global_stop
+        else:
+            continue
+        risk = entry - line_stop
+        if risk <= 0:
+            continue
+        for m in rs:
+            quoted = _rmult_value(m)
+            mult = 2 if m.group(1).upper() in ("2R", "T1") else 3
+            expected = entry + mult * risk
+            if expected <= 0:
+                continue
+            if abs(quoted - expected) / expected > _RMULT_TOL:
+                out.append(
+                    VerifierClaim(
+                        claim=f"{mult}R target {quoted:,.2f} != entry {entry:,.2f} + "
+                              f"{mult}*risk ({risk:,.2f}) = {expected:,.2f}",
+                        status="INTERNAL_CONFLICT",
+                        reason=(
+                            "The quoted R-multiple target does not resolve from the "
+                            "entry/stop pair on its own line (MU 2026-09-09: 3R 1521.68 "
+                            "vs get_swing_set 1522.65 for structure stop 862.81). "
+                            "Re-derive from that pair."
+                        ),
+                    )
+                )
+    return out
+
+
 def _valuation_identity_checks(report_text: str) -> list[VerifierClaim]:
-    """Run all identity checks (DuPont, P/E basis, EV/net-cash)."""
+    """Run all identity checks (DuPont, P/E basis, EV/net-cash, R-multiple)."""
     return (
         _dupont_identity(report_text)
         + _pe_basis_conflict(report_text)
         + _ev_net_cash_conflict(report_text)
+        + _r_multiple_identity(report_text)
     )
 
 
