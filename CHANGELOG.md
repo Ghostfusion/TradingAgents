@@ -27,6 +27,8 @@ SNDK market review-loop fixes (2026-09-10): market prompt pins - never call a fo
 SNDK news review-loop fixes (2026-09-10): news prompt pins - index-inclusion catalyst wording (no assumed rebalance-buying window), insider rows calibrated to 10b5-1 (scheduled <> discretionary), and one-timestamp-per-series macro levels (HY OAS 2.71 vs 2.59 replication slip). The HY-OAS dual-value is already flagged by the existing verifier hy-oas metric.
 
 SNDK review-loop follow-up: new get_share_buyback_authorization tool - trailing-4Q repurchase spend + ordinary-share-count trend from vendor statement rows (honest unavailable when rows absent), and it never quotes a remaining-AUTHORIZATION number (company-disclosure item). Wired into the news analyst prompt + tools and the news ToolNode; +3 tests.
+
+WDC fundamentals review-loop fixes (2026-09-10): current-ratio internal-conflict metric (balance-sheet-health 10.87 vs vendored 1.329 in one report); scenario-DCF-base metric widened to $- and slash-forms (base 93.05 vs band 57.28/80.18/156.55); FCF unit-slip identity flags an M-vs-B typo in one report ($4.1B vs $3.10M; real FY26 FCF $3.51B); fundamentals prompt pins GAAP-vs-normalized labeling and one-unit-scale FCF discipline.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

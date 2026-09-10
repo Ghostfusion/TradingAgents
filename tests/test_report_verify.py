@@ -492,6 +492,39 @@ def test_sma2000_identity_clean_when_correct():
     assert rv._sma200_identity(t) == []
 
 
+def test_internal_conflict_current_ratio_dual_values():
+    # WDC 2026-09-10 fundamentals: current ratio 10.87 (balance-sheet
+    # health) vs vendored 1.329 in one report - an 8x computed-vs-provider
+    # conflict that must flag.
+    t = ("get_balance_sheet_health pass=True (D/E 0.12<1.0, CR 10.87>1.5); "
+         "Current ratio vendor 1.329 vs get_ratios 10.87 - conflict")
+    out = rv._internal_conflicts(t)
+    assert any("'current ratio'" in c.claim for c in out)
+
+
+def test_fcf_unit_slip_flags_m_vs_b():
+    # WDC 2026-09-10: 'FCF $3.10M TTM' alongside 'FCF $4.1B TTM' - a unit
+    # slip (FY26 FCF is 3,511M) that must flag.
+    t = "FCF $4.1B TTM ... stated FCF $3.10M TTM"
+    cs = rv._fcf_unit_slip(t)
+    assert len(cs) == 1
+    assert "3.1M" in cs[0].claim
+
+
+def test_fcf_unit_slip_clean_when_same_scale():
+    # Quarterly-vs-annual FCF within one scale must NOT flag (1.28B vs 3.5B).
+    t = "quarterly FCF 1,281M ... FY26 FCF $3.51B"
+    assert rv._fcf_unit_slip(t) == []
+
+
+def test_internal_conflict_scenario_dcf_base_dollar_form():
+    # WDC 2026-09-10: 'scenario base $93.05' vs the band's base 80.18 - the
+    # dollar-prefixed base must be caught by the metric.
+    t = "scenario base $93.05 ... bear/base/bull 57.28/80.18/156.55"
+    out = rv._internal_conflicts(t)
+    assert any("'scenario dcf base'" in c.claim for c in out)
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

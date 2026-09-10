@@ -445,9 +445,13 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # so "bear": $N  is the same dollar in both the body and the summary row.
 
     "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|\d))", re.I),0.001),
-    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|\d|$)", re.I), 0.001),
+    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|\d|$)", re.I), 0.001),
     "beta": (re.compile(r"\bbeta\b", re.I), 0.05),
     "cash conversion": (re.compile(r"cash\s*conversion|cash_conversion|ocf\s*/\s*ni", re.I), 0.02),
+    # WDC 2026-09-10 fundamentals review loop: current ratio 10.87
+    # (get_balance_sheet_health) vs 1.329 (vendor currentRatio) in one
+    # report - a computed-vs-provider ratio conflict must flag.
+    "current ratio": (re.compile(r"current\s*ratio|\bcurrentRatio\b|\bCR\b", re.I), 0.20),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -858,6 +862,53 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
 _DPS_RE = re.compile(r"(?i)dividend(?:s)?\s+per\s+share[^0-9]{0,8}\$?\s*([0-9.]+)")
 _DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*([0-9.]+)\s*%")
 
+
+_FCF_AMT = re.compile(
+    r"(?i)\bfcf\b[^0-9$]{0,12}\$?\s*([\d,]+(?:\.\d+)?)\s*([KMBkmb]?)"
+)
+_FCF_AMT_FE = re.compile(
+    r"(?i)free\s+cash\s+flow[^0-9$]{0,12}\$?\s*([\d,]+(?:\.\d+)?)\s*([KMBkmb]?)"
+)
+
+
+def _fcf_unit_slip(report_text: str) -> list[VerifierClaim]:
+    """FCF amounts in one report must share the same unit scale.
+
+    WDC 2026-09-10 fundamentals review loop: the summary says 'FCF $4.1B TTM'
+    and the risk ladder says 'stated FCF $3.10M TTM' - a unit slip (the FY26
+    FCF leaf is 3,511,000,000). A sub-$1B FCF quote next to an FCF quote
+    >= $1B in the SAME report is an INTERNAL_CONFLICT (M-vs-B typo class).
+    """
+    if not report_text:
+        return []
+    vals = []
+    for rx in (_FCF_AMT, _FCF_AMT_FE):
+        for m in rx.finditer(report_text):
+            try:
+                num = float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get((m.group(2) or "").upper(), 1.0)
+            vals.append(num * mult)
+    if len(vals) < 2:
+        return []
+    small = [v for v in vals if v <= 1e9]
+    big = [v for v in vals if v > 1e9]
+    if not (small and big):
+        return []
+    worst = max(big) / max(small)
+    if worst >= 100.0:
+        return [VerifierClaim(
+            claim=f"FCF quoted at {max(small)/1e6:,.1f}M and "
+                  f"{max(big)/1e9:,.2f}B in one report (unit slip)",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "FCF amounts span a unit-scale range in the same report "
+                "(WDC 2026-09-10: $3.10M vs $3.5B - the FY26 FCF is "
+                "3,511M). Quote cash-flow totals on one unit scale."
+            ),
+        )]
+    return []
 
 _VRP_PP = re.compile(r"vrp\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(?:pp)?", re.I)
 _VRP_SIGN_LABEL = re.compile(r"vrp\s*positive", re.I)
@@ -1407,10 +1458,11 @@ def verify_report_dir(
         beat_streak = _beat_streak_identity(report_text)
         dividend_check = _dividend_yield_sanity(report_text)
         sma200 = _sma200_identity(report_text)
+        fcf_slip = _fcf_unit_slip(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
