@@ -462,6 +462,36 @@ def test_scenario_dcf_bear_scoped_no_bear_prose_hit():
     assert rv._internal_conflicts(t) == []
 
 
+def test_internal_conflict_beta_dual_values():
+    # SNDK 2026-09-10 fundamentals: Finnhub beta 3.868 vs 'beta 1.87' (risk)
+    # in the same report - two different betas presented as the beta.
+    t = "Finnhub beta is 3.868 - an extremely high-beta tape ... keep position sizing defensive (beta 1.87)"
+    out = rv._internal_conflicts(t)
+    assert any("'beta'" in c.claim for c in out)
+
+
+def test_internal_conflict_scenario_dcf_base_dual_values():
+    # SNDK 2026-09-10: body scenario base 1,388.45 vs summary base 1,476.2.
+    t = "bear 834.55 / base 1,388.45 / bull 4,404.12 ... | scenario bear 834.6/base 1,476.2/bull (band)"
+    out = rv._internal_conflicts(t)
+    assert any("'scenario dcf base'" in c.claim for c in out)
+
+
+def test_sma200_identity_flags_direction_flip():
+    # SNDK 2026-09-10: '65% below price' while price 1,698.41 / sma 1,026.54
+    # => the 200-day is 39.6% below price (65.5% is price ABOVE the sma).
+    t = ("200-day (approx 1,026.54 area is 65% below price currently per value-dip tool); "
+         "price 1,698.41")
+    cs = rv._sma200_identity(t)
+    assert len(cs) == 1
+    assert "39.6%" in cs[0].claim
+
+
+def test_sma2000_identity_clean_when_correct():
+    t = "price 1,698.41; the value-dip says dist_sma200=65.5% (price above 200-day 1,026.54)"
+    assert rv._sma200_identity(t) == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

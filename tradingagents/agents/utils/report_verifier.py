@@ -445,6 +445,9 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # so "bear": $N  is the same dollar in both the body and the summary row.
 
     "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|\d))", re.I),0.001),
+    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|\d|$)", re.I), 0.001),
+    "beta": (re.compile(r"\bbeta\b", re.I), 0.05),
+    "cash conversion": (re.compile(r"cash\s*conversion|cash_conversion|ocf\s*/\s*ni", re.I), 0.02),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -1029,6 +1032,58 @@ def _insider_sold_value_identity(report_text: str) -> list[VerifierClaim]:
     return out
 
 
+_SMA200_VAL_RE = re.compile(r"(?i)200[-\s]?day[^0-9]{0,14}?([\d,]+(?:\.\d+)?)")
+_SMA_PCT_RE = re.compile(
+    r"(?i)(\d+(?:\.\d+)?)\s*%\s*(above|below)\s+(?:the\s+)?"
+    r"(price\b|200[-\s]?day\b)")
+
+
+def _sma200_identity(report_text: str) -> list[VerifierClaim]:
+    """A 'X% above/below (the price|the 200-day)' claim must match the same
+    report's 200-day value and price.
+
+    SNDK 2026-09-10 fundamentals review loop: 'is 65% below price' while
+    the value-dip tool says dist_sma200=65.5% (price ABOVE the 200-day);
+    price 1698.41 / sma 1026.54 => the 200-day is only 39.6% below price.
+    """
+    if not report_text:
+        return []
+    m = _SMA200_VAL_RE.search(report_text)
+    price = _dd_price(report_text)
+    if not (m and price is not None):
+        return []
+    try:
+        sma = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return []
+    if sma <= 0:
+        return []
+    out = []
+    for cm in _SMA_PCT_RE.finditer(report_text):
+        try:
+            pct = float(cm.group(1))
+        except ValueError:
+            continue
+        dir_, obj = cm.group(2).lower(), cm.group(3).lower()
+        if obj.startswith("200"):
+            implied = (price - sma) / sma * 100.0 if dir_ == "above" else (sma - price) / sma * 100.0
+        else:
+            implied = (sma - price) / price * 100.0 if dir_ == "above" else (price - sma) / price * 100.0
+        if abs(implied) <= 0.5:
+            continue
+        if abs(pct - abs(implied)) / abs(implied) > 0.2:
+            out.append(VerifierClaim(
+                claim=f"'{pct:.0f}% {dir_} {obj}' vs price {price:,.2f} / "
+                      f"200-day {sma:,.2f} => {implied:.1f}%",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "Claimed distance from the 200-day does not match price/sma "
+                    "- direction or basis flipped (SNDK 2026-09-10: '65% below "
+                    "price' vs 39.6% below; the 65.5% is price ABOVE the sma)."
+                ),
+            ))
+    return out
+
 _BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
 _SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
 
@@ -1351,10 +1406,11 @@ def verify_report_dir(
         drawdown = _drawdown_identity(report_text)
         beat_streak = _beat_streak_identity(report_text)
         dividend_check = _dividend_yield_sanity(report_text)
+        sma200 = _sma200_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
