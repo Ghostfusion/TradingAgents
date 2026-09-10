@@ -2121,6 +2121,7 @@ def get_dcf_valuation(
         beta = _dcf_beta(fin)
         cash, debt = _dcf_cash_debt(fin)
         shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
+        price = market_cap / shares if (market_cap and shares) else 0.0
         if not shares:
             return f"dcf unavailable for {ticker}: no shares outstanding."
         if rf is None:
@@ -2138,6 +2139,14 @@ def get_dcf_valuation(
         cash=cash,
         debt=debt,
     )
+    if res and price and res["price"] / price > 5.0:
+        return (
+            f"dcf {ticker}: DATA-QUALITY FAIL - fair_value={res['price']:.2f} vs "
+            f"price {price:.2f} is {res['price']/price:.1f}x (>5x); the fair "
+            f"value is unit-mixed or share-basis-inconsistent (TSM 2026-09-10: "
+            f"2933.52 vs 429.55 = 6.8x). Excluded from composite valuation; "
+            f"do not cite as a USD fair value."
+        )
     if not res:
         return f"dcf unavailable for {ticker}: inputs not usable (no positive FCF or g>=wacc)."
     return (

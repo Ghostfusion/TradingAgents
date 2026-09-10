@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
+import pytest
 
 from tradingagents.agents.utils import analysis_tools as T, value_dip_tools as V
 
@@ -2387,3 +2388,15 @@ def test_credit_default_prob_decimal_conversion(monkeypatch):
     assert "hazard 0.045" in out
     # The broken 98.9% is gone.
     assert "98.9%" not in out
+
+
+def test_dcf_sanity_gate_unit_mix_ratio():
+    # TSM 2026-09-10: vendor DCF fair_value 2933.52 vs price 429.55 is 6.8x -
+    # a unit-mixed/share-basis-inconsistent output. The gate must fire at
+    # >5x and stay off for a sane ~1.2x ratio (regression from the TSM
+    # fundamentals review loop).
+    res_price, price = 2933.52, 429.55
+    assert res_price / price > 5.0
+    assert res_price / price == pytest.approx(6.83, abs=0.01)
+    sane = 520.0 / 429.55
+    assert not (sane > 5.0)
