@@ -5078,11 +5078,19 @@ def get_vol_surface_shape(
                      else "- 25d risk reversal: n/a")
         lines.append(f"- 25d butterfly: {shape['bf25']:+.3f}" if shape.get("bf25") is not None
                      else "- 25d butterfly: n/a")
-        lines.append(f"- term-structure slope (long-short ATM): {ts:+.3f}" if ts is not None
-                     else "- term-structure slope: n/a")
+        if ts is not None:
+            ts_note = "contango (long-dated vol richer)" if ts > 0 else (
+                "backwardation (long-dated vol cheaper)" if ts < 0 else "flat")
+            lines.append(
+                f"- term-structure slope (long-short ATM, IV long - IV short): {ts:+.3f} "
+                f"[{ts_note}]"
+            )
+        else:
+            lines.append("- term-structure slope: n/a")
         lines.append("")
         lines.append("Interpretation: RR < 0 = downside puts rich (skew); BF > 0 = smile "
-                     "curvature (wings rich); TS > 0 = long-dated vol contango.")
+                     "curvature (wings rich); TS = IV(long) - IV(short): TS > 0 = contango "
+                     "(long-dated richer), TS < 0 = backwardation (long-dated cheaper).")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"vol surface shape unavailable for {ticker}: {exc}"

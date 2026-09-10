@@ -35,15 +35,46 @@ def _ticker_info(ticker: str, timeout: float = 8.0) -> dict:
     return result
 
 
+def _etf_universe_sector(ticker: str) -> str | None:
+    """Sector for a known ETF from the repo's issuer mapping (no vendor call).
+
+    Vendor metadata misclassifies ETFs (IGV/SOXX/XLK all come back as
+    "Financial Services" from yfinance/FMP — the review-flagged bug on the
+    2026-09-09 IGV report). The ETF universe lists are authoritative for
+    their members: an SPDR sector maps to its own label, an industry ETF
+    maps to its parent sector's label.
+    """
+    try:
+        from tradingagents.strategies.sector_rank import (
+            INDUSTRY_ETFS,
+            SPDR_SECTORS,
+        )
+    except Exception:  # noqa: BLE001 - enrichment must never raise
+        return None
+    t = (ticker or "").strip().upper()
+    if t in SPDR_SECTORS:
+        return SPDR_SECTORS[t]
+    if t in INDUSTRY_ETFS:
+        parent = INDUSTRY_ETFS[t][0]
+        return SPDR_SECTORS.get(parent)
+    return None
+
+
 def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
     """GICS sector for the ticker; None when unavailable.
 
+    0) ETF identity first: a known ETF's sector comes from the repo's
+       universe mapping (never the provider's equity-sector field, which
+       misattributes ETFs — e.g. IGV/SOXX/XLK returned "Financial Services").
     1) FMP company profile (key-gated, instant when the key is set and not
        rate-limited) - the authoritative source when available.
     2) yfinance ``info`` on a daemon thread as a guarded fallback (slow /
        blocked vendor or unset key can never hang the scanner; worst case:
        None = unknown sector, which the sector gate treats as no-data).
     """
+    etf_sector = _etf_universe_sector(ticker)
+    if etf_sector:
+        return etf_sector
     # 1) FMP company profile (key-gated, fast).
     try:
         from tradingagents.dataflows.fmp import get_company_profile

@@ -155,3 +155,34 @@ def test_fetch_sector_fmp_wins_over_finnhub():
         ),
     ):
         assert ys.fetch_sector("AAPL") == "Consumer Cyclical"
+
+
+def test_fetch_sector_etf_universe_wins_over_provider_misclassification():
+    """IGV 2026-09-09 review loop: provider metadata says ETF tickers are
+    'Financial Services' (IGV/SOXX/XLK all came back wrong). The ETF
+    canonical mapping must win over the wrong provider sector, no vendor
+    call needed."""
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    def boom(t):  # noqa: ANN001
+        raise AssertionError("no provider call")
+    # Providers would say "Financial Services"; ETF identity must override.
+    for etf, expected in (("IGV", "Technology"), ("SOXX", "Technology"),
+                          ("XLK", "Technology"), ("CIBR", "Technology"),
+                          ("SKYY", "Technology")):
+        with (
+            mock.patch("tradingagents.dataflows.fmp.get_company_profile",
+                       return_value={"sector": "Financial Services"}),
+            mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub",
+                      return_value={"sector": "Financial Services"}),
+            mock.patch("yfinance.Ticker", side_effect=boom),
+        ):
+            assert ys.fetch_sector(etf) == expected, etf
+    # A company ticker is untouched by the ETF mapping (goes to provider).
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile",
+                  return_value={"sector": "Financial Services"}),
+        mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub", side_effect=_no_finnhub),
+        mock.patch("yfinance.Ticker", side_effect=boom),
+    ):
+        assert ys.fetch_sector("BAC") == "Financial Services"

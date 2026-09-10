@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **ETF sector identity fix (IGV 2026-09-09 review loop)** - the IGV/SOXX/
+  SKYY/CIBR market reports mapped the tech ETFs to "Financial Services" via
+  provider equity-sector metadata (yfinance/FMP return that for every ETF,
+  including XLK). fetch_sector now canonicalizes known ETFs from the repo
+  universe lists FIRST (SPDR_SECTORS / INDUSTRY_ETFS -> GICS label; no
+  vendor call) so an ETF's sector comes from the issuer mapping, never the
+  provider's wrong equity-sector field; company tickers are untouched.
+  get_vol_surface_shape now renders the term-structure convention explicitly
+  (TS = IV(long)-IV(short); >0 contango, <0 backwardation) so a report cannot
+  mislabel -0.019 as "contango"; market-analyst prompt pins RSI >70 =
+  OVERBOUGHT / <30 = OVERSOLD (the IGV report wrote ">70 oversold"). Tests:
+  tests/test_yfinance_sector.py (+1).
 - **ETF-specific fundamental engine (IGV 2026-09-09 review loop)** -
   the IGV fundamentals.md collapsed to "no DCF -> no BUY" because
   company statement tools correctly returned unavailable for a fund. Shipped
