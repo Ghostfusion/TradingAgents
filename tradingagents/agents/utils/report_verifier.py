@@ -386,7 +386,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Default tolerance 1%: vendor-consensus rounding (80.76 vs 80.75) is ONE
     # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
     "dcf fair value": (re.compile(r"dcf\s*(?:fair\s*)?value", re.I), 0.01),
-    "eps ttm":(re.compile(r"\beps\s*(?:ttm)?\b", re.I), 0.01),
+    "eps ttm":(re.compile(r"\beps\s*(\(|\s)ttm\s*(?:\))?(?!\s*growth)", re.I), 0.01),
         # DELL 2026-09-10 news.md: body quoted 'EPS actual 7.04' and the
         # summary row 'EPS actual 7.00' (both labeled Finnhub, same quarter) —
         # a 0.6% dual value. Level-type metrics use a 0.5% bucket.
@@ -888,8 +888,17 @@ def _fcf_unit_slip(report_text: str) -> list[VerifierClaim]:
                 num = float(m.group(1).replace(",", ""))
             except ValueError:
                 continue
-            mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get((m.group(2) or "").upper(), 1.0)
-            vals.append(num * mult)
+            unit = (m.group(2) or "").upper()
+            mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(unit, 1.0)
+            val = num * mult
+            if val <= 0:
+                continue
+            # Non-money contexts ("FCF yield ~1.7%", "FCF = 274.97+347.27..",
+            # "FCF ~1.42x TTM NI") are not dollar totals: require a money
+            # unit ($/B/M/K) or a large raw exact figure.
+            if not unit and num < 1e6:
+                continue
+            vals.append(val)
     if len(vals) < 2:
         return []
     small = [v for v in vals if v <= 1e9]

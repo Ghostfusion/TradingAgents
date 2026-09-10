@@ -31,6 +31,8 @@ SNDK review-loop follow-up: new get_share_buyback_authorization tool - trailing-
 WDC fundamentals review-loop fixes (2026-09-10): current-ratio internal-conflict metric (balance-sheet-health 10.87 vs vendored 1.329 in one report); scenario-DCF-base metric widened to $- and slash-forms (base 93.05 vs band 57.28/80.18/156.55); FCF unit-slip identity flags an M-vs-B typo in one report ($4.1B vs $3.10M; real FY26 FCF $3.51B); fundamentals prompt pins GAAP-vs-normalized labeling and one-unit-scale FCF discipline.
 
 WDC market review-loop fixes (2026-09-10): 200-day-SMA conflict metric hardened against paired-label rows ('close_50_sma / close_200_sma | 497.72 / 377.47' false positive eliminated; paren-form value extraction fixed); MACD dual-value flagged via macd-histogram metric (body -9.32/+8.37 vs summary -0.32/+0.25); _DOLLAR_RE eased to accept paren-prefixed figures; market prompt pins PRICE/TIMESTAMP gate (>1% gap = DATA-INTEGRITY, no final SELL on the unverified figure), SELL-vs-REDUCE wording, and one canonical MACD record per report.
+
+Verifier precision pass (found on the MSFT/TSM/ADBE/HPE batch sweep): eps-ttm conflict metric now requires the literal 'ttm' label (kills ~30 bare-eps / growth-row false flags); FCF unit-slip parser rejects non-money contexts (yield %, sum fragments, multiples) and zero values (kills the 0.0M-vs-B false positives).
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence
