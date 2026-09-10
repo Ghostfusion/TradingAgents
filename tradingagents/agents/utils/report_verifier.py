@@ -398,7 +398,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
     "debt/equity": (re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I), 0.01),
-    "200-day sma":(re.compile(r"200[-\s]?day\s+sma|close_200_sma(?:\s*\(|\s*)", re.I),0.01),
+                "200-day sma": (re.compile(r"(?<![\w-])close_200_sma(?!\s*\|)|200[-\s]?day\s+sma(?!\s*\|)", re.I), 0.01),
     "insider net": (re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I), 0.01),
     "dividend yield": (re.compile(r"dividend\s*yield", re.I), 0.01),
     "book value": (re.compile(r"book\s*value|book\s*value/share|bvps", re.I), 0.01),
@@ -457,7 +457,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
 # "$80.60", "79.78B", "5.7B". Used to extract the numeric value attached to a
 # metric. Returns (value, unit_multiplier) or None.
-_DOLLAR_RE = re.compile(r"(?<![\(\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
+_DOLLAR_RE = re.compile(r"(?<![\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
 
 # ---------------------------------------------------------------------------
 # Macro-authority gate (deterministic; SKHY 2026-09-09 review loop)

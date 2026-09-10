@@ -342,7 +342,7 @@ def test_internal_conflict_close_200_sma_dual_values():
     # DELL 2026-09-10 market.md: body 258.98 vs summary 238.98 ona
     # the SAME 'close_200_sma' label must flag (not hidden by the missing
     # '200-day' prose form).
-    t = "close_200_sma (258.98) ... close_200_sma 238.98"
+    t = "close_200_sma = 258.98 ... close_200_sma = 238.98"
     out = rv._internal_conflicts(t)
     assert any("'200-day sma'" in c.claim for c in out)
 
@@ -523,6 +523,16 @@ def test_internal_conflict_scenario_dcf_base_dollar_form():
     t = "scenario base $93.05 ... bear/base/bull 57.28/80.18/156.55"
     out = rv._internal_conflicts(t)
     assert any("'scenario dcf base'" in c.claim for c in out)
+
+
+def test_internal_conflict_macd_dual_value():
+    # WDC 2026-09-10 market.md: body (verified snapshot) MACD -9.32 / hist
+    # +8.37 vs the summary row macd/macdh -0.32/+0.25 - one metric at two
+    # values in one report.
+    t = ("macd -9.32 (verified) ... histogram +8.37 ... | macd / macdh "
+         "| -0.32 / +0.25 (verified) |")
+    out = rv._internal_conflicts(t)
+    assert any("'macd histogram'" in c.claim for c in out)
 
 
 def test_no_rating_signal_no_conflict():
