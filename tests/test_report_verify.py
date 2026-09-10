@@ -396,6 +396,29 @@ def test_dividend_yield_sanity_clean_when_honest():
     assert rv._dividend_yield_sanity("ttm yield 12.0% but no dividend/share") == []
 
 
+def test_internal_conflict_pcr_oi_dual_values():
+    # MU 2026-09-10 market.md: put/call OI 4.99-equivalent (3.99) in body vs
+    # 3.39 in the summary - same metric, dual value.
+    t = "put/call OI 3.99 (body) ... | PCR OI | 3.39 (put/call) |"
+    out = rv._internal_conflicts(t)
+    assert any("'pcr oi'" in c.claim for c in out)
+
+
+def test_vrp_sign_label_flags_negative_quoted_positive():
+    # MU 2026-09-10: body says VRP -5.24pp (IV below realized); summary
+    # labels it "VRP positive => vols cheap" - a sign flip.
+    t = "VRP \u22125.24pp (IV below realized) ... VRP positive"
+    cs = rv._vrp_sign_label(t)
+    assert len(cs) == 1
+    assert "-5.24pp" in cs[0].claim
+    assert cs[0].status == "INTERNAL_CONFLICT"
+
+
+def test_vrp_sign_label_clean_when_consistent():
+    assert rv._vrp_sign_label("VRP -5.24pp (IV below realized)") == []
+    assert rv._vrp_sign_label("VRP positive 2.1pp ... IV above realized") == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

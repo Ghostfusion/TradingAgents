@@ -415,6 +415,11 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # MU 2026-09-10 fundamentals review loop: EV/EBIT quoted at 65.2 (analyst verdict) and 66.65 (get_ratios) while the leaves show 113.91 / 113.80 - the pair must surface as one conflict.
     "ev/ebit": (re.compile(r"ev[/\s-]?ebit(?!da)", re.I), 0.01),
     "ev/ebitda": (re.compile(r"ev[/\s-]?ebitda", re.I), 0.01),
+    # MU 2026-09-10 market review loop: put/call OI 3.99 (body) vs 3.39
+    # (summary row) - same metric, dual value; and VRP quoted -5.24pp
+    # while the summary labels it "positive".
+    "pcr oi": (re.compile(r"put[/\s-]?call[^0-9]{0,12}|PCR\s*OI", re.I), 0.02),
+    "vrp": (re.compile(r"VRP", re.I), 0.05),
     "macd histogram": (re.compile(r"macd\s*h|macdh|histogram", re.I), 0.005),
     "rvol": (re.compile(r"\brvol\b|relative\s*volume", re.I), 0.005),
     "williams_r": (re.compile(r"williams", re.I), 0.005),
@@ -851,6 +856,36 @@ _DPS_RE = re.compile(r"(?i)dividend(?:s)?\s+per\s+share[^0-9]{0,8}\$?\s*([0-9.]+
 _DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*([0-9.]+)\s*%")
 
 
+_VRP_PP = re.compile(r"vrp\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(?:pp)?", re.I)
+_VRP_SIGN_LABEL = re.compile(r"vrp\s*positive", re.I)
+
+
+def _vrp_sign_label(report_text: str) -> list[VerifierClaim]:
+    """A 'VRP positive' label must not coexist with a quoted negative VRP."
+
+    MU 2026-09-10 market review loop: body quoted 'VRP -5.24pp (IV below
+    realized)' while the summary table labeled 'VRP positive => vols cheap'
+    - a sign flip between sections. A negative number quoted anywhere + a
+    'positive' label = INTERNAL_CONFLICT.
+    """
+    if not report_text:
+        return []
+    text = report_text.replace("\u2212", "-")  # unicode minus -> ASCII
+    if not _VRP_SIGN_LABEL.search(text):
+        return []
+    negs = [float(m.group(1)) for m in _VRP_PP.finditer(text) if m.group(1).startswith("-")]
+    if not negs:
+        return []
+    return [VerifierClaim(
+        claim=f"VRP labeled positive while quoted at {negs[0]:.2f}pp",
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "A 'VRP positive' label conflicts with a quoted negative VRP value "
+            "(MU 2026-09-10: -5.24pp labeled positive in the summary)."
+        ),
+    )]
+
+
 def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
     """A quoted dividend yield must not contradict the same report's
     dividend-per-share and price.
@@ -1215,7 +1250,8 @@ def verify_report_dir(
         drawdown = _drawdown_identity(report_text)
         beat_streak = _beat_streak_identity(report_text)
         dividend_check = _dividend_yield_sanity(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check
+        vrp_check = _vrp_sign_label(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

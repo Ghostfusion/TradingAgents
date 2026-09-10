@@ -400,6 +400,13 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             " verified snapshot's Close and get_market_snapshot's Prev close are"
             " CLOSES - never label a prior-session close as a 'high' (the"
             " 'high' column owns 'high'; a 52-week-high leaf owns that label)."
+            " NEVER call a forming/intraday session bar a CLOSE - the verified"
+            " snapshot annotates a FORMING bar (in-progress session); then write"
+            " intraday levels and avoid closed/EOD/daily-close wording"
+            " (MU 2026-09-10 market.md called 982.95 the close at 1:37pm)."
+            " Write trigger/reference numbers at their REAL scale - a 1,010+"
+            " trigger is never a 400-area / 500-area level (MU 2026-09-10"
+            " summarized a 1,010 trigger as 400-area confirmation)."
             " DELL 2026-09-10 market.md mislabeled the 09-09 close 535.25"
             " as '09-09 high' while the snapshot's Prev close is the close."
             + get_language_instruction()
