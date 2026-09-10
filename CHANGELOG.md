@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **All retries route to TRADINGAGENTS_BACKUP_LLM (2026-09-09 review loop)**
+  - the SOXX/IGV/CIBR/SKYY batch showed a ~20-call back-to-back burst of
+  tencent/hy4-preview with no interleaved quick calls: the RM/PM
+  structured->free-text stub path re-invoked the SAME (deep) model up to
+  _MAX_TRUNCATION_RETRIES times, re-paying the flaky model for the repair.
+  structured.py now routes EVERY retry to the backup model: _retry_if_stub
+  (remaining budget on backup_llm, never plain_llm), retry_chain_if_stub
+  (backup_chain), retry_structured_missing_fields (backup_llm); the three
+  analyst nodes pass their backup_chain. Without a distinct backup there is
+  NO same-model retry - the honest 'unavailable' notice is emitted instead
+  (no infinite loop). Tests: tests/test_structured_agents.py (4 updated to
+  the backup-routing contract).
 - **Options/liquidity metric transparency (NXPI 2026-09-09 review loop)** -
   (1) get_options_iv_read now names the VRP realized-vol basis ("ATM IV
   50.45% - 20d realized 20.58%: +29.87pp, 20d log-close basis") instead of

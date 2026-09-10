@@ -233,7 +233,7 @@ def _model_name(llm: Any) -> str:
 
 
 def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: str,
-                   fallback_llm: Any | None = None) -> str:
+                   fallback_llm: Any | None = None, backup_llm: Any | None = None) -> str:
     """A stub free-text fallback is not a usable decision.
 
     The structured->free-text path can carry back a bare stub (live runs have
@@ -246,6 +246,12 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
     on this fallback model (e.g. the quick tier) instead of the same flaky
     model — the degeneration-loop cost killer. A default of None keeps today's
     behavior; the swap is skipped when the fallback is the same model.
+
+    ``backup_llm`` (optional): ALL remaining stub retries run on this model
+    (``TRADINGAGENTS_BACKUP_LLM``) instead of the original — a model that
+    keeps returning stubs must never be re-paid for the repair (the
+    hy4-preview 20-call back-to-back burst on 2026-09-09 was the same-model
+    stub loop). The swap is skipped when the backup is the same object.
     """
     text = response_text or ""
     attempts = 0
@@ -267,15 +273,23 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
             text = nxt if nxt and nxt.strip() else text
     except Exception as exc:  # noqa: BLE001 - a failed fallback degrades
         logger.warning("%s: fallback-model stub retry failed: %s", agent_name, exc)
-    # Remaining budget on the original model.
+    # Remaining budget on the BACKUP model (never the original — a stub loop
+    # on the same model is the infinite-retry cost killer).
+    retry_llm = backup_llm if (backup_llm is not None and backup_llm is not plain_llm) else None
     for _ in range(max(0, _MAX_TRUNCATION_RETRIES - attempts)):
         if not _looks_stub(text):
             return text
+        if retry_llm is None:
+            break
         try:
-            resp = plain_llm.invoke(_stub_completion_prompt(prompt))
+            logger.info(
+                "%s: stub retry on backup model %r",
+                agent_name, _model_name(retry_llm) or retry_llm,
+            )
+            resp = retry_llm.invoke(_stub_completion_prompt(prompt))
             nxt = resp.content if hasattr(resp, "content") else str(resp)
         except Exception as exc:  # noqa: BLE001 - a failed retry degrades
-            logger.warning("%s: stub-completion retry failed: %s", agent_name, exc)
+            logger.warning("%s: backup stub-completion retry failed: %s", agent_name, exc)
             break
         if not nxt or not nxt.strip():
             break
@@ -348,7 +362,8 @@ def _looks_report_stub(text: str) -> bool:
     return len(t) < 400 and bool(_ANALYST_STATUS_TURN_RE.search(t))
 
 
-def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_name: str) -> str:
+def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_name: str,
+                        backup_chain: Any | None = None) -> str:
     """Re-invoke a tool-calling chain when its final report is a degenerate stub.
 
     Mirrors ``_retry_if_stub`` for the analyst chain path: a model that ran a
@@ -357,16 +372,25 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
     ``messages`` (it may call more tools if it needs data). If the retry is
     still degenerate, return an explicit unavailable notice - never an empty
     or one-line report that downstream would render as truth.
+
+    ``backup_chain`` (optional): the retries run on this chain (bound to
+    ``TRADINGAGENTS_BACKUP_LLM``) instead of the original — a model that keeps
+    returning stubs must never be re-paid for the repair (the 2026-09-09
+    hy4-preview back-to-back burst was the same-model stub loop). The swap is
+    skipped when the backup is the same object.
     """
     text = response_text or ""
+    retry_chain = backup_chain if (backup_chain is not None and backup_chain is not chain) else None
     for _ in range(_MAX_TRUNCATION_RETRIES):
         if not _looks_report_stub(text):
             return text
+        if retry_chain is None:
+            break
         try:
             from langchain_core.messages import HumanMessage
 
             history = _deorphan_tool_calls(messages)
-            cont = chain.invoke([*history, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
+            cont = retry_chain.invoke([*history, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
             text = cont.content if hasattr(cont, "content") else str(cont)
         except Exception as exc:  # noqa: BLE001 - failed retry degrades
             logger.warning("%s: chain stub-completion retry failed: %s", agent_name, exc)
@@ -658,7 +682,10 @@ def invoke_structured_or_freetext(
     # Harden: a bare header/stub is not a usable decision. Regenerate once;
     # if still degenerate, return an explicit 'unavailable' notice so a
     # structured-output miss can never silently produce an empty decision.
-    return _retry_if_stub(plain_llm, prompt, response_text, agent_name, fallback_llm=fallback_llm)
+    return _retry_if_stub(
+            plain_llm, prompt, response_text, agent_name,
+            fallback_llm=fallback_llm, backup_llm=backup_llm,
+        )
 
 
 def retry_structured_missing_fields(
@@ -669,6 +696,7 @@ def retry_structured_missing_fields(
     agent_name: str,
     mandatory_fields: tuple[str, ...],
     max_retries: int = 1,
+    backup_llm: Any | None = None,
 ) -> str:
     """DSA-style per-field integrity retry (research §3.2, pillar 4).
 
@@ -677,14 +705,22 @@ def retry_structured_missing_fields(
     spec of exactly what is missing — not a blind re-roll. Returns the render
     of the repaired result (or the prior render when the retry fails / the
     field appears absent after retry, so the pipeline never blocks).
+
+    ``backup_llm`` (optional): the repair re-invocation runs on this model
+    (``TRADINGAGENTS_BACKUP_LLM``) instead of the original — a model that
+    keeps dropping fields must never be re-paid for the repair. The swap is
+    skipped when the backup is the same object.
     """
     missing = [f for f in mandatory_fields if getattr(result, f, None) in (None, "", [])]
     if not missing:
         return render(result)
     current = result
+    retry_llm = backup_llm if (backup_llm is not None and backup_llm is not structured_llm) else None
     for _ in range(max_retries):
         still = [f for f in missing if getattr(current, f, None) in (None, "", [])]
         if not still:
+            break
+        if retry_llm is None:
             break
         spec = "; ".join(f"{f} must be present and non-empty" for f in still)
         retry_prompt = (
@@ -694,7 +730,7 @@ def retry_structured_missing_fields(
             f"including the missing field(s)."
         )
         try:
-            repaired = structured_llm.invoke(retry_prompt)
+            repaired = retry_llm.invoke(retry_prompt)
             if repaired is None:
                 continue
             current = repaired

@@ -210,32 +210,34 @@ def test_invoke_structured_falls_back_when_result_is_none():
 @pytest.mark.unit
 def test_invoke_structured_stub_freetext_regenerates():
     # A model that misses structured output can answer with only a section
-    # header (e.g. `**Decision`). That stub must be retried, not passed through.
+    # header (e.g. `**Decision`). That stub must be retried on the BACKUP
+    # model (never the same flaky model), not passed through.
     from tradingagents.agents.utils.structured import invoke_structured_or_freetext
 
     structured = MagicMock()
     structured.invoke.return_value = None
     plain = MagicMock()
-    plain.invoke.side_effect = [
-        MagicMock(content="**Decision"),
-        MagicMock(content="**Rating**: Sell. Guidance cut; exit on strength."),
-    ]
+    plain.invoke.return_value = MagicMock(content="**Decision")  # always stub
+    backup = MagicMock()
+    backup.invoke.return_value = MagicMock(
+        content="**Rating**: Sell. Guidance cut; exit on strength."
+    )
 
     out = invoke_structured_or_freetext(
-        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
+        structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
+        backup_llm=backup,
     )
     assert out == "**Rating**: Sell. Guidance cut; exit on strength."
-    assert plain.invoke.call_count == 2
+    assert plain.invoke.call_count == 1  # only the initial free-text stub
+    assert backup.invoke.call_count == 1
 
 
 @pytest.mark.unit
 def test_invoke_structured_stub_freetext_still_empty_returns_notice():
     # If the stub retry still comes back degenerate, we must surface an
-    # explicit 'unavailable' decision, never a bare header.
-    from tradingagents.agents.utils.structured import (
-        _MAX_TRUNCATION_RETRIES,
-        invoke_structured_or_freetext,
-    )
+    # explicit 'unavailable' decision, never a bare header. Without a backup
+    # model there is NO same-model retry (the infinite-loop killer).
+    from tradingagents.agents.utils.structured import invoke_structured_or_freetext
 
     structured = MagicMock()
     structured.invoke.return_value = None
@@ -247,8 +249,8 @@ def test_invoke_structured_stub_freetext_still_empty_returns_notice():
     )
     assert "unavailable" in out
     assert out.startswith("**Decision**:")
-    # 1 initial free-text call + the retries.
-    assert plain.invoke.call_count == 1 + _MAX_TRUNCATION_RETRIES
+    # 1 initial free-text call; no same-model retry without a backup.
+    assert plain.invoke.call_count == 1
 
 
 def test_invoke_structured_stub_uses_fallback_model_first():
@@ -279,10 +281,10 @@ def test_invoke_structured_stub_uses_fallback_model_first():
 
 
 @pytest.mark.unit
-def test_invoke_structured_stub_fallback_still_stub_uses_plain_budget():
+def test_invoke_structured_stub_fallback_still_stub_uses_backup_budget():
     # when the fallback model ALSO returns a stub, the remaining budget runs
-    # on the original model, and a persistent stub yields the honest notice
-    # (no unlimited loop, model-agnostic).
+    # on the BACKUP model (never the original), and a persistent stub yields
+    # the honest notice (no unlimited loop, model-agnostic).
     from tradingagents.agents.utils.structured import (
         _MAX_TRUNCATION_RETRIES,
         invoke_structured_or_freetext,
@@ -294,37 +296,38 @@ def test_invoke_structured_stub_fallback_still_stub_uses_plain_budget():
     plain.invoke.return_value = MagicMock(content="**Decision")  # always stub
     fallback = MagicMock()
     fallback.invoke.return_value = MagicMock(content="**Decision")
+    backup = MagicMock()
+    backup.invoke.return_value = MagicMock(content="**Decision")
 
     out = invoke_structured_or_freetext(
         structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
-        fallback_llm=fallback,
+        fallback_llm=fallback, backup_llm=backup,
     )
     assert "unavailable" in out
-    # 1 initial free-text + (budget-1) on plain after the fallback consumed one
-    assert plain.invoke.call_count == 1 + (_MAX_TRUNCATION_RETRIES - 1)
+    # 1 initial free-text on plain; the fallback consumed one; the remaining
+    # budget runs on the BACKUP, never on plain.
+    assert plain.invoke.call_count == 1
     assert fallback.invoke.call_count == 1
+    assert backup.invoke.call_count == _MAX_TRUNCATION_RETRIES - 1
 
 
 @pytest.mark.unit
 def test_invoke_structured_stub_skips_swap_when_same_model():
     # fallback == plain => no extra call on the fallback (identical model);
-    # behavior identical to not passing fallback_llm.
+    # without a distinct backup there is NO same-model retry -> honest notice.
     from tradingagents.agents.utils.structured import invoke_structured_or_freetext
 
     structured = MagicMock()
     structured.invoke.return_value = None
     plain = MagicMock()
-    plain.invoke.side_effect = [
-        MagicMock(content="**Decision"),
-        MagicMock(content="**Rating**: Buy. Add on strength."),
-    ]
+    plain.invoke.return_value = MagicMock(content="**Decision")
 
     out = invoke_structured_or_freetext(
         structured, plain, "prompt", render=lambda r: r.rating, agent_name="t",
         fallback_llm=plain,  # same object -> skip
     )
-    assert "**Rating**: Buy" in out
-    assert plain.invoke.call_count == 2  # no fallback call was added
+    assert "unavailable" in out
+    assert plain.invoke.call_count == 1  # no same-model retry was added
 
 
 @pytest.mark.unit

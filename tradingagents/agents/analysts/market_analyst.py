@@ -474,7 +474,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             # A model can answer a tool loop with a bare status turn instead of
             # the report (no tool_calls -> the router takes it as final). Ask it
             # once to deliver the report from the gathered evidence.
-            report = retry_chain_if_stub(chain, state["messages"], report, "Market Analyst")
+            report = retry_chain_if_stub(chain, state["messages"], report, "Market Analyst", backup_chain=backup_chain)
         else:
             # Tool-round cap hit: the router forced this turn; the model must
             # write the final report now (dangling tool_calls stripped, one
