@@ -386,11 +386,20 @@ def balance_sheet_health(
     Unknown inputs render that side None (ignored, never a failure); pass is
     None when neither side is measured. ``reasons`` lists which side passed.
     """
-    d_ok = debt_to_equity is not None and debt_to_equity < 1.0
+    d_ok = False
     cr_ok = current_ratio is not None and current_ratio > 1.5
     reasons = []
     if debt_to_equity is not None:
-        reasons.append(f"d_e={debt_to_equity:.2f}" + ("<1.0" if d_ok else ">=1.0"))
+        if debt_to_equity < 0:
+            # Negative equity makes D/E economically meaningless — a negative
+            # ratio must never read as "low leverage" (DELL 2026-09-10 review
+            # loop: -12.75 passed the <1 arm on negative book).
+            reasons.append(
+                f"d_e={debt_to_equity:.2f} negative-equity (unusable, FAIL)"
+            )
+        else:
+            d_ok = debt_to_equity < 1.0
+            reasons.append(f"d_e={debt_to_equity:.2f}" + ("<1.0" if d_ok else ">=1.0"))
     if current_ratio is not None:
         reasons.append(f"cr={current_ratio:.2f}" + (">1.5" if cr_ok else "<=1.5"))
     if debt_to_equity is None and current_ratio is None:

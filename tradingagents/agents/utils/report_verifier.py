@@ -422,6 +422,13 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # no prediction-market leaf. A market-implied probability must not be
     # quoted at two values in one report.
     "fed cuts 2026": (re.compile(r"fed\s*rate?\s*cuts?\s+in\s+2026|no\s*fed\s*rate\s*cuts|will\s*fed\s*rate\s*cuts", re.I), 0.02),
+# DELL 2026-09-10 review loop: scenario-DCF bear was quoted as 87.75
+    # in the body and87.60 in the summary table — a transcription slip, not a real
+    # scenario shift. Level-type (exact price) metrics use a 0.1% bucket
+    # Only the "bear" label is pair-safe — "bear" is the FIRST leg of the slash list,
+    # so "bear": $N  is the same dollar in both the body and the summary row.
+
+    "scenario dcf bear": (re.compile(r"\bbear\b", re.I),0.001),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -605,7 +612,7 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
             )
             if bucket is None:
                 distinct.append((v, raw))
-            else:
+        else:
                 # keep the first raw string for the group
                 pass
         if len(distinct) >= 2:
@@ -820,6 +827,79 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
             ))
             break  # one drawdown claim per report is enough
     return out
+
+
+# ---------------------------------------------------------------------------
+# Beat-streak identity (DELL 2026-09-10 review loop)
+# ---------------------------------------------------------------------------
+# A claim "N straight >K% EPS beats" must match the consecutive count from the
+# earnings-surprise table (newest quarter first, Surprise% column): only the
+# latest two quarters (+44.0, +100.8) exceed 40%, so "three straight >40%"
+# would be an overcount.
+_BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
+_SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
+
+_INLINE_SURPRISE_RE = re.compile(r"(?i)\b(\d{4}/Q\d)\b[^()]*\(([+\-]?\d+(?:\.\d+)?)%")
+
+def _inline_surprise_streak(text: str, threshold: float) -> int:
+    streak = 0
+    for m in _INLINE_SURPRISE_RE.finditer(text):
+        try:
+            pct = float(m.group(2))
+        except ValueError:
+            break
+        if pct >= threshold:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+
+def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
+    """Claimed 'N straight >K% EPS beats' must match the surprise-table streak."""
+    if not report_text:
+        return []
+    m = _BEAT_STREAK_RE.search(report_text)
+    if not m:
+        return []
+    _NUM_WORDS = {"two":2,"three":3,"four":4,"five":5,"six":6}
+    g = m.group(1)
+    claimed = int(g) if g.isdigit() else _NUM_WORDS.get(g.lower())
+    if claimed is None:
+        return []
+    threshold = float(m.group(2))
+    streak = 0
+    rows_seen = 0
+    for line in report_text.splitlines():
+        if not _SURPRISE_ROW.match(line):
+            continue
+        rows_seen += 1
+        parts = [p.strip() for p in line.strip().strip("|").split("|")]
+        if len(parts) < 5:
+            continue
+        try:
+            pct = float(parts[4].rstrip("%"))
+        except ValueError:
+            break
+        if pct >= threshold:
+            streak += 1
+        else:
+                break
+    if rows_seen == 0:
+        streak = _inline_surprise_streak(report_text, threshold)
+    if streak == claimed:
+        return []
+    return [VerifierClaim(
+        claim=f"'{claimed} straight >{threshold:.0f}% beats' vs surprise table gives "
+              f"{streak} consecutive",
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "Claimed beat-streak length does not match the consecutive >threshold "
+            "surprises in the earnings-surprise table (DELL 2026-09-10 review "
+            "loop: 'three straight >40%' vs +44.0/+100.8/+14.6 — only two)."
+        ),
+    )]
 
 
 # --- R-multiple (2R/3R target) identity — market-side. ---------------------
@@ -1076,7 +1156,8 @@ def verify_report_dir(
         identities = _valuation_identity_checks(report_text)
         fed_cuts = _fed_cuts_contradiction(report_text)
         drawdown = _drawdown_identity(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown
+        beat_streak = _beat_streak_identity(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

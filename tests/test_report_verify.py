@@ -559,11 +559,50 @@ def test_drawdown_identity_flags_mismatch():
 
 
 def test_drawdown_identity_clean_when_consistent():
-    text = "price 532.00, 52-week high 655.95 -> 18.9% below the high."
+    text = "price 532.00, 52-week high 655.95 ->  .,18.9% below the high."
     assert rv._drawdown_identity(text) == []
 
 
-# --- R-multiple (2R/3R) identity — market-side (MU 2026-09-09 review loop)
+def test_beat_streak_identity_flags_overcount():
+    # DELL 2026-09-10: claimed "three straight >40% EPS beats" but
+    # the surprise table shows +44.0 / +100.8 / +14..6 / +15.7 — only two
+    # consecutive quarters exceed 40%.
+    text = (
+        "Momentum: three straight >40% EPS beats.\n"
+        "| Period | Date | EPS est | EPS act | Surprise% | Day move | Implied |\n"
+        "| 2027/Q2 |2026-09-01 |4.4029 |6.34 |+44.0 |+15.8% |10.9% |\n"
+        "| 2027/Q1 |2026-05-28 |2.61 |5.24 |+100.8 |+32.8% |12.5% |\n"
+        "| 2026/Q4 |2026-02-26 |2.94 |3.37 |+14.6 |+21.9% |9.5% |\n"
+    )
+    cs = rv._beat_streak_identity(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "2 consecutive" in cs[0].claim
+
+
+def test_beat_streak_identity_clean_when_matches():
+    text = (
+        "Surprise streak: 2 straight >40% EPS beats.\n"
+        "| 2027/Q2 |2026-09-01 |4.4029 |6.34 |+44.0 |+15.8% |10.9% |\n"
+        "| 2027/Q1 |2026-05-28 |2.61 |5.24 |+100.8 |+32.8% |12.5% |\n"
+    )
+    assert rv._beat_streak_identity(text) == []
+
+
+def test_internal_conflicts_scenario_dcf_bear_dual_values():
+    # DELL 2026-09-10: body quotes scenario-DCF bear 87.75, summary
+    # table 87.60 — a transcription slip that must flag.
+
+    text = (
+        "Scenario DCF (bear/base/bull): **$87.75 / $115.51 / $240.53**\n"
+        "| Scenario DCF | Above bull | bear 87.60 / base 115.51 / bull 240.53 |\n"
+    )
+    cs = rv._internal_conflicts(text)
+    assert any(c.status == "INTERNAL_CONFLICT" for c in cs)
+    assert any("scenario dcf bear" in c.claim for c in cs)
+
+
+# --- R-multiple (2R/3R) identity — market-side(MU 2026-09-09 review loop)
 
 
 def test_r_multiple_identity_flags_wrong_3r():
