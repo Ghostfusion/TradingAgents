@@ -193,6 +193,12 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
     miss_scale = float(_num(cfg.get("catalyst_miss_scale"), 0.5) or 0.5)
     floor_scale = float(_num(cfg.get("catalyst_scale_floor"), 0.25) or 0.25)
     block_days = int(_num(cfg.get("catalyst_hard_block_days"), 0) or 0)
+    # When NO forward macro calendar is available (Fed + econ both absent),
+    # the Fed-proximity leg was never assessed — scale down modestly instead
+    # of claiming a clean window (MU 2026-09-09 review loop: fed_watch and
+    # economic_calendar both NO_DATA -> tool said "no-imminent-catalyst" with
+    # FOMC 6d out).
+    unassessed_scale = float(_num(cfg.get("catalyst_unassessed_scale"), 0.9) or 0.9)
 
     data = data or {}
     earnings = next_earnings(data.get("earnings_calendar") or [], trade_date)
@@ -269,6 +275,27 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
             verdict = "macro-backdrop"
         for r in macro_backdrop.get("reasons") or []:
             reasons.append(r)
+
+    # Honest degradation (factory-verified 2026-09-09): when neither forward
+    # macro feed was available, "no-imminent-catalyst" is an unearned claim —
+    # the Fed-proximity leg never ran. Report it as unassessed with a small
+    # de-risk so consumers (reports/overlays) never treat an unmeasured
+    # window as a known-clean one.
+    no_fed_cal = not (data.get("fed_watch") or [])
+    no_econ_cal = not (data.get("economic_calendar") or [])
+    if (
+        verdict == "no-imminent-catalyst"
+        and no_fed_cal
+        and no_econ_cal
+        and not (macro_backdrop or {}).get("verdict")
+    ):
+        scale *= unassessed_scale
+        verdict = "catalyst-unassessed"
+        reasons.append(
+            "no Fed/econ calendar data to assess macro catalyst risk "
+            f"(FOMC proximity unevaluable) -> x{unassessed_scale:.2f}; "
+            "unmeasured window, not a confirmed clean one"
+        )
 
     scale = max(floor_scale, min(1.0, scale))
     return {

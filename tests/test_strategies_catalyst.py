@@ -130,14 +130,36 @@ def test_snapshot_earnings_window_scale_down():
 
 
 def test_snapshot_no_catalyst_neutral():
+    # Fed + econ calendars PRESENT but no high event in window -> truly
+    # assessed, so "no-imminent-catalyst" with scale 1.0 is legitimate.
     snap = build_catalyst_snapshot(
-        {"earnings_calendar": [], "move_history": [], "economic_calendar": [], "fed_watch": []},
+        {
+            "earnings_calendar": [],
+            "move_history": [],
+            "economic_calendar": [{"title": "CPI", "timestamp": "2026-08-19", "star": "LOW"}],
+            "fed_watch": [{"meeting_date": "2026-09-16", "probability": 55.0}],
+        },
         "2026-08-19",
         {},
     )
     assert snap["verdict"] == "no-imminent-catalyst"
     assert snap["scale"] == pytest.approx(1.0)
     assert snap["reasons"] == []
+
+
+def test_snapshot_unassessed_when_all_macro_feeds_absent():
+    # MU 2026-09-09: fed_watch + economic_calendar both NO_DATA (vendor
+    # down) while FOMC 09-15 was 6d out -> the tool must NOT claim
+    # "no-imminent-catalyst"; it should report the window as unassessed
+    # and de-risk modestly instead of passing a false clean bill.
+    snap = build_catalyst_snapshot(
+        {"earnings_calendar": [], "move_history": [], "economic_calendar": [], "fed_watch": []},
+        "2026-09-09",
+        {},
+    )
+    assert snap["verdict"] == "catalyst-unassessed"
+    assert snap["scale"] == pytest.approx(0.9)
+    assert any("unevaluable" in r or "unmeasured" in r for r in snap["reasons"])
 
 
 def test_snapshot_macro_verdict():
@@ -447,7 +469,8 @@ def test_snapshot_hard_block_no_earnings():
         {"catalyst_hard_block_days": 7},
     )
     assert snap["hard_block"] is None
-    assert snap["verdict"] == "no-imminent-catalyst"
+    # no earnings + no macro feeds -> honest unassessed, not a clean window
+    assert snap["verdict"] == "catalyst-unassessed"
 
 
 def test_snapshot_hard_block_outside_window_no_veto():

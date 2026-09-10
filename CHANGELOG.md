@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Catalyst-scale honest degradation (MU 2026-09-09 review loop)** - when
+  fed_watch AND economic_calendar both return NO_DATA (vendor down), the
+  snapshot reported "scale=1.0 no-imminent-catalyst" — a false clean bill
+  with FOMC 09-15 six days out (SKHY-sized the same window 0.60 when its
+  feed was live). build_catalyst_snapshot now reports
+  verdict=catalyst-unassessed with the "FOMC proximity unevaluable" reason
+  and a configurable x0.90 de-risk (catalyst_unassessed_scale) instead of
+  claiming a confirmed clean window; LIVE feeds with no event in window
+  still yield no-imminent-catalyst scale 1.0. Tests:
+  tests/test_strategies_catalyst.py (+1, 2 updated to honest contract).
 - **R-multiple (2R/3R target) identity check (MU 2026-09-09 review loop)**
   - the market.md quoted "2R/3R targets 1357.69 / 1521.68" vs get_swing_set
   (evidence) 2R 1357.69 / 3R 1522.65 — a 0.06% transcription typo, and the
