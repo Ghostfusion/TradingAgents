@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Fed-cuts contradiction check (IGV 2026-09-09 review loop)** - the
+  IGV news.md asserted the same "Fed rate cuts in 2026" Polymarket event at
+  "Yes 0%" (body) and "Yes 93%" (summary table) with no prediction-market
+  leaf anywhere in the tree. report_verifier gained a deterministic
+  `_fed_cuts_contradiction`: any report citing that event at two materially
+  different probabilities (<=2% vs >=50%) is INTERNAL_CONFLICT, resolved to
+  one tool-sourced value. Tests: tests/test_report_verify.py (+2).
 - **ETF sector identity fix (IGV 2026-09-09 review loop)** - the IGV/SOXX/
   SKYY/CIBR market reports mapped the tech ETFs to "Financial Services" via
   provider equity-sector metadata (yfinance/FMP return that for every ETF,

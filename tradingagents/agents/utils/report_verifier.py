@@ -417,6 +417,11 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # (summary + get_analyst_verdict leaf 25.70) — a provider-sourced score
     # must not be quoted at two values in one report.
     "altman z": (re.compile(r"\baltman\s*z\b|altman\s*z-score", re.I), 0.005),
+    # IGV 2026-09-09 review loop: the news.md asserted both "Yes 0%" and
+    # "Yes 93%" for the same "Fed rate cuts in 2026" Polymarket event, with
+    # no prediction-market leaf. A market-implied probability must not be
+    # quoted at two values in one report.
+    "fed cuts 2026": (re.compile(r"fed\s*rate?\s*cuts?\s+in\s+2026|no\s*fed\s*rate\s*cuts|will\s*fed\s*rate\s*cuts", re.I), 0.02),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -537,8 +542,48 @@ def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, floa
     return out
 
 
+_FED_CUTS_LABEL_RE = re.compile(r"(?i)fed\s*rate?\s*cuts?\s+in\s+2026|will\s*fed\s*rate\s*cuts?|no\s*fed\s*rate\s*cuts|fed\s*cuts\s+2026|no\s*rate\s*cuts")
+_PCT_OF = re.compile(r"\b(Yes|No)\b[^0-9]{0,14}?(\d{1,3})%?")
+
+
+def _fed_cuts_contradiction(report_text: str) -> list[VerifierClaim]:
+    """Same 'Fed rate cuts in 2026' event quoted at two probabilities.
+
+    IGV 2026-09-09 review loop: news.md asserted 'Yes 0%' (no cuts, settled)
+    and 'Yes 93%' (no-cut comfort) for the same Polymarket event — both
+    recalled with no prediction-market leaf. This flags the pair.
+    """
+    if not report_text:
+        return []
+    labels = list(_FED_CUTS_LABEL_RE.finditer(report_text))
+    if not labels:
+        return []
+    probs: set[float] = set()
+    for m in labels:
+        window = report_text[m.end():m.end() + 120]
+        for pm in _PCT_OF.finditer(window):
+            try:
+                probs.add(float(pm.group(2)))
+            except ValueError:
+                continue
+    # a 0% and a >50% on the same event -> contradiction
+    if len(probs) >= 2 and min(probs) <= 2.0 and max(probs) >= 50.0:
+        p = ", ".join(f"{x:.0f}%" for x in sorted(probs))
+        return [VerifierClaim(
+            claim="'fed cuts 2026' cited at conflicting probabilities: " + p,
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The same Polymarket-style 'Fed rate cuts in 2026' event is "
+                "asserted at two materially different probabilities in this "
+                "report (IGV 2026-09-09: 0% vs 93%) with no prediction-market "
+                "leaf. Resolve to one tool-sourced value."
+            ),
+        )]
+    return []
+
+
 def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
-    """Find the same metric asserted at conflicting values within ONE report.
+    """Find the same-asserted-metric-at-different-values within ONE report.
 
     The per-claim anchor checks each claim against the tool evidence, so it
     cannot see that claim A says "DCF 80.76" and claim B says "DCF 80.60" —
@@ -965,7 +1010,8 @@ def verify_report_dir(
         conflicts = _internal_conflicts(report_text)
         macro_gate = _macro_authority_gate(report_text, evidence, stem)
         identities = _valuation_identity_checks(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities
+        fed_cuts = _fed_cuts_contradiction(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

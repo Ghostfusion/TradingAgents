@@ -522,9 +522,27 @@ def test_ev_net_cash_clean_when_consistent():
 
 
 def test_internal_conflicts_altman_z_pair():
-    text = "Altman Z 24.62 (body)\n| Altman Z | 25.70 |"
+    text = "Altman Z 24.2 (body)\n| Altman Z | 25.70 |"
     cs = rv._internal_conflicts(text)
     assert any(c.status == "INTERNAL_CONFLICT" and c.claim.startswith("'altman z'") for c in cs)
+
+
+def test_fed_cuts_contradiction_flags_0_vs_93():
+    # IGV 2026-09-09: news.md asserted the same Polymarket event at "Yes 0%"
+    # (line 11) and "Yes 93%" (summary table), with no prediction-market leaf.
+    text = (
+        'Polymarket: "Will Fed rate cuts happen in 2026?" **Yes 0%** — settled.\n'
+        "| Fed cuts 2026 | Yes 93% (Polymarket) |"
+    )
+    cs = rv._fed_cuts_contradiction(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "0%" in cs[0].claim and "93%" in cs[0].claim
+
+
+def test_fed_cuts_contradiction_clean_single_value():
+    assert rv._fed_cuts_contradiction('Will Fed rate cuts happen in 2026? Yes 0%.') == []
+    assert rv._fed_cuts_contradiction("Fed cuts 2026: Yes 93%.") == []
 
 
 # --- R-multiple (2R/3R) identity — market-side (MU 2026-09-09 review loop)
