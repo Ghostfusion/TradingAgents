@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Options/liquidity metric transparency (NXPI 2026-09-09 review loop)** -
+  (1) get_options_iv_read now names the VRP realized-vol basis ("ATM IV
+  50.45% - 20d realized 20.58%: +29.87pp, 20d log-close basis") instead of
+  the ambiguous "ATM IV - realized vol" the review could not reconcile
+  against the 60d/YZ/garch vols also listed. (2) get_liquidation_days
+  renders the 15% participation figure separately from the ADV ("X/day
+  (15% of ADV Y/day)") - the old label printed the ADV as if it were the
+  15% participation, making 445.6 days look internally inconsistent (math
+  was correct). (3) options-chain tools (moomoo + yfinance) relabel the OI
+  ratio: call_oi/put_oi is now "Call/Put OI/volume ratio" with the put/call
+  reciprocal, not the contradictory "Put/Call OI ratio (call/put)". Tests:
+  tests/test_moomoo_vendor.py, tests/test_analysis_tools.py.
 - **Valuation-data hardening (NXPI 2026-09-09 review loop)** - (1)
   get_ratios_massive now annotates >100x EV/EBITDA or EV/EBIT as
   "DATA-QUALITY: vendor-multiple anomaly (contaminated EBITDA denominator),

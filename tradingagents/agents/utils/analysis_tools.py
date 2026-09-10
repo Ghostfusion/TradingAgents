@@ -4678,7 +4678,17 @@ def get_options_iv_read(
         # vrp is in PERCENTAGE POINTS (volatility_risk_premium returns
         # (iv - rv) * 100). Rendering it with "%" multiplied by 100 again
         # (ARM 2026-09-09: +17.63pp printed as +1763%). Render as pp.
-        lines.append(f"- VRP (ATM IV - realized vol): {vrp:+.2f}pp (percentage points)" if vrp is not None else "- VRP: n/a")
+        # State the realized-vol WINDOW (20d log-close) — the NXPI 2026-09-09
+        # review could not reconcile +29.87pp against the 60d/YZ/garch vols the
+        # report also listed; VRP uses a different (shorter, 20d) realized base.
+        if vrp is not None:
+            rv_pct = (float(atm_iv) - float(vrp) / 100.0) * 100.0
+            lines.append(
+                f"- VRP (ATM IV {atm_iv*100:.2f}% - 20d realized {rv_pct:.2f}%): "
+                f"{vrp:+.2f}pp (percentage points; 20d log-close realized-vol basis)"
+            )
+        else:
+            lines.append("- VRP: n/a")
         lines.append("- IV percentile: n/a (no per-day IV history source)")
         if speed is not None and zomma is not None:
             lines.append(
@@ -5076,9 +5086,11 @@ def get_liquidation_days(
         d = _dta(shares, adv)
         if d is None:
             return f"liquidation days unavailable for {ticker}: missing shares/ADV."
+        particip = adv * 0.15 if adv is not None else None
+        ptext = f"{particip:,.0f}/day (15% of ADV {adv:,.0f}/day)" if particip is not None else "n/a"
         return (
             f"liquidation days {ticker}: {d:.1f} days to absorb "
-            f"{shares:,.0f} shares at 15% of ADV ({adv:,.0f}/day)"
+            f"{shares:,.0f} shares at 15% of ADV ({ptext})"
         )
     except Exception as exc:  # noqa: BLE001
         return f"liquidation days unavailable for {ticker}: {exc}"

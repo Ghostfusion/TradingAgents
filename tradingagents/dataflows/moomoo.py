@@ -1008,9 +1008,13 @@ def get_options_chain_moomoo(symbol: str, curr_date: str = None) -> str:
     lines.append(f"- Call open interest: {call_oi:,}")
     lines.append(f"- Put open interest:  {put_oi:,}")
     if put_oi > 0:
-        lines.append(f"- Put/Call OI ratio (call/put): {call_oi / put_oi:.2f}")
+        cpoi = call_oi / put_oi
+        lines.append(f"- Call/Put OI ratio: {cpoi:.2f} "
+                     f"(put/call = {put_oi / call_oi if call_oi else float('nan'):.2f})")
     if put_vol > 0:
-        lines.append(f"- Put/Call volume ratio (call/put): {call_vol / put_vol:.2f}")
+        cpvol = call_vol / put_vol
+        lines.append(f"- Call/Put volume ratio: {cpvol:.2f} "
+                     f"(put/call = {put_vol / call_vol if call_vol else float('nan'):.2f})")
     lines.append("")
     lines.append(
         "Interpretation: high put open interest and/or put IV skew indicates "

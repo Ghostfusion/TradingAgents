@@ -163,11 +163,11 @@ def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
 
     if put_oi > 0:
         pc_oi = call_oi / put_oi
-        lines.append(f"- Put/Call OI ratio (call/put): {pc_oi:.2f} "
+        lines.append(f"- Call/Put OI ratio: {pc_oi:.2f} "
                      f"(put/call = {put_oi / call_oi if call_oi > 0 else float('nan'):.2f})")
     if put_vol > 0:
         pc_vol = call_vol / put_vol
-        lines.append(f"- Put/Call volume ratio (call/put): {pc_vol:.2f} "
+        lines.append(f"- Call/Put volume ratio: {pc_vol:.2f} "
                      f"(put/call = {put_vol / call_vol if call_vol > 0 else float('nan'):.2f})")
     lines.append(
         "- OI ratio convention: THIS snapshot = call/put; the options-IV-read "

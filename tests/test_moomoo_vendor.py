@@ -667,6 +667,11 @@ class MoomooQualityFixTests(unittest.TestCase):
             out = moomoo.get_options_chain_moomoo("AAPL", "2026-08-16")
         self.assertIn("31.9%", out)
         self.assertIn("33.0%", out)
+        # NXPI 2026-09-09 review loop: call/put 100/200 = 0.50 must be
+        # labeled "Call/Put OI ratio" with the reciprocal, not falsely
+        # named "Put/Call OI ratio (call/put)".
+        self.assertIn("Call/Put OI ratio: 0.50", out)
+        self.assertIn("(put/call = 2.00)", out)
 
     def test_capital_flow_anchored_by_date(self):
         ctx = mock.Mock()

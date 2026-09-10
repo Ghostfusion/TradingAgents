@@ -1114,8 +1114,11 @@ def test_options_iv_read_vrp_renders_pp_not_percent(monkeypatch):
     })
     monkeypatch.setattr(_yf, "Ticker", lambda t: _FakeTk())
     out = T.get_options_iv_read.invoke({"ticker": "ARMT"})
-    assert "VRP (ATM IV - realized vol): +" in out
-    assert "pp (percentage points)" in out
+    # NXPI 2026-09-09 review-loop: the VRP label must name the realized-vol
+    # basis (20d log-close) so the reader can reconcile it against any other
+    # vols the report lists — the old "ATM IV - realized vol" was ambiguous.
+    assert "20d realized" in out
+    assert "pp (percentage points; 20d log-close realized-vol basis)" in out
     # ATM IV 0.32, RV tiny (~0.02) -> VRP ≈ +30.0pp, nowhere near +3000.
     vrp_line = next(ln for ln in out.splitlines() if "VRP" in ln)
     val = vrp_line.split(":")[-1].strip().split("pp")[0]  # "+32.00"
@@ -2047,6 +2050,15 @@ def test_liquidation_days_computes(monkeypatch):
         out = T.get_liquidation_days.invoke({"ticker": "AAPL"})
     assert "liquidation days AAPL" in out
     assert "days to absorb" in out
+    # NXPI 2026-09-09 review loop: the output must disclose the 15%
+    # participation figure separately from the ADV — the old label printed
+    # the ADV (3,765,685/day) as if it were the 15% participation, making
+    # 445.6 days look internally inconsistent. New format names both.
+    import re as _re
+
+    assert "15% of ADV" in out
+    m = _re.search(r"\(\d[\d,]*/day \(15% of ADV \d[\d,]*/day\)\)", out)
+    assert m is not None, out
 
 
 def test_liquidation_days_missing_adv():
