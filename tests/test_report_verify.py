@@ -640,6 +640,49 @@ def test_price_target_identity_clean_single():
     assert rv._price_target_identity("mean 69.38 from get_analyst_ratings") == []
 
 
+def test_sma200_pct_identity_hpe():
+    # HPE 2026-09-10 market.md: body +64.7% (55.46/33.68-1) vs table +184.7%.
+    t = ("price 55.46 vs 200-SMA 33.68 = +64.7%;\n"
+         "| price vs 200-SMA +184.7% (verified) |")
+    cs = rv._sma200_pct_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "+64.7" in cs[0].claim and "184.7" in cs[0].claim
+
+
+def test_sma200_pct_identity_clean():
+    assert rv._sma200_pct_identity("price vs 200-SMA +64.7%") == []
+
+
+def test_garch_cond_identity_hpe():
+    # HPE 2026-09-10: body 'GARCH long-run 50.71%, conditional 58.90%' vs
+    # summary 'GARCH cond 65.90%'.
+    t = ("GARCH long-run 50.71%, conditional 58.90%;\n"
+         "| GARCH cond 65.90% |")
+    cs = rv._garch_cond_identity(t)
+    assert len(cs) == 1
+    assert "58.90" in cs[0].claim and "65.90" in cs[0].claim
+
+
+def test_garch_cond_identity_clean():
+    t = "GARCH long-run 50.71%, conditional 58.90%"
+    assert rv._garch_cond_identity(t) == []
+
+
+def test_chandelier_identity_hpe():
+    # HPE 2026-09-10: body 54.11 (3xATR below 22-bar high) vs table 58.2.
+    t = ("chandelier 3xATR below 22-bar high = 54.11 (exit=False)\n"
+         "| chandelier 58.2/ema-trail 59.02 for exits |")
+    cs = rv._chandelier_identity(t)
+    assert len(cs) == 1
+    assert "54.11" in cs[0].claim and "58.2" in cs[0].claim
+
+
+def test_chandelier_identity_clean():
+    t = "chandelier 3xATR below 22-bar high = 54.11"
+    assert rv._chandelier_identity(t) == []
+
+
 def test_money_ellipsis_flagged_as_artifact():
     # HPE 2026-09-10: 'Total debt $8.22B... verbatim $20.24B' leaks a
     # mid-edit dollar value into the final report.

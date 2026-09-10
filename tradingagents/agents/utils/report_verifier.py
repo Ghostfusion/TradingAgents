@@ -1146,6 +1146,87 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_SMA200_PCT = re.compile(r"200\s*-?\s*SMA[^\n]{0,60}?([+]?\d+(?:\.\d+)?)%", re.I)
+_GARCH_COND = re.compile(r"garch[^\n]{0,40}?\bcond(?:itional)?[^0-9]{0,8}(\d+(?:\.\d+)?)%", re.I)
+_CHANDELIER_EQ = re.compile(r"chandelier[^=\n]*=\s*(\d+(?:\.\d+)?)", re.I)
+_CHANDELIER_SPACE = re.compile(r"chandelier\s+(\d+(?:\.\d+)?)(?!\s*[x×XATR])", re.I)
+
+
+def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting price-vs-200-SMA percentages in one report.
+
+    HPE 2026-09-10 market.md: body '+64.7%' (55.46/33.68-1) vs summary-table
+    '+184.7%' - the 184.7% matches no leaf and exaggerates trend extension.
+    All % distances quoted against the 200-SMA must agree.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _SMA200_PCT.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="200-SMA distance cited at conflicting values: "
+              + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes different % distances to the 200-SMA "
+            "(HPE 2026-09-10: +64.7% body = 55.46/33.68-1 vs +184.7% summary "
+            "table - the extra value matches no leaf). One canonical "
+            "distance per report."
+        ),
+    )]
+
+
+def _garch_cond_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting GARCH conditional-volatility values in one report.
+
+    HPE 2026-09-10 market.md: body 'GARCH ... conditional 58.90%' vs summary
+    'GARCH cond 65.90%' - same labeled estimator, two values.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _GARCH_COND.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="GARCH conditional vol cited at conflicting values: "
+              + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes two GARCH conditional-volatility values for "
+            "the same estimator (HPE 2026-09-10: body 58.90% vs table "
+            "65.90%). Keep one canonical GARCH cond print."
+        ),
+    )]
+
+
+def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting chandelier stop values in one report.
+
+    HPE 2026-09-10 market.md: chandelier 54.11 (body, 3xATR below 22-bar
+    high), 'chandelier/EMA trails 54.11/53.91', summary 'chandelier
+    58.2/ema-trail 59.02' and 'exit below 58.11 (chand)' - three labeled
+    chandelier values from different calc windows. One canonical stop.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _CHANDELIER_EQ.finditer(report_text)}
+    vals |= {m.group(1) for m in _CHANDELIER_SPACE.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="chandelier stop cited at conflicting values: "
+              + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes more than one chandelier stop value without "
+            "labeling the differing calculations (HPE 2026-09-10: 54.11 in "
+            "the swing trail vs 58.2 / 58.11 in the summary). One canonical "
+            "stop per methodology, explicitly labeled."
+        ),
+    )]
+
+
 _PRICE_TARGET = re.compile(r"\bmean\s+(?:PT\s*)?\$?([\d.]+)", re.I)
 
 
@@ -1686,10 +1767,13 @@ def verify_report_dir(
         sector_rank = _sector_rank_identity(report_text)
         self_corr = _self_correction_artifacts(report_text)
         pt_cons = _price_target_identity(report_text)
+        sma200_pct = _sma200_pct_identity(report_text)
+        garch_cond = _garch_cond_identity(report_text)
+        chand_stop = _chandelier_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
