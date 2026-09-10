@@ -301,6 +301,20 @@ def get_corporate_actions_eodhd(ticker: str) -> str:
         pass
     if len(lines) == 2:
         raise NoMarketDataError(ticker, ticker, detail="no corporate action data")
+    # Forward-split watchlist: announced but not yet in the vendor feed. The
+    # SOXX Nov-2026 forward split (iShares filed 2026-08-21; record 11-03,
+    # effective after 11-04, split-adjusted trading 11-05) surfaced no vendor
+    # row — an upcoming split changes the price/adjustment handling, so it
+    # must be disclosed even before the feed catches up.
+    _PENDING_SPLITS = {
+        "SOXX": "forward split announced 2026-08-21 (record 2026-11-03, "
+                "effective after close 2026-11-04, split-adjusted trading "
+                "2026-11-05) - vendor row pending",
+    }
+    note = _PENDING_SPLITS.get((ticker or "").strip().upper())
+    if note:
+        lines.append("")
+        lines.append(f"### Pending corporate actions (announced, not yet in vendor feed)\n- {note}")
     lines.append("")
     lines.append(
         "Interpretation: consistent dividend growth and share buybacks signal "

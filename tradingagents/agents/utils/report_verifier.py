@@ -757,6 +757,69 @@ def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
     return []
 
 
+_DRAWDOWN_RE = re.compile(
+    r"(?i)[~\-]?\s*(\d+(?:\.\d+)?)\s*%\s*(?:below|off)\s+"
+    r"(?:its\s+|the\s+)?(?:52[-\s]?week\s+)?(?:high|top)"
+)
+# A 52-week high with its value on the SAME line (never crosses a newline, so
+# "52-week high" at end of line cannot latch onto the next line's "52"):
+_52W_HIGH_RE = re.compile(
+    r"(?i)\b52[-\s]?week\s+high\s*[:=-]?\s*\$?\s*(\d{2,}(?:[.,]\d+)?)\b"
+)
+
+
+def _dd_price(report_text: str) -> float | None:
+    """A per-line price/close/last figure (1+ decimals), checked line-wise."""
+    for line in report_text.splitlines():
+        m = re.search(r"(?i)(?:last|price|close|nav)\s*:?[=\s]*\$?\s*(\d[\d,]*(?:\.\d+)?)", line)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+    return None
+
+
+def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
+    """A 'X% below 52-week high' claim must match price/high - 1.
+
+    SOXX 2026-09-09 review loop: the fundamentals.md asserted "NAV ~$532 is
+    at ~39% below its 52-week high" while the same report quotes price 532
+    and 52w high 655.95 (=> 18.9%). The mid-sentence self-correction
+    ('...actually -18.8%') is the kind of stale-draft artifact this catches
+    deterministically.
+    """
+    if not report_text:
+        return []
+    out = []
+    for m in _DRAWDOWN_RE.finditer(report_text):
+        claimed = abs(float(m.group(1)))
+        high_m = _52W_HIGH_RE.search(report_text)
+        price = _dd_price(report_text)
+        if not (high_m and price is not None):
+            continue
+        try:
+            high = float(high_m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if high <= 0 or abs(claimed) <= 1:
+            continue
+        implied = (price - high) / high * 100.0
+        if abs(claimed - abs(implied)) / max(abs(implied), 1e-9) > 0.2:
+            out.append(VerifierClaim(
+                claim=f"'{claimed:.0f}% below 52-week high' vs price {price:,.2f} / "
+                      f"high {high:,.2f} = {implied:.1f}%",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The claimed drawdown does not match price/high - 1 from the "
+                    "same report (SOXX 2026-09-09: 39% vs the 18.8% that "
+                    "532.0/655.95 implies). Recompute the drawdown."
+                ),
+            ))
+            break  # one drawdown claim per report is enough
+    return out
+
+
 # --- R-multiple (2R/3R target) identity — market-side. ---------------------
 # A swing framework should quote 2R/3R targets that satisfy
 #     targetN = entry + N * (entry - stop)
@@ -1011,7 +1074,8 @@ def verify_report_dir(
         macro_gate = _macro_authority_gate(report_text, evidence, stem)
         identities = _valuation_identity_checks(report_text)
         fed_cuts = _fed_cuts_contradiction(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts
+        drawdown = _drawdown_identity(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

@@ -545,6 +545,24 @@ def test_fed_cuts_contradiction_clean_single_value():
     assert rv._fed_cuts_contradiction("Fed cuts 2026: Yes 93%.") == []
 
 
+def test_drawdown_identity_flags_mismatch():
+    # SOXX 2026-09-09: claimed "~39% below 52-week high" with price 532 /
+    # high 655.95 => 18.9%. The drawdown must match price/high - 1.
+    text = (
+        "NAV ≈ $532 is at ~39% below its 52-week high.\n"
+        "52-week high 655.95, latest price $532.00"
+    )
+    cs = rv._drawdown_identity(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "18.9%" in cs[0].claim or "18.8%" in cs[0].claim
+
+
+def test_drawdown_identity_clean_when_consistent():
+    text = "price 532.00, 52-week high 655.95 -> 18.9% below the high."
+    assert rv._drawdown_identity(text) == []
+
+
 # --- R-multiple (2R/3R) identity — market-side (MU 2026-09-09 review loop)
 
 

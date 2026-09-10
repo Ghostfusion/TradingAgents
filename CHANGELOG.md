@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
+  fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
+  (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence
+  draft artifact. report_verifier gained `_drawdown_identity`: any "X%
+  below 52-week high" claim must match price/high - 1 (>20% mismatch ->
+  INTERNAL_CONFLICT). (2) SOXX's announced Nov-2026 forward split (iShares
+  filed 2026-08-21; record 11-03, effective 11-04, adjusted trading 11-05)
+  was absent from the corporate-actions vendor feed; the EODHD renderer now
+  discloses announced-but-pending splits from a watchlist. Tests: +2
+  (report_verify, eodhd_vendor).
 - **Fed-cuts contradiction check (IGV 2026-09-09 review loop)** - the
   IGV news.md asserted the same "Fed rate cuts in 2026" Polymarket event at
   "Yes 0%" (body) and "Yes 93%" (summary table) with no prediction-market

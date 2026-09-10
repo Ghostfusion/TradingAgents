@@ -161,6 +161,24 @@ def test_corporate_actions_no_data_raises():
         eodhd.get_corporate_actions_eodhd("ZZZZ")
 
 
+def test_corporate_actions_discloses_pending_soxx_forward_split():
+    # SOXX 2026-09-09 review loop: iShares announced a forward split
+    # (record 11-03, effective 11-04, adjusted trading 11-05) that the
+    # vendor feed has not yet surfaced. The renderer must disclose it even
+    # with a vendor row pending.
+    with mock.patch.object(
+        eodhd, "_eodhd_get", return_value=_DIV_ROWS,
+    ):
+        out = eodhd.get_corporate_actions_eodhd("SOXX")
+    assert "Pending corporate actions" in out
+    assert "2026-11-03" in out
+    assert "2026-11-05" in out
+    # A non-watchlist ticker gets no pending note.
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_DIV_ROWS):
+        out2 = eodhd.get_corporate_actions_eodhd("AAPL")
+    assert "Pending corporate actions" not in out2
+
+
 def test_exchange_symbols_returns_common_stocks():
     rows = [
         {"Code": "AAPL", "Name": "Apple", "Type": "Common Stock"},
