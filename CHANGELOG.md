@@ -55,6 +55,8 @@ HPE fundamentals.md review-loop (2026-09-10): new mean-price-target identity che
 HPE market.md review-loop (2026-09-10): three new level-identity checks - 200-SMA distance (body +64.7% vs table +184.7%; 55.46/33.68-1=64.7%), GARCH conditional (58.90% body vs 65.90% table), and chandelier stop (54.11 vs 58.2/58.11); market prompt pins: gap-vs-session labeling (HPE open gap -1.9% / close -5.8% were mislabeled -5.4% gap), one canonical value per labeled level, and expected-move event reference (Q3 already printed 09-02; the +/-10.9% move is not a pending event).
 
 ADBE fundamentals loop (2026-09-10, first live browser-fed chatgpt.com audit): new sum-identity verifier flags quoted additive sums whose arithmetic is wrong (report wrote TTM OCF 2.165+2.958+3.160+2.198 = $10.62B; the addends sum to 10.481B); fundamentals prompt pins an N-quarter series must list N entries (report labeled a four-quarter uptrend with five values) and DATA AS-OF must state the latest vendor-surfaced fiscal period (Q3 not in feed at report time).
+
+HPE market.md re-verify (2026-09-10, second pass on the same report): new 10-EMA identity (trend section 54.66 vs summary graph 55.54) and EMA-trail identity (body 53.91 vs summary 59.02) checks - the stop/ level duals a trader acts on must be single-valued; market prompt pins ratio conventions (Call/Put vol 2.41 vs call activity 4.2x), one call-wall per report, ATR as unsigned magnitude, and intraday cross-under claims vs OHLC (HPE said price printed under the 10-EMA 54.66 intraday while the day low was 55.21).
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

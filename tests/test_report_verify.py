@@ -694,6 +694,35 @@ def test_sum_identity_clean_when_math_right():
     assert rv._sum_identity("TTM OCF = 2.165+2.958+3.160 = $8.283B") == []
 
 
+def test_ema_identity_hpe_dual():
+    # HPE 2026-09-10 market.md: trend section 10-EMA 54.66 vs summary
+    # 'retake of the 10-EMA (graph 55.54)'.
+    t = ("Above the 10-EMA 54.66 (+1.5%)\n"
+         "Watch for retake of the 10-EMA (graph 55.54)")
+    cs = rv._ema_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "54.66" in cs[0].claim and "55.54" in cs[0].claim
+
+
+def test_ema_identity_clean_single_value():
+    assert rv._ema_identity("Above the 10-EMA 54.66 (+1.5%)") == []
+    assert rv._ema_identity("retake of the 10-EMA (graph 55.54)") == []
+
+
+def test_ema_trail_identity_hpe_dual():
+    # HPE 2026-09-10: body '20d EMA trail = 53.91' vs table 'ema-trail 59.02'.
+    t = ("20d EMA trail = 53.91 (not hit)\n"
+         "| chandelier 58.2/ema-trail 59.02 for exits |")
+    cs = rv._ema_trail_identity(t)
+    assert len(cs) == 1
+    assert "53.91" in cs[0].claim and "59.02" in cs[0].claim
+
+
+def test_ema_trail_identity_clean():
+    assert rv._ema_trail_identity("20d EMA trail = 53.91 (not hit)") == []
+
+
 def test_sum_identity_three_term_wrong():
     cs = rv._sum_identity("TTM OCF = 2.165+2.958+3.160 = $9.1B")
     assert len(cs) == 1

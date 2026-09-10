@@ -1146,6 +1146,56 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_TEMA_VAL = re.compile(r"10\s*-?\s*EMA\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I)
+_TRAIL_VAL = re.compile(r"EMA\s*-?\s?trail[^0-9]{0,12}?([0-9]+\.?[0-9]*)", re.I)
+
+
+def _ema_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting 10-EMA values in one report.
+
+    HPE 2026-09-10 market.md: trend section quotes the 10-EMA as 54.66
+    (+1.5% above it), but the summary calls for 'retake of the 10-EMA (graph
+    55.54)'. Same indicator, two values.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _TEMA_VAL.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="10-EMA cited at conflicting values: " + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes two different 10-EMA values (HPE 2026-09-10: "
+            "54.66 in the trend section vs 55.54 in the summary). Keep one "
+            "canonical 10-EMA per report and label the source."
+        ),
+    )]
+
+
+def _ema_trail_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting EMA-trail stop values in one report.
+
+    HPE 2026-09-10 market.md: body '20d EMA trail = 53.91' vs summary
+    'ema-trail 59.02' - the same labeled stop at two values; a stop level a
+    trader acts on must be single-valued.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _TRAIL_VAL.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="EMA-trail stop cited at conflicting values: " + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes more than one EMA-trail stop value (HPE "
+            "2026-09-10: body 53.91 vs summary 59.02). One canonical stop "
+            "per methodology, explicitly labeled."
+        ),
+    )]
+
+
 _SMA200_PCT = re.compile(r"200\s*-?\s*SMA[^\n]{0,60}?([+]?\d+(?:\.\d+)?)%", re.I)
 _GARCH_COND = re.compile(r"garch[^\n]{0,40}?\bcond(?:itional)?[^0-9]{0,8}(\d+(?:\.\d+)?)%", re.I)
 _CHANDELIER_EQ = re.compile(r"chandelier[^=\n]*=\s*(\d+(?:\.\d+)?)", re.I)
@@ -1811,10 +1861,12 @@ def verify_report_dir(
         garch_cond = _garch_cond_identity(report_text)
         chand_stop = _chandelier_identity(report_text)
         sum_ident = _sum_identity(report_text)
+        ema_ident = _ema_identity(report_text)
+        trail_ident = _ema_trail_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + sum_ident + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + sum_ident + ema_ident + trail_ident + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
