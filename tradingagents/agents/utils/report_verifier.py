@@ -1146,6 +1146,37 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_PRICE_TARGET = re.compile(r"\bmean\s+(?:PT\s*)?\$?([\d.]+)", re.I)
+
+
+def _price_target_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting 'mean price target' values in one report.
+
+    HPE 2026-09-10 fundamentals.md: get_analyst_ratings returned mean PT
+    69.38, the body quoted 69.38 (high 88 / low 54), but the summary table
+    wrote 'mean PT $58.38' and 'mean 58.97, high 69.38'. A report must use
+    one mean-PT per dataset and label the source; three distinct means with
+    no label is a defect.
+    """
+    if not report_text:
+        return []
+    vals = {m.group(1) for m in _PRICE_TARGET.finditer(report_text)}
+    if len(vals) <= 1:
+        return []
+    return [VerifierClaim(
+        claim="mean price target cited at conflicting values: "
+              + " / ".join(sorted(vals)),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes more than one distinct 'mean PT' figure "
+            "without labeling the datasets (HPE 2026-09-10: leaf 69.38 vs "
+            "table 58.38 / 58.97). Quote the consensus mean once - body and "
+            "summary must agree - and name the tool that produced it."
+        ),
+    )]
+
+
+_MONEY_ELLIPSIS = re.compile(r"\$\s*\d[\d,]*\.?\d*\s*[BMK]?\s*\.\.\.")
 _SELF_CORRECTION = re.compile(
     r"(?:\bcorrected?\s*:|\bcorrection\s*[\u2014-]|\b\.\.\.\s*(?:corrected?|correction))"
 )
@@ -1163,21 +1194,26 @@ def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    hits = [_SELF_CORRECTION.search(ln) for ln in report_text.splitlines()]
-    found = [m.group(0) for m in hits if m]
-    if not found:
+    markers = []
+    for ln in report_text.splitlines():
+        m = _SELF_CORRECTION.search(ln)
+        if m:
+            markers.append(m.group(0))
+        if _MONEY_ELLIPSIS.search(ln):
+            markers.append("money-ellipsis")
+    if not markers:
         return []
     return [VerifierClaim(
         claim="self-correction artifacts present in report text: "
-              + ", ".join(sorted(set(found))),
+              + ", ".join(sorted(set(markers))),
         status="INTERNAL_CONFLICT",
         reason=(
             "The report contains inline self-correction markers (e.g. "
-            "'9.87 ... corrected: 4.8', '172.346 ... correction - 154.3360'); "
-            "these are the model retyping a figure mid-generation and leaking "
-            "the repair into the artifact. Emit only the final corrected value; "
-            "never include the wrong value with a 'corrected:' caveat (HPE "
-            "2026-09-10)."
+            "'9.87 ... corrected: 4.8', '278.346 ... correction - 154.3360', "
+            "'Total debt $8.22B... verbatim'); these are the model retyping a "
+            "figure mid-generation and leaking the repair into the artifact. "
+            "Emit only the final corrected value; never include the wrong "
+            "value with a caveat (HPE 2026-09-10)."
         ),
     )]
 
@@ -1649,10 +1685,11 @@ def verify_report_dir(
         boll_bands = _bollinger_band_identity(report_text)
         sector_rank = _sector_rank_identity(report_text)
         self_corr = _self_correction_artifacts(report_text)
+        pt_cons = _price_target_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

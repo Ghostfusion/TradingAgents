@@ -623,6 +623,34 @@ def test_self_correction_artifacts_hpe():
     assert cs[0].status == "INTERNAL_CONFLICT"
 
 
+def test_price_target_identity_hpe_triple():
+    # HPE 2026-09-10 fundamentals.md: leaf mean 69.38, body 69.38, but the
+    # table wrote mean PT 58.38 and mean 58.97 - three distinct means.
+    t = ("mean PT $69.38 (high 88, low 54)\n"
+         "| Verdict | BUY | mean PT $58.38 |\n"
+         "| Analyst target | mean 58.97, high 69.38 |")
+    cs = rv._price_target_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "58.38" in cs[0].claim and "58.97" in cs[0].claim
+
+
+def test_price_target_identity_clean_single():
+    assert rv._price_target_identity("mean PT $69.38 (high 88, low 54)") == []
+    assert rv._price_target_identity("mean 69.38 from get_analyst_ratings") == []
+
+
+def test_money_ellipsis_flagged_as_artifact():
+    # HPE 2026-09-10: 'Total debt $8.22B... verbatim $20.24B' leaks a
+    # mid-edit dollar value into the final report.
+    t = ("Total debt $8.22B... verbatim from get_balance_sheet: Total Debt "
+         "$20.24B, Cash $6.22B")
+    cs = rv._self_correction_artifacts(t)
+    assert len(cs) == 1
+    assert "money-ellipsis" in cs[0].claim
+    assert rv._self_correction_artifacts("Total debt $20.24B, net debt $14.03B") == []
+
+
 def test_self_correction_artifacts_clean():
     assert rv._self_correction_artifacts("10Y 4.8 (09-08); USD/JPY 154.33") == []
     assert rv._self_correction_artifacts("correction factor 0.99 applied daily") == []

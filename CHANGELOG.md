@@ -49,6 +49,8 @@ TSM fundamentals review-loop (2026-09-10): get_dcf_valuation now hard-gates unit
 TSM market.md review-loop (2026-09-10): new bollinger-band identity check flags two unlabeled band sets in one report (body 438.16/405.14 vs table wide 438.59/404.71 - %b matches only the body pair); new sector-rank identity check flags conflicting numeric ranks for one sector (XLK rank 4 in both tools vs rank5 in the table); market prompt pins one canonical band set and one canonical sector rank.
 
 HPE news.md review-loop (2026-09-10): new self-correction-artifact identity check flags inline (corrected: / correction -) retype leaks in a final report (HPE leaked '9.87 ... corrected: 4.8' and '172.346 ... correction - 154.3360'); news-agent prompt pins: clean rewrites only, catalyst modal_prob must name the modal outcome/date (never bare 'modal 73.4%'), and the 10Y FRED id must be DGS10 (a transient 9.87 print was the wrong series id - DGS1 - not a market move).
+
+HPE fundamentals.md review-loop (2026-09-10): new mean-price-target identity check flags three distinct consensus means (leaf 69.38 vs table 58.38/58.97); self-correction detector now also catches money-ellipsis retype leaks ('Total debt $8.22B... verbatim'); fundamentals prompt pins: Total Revenue row verbatim per quarter, one analyst-consensus mean-PT, and signed gain/loss rows only (the report's $344M gain matched neither the -$444M cashflow row nor the +$373M IS unusual-items row; the leaf revenue was $12,213M while the report said $12.45B/$12.30B).
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence
