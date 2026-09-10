@@ -587,6 +587,37 @@ def test_eps_estimate_duals_conflict_same_date():
     assert "2026-10-28" in cs[0].claim and "4.16" in cs[0].claim
 
 
+def test_bollinger_band_identity_conflicting_sets():
+    # TSM 2026-09-10 market.md: body lower=405.14 upper=438.16 (canonical
+    # get_bollinger_pct_b) vs summary 'wide 438.59 / low 404.71' - a second
+    # band set; %b 0.7394 is only true for the body pair.
+    t = ("%b at 73.94% (mid/high zone, lower=405.14 upper=438.16)\n"
+         "| Bollinger %b | 0.7394 (mid/high; wide 438.59 / low 404.71) |")
+    cs = rv._bollinger_band_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "438.59" in cs[0].claim
+
+
+def test_bollinger_band_identity_clean_single_set():
+    assert rv._bollinger_band_identity("lower=405.14 upper=438.16 mid=421.65 %b=73.94%") == []
+    assert rv._bollinger_band_identity("wide 438.59 / low 404.71, %b 0.7394") == []
+
+
+def test_sector_rank_identity_conflicting_ranks():
+    # TSM 2026-09-10 market.md: body XLK rank #4 (both tools) vs table rank5.
+    t = "XLK rank #4 (tracking), quadrant Weakening\n| XLK rank5 (Weakening) |"
+    cs = rv._sector_rank_identity(t)
+    assert len(cs) == 1
+    assert "4 / 5" in cs[0].claim
+    assert cs[0].status == "INTERNAL_CONFLICT"
+
+
+def test_sector_rank_identity_clean_single_value():
+    assert rv._sector_rank_identity("XLK rank #4 (tracking)") == []
+    assert rv._sector_rank_identity("XLK rank4, XLE rank1") == []
+
+
 def test_eps_estimate_duals_clean_when_single_value():
     t = "next print 2026-10-28 (est EPS 4.72); forward table 2026-10-28 est 4.72"
     assert rv._eps_estimate_duals(t) == []

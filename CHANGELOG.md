@@ -45,6 +45,8 @@ MSFT market.md review-loop fixes (2026-09-10): new expected-band identity check 
 MSFT news.md review-loop (2026-09-10): new eps-estimate-per-date identity check flags two different EPS estimates anchored to the same earnings date (2026-10-28 cited as est 4.72 in headline/table but est 4.16 in the forward calendar - leaf says 4.72); news-agent pins: vendor- estimated next earnings date wording, routine-8-K classification instead of 'unknown material event', and one-estimate-per-date.
 
 TSM fundamentals review-loop (2026-09-10): get_dcf_valuation now hard-gates unit/share-basis-inconsistent fair values - fair_value/price >5x returns DATA-QUALITY FAIL and excludes the DCF from composite valuation (TSM: 2933.52 vs 429.55 = 6.8x); fundamentals prompt pins ADR-vs-common-share basis on every EPS/normalized-EPS figure (TSM vendor diluted EPS 136.25 TWD is per-ADR = NT$27.25/common; the report quoted it as if common).
+
+TSM market.md review-loop (2026-09-10): new bollinger-band identity check flags two unlabeled band sets in one report (body 438.16/405.14 vs table wide 438.59/404.71 - %b matches only the body pair); new sector-rank identity check flags conflicting numeric ranks for one sector (XLK rank 4 in both tools vs rank5 in the table); market prompt pins one canonical band set and one canonical sector rank.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

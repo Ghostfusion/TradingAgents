@@ -1146,6 +1146,78 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_BOLL_PAIR = re.compile(
+    r"(?:upper|wide)\s*=\s*(\d+(?:\.\d+)?)[^\n]{0,40}?(?:lower|low)\s*=\s*(\d+(?:\.\d+)?)"
+    r"|(?:lower|low)\s*=\s*(\d+(?:\.\d+)?)[^\n]{0,40}?(?:upper|wide)\s*=\s*(\d+(?:\.\d+)?)"
+    r"|wide\s+(\d+(?:\.\d+)?)\s*/\s*low\s+(\d+(?:\.\d+)?)"
+)
+_SECTOR_RANK = re.compile(r"\b([A-Z]{2,6})\s+rank\s*#?\s*(\d{1,2})\b", re.I)
+
+
+def _bollinger_band_identity(report_text: str) -> list[VerifierClaim]:
+    """Two distinct Bollinger (upper, lower) band sets in one report.
+
+    TSM 2026-09-10 market.md: the body quoted lower=405.14 upper=438.16
+    mid=421.65 (the canonical get_bollinger_pct_b print) while the summary
+    table quoted 'wide 438.59 / low 404.71' - a second band pair with no
+    source label, and the table's %b 0.7394 is only true for the body pair.
+    One canonical band set per report, or label the alternate source.
+    """
+    if not report_text:
+        return []
+    pairs = set()
+    for m in _BOLL_PAIR.finditer(report_text):
+        if m.group(5) is not None:
+            pairs.add((m.group(5), m.group(6)))
+        elif m.group(3) is not None:
+            pairs.add((m.group(3), m.group(4)))
+        elif m.group(1) is not None:
+            pairs.add((m.group(1), m.group(2)))
+    if len(pairs) <= 1:
+        return []
+    shown = ", ".join(f"({u}/{low})" for u, low in sorted(pairs))
+    return [VerifierClaim(
+        claim=f"bollinger bands cited at conflicting sets: {shown}",
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report quotes more than one Bollinger (upper/lower) pair "
+            "without labeling the alternate source/calculation; %b is only "
+            "consistent with one of them (TSM 2026-09-10: body 438.16/405.14 "
+            "vs table wide 438.59/404.71). Keep one canonical band set."
+        ),
+    )]
+
+
+def _sector_rank_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting numeric ranks for the same sector ticker.
+
+    TSM 2026-09-10 market.md: body said 'XLK rank #4 (tracking)' (both
+    get_sector_rank and get_sector_rotation_screen return 4) but the summary
+    table wrote 'XLK rank5 (Weakening)'. Rank tags must match.
+    """
+    if not report_text:
+        return []
+    per_sector: dict[str, set[str]] = {}
+    for m in _SECTOR_RANK.finditer(report_text):
+        sec, rk = m.group(1).upper(), m.group(2)
+        per_sector.setdefault(sec, set()).add(rk)
+    claims = []
+    for sec, rks in sorted(per_sector.items()):
+        if len(rks) > 1:
+            claims.append(VerifierClaim(
+                claim=f"{sec} cited at conflicting sector ranks: "
+                      f"{' / '.join(sorted(rks))}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report quotes two different numeric ranks for the "
+                    "same sector; the sector-rank tool returns exactly one "
+                    "rank (TSM 2026-09-10: XLK rank 4 in two tools vs rank5 "
+                    "in the summary table)."
+                ),
+            ))
+    return claims
+
+
 _EPS_EST_DATE = re.compile(
     r"(20\d{2}-\d{2}-\d{2})[^\n]{0,80}?est(?:imate)?[^\d]{0,30}(\d+(?:\.\d+)?)"
 )
@@ -1538,10 +1610,12 @@ def verify_report_dir(
         fcf_slip = _fcf_unit_slip(report_text)
         expected_band = _expected_band_identity(report_text)
         eps_duals = _eps_estimate_duals(report_text)
+        boll_bands = _bollinger_band_identity(report_text)
+        sector_rank = _sector_rank_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
