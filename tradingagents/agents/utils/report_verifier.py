@@ -420,9 +420,87 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 # metric. Returns (value, unit_multiplier) or None.
 _DOLLAR_RE = re.compile(r"(?<![\(\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
 
+# ---------------------------------------------------------------------------
+# Macro-authority gate (deterministic; SKHY 2026-09-09 review loop)
+# ---------------------------------------------------------------------------
+# Market-implied probabilities / macro levels must carry a TOOL leaf: the
+# news-analyst prompt pins prediction markets + macro tools, but prompt-only
+# is not enforced — the SKHY news.md quoted "Polymarket: no Fed rate cuts in
+# 2026 = Yes 93%", "10Y at 4.78 (latest FRED print)", "RRP at 0.432B",
+# "WTI 91.48" with NO get_prediction_markets / get_macro_indicators leaf in
+# the tree. This gate flags a report line citing one of these authorities
+# when the report-term's evidence has no leaf from the pinned tool group
+# (and no leaf content carries the term).
+#
+# Requirement: (phrases) -> (tools that satisfy the line). Any line
+# containing a listed phrase must have at least one leaf whose tool is in
+# the set, or a leaf whose content contains a listed phrase. Otherwise the
+# line is UNSUPPORTED — deterministic, independent of the LLM pass.
+_MACRO_AUTHORITY_PHRASES_TOOLS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("polymarket", "prediction market"), ("get_prediction_markets",)),
+    (
+        ("no rate cuts", "no fed rate cuts", "cut probability", "hike probability",
+         "fomc", "fed watch"),
+        ("get_prediction_markets", "get_fed_watch"),
+    ),
+    # TGA balance ≠ RRP: a get_tga_balance leaf must not satisfy an RRP
+    # claim (SKHY 2026-09-09: "RRP at 0.432B" passed the old mapping because
+    # TGA was called). RRP/reverse-repo need get_macro_indicators or a leaf
+    # whose content actually carries the term.
+    (("rrp", "reverse repo"), ("get_macro_indicators",)),
+    (("10y", "10-year"), ("get_macro_indicators", "get_treasury_curve")),
+    (("wti", "oil price", "crude"), ("get_macro_indicators", "get_economic_calendar")),
+)
+
+
 # Extra scale: a *_window / (18) / 30d -style label can sit between a metric
 # label and its value; 1 line = up to 40 chars after the label.
 _METRIC_WINDOW = 40
+
+
+def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) -> list[VerifierClaim]:
+    """Deterministic: market-implied/macro terms need a matching tool leaf.
+
+    The MACRO MUSTS prompt pins the tools, but prompt policy alone is not
+    enforced: the SKHY 2026-09-09 news.md carried Polymarket 93% no-cut,
+    10Y 4.78 FRED print and WTI 91.48 with no ``get_prediction_markets`` /
+    ``get_macro_indicators`` leaf anywhere in the document. The LLM pass may
+    ground the wording against other leaves; this gate holds each such line
+    to the pinned tool group regardless. Advisory: adds UNSUPPORTED claims,
+    never edits the report.
+    """
+    if not report_text:
+        return []
+    leaves = evidence.get(analyst_key) or []
+    if not isinstance(leaves, list):
+        leaves = []
+    leaf_tools = {str(leaf.get("tool") or "") for leaf in leaves if isinstance(leaf, dict)}
+    leaf_text = "\n".join(str(leaf.get("content") or "") for leaf in leaves if isinstance(leaf, dict))
+    leaf_text_low = leaf_text.lower()
+    out: list[VerifierClaim] = []
+    for line in report_text.splitlines():
+        low = line.strip().lower()
+        for phrases, tools in _MACRO_AUTHORITY_PHRASES_TOOLS:
+            present = [p for p in phrases if p in low]
+            if not present:
+                continue
+            # Satisfied when a pinned tool leaf exists, OR a leaf content
+            # itself carries a listed phrase (e.g. a fetched article).
+            satisfied = bool(leaf_tools & set(tools)) or any(p in leaf_text_low for p in present)
+            if not satisfied:
+                out.append(
+                    VerifierClaim(
+                        claim=line.strip(),
+                        status="UNSUPPORTED",
+                        reason=(
+                            f"cites '{present[0]}' without a {sorted(tools)} leaf (tool not "
+                            "called, term absent from this analyst's evidence) - recalled "
+                            "macro figure (SKHY 2026-09-09 review loop)."
+                        ),
+                    )
+                )
+            break  # one authority class per line is enough
+    return out
 
 
 def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, float]]:
@@ -648,7 +726,8 @@ def verify_report_dir(
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
         conflicts = _internal_conflicts(report_text)
-        all_claims = anchored.claims + conflicts
+        macro_gate = _macro_authority_gate(report_text, evidence, stem)
+        all_claims = anchored.claims + conflicts + macro_gate
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

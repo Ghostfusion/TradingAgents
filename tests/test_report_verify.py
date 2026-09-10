@@ -442,3 +442,71 @@ def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypat
     )
     payload = rv.verify_report_dir(report_dir, llm_override=_Boom(), max_calls=1)
     assert payload["verification"]["fundamentals"]["overall"] == "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# Macro-authority gate (SKHY 2026-09-09 review loop)
+# ---------------------------------------------------------------------------
+# news.md quoted "Polymarket: no Fed rate cuts in 2026 = Yes 93%", "10Y at
+# 4.78 FRED print", "RRP at 0.432B", "WTI 91.48" with NO
+# get_prediction_markets / get_macro_indicators leaf in the tree — the
+# MACRO MUSTS prompt pin was not enforced. The gate must flag these lines
+# independent of the LLM verdict.
+
+_SKHY_STYLE_NEWS = (
+    "- FOMC 2026-09-15: market prices 3.75-4.00% at 60.2% (get_fed_watch). "
+    "Polymarket: no Fed rate cuts in 2026 = Yes 93% - cut probability is negligible.\n"
+    "- Liquidity: RRP at 0.432B (2026-09-09), drained to floor; WTI 91.48 +9.22% window.\n"
+)
+
+
+def test_macro_gate_flags_recalled_polymarket_without_prediction_leaf():
+    evidence = {"news": [{"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"}]}
+    claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
+    flagged = [c for c in claims if c.status == "UNSUPPORTED"]
+    # Both lines fail: no get_prediction_markets / get_macro_indicators leaf.
+    assert len(flagged) == 2
+    # The Polymarket line names the missing pinned tool in its reason.
+    assert any("get_prediction_markets" in c.reason for c in flagged)
+
+
+def test_macro_gate_passes_with_full_pinned_tool_set():
+    evidence = {
+        "news": [
+            {"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"},
+            {"tool": "get_prediction_markets", "status": "ok", "content": "no Fed rate cuts in 2026 Yes 93%"},
+            {"tool": "get_macro_indicators", "status": "ok", "content": "RRP 0.432B WTI oil 91.48"},
+        ]
+    }
+    claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
+    assert claims == []
+
+
+def test_macro_gate_passes_fomc_line_but_flags_rrp_without_macro_leaf():
+    # fed_watch/prediction leaves ground the FOMC line; absent
+    # get_macro_indicators, the RRP/WTI line remains recalled.
+    evidence = {
+        "news": [
+            {"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"},
+            {"tool": "get_prediction_markets", "status": "ok", "content": "no Fed rate cuts in 2026 Yes 93%"},
+        ]
+    }
+    claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
+    unsupported = [c for c in claims if c.status == "UNSUPPORTED"]
+    assert len(unsupported) == 1
+    assert "RRP" in unsupported[0].claim
+
+
+def test_macro_gate_passes_when_macro_leaf_carries_term():
+    # The term is present in a macro leaf's content even without the exact
+    # tool name -> the line is grounded (e.g. WTI from an economic calendar).
+    evidence = {
+        "news": [
+            {"tool": "get_economic_calendar", "status": "ok", "content": "WTI crude 91.2 rescheduled"},
+        ]
+    }
+    claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
+    unsupported = [c for c in claims if c.status == "UNSUPPORTED"]
+    # Two macro lines remain flagged; the WTI-bearing economic-calendar line
+    # is grounded by content, but the Polymarket/10Y line still has no leaf.
+    assert any("Polymarket" in c.claim for c in unsupported)

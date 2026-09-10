@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Macro-authority gate (SKHY 2026-09-09 review loop)** - the news.md
+  quoted market-implied figures ("Polymarket: no Fed rate cuts in 2026 =
+  Yes 93%", "recession 8%", "10Y at 4.78 FRED print", "RRP at 0.432B")
+  with NO get_prediction_markets / get_macro_indicators leaf in the tree -
+  the MACRO MUSTS prompt pin is not enforced. report_verifier gained a
+  deterministic `_macro_authority_gate`: any line citing a pinned macro
+  authority (polymarket/prediction market/fed-cut/10Y/RRP/WTI) is
+  UNSUPPORTED unless that analyst's evidence holds the matching tool leaf
+  or a leaf whose content carries the term (TGA leaf cannot satisfy an RRP
+  claim). Runs in verify_report_dir regardless of the LLM verdict; live on
+  SKHY_20260909_155623 flags 7 lines. Tests: tests/test_report_verify.py
+  (+4).
 - **Quant decision stack P1-P3 (SKHY 2026-09-09 review loop)** -
   (P1) security-signal/portfolio-action split: `strategies/signal_action.py`
   renders "Security signal: **BUY** | Portfolio action: **NO_NEW_RISK**
