@@ -604,33 +604,46 @@ _NET_CASH_RE = re.compile(r"(?i)net\s*cash[^0-9]{0,20}\$?\s*([\d.]+)\s*B")
 
 
 def _dupont_identity(report_text: str) -> list[VerifierClaim]:
-    """ROE = net_margin x asset_turnover x equity_multiplier, when quoted."""
+    """ROE = net_margin x asset_turnover x equity_multiplier, when quoted.
+
+    The comparison targets the ROE on the SAME line as the decomposition
+    inputs — a report may legitimately quote several ROE bases (DuPont on
+    TTM, analyst screen 19.3% on another period), and only the pair attached
+    to the decomposition is an identity to check (NXPI 2026-09-09: the
+    on-line DuPont ROE 26.1% matched; a different screen's 19.34% was NOT a
+    conflict).
+    """
     if not report_text:
         return []
     nm = _NET_MARGIN_RE.search(report_text)
     at = _AT_RE.search(report_text)
     em = _EM_RE.search(report_text)
-    roes = [float(m.group(1)) for m in _ROE_RE.finditer(report_text) if float(m.group(1)) > 0]
-    if not (nm and at and em and roes):
+    if not (nm and at and em):
         return []
     product_pct = float(nm.group(1)) * float(at.group(1)) * float(em.group(1)) * 100.0
-    out = []
-    for roe in roes:
-        if abs(product_pct - roe) / max(abs(roe), 1e-9) > 0.2:
-            out.append(
-                VerifierClaim(
-                    claim="DuPont identity: net_margin x asset_turnover x equity_multiplier "
-                          f"= {product_pct:.1f}% but ROE quoted at {roe:.1f}%",
-                    status="INTERNAL_CONFLICT",
-                    reason=(
-                        "The decomposition inputs the report itself quotes do not multiply "
-                        "to the ROE it states (MU 2026-09-09: inputs give 66.4% while text "
-                        "claims ~35%). Fix the decomposed value or label it a fuzzy estimate."
-                    ),
-                )
-            )
-            break  # one DuPont conflict is enough
-    return out
+    # Same line as any decomposition input carries the checked ROE.
+    for line in report_text.splitlines():
+        if not (_NET_MARGIN_RE.search(line) or _AT_RE.search(line) or _EM_RE.search(line)):
+            continue
+        for m in _ROE_RE.finditer(line):
+            roe = float(m.group(1))
+            if roe <= 0:
+                continue
+            if abs(product_pct - roe) / max(abs(roe), 1e-9) > 0.2:
+                return [
+                    VerifierClaim(
+                        claim="DuPont identity: net_margin x asset_turnover x equity_multiplier "
+                              f"= {product_pct:.1f}% but ROE quoted at {roe:.1f}% on the same line",
+                        status="INTERNAL_CONFLICT",
+                        reason=(
+                            "The decomposition inputs on the DuPont line do not multiply to "
+                            "the ROE the same line states (MU 2026-09-09: inputs give 66.4% "
+                            "while text claimed ~35%). Fix the decomposed value or label it "
+                            "a fuzzy estimate."
+                        ),
+                    )
+                ]
+    return []
 
 
 def _pe_basis_conflict(report_text: str) -> list[VerifierClaim]:

@@ -152,6 +152,53 @@ class MassiveRouterTests(unittest.TestCase):
 
 
 @pytest.mark.unit
+class MassiveRatiosSanityTests(unittest.TestCase):
+    """get_ratios_massive must not hand a >100x vendor multiple as evidence."""
+
+    def _row(self, **over):
+        row = {
+            "date": "2026-09-09",
+            "enterprise_value": 65511824000,
+            "ev_to_ebitda": 15.0,
+            "ev_to_ebit": 21.5,
+            "price_to_earnings": 28.44,
+            "price_to_book": 5.5,
+            "price_to_sales": 4.68,
+            "return_on_equity": 0.1933,
+            "return_on_assets": 0.0761,
+            "debt_to_equity": 1.05,
+            "current": 2.05,
+            "quick": 1.38,
+            "cash": 0.75,
+            "dividend_yield": 0.0178,
+            "free_cash_flow": 2423000000,
+            "market_cap": 57451824000,
+        }
+        row.update(over)
+        return row
+
+    def test_absurd_ratio_annotated_data_quality(self):
+        # NXPI 2026-09-09: vendor EV/EBITDA 474.72 / EV/EBIT 3119.61 — a
+        # contaminated low-EBITDA denominator, not a real multiple. The tool
+        # must annotate it so analysts never treat it as valuation evidence.
+        with mock.patch.object(
+            massive, "_get",
+            return_value={"results": [self._row(ev_to_ebitda=474.72, ev_to_ebit=3119.61)]},
+        ):
+            out = get_ratios_massive("NXPI", "2026-09-09")
+        self.assertIn("DATA-QUALITY", out)
+        self.assertIn("474.72", out)
+        self.assertIn("3119.61", out)
+
+    def test_normal_multiple_not_annotated(self):
+        with mock.patch.object(
+            massive, "_get", return_value={"results": [self._row()]},
+        ):
+            out = get_ratios_massive("NXPI", "2026-09-09")
+        self.assertNotIn("DATA-QUALITY", out)
+
+
+@pytest.mark.unit
 class MassiveMacroTests(unittest.TestCase):
     def test_macro_indicator_formats_report(self):
         rows = [

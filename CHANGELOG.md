@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Valuation-data hardening (NXPI 2026-09-09 review loop)** - (1)
+  get_ratios_massive now annotates >100x EV/EBITDA or EV/EBIT as
+  "DATA-QUALITY: vendor-multiple anomaly (contaminated EBITDA denominator),
+  do not use as valuation evidence" instead of handing 474.72x / 3119.61x to
+  the analyst as a real multiple. (2) DuPont identity fixed: the product is
+  compared against the ROE on the SAME line as the decomposition inputs, not
+  the first ROE in the report (NXPI 26.1% on-line product matched; a
+  different analyst-screen 19.34% was a false positive). Tests:
+  tests/test_massive_vendor.py (+2), tests/test_report_verify.py (+1).
 - **Catalyst-scale honest degradation (MU 2026-09-09 review loop)** - when
   fed_watch AND economic_calendar both return NO_DATA (vendor down), the
   snapshot reported "scale=1.0 no-imminent-catalyst" — a false clean bill

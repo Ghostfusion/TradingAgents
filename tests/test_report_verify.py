@@ -464,6 +464,30 @@ def test_dupont_identity_clean():
     assert rv._dupont_identity(text) == []
 
 
+def test_dupont_identity_scoped_to_same_line():
+    # NXPI 2026-09-09: on-line DuPont ROE 26.1% correctly equals the product
+    # of its quoted inputs; a DIFFERENT screen's ROE 19.34% (analyst verdict,
+    # another period) is NOT a conflict. The check must not compare the
+    # product against the first ROE in the whole document.
+    text = (
+        "DuPont ROE 26.1% — margin-led (net_margin 0.2256, asset_turnover "
+        "0.4943, equity_multiplier 2.339): quality-driven\n"
+        "get_analyst_verdict ROE 19.34%"
+    )
+    assert rv._dupont_identity(text) == []
+
+
+def test_dupont_identity_flags_offline_inputs_even_with_other_roe():
+    # A genuine contradiction is still caught when the product is wildly off
+    # the on-line ROE (MU 2026-09-09 case: 66.4% vs stated 35%).
+    text = (
+        "DuPont ROE 35% decomposed as margin-led (net_margin 0.5591, "
+        "asset_turnover 0.8929, equity_multiplier 1.3315)"
+    )
+    cs = rv._dupont_identity(text)
+    assert any(c.status == "INTERNAL_CONFLICT" and "66" in c.claim for c in cs)
+
+
 def test_pe_basis_conflict_catches_annual_vs_ttm():
     text = (
         "P/E: 135.94\nDiluted EPS | TTM $44.17\n"

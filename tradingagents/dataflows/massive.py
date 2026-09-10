@@ -760,9 +760,32 @@ def get_ratios_massive(ticker: str, curr_date: str | None = None) -> str:
         else:
             lines.append(f"- {label}: {_fmt_int(v)}")
     lines.append("")
+    # Absurd-multiple sanity (NXPI 2026-09-09 review loop): a >100x
+    # EV/EBITDA (or EV/EBIT) from the vendor is almost always a contaminated
+    # EBITDA/EBIT denominator (e.g. a tiny trailing value), not a real
+    # multiple. Flag it inline so the analyst never treats 474.72x as
+    # valuation evidence.
+    ev_ebitda = row.get("ev_to_ebitda")
+    ev_ebit = row.get("ev_to_ebit")
+    anomalies = []
+    for lbl, v in (("EV/EBITDA", ev_ebitda), ("EV/EBIT", ev_ebit)):
+        try:
+            if v is not None and -100 < float(v) < 100:
+                continue
+            if v is not None and abs(float(v)) >= 100:
+                anomalies.append(f"{lbl} {float(v):.2f}")
+        except (TypeError, ValueError):
+            continue
+    if anomalies:
+        lines.append(
+            "DATA-QUALITY: " + "; ".join(anomalies)
+            + " > 100x — vendor-multiple anomaly (contaminated EBITDA/EBIT "
+            "denominator), do not use as valuation evidence; recompute from "
+            "normalized EBITDA = EBIT + D&A if needed."
+        )
     lines.append(
         "Interpretation: precomputed valuation/profitability from Massive. "
-        "Cross-check against screener value screens (EY/EV-EBIT/F/Z) before a "
+        "Cross-check against screener value multiples (EY/EV-EBIT/F/Z) before a "
         "final cheap/quality call."
     )
     return "\n".join(lines)
