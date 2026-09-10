@@ -613,6 +613,21 @@ def test_sector_rank_identity_conflicting_ranks():
     assert cs[0].status == "INTERNAL_CONFLICT"
 
 
+def test_self_correction_artifacts_hpe():
+    # HPE 2026-09-10 news.md leaked the model's retyping into the artifact:
+    # '9.87 ... corrected: 4.8' and '172.346 ... correction - 154.3360'.
+    t = ("10Y at 4.78 (2026-08-09, latest print 09-08: 9.87 ... corrected: "
+         "latest 4.8); FX USD/JPY 172.346 ... correction: 154.3360")
+    cs = rv._self_correction_artifacts(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+
+
+def test_self_correction_artifacts_clean():
+    assert rv._self_correction_artifacts("10Y 4.8 (09-08); USD/JPY 154.33") == []
+    assert rv._self_correction_artifacts("correction factor 0.99 applied daily") == []
+
+
 def test_sector_rank_identity_clean_single_value():
     assert rv._sector_rank_identity("XLK rank #4 (tracking)") == []
     assert rv._sector_rank_identity("XLK rank4, XLE rank1") == []

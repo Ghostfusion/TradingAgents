@@ -1146,6 +1146,42 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_SELF_CORRECTION = re.compile(
+    r"(?:\bcorrected?\s*:|\bcorrection\s*[\u2014-]|\b\.\.\.\s*(?:corrected?|correction))"
+)
+
+
+def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
+    """Mid-sentence self-repair text should not reach a final report.
+
+    HPE 2026-09-10 news.md: '10Y at 4.78 (2026-08-09, latest print 09-08:
+    9.87 ... corrected: latest 4.8' and 'USD/JPY 172.346 ... correction -
+    USD/JPY 154.3360' - the verbatim-fidelity pin leaked the model's own
+    retyping (wrong value, then inline correction) into the artifact. A final
+    report must contain the corrected value only; 'corrected:' /
+    'correction --' inside a claim marks the editing process leaking through.
+    """
+    if not report_text:
+        return []
+    hits = [_SELF_CORRECTION.search(ln) for ln in report_text.splitlines()]
+    found = [m.group(0) for m in hits if m]
+    if not found:
+        return []
+    return [VerifierClaim(
+        claim="self-correction artifacts present in report text: "
+              + ", ".join(sorted(set(found))),
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "The report contains inline self-correction markers (e.g. "
+            "'9.87 ... corrected: 4.8', '172.346 ... correction - 154.3360'); "
+            "these are the model retyping a figure mid-generation and leaking "
+            "the repair into the artifact. Emit only the final corrected value; "
+            "never include the wrong value with a 'corrected:' caveat (HPE "
+            "2026-09-10)."
+        ),
+    )]
+
+
 _BOLL_PAIR = re.compile(
     r"(?:upper|wide)\s*=\s*(\d+(?:\.\d+)?)[^\n]{0,40}?(?:lower|low)\s*=\s*(\d+(?:\.\d+)?)"
     r"|(?:lower|low)\s*=\s*(\d+(?:\.\d+)?)[^\n]{0,40}?(?:upper|wide)\s*=\s*(\d+(?:\.\d+)?)"
@@ -1612,10 +1648,11 @@ def verify_report_dir(
         eps_duals = _eps_estimate_duals(report_text)
         boll_bands = _bollinger_band_identity(report_text)
         sector_rank = _sector_rank_identity(report_text)
+        self_corr = _self_correction_artifacts(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
