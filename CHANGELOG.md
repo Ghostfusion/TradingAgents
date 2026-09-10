@@ -13,6 +13,8 @@ DELL fundamentals review-loop fixes (2026-09-10): negative-equity D/E gate fails
 DELL market.md review-loop fixes (2026-09-10): close_200_sma dual-value flag (258.98 vs 238.98); ema20 trail dual-value flag (481.74 vs 503.74); T1 tolerance tightened to 0.05% (611.43 vs.611.85); ATR excludes dash-multiplier forms (1-ATR); market prompt pins close-vs-high label rule.
 
 DELL news.md review-loop fixes (2026-09-10): EPS-actual dual-value flag (7.04 vs 7.00, both Finnhub); EPS-estimate dual-value flag (5.012 vs  .,5.03; news prompt pins summary-table figures must match body figures exactly (AI-orders $61B row was lost as $2B in the summary).
+
+MU fundamentals review-loop fixes (2026-09-10): ev/ebit + ev/ebitda internal-conflict metrics (report quoted 65.2/66.65 vs leaves 113.91/113.80); dividend-yield sanity check flags a quoted yield >5x the same report's dividend-per-share x4 / price implication (MU 4.91% vs 0.061% - stale/unit-scaled vendor field); bare 'TTM yield' label covered without capturing 'earnings yield'.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

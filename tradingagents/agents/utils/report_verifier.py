@@ -412,6 +412,9 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # real conflict, so level-type metrics use a 0.1% bucket.
     "t1": (re.compile(r"\bT1\b|2R|2xR|T\s*1\s*(?:\(|2R)", re.I), 0.0005),
     "t2": (re.compile(r"\bT2\b|3R|3xR", re.I), 0.001),
+    # MU 2026-09-10 fundamentals review loop: EV/EBIT quoted at 65.2 (analyst verdict) and 66.65 (get_ratios) while the leaves show 113.91 / 113.80 - the pair must surface as one conflict.
+    "ev/ebit": (re.compile(r"ev[/\s-]?ebit(?!da)", re.I), 0.01),
+    "ev/ebitda": (re.compile(r"ev[/\s-]?ebitda", re.I), 0.01),
     "macd histogram": (re.compile(r"macd\s*h|macdh|histogram", re.I), 0.005),
     "rvol": (re.compile(r"\brvol\b|relative\s*volume", re.I), 0.005),
     "williams_r": (re.compile(r"williams", re.I), 0.005),
@@ -844,6 +847,52 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
 # earnings-surprise table (newest quarter first, Surprise% column): only the
 # latest two quarters (+44.0, +100.8) exceed 40%, so "three straight >40%"
 # would be an overcount.
+_DPS_RE = re.compile(r"(?i)dividend(?:s)?\s+per\s+share[^0-9]{0,8}\$?\s*([0-9.]+)")
+_DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*([0-9.]+)\s*%")
+
+
+def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
+    """A quoted dividend yield must not contradict the same report's
+    dividend-per-share and price.
+
+    MU 2026-09-10 fundamentals review loop: the report quoted 'TTM yield 4.91%
+    per get_basic_financials' while its own dividend-per-share $0.15 and price
+    ~$983 imply 0.061% (4 x 0.15 / 982.95) - a stale/unit-scaled vendor field.
+    A >5x deviation is an INTERNAL_CONFLICT (quarterly-payment convention).
+    """
+    if not report_text:
+        return []
+    dps_m = _DPS_RE.search(report_text)
+    price = _dd_price(report_text)
+    if not (dps_m and price is not None):
+        return []
+    try:
+        dps = float(dps_m.group(1))
+    except ValueError:
+        return []
+    annual = 4.0 * dps
+    implied = annual / price * 100.0
+    if implied <= 0 or annual <= 0:
+        return []
+    for m in _DIV_YIELD_RE.finditer(report_text):
+        try:
+            quoted = float(m.group(1))
+        except ValueError:
+            continue
+        if quoted > 5.0 * implied:
+            return [VerifierClaim(
+                claim=f"dividend yield {quoted:.2f}% vs {annual:.2f}/share / price "
+                      f"{price:,.2f} => {implied:.3f}% implied",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "Quoted dividend yield contradicts the same report's dividend-per-share "
+                    "and price - stale/unit-scaled vendor field (MU 2026-09-10: 4.91% vs "
+                    "0.061% implied)."
+                ),
+            )]
+    return []
+
+
 _BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
 _SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
 
@@ -1165,7 +1214,8 @@ def verify_report_dir(
         fed_cuts = _fed_cuts_contradiction(report_text)
         drawdown = _drawdown_identity(report_text)
         beat_streak = _beat_streak_identity(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak
+        dividend_check = _dividend_yield_sanity(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

@@ -368,6 +368,34 @@ def test_internal_conflict_t1_transcription_slip():
     assert rv._internal_conflicts("T1 611.85 ... T1 612.00") == []
 
 
+def test_internal_conflict_ev_ebit_dual_values():
+    # MU 2026-09-10 fundamentals: EV/EBIT quoted 65.2 (analyst verdict) and
+    # 66.65 (get_ratios) - two values for one metric in one report.
+    t = "EV/EBIT **65.2** (analyst verdict)  ...  EV/EBIT 66.65 (get_ratios)"
+    out = rv._internal_conflicts(t)
+    assert any("'ev/ebit'" in c.claim for c in out)
+
+
+def test_dividend_yield_sanity_flags_stale_vendor_field():
+    # MU 2026-09-10: 'TTM yield 4.91%' vs the same report's $0.15/share and
+    # price ~983 -> implied 0.061%; a 4.91% quote is a unit-scaled vendor field.
+    t = (
+        "dividend per share $0.15 (+30.43% QoQ)\n"
+        "latest price $982.95; the market is paying ~5.7x\n"
+        "TTM yield 4.91% per get_basic_financials"
+    )
+    cs = rv._dividend_yield_sanity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "0.061%" in cs[0].claim
+
+
+def test_dividend_yield_sanity_clean_when_honest():
+    t = "dividend per share $0.50; latest price 100.00 => ttm yield 2.00%"
+    assert rv._dividend_yield_sanity(t) == []
+    assert rv._dividend_yield_sanity("ttm yield 12.0% but no dividend/share") == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []
