@@ -23,6 +23,8 @@ MU news.md review-loop fixes (2026-09-10): double-digit-beat-streak identity (cl
 SNDK fundamentals review-loop fixes (2026-09-10): beta internal-conflict metric (Finnhub 3.868 vs risk 1.87); scenario-DCF-base metric (1,388.45 vs 1,476.2); cash-conversion metric (OCF/NI 1.6 vs 1.032/1.28); SMA200-distance identity flags a direction/basis flip (65% below price vs true 39.6%; 65.5% is price ABOVE sma); fundamentals prompt pins fiscal-period labels (SNDK fiscal Q4 2026, not Q2 2026).
 
 SNDK market review-loop fixes (2026-09-10): market prompt pins - never call a forming-bar intraday move CONFIRMED (gap-down/close/fill); label trailing stops by their own basis (20-day-true-range trail is not a 20-EMA - SNDK renamed 1586.04).
+
+SNDK news review-loop fixes (2026-09-10): news prompt pins - index-inclusion catalyst wording (no assumed rebalance-buying window), insider rows calibrated to 10b5-1 (scheduled <> discretionary), and one-timestamp-per-series macro levels (HY OAS 2.71 vs 2.59 replication slip). The HY-OAS dual-value is already flagged by the existing verifier hy-oas metric.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence
