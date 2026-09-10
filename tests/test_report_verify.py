@@ -445,6 +445,65 @@ def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
+# Valuation-identity checks (MU 2026-09-09 review loop)
+# ---------------------------------------------------------------------------
+
+
+def test_dupont_identity_flags_numerator_product_mismatch():
+    text = (
+        "DuPont: ROE ~35% decomposed as margin-led — net_margin 0.5591, "
+        "asset_turnover 0.8929, equity_multiplier 1.3315"
+    )
+    claims = rv._dupont_identity(text)
+    assert len(claims) == 1
+    assert claims[0].status == "INTERNAL_CONFLICT"
+
+
+def test_dupont_identity_clean():
+    text = "ROE 20.0% (net_margin 0.50 asset_turnover 1.00 equity_multiplier 0.40)"
+    assert rv._dupont_identity(text) == []
+
+
+def test_pe_basis_conflict_catches_annual_vs_ttm():
+    text = (
+        "P/E: 135.94\nDiluted EPS | TTM $44.17\n"
+        "latest price $1,027.77"
+    )
+    claims = rv._pe_basis_conflict(text)
+    assert len(claims) == 1
+    assert claims[0].status == "INTERNAL_CONFLICT"
+    # 1027.77 / 44.17 = 23.27, not 135.94
+    assert "23.27" in claims[0].claim
+
+
+def test_pe_basis_clean_when_consistent():
+    text = "P/E 12.5\nEPS ttm $4.00\nprice $50.00"
+    assert rv._pe_basis_conflict(text) == []
+
+
+def test_ev_net_cash_conflict_flags_ev_above_mcap():
+    text = (
+        "- EV: 1,166,392,461,568\n"
+        "- Market cap: 1,160,756,461,568\n"
+        "net CASH ≈ $19.65B (cash 26.02B - debt 6.38B)"
+    )
+    claims = rv._ev_net_cash_conflict(text)
+    assert len(claims) == 1
+    assert claims[0].status == "INTERNAL_CONFLICT"
+
+
+def test_ev_net_cash_clean_when_consistent():
+    text = "- EV: 1,140,000,000,000\n- Market cap: 1,160,000,000,000\nnet CASH $19.65B"
+    assert rv._ev_net_cash_conflict(text) == []
+
+
+def test_internal_conflicts_altman_z_pair():
+    text = "Altman Z 24.62 (body)\n| Altman Z | 25.70 |"
+    cs = rv._internal_conflicts(text)
+    assert any(c.status == "INTERNAL_CONFLICT" and c.claim.startswith("'altman z'") for c in cs)
+
+
+# ---------------------------------------------------------------------------
 # Macro-authority gate (SKHY 2026-09-09 review loop)
 # ---------------------------------------------------------------------------
 # news.md quoted "Polymarket: no Fed rate cuts in 2026 = Yes 93%", "10Y at

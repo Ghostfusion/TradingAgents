@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **Valuation-identity checks (MU 2026-09-09 review loop)** - the
+  fundamentals.md mixed basis and broke identities the same report asserted:
+  get_ratios P/E 135.94 (annual FY25 EPS basis) vs "TTM EPS $44.17" at
+  price $1,027.77 (=> 23.3); ROE ~35% decomposed from net_margin 0.5591 x
+  asset_turnover 0.8929 x equity_multiplier 1.3315 (=> 66.5%); EV
+  $1.166T > market cap $1.16T while asserting net cash $19.65B. report_verifier
+  gained deterministic `_valuation_identity_checks` (DuPont product vs ROE,
+  P/E basis vs price/TTM-EPS, EV>mcap-with-net-cash) plus an `altman z`
+  internal-conflict metric (MU body 24.60 vs summary/evidence 25.70). Runs in
+  verify_report_dir regardless of the LLM pass; live on MU_20260909_171033
+  flags 3 identity + 2 internal conflicts. Tests: tests/test_report_verify.py
+  (+7).
 - **Macro-authority gate (SKHY 2026-09-09 review loop)** - the news.md
   quoted market-implied figures ("Polymarket: no Fed rate cuts in 2026 =
   Yes 93%", "recession 8%", "10Y at 4.78 FRED print", "RRP at 0.432B")

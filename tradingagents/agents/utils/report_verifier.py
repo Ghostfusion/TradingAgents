@@ -413,6 +413,10 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "hy oas": (re.compile(r"hy[-\s]?oas|high\s*yield.{0,20}oas", re.I), 0.005),
     "forward peg": (re.compile(r"peg|forward\s*p/e.{0,6}growth|price.{0,6}earnings.{0,6}growth", re.I), 0.005),
     "ttm p/e": (re.compile(r"ttm\s*p/e|p/e\s*ttm|pe\s*ttm", re.I), 0.005),
+    # MU 2026-09-09 review-loop metrics: Altman Z 24.60 (body) vs 25.70
+    # (summary + get_analyst_verdict leaf 25.70) — a provider-sourced score
+    # must not be quoted at two values in one report.
+    "altman z": (re.compile(r"\baltman\s*z\b|altman\s*z-score", re.I), 0.005),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -577,6 +581,134 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
 
 
 # ---------------------------------------------------------------------------
+# Valuation-identity checks (deterministic; MU 2026-09-09 review loop)
+# ---------------------------------------------------------------------------
+# The MU fundamentals.md mixed basis and broke identities the same report
+# asserted: "P/E 135.94" (provider, annual-EPS basis) vs "TTM EPS $44.17" +
+# price $1,027.77 (=> P/E 23.3); "RoE ~35%" decomposed from inputs that
+# multiply to 66.5%; "EV $1.166T" while "net CASH $19.65B" with
+# "Market cap $1.16T" (EV must be below the cap). These are not
+# number-vs-vendor conflicts — they are internal identities broken inside
+# ONE report. Deterministic identity checks below; advisory, never rewrite.
+
+_PE_RE = re.compile(r"\bP\s*/\s*E\b\s*:?\s*\**\s*([\d,]+(?:\.\d+)?)")
+_PRICE_RE = re.compile(r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*([\d,]+\.\d{2})|at\s+\$([\d,]+\.\d{2})")
+_TTM_EPS_RE = re.compile(r"(?i)\beps\b[^0-9]{0,40}ttm[^0-9]{0,40}\$\s*\**\s*([\d,]+(?:\.\d+)?)")
+_ROE_RE = re.compile(r"\bROE\b\s*\**\s*~?\s*([\d.]+)\s*%")
+_NET_MARGIN_RE = re.compile(r"net_margin\s*\**\s*([\d.]+)")
+_AT_RE = re.compile(r"asset_turnover\s*\**\s*([\d.]+)")
+_EM_RE = re.compile(r"equity_multiplier\s*\**\s*([\d.]+)")
+_EV_RE = re.compile(r"\bEV\b(?!\s*/)[::]?\s*\**\s*\$?\s*\**\s*([\d,]+)")
+_MCAP_RE = re.compile(r"(?i)market\s*cap[^0-9]{0,45}\$?\s*\**\s*([\d,]+)")
+_NET_CASH_RE = re.compile(r"(?i)net\s*cash[^0-9]{0,20}\$?\s*([\d.]+)\s*B")
+
+
+def _dupont_identity(report_text: str) -> list[VerifierClaim]:
+    """ROE = net_margin x asset_turnover x equity_multiplier, when quoted."""
+    if not report_text:
+        return []
+    nm = _NET_MARGIN_RE.search(report_text)
+    at = _AT_RE.search(report_text)
+    em = _EM_RE.search(report_text)
+    roes = [float(m.group(1)) for m in _ROE_RE.finditer(report_text) if float(m.group(1)) > 0]
+    if not (nm and at and em and roes):
+        return []
+    product_pct = float(nm.group(1)) * float(at.group(1)) * float(em.group(1)) * 100.0
+    out = []
+    for roe in roes:
+        if abs(product_pct - roe) / max(abs(roe), 1e-9) > 0.2:
+            out.append(
+                VerifierClaim(
+                    claim="DuPont identity: net_margin x asset_turnover x equity_multiplier "
+                          f"= {product_pct:.1f}% but ROE quoted at {roe:.1f}%",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The decomposition inputs the report itself quotes do not multiply "
+                        "to the ROE it states (MU 2026-09-09: inputs give 66.4% while text "
+                        "claims ~35%). Fix the decomposed value or label it a fuzzy estimate."
+                    ),
+                )
+            )
+            break  # one DuPont conflict is enough
+    return out
+
+
+def _pe_basis_conflict(report_text: str) -> list[VerifierClaim]:
+    """P/E quoted must be consistent with a quoted TTM EPS at the quoted price."""
+    if not report_text:
+        return []
+    pes = [float(m.group(1).replace(",", "")) for m in _PE_RE.finditer(report_text)]
+    ttm_eps = None
+    m = _TTM_EPS_RE.search(report_text)
+    if m:
+        ttm_eps = float(m.group(1).replace(",", ""))
+    price = None
+    mp = _PRICE_RE.search(report_text)
+    if mp:
+        price = float((mp.group(1) or mp.group(2)).replace(",", ""))
+    if not (pes and ttm_eps and price):
+        return []
+    implied = price / ttm_eps
+    for pe in pes:
+        if pe <= 0:
+            continue
+        if abs(pe - implied) / max(implied, 1e-9) > 0.5:
+            return [
+                VerifierClaim(
+                    claim=f"P/E quoted at {pe:.2f} vs {price:,.2f} / TTM EPS {ttm_eps:.2f} "
+                          f"= {implied:.2f}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The P/E basis does not match the TTM EPS basis the report itself "
+                        "quotes (MU 2026-09-09: provider P/E 135.9 is on annual FY25 EPS, "
+                        "not the $44.17 TTM the report cites). Reconcile the basis."
+                    ),
+                )
+            ]
+    return []
+
+
+def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
+    """EV must be below market cap when the report asserts net cash."""
+    if not report_text:
+        return []
+    ev_m = _EV_RE.search(report_text)
+    mcap_m = _MCAP_RE.search(report_text)
+    nc_m = _NET_CASH_RE.search(report_text)
+    if not (ev_m and mcap_m and nc_m):
+        return []
+    ev = float(ev_m.group(1).replace(",", ""))
+    mcap = float(mcap_m.group(1).replace(",", ""))
+    net_cash = float(nc_m.group(1)) * 1e9
+    # EV = mcap - net_cash is the identity; allow unit noise (2% of mcap).
+    expected = mcap - net_cash
+    if ev > mcap and abs(ev - expected) / max(abs(expected), 1e-9) > 0.02:
+        return [
+            VerifierClaim(
+                claim=f"EV {ev:,.0f} > market cap {mcap:,.0f} while report asserts "
+                      f"net cash ${net_cash/1e9:.2f}B",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A net-cash balance sheet must price EV below (or around) market cap. "
+                    "The quoted EV uses a different debt/cash/lease basis than the "
+                    "balance-sheet row (MU 2026-09-09: EV 1.17T vs expected 1.14T). "
+                    "Reconcile EV to one basis."
+                ),
+            )
+        ]
+    return []
+
+
+def _valuation_identity_checks(report_text: str) -> list[VerifierClaim]:
+    """Run all identity checks (DuPont, P/E basis, EV/net-cash)."""
+    return (
+        _dupont_identity(report_text)
+        + _pe_basis_conflict(report_text)
+        + _ev_net_cash_conflict(report_text)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -727,7 +859,8 @@ def verify_report_dir(
         anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
         conflicts = _internal_conflicts(report_text)
         macro_gate = _macro_authority_gate(report_text, evidence, stem)
-        all_claims = anchored.claims + conflicts + macro_gate
+        identities = _valuation_identity_checks(report_text)
+        all_claims = anchored.claims + conflicts + macro_gate + identities
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
