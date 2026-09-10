@@ -1227,6 +1227,46 @@ def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
     )]
 
 
+_SUM_LINE = re.compile(
+    r"([0-9][0-9,]*\.?[0-9]*(?:\s*\+\s*[0-9][0-9,]*\.?[0-9]*){2,})\s*=\s*\$?\s*(\d+(?:\.\d+)?)"
+)
+
+
+def _sum_identity(report_text: str) -> list[VerifierClaim]:
+    """Flag a quoted additive sum whose arithmetic is wrong.
+
+    ADBE 2026-09-10 fundamentals.md wrote 'TTM OCF = $2.165+2.958+3.160+2.198
+    = $10.62B' but 2.165+2.958+3.160+2.198 = 10.481B. A report that states
+    the addends and a total must present arithmetic that matches; a >0.5%
+    discrepancy is a transcription/derivation slip.
+    """
+    if not report_text:
+        return []
+    for m in _SUM_LINE.finditer(report_text):
+        raw = m.group(1)
+        total = float(m.group(2).replace(",", ""))
+        addends = [float(x.replace(",", "")) for x in re.findall(r"[0-9][0-9,]*\.?[0-9]*", raw)]
+        if len(addends) < 3:
+            continue
+        s = sum(addends)
+        if abs(s) < 1e-9:
+            continue
+        if abs(s - total) / abs(s) > 0.005:
+            expr = "+".join(str(x) for x in addends)
+            return [VerifierClaim(
+                claim=f"quoted sum {expr} = {total:g} (as written) sums to {s:g}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report states addends and a total whose "
+                    "arithmetic does not match (ADBE 2026-09-10: TTM OCF "
+                    "2.165+2.958+3.160+2.198 written as $10.62B but "
+                    "summing to 10.481B). Re-add from the verbatim "
+                    "addends."
+                ),
+            )]
+    return []
+
+
 _PRICE_TARGET = re.compile(r"\bmean\s+(?:PT\s*)?\$?([\d.]+)", re.I)
 
 
@@ -1770,10 +1810,11 @@ def verify_report_dir(
         sma200_pct = _sma200_pct_identity(report_text)
         garch_cond = _garch_cond_identity(report_text)
         chand_stop = _chandelier_identity(report_text)
+        sum_ident = _sum_identity(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + sum_ident + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)

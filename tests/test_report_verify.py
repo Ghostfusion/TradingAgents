@@ -678,6 +678,28 @@ def test_chandelier_identity_hpe():
     assert "54.11" in cs[0].claim and "58.2" in cs[0].claim
 
 
+def test_sum_identity_adbe_missum():
+    # ADBE 2026-09-10 fundamentals.md: TTM OCF written as
+    # 2.165+2.958+3.160+2.198 = $10.62B but the addends sum to 10.481B.
+    t = ("TTM OCF = $2.165+2.958+3.160+2.198 = $10.62B; TTM FCF = $10.28B")
+    cs = rv._sum_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "10.62" in cs[0].claim and "10.481" in cs[0].claim
+
+
+def test_sum_identity_clean_when_math_right():
+    assert rv._sum_identity("TTM OCF = 2.165+2.958+3.160+2.198 = $10.481B") == []
+    assert rv._sum_identity("TTM repurchases 2.111+2.478+2.474+2.057 = $9.12B") == []
+    assert rv._sum_identity("TTM OCF = 2.165+2.958+3.160 = $8.283B") == []
+
+
+def test_sum_identity_three_term_wrong():
+    cs = rv._sum_identity("TTM OCF = 2.165+2.958+3.160 = $9.1B")
+    assert len(cs) == 1
+    assert "8.283" in cs[0].claim
+
+
 def test_chandelier_identity_clean():
     t = "chandelier 3xATR below 22-bar high = 54.11"
     assert rv._chandelier_identity(t) == []
