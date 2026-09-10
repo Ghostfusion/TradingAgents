@@ -41,6 +41,8 @@ Methodology extensions (from review-loop recommendations): (1) get_margin_of_saf
 Fix(1) in margin_of_safety_bases: the price-basis MoS was computed as -(P/IV - 1), which is algebraically identical to the FV-basis - the tool printed the same number for both conventions (caught live on MSFT: -335.4% FV and -335.4% price). Corrected to (IV - P)/P, so MSFT reads -333.7% FV-basis vs -76.9% price-basis, exactly the two conventions the review asked to separate; +regression test.
 
 MSFT market.md review-loop fixes (2026-09-10): new expected-band identity check flags a '+/-$0.00' dollar band next to a stated expected-move % (a fabrication - the vendor leaf gave [458, 523]; MSFT reported 6.6% as +/-$0.00); market prompt pins 'quote the vendor band or write unavailable, never $0.00'.
+
+MSFT news.md review-loop (2026-09-10): new eps-estimate-per-date identity check flags two different EPS estimates anchored to the same earnings date (2026-10-28 cited as est 4.72 in headline/table but est 4.16 in the forward calendar - leaf says 4.72); news-agent pins: vendor- estimated next earnings date wording, routine-8-K classification instead of 'unknown material event', and one-estimate-per-date.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

@@ -575,6 +575,23 @@ def test_expected_band_identity_flags_zero_dollar():
     assert cs[0].status == "INTERNAL_CONFLICT"
 
 
+def test_eps_estimate_duals_conflict_same_date():
+    # MSFT 2026-09-10 news.md: 2026-10-28 cited as est 4.72 in the headline
+    # and table but est 4.16 in the forward-calendar line - same print, two
+    # estimates; leaf said 4.72.
+    t = ("next print 2026-10-28 (est EPS 4.72; last reported 4.74)\n"
+         "MSFT earnings 2026-10-28 (est 4.16)")
+    cs = rv._eps_estimate_duals(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "2026-10-28" in cs[0].claim and "4.16" in cs[0].claim
+
+
+def test_eps_estimate_duals_clean_when_single_value():
+    t = "next print 2026-10-28 (est EPS 4.72); forward table 2026-10-28 est 4.72"
+    assert rv._eps_estimate_duals(t) == []
+
+
 def test_expected_band_identity_clean_when_real_band():
     t = "expected earnings move 6.6%; band [458.04, 522.90]"
     assert rv._expected_band_identity(t) == []

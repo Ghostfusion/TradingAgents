@@ -1146,6 +1146,44 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
+_EPS_EST_DATE = re.compile(
+    r"(20\d{2}-\d{2}-\d{2})[^\n]{0,80}?est(?:imate)?[^\d]{0,30}(\d+(?:\.\d+)?)"
+)
+
+
+def _eps_estimate_duals(report_text: str) -> list[VerifierClaim]:
+    """Two different EPS estimates anchored to the SAME earnings date.
+
+    MSFT 2026-09-10 news.md: the summary table and headline both cite
+    "2026-10-28 (est EPS 4.72)" while the forward-calendar section wrote
+    "MSFT earnings 2026-10-28 (est 4.16)". The earnings-calendar leaf said
+    estimate=4.72, so 4.16 was a conflicting second figure. Same-print
+    estimates must agree; flag differing values for one date.
+    """
+    if not report_text:
+        return []
+    claims: list[VerifierClaim] = []
+    per_date: dict[str, set[str]] = {}
+    for m in _EPS_EST_DATE.finditer(report_text):
+        d, v = m.group(1), m.group(2)
+        per_date.setdefault(d, set()).add(v)
+    for d, vals in sorted(per_date.items()):
+        if len(vals) > 1:
+            claims.append(VerifierClaim(
+                claim=f"eps estimate for {d} cited at conflicting values: "
+                      f"{' / '.join(sorted(vals))}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report quotes more than one EPS estimate for the same "
+                    "earnings date; the earnings-calendar leaf supplies exactly "
+                    "one estimate per print. Keep one value per date (MSFT "
+                    "2026-09-10: 4.72 in the table vs 4.16 in the forward "
+                    "calendar for 2026-10-28)."
+                ),
+            ))
+    return claims
+
+
 _BAND_ZERO = re.compile(r"[±–—-]\s*\$\s*0(?:\.00)?\b", re.I)
 
 
@@ -1499,10 +1537,11 @@ def verify_report_dir(
         sma200 = _sma200_identity(report_text)
         fcf_slip = _fcf_unit_slip(report_text)
         expected_band = _expected_band_identity(report_text)
+        eps_duals = _eps_estimate_duals(report_text)
         dd_streak = _double_digit_streak_identity(report_text)
         insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + dd_streak + insider_value
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
