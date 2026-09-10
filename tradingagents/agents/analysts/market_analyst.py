@@ -404,9 +404,20 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             " snapshot annotates a FORMING bar (in-progress session); then write"
             " intraday levels and avoid closed/EOD/daily-close wording"
             " (MU 2026-09-10 market.md called 982.95 the close at 1:37pm)."
+            " ALSO do not call a forming-bar intraday move a CONFIRMED gap-down"
+            " / confirmed fill / confirmed close - provisional until the"
+            " session closes (SNDK 2026-09-10 called the gap-down into"
+            " 1698.41 confirmed on a forming bar)."
+
             " Write trigger/reference numbers at their REAL scale - a 1,010+"
             " trigger is never a 400-area / 500-area level (MU 2026-09-10"
             " summarized a 1,010 trigger as 400-area confirmation)."
+            " Label a trailing stop by its OWN basis; do not reuse another"
+            "indicator's name: a 20-day-true-range trail is not a 20-EMA;"
+            " quote each exit value under the tool that produced it (SNDK"
+            " 2026-09-10 market.md renamed its 20-day-true trail 1586.04"
+            " as 20-EMA 1586.04 in the summary table)."
+
             " DELL 2026-09-10 market.md mislabeled the 09-09 close 535.25"
             " as '09-09 high' while the snapshot's Prev close is the close."
             + get_language_instruction()
