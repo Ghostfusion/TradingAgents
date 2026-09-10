@@ -1232,6 +1232,313 @@ def get_basic_financials(
 
 
 @tool
+def get_etf_valuation(
+    ticker: Annotated[str, "ETF ticker symbol"],
+    current_date: Annotated[str | None, "as-of date (yyyy-mm-dd)"] = None,
+) -> str:
+    """Weighted constituent valuation for an ETF (advisory, ETF engine).
+
+    For a fund/ETF the company-level DCF/statement tools are expected to be
+    unavailable — this is the ETF-appropriate valuation: the weighted
+    multiples of the underlying basket (harmonic P/E, forward P/E, earnings
+    yield, FCF yield, revenue/EPS growth, valuation percentile vs the ETF's
+    own history, vs SPY and vs XLK, top-10 concentration). Every metric is
+    None-safe; a missing constituent is skipped, never fabricated. Use
+    before any 'cheap / expensive / no valuation anchor' claim on an ETF.
+
+    Args:
+        ticker: the ETF symbol (e.g. IGV, SOXX, CIBR, SKYY).
+        current_date: optional as-of date.
+
+    Returns:
+        A ``Metric: value`` block, or an explicit 'unavailable' message when
+        the ticker is not a known ETF or no constituent metrics resolve.
+    """
+    try:
+        from tradingagents.strategies.etf_valuation import etf_valuation
+        from tradingagents.strategies.sector_rank import SECTOR_CONSTITUENTS
+    except Exception as exc:  # noqa: BLE001
+        return f"etf valuation unavailable for {ticker}: {exc}"
+    t = (ticker or "").strip().upper()
+    names = SECTOR_CONSTITUENTS.get(t)
+    if not names:
+        return (
+            f"etf valuation unavailable for {ticker}: not a known ETF in the "
+            "constituent universe (SECTOR_CONSTITUENTS)."
+        )
+    # Per-constituent metrics: price from the OHLCV cache, EPS/growth from
+    # Finnhub basic financials. Bounded to the curated core (<= 10 names) so
+    # the tool stays cheap; a failed constituent is skipped.
+    constituents: dict = {}
+    for name in names:
+        try:
+            from tradingagents.dataflows.finnhub import get_basic_financials_finnhub
+
+            bf = get_basic_financials_finnhub(name, None)
+            # parse the "Metric: value" block into a dict
+            metrics: dict[str, float | None] = {}
+            for line in bf.splitlines():
+                if ":" not in line:
+                    continue
+                k, _, v = line.partition(":")
+                k = k.strip().lower()
+                try:
+                    metrics[k] = float(v.strip().rstrip("%"))
+                except ValueError:
+                    continue
+            closes = _ohlcv(name).get("closes") or []
+            price = closes[-1] if closes else None
+            constituents[name] = {
+                "price": price,
+                "eps_ttm": metrics.get("eps ttm") or metrics.get("eps"),
+                "eps_fwd": metrics.get("forward eps") or metrics.get("eps forward"),
+                "fcf": metrics.get("free cash flow") or metrics.get("fcf"),
+                "mcap": metrics.get("market cap"),
+                "rev_growth": metrics.get("revenue growth yoy") or metrics.get("revenue growth"),
+                "eps_growth": metrics.get("eps growth yoy") or metrics.get("eps growth"),
+            }
+        except Exception:  # noqa: BLE001 - a failed constituent is skipped
+            continue
+    if not constituents:
+        return f"etf valuation unavailable for {ticker}: no constituent metrics resolved."
+    # Benchmark P/Es: SPY and XLK from the same Finnhub source (best-effort).
+    spy_pe = xlk_pe = None
+    try:
+        from tradingagents.dataflows.finnhub import get_basic_financials_finnhub
+
+        for bench, key in (("SPY", "spy_pe"), ("XLK", "xlk_pe")):
+            bf = get_basic_financials_finnhub(bench, None)
+            for line in bf.splitlines():
+                if ":" not in line:
+                    continue
+                k, _, v = line.partition(":")
+                if k.strip().lower() in ("pe ratio (ttm)", "pe ttm", "pe"):
+                    try:
+                        if key == "spy_pe":
+                            spy_pe = float(v.strip())
+                        else:
+                            xlk_pe = float(v.strip())
+                    except ValueError:
+                        pass
+                    break
+    except Exception:  # noqa: BLE001 - benchmarks are best-effort
+        pass
+    r = etf_valuation(
+        t,
+        constituents=constituents,
+        spy_pe=spy_pe,
+        xlk_pe=xlk_pe,
+    )
+    lines = [f"## ETF valuation — {t} (weighted constituents)", ""]
+    for label, key in (
+        ("Weighted P/E (TTM)", "weighted_pe"),
+        ("Forward P/E", "forward_pe"),
+        ("Earnings yield", "earnings_yield"),
+        ("Weighted FCF yield", "fcf_yield"),
+        ("Weighted revenue growth", "rev_growth"),
+        ("Weighted EPS growth", "eps_growth"),
+        ("Valuation percentile (own history)", "valuation_percentile"),
+        ("P/E vs SPY", "vs_spy"),
+        ("P/E vs XLK", "vs_xlk"),
+        ("Top-10 weight", "top_n_weight"),
+    ):
+        v = r.get(key)
+        if v is None:
+            lines.append(f"- {label}: n/a")
+        elif key in ("earnings_yield", "fcf_yield", "rev_growth", "eps_growth"):
+            lines.append(f"- {label}: {v:.2%}")
+        elif key == "valuation_percentile":
+            lines.append(f"- {label}: {v:.0%}")
+        else:
+            lines.append(f"- {label}: {v}")
+    lines.append(f"- Constituents resolved: {r['n_constituents']} ({r['weights_used']} weight)")
+    lines.append(
+        "Interpretation: ETF-level valuation from the underlying basket — "
+        "company-level DCF/statement tools are expected to be unavailable for "
+        "a fund; use this instead of treating their absence as 'no valuation'."
+    )
+    return "\n".join(lines)
+
+
+def _bench_ohlcv(label):
+    """Closes for a benchmark ETF via the shared OHLCV cache (None-safe)."""
+    try:
+        return _ohlcv(label).get("closes") or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@tool
+def get_etf_decline_driver(
+    ticker: Annotated[str, "ETF ticker symbol"],
+) -> str:
+    """Classify what drives an ETF's decline (advisory, ETF engine).
+
+    The company-oriented decline-driver screen returns `clean=True` for a
+    fund, which is meaningless. This classifies the cause as MARKET /
+    SECTOR / ETF_SPECIFIC / CONSTITUENT_DRIVEN / UNKNOWN from the ETF's
+    close plus SPY/QQQ/XLK. Use before any 'decline is/not structural' claim
+    on an ETF.
+
+    Args:
+        ticker: the ETF symbol.
+
+    Returns:
+        A ``driver + evidence`` block.
+    """
+    try:
+        from tradingagents.strategies.etf_decline_driver import etf_decline_driver
+    except Exception as exc:  # noqa: BLE001
+        return f"etf decline driver unavailable for {ticker}: {exc}"
+    t = (ticker or "").strip().upper()
+    r = etf_decline_driver(
+        t,
+        etf_closes=_ohlcv(t).get("closes") or None,
+        spy_closes=_bench_ohlcv("SPY"),
+        qqq_closes=_bench_ohlcv("QQQ"),
+        xlk_closes=_bench_ohlcv("XLK"),
+    )
+    lines = [f"## ETF decline driver — {t}", ""]
+    lines.append(f"- driver: **{r['driver']}**")
+    for e in r["evidence"] or []:
+        lines.append(f"- {e}")
+    return "\n".join(lines)
+
+
+@tool
+def get_etf_relative_strength(
+    ticker: Annotated[str, "ETF ticker symbol"],
+) -> str:
+    """ETF relative strength vs SPY/QQQ/XLK, BOTH legs shown (advisory).
+
+    Fixes the priceRelativeToS&P500 ambiguity: renders the ETF return, the
+    benchmark return, and the relative spread side by side at 21/63/126/252
+    days. Use before any 'outperforming/underperforming' claim on an ETF.
+
+    Args:
+        ticker: the ETF symbol.
+
+    Returns:
+        A per-benchmark, per-window block (each value None-safe).
+    """
+    try:
+        from tradingagents.strategies.etf_risk import etf_relative_strength
+    except Exception as exc:  # noqa: BLE001
+        return f"etf relative strength unavailable for {ticker}: {exc}"
+    t = (ticker or "").strip().upper()
+    r = etf_relative_strength(
+        t, closes=_ohlcv(t).get("closes") or None,
+        bench_map={"SPY": _bench_ohlcv("SPY"), "QQQ": _bench_ohlcv("QQQ"), "XLK": _bench_ohlcv("XLK")},
+    )
+    lines = [f"## ETF relative strength — {t}", ""]
+    for label, legs in sorted(r["benchmarks"].items()):
+        lines.append(f"- {label}:")
+        for w, v in sorted(legs.items(), key=lambda kv: int(kv[0])):
+            etf = f"{v['etf_ret']:+.2%}" if v["etf_ret"] is not None else "n/a"
+            bench = f"{v['bench_ret']:+.2%}" if v["bench_ret"] is not None else "n/a"
+            rel = f"{v['relative']:+.2%}" if v["relative"] is not None else "n/a"
+            lines.append(f"    {w}d: ETF {etf} vs {label} {bench} -> relative {rel}")
+    return "\n".join(lines)
+
+
+@tool
+def get_etf_risk(
+    ticker: Annotated[str, "ETF ticker symbol"],
+) -> str:
+    """ETF risk profile: beta/downside-capture vs SPY/QQQ, vol%, ATR%, maxDD.
+
+    The IGV 2026-09-09 review loop: beta alone is regime-dependent. This
+    adds downside/upside capture, realized-vol percentile, ATR% and max
+    drawdown. Use before any 'risk / beta / volatility' claim on an ETF.
+
+    Args:
+        ticker: the ETF symbol.
+
+    Returns:
+        A ``Metric: value`` block (each value None-safe).
+    """
+    try:
+        from tradingagents.strategies.etf_risk import etf_risk_profile
+    except Exception as exc:  # noqa: BLE001
+        return f"etf risk unavailable for {ticker}: {exc}"
+    t = (ticker or "").strip().upper()
+    o = _ohlcv(t)
+    r = etf_risk_profile(
+        t,
+        closes=o.get("closes") or None,
+        highs=o.get("highs") or None,
+        lows=o.get("lows") or None,
+        bench_map={"SPY": _bench_ohlcv("SPY"), "QQQ": _bench_ohlcv("QQQ")},
+    )
+    lines = [f"## ETF risk profile — {t}", ""]
+    lines.append(f"- Realized vol (20d): {r['realized_vol']:.2%}" if r["realized_vol"] is not None else "- Realized vol (20d): n/a")
+    lines.append(f"- Vol percentile (3Y): {r['vol_percentile']:.0%}" if r["vol_percentile"] is not None else "- Vol percentile (3Y): n/a")
+    lines.append(f"- ATR%: {r['atr_pct']:.2%}" if r["atr_pct"] is not None else "- ATR%: n/a")
+    lines.append(f"- Max drawdown (252d): {r['max_drawdown']:.2%}" if r["max_drawdown"] is not None else "- Max drawdown (252d): n/a")
+    for label, b in sorted(r["benchmarks"].items()):
+        beta = f"{b['beta']:.2f}" if b["beta"] is not None else "n/a"
+        dc = f"{b['downside_capture']:.2f}" if b["downside_capture"] is not None else "n/a"
+        uc = f"{b['upside_capture']:.2f}" if b["upside_capture"] is not None else "n/a"
+        lines.append(f"- {label}: beta {beta}, downside capture {dc}, upside capture {uc}")
+    return "\n".join(lines)
+
+
+@tool
+def get_etf_mechanics(
+    ticker: Annotated[str, "ETF ticker symbol"],
+) -> str:
+    """ETF mechanics: NAV premium/discount, tracking, distributions (advisory).
+
+    For a fund, distributions are ETF distributions (net-of-expense income),
+    not corporate dividends; NAV premium/discount and tracking difference are
+    the fund-specific quality reads. Every field is None-safe — a vendor
+    without the feed renders n/a, never fabricated.
+
+    Args:
+        ticker: the ETF symbol.
+
+    Returns:
+        A ``Metric: value`` block, or an explicit 'unavailable' message.
+    """
+    t = (ticker or "").strip().upper()
+    lines = [f"## ETF mechanics — {t}", ""]
+    # NAV premium/discount: yfinance quoteType ETF + navPrice when available.
+    nav = None
+    price = None
+    try:
+        import yfinance as _yf
+
+        info = _yf.Ticker(t).info or {}
+        nav = info.get("navPrice")
+        price = info.get("regularMarketPrice") or info.get("previousClose")
+    except Exception:  # noqa: BLE001 - best-effort
+        pass
+    if nav is not None and price:
+        try:
+            prem = (float(price) / float(nav) - 1.0) * 100.0
+            lines.append(f"- NAV premium/discount: {prem:+.2f}% (price {price} vs NAV {nav})")
+        except (TypeError, ValueError):
+            lines.append("- NAV premium/discount: n/a")
+    else:
+        lines.append("- NAV premium/discount: n/a (no NAV feed)")
+    # Distribution yield + frequency from the corporate-actions tool.
+    try:
+        from tradingagents.agents.utils.moomoo_extra_tools import get_corporate_actions
+
+        ca = get_corporate_actions(t)
+        first = (ca.splitlines() or [""])[0]
+        lines.append(f"- Distributions: {first if first else 'n/a'}")
+    except Exception:  # noqa: BLE001
+        lines.append("- Distributions: n/a")
+    lines.append(
+        "Interpretation: fund-level mechanics — distributions are ETF "
+        "distributions, not corporate dividends; NAV premium/discount and "
+        "tracking are the fund-specific quality reads."
+    )
+    return "\n".join(lines)
+
+
+@tool
 def get_insider_activity(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:

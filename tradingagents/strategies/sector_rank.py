@@ -635,6 +635,19 @@ def rank_industry_group(
 SECTOR_CONSTITUENTS: dict[str, list] = {
     "SOXX": ["NVDA", "AMD", "AVGO", "MU", "TSM", "AMAT", "LRCX", "KLAC", "MRVL", "QCOM"],
     "XBI": ["MRNA", "REGN", "VRTX", "AMGN", "GILD", "ILMN", "ALNY", "BIIB", "MGNX", "NTLA"],
+    # IT subsector universe (ETF engine, 2026-09-09 review loop): curated
+    # top-holdings core for the ETF valuation engine. Fetch-light by design;
+    # anything missing renders n/a, never fabricated.
+    "IGV": ["MSFT", "ORCL", "CRM", "ADBE", "NOW", "INTU", "PANW", "CRWD", "SNPS", "CDNS"],
+    "CIBR": ["CRWD", "PANW", "FTNT", "ZS", "OKTA", "S", "CYBR", "TENB", "RPD", "VRNS"],
+    "SKYY": ["MSFT", "AMZN", "GOOGL", "ORCL", "CRM", "NOW", "ADBE", "INTU", "SNOW", "DDOG"],
+    "AIQ": ["NVDA", "MSFT", "GOOGL", "AMZN", "META", "AVGO", "ORCL", "CRM", "NOW", "PLTR"],
+    "BOTZ": ["NVDA", "ISRG", "ABBV", "MSFT", "GOOGL", "AMZN", "INTC", "DE", "CAT", "SYK"],
+    "DTCR": ["MSFT", "ORCL", "CRM", "NOW", "ADBE", "INTU", "SNOW", "DDOG", "MDB", "NET"],
+    "NXTG": ["AVGO", "QCOM", "TXN", "AMD", "MU", "INTC", "MRVL", "ADI", "NXPI", "SWKS"],
+    "IYW": ["MSFT", "NVDA", "AVGO", "AAPL", "ORCL", "CRM", "ADBE", "NOW", "INTU", "QCOM"],
+    "FINX": ["V", "MA", "PYPL", "SQ", "ADYEY", "FISV", "GPN", "AFRM", "COIN", "SOFI"],
+    "XSD": ["NVDA", "AMD", "AVGO", "MU", "QCOM", "TXN", "ADI", "MRVL", "NXPI", "ON"],
 }
 
 

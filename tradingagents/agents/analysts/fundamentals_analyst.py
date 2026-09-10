@@ -26,6 +26,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_earnings_surprise_history,
     get_earnings_transcript,
     get_edgar_fulltext_search,
+    get_etf_decline_driver,
+    get_etf_mechanics,
+    get_etf_relative_strength,
+    get_etf_risk,
+    get_etf_valuation,
     get_fcf_yield,
     get_financial_history,
     get_fixed_income_risk,
@@ -54,12 +59,78 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
+def _etf_toolset():
+    """The ETF-appropriate tool set (docs/design_etf_fundamental_valuation.md).
+
+    Company statement tools (get_balance_sheet, get_cashflow,
+    get_dcf_valuation, ...) are expected to return 'unavailable' for a fund
+    wrapper — they are excluded so their absence is never a verdict input;
+    the analyst instead values the ETF from its underlying basket.
+    """
+    return [
+        get_fundamentals,
+        get_basic_financials,
+        get_etf_valuation,
+        get_etf_decline_driver,
+        get_etf_relative_strength,
+        get_etf_risk,
+        get_etf_mechanics,
+        get_corporate_actions,
+        get_congress_trades,
+        get_regime_state,
+        get_edgar_fulltext_search,
+        get_position_risk_multiplier,
+    ]
+
+
+_ETF_SYSTEM_TAIL = (
+    " SECURITY-TYPE: ETF/FUND. This is an index or exchange-traded fund "
+    "wrapper, NOT an operating company. Company statement tools "
+    "(get_balance_sheet / get_cashflow / get_income_statement / get_ratios / "
+    "get_dcf_valuation / get_fcf_yield / get_analyst_verdict / "
+    "get_earnings_quality / get_value_floors / ...) are EXPECTED to be "
+    "unavailable for a fund — do not treat their absence as a 'no valuation' "
+    "conclusion. Instead: call get_etf_valuation(ticker) for the weighted "
+    "constituent valuation (harmonic P/E, forward P/E, earnings/FCF yield, "
+    "valuation percentile vs own history, vs SPY/XLK) and use those numbers "
+    "before any 'cheap / expensive / no anchor' claim; get_etf_decline_driver "
+    "(classifies the decline cause as MARKET/SECTOR/ETF_SPECIFIC/"
+    "CONSTITUENT_DRIVEN instead of the company 'clean' read); "
+    "get_etf_relative_strength (both legs shown, fixes the "
+    "priceRelativeToS&P500 ambiguity); get_etf_risk (beta/downside-capture/"
+    "vol%/ATR%/maxDD); get_etf_mechanics (NAV premium/discount; distributions "
+    "are ETF distributions, not corporate dividends). A BUY requires an "
+    "ETF-level valuation case — never 'no DCF -> no BUY'. Congressional "
+    "trades on a fund are noise (weight ~0)."
+)
+
+
 def create_fundamentals_analyst(llm, backup_llm=None, config=None):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
 
-        tools = [
+        # ETF routing (docs/design_etf_fundamental_valuation.md): when the
+        # engine is enabled and the security is classified as a fund/ETF,
+        # swap the company toolset for the ETF one and append the ETF
+        # instructions. Default-off; a classification UNKNOWN keeps today's
+        # company path.
+        security_type = "UNKNOWN"
+        if config and config.get("enable_etf_engine"):
+            try:
+                from tradingagents.agents.utils.agent_utils import resolve_instrument_identity
+                from tradingagents.strategies.security_type import classify_security
+
+                cls = classify_security(
+                    str(state["company_of_interest"]).upper(),
+                    identity=resolve_instrument_identity(str(state["company_of_interest"])),
+                )
+                security_type = cls.get("security_type") or "UNKNOWN"
+            except Exception:  # noqa: BLE001 - degrade to company path
+                security_type = "UNKNOWN"
+        is_etf = security_type == "ETF"
+
+        tools = _etf_toolset() if is_etf else (
             get_fundamentals,
             get_balance_sheet,
             get_cashflow,
@@ -107,7 +178,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             get_kalman_spread,
             get_allocation_black_litterman,
             get_position_risk_multiplier,
-        ]
+        )
 
         # Forced-tool evidence (map-reduce): when analyst_forced_tools is set,
         # gather the fixed tool set once (skipped on tool-loop re-entries via
@@ -136,6 +207,12 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             + " You also have three free-tier depth tools: `get_financial_history(ticker, years=?)` returns the SEC EDGAR XBRL annual 10-K history (revenue/NI/OCF/capex/assets/liabilities/equity/cash; the only free source beyond ~4-5y; pre-XBRL years render n/a, stated per the report span) - cite it before any long-run trajectory claim; `get_congress_trades(ticker)` returns the House + Senate Stock Watcher open-market trades (net buys/sells + samples; free, keyless) - cite it before any Congress-insider flow claim, a negative net is a (secondary) caution flag, never a gate; `get_earnings_transcript(ticker)` returns the latest earnings-call transcript date/quarter + an excerpt when the FMP free tier serves it (quote only from the returned text; never invent management quotes) - cite it before any \"management said / guided\" claim. You also have industry-depth tools: `get_edgar_fulltext_search(query, forms=?, date_range=?)` searches SEC filing text (e.g. 'major customer' in 10-K) for the customer/supplier-concentration footnote, peer 10-K mentions, and thematic scans - use it before any 'concentrated customer / supplier dependency / moat' claim (verify in the actual filing); `get_patent_activity(ticker)` returns USPTO PatentsView annual granted patents + recent titles (name-based assignee match; free key) as an advisory innovation/moat gauge." + " You also have income/outcome tools: `get_fixed_income_risk(ticker, years=...)` returns the indicated yield and - only when a call/redemption horizon is inferable - YTM, Macaulay/modified duration, DV01 and convexity for bond-like preferreds (a perpetual renders YTM n/a, never a fake yield) - cite it before any 'yield / duration / income risk' claim on a preferred; `get_alpha_scoring(direction, predicted_magnitude, period_days, actual_return, confidence)` scores a past insight's direction + magnitude accuracy ('I said +12%, realized +2%') for the journal/reflection - use it to audit past calls, not to invent a track record."
             + " You also have quant-engine v2 reads (ground your 'quality / value / accounting risk' claims in them; all advisory): `get_dupont_read(net_margin, asset_turnover, equity_multiplier, tax_burden?, interest_burden?)` decomposes ROE into margin/turnover/leverage legs and tells you whether it is margin-led (quality) or leverage-led (lower quality); `get_scenario_dcf(fcf, wacc, shares?, cash?, debt?, g_base?, g_bear?, g_bull?, margin_shock_bear?, margin_shock_bull?, market_price?)` gives the bear/base/bull intrinsic range and, when you pass the market price, the band it sits in (below bear / bear-base / base-bull / above bull) plus the base-case margin of safety - cite it before any 'undervalued/overvalued on intrinsic value' framing; `get_earnings_quality(ticker, current_date)` is the provider-fed earnings-quality read - it fetches the statements itself and returns the consensus concern level (LOW/MEDIUM/HIGH = concern; HIGH means most concern, lowest quality) with the cash-conversion / accrual / FCF evidence plus the forensic Beneish/Altman/F-Score trap - cite it before any 'earnings quality' claim; `get_earnings_quality_verdict(net_income, ocf, total_assets, ...)` is the raw-number variant when you already hold the three figures." + " Regime / sizing context: `get_regime_state(ticker, current_date)` returns the Kalman-filtered trend regime (level/slope + spread) - cite it before any 'trend regime / structural break' claim and pair it with `get_kalman_spread` for the regime-spread read; `get_position_risk_multiplier(ticker, position_pct)` returns the position risk multiplier (size x vol x correlation) - use it before any 'this size is too risky / overweight' claim on a book; `get_allocation_black_litterman(returns, expected_excess_returns, ...)` returns the Black-Litterman posterior weights (the shrink-toward-prior tilt of get_allocation) - offer it as the prior-informed variant when proposing the allocation. Ownership extras: `get_dividends(ticker)` returns the dividend schedule and yield history (consistent payouts reinforce the corporate-actions return-discipline read) - cite it before any 'dividend/yield history' claim; `get_form4_insider(ticker, start_date, end_date)` returns SEC Form 4 open-market net insider $-flow over the window (purchases minus sales, option rows excluded) - cite it (or its explicit 'unavailable') before any 'insider accumulation/selling this window' claim, as the windowed complement to `get_insider_activity`'s 12-month net." + get_language_instruction() + get_output_budget("analyst"),
         )
+
+        if is_etf:
+            # The multi-line literal builds a 1-tuple (trailing comma); join
+            # it to a plain str before appending the ETF tail.
+            system_message = ("".join(system_message) if isinstance(system_message, tuple)
+                              else system_message) + _ETF_SYSTEM_TAIL
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -188,6 +265,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
                 "fundamentals_report": _report,
                 "tool_evidence": tool_evidence,
+                "security_type": security_type,
             }
 
         result = chain.invoke(state["messages"])
@@ -219,6 +297,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             "messages": [result],
             "fundamentals_report": report,
             "tool_evidence": tool_evidence,
+            "security_type": security_type,
         }
 
     return fundamentals_analyst_node

@@ -43,6 +43,11 @@ from tradingagents.agents.utils.analysis_tools import (
     get_earnings_transcript,
     get_edgar_fulltext_search,
     get_enhanced_index_tilt,
+    get_etf_decline_driver,
+    get_etf_mechanics,
+    get_etf_relative_strength,
+    get_etf_risk,
+    get_etf_valuation,
     get_event_pnl_response,
     get_execution_schedule,
     get_exit_check,
@@ -222,6 +227,11 @@ from tradingagents.agents.utils.value_dip_tools import (
 # Public surface: the data tools are imported here so agents and the graph
 # import them from one place, plus the instrument/language helpers defined below.
 __all__ = [
+    "get_etf_decline_driver",
+    "get_etf_mechanics",
+    "get_etf_relative_strength",
+    "get_etf_risk",
+    "get_etf_valuation",
     "get_allocation_black_litterman",
     "get_kalman_spread",
     "get_position_risk_multiplier",

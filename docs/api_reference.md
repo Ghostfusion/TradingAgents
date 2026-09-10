@@ -756,6 +756,9 @@ preserves `Risk Gate (computed)` blocks.
 
 | Command | Purpose |
 | --- | --- |
+| `python *.py` ETF engine (docs/design_etf_fundamental_valuation.md) | `get_etf_valuation()` weighted constituent P/E/fwd-P/E/yields/percentile/vs-SPY-XLK; `get_etf_decline_driver()` MARKET/SECTOR/ETF_SPECIFIC/CONSTITUENT_DRIVEN/UNKNOWN; `get_etf_relative_strength()` both legs vs SPY/QQQ/XLK; `get_etf_risk()` beta/capture/vol%-percentile/ATR%/maxDD; `get_etf_mechanics()` NAV premium/discount + distributions | `TRADINGAGENTS_ENABLE_ETF_ENGINE=true` routes ETF tickers in the fundamentals analyst |
+| `classify_security(ticker)` | security-type gate: ETF (quote_type / universe / fund-issuer name) vs operating_company vs UNKNOWN (no behavior change) | ETF engine routing |
+| `TRADINGAGENTS_ENABLE_ETF_ENGINE` | default-off gate: fundamentals analyst swaps company statement tools for the ETF toolset when the security classifies as a fund | `.env` |
 | `tradingagents` | interactive   CLI (typer/rich), full flow |
 | `python batch.py --symbols ...` | headless concurrent; `--vendor`, `--workers`, `--analysts`, `--depth`, `--date` |
 | `python pipeline.py --universe top-losers --top 5` | screener + composite rank + batch (B2) |

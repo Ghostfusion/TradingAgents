@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
+- **ETF-specific fundamental engine (IGV 2026-09-09 review loop)** -
+  the IGV fundamentals.md collapsed to "no DCF -> no BUY" because
+  company statement tools correctly returned unavailable for a fund. Shipped
+  docs/design_etf_fundamental_valuation.md end-to-end (default-off via
+  TRADINGAGENTS_ENABLE_ETF_ENGINE): (P0) security_type.py classifies
+  ETF/company (quote_type, universe lists, fund-issuer names; UNKNOWN keeps
+  today's path); (P1) etf_valuation.py weighted constituent valuation (harmonic
+  P/E, fwd P/E, earnings/FCF yield, val percentile, vs SPY/XLK, top-N) +
+  SECTOR_CONSTITUENTS extended to IGV/CIBR/SKYY/AIQ/BOTZ/DTCR/NXTG/IYW/
+  FINX/XSD; (P2) etf_decline_driver.py MARKET/SECTOR/ETF_SPECIFIC/
+  CONSTITUENT_DRIVEN/UNKNOWN (replaces company "clean"); (P3) etf_risk.py
+  relative strength with both legs + beta/capture/vol%/ATR%/maxDD; (P4)
+  get_etf_mechanics NAV premium + distributions; (P5) fundamentals analyst
+  routes to the ETF toolset + ETF prompt when classified, stamps
+  security_type on state. Tests: 29 new (security_type, valuation, decline,
+  risk, mechanics, analyst gating).
 - **All retries route to TRADINGAGENTS_BACKUP_LLM (2026-09-09 review loop)**
   - the SOXX/IGV/CIBR/SKYY batch showed a ~20-call back-to-back burst of
   tencent/hy4-preview with no interleaved quick calls: the RM/PM

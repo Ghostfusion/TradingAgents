@@ -237,6 +237,10 @@ _ENV_OVERRIDES = {
     # Pre-market review (docs/pre_market_review.md): opt-in gate for the
     # in-batch same-night catalyst/quality re-check (choice (a)).
     "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
+    # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
+    # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
+    # decline-driver / mechanics toolset instead of company statement tools.
+    "TRADINGAGENTS_ENABLE_ETF_ENGINE": "enable_etf_engine",
     # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
     # item 1): when on, the allocation plan down-weights names whose average
     # pairwise correlation with the rest of the book exceeds the threshold.
