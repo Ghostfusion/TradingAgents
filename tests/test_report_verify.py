@@ -419,6 +419,49 @@ def test_vrp_sign_label_clean_when_consistent():
     assert rv._vrp_sign_label("VRP positive 2.1pp ... IV above realized") == []
 
 
+def test_double_digit_streak_identity_flags_overcount():
+    # MU 2026-09-10 news.md: claimed 'the fifth consecutive double-digit beat'
+    # with (Mar-26 +33.21%, Dec-25 +20.58%, Sep-25 +5.94%) + surprise_pct=21.39 -
+    # only THREE consecutive >=10% surprises (Sep-25 5.94 breaks).
+    text = (
+        "Last reported (2026-06-24): estimate 20.69, reported 25.11, "
+        "surprise_pct=21.39 - the fifth consecutive double-digit beat "
+        "(Mar-26 +33.21%, Dec-25 +20.58%, Sep-25 +5.94%)\n"
+    )
+    cs = rv._double_digit_streak_identity(text)
+    assert len(cs) == 1
+    assert "3 consecutive" in cs[0].claim
+
+
+def test_double_digit_streak_identity_clean_when_accurate():
+    text = (
+        "estimate 20.69, reported 25.11, surprise_pct=21.39, "
+        "then Mar-26 +33.21%, Dec-25 +20.58%, Sep-25 +5.94% - "
+        "3 consecutive double-digit beats"
+    )
+    assert rv._double_digit_streak_identity(text) == []
+
+
+def test_insider_sold_value_identity_flags_share_mismatch():
+    # MU 2026-09-10: summary 'CEO sold 30,000 sh at 959.14-989.59 ($38.8M)'
+    # vs the leaf's 40,000 sh / value 38,756,162 - shares don't reconcile.
+    text = "CEO sold 30,000 sh at 959.14-989.59 ($38.8M)"
+    cs = rv._insider_sold_value_identity(text)
+    assert len(cs) == 1
+    assert "30,000" in cs[0].claim
+
+
+def test_insider_sold_value_identity_clean_when_consistent():
+    text = "sold 40,000 shares at 959.14-989.59 (value 38,756,162)"
+    assert rv._insider_sold_value_identity(text) == []
+
+
+def test_scenario_dcf_bear_scoped_no_bear_prose_hit():
+    # 'Bear-side framing' prose must not trigger the scenario-dcf metric.
+    t = "Bear-side framing: 'From $8.7B Profit to $5.8B Loss' ... (10Y 4.8)"
+    assert rv._internal_conflicts(t) == []
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

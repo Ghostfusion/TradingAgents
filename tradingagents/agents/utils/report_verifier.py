@@ -444,7 +444,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Only the "bear" label is pair-safe — "bear" is the FIRST leg of the slash list,
     # so "bear": $N  is the same dollar in both the body and the summary row.
 
-    "scenario dcf bear": (re.compile(r"\bbear\b", re.I),0.001),
+    "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|\d))", re.I),0.001),
 }
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
@@ -928,6 +928,107 @@ def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
     return []
 
 
+_DD_CLAIM = re.compile(
+    r"\b(?:the\s+)?(\d+|[a-z]+)\s+(?:straight|consecutive)\s+"
+    r"double[- ]digit\s+(?:eps\s+)?beats?\b", re.I)
+_DD_WORDS = {"three": 3, "third": 3, "four": 4, "fourth": 4,
+             "five": 5, "fifth": 5, "six": 6, "sixth": 6,
+             "seven": 7, "seventh": 7, "eight": 8, "eighth": 8}
+_DD_PCT = re.compile(r"surprise_pct\s*=\s*([\d.]+)|\+\s*([\d.]+)%")
+
+
+def _parse_dd_count(raw: str) -> int | None:
+    if raw.isdigit():
+        return int(raw)
+    return _DD_WORDS.get(raw.lower())
+
+
+def _double_digit_streak_identity(report_text: str) -> list[VerifierClaim]:
+    """'N consecutive double-digit beats' must match the >=10% surprise run.
+
+    MU 2026-09-10 news.md claimed 'the fifth consecutive double-digit beat
+    (Mar-26 +33.21%, Dec-25 +20.58%, Sep-25 +5.94%)' while the earnings
+    calendar shows 21.39 / 33.21 / 20.58 / 5.94 - only THREE consecutive
+    >=10% surprises (Sep-25 5.94 breaks the run).
+    """
+    if not report_text:
+        return []
+    claims = list(_DD_CLAIM.finditer(report_text))
+    if not claims:
+        return []
+    lines = [ln for ln in report_text.splitlines()
+             if "surprise_pct" in ln or "Straight" in ln]
+    merged = "\n".join(lines)
+    pcts = []
+    for m in _DD_PCT.finditer(merged):
+        try:
+            v = float(m.group(1) or m.group(2))
+        except (TypeError, ValueError):
+            continue
+        pcts.append(v)
+    streak = 0
+    for v in pcts:
+        if v < 10.0:
+            break
+        streak += 1
+    out = []
+    for m in claims:
+        claimed = _parse_dd_count(m.group(1))
+        if claimed is None or claimed == streak:
+            continue
+        out.append(VerifierClaim(
+            claim=f"'{m.group(0).strip()}' vs {streak} consecutive "
+                  f">=10% surprises in calendar",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "Claimed consecutive double-digit-beat count does not match "
+                "the calendar's >=10% run (MU 2026-09-10: 'fifth' vs 3 - "
+                "Sep-25 +5.94% breaks it)."
+            ),
+        ))
+    return out
+
+
+_INS_SOLD_LINE = re.compile(
+    r"(?i)\bsold\s+([\d,]+)\s*(?:sh|shares|shs)?[\s\S]{0,30}?"
+    r"\bat\s+([\d.]+)\s*(?:[-\u2013]\s*([\d.]+))?"
+    r"\s*(?:\(|\s)(?:value\s*)?[$]?\s*"
+    r"([\d,]+(?:\.\d+)?)\s*([kmb]?)\b"
+)
+
+
+def _insider_sold_value_identity(report_text: str) -> list[VerifierClaim]:
+    """A 'sold N sh at lo[-hi] (value V)' must satisfy V ~= N x price."""
+    if not report_text:
+        return []
+    out = []
+    for m in _INS_SOLD_LINE.finditer(report_text):
+        try:
+            sh = float(m.group(1).replace(",", ""))
+            lo = float(m.group(2))
+            hi = float(m.group(3)) if m.group(3) else lo
+            val = float(m.group(4).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        mult = {"k": 1e3, "m": 1e6, "b": 1e9}.get((m.group(5) or "").lower(), 1.0)
+        val *= mult
+        if val <= 0:
+            continue
+        implied = sh * (lo + hi) / 2.0
+        ratio = implied / val
+        if ratio < 0.8 or ratio > 1.25:
+            out.append(VerifierClaim(
+                claim=f"sold {sh:,.0f} sh at {lo:,.2f}-{hi:,.2f} vs value {val:,.0f}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "Shares x price range does not reconcile to the quoted value "
+                    "(MU 2026-09-10 summary: 30,000 x ~974 = $29M vs $38.8M; "
+                    "the leaf shows the sale as 40,000 sh / 38,756,162)."
+                ),
+            ))
+    return out
+
+
 _BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
 _SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
 
@@ -1250,8 +1351,10 @@ def verify_report_dir(
         drawdown = _drawdown_identity(report_text)
         beat_streak = _beat_streak_identity(report_text)
         dividend_check = _dividend_yield_sanity(report_text)
+        dd_streak = _double_digit_streak_identity(report_text)
+        insider_value = _insider_sold_value_identity(report_text)
         vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check
+        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + dd_streak + insider_value
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
