@@ -535,6 +535,22 @@ def test_internal_conflict_macd_dual_value():
     assert any("'macd histogram'" in c.claim for c in out)
 
 
+def test_internal_conflict_scenario_dcf_bull_dual_values():
+    # MSFT 2026-09-10 fundamentals: body bull 231.62 vs summary bull $201 -
+    # a 13% contradiction, not rounding.
+    t = "Scenario DCF (fcf 66.99B, wacc 10.34%): bear $114.31, base $158.53, bull $231.62 ... | Scenario DCF | bear $114, base $159, bull $201 |"
+    out = rv._internal_conflicts(t)
+    assert any("'scenario dcf bull'" in c.claim for c in out)
+
+
+def test_internal_conflict_diluted_eps_dual_values():
+    # MSFT 2026-09-10 class: a diluted-eps label quoted at two values in one
+    # report (body 4.81 vs a later 4.84 on the same label) must flag.
+    t = "Diluted EPS $4.81 (leaf, FY26 Q4); diluted EPS 4.84 in the summary"
+    out = rv._internal_conflicts(t)
+    assert any("'diluted eps'" in c.claim for c in out)
+
+
 def test_no_rating_signal_no_conflict():
     # Ordinary prose with a metric but a single consistent value -> no conflict.
     assert rv._internal_conflicts("Simply an eps ttm of 5.4 and nothing more.") == []

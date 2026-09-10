@@ -33,6 +33,8 @@ WDC fundamentals review-loop fixes (2026-09-10): current-ratio internal-conflict
 WDC market review-loop fixes (2026-09-10): 200-day-SMA conflict metric hardened against paired-label rows ('close_50_sma / close_200_sma | 497.72 / 377.47' false positive eliminated; paren-form value extraction fixed); MACD dual-value flagged via macd-histogram metric (body -9.32/+8.37 vs summary -0.32/+0.25); _DOLLAR_RE eased to accept paren-prefixed figures; market prompt pins PRICE/TIMESTAMP gate (>1% gap = DATA-INTEGRITY, no final SELL on the unverified figure), SELL-vs-REDUCE wording, and one canonical MACD record per report.
 
 Verifier precision pass (found on the MSFT/TSM/ADBE/HPE batch sweep): eps-ttm conflict metric now requires the literal 'ttm' label (kills ~30 bare-eps / growth-row false flags); FCF unit-slip parser rejects non-money contexts (yield %, sum fragments, multiples) and zero values (kills the 0.0M-vs-B false positives).
+
+MSFT fundamentals review-loop fixes (2026-09-10): new scenario-dcf-bull conflict metric (body 231.62 vs summary $201 - a 13% contradiction; bear/base rounding pairs also surfaced); new diluted-eps conflict metric (4.81 vs 4.84 label duals); fundamentals prompt pins MARGIN-OF-SAFETY denominator basis ((FV-P)/FV -333.7% vs (FV-P)/P -76.9% for MSFT) and exact restatement of key figures in the summary table.
 - **SOXX fundamentals review-loop fixes (2026-09-09)** - (1) the SOXX
   fundamentals.md asserted "NAV ~$532 is at ~39% below its 52-week high"
   (true drawdown 18.9%; price 532 / high 655.95) - a stale mid-sentence

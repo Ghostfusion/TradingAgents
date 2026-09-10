@@ -387,6 +387,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
     "dcf fair value": (re.compile(r"dcf\s*(?:fair\s*)?value", re.I), 0.01),
     "eps ttm":(re.compile(r"\beps\s*(\(|\s)ttm\s*(?:\))?(?!\s*growth)", re.I), 0.01),
+    "diluted eps": (re.compile(r"diluted\s*eps|eps\s*\(diluted\)", re.I), 0.005),
         # DELL 2026-09-10 news.md: body quoted 'EPS actual 7.04' and the
         # summary row 'EPS actual 7.00' (both labeled Finnhub, same quarter) —
         # a 0.6% dual value. Level-type metrics use a 0.5% bucket.
@@ -446,6 +447,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 
     "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|\d))", re.I),0.001),
     "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|\d|$)", re.I), 0.001),
+    "scenario dcf bull": (re.compile(r"scenario[\s-]*dcf.{0,40}?bull\b|bull\s*(?:\||:|=|/|\$|\d|$)", re.I), 0.001),
     "beta": (re.compile(r"\bbeta\b", re.I), 0.05),
     "cash conversion": (re.compile(r"cash\s*conversion|cash_conversion|ocf\s*/\s*ni", re.I), 0.02),
     # WDC 2026-09-10 fundamentals review loop: current ratio 10.87
