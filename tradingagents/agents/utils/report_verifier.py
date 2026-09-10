@@ -573,10 +573,10 @@ def _fed_cuts_contradiction(report_text: str) -> list[VerifierClaim]:
             claim="'fed cuts 2026' cited at conflicting probabilities: " + p,
             status="INTERNAL_CONFLICT",
             reason=(
-                "The same Polymarket-style 'Fed rate cuts in 2026' event is "
-                "asserted at two materially different probabilities in this "
-                "report (IGV 2026-09-09: 0% vs 93%) with no prediction-market "
-                "leaf. Resolve to one tool-sourced value."
+                "The same 'Fed rate cuts in 2026' event is asserted at two "
+                "materially different probabilities in this report with no "
+                "prediction-market leaf. Resolve to one tool-sourced value "
+                "(rule pinned by the IGV 2026-09-09 review loop)."
             ),
         )]
     return []
@@ -682,9 +682,9 @@ def _dupont_identity(report_text: str) -> list[VerifierClaim]:
                         status="INTERNAL_CONFLICT",
                         reason=(
                             "The decomposition inputs on the DuPont line do not multiply to "
-                            "the ROE the same line states (MU 2026-09-09: inputs give 66.4% "
-                            "while text claimed ~35%). Fix the decomposed value or label it "
-                            "a fuzzy estimate."
+                            "the ROE the same line states. Fix the decomposed value or "
+                            "label it a fuzzy estimate (rule pinned by the MU 2026-09-09 "
+                            "review loop)."
                         ),
                     )
                 ]
@@ -718,8 +718,9 @@ def _pe_basis_conflict(report_text: str) -> list[VerifierClaim]:
                     status="INTERNAL_CONFLICT",
                     reason=(
                         "The P/E basis does not match the TTM EPS basis the report itself "
-                        "quotes (MU 2026-09-09: provider P/E 135.9 is on annual FY25 EPS, "
-                        "not the $44.17 TTM the report cites). Reconcile the basis."
+                        "quotes (a provider P/E may sit on annual EPS while the report "
+                        "cites TTM EPS). Reconcile the basis (rule pinned by the MU "
+                        "2026-09-09 review loop)."
                     ),
                 )
             ]
@@ -748,9 +749,9 @@ def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
                 status="INTERNAL_CONFLICT",
                 reason=(
                     "A net-cash balance sheet must price EV below (or around) market cap. "
-                    "The quoted EV uses a different debt/cash/lease basis than the "
-                    "balance-sheet row (MU 2026-09-09: EV 1.17T vs expected 1.14T). "
-                    "Reconcile EV to one basis."
+"The quoted EV uses a different debt/cash/lease basis than the "
+                        "balance-sheet row. Reconcile EV to one basis (rule pinned by "
+                        "the MU 2026-09-09 review loop)."
                 ),
             )
         ]
@@ -811,9 +812,10 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
                       f"high {high:,.2f} = {implied:.1f}%",
                 status="INTERNAL_CONFLICT",
                 reason=(
-                    "The claimed drawdown does not match price/high - 1 from the "
-                    "same report (SOXX 2026-09-09: 39% vs the 18.8% that "
-                    "532.0/655.95 implies). Recompute the drawdown."
+                    "Claimed 'X% below 52-week high' does not match (price - "
+                    "52w high)/52w high computed from the same report - "
+                    "recompute the drawdown (rule pinned by the SOXX 2026-09-09 "
+                    "review loop)."
                 ),
             ))
             break  # one drawdown claim per report is enough
@@ -902,9 +904,8 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
                         status="INTERNAL_CONFLICT",
                         reason=(
                             "The quoted R-multiple target does not resolve from the "
-                            "entry/stop pair on its own line (MU 2026-09-09: 3R 1521.68 "
-                            "vs get_swing_set 1522.65 for structure stop 862.81). "
-                            "Re-derive from that pair."
+                            "entry/stop pair on its own line. Re-derive from that "
+                            "pair (rule pinned by the MU 2026-09-09 review loop)."
                         ),
                     )
                 )
