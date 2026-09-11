@@ -54,42 +54,7 @@ TRIGGER_RE = re.compile(
 
 # Audited pre-existing gaps (W3 fills each one, then its entry is deleted
 # here; an entry whose tool now carries a trigger fails the gate).
-PENDING: dict[str, set[str]] = {
-    "market_analyst.py": {
-        "get_book_depth_read",
-        "get_bsm_option_quote",
-        "get_exit_check",
-        "get_exit_plan",
-        "get_expected_move",
-        "get_position_sizing",
-        "get_risk_gate",
-        "get_swing_set",
-        "get_top_movers",
-        "get_verified_market_snapshot",
-    },
-    "news_analyst.py": {
-        "get_beat_miss_sizing",
-        "get_earnings_calendar",
-        "get_global_news",
-        "get_massive_news",
-        "get_news",
-        "get_news_relevance_read",
-        "get_prediction_markets",
-        "get_sec_filings",
-    },
-    "fundamentals_analyst.py": {
-        "get_analyst_ratings",
-        "get_corporate_actions",
-        "get_earnings_surprise_history",
-        "get_fundamentals",
-        "get_institution_holdings",
-        "get_normalized_cycle_dcf",
-        "get_portfolio_weights",
-        "get_revenue_breakdown",
-        "get_smart_money",
-    },
-    "aggressive_debator.py": {"get_merton_distance"},
-}
+PENDING: dict[str, set[str]] = {}
 
 
 def _surfaces() -> dict[Path, list]:
