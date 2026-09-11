@@ -65,6 +65,7 @@ def _build_lists() -> None:
         get_tail_decomposition,
         get_tail_extreme_var,
         get_tail_risk,
+        get_trade_outcome_metrics,
         get_trade_plan,
         get_trailing_exit,
         get_vol_cones,
@@ -107,6 +108,7 @@ def _build_lists() -> None:
         get_vol_cones,
         get_regime_gate_read,
         get_trade_plan,
+        get_trade_outcome_metrics,
     ])
 
     from tradingagents.agents.utils.analysis_tools import (

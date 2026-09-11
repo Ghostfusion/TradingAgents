@@ -27,6 +27,7 @@ from langchain_core.tools import tool
 
 from tradingagents.dataflows.errors import VendorError
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.strategies import factor_expressions as fe
 
 # ---------------------------------------------------------------------------
 # Shared data helpers (vendor chain CSV, benchmark closes)
@@ -6913,23 +6914,49 @@ def get_fixed_income_risk(
 
 @tool
 def get_pair_risk(
-    x: Annotated[list, "first series (e.g. closes of the anchor)"],
-    y: Annotated[list, "second series (e.g. closes of the pair)"],
+    ticker_x: Annotated[str, "first ticker (the anchor)"],
+    ticker_y: Annotated[str, "second ticker (the pair)"],
+    window: Annotated[int, "trailing bars to align, default 120"] = 120,
     maxlag: Annotated[int, "max lag for the Granger test, default 3"] = 3,
 ) -> str:
     """Pair risk: cointegration + Granger causality (OpenBB Q5).
 
     Engle-Granger cointegration (ADF on the residual) and lag-wise Granger
-    causality for the pair - the mean-reversion/lead-lag risk read the single
-    name tools cannot give.
+    causality between two tickers - the mean-reversion / lead-lag risk read the
+    single-name tools cannot give. It fetches both close series itself, so the
+    caller passes names, never numbers. Use before any "these two mean-revert /
+    A leads B / the spread is tradeable" claim.
 
     Args:
-        x: first aligned series.
-        y: second aligned series.
+        ticker_x: first ticker (the anchor).
+        ticker_y: second ticker (the pair).
+        window: trailing bars to align (both series are trimmed to it).
         maxlag: max Granger lag.
 
     Returns:
         cointegration + Granger lines, or "unavailable" below min observations.
+    """
+    dx = _ohlcv(ticker_x)
+    dy = _ohlcv(ticker_y)
+    xs_raw = dx.get("closes") or []
+    ys_raw = dy.get("closes") or []
+    if not xs_raw or not ys_raw:
+        missing = [
+            t for t, d in ((ticker_x, dx), (ticker_y, dy)) if not (d.get("closes") or [])
+        ]
+        return (
+            f"pair risk unavailable: no close series for {', '.join(missing)} "
+            "(the pair needs both names priced)"
+        )
+    n = min(len(xs_raw), len(ys_raw), max(20, int(window or 0)))
+    return _pair_risk_from_series(xs_raw[-n:], ys_raw[-n:], maxlag)
+
+
+def _pair_risk_from_series(x, y, maxlag: int = 3) -> str:
+    """The series-level computation behind ``get_pair_risk``.
+
+    Kept as a plain function so callers that already hold aligned series
+    (tests, batch QA) do not have to re-fetch prices.
     """
     try:
         from tradingagents.strategies.statistical import (
@@ -7124,21 +7151,98 @@ def get_book_depth_read(
     )
 
 
+#: Factor names ``get_vif_read`` can build from the run OHLCV, mapped to the
+#: live expression primitives (``strategies.factor_expressions``) so the tool
+#: never re-implements a factor. Add a name here rather than accepting a raw
+#: series from the model.
+_VIF_FACTORS = {
+    "rsi": lambda d: fe.rsi(d["closes"], 14),
+    "mom": lambda d: fe.mom(d["closes"], 20),
+    "bias": lambda d: fe.bias(d["closes"], 20),
+    "zscore": lambda d: fe.zscore(d["closes"], 20),
+    "std": lambda d: fe.std(d["closes"], 20),
+    "vol": lambda d: fe.avg_vol(d["volumes"], 20),
+    "range": lambda d: fe.high_low_range(d["highs"], d["lows"], d["closes"], 20),
+}
+
+
 @tool
 def get_vif_read(
-    columns: Annotated[dict, "name -> aligned series dict, e.g. {'mom': [...], 'rsi': [...]}"],
+    ticker: Annotated[str, "ticker symbol"],
+    factors: Annotated[
+        list,
+        "factor names to check, e.g. ['rsi','mom','vol'] (see the docstring)",
+    ],
+    window: Annotated[int, "trailing bars to align, default 120"] = 120,
 ) -> str:
-    """Multicollinearity check (OpenBB Q2): VIF per factor column.
+    """Multicollinearity check (OpenBB Q2): VIF across named factors.
 
-    Regresses each column on the others; VIF > 5 flags a collinear factor the
-    LLM should not stack with its peers. None for < 3 columns or a singular
-    fit.
+    Regresses each factor on the others; VIF > 5 flags a collinear factor the
+    LLM should not stack with its peers. It builds every factor series itself
+    from the run's OHLCV, so the caller passes factor NAMES - never numbers.
+    Supported factors: rsi, mom, bias, zscore, std, vol, range. Use before
+    presenting two like measures (e.g. RSI and StochRSI) as independent
+    evidence.
 
     Args:
-        columns: dict of factor name -> aligned series.
+        ticker: ticker symbol.
+        factors: factor names (at least 3 are needed for a meaningful VIF).
+        window: trailing bars to align.
 
     Returns:
-        per-column VIF + high flags, or "unavailable" below 3 columns.
+        per-factor VIF + high flags, or "unavailable" below 3 usable factors.
+    """
+    try:
+        requested = [str(f).strip().lower() for f in (factors or []) if str(f).strip()]
+    except Exception:  # noqa: BLE001 - a malformed factor list degrades to n/a
+        return "vif read unavailable: factors must be a list of names"
+    if len(requested) < 3:
+        return f"vif read unavailable: need >= 3 factor names (got {len(requested)})"
+    unknown = [f for f in requested if f not in _VIF_FACTORS]
+    if unknown:
+        return (
+            f"vif read unavailable: unknown factor(s) {', '.join(sorted(set(unknown)))}; "
+            f"supported: {', '.join(sorted(_VIF_FACTORS))}"
+        )
+    data = _ohlcv(ticker)
+    if not (data.get("closes") or []):
+        return f"vif read unavailable: no close series for {ticker}"
+    cols = {}
+    for name in dict.fromkeys(requested):
+        try:
+            cols[name] = list(_VIF_FACTORS[name](data))
+        except Exception:  # noqa: BLE001 - one bad factor must not hide the rest
+            continue
+    # Trim the common warm-up prefix (each primitive emits leading None).
+    usable = {}
+    for name, series in cols.items():
+        start = 0
+        while start < len(series) and series[start] is None:
+            start += 1
+        usable[name] = (start, series)
+    if len(usable) < 3:
+        return f"vif read unavailable: only {len(usable)} factor(s) computable for {ticker}"
+    offset = max(start for start, _ in usable.values())
+    n = min(len(series) - offset for _, series in usable.values())
+    tail = max(10, int(window or 0))
+    if n > tail:
+        offset += n - tail
+        n = tail
+    trimmed = {}
+    for name, (_, series) in usable.items():
+        vals = [float(v) for v in series[offset:offset + n] if v is not None]
+        if len(vals) >= 10:
+            trimmed[name] = vals
+    if len(trimmed) < 3:
+        return f"vif read unavailable: need >= 3 factors with >= 10 obs (got {len(trimmed)})"
+    return _vif_from_columns(trimmed)
+
+
+def _vif_from_columns(columns: dict) -> str:
+    """The series-level computation behind ``get_vif_read``.
+
+    Kept as a plain function for callers that already hold aligned columns
+    (tests, batch QA); the LLM-facing tool never asks the model for numbers.
     """
     try:
         from tradingagents.strategies.statistical import variance_inflation_factor
@@ -7152,7 +7256,13 @@ def get_vif_read(
     if len(cols) < 3:
         return f"vif read unavailable: need >= 3 columns with >= 10 obs (got {len(cols)})"
     v = variance_inflation_factor(cols)
-    rows = v.get("columns", {}) if isinstance(v, dict) else {}
+    if not isinstance(v, dict):
+        return "vif read unavailable: singular fit / no result"
+    # The calc returns {column: {vif, high}} directly; tolerate a wrapper key
+    # so a future change to the calc's envelope cannot silently empty the read
+    # (it did: the tool looked for "columns" and reported 'singular fit' for
+    # every well-formed input).
+    rows = v["columns"] if isinstance(v.get("columns"), dict) else v
     if not rows:
         return "vif read unavailable: singular fit / no result"
     lines = []

@@ -17,6 +17,8 @@ Hermetic: no network, no real LLM. Mocked vendor/config/LLM only.
 import pytest
 
 from tradingagents.agents.utils.analysis_tools import (
+    _pair_risk_from_series,
+    _vif_from_columns,
     get_alpha_scoring,
     get_exit_overrides,
     get_fixed_risk_size,
@@ -204,7 +206,7 @@ def test_alpha_scoring_magnitude_error():
 
 
 @pytest.mark.unit
-def test_pair_risk_on_cointegrated_pair():
+def test_pair_risk_on_cointegrated_pair(monkeypatch):
     import numpy as np
 
     rng = np.random.default_rng(7)
@@ -212,8 +214,17 @@ def test_pair_risk_on_cointegrated_pair():
     # y = 2*x + stationary noise -> cointegrated
     noise = [n * 0.05 for n in rng.normal(0, 1, 300)]
     y = [2 * a + b for a, b in zip(x, noise, strict=True)]
-    out = get_pair_risk.invoke({"x": x, "y": y, "maxlag": 1})
+    # The LLM-facing tool takes NAMES; the series-level computation is the
+    # plain helper the tool delegates to (so this test needs no vendor).
+    out = _pair_risk_from_series(x, y, maxlag=1)
     assert "cointegrated=True" in out
+
+    # ... and the ticker form degrades explicitly when a name has no series
+    # (the OHLCV seam is stubbed: this test must not touch a vendor).
+    import tradingagents.agents.utils.analysis_tools as at
+
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: {"closes": []})
+    assert "unavailable" in get_pair_risk.invoke({"ticker_x": "AAPL", "ticker_y": "MSFT"}).lower()
 
 
 @pytest.mark.unit
@@ -233,8 +244,42 @@ def test_regime_gate_read_requires_history():
 
 
 @pytest.mark.unit
+def test_vif_read_builds_its_factors(monkeypatch):
+    """The ticker form computes its own factor columns (hermetic seam)."""
+    import random
+
+    import tradingagents.agents.utils.analysis_tools as at
+
+    rng = random.Random(11)
+    closes = [100.0]
+    for _ in range(180):
+        closes.append(max(1.0, closes[-1] * (1 + rng.gauss(0, 0.012))))
+    volumes = [rng.uniform(5e5, 2e6) for _ in closes]
+    data = {
+        "closes": closes,
+        "volumes": volumes,
+        "highs": [c * 1.01 for c in closes],
+        "lows": [c * 0.99 for c in closes],
+    }
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: data)
+    out = get_vif_read.invoke({"ticker": "TEST", "factors": ["rsi", "mom", "bias", "vol"]})
+    assert "vif rsi:" in out and "vif vol:" in out
+    assert "HIGH>5" in out or "ok" in out
+
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: {"closes": []})
+    assert "unavailable" in get_vif_read.invoke(
+        {"ticker": "TEST", "factors": ["rsi", "mom", "bias"]}
+    ).lower()
+
+
+@pytest.mark.unit
 def test_vif_and_excursions_degrade_cleanly():
-    assert "unavailable" in get_vif_read.invoke({"columns": {"a": [1, 2]}}).lower()
+    # too few factors / too few observations -> explicit unavailable
+    assert "unavailable" in get_vif_read.invoke({"ticker": "AAPL", "factors": ["rsi", "mom"]}).lower()
+    assert "unavailable" in _vif_from_columns({"a": [1, 2]}).lower()
+    assert "unknown factor" in get_vif_read.invoke(
+        {"ticker": "AAPL", "factors": ["rsi", "mom", "bogus"]}
+    ).lower()
     assert "unavailable" in get_trade_excursions.invoke({"trades": []}).lower()
 
 

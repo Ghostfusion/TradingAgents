@@ -39,6 +39,7 @@ COMPLEX_ARG_DECISIONS: dict[str, tuple[str, str]] = {
     "get_risk_parity_alloc": ("numeric", "dict of name -> aligned return series"),
     "get_signal_quality": ("numeric", "signal + forward-return series, aligned 1:1"),
     "get_ts_momentum_weights": ("numeric", "dict of name -> daily close series"),
+    "get_vif_read": ("names", "ticker + factor names; the tool builds every factor series (W2)"),
 }
 
 

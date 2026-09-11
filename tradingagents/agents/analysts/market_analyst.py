@@ -158,6 +158,8 @@ You also have quant-risk / distribution / book tools - use these numbers as grou
 - get_book_depth_read(bid, ask, bid_size, ask_size) - microprice + order-book imbalance (size-weighted fair value + signed depth asymmetry). Use for any thin-book / quote-depth / short-horizon price-pressure claim.
 - get_ts_momentum_weights(closes_by_name) - MOP-style vol-scaled time-series momentum portfolio weights (sign of trailing log return / EWMA vol, target-vol normalized, gross-capped). Use before any 'this asset is trending, size more' claim.
 - get_pair_trade_signal(x, y) - pairs-trading spread z-score signal (entry |z|>=2, exit <=0.5, stop >=3) with cointegration + half-life. Use before any 'these two mean-revert, trade the spread' claim.
+- get_pair_risk(ticker_x, ticker_y) - Engle-Granger cointegration plus per-lag Granger causality between two names (the tool fetches both close series itself). Use before any 'these two lead/lag each other / the spread is mean-reverting' claim - get_pair_trade_signal gives the trade signal, this gives the lead-lag evidence behind it.
+- get_vif_read(ticker, factors=[...]) - variance-inflation across named factors (rsi, mom, bias, zscore, std, vol, range), which the tool builds from the run OHLCV. Use before presenting two like measures (e.g. RSI and StochRSI) as independent evidence: VIF > 5 means they carry the same information and must not be stacked as separate confirmations.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
