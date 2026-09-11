@@ -5,9 +5,18 @@ able to obtain it **by tool** *and* be told **by prompt** when it matters. Deliv
 the decisions and the ordered work. **No code has been changed.**
 
 Audited at `acfd15c` (main, clean). Method: a mechanical chain map (706 public calcs in
-`tradingagents/strategies/*`; 208 `@tool` functions; 192 bound to an agent surface) plus three read-only
+`tradingagents/strategies/*`; 208 `@tool` functions; 192 callable by an agent) plus three read-only
 semantic audits (unbound tools, prompt guidance, the non-tool context channel). Every claim below carries
 a file:line and was reproduced by the main thread where it is load-bearing.
+
+**Drafting correction (2026-09-10), recorded before any code changed.** An intermediate check suggested that
+`892ade2` (S1, the single-source refactor) had silently unbound live tools, because the 16 tools under audit
+appear in the pre-S1 `_create_tool_nodes` ToolNode lists and on no surface after it. That reading was wrong
+and is retracted. At `48d1bc5` every analyst carried its **own** LLM-facing `tools = [...]` literal
+(`market_analyst.py:130` = 111 entries, news 25, fundamentals 48, social 0) and **none of the 16 appears in
+any of them**, so no model could call them; they were dead executor entries, and S1's removal of them (and
+of 6 more such entries) was correct. The audit's original conclusion stands: the 16 are genuinely unbound.
+The detour produced one durable result, now W1's bidirectional gate — see §3.E.
 
 ---
 
@@ -27,7 +36,9 @@ the only one — which is where the deepest gaps are.
 
 - 706 public calcs; **255** referenced directly by a bound tool, **450** reachable through another calc,
   **1** unreachable (`factor_expressions.clear_expr_cache` — a cache utility, see W5).
-- 208 `@tool` functions; 192 bound; **16 bound to nothing**.
+- 208 `@tool` functions; 192 callable by an agent (in the agent's `bind_tools` set **and** dispatchable by
+  its executor); **16 in no callable surface** (13 on no surface at all, 3 reachable only from the debator
+  loop). See §3.E: "bound" is two conditions, and only the single-source toolset guarantees both.
 - Prompt guidance: market 100 guided / 10 listed-only; news 18 / 7; fundamentals 35 / 9 (+ETF 8 / 4);
   risk debators 23 named / **4 absent**; trader 12 / 1. **35 tools have no trigger sentence** (5 of them
   carry a usable trigger in their own docstring, 30 do not).
@@ -39,6 +50,10 @@ the only one — which is where the deepest gaps are.
 ## 3. Findings
 
 ### A. The 16 unbound `@tool` functions → 4 bind / 6 already-covered / 6 not agent-facing
+
+Verified pre-S1: none of the 16 was present in any analyst's LLM-facing `tools = [...]` list at `48d1bc5`,
+so none was ever model-callable. Their earlier presence in the hand-maintained ToolNode lists is the
+false-positive the old gate counted as "bound" (§3.E), not a binding that was later lost.
 
 **A1 — bind (4).** Each already has the claim class in some agent's prompt; only the tool + line are missing.
 
@@ -111,9 +126,13 @@ emits the ETF/FUND TOOLING paragraph unconditionally (so a company run is told a
 
 `CHANGELOG.md:994-1005` ("now bound (market / fundamentals)"), `README.md:180-187` ("No more silent gaps"),
 and `docs/api_reference.md:628-634` (a `surface` column naming market / market+fundamentals) all claim
-bindings that my scan disproves for all 16 tools. The likely cause: those docs were written while the tools
-sat in the hand-maintained ToolNode lists, which the binding gate counted as "bound"; S1 removed those lists
-and exposed the truth. The plan must correct the docs to reality.
+bindings that the audit disproves for all 16 tools. Cause (now proven, not inferred): the 2026-09-04 wiring
+gate defined "bound" as *appearing in a ToolNode list*, and at `cdddd85` these 16 were added to the market /
+fundamentals / news ToolNode lists — but never to those analysts' `bind_tools` sets, so no model could emit
+the call. The docs recorded the gate's definition rather than the tool's reachability; they were wrong when
+written, not falsified later. Correction per doc type: `README.md` (current-state) is fixed in place; the
+`api_reference` surface column becomes machine-checked (W1); the `CHANGELOG.md` entry is a historical record
+and is **kept**, with a dated correction appended rather than rewritten.
 
 ### E. Gate integrity issue (must be fixed before the binds, or the plan can be faked)
 
@@ -121,6 +140,20 @@ and exposed the truth. The plan must correct the docs to reality.
 (`TOOL_BINDING_BLOB`, :216-243). Adding only a prompt sentence would silence the binding gate while the tool
 stays uncallable (the prompt-guidance gate only checks tools that are *already* in a toolset). Two holes:
 the blob-scan, and `TOOL_LEGACY_BINDING` as the escape hatch for exactly the 16 tools under audit.
+
+There is also a **second dimension the gate never checked, and it cuts both ways**: a tool is callable only
+if (i) its name is in the agent's `bind_tools` set — the model has to know the schema to emit the call — and
+(ii) its name is dispatchable by that agent's executor (the ToolNode / `run_tool_loop` list). Two production
+instances prove the halves are independently breakable:
+
+- **bind-only**: the 5 `get_etf_*` tools were in the fundamentals `bind_tools` set with no ToolNode entry,
+  so langgraph rejected every ETF-path call as "not a valid tool" (fixed in `892ade2`, P0-4).
+- **execute-only**: these 16 were in ToolNode lists and in no `bind_tools` set, so the model could never
+  emit the call and the entry was dead weight (removed in `892ade2`; the docs outlived the truth).
+
+W1's gate must therefore check both directions for every agent: `bind_tools` ⊆ executor, and executor ⊆
+`bind_tools`. The single-source `toolsets.py` makes that invariant structural for the analysts; the gate
+exists so a future refactor cannot silently break it again.
 
 ---
 
@@ -170,7 +203,12 @@ starts before its predecessor's gate is green.
 - Correct `CHANGELOG.md:994-1005`, `README.md:180-187`, `docs/api_reference.md:628-634` to the real state
   (and note the historical cause). Docs are the contract the next reader trusts.
 
-**Acceptance:** the new gates fail on the current tree (proving teeth), and the doc lines no longer claim a
+- Add the **bidirectional callability gate**: for every analyst/debator/trader surface, the `bind_tools`
+  set and the executor list must be equal (both directions, per §3.E). It fails today for any surface that
+  still holds an execute-only entry, and it is the gate that would have caught both P0-4 and the 16.
+
+**Acceptance:** the new gates fail on the current tree (proving teeth), including the bidirectional gate
+against a synthetic execute-only and a synthetic bind-only entry; and the doc lines no longer claim a
 binding that does not exist.
 
 ### W2 — The binds (A1)
@@ -263,7 +301,10 @@ to avoid churn in the same prompts. `W5` closes what W2/W4 changed. `W6` last.
   rules are reworded to cite the limits, not a verdict. Mitigation: single-source calc, the post-graph overlays
   unchanged, and the W6 PM-render smoke asserting the numbers are present in what the model reads.
 - **Docs are load-bearing here**: correcting them is part of the deliverable, because the false claims are
-  what let this gap persist.
+  what let this gap persist. The correction must state the real cause — the 2026-09-04 gate counted
+  executor-list membership as "bound", so the docs (and the gate) asserted callability for 16 tools no model
+  could call. `README.md` is fixed in place, the `api_reference` surface column becomes machine-checked, and
+  the `CHANGELOG.md` entry is kept as history with a dated correction appended rather than rewritten.
 
 ## 8. What this plan does NOT do
 
