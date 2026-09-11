@@ -734,10 +734,19 @@ def support_structure(
     sma200 = _sma(closes, sma_window)
     base_low = min(float(v) for v in lows[-base_window:])
     base_high = max(float(v) for v in highs[-base_window:])
+    # Two DIFFERENT readings, deliberately separate and separately named (GOOG
+    # 2026-09-11: the number exported as ``distance_to_base_pct`` was the depth
+    # formula, so it did not reproduce from the sibling convention — 19.4% vs
+    # 24.0% above the base low — and the verdict prose rendered it as "close
+    # 19.4% above the multi-month base low", which was wrong by 4.6pp):
+    #   * base_depth_pct      = (price - base_low)/price    -> room DOWN to the
+    #     base (drawdown to support); the <15% verdict test reads this.
+    #   * distance_to_base_pct = (price - base_low)/base_low -> how far ABOVE
+    #     the base low, the same convention as distance_to_sma200_pct.
     base_depth = (price - base_low) / price if price > 0 else None
-    a = atr_value if atr_value and atr_value > 0 else None
-    dist_base = (price - base_low) / price if price > 0 else None
+    dist_base = (price - base_low) / base_low if base_low else None
     dist_sma = (price - sma200) / sma200 if sma200 else None
+    a = atr_value if atr_value and atr_value > 0 else None
     reasons = []
     if a is not None and dist_base is not None and (price - base_low) <= 1.5 * a:
         verdict = "multi-month-base-support"
@@ -749,7 +758,9 @@ def support_structure(
         reasons.append("price within 1 ATR / 3% of the 200-day SMA")
     elif dist_base is not None and base_depth is not None and base_depth < 0.15:
         verdict = "holding-above-base"
-        reasons.append(f"close {dist_base:.1%} above the multi-month base low")
+        reasons.append(
+            f"close {round(dist_base, 4):.1%} above the multi-month base low"
+        )
     else:
         verdict = "no-near-support"
         reasons.append("no major weekly / base / 200-SMA support nearby")
@@ -760,6 +771,7 @@ def support_structure(
         "base_low": round(base_low, 4),
         "base_high": round(base_high, 4),
         "distance_to_base_pct": round(dist_base, 4) if dist_base is not None else None,
+        "base_depth_pct": round(base_depth, 4) if base_depth is not None else None,
         "distance_to_sma200_pct": round(dist_sma, 4) if dist_sma is not None else None,
         "reasons": reasons,
     }

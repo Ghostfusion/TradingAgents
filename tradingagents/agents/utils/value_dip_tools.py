@@ -804,6 +804,7 @@ def get_value_dip_setup(
         lines.append(
             f"  support: {sup.get('verdict')} sma200={sup.get('sma200')} "
             f"dist_base={_txt_pct(sup.get('distance_to_base_pct'))} "
+            f"base_depth={_txt_pct(sup.get('base_depth_pct'))} "
             f"dist_sma200={_txt_pct(sup.get('distance_to_sma200_pct'))}"
         )
     rg = rows.get("regime_gate") or {}
@@ -992,6 +993,7 @@ def get_support_structure(
         f"price={sp.get('price')} base_low={sp.get('base_low')} "
         f"sma200={sp.get('sma200')} "
         f"distance_to_base={_txt_pct(sp.get('distance_to_base_pct'))} "
+        f"base_depth={_txt_pct(sp.get('base_depth_pct'))} "
         f"distance_to_sma200={_txt_pct(sp.get('distance_to_sma200_pct'))}"
     ) + _scale_note(ticker, closes)
 

@@ -669,3 +669,34 @@ def test_value_dip_setup_require_trend_opt_in():
         atr_value=1.0,
     )
     assert s2["rows"]["trend"]["pass"] is True
+
+
+def test_support_structure_separates_base_distance_from_base_depth():
+    """GOOG 2026-09-11 fact-check: `distance_to_base_pct` used the depth formula
+    ((price-base_low)/price) while its sibling `distance_to_sma200_pct` used the
+    level formula, so the exported "distance to base" did not reproduce from the
+    documented convention (19.4% vs 24.0% above the base low) and the verdict
+    prose ("close X% above the multi-month base low") was wrong by 4.6pp. Each
+    name now has ONE convention: distance = % above the level, depth = drawdown
+    to the level (the reading the <15% verdict test uses)."""
+    closes = [100.0 + 0.1 * i for i in range(300)]
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    # The trailing 150-bar window's low is the base; it is shallow enough to
+    # reach the "holding-above-base" branch whose prose names the number.
+    sp = support_structure(closes, highs, lows)
+
+    price = sp["price"]
+    base_low = sp["base_low"]
+    assert base_low == pytest.approx(min(lows[-150:]))
+    assert sp["verdict"] == "holding-above-base"
+    # Level convention: how far the price sits ABOVE the base low.
+    assert sp["distance_to_base_pct"] == pytest.approx((price - base_low) / base_low, rel=1e-3)
+    # Drawdown convention: room DOWN to the base, the gate's own reading.
+    assert sp["base_depth_pct"] == pytest.approx((price - base_low) / price, rel=1e-3)
+    # The two readings differ (the old code exported the depth under both names).
+    assert sp["distance_to_base_pct"] > sp["base_depth_pct"]
+    # The verdict prose must agree with the number it names.
+    prose = " ".join(sp["reasons"])
+    assert "above the multi-month base low" in prose
+    assert f"{sp['distance_to_base_pct']:.1%}" in prose
