@@ -52,8 +52,10 @@ the only one — which is where the deepest gaps are.
 ### A. The 16 unbound `@tool` functions → 4 bind / 6 already-covered / 6 not agent-facing
 
 Verified pre-S1: none of the 16 was present in any analyst's LLM-facing `tools = [...]` list at `48d1bc5`,
-so none was ever model-callable. Their earlier presence in the hand-maintained ToolNode lists is the
-false-positive the old gate counted as "bound" (§3.E), not a binding that was later lost.
+and only 3 (`get_covariance_read`, `get_concentration_read`, `get_tail_extreme_var`) were in the debator
+loop — they still are, so nothing was lost for them; the other 13 were unreachable then and remain so. The
+presence of all 16 in the hand-maintained ToolNode lists is the false positive the old gate counted as
+"bound" (§3.E), not a binding that was later lost.
 
 **A1 — bind (4).** Each already has the claim class in some agent's prompt; only the tool + line are missing.
 
