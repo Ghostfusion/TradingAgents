@@ -55,7 +55,8 @@ the only one — which is where the deepest gaps are.
 forbids per-ticker use), `get_prediction_ledger_score` (`get_ledger_risk_state` covers win-rate; the
 unique stops/targets half moves to `get_trade_outcome_metrics`), `get_stress_grid_read` (`get_scenario_dcf`
 is the modelled version; the grid never receives its sensitivity axis and says so), `get_thesis_evidence_matrix`
-(`get_debate_claims_verdict` + the in-node deterministic HARD BREACH + the report-level grounded-claim gate),
+(**deleted in W5**, per §4.4 — `get_debate_claims_verdict` + the in-node deterministic HARD BREACH + the
+report-level grounded-claim gate already cover it, and it takes model-authored JSON),
 `get_kelly_alloc` (`get_allocation_black_litterman` / `get_position_sizing` / `get_hrp_alloc`).
 
 **A3 — not agent-facing (6)** — declare, and record the real consumer:
@@ -132,16 +133,26 @@ the blob-scan, and `TOOL_LEGACY_BINDING` as the escape hatch for exactly the 16 
    is dropped, rounded or invented, which is exactly what the suite's never-fabricate rule forbids. Instead:
    change the tool to take `ticker` + indicator names, fetch/compute the series internally (run OHLCV cache +
    the existing indicator path), and only then bind it to the market analyst. See W2.0.
-2. **`get_pair_risk` / `get_trade_outcome_metrics`**: bind (my recommendation) or declare, given each has a
-   partial overlap with a bound tool (`get_pair_trade_signal`, `get_post_close_confirmation`)?
-3. **The 6 already-covered**: accept as declared (recommended), or upgrade any to a real bind (each has a
-   stated leftover unique field)?
-4. **The 2 zero-consumer tools** (`get_prompt_injection_read`, `get_thesis_evidence_matrix`): declare, or delete?
-5. **PM gating** (C1/C2): should the PM receive a **pre-graph** computed risk gate / position contract /
-   liquidity read (a genuine pre-decision gate), or should those prompt rules be softened to "if the context
-   reports…"? This changes what the PM can act on, so it is your call.
-6. **Prompt-guidance scope**: fill all 30 real gaps now, or only the claim classes you consider load-bearing
-   (my recommendation: all, in one batch, since each is a one-line append and the gate can enforce it).
+2. **RESOLVED: bind both.** `get_pair_risk` → market (its Granger lead-lag half is returned by no bound tool;
+   the cointegration half does overlap `get_pair_trade_signal`, and the prompt line will say so).
+   `get_trade_outcome_metrics` → risk debators (entry-anchored MAE/MFE + stop/target hits for the plan they are
+   arguing; `get_post_close_confirmation` only reads a verdict off the newest decision.md).
+3. **RESOLVED: accept the 6 as declared**, each naming its covering tool. No upgrades to binds now; the stated
+   leftover unique fields are recorded in §3/A2 so a later review can promote one with a single prompt line.
+4. **RESOLVED: declare `get_prompt_injection_read`, delete `get_thesis_evidence_matrix`.** The injection scan is
+   a real guard whose home is the ingestion layer (an LLM that can call it has already ingested the text), so it
+   stays declared rather than deleted. The thesis-evidence matrix duplicates live machinery (`get_debate_claims_verdict`,
+   the in-node deterministic HARD BREACH, the report-level grounded-claim gate) and takes model-authored JSON — it
+   is removed in W5.
+5. **RESOLVED: hoist the pre-decision inputs; soften only what is inherently post-decision.** The PM gets the
+   values it can act on *before* it decides — book drawdown vs `risk_max_drawdown_pct`, the liquidity verdict, and
+   the position-contract size/stop where they are computable pre-graph (all of these come from data the pre-graph
+   precompute already loads next to `_precompute_risk_context`). Any rule whose number is inherently a verdict on
+   the PM's *own* final size stays post-decision, so that rule's wording changes to reference the pre-graph limits
+   instead of a verdict it cannot have. The point is that no prompt may reference a number that is absent from the
+   rendered prompt (enforced by W4's acceptance test).
+6. **RESOLVED: fill all 30 real gaps** in one batch — each is a one-line append in the house style, and W1's
+   trigger-phrase gate then keeps them from regressing.
 
 ---
 
@@ -173,8 +184,9 @@ stubbed OHLCV seam returns the VIF table and never asks the model for data; a mi
 degrades to an explicit 'unavailable' rather than a fabricated column. Only after this lands does the market
 prompt line reference `get_vif_read(ticker, indicators=[…])`.
 
-Per tool (the other three): add to the toolset/loop → add the prompt line → extend the gate test that the tool
-is bound *and* guided. Four files for toolsets/prompts + `risk_tool_loop.py` + the debator prompts; remove the
+Per tool (the other three — `get_macro_regime_read` → news, `get_pair_risk` → market,
+`get_trade_outcome_metrics` → `RISK_DEBATOR_TOOLS`): add to the toolset/loop → add the prompt line → extend the
+gate test that the tool is bound *and* guided. Four files for toolsets/prompts + `risk_tool_loop.py` + the debator prompts; remove the
 `TOOL_LEGACY_BINDING` entries for the bound names.
 
 **Acceptance:** each new tool is in the toolset, mentioned with a trigger, executed by its ToolNode (an
@@ -182,7 +194,8 @@ end-to-end call with a stubbed vendor seam), and the binding gate is green witho
 
 ### W3 — Prompt guidance for the remaining gap list (B)
 
-One line per tool, in the house style ("cite it before any <claim>"), in the owning analyst prompt; fix the
+All **30 real gaps** (the 5 whose trigger already lives in the tool docstring are checked, not rewritten): one
+line per tool, in the house style ("cite it before any <claim>"), in the owning analyst prompt; fix the
 "three tools / four listed" miscount and the unconditional ETF paragraph (emit it only on the ETF path).
 Re-run the S2 advertised-signature gate (the new lines must not advertise wrong arities) and the prompt-token
 budget check.
@@ -192,9 +205,10 @@ mention fails it.
 
 ### W4 — Context-channel fixes (C)
 
-1. PM: inject the computed risk gate / position contract / liquidity into the PM prompt (pre-graph precompute
-   alongside `_precompute_risk_context`), per your decision in §4.5 — and if any rule cannot be backed, soften
-   the prompt instead of leaving a rule that references a phantom number.
+1. PM (per §4.5): hoist the pre-decision inputs into the pre-graph precompute next to `_precompute_risk_context`
+   — book drawdown vs `risk_max_drawdown_pct`, the liquidity verdict, and the position-contract size/stop where
+   computable — and render them in the PM's context list. Then soften the wording of any rule whose number is a
+   verdict on the PM's own final size, so no rule references a number the render cannot contain.
 2. Pass the measured inputs into both `build_trade_plan` callers (tranche/value-dip setup, BE rule, targets,
    trail) so the shared card stops rendering `unavailable`.
 3. Judge prompt: inject the per-claim ledger rows (metric, asserted value, ground-truth key, true value,
@@ -210,7 +224,8 @@ trader/PM/debater prompts contain no reference to a number that is absent from t
 - Rewrite `TOOL_LEGACY_BINDING` to contain only the A2/A3 declarations, each with the covering tool or the
   real consumer named (no more "no code/test consumer").
 - `factor_expressions.clear_expr_cache`: classify in `LEGACY_WHITELIST` (cache utility, not a calc).
-- Decision §4.4: delete the two zero-consumer tools or keep them declared.
+- Decision §4.4: **delete `get_thesis_evidence_matrix`** (tool + its calc export + the tests that only pin its
+  existence); keep `get_prompt_injection_read` declared with the ingestion-layer rationale.
 - Optional cleanups found en route: `get_topk_drop_plan`/`get_enhanced_index_tilt` doc references to a PM
   toolset that cannot exist (PM is `NO_EXTERNAL_TOOLS`).
 
