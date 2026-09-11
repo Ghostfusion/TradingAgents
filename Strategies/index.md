@@ -79,7 +79,8 @@ feeds straight into the analyst teams. **Status:** plan + reference implementati
 - **V2** composite (value + momentum) ranking -> `strategies/factors.py`;
 - **V3** book/portfolio caps -> `strategies/portfolio.py`;
 - **V4** ATR exits / rebalance -> `strategies/exits.py`;
-- **V5** computed numbers into debate -> `strategies/debate_context.py`.
+- **V5** computed numbers into debate -> was `strategies/debate_context.py`; **removed** (its snippet was
+  written to state and read by no agent - see CHANGELOG).
 
 ---
 

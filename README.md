@@ -1356,8 +1356,8 @@ only after validating in the evaluation harness:
   median-margin normalized EBIT, historical percentiles, Sloan accruals,
   and a LOW/MED/HIGH trap verdict surfaced as the watchlist **Trap** column),
   `strategies/portfolio.py` (hard per-name/sector caps, residual cash),
-  `strategies/exits.py` (stop-to-breakeven, ATR targets, rebalance cadence),
-  `strategies/debate_context.py` (computed context snippets for the LLM debate).
+  `strategies/exits.py` (stop-to-breakeven, ATR targets, rebalance cadence). The V5 computed-context
+  snippets were removed (write-only state read by no agent; see CHANGELOG).
   V2 wires value+momentum composite ranking into the screener
   R0-R4: deterministic **RiskGovernor** gate (PASS/WARN/REJECT), stress/shock
   scenarios and CVaR book risk (`strategies/book_risk.py`), escalation via

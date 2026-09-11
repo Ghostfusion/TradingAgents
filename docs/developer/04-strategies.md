@@ -129,10 +129,17 @@ involved. This is the "compute, don't narrate" core.
 
 ## 4.4 How strategies feed the graph
 
-- **Pre-graph**: the analyst tool loops call `get_*` tools that wrap a strategy
-  function (e.g. `get_swing_set` -> `swing.swing_report`).
+- **Pre-graph, before the agents decide**: `_precompute_risk_context(ticker)`
+  (gated by `enable_risk_governor`) seeds `risk_context` with the CVaR reads,
+  the liquidity verdict, the measured book drawdown vs limit, the per-trade
+  size cap and the daily CVaR budget, so the Portfolio Manager's rules cite
+  numbers that exist before its decision (`02-graph-workflow.md` §2.6).
+- **Pre-graph, during the analyst turn**: the analyst tool loops call `get_*`
+  tools that wrap a strategy function (e.g. `get_swing_set` ->
+  `swing.swing_report`).
 - **Post-graph**: `_apply_strategy_overlays` calls several of these in an
-  order (see `02-graph-workflow.md` §2.6).
+  order (see `02-graph-workflow.md` §2.6) and consumes the pre-graph values
+  rather than recomputing them.
 
 ## 4.5 Config flags that gate them
 

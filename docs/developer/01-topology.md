@@ -26,12 +26,15 @@ reports/                # run output (batch / pipeline)
 ```
 ├─ __init__.py                    # re-exports create_* nodes
 ├─ schemas.py                     # pydantic structured output schemas
+├─ toolsets.py                    # single source of each analyst's bound toolset (bind == execute)
 ├─ analysts/
 │   ├─ market_analyst.py          # market analyst (tool-calling loop)
 │   ├─ sentiment_analyst.py       # = social; pre-fetches news+stocktwits+reddit
 │   ├─ news_analyst.py            # news analyst (tool-calling loop)
 │   ├─ fundamentals_analyst.py    # fundamentals analyst (tool-calling loop)
 │   └─ social_media_analyst.py    # deprecated alias for create_sentiment_analyst
+├─ arbiters/
+│   └─ debate_judge.py             # L1 claim-level scorecard for the debate
 ├─ researchers/
 │   ├─ bull_researcher.py         # Bull Researcher (tool-calling debate)
 │   └─ bear_researcher.py         # Bear Researcher
@@ -93,7 +96,7 @@ category/tool methods in `interface.py`.
 ```swing1 / swing2 / momentum / regime / relative_strength / sector_rank
 overlays / size / book_risk / catalyst / events / risk_governor /
 contract / calibration / consensus / exits / factors / normalized /
-portfolio / reflection / sentiment / orderflow / debate_context / evaluate
+portfolio / reflection / sentiment / orderflow / evaluate
 journal / value_dip
 ```
 
@@ -117,7 +120,9 @@ __init__.py           # loads .env at import, forward-compat warning filters
 
 ## Layout conventions
 
-- **Tool binding** lives in `agents/utils/*_tools.py` files.
+- **Tool binding** has one source of truth: `agents/toolsets.py` (the analyst node binds it and the graph
+  ToolNode executes it, so a bound tool can never be rejected as unknown); `agents/utils/*_tools.py` define
+  the `@tool` functions themselves. `tests/test_tool_binding_single_source.py` pins the invariant.
 - **Vendor methods** live in `dataflows/*/` modules; `interface.py` routes.
 - **Deterministic analysis** lives in `strategies/*/` and is re-exported via
   `analysis_tools.get_*` so agents can `# bound tool`.

@@ -165,6 +165,8 @@ Git: `origin` = `https://github.com/Ghostfusion/TradingAgents.git`, branch `main
 ```
 tradingagents/
 ├─ agents/                 # LLM agent nodes (prompts + tool binding)
+│  ├─ toolsets.py          # SINGLE SOURCE of each analyst's bound toolset (bind == execute)
+│  ├─ arbiters/            # debate_judge (L1 scorecard: per-claim grounding rows)
 │  ├─ analysts/            # market, sentiment(news+reddit/stocktwits), news, fundamentals
 │  ├─ researchers/         # bull / bear
 │  ├─ risk_mgmt/           # aggressive / conservative / neutral
@@ -191,7 +193,7 @@ tradingagents/
 ├── strategies/            # deterministic overlays (compute, don't narrate)
 │  ├─ regime.py size.py factors.py events.py catalyst.py orderflow.py
 │  ├─ contract.py (G1) calibration.py consensus.py sentiment.py exits.py
-│  ├─ risk_governor.py (R0-R4) book_risk.py debate_context.py portfolio.py
+│  ├─ risk_governor.py (R0-R4) book_risk.py portfolio.py
 │  ├─ swing.py relative_strength.py sector_rank.py  # techno-fundamental swing (--scan swing/vcp)
 │  └─ value_dip.py              # Value Dip hybrid + tranche risk fold (--scan value-dip)
 ├── llm_clients/           # factory + provider registry (OpenAI/anthropic/google/azure/bedrock/

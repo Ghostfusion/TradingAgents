@@ -325,18 +325,22 @@ All wrap existing pure strategies functions; signatures follow tool style
 
 | New tool | Wraps | Bound to | Why it matters |
 | --- | --- | --- | --- |
-| `get_fixed_risk_size(equity, risk_frac, entry, stop, commission_rate, units)` | `risk_sizing.riskable_money`/`risk_money`/`risk_quantity` | market (and Trader node in Phase 5) | the one commission-aware, tranche-aware sizer; makes the governor's budget and the sizer agree from the LLM side |
+
+Surface and signature cells in this table are kept in sync by hand; the machine-checked contract for
+callable surfaces is `docs/api_reference.md` (see `tests/test_doc_binding_claims.py`, which also asserts
+that every tool named here still exists).
+| `get_fixed_risk_size(equity, risk_frac, entry, stop, commission_rate, units)` | `risk_sizing.riskable_money`/`risk_money`/`risk_quantity` | risk debators / trader | the one commission-aware, tranche-aware sizer; makes the governor's budget and the sizer agree from the LLM side |
 | `get_exit_overrides(targets, state_by_name, max_drawdown_pct, trail_pct)` | `risk_manager.manage_risk` + `trailing_stop_targets` | risk debators / PM (advisory; needs persisted `state_by_name` from paper ledger; returns `unavailable` without it) | Lean-style second-pass liquidate/shrink override the LLMs can reference for held names |
 | `get_pre_trade_read(symbol, notional, symbol_notional, max_notional, max_rate, window_secs)` | `risk_checks.pre_trade_check` + `RateLimiter` + `notional` | risk debators (advisory) | submission-rate + notional-cap bound for paper/backtest execution context |
 | `get_trade_plan(ticker, price, ...)` | `trade_plan.build_trade_plan` (+ tranche/exits/be_rule inputs) | Trader node (Phase 5) + PM context | makes the plan card a callable first-class object instead of only a context string |
 | `get_ledger_risk_state(ticker)` | `pre_market.ledger_track_record` + memory-log realized entries (`daily_loss_pct`, `hwm_drawdown_pct`, win-rate drift) | risk debators + PM | supplies the `daily_loss` + `hwm` inputs the governor's `get_risk_gate` currently cannot see (F5) |
 | `get_fixed_income_risk(ticker, price?, par?, years?)` | `fixed_income.preferred_ytm`/`macaulay_duration`/`modified_duration`/`dv01`/`bond_convexity` | fundamentals | preferreds/income names: yield + duration + DV01 risk rows (labels perpetuals n/a, never a fake YTM) |
-| `get_pair_risk(x, y, maxlag)` | `statistical.cointegration_pair` + `granger_causality` | market | pair mean-reversion + lead-lag, mark-to-market style |
-| `get_vif_read(columns)` | `statistical.variance_inflation_factor` | market | collinearity check before the LLM stacks factor claims |
-| `get_vol_cones(ticker)` | `rotation.vol_cones` | market | multi-horizon realized-vol percentile (5/10/21/63/126d) |
-| `get_trade_excursions(trades)` | `journal.trade_excursions` | market (strategy-quality block) | MAE/MFE/profit-factor; exit-quality QA |
+| `get_pair_risk(ticker_x, ticker_y, window?, maxlag?)` | `statistical.cointegration_pair` + `granger_causality` | market | pair mean-reversion + lead-lag, mark-to-market style |
+| `get_vif_read(ticker, factors, window?)` | `statistical.variance_inflation_factor` | market | collinearity check before the LLM stacks factor claims |
+| `get_vol_cones(ticker)` | `rotation.vol_cones` | risk debators | multi-horizon realized-vol percentile (5/10/21/63/126d) |
+| `get_trade_excursions(trades)` | `journal.trade_excursions` | declared | MAE/MFE/profit-factor; exit-quality QA |
 | `get_alpha_scoring(direction, predicted_magnitude, period_days, actual_return, confidence)` | `alpha_eval.alpha_score` + `insight_accuracy` | fundamentals | predicted-magnitude vs actual scoring (Insight/L7) |
-| `get_regime_gate_read(ticker, catalyst_window)` | `regime.regime_gate_read` | market (mirrors the context line, callable) | knife-guard verdict the debators currently see only as a context string |
+| `get_regime_gate_read(ticker, catalyst_window)` | `regime.regime_gate_read` | risk debators | knife-guard verdict the debators currently see only as a context string |
 
 - Extend `get_risk_gate` (F5): accept + forward `daily_loss_pct`,
   `hwm_drawdown_pct`, `liquidity_verdict`, `capital_at_risk_pct`,

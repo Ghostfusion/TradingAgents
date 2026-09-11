@@ -46,7 +46,7 @@ The tool loops are **bounded** by `ConditionalLogic.should_continue_<analyst>`.
 
 Bull and Bear researchers argue over the analysts' reports for
 `max_debate_rounds`. The **Research Manager** (a deep-think model) synthesizes
-a `ResearchPlan` (`strategies/debate_context` may inject computed numbers) and
+a `ResearchPlan` (`computed_decision_context` carries the computed numbers) and
 returns `investment_plan`.
 
 ## Step 4 — Trader

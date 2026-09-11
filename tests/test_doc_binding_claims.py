@@ -22,6 +22,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 DOC = REPO / "docs" / "api_reference.md"
 WIRING_TEST = REPO / "tests" / "test_calc_agent_wiring.py"
+UTILS = REPO / "tradingagents" / "agents" / "utils"
+# Docs whose tool tables are hand-maintained: their surface/signature cells are
+# not machine-checked (the contract doc is api_reference.md), but a tool they
+# name must still exist - a deleted tool must not linger in the wiring design.
+EXTRA_TOOL_DOCS = (REPO / "docs" / "design_risk_calculations_agent_wiring.md",)
 
 # The doc's label -> the surface it claims. "macro" is the doc's name for the
 # macro-data reads the news analyst owns.
@@ -86,6 +91,56 @@ def _claims(cell: str) -> list[str]:
 def test_reference_table_is_non_empty():
     rows = _rows()
     assert len(rows) > 50, f"the tool table moved or shrank unexpectedly ({len(rows)} rows)"
+
+
+def _tool_names(path: Path) -> set[str]:
+    """Public @tool-decorated functions in a module (same rule as the wiring gate)."""
+    out: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        for dec in node.decorator_list:
+            name = None
+            if isinstance(dec, ast.Name):
+                name = dec.id
+            elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name):
+                name = dec.func.id
+            elif isinstance(dec, ast.Attribute):
+                name = dec.attr
+            if name == "tool":
+                out.add(node.name)
+                break
+    return out
+
+
+def _tools_in_tables(path: Path) -> set[str]:
+    out: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("|"):
+            continue
+        m = re.match(r"^\|\s*`((?:get_|screen_)[a-z_0-9]+)\(", line)
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def test_tools_named_in_hand_maintained_tables_exist():
+    """A tool deleted from the code must not linger in a hand-kept table."""
+    known: set[str] = set()
+    for f in UTILS.glob("*_tools.py"):
+        known |= _tool_names(f)
+    ghost = sorted(
+        (path.name, name)
+        for path in EXTRA_TOOL_DOCS
+        for name in _tools_in_tables(path)
+        if name not in known
+    )
+    assert not ghost, (
+        "these docs name tools that no longer exist - delete or correct the rows: "
+        + ", ".join(f"{doc}:{name}" for doc, name in ghost)
+    )
 
 
 def test_documented_surfaces_are_known():

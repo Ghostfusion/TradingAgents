@@ -703,7 +703,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_ledger_risk_state(ticker)` | memory log + `strategies.pre_market.ledger_track_record` | risk debators | realized win-rate drift + paper-reviewer track record (daily-loss/HWM inputs) |
 | `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable |
 | `get_fixed_income_risk(ticker, years?)` | `strategies.fixed_income` | fundamentals | preferred yield + duration/DV01/convexity risk rows (perpetual YTM n/a) |
-| `get_pair_risk(x, y, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` | market | Engle-Granger cointegration + lag-wise Granger causality |
+| `get_pair_risk(ticker_x, ticker_y, window?, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` (fetches both close series) | market | Engle-Granger cointegration + lag-wise Granger causality |
 | `get_pair_trade_signal(x, y, entry?, exit_thresh?, stop?)` | `strategies.statistical.pair_signal` (`spread_zscore` + cointegration + half-life) | market | cookbook recipe-3 pairs signal: entry \|z\|≥2 / exit ≤0.5 / stop ≥3, dollar-neutral `pair_quantities` + VECM `ecm_loading` advisory |
 | `get_signal_quality(signal, forward_returns, quantile?)` | `strategies.signal_analysis` (`rank_ic` / `icir` / `long_short_precision`) + `evaluate.purged_cpcv_splits` | market | deterministic validation read for a forecast: Spearman rank IC, ICIR, Qlib long-short precision (top-quantile sign hit rate) + combinatorial-CPCV path count (audit-fixed 2026-09-06) |
 | `get_bsm_option_quote(spot, strike, t_years, vol, option_type?, r?, q?)` | `strategies.options_math.bsm_equity_surface` | market | direct Black-Scholes-Merton spot-space price + Greeks (incl. charm with dividend term) when the chain does not quote the asked strike/expiry — advisory model quote |
@@ -712,7 +712,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_event_pnl_response(spot, delta, gamma, vega, theta, dS_pct, dSigma?)` | `strategies.options_math.greek_pnl_response` | market | cookbook recipe-5 scenario P&L: `Δ·dS + ½Γ·dS² + ν·dσ + Θ·dt` per option unit |
 | `get_merton_distance(equity, debt, equity_vol, r?, t?)` | `strategies.credit_spread.merton_distance_to_default` | market / risk debators | structural distance-to-default (equity-as-a-call fixed-point; DtD = d2 + risk-neutral PD) |
 | `get_book_depth_read(bid, ask, bid_size, ask_size)` | `strategies.market_session.book_depth_read` | market | microprice `(bid·ask_sz + ask·bid_sz)/(bid_sz+ask_sz)` + order-book imbalance + thin-side verdict |
-| `get_vif_read(columns)` | `strategies.statistical.variance_inflation_factor` | market | per-column VIF (collinearity check; > 5 = HIGH) |
+| `get_vif_read(ticker, factors, window?)` | `strategies.factor_expressions` primitives (rsi/mom/bias/zscore/std/vol/range) + `statistical.variance_inflation_factor` | market | per-column VIF (collinearity check; > 5 = HIGH) |
 | `get_vol_cones(ticker)` | `strategies.rotation.vol_cones` | risk debators | multi-horizon realized-vol percentiles (5/10/21/63/126d) |
 | `get_trade_excursions(trades)` | `strategies.journal.trade_excursions` | declared | MAE / MFE / profit-factor / max intra-trade drawdown (exit quality) |
 | `get_alpha_scoring(direction, predicted_magnitude?, period_days?, actual_return?, confidence?)` | `strategies.alpha_eval.alpha_score` | fundamentals | direction + magnitude-scored alpha ("said +12%, realized +2%") |

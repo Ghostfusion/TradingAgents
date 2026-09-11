@@ -112,6 +112,13 @@ from `strategies/overlays.py::build_strategy_overlays`, then folds additional
 signals in, and finally `apply_overlay_to_state(state, overlay)` updates
 `final_state["strategy_overlays"]` + any `computed_*` keys.
 
+**Pre-graph counterpart (`enable_risk_governor`):** before the graph runs,
+`_precompute_risk_context(ticker)` seeds `risk_context` with the CVaR reads **and** the liquidity verdict, the
+measured book drawdown against `risk_max_drawdown_pct`, the per-trade size cap and the daily CVaR budget. The
+Portfolio Manager renders those as its cvar / liquidity / limits lines, so its stop-gate, veto and size-cap rules
+cite numbers that exist *before* the decision. The post-graph folds below then **consume** those values instead of
+recomputing them - one producer per number, pinned by `tests/test_risk_context_hoist.py`.
+
 The **order of folds matters** (each multiplies / feeds the downstream):
 
 1. **regime/size** – `strategies/regime.py`, `size.py`: volatility percentile +
@@ -135,10 +142,9 @@ The **order of folds matters** (each multiplies / feeds the downstream):
    per-tranche losses at the hard stop vs `tranche_risk_pct`); the state
    gains `tranche_context` (avg_entry, peak_deployed_pct, capital_at_risk_pct,
    peak_ok, book_ok).
-6. **computed context** (removed 2026-09-11) – the snippet was written to state and read by no agent
-   (and its V5 inputs were never supplied); the live paths read `computed_decision_context`. The
-   former builder, fed into the
-   debates.
+6. **computed context** (removed 2026-09-11) – `strategies/debate_context.py` wrote a snippet into
+   `final_state["computed_context"]` that no agent ever read (and whose V5 inputs were never supplied
+   outside tests). The live paths read `computed_decision_context` instead; see CHANGELOG.
 7. `apply_overlay_to_state(final_state, overlay)`.
 
 Only the flags enabled in config run; all others skip cleanly. `enable_*`

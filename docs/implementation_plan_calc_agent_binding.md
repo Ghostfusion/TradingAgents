@@ -4,8 +4,9 @@
 able to obtain it **by tool** *and* be told **by prompt** when it matters. Deliverable of this document:
 the decisions and the ordered work. **No code has been changed.**
 
-Audited at `acfd15c` (main, clean). Method: a mechanical chain map (706 public calcs in
-`tradingagents/strategies/*`; 208 `@tool` functions; 192 callable by an agent) plus three read-only
+Audited at `acfd15c` (main, clean); counts below are the **current** state after W1-W5, which is noted where
+it differs from the audit-time snapshot. Method: a mechanical chain map (706 public calcs in
+`tradingagents/strategies/*`; 208 `@tool` functions and 192 callable at the audit commit) plus three read-only
 semantic audits (unbound tools, prompt guidance, the non-tool context channel). Every claim below carries
 a file:line and was reproduced by the main thread where it is load-bearing.
 
@@ -35,10 +36,13 @@ the only one — which is where the deepest gaps are.
 ## 2. Numbers
 
 - 706 public calcs; **255** referenced directly by a bound tool, **450** reachable through another calc,
-  **1** unreachable (`factor_expressions.clear_expr_cache` — a cache utility, see W5).
-- 208 `@tool` functions; 192 callable by an agent (in the agent's `bind_tools` set **and** dispatchable by
-  its executor); **16 in no callable surface** (13 on no surface at all, 3 reachable only from the debator
-  loop). See §3.E: "bound" is two conditions, and only the single-source toolset guarantees both.
+  **0** unreachable: `factor_expressions.clear_expr_cache` (the one the audit flagged) is an internal helper of
+  a module the reshaped VIF tool now references, so W5 needed no whitelist entry for it.
+- **207** `@tool` functions (the thesis-evidence matrix tool was deleted in W5); **196** callable by an agent
+  (in the agent's `bind_tools` set **and** dispatchable by its executor: market 113, news 26, fundamentals 53
+  deduped, risk debators 28, trader 13); **11 everywhere-unbound**, each declared in `TOOL_LEGACY_BINDING` with
+  either the bound tool that covers the claim or the real consumer of the read. See §3.E: "bound" is two
+  conditions, and only the single-source toolset guarantees both.
 - Prompt guidance: the audit's original name-only count (35 tools without a trigger sentence, 5 of them
   carrying a usable trigger in their own docstring) was re-measured when the gate was built (W1): the gate's
   trigger test (a name must sit on a line that says *when* to use it) finds **28 gaps**, listed by name in
@@ -52,7 +56,11 @@ the only one — which is where the deepest gaps are.
 
 ## 3. Findings
 
-### A. The 16 unbound `@tool` functions → 4 bind / 6 already-covered / 6 not agent-facing
+### A. The 16 unbound `@tool` functions → 4 bound, 1 deleted, 11 declared (resolved)
+
+The triage below was executed in W2/W5: the four A1 tools are bound to their analysts, `get_thesis_evidence_matrix`
+is deleted, and the remaining 11 stand as declarations (each with its covering tool or real consumer). The
+original 6 / 6 split into "already covered" and "not agent-facing" is kept as the rationale for each declaration.
 
 Verified pre-S1: none of the 16 was present in any analyst's LLM-facing `tools = [...]` list at `48d1bc5`,
 and only 3 (`get_covariance_read`, `get_concentration_read`, `get_tail_extreme_var`) were in the debator
@@ -64,7 +72,7 @@ presence of all 16 in the hand-maintained ToolNode lists is the false positive t
 
 | tool | target | why | proposed prompt line |
 |---|---|---|---|
-| `get_pair_risk` | market | Granger x→y with per-lag p-values is returned by **no** bound tool (`get_pair_trade_signal` gives only cointegration/β/half-life) | slot after the `get_pair_trade_signal` bullet: "`get_pair_risk(x, y)` … cite `granger(x→y)` with its p-values before calling either name the leader" |
+| `get_pair_risk` | market | Granger x→y with per-lag p-values is returned by **no** bound tool (`get_pair_trade_signal` gives only cointegration/β/half-life) | slot after the `get_pair_trade_signal` bullet: "`get_pair_risk(ticker_x, ticker_y)` … cite `granger(x→y)` with its p-values before calling either name the leader" |
 | `get_macro_regime_read` | news | composite Risk-On / Liquidity-Contraction / Stagflation label from the 5 inputs news already cites; no bound tool produces the composite | after the `get_credit_spread_read` sentence: "…folds the same fed/curve/credit/DXY/vol markers into ONE cross-asset label — cite it before any 'the tape is risk-on / liquidity crunch / stagflation' claim" |
 | `get_vif_read` | market | no bound tool measures regressor collinearity; the prompt already demands non-redundant indicators (`market_analyst.py:55`) | **prerequisite (W2.0):** make the tool take `ticker` + indicator names and fetch/compute the series itself. Then, after that instruction: "`get_vif_read(ticker, indicators=[…])` … call it before presenting two like measures as independent evidence" |
 | `get_trade_outcome_metrics` | risk debators (`RISK_DEBATOR_TOOLS`) | entry-anchored MAE/MFE + stop/target hits for the plan the debators are arguing; the market-bound `get_post_close_confirmation` gives only a stopped-out/target-hit verdict from the newest decision.md | append to the shared debator risk-tool line: "`get_trade_outcome_metrics(ticker, entry, stop?, target?)` — the measured MAE/MFE + stop/target hits for the plan entry" |

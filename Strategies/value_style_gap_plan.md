@@ -39,6 +39,7 @@ Status updated after each phase (tests + regression gates).
 ## V4 - exits.py (planned)
 - stop_to_breakeven, target_level(atr_mult), costs default 10bps
 
-## V5 - computed context (planned)
-- build_debate_context(margin_safety, percentile, trap) snippet for prompts
-- graph overlay appends when enable_computed_context
+## V5 - computed context (built, then removed 2026-09-11)
+- `build_debate_context(...)` shipped, then was deleted: the snippet went into
+  `final_state["computed_context"]`, which no agent read, and its V5 inputs were never supplied
+  outside tests. The live paths read `computed_decision_context` instead (see CHANGELOG).
