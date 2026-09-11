@@ -972,10 +972,7 @@ class TradingAgentsGraph:
                         hard_guards=_hard_guards,
                     )
                     if contract is not None:
-                        final_state["position_contract"] = (
-                            f"size {contract.size_pct:.1%}, stop "
-                            f"{contract.stop_loss}, reason: {contract.reason()}"
-                        )
+                        final_state["position_contract"] = contract.summary()
                         overlay["position_contract"] = (
                             f"{contract.size_pct:.1%} @ stop {contract.stop_loss} "
                             f"({contract.reason()})"

@@ -383,13 +383,29 @@ def _risk_gate_block(final_state: dict) -> str:
     if snap:
         parts.append(f"Snapshot: {snap}")
     # Expose both the analyzed name's own daily-tail CVaR and (when a risk
-    # basket is configured) the book-level CVaR that actually fed the gate - so
-    # a reader can tell "this idea's tail" from "my book's tail".
+    # basket is configured) the book-level CVaR - so a reader can tell "this
+    # idea's tail" from "my book's tail". Each leg carries its BUDGET and only
+    # the leg that breaches one claims to fund the gate: the old text tagged the
+    # book CVaR "this fed the gate" unconditionally, so a book CVaR of 1.21%
+    # (budget 3.00%) read as the operative constraint while the 4.12% name-level
+    # CVaR was the one blocking new risk (GOOG 2026-09-11 decision.md - the PM
+    # had to resolve the contradiction in prose).
     ctx = final_state.get("risk_context") or {}
+    budget = ctx.get("cvar_budget_pct")
     if ctx.get("single_cvar") is not None:
-        parts.append(f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}")
+        line = f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}"
+        if budget is not None:
+            line += f" (budget {budget:.2%})"
+            if ctx["single_cvar"] > budget:
+                line += " — over budget: blocks NEW risk in this name"
+        parts.append(line)
     if ctx.get("book_cvar") is not None:
-        parts.append(f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%} — this fed the gate")
+        line = f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%}"
+        if budget is not None:
+            line += f" (budget {budget:.2%})"
+            if ctx["book_cvar"] > budget:
+                line += " — funds the portfolio gate"
+        parts.append(line)
     # Decision-gate auditability (IREN 2026-09-10 decision.md review): the
     # realized book drawdown that actually drives the portfolio veto must be
     # visible next to the verdict - a PASS header beside 'REJECT new risk' in

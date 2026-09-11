@@ -67,9 +67,41 @@ def test_risk_gate_renders_both_cvars(tmp_path):
     path = write_report_tree(state, "TST", tmp_path)
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     assert "Analyzed-name CVaR: 1.23%" in decision
-    assert "Portfolio (book) CVaR: 3.25% — this fed the gate" in decision
+    assert "Portfolio (book) CVaR: 3.25%" in decision
+    # No budget in the context -> NEITHER leg claims to have funded the gate
+    # (the old text tagged the book CVaR unconditionally, which read as the
+    # operative constraint even when the name level was blocking - GOOG
+    # 2026-09-11 decision.md, where the PM had to contradict it in prose).
+    assert "this fed the gate" not in decision
+    assert "funds the portfolio gate" not in decision
     report = path.read_text(encoding="utf-8")
     assert "Analyzed-name CVaR: 1.23%" in report
+
+
+def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
+    """GOOG 2026-09-11: name CVaR 4.12% over a 3.00% budget while the book CVaR
+    was 1.21% - the block must attribute the block to the name leg (and carry
+    both budgets), never tag the book leg as what fed the gate."""
+    state = _state(
+        verdict="PASS",
+        reasons=[],
+        risk_ctx={"single_cvar": 0.0412, "book_cvar": 0.0121, "cvar_budget_pct": 0.03},
+    )
+    write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Analyzed-name CVaR: 4.12% (budget 3.00%) — over budget: blocks NEW risk in this name" in decision
+    assert "Portfolio (book) CVaR: 1.21% (budget 3.00%)" in decision
+    assert "fed the gate" not in decision
+
+    state2 = _state(
+        verdict="REJECT",
+        reasons=["book cvar over budget"],
+        risk_ctx={"single_cvar": 0.0100, "book_cvar": 0.0500, "cvar_budget_pct": 0.03},
+    )
+    write_report_tree(state2, "TST2", tmp_path)
+    decision2 = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Portfolio (book) CVaR: 5.00% (budget 3.00%) — funds the portfolio gate" in decision2
+    assert "blocks NEW risk in this name" not in decision2
 
 
 def test_risk_gate_renders_book_drawdown_and_mismatch(tmp_path):

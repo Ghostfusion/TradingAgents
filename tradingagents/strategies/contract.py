@@ -17,6 +17,12 @@ class PositionContract:
     size_pct: float
     stop_loss: float | None
     stop_pct: float
+    # The entry the stop was measured FROM. Rendered next to the stop: without
+    # it a reader cannot reconcile the contract's stop with the report's spot
+    # price (GOOG 2026-09-11: contract stop 323.5084 was anchored on the 330.39
+    # close while the report's spot was 336.25, and the contract line showed
+    # neither the anchor nor the difference).
+    entry_price: float | None = None
     reason_parts: list[str] = field(default_factory=list)
     breakeven_stop: float | None = None
     target: float | None = None
@@ -24,6 +30,17 @@ class PositionContract:
 
     def reason(self) -> str:
         return "; ".join(self.reason_parts) if self.reason_parts else "no budget bound"
+
+    def summary(self) -> str:
+        """One-line render for the risk-gate block.
+
+        The anchor entry is printed WITH the stop: the stop is measured from it,
+        so without it the number cannot be reconciled with the report's spot
+        price (GOOG 2026-09-11: stop 323.5084 anchored on the 330.39 close while
+        the report's spot was 336.25 - a reader saw two unexplained stops).
+        """
+        anchor = f" (from entry {self.entry_price:.2f})" if self.entry_price else ""
+        return f"size {self.size_pct:.1%}, stop {self.stop_loss}{anchor}, reason: {self.reason()}"
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -241,6 +258,7 @@ def build_position_contract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
         stop_loss=round(stop, 4),
         stop_pct=round(stop_pct, 4),
+        entry_price=round(float(entry), 4),
         reason_parts=reasons + reasons_extra + (["tranche weighted entry"] if entry is not last else []),
         breakeven_stop=round(be_stop, 4) if be_stop is not None else None,
         target=round(target, 4) if target is not None else None,

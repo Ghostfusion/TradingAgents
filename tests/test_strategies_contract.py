@@ -145,3 +145,27 @@ def test_contract_implied_move_scales_size():
     assert ev is not None
     assert ev.size_pct <= base.size_pct
     assert "implied_move" in ev.reason()
+
+
+def test_contract_renders_the_entry_its_stop_was_measured_from():
+    """GOOG 2026-09-11: the gate block printed "stop 323.5084" while the trader's
+    stop was 335.1665 and the report's spot 336.25 — the contract's stop was
+    anchored on a different entry (330.39) and the render never said so, leaving
+    two unexplained stops in one document. The anchor is now part of the data and
+    of the one-line render."""
+    from tradingagents.strategies.contract import build_position_contract
+
+    closes = [330.0] * 40 + [330.39]
+    contract = build_position_contract(
+        cfg={"risk_per_trade": 0.01, "max_position_pct": 0.30, "kelly_fraction": 0.25},
+        closes=closes,
+        entry_price=330.39,
+        agreement=0.75,
+    )
+    assert contract is not None
+    assert contract.entry_price == pytest.approx(330.39)
+    summary = contract.summary()
+    assert "(from entry 330.39)" in summary
+    assert "stop " in summary and "reason:" in summary
+    # The stop is measured FROM the anchor: entry * (1 - risk/risk_part).
+    assert contract.stop_loss == pytest.approx(330.39 * (1 - 0.01 / 2.0), rel=1e-3)
