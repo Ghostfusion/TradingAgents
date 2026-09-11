@@ -1020,6 +1020,58 @@ def get_orderflow_read(
 # ---------------------------------------------------------------------------
 
 
+
+
+
+
+_SURPRISE_BASIS_NOTE = (
+    " note: actual is negative (likely GAAP) - the consensus estimate may be "
+    "adjusted; treat the surprise % as basis-unreconciled until confirmed"
+)
+
+
+def surprise_basis_note(last) -> str:
+    """Append a basis caveat when the reported actual EPS is a loss.
+
+    IREN 2026-09-10 review loop: the vendor surprise pairs GAAP actual EPS
+    (act -2.16) with a consensus estimate whose basis can differ (adjusted).
+    A negative actual is the tell - the surprise mixes bases until verified.
+    """
+    act = (last or {}).get("actual")
+    try:
+        if act is not None and float(act) < 0:
+            return _SURPRISE_BASIS_NOTE
+    except (TypeError, ValueError):
+        pass
+    return ""
+
+def screen_value_line(key: str, v, ev_ebit) -> str:
+    """One analyst-verdict line with EV/EBIT artifact guards (IREN loop)."""
+    label = {
+        "earnings_yield": "EY",
+        "ev_ebit": "EV/EBIT",
+        "f_score": "Piotroski F",
+        "beneish_m": "Beneish M",
+        "altman_z": "Altman Z",
+        "roe": "ROE",
+        "eps_yoy": "EPS YoY",
+        "revenue_yoy": "Revenue YoY",
+    }.get(key, key)
+    if v is None:
+        return f"  {label}: n/a"
+    if key == "ev_ebit" and abs(v) > 1000:
+        return (
+            f"  {label}: {v:.2f} (ARTIFACT: EBIT near zero - see get_ratios "
+            "EV/EBIT for the meaningful sign)"
+        )
+    if key == "earnings_yield" and ev_ebit is not None and abs(ev_ebit) > 1000:
+        return f"  {label}: {v:.2%} (ARTIFACT: same near-zero EBIT denominator)"
+    if key in ("beneish_m", "altman_z", "f_score", "ev_ebit"):
+        return f"  {label}: {v:.2f}"
+    if key in ("roe", "eps_yoy", "revenue_yoy", "earnings_yield"):
+        return f"  {label}: {v:.2%}"
+    return f"  {label}: {v}"
+
 @tool
 def get_analyst_verdict(
     ticker: Annotated[str, "ticker symbol"],
@@ -1054,7 +1106,7 @@ def get_analyst_verdict(
         )
     row = screen_ticker(ticker, fin)
     lines = [f"analyst verdict {ticker}:"]
-    for key, label in (
+    for key, _label in (
         ("earnings_yield", "EY"),
         ("ev_ebit", "EV/EBIT"),
         ("f_score", "Piotroski F"),
@@ -1065,14 +1117,7 @@ def get_analyst_verdict(
         ("revenue_yoy", "Revenue YoY"),
     ):
         v = row.get(key)
-        if v is None:
-            lines.append(f"  {label}: n/a")
-        elif key in ("beneish_m", "altman_z", "f_score", "ev_ebit"):
-            lines.append(f"  {label}: {v:.2f}")
-        elif key in ("roe", "eps_yoy", "revenue_yoy", "earnings_yield"):
-            lines.append(f"  {label}: {v:.2%}")
-        else:
-            lines.append(f"  {label}: {v}")
+        lines.append(screen_value_line(key, v, row.get("ev_ebit")))
     lines.append(f"  net_net: {row.get('net_net')}")
     # Ohlson O-score + Zmijewski X-score (distress models, a different
     # functional form than Altman Z). Only rendered when the canonical carries
@@ -1146,9 +1191,10 @@ def get_earnings_surprise(
             f"earnings surprise unavailable for {ticker}: no reported print "
             "with both actual and estimate in the window."
         )
+    note = surprise_basis_note(last)
     return (
         f"earnings surprise {ticker}: last_surprise={_fmt_pct(last['surprise'])} "
-        f"side={last['side']} date={last.get('date')}"
+        f"side={last['side']} date={last.get('date')}{note}"
     )
 
 

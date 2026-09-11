@@ -2331,12 +2331,26 @@ def get_earnings_surprise_history_moomoo(ticker: str, curr_date: str = None) -> 
             f"{act if act is not None else '-'} | {surprise or '-'} | {move or '-'} | {implied} |"
         )
     lines.append("")
+    by_date = {c["date"]: c for c in cal}
+    has_neg_act = any(
+        (by_date.get(p["date"]) or {}).get("eps_actual") is not None
+        and float((by_date.get(p["date"]) or {}).get("eps_actual")) < 0
+        for p in prints[:8]
+    )
     lines.append(
         "Interpretation: negative-surprise quarters with a large implied move "
-        "flag elevated catalyst risk; a succession of beats (acceleration) with "
+        "flag elevated catalyst risk; a large succession of beats (acceleration) with "
         "rising implied moves supports momentum. Use for event-risk sizing, not "
         "direction alone."
     )
+    if has_neg_act:
+        lines.append(
+            "Basis note: negative EPS actuals (likely GAAP) are paired with "
+            "consensus estimates whose basis can differ (adjusted). The "
+            "surprise % mixes bases unless confirmed - do not extrapolate a "
+            "string of misses into a catalyst signal without checking the "
+            "actual/estimate bases (IREN 2026-09-10 review loop)."
+        )
     return "\n".join(lines)
 
 

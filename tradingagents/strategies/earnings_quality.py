@@ -62,7 +62,23 @@ def earnings_quality_verdict(
     if ni is not None and o is not None:
         if ni != 0:
             cc = o / ni
-            if cc >= 1.0:
+            if ni < 0:
+                # Negative income inverts the ratio's meaning: the 0.8/1.0
+                # warning bands assume a positive denominator. A negative NI
+                # with positive OCF means non-cash charges + working-capital
+                # effects dominate the gap, not uncollected paper earnings
+                # (IREN 2026-09-10 review loop).
+                if cc < 0:
+                    flags.append("cash_conversion_negative_ni")
+                    evidence.append(
+                        f"cash conversion {cc:.2f} (negative NI - ratio sign "
+                        "inverted; inspect non-cash items instead of the "
+                        "< 0.8 warning)"
+                    )
+                elif cc < 1.0:
+                    flags.append("cash_conversion_caution")
+                    evidence.append(f"cash conversion {cc:.2f} (0-1 with negative NI)")
+            elif cc >= 1.0:
                 flags.append("cash_conversion_healthy")
             elif cc >= 0.8:
                 flags.append("cash_conversion_caution")

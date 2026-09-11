@@ -985,6 +985,35 @@ def test_scenario_dcf_renders_band_with_market_price():
     assert "vs market 160.0: bear-base (discounted)" in out and "mos vs base +1.0%" in out
 
 
+def test_screen_value_line_ev_ebit_artifact():
+    # IREN 2026-09-10 review loop: EV/EBIT 270,761 with loss-making EBIT is
+    # a near-zero-EBIT artifact - the negative multiple is the meaningful side.
+    assert "ARTIFACT" in T.screen_value_line("ev_ebit", 270761.04, 270761.04)
+    assert "ARTIFACT" in T.screen_value_line("earnings_yield", 0.0, 270761.04)
+    assert "ARTIFACT" not in T.screen_value_line("ev_ebit", -18.29, -18.29)
+    assert T.screen_value_line("ev_ebit", -18.29, -18.29) == "  EV/EBIT: -18.29"
+    assert T.screen_value_line("altman_z", 1.28, None) == "  Altman Z: 1.28"
+
+
+def test_surprise_basis_note_negative_actual():
+    # IREN Q4 FY26: act -2.16 (GAAP) vs est -0.6058 - bases must be reconciled.
+    assert "basis-unreconciled" in T.surprise_basis_note({"actual": -2.16, "estimate": -0.6058})
+    assert T.surprise_basis_note({"actual": 1.11, "estimate": 0.94}) == ""
+    assert T.surprise_basis_note({}) == ""
+
+
+def test_earnings_quality_verdict_negative_ni_sign():
+    # IREN 2026-09-10: cash conversion = OCF/NI = -2.99 with negative NI; the
+    # <0.8 warning bands assume positive income, so this must NOT badge
+    # "warning" - it must flag the sign-inverted read.
+    out = T.get_earnings_quality_verdict.invoke({
+        "net_income": -702.62e6, "ocf": 2100.0e6, "total_assets": 15.79e9,
+        "fcf": -2350.52e6,
+    })
+    assert "negative NI - ratio sign inverted" in out
+    assert "instead of the" in out
+
+
 def test_earnings_quality_verdict_renders_level():
     out = T.get_earnings_quality_verdict.invoke({
         "net_income": 10.0, "ocf": 9.0, "total_assets": 100.0,
