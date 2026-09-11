@@ -388,6 +388,14 @@ treats it as an internal helper of a reachable module.
 `get_vif_read(AAPL, [...])` (real VIF, HIGH flags), `get_pair_risk(AAPL, MSFT)` (real cointegration + Granger),
 unknown-factor degradation, and the hermetic PM-render / card / judge tests from W4.
 
+**Measurement instrument (2026-09-11).** The budget ceilings in W1 are a proxy for the real question ("does more
+computed context help?"), so `scripts/context_ab.py` measures it directly: two paired experiments — tool selection
+with the full surface vs a shortlist, and an injected computed block present vs absent — scored per item and
+reported with an exact McNemar test plus the cost side (tools presented, characters of context). Items are drawn
+from the live toolsets and the real renders (the expected numbers are parsed back out of the card/snapshot), the
+producers are injected so the default run is hermetic, `--demo` checks the plumbing and `--live` runs the repo's
+own LLM client. Hermetic tests: `tests/test_context_ab.py`.
+
 ## 6. Sequencing & dependencies
 
 `W1 → W2 → W3` are strictly ordered (the gate must be honest before binds, and binds before guidance can be
