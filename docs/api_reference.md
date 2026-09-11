@@ -589,6 +589,12 @@ tools bound to the news node: `get_catalyst_scale`, `get_earnings_event_read`.
 The analyst tool loops bind deterministic calculators from `tradingagents/strategies/*`
 so the LLM reasons over computed numbers rather than re-deriving them:
 
+Surface labels in the "Bound to" column are machine-checked
+(`tests/test_doc_binding_claims.py`): `market` / `news` / `fundamentals` /
+`risk debators` / `trader` name the toolset a tool is callable from, and
+`declared` means no agent surface can call it — a library/CLI read whose
+reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
+
 | Tool | Wraps | Bound to | Returns |
 | --- | --- | --- | --- |
 | `get_swing_set(ticker)` | `swing.swing_report` | market | trend stack, RSI band, 1-ATR stop, 2R/3R targets, VCP, trail |
@@ -607,9 +613,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_earnings_transcript(ticker)` | FMP Earnings Transcript API (free tier) | fundamentals | Latest earnings-call transcript: date/quarter + (when served) excerpt — quote only from returned text |
 | `get_congress_trades(ticker)` | House/Senate Stock Watcher mirrors (keyless) | fundamentals | Congressional open-market stock trades: net buys/sells + samples per chamber |
 | `get_financial_history(ticker, years=?)` | SEC EDGAR XBRL companyconcept (keyless) | fundamentals | Annual 10-K financial history (~10-15y; pre-XBRL years n/a) |
-| `get_tga_balance(days=?)` | US Treasury Fiscal Data API (keyless) | macro | Daily Treasury General Account operating-cash balance + net draw/build (reserve injection/drain) read |
-| `get_fx_snapshot()` | yfinance (delayed) | macro | DXY + major FX pairs with 1d/5d changes (advisory) |
-| `get_macro_indicators` aliases extended | `fred.MACRO_SERIES` | macro | liquidity (tga/reverse_repo/repo/fed_balance_sheet/effr/sofr), commodities (wti/gold/natgas/copper), global rates (ecb_rate/boj_rate) |
+| `get_tga_balance(days=?)` | US Treasury Fiscal Data API (keyless) | news | Daily Treasury General Account operating-cash balance + net draw/build (reserve injection/drain) read |
+| `get_fx_snapshot()` | yfinance (delayed) | news | DXY + major FX pairs with 1d/5d changes (advisory) |
+| `get_macro_indicators` aliases extended | `fred.MACRO_SERIES` | news | liquidity (tga/reverse_repo/repo/fed_balance_sheet/effr/sofr), commodities (wti/gold/natgas/copper), global rates (ecb_rate/boj_rate) |
 | `get_dark_pool_flow(ticker, weeks=?)` | FINRA ATS weekly (OTC Transparency, keyless) | market | Weekly off-exchange share/trade/notional flow per issue (as-of + staleness-gated) |
 | `get_short_sale_volume(ticker, days=?)` | FINRA Reg SHO daily (keyless) | market | Daily short-sale volume (% short-sale of volume), keyless variant of get_short_volume |
 | `get_edgar_fulltext_search(query, forms?, date_range?)` | SEC EDGAR full-text search (efts.sec.gov, keyless) | fundamentals | Full-text filing search (10-K 'major customer' footnote, peer mentions, thematic scans) |
@@ -623,15 +629,15 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |
 | `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` | market | book-level portfolio CVaR + correlated -10% stress + drawdown gate |
-| `get_covariance_read(tickers)` | `covariance_models.ledoit_wolf_shrink` + `ewma_covariance` | market | Ledoit-Wolf shrunk covariance (delta = b2/d2) + EWMA vol for a name list |
-| `get_concentration_read(weights, benchmark_weights?)` | `portfolio.active_share` + `weight_hhi` + `effective_holdings` + `weight_entropy` | market | how concentrated a proposed book is (active share vs benchmark, HHI, entropy) |
-| `get_tail_extreme_var(ticker, alpha?)` | `book_risk.extreme_quantile_var` | market | EVT/GPD extreme-quantile VaR/ES (extrapolates beyond the observed worst day) |
-| `get_kyle_lambda(ticker)` | `liquidity_risk.kyle_lambda` | market | daily-bar price-impact slope (cross-sectional liquidity proxy) |
-| `get_kelly_alloc(expected_excess_returns)` | `portfolio.kelly_weights` | market + fundamentals | multi-asset fractional Kelly alloc (w = f·Σ⁻¹μ, long-only) |
-| `get_trade_outcome_metrics(ticker, entry, stop?, target?, direction?)` | `prediction_ledger.outcome_metrics` | market | MAE/MFE + stop/target hits over the trailing closes (W1-3) |
-| `get_prediction_ledger_score(results_dir?, auto_invalidate?)` | `prediction_ledger.score_all` | market | calibration read: scores every logged prediction vs realized closes (W1-1) |
-| `get_stress_grid_read(base_value, revenue_shifts?, discount_shifts?)` | `regime_performance.stress_grid` | market | DCF-style scenario grid (W2-11) |
-| `get_macro_regime_read(rate_change?, curve?, spread?, usd?, vol?)` | `regime_performance.macro_regime` | market | cross-asset Risk-On / Liquidity-Contraction / Stagflation (W4-6) |
+| `get_covariance_read(tickers)` | `covariance_models.ledoit_wolf_shrink` + `ewma_covariance` | risk debators | Ledoit-Wolf shrunk covariance (delta = b2/d2) + EWMA vol for a name list |
+| `get_concentration_read(weights, benchmark_weights?)` | `portfolio.active_share` + `weight_hhi` + `effective_holdings` + `weight_entropy` | risk debators | how concentrated a proposed book is (active share vs benchmark, HHI, entropy) |
+| `get_tail_extreme_var(ticker, alpha?)` | `book_risk.extreme_quantile_var` | risk debators | EVT/GPD extreme-quantile VaR/ES (extrapolates beyond the observed worst day) |
+| `get_kyle_lambda(ticker)` | `liquidity_risk.kyle_lambda` | declared | daily-bar price-impact slope (cross-sectional liquidity proxy) |
+| `get_kelly_alloc(expected_excess_returns)` | `portfolio.kelly_weights` | declared | multi-asset fractional Kelly alloc (w = f·Σ⁻¹μ, long-only) |
+| `get_trade_outcome_metrics(ticker, entry, stop?, target?, direction?)` | `prediction_ledger.outcome_metrics` | declared | MAE/MFE + stop/target hits over the trailing closes (W1-3) |
+| `get_prediction_ledger_score(results_dir?, auto_invalidate?)` | `prediction_ledger.score_all` | declared | calibration read: scores every logged prediction vs realized closes (W1-1) |
+| `get_stress_grid_read(base_value, revenue_shifts?, discount_shifts?)` | `regime_performance.stress_grid` | declared | DCF-style scenario grid (W2-11) |
+| `get_macro_regime_read(rate_change?, curve?, spread?, usd?, vol?)` | `regime_performance.macro_regime` | declared | cross-asset Risk-On / Liquidity-Contraction / Stagflation (W4-6) |
 | `get_liquidation_days(ticker, shares_to_liquidate?)` | `liquidity_risk.days_to_absorb` | market | days for the market to absorb a block at a 15% participation cap |
 | `get_premarket_review(ticker, prior_close?, open_price?, prior_stop?, entry_price?)` | `pre_market.review_decision` | market | deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas |
 | `get_relative_strength(ticker)` | `relative_strength.relative_strength_report` | market | leading/uptrend/lagging/diverging/unknown vs SPY |
@@ -653,7 +659,7 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_exit_check(entry, close, atr)` | `strategies.exits.exit_check` | market | stop-to-breakeven, ATR target, holding action |
 | `get_allocation(scores, sector_map?, returns_by_name?)` | `strategies.portfolio.adjust_for_caps` (+ `correlation_penalty` when `enable_correlation_penalty` is on and return series are provided) | fundamentals | cap-respecting book allocation; optionally correlation-penalized (down-weights names whose avg pairwise correlation with the book exceeds the threshold) |
 | `get_regime_components(ticker)` | `strategies.regime` | market | vol_pct / trend / chop / regime label breakdown |
-| `get_consensus(ratings)` | `strategies.consensus` | PM tool + injected | numeric agreement -> high/low consensus |
+| `get_consensus(ratings)` | `strategies.consensus` | declared | numeric agreement -> high/low consensus |
 | `get_momentum_detail(ticker)` | `strategies.momentum` | market | pillars, rvol, vwap, ema9, first-pullback |
 | `get_beat_miss_sizing(side, catalyst)` | `strategies.events.position_mult_by_side` | news | post-earnings key multiplier |
 | `get_dcf_valuation(ticker, date, growth?, erp?)` | `strategies.dcf.compute_dcf` | fundamentals | provider-sourced DCF fair value + WACC / EV breakdown; Gordon terminal value anchored to the last projected year's FCF (`F_0·(1+g)^years`, discounted back from year N) — audit-fixed 2026-09-06 |
@@ -692,14 +698,14 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_support_structure(ticker)` | `strategies.value_dip.support_structure` | market | major weekly / multi-month base support + 200-day SMA proximity |
 | `get_decline_driver_check(ticker, date)` | `strategies.value_dip.decline_driver_check` | fundamentals | negative-force screen (clean/caution/structural): trap-HIGH, accruals>6%, negative 12-1m momentum, non-positive FCF/ROE, severe EPS decline |
 
-| `get_regime_gate_read(ticker, catalyst_window?)` | `strategies.regime.regime_gate_read` | market / risk debators | mean-reversion knife guard: vol_pct + fast-downtrend + pass/block verdict |
-| `get_fixed_risk_size(equity, risk_frac, entry, stop_loss, commission_rate?, units?)` | `strategies.risk_sizing` | market / risk debators / trader | commission-aware, tranche-aware fixed-risk share count (the governor-budget sizer) |
+| `get_regime_gate_read(ticker, catalyst_window?)` | `strategies.regime.regime_gate_read` | risk debators | mean-reversion knife guard: vol_pct + fast-downtrend + pass/block verdict |
+| `get_fixed_risk_size(equity, risk_frac, entry, stop_loss, commission_rate?, units?)` | `strategies.risk_sizing` | risk debators / trader | commission-aware, tranche-aware fixed-risk share count (the governor-budget sizer) |
 | `get_exit_overrides(targets, state_by_name, max_drawdown_pct?, trail_pct?)` | `strategies.risk_manager.manage_risk` + `trailing_stop_targets` | risk debators | two-pass liquidate/shrink overrides (Lean L1) from persisted entry/peak/current state |
 | `get_pre_trade_read(symbol, notional, max_notional?, max_rate?, window_secs?)` | `strategies.risk_checks.pre_trade_check` + `RateLimiter` + `notional` | risk debators | notional-cap + rolling-rate submission gate (advisory) |
 | `get_ledger_risk_state(ticker)` | memory log + `strategies.pre_market.ledger_track_record` | risk debators | realized win-rate drift + paper-reviewer track record (daily-loss/HWM inputs) |
 | `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable |
 | `get_fixed_income_risk(ticker, years?)` | `strategies.fixed_income` | fundamentals | preferred yield + duration/DV01/convexity risk rows (perpetual YTM n/a) |
-| `get_pair_risk(x, y, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` | market | Engle-Granger cointegration + lag-wise Granger causality |
+| `get_pair_risk(x, y, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` | declared | Engle-Granger cointegration + lag-wise Granger causality |
 | `get_pair_trade_signal(x, y, entry?, exit_thresh?, stop?)` | `strategies.statistical.pair_signal` (`spread_zscore` + cointegration + half-life) | market | cookbook recipe-3 pairs signal: entry \|z\|≥2 / exit ≤0.5 / stop ≥3, dollar-neutral `pair_quantities` + VECM `ecm_loading` advisory |
 | `get_signal_quality(signal, forward_returns, quantile?)` | `strategies.signal_analysis` (`rank_ic` / `icir` / `long_short_precision`) + `evaluate.purged_cpcv_splits` | market | deterministic validation read for a forecast: Spearman rank IC, ICIR, Qlib long-short precision (top-quantile sign hit rate) + combinatorial-CPCV path count (audit-fixed 2026-09-06) |
 | `get_bsm_option_quote(spot, strike, t_years, vol, option_type?, r?, q?)` | `strategies.options_math.bsm_equity_surface` | market | direct Black-Scholes-Merton spot-space price + Greeks (incl. charm with dividend term) when the chain does not quote the asked strike/expiry — advisory model quote |
@@ -708,9 +714,9 @@ so the LLM reasons over computed numbers rather than re-deriving them:
 | `get_event_pnl_response(spot, delta, gamma, vega, theta, dS_pct, dSigma?)` | `strategies.options_math.greek_pnl_response` | market | cookbook recipe-5 scenario P&L: `Δ·dS + ½Γ·dS² + ν·dσ + Θ·dt` per option unit |
 | `get_merton_distance(equity, debt, equity_vol, r?, t?)` | `strategies.credit_spread.merton_distance_to_default` | market / risk debators | structural distance-to-default (equity-as-a-call fixed-point; DtD = d2 + risk-neutral PD) |
 | `get_book_depth_read(bid, ask, bid_size, ask_size)` | `strategies.market_session.book_depth_read` | market | microprice `(bid·ask_sz + ask·bid_sz)/(bid_sz+ask_sz)` + order-book imbalance + thin-side verdict |
-| `get_vif_read(columns)` | `strategies.statistical.variance_inflation_factor` | market | per-column VIF (collinearity check; > 5 = HIGH) |
-| `get_vol_cones(ticker)` | `strategies.rotation.vol_cones` | market / risk debators | multi-horizon realized-vol percentiles (5/10/21/63/126d) |
-| `get_trade_excursions(trades)` | `strategies.journal.trade_excursions` | market | MAE / MFE / profit-factor / max intra-trade drawdown (exit quality) |
+| `get_vif_read(columns)` | `strategies.statistical.variance_inflation_factor` | declared | per-column VIF (collinearity check; > 5 = HIGH) |
+| `get_vol_cones(ticker)` | `strategies.rotation.vol_cones` | risk debators | multi-horizon realized-vol percentiles (5/10/21/63/126d) |
+| `get_trade_excursions(trades)` | `strategies.journal.trade_excursions` | declared | MAE / MFE / profit-factor / max intra-trade drawdown (exit quality) |
 | `get_alpha_scoring(direction, predicted_magnitude?, period_days?, actual_return?, confidence?)` | `strategies.alpha_eval.alpha_score` | fundamentals | direction + magnitude-scored alpha ("said +12%, realized +2%") |
 
 ### 6.5b Decision-agent wiring (risk debators / Trader / PM / researchers)

@@ -39,9 +39,12 @@ the only one — which is where the deepest gaps are.
 - 208 `@tool` functions; 192 callable by an agent (in the agent's `bind_tools` set **and** dispatchable by
   its executor); **16 in no callable surface** (13 on no surface at all, 3 reachable only from the debator
   loop). See §3.E: "bound" is two conditions, and only the single-source toolset guarantees both.
-- Prompt guidance: market 100 guided / 10 listed-only; news 18 / 7; fundamentals 35 / 9 (+ETF 8 / 4);
-  risk debators 23 named / **4 absent**; trader 12 / 1. **35 tools have no trigger sentence** (5 of them
-  carry a usable trigger in their own docstring, 30 do not).
+- Prompt guidance: the audit's original name-only count (35 tools without a trigger sentence, 5 of them
+  carrying a usable trigger in their own docstring) was re-measured when the gate was built (W1): the gate's
+  trigger test (a name must sit on a line that says *when* to use it) finds **28 gaps**, listed by name in
+  `tests/test_prompt_trigger_contract.py::PENDING`; the rest carry the trigger in the prompt or the tool's own
+  docstring. The original "listed-only" audit and this gate disagree only in wording they accept, and the
+  gate's list is the one W3 fills.
 - Context channel: **3 PM prompt rules reference numbers that are never injected**, 1 always-`unavailable`
   card, 1 judge prompt reduced to counts, 2 blocks built-and-never-read, 1 guard that can never fire.
 
@@ -218,16 +221,18 @@ proven to fail before its phase lands:
   with a real consumer; `CHANGELOG.md:994-1005` is a historical record and is **kept** — a dated correction is
   appended naming the real cause (the gate counted executor-list membership as "bound"), never a rewrite.
 - Add the **prompt-budget gate** (R1): assemble each analyst prompt and assert a ceiling, not a vibe.
-  Measured basis at drafting: market fixed text 27,719 chars, of which the forced-tool bullets are 18,819
-  (67.9%) across 77 bullets (244 chars average). Ceilings: market ≤ 30,000 chars (+8%), every tool bullet
-  ≤ 200 chars, and the tool-bullet *count* recorded so a reflow cannot hide growth. The W3 additions must be
-  funded by the two text trims, and the gate must fail when the tree is given 30 extra lines at the current
-  average length.
+  Measured when the gate landed: market prompt text 37,527 chars, of which the forced-tool bullets are
+  18,819 (50.1%) across 77 bullets, the longest 523 chars. Ceilings: market ≤ 40,000 chars, ≤ 95 tool
+  bullets, and no bullet longer than the recorded 523 (a reflow that merges or splits lines cannot hide
+  growth). The gate is `tests/test_prompt_budget_contract.py`, with a synthetic case proving it fails.
 - Add the **argument-shape gate** (R2): iterate every tool on every surface, read its advertised schema, and
-  fail if an LLM-facing argument is a list/dict of numbers. Allowlist the four pre-existing offenders
-  (`get_pair_trade_signal`, `get_book_correlation`, `get_hrp_alloc`, `get_ts_momentum_weights`) with a
-  one-line rationale and a conversion item each; the allowlist may only shrink, and an entry for a tool that
-  no longer exists fails the gate.
+  fail if an LLM-facing argument is a list/dict of numbers. The first run found **11 bound tools** (not the
+  4 the drafting pass had listed) that advertise a complex argument: `get_allocation`,
+  `get_allocation_black_litterman`, `get_book_correlation`, `get_constituent_cap_weights`,
+  `get_exit_overrides`, `get_hrp_alloc`, `get_pair_trade_signal`, `get_portfolio_weights`,
+  `get_risk_parity_alloc`, `get_signal_quality`, `get_ts_momentum_weights` — each recorded in the gate's
+  `COMPLEX_ARG_DECISIONS` with its reason; the list may only shrink, and an entry for a tool that is unbound
+  or no longer complex fails the gate.
 - Add the **doc-claim test** (R4): the api_reference surface column must not assert a callability the
   toolset objects do not have. It fails on the current tree (16 rows) and passes once the column is corrected.
 - Add the **bidirectional callability gate**: for every analyst/debator/trader surface, the `bind_tools`
@@ -326,6 +331,26 @@ system then contradicts.
   present.
 - Prompt-budget check on the three analyst prompts after the added lines.
 
+**W1 landed (2026-09-11) and its findings, recorded here as executed:**
+
+- The object-based binding gate replaced the raw-text blob scan; the text scan is deleted (nothing can satisfy
+  it by wording any more). The 16 declared tools are confirmed real and genuinely unbound, and a stale
+  declaration now fails the gate.
+- The old prompt-guidance gate was **vacuous**: its case list was empty since S1 (it searched for hand-written
+  tool lists that no longer exist), so a skip, not a failure, hid the whole class. It is deleted, replaced by
+  the trigger gate.
+- The bidirectional callability gate is behavioural: the analyst node is invoked with a stub LLM and the
+  captured `bind_tools` list must equal the toolset the ToolNode executes; the risk/trader loops must bind
+  exactly the list they dispatch.
+- The argument-shape gate found 11 complex-argument tools (drafting pass had listed 4) — see §7 R2.
+- The budget gate's real basis is 37,527 chars / 77 bullets / 523-char longest (the drafting numbers came from
+  a single literal, not the assembled prompt).
+- 28 prompt-trigger gaps are pinned in the gate's `PENDING` map; W3 empties it.
+- `docs/api_reference.md`: 19 rows corrected (3 macro rows to `news`, 3 to `risk debators`, 12 to `declared`,
+  1 from `PM tool + injected` to `declared`), the label vocabulary is documented, and a new gate
+  (`tests/test_doc_binding_claims.py`) checks every row against the toolsets. README's 2026-09-04 entry carries
+  the correction; the CHANGELOG entry is kept as history with a dated correction appended.
+
 ## 6. Sequencing & dependencies
 
 `W1 → W2 → W3` are strictly ordered (the gate must be honest before binds, and binds before guidance can be
@@ -340,10 +365,10 @@ to avoid churn in the same prompts. `W5` closes what W2/W4 changed. `W6` last.
   trims funding the additions; house style stays one clause per tool.
 - **Binding a tool the model can't drive**: mitigated *structurally* for both tools this plan touches —
   `get_vif_read` and `get_pair_risk` are reshaped to take names (W2.0), so there is nothing to transcribe. Gate:
-  W1's argument-shape rule, which refuses any new LLM-facing list/dict-of-numbers argument. Residual: the four
-  pre-existing series-argument tools (`get_pair_trade_signal`, `get_book_correlation`, `get_hrp_alloc`,
-  `get_ts_momentum_weights`) stay on the allowlist; they rely on the prompt naming the exact call, and
-  converting them is recorded as separate work, not silently accepted as fine.
+  W1's argument-shape rule, which refuses any new LLM-facing list/dict-of-numbers argument. Residual: **11**
+  bound tools still advertise a complex (list/object) argument — the four the drafting pass named plus seven
+  the gate found — each recorded with its reason in `tests/test_tool_argument_shape.py`; they rely on the
+  prompt naming the exact call, and converting them is recorded as separate work, not silently accepted.
 - **PM pre-graph gating changes what the decision can act on.** Resolved as "hoist" in §4.5, so this is the one
   change in the plan that can alter a trading decision: the PM will now see a drawdown-vs-limit / liquidity /
   contract read it previously never received, and may veto or shrink trades it used to pass. Two residual risks

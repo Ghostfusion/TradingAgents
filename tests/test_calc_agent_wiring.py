@@ -14,7 +14,6 @@ reviewed, not silent.
 """
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
@@ -150,20 +149,24 @@ def test_public_calc_reachable_or_whitelisted(case):
 # "defined but unbound" gap that text-substring audits cannot see.
 # ---------------------------------------------------------------------------
 
-TOOL_BINDING_DOMAINS = (
-    list((REPO / "tradingagents" / "agents" / "analysts").rglob("*.py"))
-    + list((REPO / "tradingagents" / "agents" / "arbiters").rglob("*.py"))
-    + list((REPO / "tradingagents" / "agents" / "managers").rglob("*.py"))
-    + list((REPO / "tradingagents" / "agents" / "risk_mgmt").rglob("*.py"))
-    + list((REPO / "tradingagents" / "agents" / "researchers").rglob("*.py"))
-    + [REPO / "tradingagents" / "agents" / "utils" / "risk_tool_loop.py"]
-    + list((REPO / "tradingagents" / "graph").glob("*.py"))
-)
-TOOL_BINDING_BLOB = "\n".join(
-    p.read_text(encoding="utf-8", errors="ignore")
-    for p in TOOL_BINDING_DOMAINS
-    if p.exists()
-)
+def _bound_tool_names() -> set[str]:
+    """Names callable by an agent, read from the toolset OBJECTS.
+
+    The old gate searched the raw text of the analyst/graph files, so a tool
+    named only in a prompt sentence counted as "bound" while no LLM could
+    call it (the gate asserted the docs, not the capability). Reading the
+    actual lists is the only definition that cannot be fooled by wording.
+    """
+    from tradingagents.agents.toolsets import analyst_toolset
+    from tradingagents.agents.utils import risk_tool_loop
+
+    risk_tool_loop._build_lists()
+    names: set[str] = set()
+    for key in ("market", "news", "fundamentals"):
+        names |= {t.name for t in analyst_toolset(key)}
+    names |= {t.name for t in risk_tool_loop.RISK_DEBATOR_TOOLS}
+    names |= {t.name for t in risk_tool_loop.TRADER_TOOLS}
+    return names
 
 # Tools bound only inside their own module (no agent-side binding) -> must be
 # whitelisted with a reason (e.g. internal helpers a wrapper calls directly).
@@ -226,12 +229,11 @@ def _tool_names(path: Path):
 
 
 TOOL_CASES = []
+_ALL_TOOL_NAMES: set[str] = set()
 for f in sorted((REPO / "tradingagents" / "agents" / "utils").glob("*_tools.py")):
-    own = f.read_text(encoding="utf-8", errors="ignore")
     for name in sorted(_tool_names(f)):
-        # The tool's own module is in agents/utils - binding must be in the
-        # non-utils binding surface (its own def text would self-count).
-        if name in TOOL_BINDING_BLOB:
+        _ALL_TOOL_NAMES.add(name)
+        if name in _bound_tool_names():
             continue
         TOOL_CASES.append((f"{f.parent.name}/{f.name}:{name}", name))
 
@@ -240,108 +242,30 @@ for f in sorted((REPO / "tradingagents" / "agents" / "utils").glob("*_tools.py")
 def test_tool_bound_to_agent_surface(case):
     key, name = case
     assert name in TOOL_LEGACY_BINDING, (
-        f"@tool {key} is not bound anywhere in the agent surface (graph "
-        "ToolNode lists / risk-tool loop / analyst files) - the agents can "
-        "never call it. Bind it to a ToolNode or the risk loop, or "
-        "whitelist it in TOOL_LEGACY_BINDING with a reason."
+        f"@tool {key} is not in any agent toolset or tool loop (the objects "
+        "are the source of truth) - no LLM can call it. Bind it to a toolset "
+        "or the risk loop, or declare it in TOOL_LEGACY_BINDING with the real "
+        "consumer and the reason it stays unbound."
     )
 
 
-# ---------------------------------------------------------------------------
-# prompt-guidance gate: every @tool bound to an analyst's tool list must be
-# mentioned in that analyst's system_message (or _build_system_message), so
-# the LLM knows WHEN the tool applies. This closes the "bound but never
-# explained" gap - a tool in the list an LLM never triggers is dead weight,
-# and the risk-loop binds tools by name with the loop's own guidance.
-# ---------------------------------------------------------------------------
+def test_declared_tools_are_real_and_unbound():
+    """A declaration must name a real @tool that is genuinely unbound.
 
-
-def _system_message_strings(path: Path) -> str:
-    """Concatenated prompt text from ``system_message = (...+...)`` assignments
-    and ``_build_system_message`` f-string returns (AST-safe, paren-safe)."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (OSError, SyntaxError):
-        return ""
-    vals = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id == "system_message":
-                    vals.append(node.value)
-        if isinstance(node, ast.FunctionDef) and node.name == "_build_system_message":
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Return) and isinstance(sub.value, ast.JoinedStr):
-                    vals.append(sub.value)
-    out = []
-
-    def collect(v):
-        if isinstance(v, ast.Constant) and isinstance(v.value, str):
-            out.append(v.value)
-        elif isinstance(v, ast.JoinedStr):
-            for x in v.values:
-                if isinstance(x, ast.Constant):
-                    out.append(x.value)
-        elif isinstance(v, ast.BinOp):
-            collect(v.left)
-            collect(v.right)
-        elif isinstance(v, ast.Tuple):
-            for e in v.elts:
-                collect(e)
-
-    for v in vals:
-        collect(v)
-    return "\n".join(out)
-
-
-def _tool_list_names(path: Path) -> set[str]:
-    """Names appearing in the file's indented tool-list assignments (the same
-    heuristic the binding gate uses for the tool list)."""
-    txt = path.read_text(encoding="utf-8", errors="ignore")
-    try:
-        ast.parse(txt)
-    except (OSError, SyntaxError):
-        return set()
-    clean = re.sub(r"#.*$", "", txt, flags=re.M)
-    return {m.group(1) for m in re.finditer(r"^\s+([A-Za-z_]\w*),?\s*$", clean, re.M)}
-
-
-def _imported_names(path: Path) -> set[str]:
-    txt = path.read_text(encoding="utf-8", errors="ignore")
-    try:
-        tree = ast.parse(txt)
-    except (OSError, SyntaxError):
-        return set()
-    return {a.asname or a.name for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) for a in node.names}
-
-
-def _tool_names_set() -> set[str]:
-    names: set[str] = set()
-    for f in (REPO / "tradingagents" / "agents" / "utils").glob("*_tools.py"):
-        names |= set(_tool_names(f))
-    return names
-
-
-PROMPT_CASES: list[tuple[str, str, str]] = []
-for f in sorted((REPO / "tradingagents" / "agents" / "analysts").rglob("*.py")):
-    prompt = _system_message_strings(f)
-    listed = _tool_list_names(f)
-    imported = _imported_names(f)
-    for name in sorted(listed & imported & _tool_names_set()):
-        if re.search(r"\b" + re.escape(name) + r"\b", prompt):
-            continue
-        PROMPT_CASES.append((f"{f.parent.name}/{f.name}:{name}", name, f.name))
-
-
-
-@pytest.mark.parametrize("case", PROMPT_CASES, ids=[c[0] for c in PROMPT_CASES])
-def test_bound_tool_has_prompt_guidance(case):
-    key, name, analyst = case
-    raise AssertionError(
-        f"@tool {key} is in {analyst}'s tool list but is never mentioned in its "
-        "system_message - the LLM has no guidance for when to call it. Add a "
-        "'cite it before any X claim' line for this tool to that analyst's prompt."
+    Both halves matter: a typo would silently exempt nothing, and a stale
+    entry would keep claiming "no agent can call this" for a tool that is now
+    bound. The list may only shrink as declarations are wired or deleted.
+    """
+    bound = _bound_tool_names()
+    stale = sorted(n for n in TOOL_LEGACY_BINDING if n in bound)
+    unknown = sorted(n for n in TOOL_LEGACY_BINDING if n not in _ALL_TOOL_NAMES)
+    assert not stale, (
+        "TOOL_LEGACY_BINDING still declares tools that ARE bound - remove "
+        f"these entries: {stale}"
+    )
+    assert not unknown, (
+        "TOOL_LEGACY_BINDING names functions that are not @tools in "
+        f"agents/utils/*_tools.py - drop the typos: {unknown}"
     )
 
 
