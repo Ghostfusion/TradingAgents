@@ -446,6 +446,7 @@ def _find_bar_on_or_after(dates: list, target: str | None) -> int | None:
 def get_catalyst_scale(
     ticker: Annotated[str, "ticker symbol"],
     current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+    current_rate: Annotated[float | None, "current fed funds effective rate, e.g. 3.63 (optional - enables hold/hike/cut labeling)"] = None,
 ) -> str:
     """One scheduled-catalyst risk scale (0..1) + verdict for the ticker.
 
@@ -496,10 +497,18 @@ def get_catalyst_scale(
             f"{snap['macro']['count_high']}"
         )
     if snap.get("fed") and snap["fed"].get("days_until") is not None:
-        lines.append(
-            f"  fomc {snap['fed']['days_until']}d out "
-            f"modal_prob={_txt(snap['fed'].get('modal_prob'))}"
+        fed = snap["fed"]
+        line = (
+            f"  fomc {fed['days_until']}d out "
+            f"modal_prob={_txt(fed.get('modal_prob'))}"
         )
+        if fed.get("modal_range"):
+            line += f" {fed['modal_range']}"
+            if current_rate is not None:
+                from tradingagents.strategies.catalyst import fed_direction
+
+                line += f" -> {fed_direction(current_rate, fed['modal_range'])}"
+        lines.append(line)
     if snap.get("reasons"):
         lines.append("  reasons: " + "; ".join(snap["reasons"]))
     return chr(10).join(lines)

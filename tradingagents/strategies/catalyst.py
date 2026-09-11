@@ -140,11 +140,18 @@ def macro_imminence(events: list, trade_date: str, window_days: int = 3) -> dict
 
 
 def fed_imminence(fed_rows: list, trade_date: str, window_days: int = 14) -> dict:
-    """Next FOMC meeting within the window + modal target-rate probability."""
+    """Next FOMC meeting within the window + modal target-rate probability
+    and the modal target range.
+
+    IREN 2026-09-10 review loop: the modal range (e.g. 3.75-4.00%) cannot be
+    labeled hold/hike/cut without the current band. This surfaces the modal
+    target range so the caller (and the tool) can compute direction via
+    :func:`fed_direction`.
+    """
     td = parse_date(trade_date)
     if td is None:
-        return {"days_until": None, "modal_prob": None}
-    meetings = {}
+        return {"days_until": None, "modal_prob": None, "modal_range": None}
+    by_meeting: dict[str, dict] = {}
     for row in fed_rows or []:
         d = parse_date(row.get("meeting_date"))
         if d is None:
@@ -153,14 +160,55 @@ def fed_imminence(fed_rows: list, trade_date: str, window_days: int = 14) -> dic
         if days < 0:
             continue
         prob = _num(row.get("probability"))
-        if prob is not None and days <= window_days:
-            meeting = d.strftime("%Y-%m-%d")
-            meetings[meeting] = max(meetings.get(meeting, 0.0), prob)
-    if not meetings:
-        return {"days_until": None, "modal_prob": None}
-    meeting = min(meetings, key=lambda m: m)
+        if prob is None or days > window_days:
+            continue
+        meeting = d.strftime("%Y-%m-%d")
+        cur = by_meeting.get(meeting)
+        if cur is None or prob > cur["prob"]:
+            by_meeting[meeting] = {
+                "prob": prob,
+                "range": str(row.get("target_range") or ""),
+            }
+    if not by_meeting:
+        return {"days_until": None, "modal_prob": None, "modal_range": None}
+    meeting = min(by_meeting, key=lambda m: m)
     md = parse_date(meeting)
-    return {"days_until": (md - td).days if md else None, "modal_prob": meetings[meeting]}
+    entry = by_meeting[meeting]
+    return {
+        "days_until": (md - td).days if md else None,
+        "modal_prob": entry["prob"],
+        "modal_range": entry["range"],
+    }
+
+
+def fed_direction(current_rate: float | None, modal_range: str) -> str:
+    """Classify a Fed modal target range as HOLD/HIKE/CUT vs the current rate.
+
+    25bp-bucket the effective rate into its current target band and compare to
+    the modal range midpoint. IREN 2026-09-10: effective 3.63 -> band
+    3.50-3.75, so a modal 3.75-4.00% is a HIKE, not the 'hold' an earlier
+    report labeled. Returns 'n/a' when inputs are unusable.
+    """
+    if current_rate is None or not modal_range:
+        return "n/a"
+    import re as _re
+    m = _re.search(r"([\d.]+)[^\d.]+([\d.]+)", modal_range)
+    if not m:
+        return "n/a"
+    try:
+        modal_lo, modal_hi = float(m.group(1)), float(m.group(2))
+    except (TypeError, ValueError):
+        return "n/a"
+    cur = float(current_rate)
+    # current target band: floor to the 25bp grid
+    cur_lo = (cur // 0.25) * 0.25
+    modal_mid = (modal_lo + modal_hi) / 2.0
+    cur_mid = cur_lo + 0.125
+    if abs(modal_mid - cur_mid) < 0.001 or abs(modal_lo - cur_lo) < 0.001:
+        return "HOLD"
+    if modal_mid > cur_mid:
+        return "HIKE"
+    return "CUT"
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +520,7 @@ __all__ = [
     "implied_move_from_history",
     "macro_imminence",
     "fed_imminence",
+    "fed_direction",
     "build_catalyst_snapshot",
     "fold_catalyst_into_overlay",
     "apply_catalyst_scale",

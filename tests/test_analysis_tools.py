@@ -254,6 +254,41 @@ def test_catalyst_scale_computed():
     assert "reasons:" in out
 
 
+def test_fed_direction_classifies_against_current_rate():
+    # IREN 2026-09-10 review loop: effective 3.63 -> current band 3.50-3.75,
+    # so a modal 3.75-4.00% is a HIKE, not the 'hold' an earlier report
+    # labeled. 3.50-3.75% would be a HOLD; a lower modal is a CUT.
+    from tradingagents.strategies.catalyst import fed_direction
+
+    assert fed_direction(3.63, "3.75-4.00%") == "HIKE"
+    assert fed_direction(3.63, "3.50-3.75%") == "HOLD"
+    assert fed_direction(4.00, "3.75-4.00%") == "CUT"
+    assert fed_direction(3.13, "3.50-3.75%") == "HIKE"
+    assert fed_direction(None, "3.75-4.00%") == "n/a"
+    assert fed_direction(3.63, "") == "n/a"
+
+
+def test_catalyst_scale_renders_modal_range_and_direction():
+    # get_catalyst_scale must surface the modal target range, and when a
+    # current_rate is supplied, the hold/hike/cut direction (IREN 2026-09-10).
+    fake = {
+        "earnings_calendar": [],
+        "move_history": [],
+        "economic_calendar": [],
+        "fed_watch": [
+            {"meeting_date": "2026-09-15", "target_range": "3.50-3.75%", "probability": 28.8},
+            {"meeting_date": "2026-09-15", "target_range": "3.75-4.00%", "probability": 71.3},
+        ],
+    }
+    with mock.patch("tradingagents.strategies.catalyst.fetch_catalyst_data", return_value=fake):
+        out = T.get_catalyst_scale.invoke({
+            "ticker": "IREN", "current_date": "2026-09-10", "current_rate": 3.63,
+        })
+    assert "modal_prob=0.7" in out or "modal_prob=71.3" in out
+    assert "3.75-4.00%" in out
+    assert "HIKE" in out
+
+
 def test_catalyst_scale_unavailable_neutral():
     with mock.patch("tradingagents.strategies.catalyst.fetch_catalyst_data", return_value=None):
         out = T.get_catalyst_scale.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
