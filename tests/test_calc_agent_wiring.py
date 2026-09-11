@@ -171,26 +171,21 @@ def _bound_tool_names() -> set[str]:
 # Tools bound only inside their own module (no agent-side binding) -> must be
 # whitelisted with a reason (e.g. internal helpers a wrapper calls directly).
 TOOL_LEGACY_BINDING = {
-    # @tool functions that no analyst binds and that are not wired into the
-    # risk loop. They were previously "bound" only by appearing in a graph
-    # ToolNode list, which satisfied this gate while leaving them uncallable
-    # by any LLM (the model can only emit calls for tools it was bound).
-    # S1 now derives every ToolNode from the analyst's own toolset, so the
-    # truth is visible: these are library/registry reads with no agent
-    # surface. Each entry states its real consumers; revisit as either
-    # "bind + document in the analyst prompt" or "delete".
-    "get_consensus": "advisory consensus read; docs/api_reference.md + AGENT_ONBOARDING; exercised by test_analysis_tools.py",
-    "get_enhanced_index_tilt": "index-tilt read; docs/design_qlib_integration.md; exercised by test_qlib_wiring.py",
-    "get_kelly_alloc": "allocation read documented in api_reference.md; no code/test consumer",
-    "get_kyle_lambda": "liquidity read documented in api_reference.md; no code/test consumer",
-    "get_no_trade_guard_band": "rebalance guard read documented in README; no code/test consumer",
-    "get_prediction_ledger_score": "ledger-score read documented in README/api_reference; no code/test consumer",
-    "get_prompt_injection_read": "injection-scan read; no consumer anywhere (docs, tests or code) - bind-or-delete candidate",
-    "get_stress_grid_read": "stress-grid read documented in README/api_reference; no code/test consumer",
-    "get_thesis_evidence_matrix": "thesis-evidence read; no consumer anywhere (docs, tests or code) - bind-or-delete candidate",
-    "get_topk_drop_plan": "drop-plan read; docs/implementation_qlib_integration.md; exercised by test_qlib_wiring.py",
-    "get_trade_excursions": "excursion read; docs/design_risk_calculations_agent_wiring.md; exercised by test_risk_agent_wiring.py",
-    "screen_equities": "equity screener; called by scripts/screener.py (CLI-facing), not an analyst tool",
+    # @tool functions with NO callable agent surface. Every entry names either
+    # the bound tool that covers the same claim or the real consumer of the
+    # read; "nothing uses it" is not an acceptable reason to keep one, and the
+    # test above refuses an entry once its tool becomes bound.
+    "get_consensus": "covered: the PM receives the computed agreement number in computed_independent_vote; both managers run NO_EXTERNAL_TOOLS",
+    "get_enhanced_index_tilt": "universe-level index tilt; consumer is the screener alloc block (docs/design_qlib_integration.md), exercised by tests/test_qlib_wiring.py",
+    "get_kelly_alloc": "covered: get_allocation_black_litterman / get_position_sizing / get_hrp_alloc are the bound allocation reads",
+    "get_kyle_lambda": "covered: get_liquidity_risk returns ILLIQ / float-turnover / IWF / verdict; the tool docstring forbids per-ticker use",
+    "get_no_trade_guard_band": "rebalance guard; needs a current book weight no agent surface carries (README documents it)",
+    "get_prediction_ledger_score": "covered: get_ledger_risk_state is the bound win-rate read; the stops/targets half is get_trade_outcome_metrics (bound to the debators)",
+    "get_prompt_injection_read": "ingestion-layer guard: by the time an LLM can call it the text is already in context, so the scan belongs to the loader, not a tool",
+    "get_stress_grid_read": "covered: get_scenario_dcf is the modelled version; the grid never receives its sensitivity axis and says so",
+    "get_topk_drop_plan": "universe-level drop plan; consumer is the screener alloc block (docs/implementation_qlib_integration.md) - the PM that docs once gave it to runs NO_EXTERNAL_TOOLS",
+    "get_trade_excursions": "journal / QA rows for the CLI batch path (docs/design_risk_calculations_agent_wiring.md), exercised by tests/test_risk_agent_wiring.py",
+    "screen_equities": "CLI screener (scripts/screener.py, enable_screener=False); breadth is covered by the bound get_market_movers",
 }
 
 

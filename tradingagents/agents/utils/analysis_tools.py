@@ -5459,39 +5459,6 @@ def get_parity_screen(
 
 @tool
 
-def get_thesis_evidence_matrix(
-    claims_json: Annotated[str, "JSON list of {thesis, metric, direction, target} claims"],
-    evidence_json: Annotated[str, "JSON dict of {metric: current value}"],
-) -> str:
-    """Thesis-vs-evidence matrix (W3-6): deterministic claims vs measured
-    evidence -> {thesis, metric, evidence, strength, status} rows (Strong /
-    Medium / Weak / Contradicted / unmeasured). Use before any 'the thesis is
-    confirmed / contradicted by the data' claim - strength comes from the
-    measured metrics, never the narrative. Advisory.
-    """
-    import json as _json
-
-    try:
-        from tradingagents.strategies.integrity_tools import thesis_evidence_matrix
-    except Exception as exc:  # noqa: BLE001 - degrades
-        return f"thesis evidence matrix unavailable: {exc}"
-    try:
-        claims = _json.loads(claims_json or "[]")
-        evidence = _json.loads(evidence_json or "{}")
-    except ValueError as exc:
-        return f"thesis evidence matrix unavailable: bad JSON - {exc}"
-    if not isinstance(claims, list) or not isinstance(evidence, dict):
-        return "thesis evidence matrix unavailable: claims must be a JSON list, evidence a JSON dict"
-    rows = thesis_evidence_matrix(claims, evidence)
-    lines = ["## Thesis vs Evidence", "", "| thesis | metric | evidence | strength | status |", "| --- | --- | --- | --- | --- |"]
-    for r in rows:
-        ev = f"{r['evidence']:.4f}" if isinstance(r.get("evidence"), (int, float)) else str(r.get("evidence") or "n/a")
-        lines.append(f"| {r.get('thesis','')} | {r.get('metric','')} | {ev} | {r.get('strength') or 'n/a'} | {r.get('status') or 'n/a'} |")
-    return "\n".join(lines)
-
-
-@tool
-
 def get_prompt_injection_read(
     text: Annotated[str, "text to scan for instruction-injection hints"],
 ) -> str:
