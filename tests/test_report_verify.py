@@ -750,6 +750,26 @@ def test_self_correction_artifacts_clean():
     assert rv._self_correction_artifacts("correction factor 0.99 applied daily") == []
 
 
+def test_ema20_does_not_cross_table_pipe():
+    # IREN 2026-09-10 market.md: 'Chandelier / EMA20 trail | 39.8302 / 41.7342'
+    # - the chandelier (39.83) is a DIFFERENT level from EMA20 (41.73); the
+    # ema20 metric must not attribute the chandelier value across the row.
+    t = ("get_swing_exits: chandelier stop **39.8302** (exit=False), EMA20 "
+         "trail **41.7342** (trail_exit=False)\n"
+         "| Chandelier / EMA20 trail | 39.8302 / 41.7342 |")
+    cs = rv._internal_conflicts(t)
+    assert not any("ema20" in c.claim for c in cs)
+
+
+def test_atr_stop_basis_dual_flags():
+    # IREN 2026-09-10: headline ATR 3.38 vs the swing-set's 3.1533 used for
+    # the structure stop (34.81 - 3.1533 = 31.6567, not 34.81 - 3.38).
+    t = ("ATR 3.38 as stop yardstick; get_swing_set structure_stop uses "
+         "ATR 3.1533 below swing low 34.81")
+    cs = rv._internal_conflicts(t)
+    assert any("atr" in c.claim for c in cs)
+
+
 def test_sector_rank_identity_clean_single_value():
     assert rv._sector_rank_identity("XLK rank #4 (tracking)") == []
     assert rv._sector_rank_identity("XLK rank4, XLE rank1") == []

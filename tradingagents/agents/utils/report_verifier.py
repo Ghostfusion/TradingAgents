@@ -407,7 +407,7 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # ATR/bands/surprise) use a tighter 0.5% so a real target mismatch (T1
     # 265.03 vs 265.97, a 0.35% diff masked by the 1% bucket, or macdh -1.36
     # vs -1.15) still flags.
-    "ema20":(re.compile(r"\bema\s*20\b", re.I), 0.005),
+    "ema20":(re.compile(r"\bema\s*20\b(?=[^0-9|]{0,20}?\d)", re.I), 0.005),
         "atr":(re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),0.005),
     # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
     # real conflict, so level-type metrics use a 0.1% bucket.
