@@ -242,7 +242,15 @@ def run_tool_loop(
                 backup_chain = backup_llm.bind_tools(tools)
             except Exception:  # noqa: BLE001 - provider without tool binding
                 backup_chain = None
-        text = finalize_messages(chain, messages, result, backup_chain=backup_chain, agent_name="Risk Debators")
+        # Tool-less twins: the cap-forced terminal turn runs on these, because a
+        # relay that ignores tool_choice="none" can answer the forced turn with
+        # another tool call and an empty content (2026-09-11).
+        text = finalize_messages(
+            chain, messages, result, backup_chain=backup_chain,
+            agent_name="Risk Debators",
+            plain_chain=llm,
+            backup_plain_chain=(backup_llm if backup_llm is not llm else None),
+        )
     else:
         text = result.content if hasattr(result, "content") else str(result)
     return str(text or ""), transcript

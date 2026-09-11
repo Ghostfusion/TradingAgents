@@ -122,6 +122,25 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             " consecutive misses into a catalyst/risk signal without"
             " confirming the actual and estimate bases match (IREN 2026-09-10"
             " Q4: act -2.16 GAAP vs est -0.6058; the adjusted read was a beat)."
+            "  NON-OPERATING GAIN SUBSTANCE: a vendor row NAME is not evidence"
+            " of the transaction. A 'Gain on Sale of Security' row is often an"
+            " UNREALIZED mark-to-market on equity stakes, not a completed sale"
+            " (GOOG 2026-09-11 Q2: $98.839B vendor row; coverage describes an"
+            " unrealized mark-to-market, the report's 'Gain On Sale Of"
+            " Security' label implied a cash-realizing sale). State the amount,"
+            " that the vendor flags it unusual/non-operating, and whether the"
+            " feed establishes realized vs unrealized; when it does not, say"
+            " the feed does not - never write 'proceeds'/'sold'/'cashed in'"
+            " that no leaf evidences."
+            "  NORMALIZED-EPS PROVENANCE: when the feed supplies its own"
+            " Normalized Income (unusual items removed, often tax-effected at"
+            " the reported effective rate), label that figure as the VENDOR's"
+            " normalization and do not present it as the Street's adjusted"
+            " basis: the two differ (GOOG 2026-09-11 Q2: vendor-normalized"
+            " ~$2.62 vs the reported adjusted print ~$2.85 against a $2.8991"
+            " consensus). Give the add-back and implied tax treatment when the"
+            " leaves allow it, and mark any vendor-normalized-vs-consensus"
+            " comparison as cross-basis."
             "  EV/EBIT SIGN SANITY: when operating income is negative the"
             " EV/EBIT (acquirers multiple) MUST be negative; a huge positive"
             " EV/EBIT next to a loss is an artifact (near-zero EBIT slice) -"
@@ -205,6 +224,24 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
 
         chain = prompt | llm.bind_tools(tools)
 
+        # Tool-less twins of the two chains above: the cap-forced terminal turn
+        # runs on these, because a relay that ignores tool_choice="none" can
+        # answer the forced turn with another tool call, whose content is empty
+        # (measured 2026-09-11 through OpenRouter: finish_reason "tool_calls",
+        # 467 output tokens -> the "empty terminal turn" notice was a model
+        # still asking for tools, not a token burn).
+        plain_chain = None
+        try:
+            plain_chain = prompt | llm
+        except Exception:  # noqa: BLE001 - non-runnable llm: fall back to the bound chain
+            plain_chain = None
+        backup_plain_chain = None
+        if backup_llm is not None and backup_llm is not llm:
+            try:
+                backup_plain_chain = prompt | backup_llm
+            except Exception:  # noqa: BLE001 - degrade to the bound backup chain
+                backup_plain_chain = None
+
         # Backup model (TRADINGAGENTS_BACKUP_LLM): same prompt + tool surface,
         # different model, used for truncation-continuation retries only.
         backup_chain = None
@@ -225,7 +262,8 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="Fundamentals Analyst")
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="Fundamentals Analyst",
+                          plain_chain=plain_chain, backup_plain_chain=backup_plain_chain)
             return {
                 "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
                 "fundamentals_report": _report,
@@ -255,7 +293,8 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="Fundamentals Analyst")
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="Fundamentals Analyst",
+                          plain_chain=plain_chain, backup_plain_chain=backup_plain_chain)
 
         return {
             "messages": [result],

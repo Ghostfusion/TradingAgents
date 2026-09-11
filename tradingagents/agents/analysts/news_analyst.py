@@ -148,6 +148,24 @@ def create_news_analyst(llm, backup_llm=None, config=None):
 
         chain = prompt | llm.bind_tools(tools)
 
+        # Tool-less twins of the two chains above: the cap-forced terminal turn
+        # runs on these, because a relay that ignores tool_choice="none" can
+        # answer the forced turn with another tool call, whose content is empty
+        # (measured 2026-09-11 through OpenRouter: finish_reason "tool_calls",
+        # 467 output tokens -> the "empty terminal turn" notice was a model
+        # still asking for tools, not a token burn).
+        plain_chain = None
+        try:
+            plain_chain = prompt | llm
+        except Exception:  # noqa: BLE001 - non-runnable llm: fall back to the bound chain
+            plain_chain = None
+        backup_plain_chain = None
+        if backup_llm is not None and backup_llm is not llm:
+            try:
+                backup_plain_chain = prompt | backup_llm
+            except Exception:  # noqa: BLE001 - degrade to the bound backup chain
+                backup_plain_chain = None
+
         # Backup model (TRADINGAGENTS_BACKUP_LLM): same prompt + tool surface,
         # different model, used for truncation-continuation retries only.
         backup_chain = None
@@ -168,7 +186,8 @@ def create_news_analyst(llm, backup_llm=None, config=None):
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="News Analyst")
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="News Analyst",
+                          plain_chain=plain_chain, backup_plain_chain=backup_plain_chain)
             return {
                 "messages": [_CapAIMessage(content=_report, id="news-cap-report")],
                 "news_report": _report,
@@ -197,7 +216,8 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="News Analyst")
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="News Analyst",
+                          plain_chain=plain_chain, backup_plain_chain=backup_plain_chain)
 
         return {
             "messages": [result],

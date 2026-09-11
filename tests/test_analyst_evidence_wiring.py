@@ -172,6 +172,28 @@ def test_market_and_news_prompts_carry_verbatim_citation_rule():
     assert "never splice, substitute, or reconcile silently" in sys_text
 
 
+def test_fundamentals_prompt_states_gain_substance_and_normalized_provenance():
+    """Regression (GOOG 2026-09-11 fact-check): the feed's 'Gain On Sale Of
+    Security' row ($98.839B) is the vendor's NAME for what coverage describes as
+    an unrealized mark-to-market on equity stakes, and the vendor's Normalized
+    Income (~$2.62 EPS after tax-effecting the pretax gain) is not the Street's
+    adjusted basis (~$2.85 vs a $2.8991 consensus). The rendered prompt must
+    require the substance (never a completed sale the leaves do not evidence)
+    and the vendor-normalization provenance, so a repeated label cannot carry a
+    quality-of-earnings read on its own."""
+    captured: list = []
+    fundamentals_mod.create_fundamentals_analyst(
+        _FakeLLM(["f"], captured), config=None
+    )(_base_state())
+    sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
+    assert "NON-OPERATING GAIN SUBSTANCE" in sys_text
+    assert "UNREALIZED mark-to-market" in sys_text
+    assert "never write 'proceeds'" in sys_text
+    assert "NORMALIZED-EPS PROVENANCE" in sys_text
+    assert "VENDOR's normalization" in sys_text
+    assert "cross-basis" in sys_text
+
+
 def test_evidence_block_render_carries_citation_rule():
     """The shared §Tool Evidence block (all evidence-fed analysts) states the
     same verbatim-copy / conflict-quote rule above the leaves."""

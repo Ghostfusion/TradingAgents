@@ -564,7 +564,9 @@ def _terminal_turn_max_tokens() -> int | None:
 
 def finalize_messages(chain: Any, messages: Any, result: Any,
                       backup_chain: Any | None = None,
-                      agent_name: str = "") -> str:
+                      agent_name: str = "",
+                      plain_chain: Any | None = None,
+                      backup_plain_chain: Any | None = None) -> str:
     """Force a terminal report turn when an analyst hit its tool-round cap.
 
     The analyst routers force back to the analyst node after
@@ -582,6 +584,15 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
     ``agent_name`` (optional): the role whose report this turn produces. Used
     for the log lines and the forensic journal entry, so an empty terminal turn
     can be traced to the analyst that burned its budget.
+
+    ``plain_chain`` / ``backup_plain_chain`` (optional): the same prompt bound
+    to the same model WITHOUT tools. The terminal turn runs on the tool-less
+    chain, because a relay that ignores ``tool_choice="none"`` can answer the
+    forced turn with yet another tool call, whose content is empty - measured
+    2026-09-11 through OpenRouter (`finish_reason="tool_calls"`, 467 output
+    tokens): the "empty terminal turn" notice was a model still asking for
+    tools, not a token burn. Without a plain chain the bound chain is used
+    (unchanged legacy behavior) and the repair loop below is the only net.
 
     An EMPTY terminal turn is repaired on a different chain with a doubled
     output budget before degrading to the unavailable notice. Rationale:
@@ -612,12 +623,14 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         # its truncation continuation AND the backup empty-retry all see a
         # valid history (regression: TSM 2026-09-07 cap retry).
         cleaned_msgs = _deorphan_tool_calls(cleaned_msgs)
-        final = chain.invoke(cleaned_msgs)
+        term_chain = plain_chain if plain_chain is not None else chain
+        final = term_chain.invoke(cleaned_msgs)
         text = content_to_text(getattr(final, "content", final))
         if text.strip():
-            return _retry_if_truncated(chain, cleaned_msgs, text, backup_llm=backup_chain)
+            return _retry_if_truncated(term_chain, cleaned_msgs, text,
+                                       backup_llm=backup_plain_chain or backup_chain)
         # Cap-forced terminal turn came back empty: no usable report text.
-        # Repair on a DIFFERENT chain with a RAISED output budget (see
+        # Repair on a different chain with a RAISED output budget (see
         # ``_terminal_turn_max_tokens``); only then emit the explicit
         # unavailable notice - never a silent "" that downstream would render
         # as a bare report-unavailable placeholder (QCOM fundamentals / NXPI
@@ -626,16 +639,22 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
 
         repair_msgs = [*cleaned_msgs, HumanMessage(content=_EMPTY_CAP_PROMPT)]
         raised_cap = _terminal_turn_max_tokens()
-        attempts: list[tuple[str, Any]] = []
-        if backup_chain is not None and backup_chain is not chain:
-            attempts.append(
-                (f"backup model {_model_name(backup_chain) or backup_chain}", backup_chain)
-            )
-        attempts.append(("primary model", chain))
+        candidates: list[tuple[str, Any]] = []
+        for label, bound_chain, plain in (
+            ("backup model", backup_chain, backup_plain_chain),
+            ("primary model", chain, plain_chain),
+        ):
+            for suffix, cand in ((" (tools unbound)", plain), ("", bound_chain)):
+                if cand is None or any(cand is c for _, c in candidates):
+                    continue
+                candidates.append((label + suffix, cand))
+                break
+            if len(candidates) >= 2:
+                break
         outcomes: list[str] = []
         first_meta: dict[str, Any] = {}
         first = True
-        for label, repair_chain in attempts:
+        for label, repair_chain in candidates:
             kwargs = {"max_tokens": raised_cap} if raised_cap else {}
             logger.info(
                 "cap-forced terminal turn returned empty%s; repairing on %s "
@@ -667,24 +686,44 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
                 _journal_terminal_turn(agent_name, final, first_meta, outcomes,
                                        repaired=True, raised_cap=raised_cap)
                 return _retry_if_truncated(repair_chain, repair_msgs, nxt,
-                                           backup_llm=backup_chain)
+                                           backup_llm=backup_plain_chain or backup_chain)
             outcomes.append(f"{label}: empty")
         logger.warning(
             "cap-forced final report turn returned empty after %d repair "
             "attempt(s); emitting unavailable notice",
-            len(attempts),
+            len(candidates),
         )
         _journal_terminal_turn(agent_name, final, first_meta, outcomes,
                                repaired=False, raised_cap=raised_cap)
-        return (
-            "**Report unavailable** - the analyst's cap-forced terminal turn"
-            " returned empty content (the model burned its output budget before"
-            " writing). The prior tool evidence stands; re-run to regenerate the"
-            " report."
-        )
+        return _unavailable_notice(final)
     except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-run
         logger.warning("final-report turn after tool cap failed: %s", exc)
         return content_to_text(getattr(result, "content", result))
+
+
+# Why the forced terminal turn produced no text, keyed by the provider's
+# finish reason. The cause decides what the reader is told: a turn that called
+# tools again is a different failure from one that exhausted its output budget,
+# and calling both "burned its output budget" (the first wording) was wrong for
+# every production hit recorded on 2026-09-11.
+_EMPTY_TURN_REASONS = {
+    "tool_calls": "the model kept requesting tools instead of writing",
+    "function_call": "the model kept requesting tools instead of writing",
+    "length": "the model burned its output budget before writing",
+}
+
+
+def _unavailable_notice(final: Any) -> str:
+    """The reader-facing notice for an unrepairable empty terminal turn."""
+    meta = getattr(final, "response_metadata", None) or {}
+    reason = _EMPTY_TURN_REASONS.get(
+        str(meta.get("finish_reason") or ""), "the model produced no report text"
+    )
+    return (
+        "**Report unavailable** - the analyst's cap-forced terminal turn"
+        f" returned empty content ({reason}). The prior tool evidence stands;"
+        " re-run to regenerate the report."
+    )
 
 
 def _journal_terminal_turn(agent_name: str, final: Any, first_meta: dict,

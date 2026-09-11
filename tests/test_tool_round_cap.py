@@ -407,12 +407,12 @@ def test_market_analyst_cap_turn_produces_report():
     bind = mock.MagicMock()
     llm.bind_tools.return_value = bind
     # RunnableSequence coerces a plain mock via __call__ (not .invoke): the
-    # chain.invoke paths hit bind(...) directly.
+    # chain.invoke paths hit bind(...) directly, while the TOOL-LESS terminal
+    # chain (`prompt | llm`) calls llm(...) -> llm.return_value.
+    llm.return_value = mock.MagicMock(content="**Market report**: NVDA trend up, RSI 58.")
     bind.side_effect = [
-        # First chain.invoke = the cap turn (emits tool_calls)...
+        # chain.invoke on the tool-bound loop = a turn that emits tool_calls.
         mock.MagicMock(content="", tool_calls=[{"name": "get_stock_data", "args": {}, "id": "t1"}]),
-        # Second = the terminal report turn (prose).
-        mock.MagicMock(content="**Market report**: NVDA trend up, RSI 58."),
     ]
     node = create_market_analyst(llm)
     state = {
@@ -840,3 +840,97 @@ def test_terminal_turn_reads_block_shaped_content(monkeypatch):
         agent_name="News Analyst",
     )
     assert out == "News report body. End."
+
+
+# The real cause of the live empty terminal turn: the model kept calling tools
+# ---------------------------------------------------------------------------
+# Production evidence (journal entries 2026-09-11 13:43:59 and 13:44:59, both
+# `finalize_messages/News Analyst`): the cap-forced terminal turn came back with
+# `finish_reason="tool_calls"` and 467/391 output tokens - NOT a token burn. The
+# model answered the forced turn with yet another tool call, whose content is
+# empty, and the old wording blamed the output budget. `tool_choice="none"` is
+# not honored by the OpenRouter relay (measured: the model still returned
+# tool_calls), so the terminal turn must run on a chain with NO tools bound.
+
+
+def test_terminal_turn_runs_on_the_tool_less_chain():
+    """The forced terminal turn must use the tool-less chain, so the model
+    cannot answer it with another tool call (however much it wants to)."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    bound = mock.MagicMock()
+    bound.invoke.return_value = mock.MagicMock(
+        content="", tool_calls=[{"name": "get_news", "args": {}, "id": "tc-9"}]
+    )
+    plain = mock.MagicMock()
+    plain.invoke.return_value = mock.MagicMock(content="News report from the tool-less chain.")
+
+    out = finalize_messages(
+        bound, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        agent_name="News Analyst", plain_chain=plain,
+    )
+    assert out == "News report from the tool-less chain."
+    assert bound.invoke.call_count == 0, "the tool-bound chain must not run the terminal turn"
+    assert plain.invoke.call_count == 1
+
+
+def test_tool_less_repair_prefers_the_plain_chains():
+    """When the tool-less terminal turn is still empty, both repair attempts
+    run on tool-less chains (backup first, then primary)."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    bound = mock.MagicMock()
+    bound.invoke.return_value = mock.MagicMock(content="")
+    bound_backup = mock.MagicMock()
+    bound_backup.invoke.return_value = mock.MagicMock(content="")
+    plain = mock.MagicMock()
+    plain.invoke.return_value = mock.MagicMock(content="")
+    plain_backup = mock.MagicMock()
+    plain_backup.invoke.return_value = mock.MagicMock(content="Tool-less backup report.")
+
+    out = finalize_messages(
+        bound, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        backup_chain=bound_backup, agent_name="News Analyst",
+        plain_chain=plain, backup_plain_chain=plain_backup,
+    )
+    assert out == "Tool-less backup report."
+    assert plain_backup.invoke.call_count == 1
+    assert bound.invoke.call_count == 0
+    assert bound_backup.invoke.call_count == 0
+    # `plain` ran the terminal turn (1) and returned empty, so the repair moved
+    # on to the tool-less backup instead of re-asking it.
+    assert plain.invoke.call_count == 1
+
+
+def test_notice_names_the_reported_cause(monkeypatch):
+    """The notice must not assert a cause the provider did not report: a turn
+    that called tools again is not a burned output budget."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"llm_failure_journal_dir": ""},
+    )
+
+    def _empty(finish_reason):
+        m = mock.MagicMock()
+        m.invoke.return_value = AIMessage(
+            content="", response_metadata={"finish_reason": finish_reason}
+        )
+        return m
+
+    tools_out = finalize_messages(
+        _empty("tool_calls"), _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+    )
+    assert "kept requesting tools" in tools_out
+
+    length_out = finalize_messages(
+        _empty("length"), _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+    )
+    assert "burned its output budget" in length_out
