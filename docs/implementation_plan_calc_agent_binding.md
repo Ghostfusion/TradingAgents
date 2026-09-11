@@ -196,27 +196,56 @@ exists so a future refactor cannot silently break it again.
 Each phase: fix → regression gate → `ruff` → targeted tests → full suite → CHANGELOG → commit. No phase
 starts before its predecessor's gate is green.
 
+**Risk coverage (the four §7 risks → phases).** Every risk has a *gate*, not just a fix, and each gate is
+proven to fail before its phase lands:
+
+| risk | fix | gate | phase |
+|---|---|---|---|
+| R1 prompt bloat | trim the two known text defects; add lines at ≤120 chars | prompt-budget ceiling on the assembled prompt + per-line cap (W1) | W1 → W3 → W6 re-measure |
+| R2 undrivable tools | structural conversions (names, not series) | no LLM-facing list/dict-of-numbers arg, with a shrinking allowlist (W1) | W1 → W2.0 |
+| R3 PM pre-graph gating | hoist the pre-decision inputs, single-source | rendered-value test + pre-graph/overlay equality test (W4) | W4 (+ W6 smoke) |
+| R4 docs | README in place, api_reference machine-checked, CHANGELOG appended | doc-claim test over the api_reference surface column (W1) | W1 → W5 |
+
 ### W1 — Make the gates honest + fix the doc drift (must be first)
 
 - Add a `@tool` → binding gate that checks the **toolset/loop objects** (`toolsets.analyst_toolset(key)`,
   `risk_tool_loop.RISK_DEBATOR_TOOLS/TRADER_TOOLS`), not raw text, and delete the blob loophole.
 - Extend the prompt-guidance gate to require a **trigger phrase** (not just a name) for every bound tool, so
   B's list becomes enforceable rather than advisory; allow the docstring-trigger exemption explicitly.
-- Correct `CHANGELOG.md:994-1005`, `README.md:180-187`, `docs/api_reference.md:628-634` to the real state
-  (and note the historical cause). Docs are the contract the next reader trusts.
-
+- Correct the three doc passages **per doc type** (per §3.D): `README.md:180-187` is current-state text and is
+  fixed in place; the `docs/api_reference.md:628-634` surface column gets a **machine-checked test** that
+  parses the table's tool names and asserts each is callable on the surface named, or listed as a declaration
+  with a real consumer; `CHANGELOG.md:994-1005` is a historical record and is **kept** — a dated correction is
+  appended naming the real cause (the gate counted executor-list membership as "bound"), never a rewrite.
+- Add the **prompt-budget gate** (R1): assemble each analyst prompt and assert a ceiling, not a vibe.
+  Measured basis at drafting: market fixed text 27,719 chars, of which the forced-tool bullets are 18,819
+  (67.9%) across 77 bullets (244 chars average). Ceilings: market ≤ 30,000 chars (+8%), every tool bullet
+  ≤ 200 chars, and the tool-bullet *count* recorded so a reflow cannot hide growth. The W3 additions must be
+  funded by the two text trims, and the gate must fail when the tree is given 30 extra lines at the current
+  average length.
+- Add the **argument-shape gate** (R2): iterate every tool on every surface, read its advertised schema, and
+  fail if an LLM-facing argument is a list/dict of numbers. Allowlist the four pre-existing offenders
+  (`get_pair_trade_signal`, `get_book_correlation`, `get_hrp_alloc`, `get_ts_momentum_weights`) with a
+  one-line rationale and a conversion item each; the allowlist may only shrink, and an entry for a tool that
+  no longer exists fails the gate.
+- Add the **doc-claim test** (R4): the api_reference surface column must not assert a callability the
+  toolset objects do not have. It fails on the current tree (16 rows) and passes once the column is corrected.
 - Add the **bidirectional callability gate**: for every analyst/debator/trader surface, the `bind_tools`
   set and the executor list must be equal (both directions, per §3.E). It fails today for any surface that
   still holds an execute-only entry, and it is the gate that would have caught both P0-4 and the 16.
 
-**Acceptance:** the new gates fail on the current tree (proving teeth), including the bidirectional gate
-against a synthetic execute-only and a synthetic bind-only entry; and the doc lines no longer claim a
-binding that does not exist.
+**Acceptance:** every new gate is shown failing on the current tree (proving teeth) — the bidirectional gate
+against a synthetic execute-only and a synthetic bind-only entry, the budget gate against added lines, the
+argument-shape gate against a synthetic `{"series": list[float]}` tool and against each allowlisted tool once
+its entry is removed, the doc-claim test on the 16 rows; and the three doc passages no longer claim a
+callability that does not exist.
 
 ### W2 — The binds (A1)
 
-**W2.0 (prerequisite for `get_vif_read` only):** make the tool self-sufficient before binding it. New shape:
-`get_vif_read(ticker, indicators=[...])` — resolve each requested indicator to its series internally using the
+**W2.0 (structural conversions — both tools we are touching):** make each self-sufficient before binding it,
+so the model passes names, never numbers (R2).
+
+`get_vif_read`: new shape `get_vif_read(ticker, indicators=[...])` — resolve each requested indicator to its series internally using the
 run OHLCV cache (`_ohlcv`) plus the existing indicator computation the vendor path already uses, then run the
 existing `variance_inflation_factor` calc. Keep the series-dict form as an internal/advanced path if a caller
 needs it, but the LLM-facing arg must be names, not numbers. Regression test: a call with indicator names on a
@@ -224,13 +253,23 @@ stubbed OHLCV seam returns the VIF table and never asks the model for data; a mi
 degrades to an explicit 'unavailable' rather than a fabricated column. Only after this lands does the market
 prompt line reference `get_vif_read(ticker, indicators=[…])`.
 
-Per tool (the other three — `get_macro_regime_read` → news, `get_pair_risk` → market,
+`get_pair_risk`: the same treatment — `get_pair_risk(ticker_x, ticker_y, window=…)` resolving both close
+series internally through the run OHLCV cache, instead of asking the model to re-type two price lists. It is
+a *new* bind, so converting it now costs nothing; the alternative (bind it as-is and rely on the prompt naming
+the exact call) leaves the weakest of the four binds in place and is not taken. The four pre-existing
+series-argument tools stay on the W1 allowlist — converting live tools is a separate change with its own
+prompt edits, recorded as such rather than smuggled into this phase.
+
+The other three binds (`get_macro_regime_read` → news, `get_pair_risk` → market,
 `get_trade_outcome_metrics` → `RISK_DEBATOR_TOOLS`): add to the toolset/loop → add the prompt line → extend the
 gate test that the tool is bound *and* guided. Four files for toolsets/prompts + `risk_tool_loop.py` + the debator prompts; remove the
 `TOOL_LEGACY_BINDING` entries for the bound names.
 
 **Acceptance:** each new tool is in the toolset, mentioned with a trigger, executed by its ToolNode (an
-end-to-end call with a stubbed vendor seam), and the binding gate is green without the whitelist entry.
+end-to-end call with a stubbed vendor seam), and the binding gate is green without the whitelist entry. For
+the two converted tools: a names-only call on a stubbed OHLCV seam returns the table and never asks the model
+for data, an unknown ticker/indicator degrades to an explicit `unavailable`, and the W1 argument-shape gate
+does not need an allowlist entry for them.
 
 ### W3 — Prompt guidance for the remaining gap list (B)
 
@@ -241,14 +280,19 @@ Re-run the S2 advertised-signature gate (the new lines must not advertise wrong 
 budget check.
 
 **Acceptance:** the trigger-phrase gate is green for all bound tools; a negative test proves a name-only
-mention fails it.
+mention fails it; the prompt-budget gate is green for the three analyst prompts, i.e. the two text trims fund
+the added lines and the market prompt stays within its ceiling.
 
 ### W4 — Context-channel fixes (C)
 
-1. PM (per §4.5): hoist the pre-decision inputs into the pre-graph precompute next to `_precompute_risk_context`
-   — book drawdown vs `risk_max_drawdown_pct`, the liquidity verdict, and the position-contract size/stop where
-   computable — and render them in the PM's context list. Then soften the wording of any rule whose number is a
-   verdict on the PM's own final size, so no rule references a number the render cannot contain.
+1. PM (per §4.5): **extend the existing `_precompute_risk_context`** (`trading_graph.py:1590-1611`, already
+   called pre-graph at `:651-654`) rather than adding a second producer — it must also emit book drawdown vs
+   `risk_max_drawdown_pct` (`_basket_drawdown`, `:1681`), the liquidity verdict, and the **size cap** (config
+   cap composed with the CVaR budget; the contract's final size is a verdict on the PM's own output and stays
+   post-decision). Refactor the post-graph block (`:1058-1165`) to *consume* those values instead of
+   recomputing them, so one quantity has one producer. Render them in the PM's context list, then reword only
+   the rules that are inherently post-decision (`portfolio_manager.py:268`, `:272`) to cite the pre-graph stop
+   read and size cap; `:270` (portfolio-veto on drawdown over limit) becomes live and stays.
 2. Pass the measured inputs into both `build_trade_plan` callers (tranche/value-dip setup, BE rule, targets,
    trail) so the shared card stops rendering `unavailable`.
 3. Judge prompt: inject the per-claim ledger rows (metric, asserted value, ground-truth key, true value,
@@ -257,7 +301,10 @@ mention fails it.
    string as a dict).
 
 **Acceptance:** one test per fix asserting the value the agent now sees (not the injection mechanics); the
-trader/PM/debater prompts contain no reference to a number that is absent from the rendered prompt.
+trader/PM/debater prompts contain no reference to a number that is absent from the rendered prompt; and — the
+single-source requirement — a fixture with a stubbed close seam asserts the pre-graph `risk_context` values
+equal the ones the post-graph overlay and the governor receive, so the PM cannot argue against a number the
+system then contradicts.
 
 ### W5 — Declarations, deletions, and the calc tail
 
@@ -287,12 +334,16 @@ to avoid churn in the same prompts. `W5` closes what W2/W4 changed. `W6` last.
 
 ## 7. Risks
 
-- **Prompt bloat**: the market prompt already carries ~100 guided tools; four more lines plus 11 trigger
-  phrases is real token weight. W3 includes the budget check, and the house style is one clause per tool.
-- **Binding a tool the model can't drive**: `get_pair_risk` needs the model to supply two price series; the
-  mitigation is the prompt naming the exact call, as the already-bound `get_book_correlation` / `get_hrp_alloc` /
-  `get_pair_trade_signal` do. For `get_vif_read` the mitigation is structural instead — W2.0 removes the series
-  argument from the LLM-facing signature, so there is nothing left to transcribe.
+- **Prompt bloat**: the market prompt already carries ~100 guided tools (measured: 27,719 chars, 18,819 of
+  them tool bullets, 244 chars average); four more lines plus 11 trigger phrases is real token weight. Gate:
+  W1's budget ceiling (market ≤ 30,000 chars, bullet ≤ 200 chars, bullet count recorded) with the two text
+  trims funding the additions; house style stays one clause per tool.
+- **Binding a tool the model can't drive**: mitigated *structurally* for both tools this plan touches —
+  `get_vif_read` and `get_pair_risk` are reshaped to take names (W2.0), so there is nothing to transcribe. Gate:
+  W1's argument-shape rule, which refuses any new LLM-facing list/dict-of-numbers argument. Residual: the four
+  pre-existing series-argument tools (`get_pair_trade_signal`, `get_book_correlation`, `get_hrp_alloc`,
+  `get_ts_momentum_weights`) stay on the allowlist; they rely on the prompt naming the exact call, and
+  converting them is recorded as separate work, not silently accepted as fine.
 - **PM pre-graph gating changes what the decision can act on.** Resolved as "hoist" in §4.5, so this is the one
   change in the plan that can alter a trading decision: the PM will now see a drawdown-vs-limit / liquidity /
   contract read it previously never received, and may veto or shrink trades it used to pass. Two residual risks
