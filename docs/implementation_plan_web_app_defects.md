@@ -91,8 +91,9 @@ not a stale row. The only remedy today is a server restart.
 **Impact.** Permanent 50% throughput loss on a 2-slot pool; a phantom "running" row in the timeline forever;
 `recover_stale_jobs` cannot help because the server has stayed up.
 
-**Fix.** (a) Per-job wall clock (`config.JOB_TIMEOUT_SECONDS`) enforced by a watchdog that marks the row
-`failed`/`timed out` and kills the process tree — the worker thread itself cannot be interrupted. (b)
+**Fix.** (a) Per-job wall clock (`config.JOB_TIMEOUT_SECONDS`; **value and semantics recommended in §9 item 1**)
+enforced by a watchdog that marks the row `failed`/`timed out` and kills the process tree — the worker thread
+itself cannot be interrupted. (b)
 `POST /api/jobs/{job_id}/cancel` (owner + CSRF) that sets `cancelled`, sets a cancel flag and kills any tracked
 child subtree. (c) A reaper that fails `running` rows older than the timeout at boot **and** periodically, so a
 hung worker cannot hide.
@@ -392,15 +393,28 @@ repo running `pytest trading_web/tests -q` plus the engine's own suite.
 
 ## 9. Decisions the owner should make
 
-1. **Job timeout value and semantics** — a batch can legitimately run for hours. Proposed: `JOB_TIMEOUT_SECONDS`
-   default 3600 for `run_batch`, 900 for the rest, configurable by env; cancel is the escape hatch for long runs.
-2. **Credential precedence** — make `trading_web/.env` authoritative (`override=True`) as the primary fix, or keep
-   the engine's precedence and write to the defining file. The first is simpler; the second preserves "engine .env
-   wins" as a documented principle.
-3. **`/api/docs` + `/api/openapi.json`** — disable, or require auth. (They are public today on a `0.0.0.0` bind.)
+Each item carries a **recommended answer** (the default taken if no objection is raised) with the evidence behind
+it. Recommendations recorded 2026-09-11; **no code changed** — the audit's status in §11 is unchanged.
+
+1. **Job timeout value and semantics** — a batch can legitimately run for hours.
+   **Recommended:** `JOB_TIMEOUT_SECONDS` default **7200 s for `run_batch`**, **900 s for `run_value_tools`**, env-overridable; for the *existing* subprocess tier keep 900 s but move `run_screener` to the existing **2400 s** tier. **Timeout semantics: kill the process tree, mark the row `failed` with `error="timed out after Ns"`, and do NOT auto-retry** — a batch may already have written part of a report tree, so a retry duplicates side effects; `cancel` stays the manual escape hatch. **Plus a stall rule:** the wall clock is only a backstop — the worst row in the store (`run_batch`, 134.8 min) was killed *by hand* with `killed by user (stalled: no output after 2h14m, 0 cpu, idle)`, which a 2 h ceiling would barely have caught; the watchdog should fail a job that reports no progress for N minutes (the batch already pauses between tickers, so a per-ticker heartbeat is cheap) and the reaper should run at boot **and** periodically.
+   **Why not the originally proposed 3600/900:** measured against the live store — the only two **successful** `run_batch` runs took **64.8 and 63.4 min**, so a 1 h default would have killed the longest *good* run; and 900 s is already killing work whose status is unknown: **4 `run_screener` and 2 `run_action_report` rows** carry `capability timed out (>900s)` at exactly 15.0 min (against a heaviest *successful* screener of 9.0 min). Whether those six were slow-but-working or wedged is **not knowable from the store** — one adjacent screener failure is a moomoo `open_context_base` error, i.e. gateway trouble — so the recommendation is to **measure first**: emit per-stage progress, then move `run_screener` to the 2400 s tier only if the log shows real work past 900 s. Halving the pool's throughput is the *cost* of too-tight ceilings; a phantom 2 h row is the cost of too-loose ones. Item 1 is a **blocker for X2**.
+
+2. **Credential precedence** — make `trading_web/.env` authoritative (`override=True`), or keep the engine's precedence and write to the defining file.
+   **Recommended: write to the defining file** (the engine `.env` when that is what defines the key, the web `.env` otherwise), return the **effective source per key** to the UI, and reject values containing newlines/`=` (today a value with `\n` injects extra `KEY=value` lines).
+   **Why not `override=True`:** it makes a *file* beat the *process environment*. `load_dotenv(override=True)` clobbers variables injected by the deployment (shell, service manager, container), so a stale `trading_web/.env` would silently defeat the operator's real secret source — a worse failure than the one being fixed, and one this audit could not even see from the repo. The second option also keeps "engine `.env` wins" as the documented principle the code already implements. The UI must show which file won, or the original deception (`saved`, then silently reverted) simply moves.
+
+3. **`/api/docs` + `/api/openapi.json`** — disable, or require auth.
+   **Recommended: require auth** (session, same as every other route): FastAPI `docs_url=None`/`openapi_url=None`, plus authenticated equivalents, keeping them useful for this internal tool. **Disable is the fallback** if the authenticated path turns out to be more than a trivial unit of work. Either way, the separate W-P2-4 fix stands unconditionally: unknown `/api/*` must return JSON 404, not the SPA's HTML **200**.
+   **Why not leave them public:** they are open on a `0.0.0.0` bind and expose the full route/parameter/payload map — reconnaissance, not data, which is why this is a decision rather than a P0.
+
 4. **Missing Screener controls** (`--alloc`, market) — add the inputs, or delete the help/README claims.
-5. **Frontend test harness choice** — vitest + RTL (+ Playwright for the CSP and URL cases) is assumed; if another
-   harness is preferred, X6's gates change shape.
+   **Recommended: add the controls.** Both flags are real engine capabilities — `scripts/value_screener.py:1400` implements `--alloc` ("append a capped allocation plan block") and `:1203` implements `--market` (US/HK, used by `--universe top-losers/heat-proxy`) — so the claims are accurate descriptions of working functionality that the app simply fails to expose; deleting them would hide a feature rather than remove a falsehood. Add the Allocation checkbox and the market selector (label it as applying to universe-driven scans only), and fix the preset round-trip regardless through a single `SCREENER_FIELDS` list shared by `screenerArgs()` and the apply path — that part is a bug, not a choice.
+
+5. **Frontend test harness choice** — vitest + RTL (+ Playwright for the CSP and URL cases) is assumed.
+   **Recommended: confirm vitest + RTL + fake timers + Playwright.** RTL with **fake timers is required** by the polling findings (W-P1-3: polling is dead or never stops — untestable in real time), RTL covers the form/state fixes (W-P1-2/4/6), and **Playwright is the only harness that can observe the CSP-blocked chart (W-P0-3) and URL/history behaviour** — those two cannot be seen from jsdom at all. Jest would add transform/config weight for no coverage gain; Cypress is e2e-only with weaker fake-timer support than vitest's.
+   **Why this is a decision and not a detail:** the app has **no test script and no test dependency today**, so this choice *is* X6's first task and reshapes every gate after it — X6 opens by asserting the harness can **fail** on one deliberately broken case, per this repo's gate rule. Item 5 is a **blocker for X6**.
+
 
 ## 10. What this audit could not verify
 
@@ -418,6 +432,6 @@ repo running `pytest trading_web/tests -q` plus the engine's own suite.
 |---|---|---|
 | X1 … X8 | **not started** | no code changed by this audit |
 
-*Filed 2026-09-11. Sources: three read-only audits (backend / frontend / engine-integration) with `file:line`
+*Filed 2026-09-11; §9 recommendations added 2026-09-11 (evidence: the live job store, read-only). Sources: three read-only audits (backend / frontend / engine-integration) with `file:line`
 evidence on both sides, plus main-thread verification of every P0 and the live job store, audit log and engine
 symbol surface.*
