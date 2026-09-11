@@ -101,6 +101,7 @@ from .screener import (
     screen_equities as screen_equities_yfinance,
 )
 from .sec_edgar import get_edgar_fulltext_search, get_financial_history, get_sec_filings
+from .seekingalpha import get_news_seekingalpha
 from .stockdata import (
     get_news_stockdata,
     get_stock_data_stockdata,
@@ -487,6 +488,10 @@ VENDOR_METHODS = {
         # needs a registered key. Add to `news_data` to enable.
         "gdelt": get_news_gdelt,
         "benzinga": get_news_benzinga,
+        # seekingalpha is the keyless contributor-commentary tail: it serves
+        # (title/author only, opinion-pinned) only when every newswire vendor
+        # above fails - never the primary news source.
+        "seekingalpha": get_news_seekingalpha,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
