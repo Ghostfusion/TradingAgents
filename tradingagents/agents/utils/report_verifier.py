@@ -1202,29 +1202,106 @@ _CHANDELIER_EQ = re.compile(r"chandelier[^=\n]*=\s*(\d+(?:\.\d+)?)", re.I)
 _CHANDELIER_SPACE = re.compile(r"chandelier\s+(\d+(?:\.\d+)?)(?!\s*[x×XATR])", re.I)
 
 
-def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
-    """Conflicting price-vs-200-SMA percentages in one report.
+_PRIMARY_PRICE = re.compile(
+    r"(?i)(?:at|close|price|spot)[\s:$]{0,3}\$?\s*([0-9]+\.[0-9]{2})"
+)
 
-    HPE 2026-09-10 market.md: body '+64.7%' (55.46/33.68-1) vs summary-table
-    '+184.7%' - the 184.7% matches no leaf and exaggerates trend extension.
-    All % distances quoted against the 200-SMA must agree.
+
+def _primary_price(report_text: str) -> float | None:
+    """First the-stated spot price in a single-ticker report.
+
+    Matches 'at / X.XX' / 'close X.XX' / 'price $X.XX' so a DCF, stop,
+    or price target is NOT picked up.
+    """
+    m = _PRIMARY_PRICE.search(report_text or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+_SMA_ABOVE_RE = re.compile(r"([+]?-?\d+(?:\.\d+)?)%\s*(?:above|below)\s+the\s+200\s*-?\s*SMA\b[^\n:!]{0,16}?([0-9]+\.?[0-9]*)", re.I)
+
+
+def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
+    """Conflicting (or mislabeled) price-vs-200-SMA percentages in one report.
+
+    1) Two differently stated % distances to the 200-SMA (HPE 2026-09-10:
+       body '+64.7%' = 55.46/33.68-1 vs table '+184.7%').
+    2) A single '% above/below the 200-SMA' that does NOT recompute from the
+       report's own price + 200-SMA values (MSFT 2026-09-10 decision.md:
+       'price +8.8% above the 200-SMA 429.51' while the same text's ~490.50
+       price implies +14.2% - the +8.8% is the 50-SMA distance mislabeled).
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _SMA200_PCT.finditer(report_text)}
-    if len(vals) <= 1:
-        return []
-    return [VerifierClaim(
-        claim="200-SMA distance cited at conflicting values: "
-              + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes different % distances to the 200-SMA "
-            "(HPE 2026-09-10: +64.7% body = 55.46/33.68-1 vs +184.7% summary "
-            "table - the extra value matches no leaf). One canonical "
-            "distance per report."
-        ),
-    )]
+    out: list[VerifierClaim] = []
+
+    def _pct(v: str) -> float | None:
+        try:
+            return float(v.rstrip("%").strip("+"))
+        except (TypeError, ValueError):
+            return None
+
+    # 1) pairwise conflicts between distinct stated percents
+    vals = sorted({v for m in _SMA200_PCT.finditer(report_text)
+                   if (v := _pct(m.group(1))) is not None})
+    if len(vals) > 1:
+        out.append(VerifierClaim(
+            claim="200-SMA distance cited at different values: "
+                  + " / ".join(f"{v:+.1f}%" for v in vals),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes differing % distances to the 200-SMA "
+                "(HPE 2026-09-10: +64.7% body = 55.46/33.68-1 vs +184.7% "
+                "summary table - the extra value matches no leaf). Keep one "
+                "canonical distance per report."
+            ),
+        ))
+
+    # 2) mislabeled-%-as-200-SMA: the claim line ALSO carries a 50-SMA value
+    #    and the stated % is objectively the 50-SMA distance, not the 200-SMA
+    #    distance (MSFT 2026-09-10: '+8.8% above the 200-SMA 429.51 and above
+    #    the rising 50-SMA 450.83' at ~490.50: the 200-SMA distance is ~+14%
+    #    and +8.8% is the 50-SMA distance).
+    m = _SMA_ABOVE_RE.search(report_text)
+    if m:
+        claimed = _pct(m.group(1))
+        sma200 = m.group(2)
+        if claimed is not None and sma200:
+            line = report_text[m.start():].split("\n", 1)[0]
+            m50 = re.search(r"50\s*-?\s*SMA\b[^\n:!]{0,20}?([0-9]+\.?[0-9]+)", line, re.I)
+            price = _primary_price(report_text)
+            if m50 and price is not None:
+                s200 = float(sma200)
+                s50 = float(m50.group(1))
+                if s200 > 0 and s50 > 0 and abs(s50 - s200) / s200 > 0.02:
+                    d200 = (price - s200) / s200 * 100.0
+                    d50 = (price - s50) / s50 * 100.0
+                    d200_rel = abs(claimed - d200) / max(abs(d200), 1e-9)
+                    d50_rel = abs(claimed - d50) / max(abs(d50), 1e-9)
+                    if d200_rel > 0.2 and d50_rel <= 0.1:
+                        out.append(VerifierClaim(
+                            claim=(
+                                f"stated {claimed:+.1f}% as the 200-SMA distance "
+                                f"({sma200}) is actually the 50-SMA distance "
+                                f"({s50}): at price {price:.2f} the 200-SMA is "
+                                f"{d200:+.1f}%, the 50-SMA {d50:+.1f}%"
+                            ),
+                            status="INTERNAL_CONFLICT",
+                            reason=(
+                                "A % quoted 'above/below the 200-SMA' is, by the "
+                                "report's own numbers, the 50-SMA distance - the "
+                                "label was swapped (MSFT 2026-09-10 decision.md: "
+                                "+8.8% above the 200-SMA 429.51 at ~490.50 is "
+                                "+14.2% on the 200-SMA and +8.8% on the 50-SMA "
+                                "450.83). Recompute from the paired SMA values."
+                            ),
+                        ))
+    return out
+    return out
 
 
 def _garch_cond_identity(report_text: str) -> list[VerifierClaim]:

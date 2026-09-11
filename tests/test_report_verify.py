@@ -650,6 +650,23 @@ def test_sma200_pct_identity_hpe():
     assert "+64.7" in cs[0].claim and "184.7" in cs[0].claim
 
 
+def test_sma200_mislabel_recompute_msft():
+    # MSFT 2026-09-10 decision.md: 'price +8.8% above the 200-SMA 429.51'
+    # with the same line's 50-SMA 450.83: at 490.50 the 200-SMA distance is
+    # +14.2% and +8.8% is the 50-SMA distance - a mislabeled label.
+    t = ("Stay flat on msft at 491.65. ... STRONG_BULL regime (F=0.75), "
+         "price +8.8% above the 200-SMA 429.51 and above the rising 50-SMA 450.83")
+    cs = rv._sma200_pct_identity(t)
+    assert len(cs) == 1
+    assert "50-SMA distance" in cs[0].claim
+    assert cs[0].status == "INTERNAL_CONFLICT"
+
+
+def test_sma200_mislabel_clean_when_correct():
+    t = "price 490.50 above the 200-SMA 429.51 (+14.2%)"
+    assert rv._sma200_pct_identity(t) == []
+
+
 def test_sma200_pct_identity_clean():
     assert rv._sma200_pct_identity("price vs 200-SMA +64.7%") == []
 
