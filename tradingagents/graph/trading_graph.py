@@ -644,10 +644,11 @@ class TradingAgentsGraph:
         )
         # Seed the deterministic risk context BEFORE the Portfolio Manager runs:
         # the PM reads state["risk_context"] to ground its tail-risk / liquidity
-        # language, but it was previously only computed in _apply_strategy_overlays
-        # AFTER the graph completed, so the PM never saw it (cvar_line/liq_line
-        # were always empty). The post-graph overlays still recompute the
-        # authoritative gate; this only makes the PM's *reasoning inputs* real.
+        # / book-drawdown language, but it was previously only computed in
+        # _apply_strategy_overlays AFTER the graph completed, so the PM never
+        # saw it (cvar_line/liq_line were always empty). This precompute is the
+        # single producer of those quantities; the post-graph overlays CONSUME
+        # them instead of recomputing, so one number has one producer.
         if self.config.get("enable_risk_governor") and not init_agent_state.get("risk_context"):
             rc = self._precompute_risk_context(company_name)
             if rc:
@@ -900,8 +901,14 @@ class TradingAgentsGraph:
                             _hard_guards.append("max_portfolio_risk")
                         if _data_quality_blocks_position(final_state.get("pm_decision")):
                             _hard_guards.append("data_quality_failure")
-                        _liq = (final_state.get("risk_snapshot") or {}).get("liquidity_verdict")
-                        if _liq == "ILLIQUID":
+                        # The liquidity verdict lives in the risk context (the
+                        # pre-graph precompute is its single producer). The old
+                        # read was a dict-key read on `risk_snapshot`, which
+                        # build_risk_snapshot returns as a STR - so the guard
+                        # could never fire. Unknown/absent verdicts stay silent;
+                        # only a genuine ILLIQUID read blocks.
+                        _liq = (final_state.get("risk_context") or {}).get("liquidity") or {}
+                        if str(_liq.get("verdict") or "").upper() == "ILLIQUID":
                             _hard_guards.append("insufficient_liquidity")
                         _hard_guards = tuple(_hard_guards)
                     _rf = 1.0
@@ -977,9 +984,9 @@ class TradingAgentsGraph:
                     logger.warning("position contract skipped: %s", contract_exc)
             if self.config.get("enable_risk_governor"):
                 try:
-                    from tradingagents.strategies.book_risk import cvar as book_cvar
                     from tradingagents.strategies.risk_governor import (
                         build_risk_snapshot,
+                        default_limits,
                         govern,
                     )
 
@@ -1015,121 +1022,30 @@ class TradingAgentsGraph:
                                 "book_ok": tranche_read.get("book_ok"),
                             }
                         )
-                    rets = None
-                    if closes:
-                        rets = __import__(
-                            "tradingagents.strategies.contract", fromlist=["_log_returns"]
-                        )._log_returns(closes)
-                    cvar_pct = None
-                    if rets and len(rets) >= 5:
-                        cv = book_cvar(rets, alpha=0.05)
-                        cvar_pct = abs(cv) if cv is not None else None
-                    # The analyzed name's own daily-tail CVaR, kept for display
-                    # alongside the (possibly basket-derived) gate input.
-                    single_name_cvar = cvar_pct
-                    # True portfolio CVaR (R2): when a risk basket is configured,
-                    # mix the basket names' daily return series (weighted) and
-                    # take the basket's historical CVaR as the daily tail budget
-                    # instead of the analyzed name's own series. Falls back to
-                    # the single-name series when the basket can't be resolved.
-                    basket_budget = self._basket_cvar(ticker)
-                    if basket_budget is not None:
-                        cvar_pct = basket_budget
-                    # Surface both numbers on the state so the report / agents
-                    # can compare the analyzed name's own tail vs the book tail.
+                    # Single source (W4): the pre-graph precompute produced the
+                    # CVaR / liquidity / drawdown context the Portfolio Manager
+                    # reasoned on; the gate consumes those numbers instead of
+                    # recomputing them, so each quantity has one producer.
                     risk_ctx = final_state.setdefault("risk_context", {})
-                    if basket_budget is not None:
-                        risk_ctx["book_cvar"] = basket_budget
-                    if single_name_cvar is not None:
-                        risk_ctx["single_cvar"] = single_name_cvar
+                    if not risk_ctx:
+                        risk_ctx.update(self._precompute_risk_context(ticker))
+                    cvar_pct = risk_ctx.get("book_cvar")
+                    if cvar_pct is None:
+                        cvar_pct = risk_ctx.get("single_cvar")
                     # Book-level correlated stress (item 2): shock the whole
                     # basket together, not just single names. Surfaces in the
                     # risk snapshot and the report's risk-gate block.
                     basket_stress = self._basket_stress(ticker)
                     if basket_stress is not None:
                         risk_ctx["book_stress"] = basket_stress
-                    # risk2.md liquidity/ownership gate (opt-in). When
-                    # enable_liquidity_gate is on, compute the composite
-                    # liquidity verdict from the vendor OHLCV + float + short
-                    # interest and pass it to the governor (ILLIQUID REJECTs,
-                    # CAUTION WARNs). Off by default -> no behavior change.
-                    liq_verdict = None
-                    liq_dangers = None
-                    if self.config.get("enable_liquidity_gate"):
-                        try:
-                            from tradingagents.strategies.liquidity_risk import (
-                                amihud_illiquidity,
-                                float_turnover as _ft,
-                                free_float_factor as _iwf,
-                                liquidity_verdict as _lv,
-                                roll_spread as _roll,
-                            )
-
-                            closes = final_state.get("closes") or []
-                            volumes = final_state.get("volumes") or []
-                            illiq = amihud_illiquidity(closes, volumes)
-                            adv = (
-                                sum(volumes[-30:]) / len(volumes[-30:])
-                                if len(volumes) >= 30
-                                else None
-                            )
-                            # Dollar volume + Roll-spread (bps) for the
-                            # ADV/spread liquidity guards (mean-reversion
-                            # slippage; fees below match graph conventions).
-                            cur_price = final_state.get("last_price")
-                            adv_dollar = (
-                                (adv or 0) * (cur_price or 0)
-                                if adv and cur_price else None
-                            )
-                            _sp = _roll(closes)
-                            spread_bps = (_sp * 1e4) if _sp is not None else None
-                            cfg_min_dv = self.config.get("min_dollar_volume")
-                            cfg_max_sp = self.config.get("max_spread_bps")
-                            float_sh = None
-                            try:
-                                from tradingagents.dataflows.float_shares import (
-                                    fetch_float_shares,
-                                )
-
-                                float_sh = fetch_float_shares(ticker)
-                            except Exception:  # noqa: BLE001
-                                float_sh = None
-                            tot_sh = None
-                            try:
-                                from tradingagents.dataflows.statement_parsing import (
-                                    fetch_ticker as _ftk,
-                                )
-
-                                fin = _ftk(ticker, self.config.get("date") or "") or {}
-                                tot_sh = (fin.get("shares") or {}).get("current") if isinstance(
-                                    fin.get("shares"), dict
-                                ) else fin.get("shares")
-                            except Exception:  # noqa: BLE001
-                                tot_sh = None
-                            ft = _ft(adv, float_sh)
-                            iwf = _iwf(float_sh, tot_sh)
-                            lv = _lv(
-                                illiq,
-                                ft,
-                                None,  # days-to-absorb needs a liquidation block
-                                iwf=iwf,
-                                adv_dollar=adv_dollar,
-                                min_dollar_volume=cfg_min_dv,
-                                spread_bps=spread_bps,
-                                max_spread_bps=cfg_max_sp,
-                            )
-                            liq_verdict = lv.get("verdict")
-                            liq_dangers = lv.get("dangers")
-                            risk_ctx["liquidity"] = {
-                                "verdict": liq_verdict,
-                                "illiq": illiq,
-                                "float_turnover": ft,
-                                "iwf": iwf,
-                                "dangers": liq_dangers,
-                            }
-                        except Exception:  # noqa: BLE001 - gate must never crash
-                            liq_verdict = None
-                    basket_dd = self._basket_drawdown(ticker)
+                    # risk2.md liquidity/ownership read: the pre-graph
+                    # precompute is its single producer (gated on
+                    # enable_liquidity_gate); this gate and the PM prompt
+                    # consume one read, never a second computation.
+                    liq = risk_ctx.get("liquidity") or {}
+                    liq_verdict = liq.get("verdict")
+                    liq_dangers = liq.get("dangers")
+                    basket_dd = risk_ctx.get("book_drawdown")
                     verdict = govern(
                         govern_size,
                         self.config,
@@ -1158,11 +1074,12 @@ class TradingAgentsGraph:
                             "numbers": "catalyst-hard-block",
                         }
                     final_state["risk_gate"] = verdict
-                    if basket_dd is not None:
-                        risk_ctx.setdefault("book_drawdown", basket_dd)
-                        risk_ctx["drawdown_limit"] = float(
-                            (self.config or {}).get("risk_max_drawdown_pct", 0.10) or 0.10
-                        )
+                    # drawdown_limit is hoisted by the pre-graph precompute
+                    # (single source); setdefault keeps a direct-call fallback
+                    # reading the same limits registry the governor gates on.
+                    risk_ctx.setdefault(
+                        "drawdown_limit", default_limits(self.config)["risk_max_drawdown_pct"]
+                    )
                     if verdict["verdict"] in ("WARN", "REJECT"):
                         final_state["risk_snapshot"] = build_risk_snapshot(
                             verdict,
@@ -1197,25 +1114,6 @@ class TradingAgentsGraph:
                         )
                 except Exception as risk_exc:
                     logger.warning("risk governor skipped: %s", risk_exc)
-            if self.config.get("enable_computed_context"):
-                try:
-                    from tradingagents.strategies.debate_context import (
-                        build_computed_context,
-                    )
-
-                    overlay = overlay or {}
-                    extra = [
-                        f"regime={overlay.get('regime', '?')}",
-                        f"flow={overlay.get('flow', {}).get('flag', 'n/a')}",
-                    ]
-                    if overlay.get("position_contract"):
-                        extra.append("contract=" + overlay["position_contract"])
-                    snippet = build_computed_context(self.config, extra=extra)
-                    if snippet:
-                        final_state["computed_context"] = snippet
-                        overlay["context"] = overlay.get("context", "") + " | " + snippet
-                except Exception as ctx_exc:
-                    logger.warning("computed context skipped: %s", ctx_exc)
         except Exception as exc:
             logger.warning("strategy overlays skipped: %s", exc)
             return final_state
@@ -1381,12 +1279,16 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001
             pass
         try:
-            from tradingagents.strategies.trade_plan import build_trade_plan
+            from tradingagents.strategies.trade_plan import (
+                build_trade_plan,
+                measured_inputs,
+            )
 
             plan = build_trade_plan(
                 ticker=ticker,
                 price=(closes[-1] if closes else None),
                 config=self.config,
+                **measured_inputs(closes, self.config),
             )
             out.append(plan)
         except Exception:  # noqa: BLE001
@@ -1588,10 +1490,14 @@ class TradingAgentsGraph:
         return "\n\n".join(out) if out else "Computed decision context: unavailable."
 
     def _precompute_risk_context(self, ticker: str) -> dict:
-        """Deterministic CVaR/stress context for the PM prompt, computed BEFORE
-        the graph runs so the Portfolio Manager can ground its tail-risk
-        language. Reuses the same calculators as the post-graph overlays (which
-        remain authoritative for the gate). Best-effort — never raises.
+        """Deterministic pre-decision risk context for the PM prompt, computed
+        BEFORE the graph runs so the Portfolio Manager can ground its
+        tail-risk / liquidity / book-drawdown / limits language in numbers that
+        exist at decision time.
+
+        Single producer (W4): the post-graph risk governor CONSUMES these
+        values from ``state['risk_context']`` instead of recomputing them, so
+        each quantity has exactly one producer. Best-effort - never raises.
         """
         out: dict = {}
         try:
@@ -1606,9 +1512,92 @@ class TradingAgentsGraph:
             basket = self._basket_cvar(ticker)
             if basket is not None:
                 out["book_cvar"] = basket
+            drawdown = self._basket_drawdown(ticker)
+            if drawdown is not None:
+                out["book_drawdown"] = drawdown
+            # Limits registry (same source the governor gates against), so a
+            # PM prompt rule can cite the cap / budget / drawdown limit it is
+            # actually measured against.
+            from tradingagents.strategies.risk_governor import default_limits
+
+            limits = default_limits(self.config)
+            out["drawdown_limit"] = limits["risk_max_drawdown_pct"]
+            out["max_position_pct"] = limits["max_position_pct"]
+            out["cvar_budget_pct"] = limits["risk_daily_cvar_budget_pct"]
+            liquidity = self._liquidity_context(ticker, closes)
+            if liquidity is not None:
+                out["liquidity"] = liquidity
         except Exception:  # noqa: BLE001 - precompute is best-effort
             pass
         return out
+
+    def _liquidity_context(self, ticker: str, closes: list) -> dict | None:
+        """Composite liquidity/ownership read for the analyzed name.
+
+        Single producer of ``risk_context['liquidity']``: the pre-graph
+        precompute calls it and the post-graph risk governor consumes the
+        result. Gated on ``enable_liquidity_gate`` (None when off, so the gate
+        stays opt-in). Volume is not loaded on this pre-graph path, so the
+        Amihud / dollar-volume legs read None (unknown, never fabricated); the
+        close-based Roll spread and the share-count IWF still resolve. Never
+        raises.
+        """
+        if not self.config.get("enable_liquidity_gate"):
+            return None
+        try:
+            from tradingagents.strategies.liquidity_risk import (
+                amihud_illiquidity,
+                float_turnover as _ft,
+                free_float_factor as _iwf,
+                liquidity_verdict as _lv,
+                roll_spread as _roll,
+            )
+
+            closes = list(closes or [])
+            illiq = amihud_illiquidity(closes, [])
+            float_sh = None
+            try:
+                from tradingagents.dataflows.float_shares import fetch_float_shares
+
+                float_sh = fetch_float_shares(ticker)
+            except Exception:  # noqa: BLE001 - a missing float drops that leg only
+                float_sh = None
+            tot_sh = None
+            try:
+                from tradingagents.dataflows.statement_parsing import (
+                    fetch_ticker as _ftk,
+                )
+
+                fin = _ftk(ticker, self.config.get("date") or "") or {}
+                tot_sh = (
+                    (fin.get("shares") or {}).get("current")
+                    if isinstance(fin.get("shares"), dict)
+                    else fin.get("shares")
+                )
+            except Exception:  # noqa: BLE001 - a missing share count drops that leg
+                tot_sh = None
+            ft = _ft(None, float_sh)
+            iwf = _iwf(float_sh, tot_sh)
+            spread = _roll(closes)
+            spread_bps = (spread * 1e4) if spread is not None else None
+            lv = _lv(
+                illiq,
+                ft,
+                None,  # days-to-absorb needs a liquidation block
+                iwf=iwf,
+                min_dollar_volume=self.config.get("min_dollar_volume"),
+                spread_bps=spread_bps,
+                max_spread_bps=self.config.get("max_spread_bps"),
+            )
+            return {
+                "verdict": lv.get("verdict"),
+                "illiq": illiq,
+                "float_turnover": ft,
+                "iwf": iwf,
+                "dangers": lv.get("dangers"),
+            }
+        except Exception:  # noqa: BLE001 - gate must never crash
+            return None
 
     def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> float | None:
         """True portfolio CVaR for the configured risk basket, or None.

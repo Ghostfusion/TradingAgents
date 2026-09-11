@@ -189,7 +189,6 @@ def test_apply_overlays_noops_on_short_closes(monkeypatch, mock_llm_client):
             "enable_position_contract": True,
             "enable_risk_governor": True,
             "enable_events": True,
-            "enable_computed_context": False,
             "enable_agreement": False,
             "enable_tranche_risk": False,
             "risk_audit_enabled": False,

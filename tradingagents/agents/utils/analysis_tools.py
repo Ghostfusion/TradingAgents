@@ -6828,15 +6828,19 @@ def get_trade_plan(
     """
     try:
         from tradingagents.dataflows.config import get_config
-        from tradingagents.strategies.trade_plan import build_trade_plan
+        from tradingagents.strategies.trade_plan import build_trade_plan, measured_inputs
     except Exception as exc:
         return f"trade plan unavailable: {exc}"
     try:
         cfg = get_config()
+        closes = _ohlcv(ticker).get("closes") or []
         if price is None:
-            closes = _ohlcv(ticker).get("closes") or []
             price = closes[-1] if closes else None
-        return build_trade_plan(ticker=ticker, price=price, config=cfg)
+        # Same measured pieces the graph's own card uses (one implementation):
+        # without them every row rendered 'unavailable'.
+        return build_trade_plan(
+            ticker=ticker, price=price, config=cfg, **measured_inputs(closes, cfg)
+        )
     except Exception as exc:
         return f"trade plan unavailable: {exc}"
 

@@ -135,15 +135,16 @@ The **order of folds matters** (each multiplies / feeds the downstream):
    per-tranche losses at the hard stop vs `tranche_risk_pct`); the state
    gains `tranche_context` (avg_entry, peak_deployed_pct, capital_at_risk_pct,
    peak_ok, book_ok).
-6. **computed context** (optional, `enable_computed_context`) –
-   `strategies/debate_context.py::build_computed_context`: snippet fed into the
+6. **computed context** (removed 2026-09-11) – the snippet was written to state and read by no agent
+   (and its V5 inputs were never supplied); the live paths read `computed_decision_context`. The
+   former builder, fed into the
    debates.
 7. `apply_overlay_to_state(final_state, overlay)`.
 
 Only the flags enabled in config run; all others skip cleanly. `enable_*`
 flags: default ON: `enable_strategy_overlays, enable_orderflow,
 enable_position_contract, enable_calibration, enable_agreement,
-enable_composite_rank, enable_exits, enable_computed_context,
+enable_composite_rank, enable_exits,
 enable_risk_governor, enable_events, enable_reflection`. Default OFF:
 `enable_regime, enable_factors, enable_sentiment, enable_threshold_gate`.
 

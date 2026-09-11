@@ -90,7 +90,6 @@ involved. This is the "compute, don't narrate" core.
   risk/stop)*vol*flow*agree*catalyst).
 - `calibration.py` — `fit_buckets` (ledger win-rate -> calibrated P).
 - `consensus.py` — `agreement_score` (debate stances -> agreement).
-- `debate_context.py` — `build_computed_context` (numbers into debate).
 - `exits.py` — stop/BE/targets.
 - `reflection.py` — ledger, analyst hit-rates.
 - `orderflow.py` — `fetch_flow`, `summarize`, divergence/alignment/exhaustion.

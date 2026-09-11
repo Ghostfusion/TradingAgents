@@ -58,6 +58,47 @@ def _candidate_block(cand: dict) -> str:
     return "\n".join(rows)
 
 
+def _fmt_num(v) -> str:
+    """Format a claim/ground-truth number, or ``-`` when absent/unparsable."""
+    try:
+        return f"{float(v):g}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _claim_rows_block(rows: list, gt_keys: dict, limit: int = 15) -> list[str]:
+    """Per-claim L1 rows for the judge prompt.
+
+    The judge's rubric demands empirical grounding and distrust of
+    unverifiable numbers, so it must see WHICH specific claims L1 could not
+    verify - not a bare per-role count. Renders metric, asserted value,
+    ground-truth key, true value and verdict status per claim.
+
+    True values come from the persisted ground-truth registry (the debate's
+    single producer); a key that does not resolve renders ``-`` rather than an
+    invented number. Bounded to ``limit`` rows per role.
+    """
+    from tradingagents.strategies.debate_claim import resolve_ground_truth_key
+
+    lines = []
+    for claim in rows[:limit]:
+        key = str(getattr(claim, "ground_truth_key", "") or "")
+        metric = str(getattr(claim, "metric_name", "") or "") or key or "?"
+        truth = None
+        if key:
+            resolved = resolve_ground_truth_key(key, gt_keys)
+            if resolved is not None:
+                truth = gt_keys.get(resolved)
+        lines.append(
+            f"  - claim {metric}={_fmt_num(getattr(claim, 'value', None))}; "
+            f"ground_truth_key={key or '-'}; true={_fmt_num(truth)}; "
+            f"status={getattr(claim, 'status', '') or 'unknown'}"
+        )
+    if len(rows) > limit:
+        lines.append(f"  - ... {len(rows) - limit} more claim(s) omitted")
+    return lines
+
+
 def _build_judge_candidate_prompt(
     round_no: int,
     candidate: dict,
@@ -74,7 +115,9 @@ def _build_judge_candidate_prompt(
         opponent: preceding speaker's {alias, thesis, claims} or None
             (opening round).
         l1_scorecard: deterministic per-role valid/violated/unverified/abstain
-            counts (rendered by the caller).
+            counts plus one row per claim (metric, asserted value,
+            ground-truth key, true value, status) so the judge can see which
+            specific claims failed verification (rendered by the caller).
     """
     opp_block = _candidate_block(opponent) if opponent else (
         "Opening round - evaluate thesis clarity."
@@ -222,6 +265,7 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
             for idx, rec in enumerate(round_records)
             if isinstance(rec.get(r), dict) and not _degraded(rec.get(r))
         }
+        gt_keys = ((debate_state.get("ground_truth_registry") or {}).get("keys") or {})
         sc_lines = []
         for r in roles:
             rows = [c for c in ledger.rows if c.role == r]
@@ -235,6 +279,9 @@ def create_debate_judge(judge_llm, section: str = "research", cfg: dict | None =
                 f"- {r}: valid={counts['valid']} violated={counts['violated']} "
                 f"unverified={counts['unverified']} abstain={counts['abstain']}"
             )
+            # The counts alone hide which claims failed verification; the judge
+            # scores empirical grounding, so it gets the per-claim rows too.
+            sc_lines.extend(_claim_rows_block(rows, gt_keys))
         l1_scorecard = "\n".join(sc_lines) or "(no claims verified)"
         def _score_all() -> tuple:
             side_scores = {}

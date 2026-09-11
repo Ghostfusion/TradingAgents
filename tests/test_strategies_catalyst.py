@@ -389,7 +389,6 @@ def test_graph_overlay_wiring_enable_events(monkeypatch):
         "enable_orderflow": False,
         "enable_position_contract": False,
         "enable_risk_governor": False,
-        "enable_computed_context": False,
         "target_vol": 0.15,
     }
     closes = [100.0 + 0.2 * i for i in range(300)]
@@ -427,7 +426,6 @@ def test_graph_overlay_wiring_events_disabled(monkeypatch):
         "enable_orderflow": False,
         "enable_position_contract": False,
         "enable_risk_governor": False,
-        "enable_computed_context": False,
         "target_vol": 0.15,
     }
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: [100.0 + i for i in range(300)])
@@ -496,7 +494,6 @@ def test_graph_overlay_wiring_hard_block_rejects(monkeypatch):
         "enable_orderflow": False,
         "enable_position_contract": False,
         "enable_risk_governor": True,
-        "enable_computed_context": False,
         "risk_audit_enabled": False,
         "data_cache_dir": "~/.tradingagents",
         "target_vol": 0.15,
@@ -537,7 +534,6 @@ def test_graph_overlay_wiring_no_hard_block_passes(monkeypatch):
         "enable_orderflow": False,
         "enable_position_contract": True,
         "enable_risk_governor": True,
-        "enable_computed_context": False,
         "risk_audit_enabled": False,
         "target_vol": 0.15,
     }
@@ -575,7 +571,6 @@ def test_risk_governor_basket_cvar_overrides_single_name(monkeypatch):
         "enable_orderflow": False,
         "enable_position_contract": False,
         "enable_risk_governor": True,
-        "enable_computed_context": False,
         "enable_events": False,
         "risk_audit_enabled": False,
         "risk_basket_tickers": ["SPY", "QQQ"],

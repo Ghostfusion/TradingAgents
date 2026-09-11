@@ -2,7 +2,6 @@
 
 import pytest
 
-from tradingagents.strategies.debate_context import build_computed_context
 from tradingagents.strategies.exits import (
     exit_check,
     net_of_cost,
@@ -75,16 +74,3 @@ def test_stop_to_breakeven_r():
     assert stop_to_breakeven_r(100.0, 95.0, rr=1.5) == pytest.approx(107.5)
     # Non-positive risk (stop >= entry) cannot move to BE below entry.
     assert stop_to_breakeven_r(100.0, 105.0) == pytest.approx(100.0)
-
-
-def test_build_computed_context():
-    ctx = build_computed_context(
-        nebit=1.2e9,
-        ev_nebit=12.5,
-        pe_hist_pct=0.35,
-        trap={"level": "LOW", "evidence": []},
-        margin=0.18,
-    )
-    assert "Computed context" in ctx
-    assert "trap_risk=LOW" in ctx
-    assert build_computed_context() == ""

@@ -18,6 +18,8 @@ the risk governor / strict value-dip flags).
 
 from __future__ import annotations
 
+import contextlib
+
 
 def _pct(v) -> str:
     if v is None:
@@ -141,4 +143,51 @@ def build_trade_plan(
     return "\n".join(lines)
 
 
-__all__ = ["build_trade_plan"]
+def measured_inputs(closes, config: dict | None = None) -> dict:
+    """The plan pieces measurable from the close series alone.
+
+    ``build_trade_plan`` renders whatever it is handed and prints
+    "unavailable" for the rest, so call sites that hold prices but no
+    statement data were passing nothing and the card degenerated into a wall
+    of "unavailable" on every run. This builds what *is* measured - the same
+    tranche read the risk fold uses (last close = P1, ATR-14), its targets,
+    the breakeven rule off that tranche's stop, and the trailing EMA read -
+    from ONE implementation so both call sites agree.
+
+    ``setup`` is deliberately absent: its rows come from the statement /
+    valuation path, so a price-only caller leaves them out rather than
+    inventing rows. Returns ``{}`` when the tranche read is unusable.
+    """
+    cfg = config or {}
+    if not closes:
+        return {}
+    from tradingagents.strategies.exits import breakeven_after_confirmation
+    from tradingagents.strategies.swing import trail_ema
+    from tradingagents.strategies.value_dip import tranche_risk_read
+
+    read = tranche_risk_read(
+        closes,
+        weights=tuple(cfg.get("tranche_weights") or (0.3, 0.3, 0.4)),
+        stop_mult=float(cfg.get("tranche_stop_mult", 1.5)),
+        risk_pct=float(cfg.get("tranche_risk_pct", 0.015)),
+        account=float(cfg.get("tranche_account", 100_000.0)),
+    )
+    if not read.get("valid"):
+        return {}
+    out: dict = {"tranche": read, "targets": read.get("targets")}
+    # The BE row and the trail are single rows of the card: a failure there
+    # must not hide the tranche numbers.
+    with contextlib.suppress(Exception):
+        out["be_rule"] = breakeven_after_confirmation(
+            entry_price=float(read["avg_entry"]),
+            stop_price=float(read["stop"]) if read.get("stop") is not None else None,
+            trigger=str(cfg.get("breakeven_trigger", "structure")),
+        )
+    with contextlib.suppress(Exception):
+        trail = trail_ema(closes)
+        if trail:
+            out["trail"] = trail
+    return out
+
+
+__all__ = ["build_trade_plan", "measured_inputs"]

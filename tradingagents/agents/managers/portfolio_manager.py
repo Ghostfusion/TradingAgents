@@ -179,6 +179,37 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
         except Exception:  # noqa: BLE001 - degrade to no line
             liq_line = ""
 
+        # Computed pre-decision limits (W4): book drawdown vs the governor's
+        # limit plus the per-trade size cap / daily CVaR budget, hoisted into
+        # risk_context BEFORE the graph runs. The PM's drawdown veto and its
+        # size-cap rule are grounded in these numbers instead of the
+        # post-decision contract, which the PM never sees.
+        limits_line = ""
+        try:
+            ctx = state.get("risk_context") or {}
+            bits = []
+            dd = ctx.get("book_drawdown")
+            limit = ctx.get("drawdown_limit")
+            if dd is not None and limit is not None:
+                state_txt = "OVER LIMIT - new risk blocked" if dd > limit else "within limit"
+                bits.append(f"book drawdown {dd:.2%} vs limit {limit:.2%} ({state_txt})")
+            elif limit is not None:
+                bits.append(f"drawdown limit {limit:.2%} (book drawdown unmeasured)")
+            if ctx.get("max_position_pct") is not None:
+                bits.append(f"per-trade size cap {ctx['max_position_pct']:.1%}")
+            if ctx.get("cvar_budget_pct") is not None:
+                bits.append(f"daily CVaR budget {ctx['cvar_budget_pct']:.2%}")
+            if bits:
+                limits_line = (
+                    "**Computed pre-decision limits** (deterministic): "
+                    + "; ".join(bits)
+                    + ". Size `position_size` within the per-trade cap and the "
+                    "daily CVaR budget; a book drawdown over its limit blocks "
+                    "new risk.\n\n"
+                )
+        except Exception:  # noqa: BLE001 - degrade to no line
+            limits_line = ""
+
         # Structured risk-debate judge evidence (direction.md item 5): the L2
         # judge verdict over the three risk candidates + L1 triage feed the PM
         # exactly as the research judge feeds the RM. Advisory — absent when
@@ -250,7 +281,7 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
 {risk_judge_block}
 
 {judge_reliability_line}
-{cvar_line}{liq_line}{consensus_line}
+{cvar_line}{liq_line}{limits_line}{consensus_line}
 **Computed decision context (deterministic, advisory - ground your final
 decision in these numbers, never invent your own):**
 {computed_context}
@@ -265,11 +296,11 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 - Prefer a clear `Hold`/`Underweight`/`Sell` (with `position_size` `0%` or a reduction) over an ambiguous call when the debate is split — a decision to do nothing is a decision.
 
 **Label consistency (IREN 2026-09-10 decision.md review):**
-- STOP BASIS: when the computed Position contract stop and your narrative Stop Loss differ (e.g. a risk-engine hard stop vs the chandelier trailing stop), state which one governs — never present two different stop values for the same current position without saying they are different mechanisms (contract stop vs trailing chandelier).
+- STOP BASIS: when the trade-plan card's unified stop and your narrative Stop Loss differ (e.g. a hard invalidation stop vs the chandelier trailing stop), state which one governs — never present two different stop values for the same current position without saying they are different mechanisms (unified stop vs trailing chandelier).
 - SIZE BASIS: distinguish a computed NEW-ENTRY size from a TARGET BOOK WEIGHT for an existing position being trimmed down. A `0.4%` incremental/new-add size and a `5.0%` residual target weight are different things — label them as such, never let them read as conflicting values of one size.
-- GATE HEADER: if the computed risk gate or the risk context reports a portfolio-veto (drawdown over limit → new risk blocked), your header Verdict must not read `PASS`/`TRADE_ALLOWED` while the body says the house gate REJECTs new risk. Reconcile the header with the gate (e.g. `TRADE_ALLOWED` only for exit/trim actions; buys gated) or state the gate status explicitly.
+- GATE HEADER: if the computed pre-decision limits report a book drawdown over its limit (new risk blocked), your header Verdict must not read `PASS`/`TRADE_ALLOWED` while the body says the house gate REJECTs new risk. Reconcile the header with that gate (e.g. `TRADE_ALLOWED` only for exit/trim actions; buys gated) or state the gate status explicitly.
 - SPOT PRICE: use ONE spot price throughout the decision and timestamp it (e.g. "at 491.65 (09-10 snapshot)") — never two different spot prices for the same name without stating which is which (MSFT 2026-09-10 decision.md cited 491.65 in the exec summary and 490.50 in the thesis for the DCF comparison).
-- SIZE CAP EXPLICITNESS: when the computed Position contract size (e.g. 3.6%) is capped down by the name CVaR / budget (e.g. to 3.0% max), say "contract X capped to Y" — never leave two size numbers on the page without stating the cap (MSFT 2026-09-10: contract `size 3.6%` beside a `3.0% max` ceiling with no explicit downgrade).
+- SIZE CAP EXPLICITNESS: when the computed pre-decision limits cap `position_size` below the size the trader proposed (the per-trade size cap or the daily CVaR budget), say "proposed X capped to Y" — never leave two size numbers on the page without stating the cap.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}{get_output_budget("portfolio")}"""
 

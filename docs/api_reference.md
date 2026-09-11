@@ -85,7 +85,6 @@ in `batch.py`).
 | `TRADINGAGENTS_KELLY_FRACTION` | `kelly_alloc_fraction` | fractional-Kelly scaling (default 0.25) |
 | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
-| `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` |
 | `TRADINGAGENTS_ENABLE_RISK_GOVERNOR` | `enable_risk_governor` |
 | `TRADINGAGENTS_ENABLE_DECISION_AUDIT` | `enable_decision_audit` | on, the PM's report shows a claim-vs-computed audit note |
 | `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
@@ -222,7 +221,7 @@ report). Only `enable_events` (B1 catalyst gate), `enable_reflection`,
 `enable_sentiment`, and `enable_strategy_overlays` default **True**;
 `enable_orderflow`, `enable_position_contract`, `enable_calibration`,
 `enable_agreement`, `enable_independent_vote`, `enable_composite_rank`,
-`enable_exits`, `enable_computed_context`, and `enable_risk_governor` default
+`enable_exits` and `enable_risk_governor` default
 **False** (opt-in;
 the dev machine enables most via the gitignored `.env`). Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
@@ -341,7 +340,6 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Calibration | `enable_calibration` (F) | `strategies/calibration.py` | calibrated P from ledger |
 | Agreement | `enable_agreement` (F) | `strategies/consensus.py` | debate agreement -> size; with `enable_independent_vote` the agreement comes from the INDEPENDENT pre-debate stances, not the debate transcript (no conformity contamination) |
 | Sentiment factor | `enable_sentiment_factor` (F) | `strategies/sentiment_research.py` + `overlays.fold_sentiment_into_overlay` | position scale x 1 ± `sentiment_factor_max_scale` ONLY when the name's measured rank IC ≥ `sentiment_factor_min_ic`; else neutral 1.0 (never blocks) |
-| Computed context | `enable_computed_context` (F) | `strategies/debate_context.py` | numbers into debate |
 | Exits | `enable_exits` (F) | `strategies/exits.py` | stops/BE/targets |
 | Reflection | `enable_reflection` (T) | `strategies/reflection.py` | ledger, analyst hit-rates |
 | Composite rank | `enable_composite_rank` (F) | `strategies/factors.py` | EY + momentum + 52w composite |

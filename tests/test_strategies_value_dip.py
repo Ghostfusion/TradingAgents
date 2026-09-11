@@ -374,7 +374,6 @@ def _graph_config(**overrides):
         "enable_orderflow": False,
         "enable_position_contract": True,
         "enable_risk_governor": True,
-        "enable_computed_context": False,
         "enable_agreement": False,
         "enable_calibration": False,
         "enable_exits": False,
