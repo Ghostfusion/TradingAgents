@@ -253,8 +253,15 @@ to avoid churn in the same prompts. `W5` closes what W2/W4 changed. `W6` last.
   mitigation is the prompt naming the exact call, as the already-bound `get_book_correlation` / `get_hrp_alloc` /
   `get_pair_trade_signal` do. For `get_vif_read` the mitigation is structural instead — W2.0 removes the series
   argument from the LLM-facing signature, so there is nothing left to transcribe.
-- **PM pre-graph gating** changes what the decision can act on; if you choose "soften the prompt" instead,
-  the PM keeps its current behaviour and only the honesty of the instruction changes.
+- **PM pre-graph gating changes what the decision can act on.** Resolved as "hoist" in §4.5, so this is the one
+  change in the plan that can alter a trading decision: the PM will now see a drawdown-vs-limit / liquidity /
+  contract read it previously never received, and may veto or shrink trades it used to pass. Two residual risks
+  follow. (a) **Two numbers for one quantity:** the hoisted value and the post-graph overlay must come from the
+  same calc, or the PM argues against one number while the system applies another — so the pre-graph precompute
+  calls the existing functions, it does not re-derive them. (b) **A gate that cannot precede the decision:**
+  only the inputs can be hoisted; a verdict on the PM's *own* final size is inherently post-decision, so those
+  rules are reworded to cite the limits, not a verdict. Mitigation: single-source calc, the post-graph overlays
+  unchanged, and the W6 PM-render smoke asserting the numbers are present in what the model reads.
 - **Docs are load-bearing here**: correcting them is part of the deliverable, because the false claims are
   what let this gap persist.
 
