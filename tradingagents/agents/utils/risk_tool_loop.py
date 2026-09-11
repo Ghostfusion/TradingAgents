@@ -44,6 +44,7 @@ def _build_lists() -> None:
         return
     from tradingagents.agents.utils.analysis_tools import (
         get_book_tail_risk,
+        get_composite_sizing,
         get_concentration_read,
         get_covariance_read,
         get_credit_spread_read,
@@ -117,6 +118,7 @@ def _build_lists() -> None:
 
     TRADER_TOOLS.extend([
         get_position_sizing,
+        get_composite_sizing,
         get_risk_gate,
         get_fixed_risk_size,
         get_exit_check,

@@ -67,21 +67,28 @@ class TestGuardrailHook:
 
 class TestIntegrityRetry:
     def test_missing_field_triggers_rebuild(self):
-        calls = []
+        primary_calls = []
+        backup_calls = []
         class FakeLLM:
+            def __init__(self, sink):
+                self.sink = sink
             def invoke(self, prompt):
-                calls.append(prompt)
+                self.sink.append(prompt)
                 # the single TARGETED retry returns a complete decision
                 return PortfolioDecision(rating="Buy", executive_summary="full",
                                          investment_thesis="t")
-        structured = FakeLLM()
+        structured = FakeLLM(primary_calls)
+        backup = FakeLLM(backup_calls)
         # force typing: pass it as Any
         out = retry_structured_missing_fields(
             structured, "PROMPT", PortfolioDecision(rating="Buy", executive_summary="",
                                                     investment_thesis="t"),
-            render_pm_decision, "PM", mandatory_fields=("executive_summary",), max_retries=1)
-        assert len(calls) == 1  # one TARGETED retry; loop breaks once the field is present
-        assert "missing required field" in calls[0]
+            render_pm_decision, "PM", mandatory_fields=("executive_summary",), max_retries=1,
+            backup_llm=backup,
+        )
+        assert len(backup_calls) == 1  # one TARGETED repair ON THE BACKUP model
+        assert len(primary_calls) == 0  # the field-dropping model is never re-paid
+        assert "missing required field" in backup_calls[0]
         assert "**Executive Summary**: full" in out
 
     def test_complete_result_no_retry(self):

@@ -60,13 +60,20 @@ def test_looks_report_stub_passes_real_report():
     assert structured._looks_report_stub(long_with_progress) is False
 
 
-def test_retry_chain_if_stub_reinvokes_and_returns_report():
-    """A status-turn stub must be re-invoked once; the completion becomes the report."""
-    chain = _fake_chain([_STATUS_TURN_STUB, _REAL_REPORT])
-    out = structured.retry_chain_if_stub(chain, ["msg"], _STATUS_TURN_STUB, "Fundamentals Analyst")
+def test_retry_chain_if_stub_reinvokes_on_backup_and_returns_report():
+    """A status-turn stub must be re-invoked once on the BACKUP chain (the
+    original model that produced the stub is never re-paid); the completion
+    becomes the report."""
+    chain = _fake_chain([])
+    backup = _fake_chain([_REAL_REPORT])
+    out = structured.retry_chain_if_stub(
+        chain, ["msg"], _STATUS_TURN_STUB, "Fundamentals Analyst", backup_chain=backup
+    )
     assert "HOLD" in out
     assert out == _REAL_REPORT
-    assert chain.invoke.call_count == 2
+    assert backup.invoke.call_count == 1
+    # the flaky original chain is never re-invoked
+    chain.invoke.assert_not_called()
 
 
 def test_retry_chain_if_stub_no_retry_when_complete():
@@ -78,17 +85,33 @@ def test_retry_chain_if_stub_no_retry_when_complete():
 
 def test_retry_chain_if_stub_unavailable_after_exhausted_retries():
     """Still a stub after the retry budget -> explicit unavailable, never an empty report."""
-    chain = _fake_chain([_STATUS_TURN_STUB] * (structured._MAX_TRUNCATION_RETRIES + 1))
+    chain = _fake_chain([])
+    backup = _fake_chain([_STATUS_TURN_STUB] * structured._MAX_TRUNCATION_RETRIES)
+    out = structured.retry_chain_if_stub(
+        chain, ["msg"], _STATUS_TURN_STUB, "News Analyst", backup_chain=backup
+    )
+    assert out.startswith("**Report unavailable**")
+    assert "stub" in out.lower()
+    assert backup.invoke.call_count == structured._MAX_TRUNCATION_RETRIES
+
+
+def test_retry_chain_if_stub_no_backup_no_retry_unavailable():
+    """Without a configured backup chain a stub is reported unavailable, never
+    re-invoking the flaky original (661d879: never re-pay the same model)."""
+    chain = _fake_chain([])
     out = structured.retry_chain_if_stub(chain, ["msg"], _STATUS_TURN_STUB, "News Analyst")
     assert out.startswith("**Report unavailable**")
     assert "stub" in out.lower()
-    assert chain.invoke.call_count == structured._MAX_TRUNCATION_RETRIES
+    chain.invoke.assert_not_called()
 
 
 def test_retry_chain_if_stub_handles_chain_failure():
-    chain = mock.MagicMock()
-    chain.invoke.side_effect = RuntimeError("provider down")
-    out = structured.retry_chain_if_stub(chain, ["msg"], _STATUS_TURN_STUB, "Fundamentals Analyst")
-    # Still a stub and the retry failed -> explicit unavailable, never raises.
+    chain = _fake_chain([])
+    backup = mock.MagicMock()
+    backup.invoke.side_effect = RuntimeError("provider down")
+    out = structured.retry_chain_if_stub(
+        chain, ["msg"], _STATUS_TURN_STUB, "Fundamentals Analyst", backup_chain=backup
+    )
+    # Still a stub and the retry failed -> explicit unavailable, never a raise.
     assert out.startswith("**Report unavailable**")
-    assert chain.invoke.call_count == 1
+    assert backup.invoke.call_count == 1

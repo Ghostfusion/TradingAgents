@@ -122,6 +122,7 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             "  10y field), never DGS1 (1-year); label the as-of date with"
             "  the value (a transient 9.87 print in HPE was the wrong"
             "  series id, not a market move)."
+            "  MACRO MUSTS: Treasury yields (10Y DGS10), RRP, and EFFR"
             " MUST come from get_macro_indicators(...,'10y_treasury'/'fed_funds_rate'/"
             "'reverse_repo' or a raw FRED id); market-implied probabilities (Fed"
             " cut, recession odds) MUST come from get_prediction_markets; TGA"
