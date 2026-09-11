@@ -51,7 +51,7 @@ TOOL_METRIC_MAP: dict[str, str] = {
 # Numeric value extractor: the first decimal / integer "number" token in a
 # line. Kept deliberately simple (values in leaves are formatted like
 # "120.33", "1,234.5", "12.3%", "$80.60").
-_NUM_RE = re.compile(r"-?\$?\s*([\d,]+(?:\.\d+)?)\s*(?:[%MBK])?", re.IGNORECASE)
+_NUM_RE = re.compile(r"-?\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(?:[%MBK])?", re.IGNORECASE)
 
 # Debt/equity extraction: D/E appears in different shapes across tools -
 # get_fundamentals "Debt to Equity: 5.62" (raw vendor), get_ratios "D/E: 0.06"

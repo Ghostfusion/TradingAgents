@@ -1266,3 +1266,51 @@ def test_macro_gate_passes_when_macro_leaf_carries_term():
     # Two macro lines remain flagged; the WTI-bearing economic-calendar line
     # is grounded by content, but the Polymarket/10Y line still has no leaf.
     assert any("Polymarket" in c.claim for c in unsupported)
+
+
+# --- the comma-only capture that killed the whole verifier -----------------
+# GOOG 2026-09-11: sentiment.md writes "sub-30 P/E, cheap vs Costco/Meta". The
+# regex family `([\d,]+...)` matched a COMMA-ONLY capture, `float("," .replace)`
+# raised ValueError out of _pe_basis_conflict, and verify_report_dir lost the
+# entire payload for every section — 30 of 35 report trees have no
+# verify_flags.json. Two guards now: every number capture requires a digit, and
+# each metric family is isolated (recorded in metric_errors, never silently).
+
+
+def test_pe_capture_requires_a_digit(tmp_path):
+    """The exact prose that crashed the gate must parse to nothing, not raise."""
+    t = (
+        "StockTwits bull case (sub-30 P/E, cheap vs Costco/Meta) is the same "
+        "argument.\nLast: 336.37; EPS TTM $12.34.\n"
+    )
+    assert rv._pe_basis_conflict(t) == []          # would raise ValueError before
+    assert rv._text_metrics(t)[1] == []            # no metric errored
+
+
+def test_verify_report_dir_survives_a_comma_only_pe_capture(tmp_path):
+    """A report tree containing that prose must still yield a payload."""
+    d = _mk_report_dir(
+        tmp_path,
+        reports={
+            "sentiment": "Bull case: sub-30 P/E, cheap vs Costco/Meta.\n",
+            "fundamentals": "P/E 17 vs META 23; EPS TTM $12.34 at price 336.37.\n",
+        },
+    )
+    payload = rv.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
+    assert set(payload["verification"]) == {"sentiment", "fundamentals"}
+    for entry in payload["verification"].values():
+        assert "metric_errors" not in entry, entry.get("metric_errors")
+
+
+def test_verify_report_dir_records_a_failing_metric(tmp_path, monkeypatch):
+    """A metric that cannot parse a report is recorded, not fatal: the other
+    metrics' claims and the section entry still land in the payload."""
+    def _boom(_text):
+        raise ValueError("could not convert string to float: ''")
+
+    monkeypatch.setitem(rv._text_metrics.__globals__, "_sma200_identity", _boom)
+    d = _mk_report_dir(tmp_path, reports={"market": "200-day 335.17.\n"})
+    payload = rv.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
+    entry = payload["verification"]["market"]
+    assert entry["overall"] in ("PASS", "UNKNOWN", "FLAG")
+    assert any(e.startswith("sma200_identity: ValueError") for e in entry["metric_errors"])

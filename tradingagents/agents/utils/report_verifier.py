@@ -593,7 +593,7 @@ def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, floa
 # against its twin (MU 2026-09-09 review loop).
 _R_LABEL_PAIR_RE = re.compile(
     r"\b(?:(2R|2xR|3R|3xR|T1|T2)\s*/\s*)?(2R|2xR|3R|3xR|T1|T2)\b"
-    r"[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*([\d,]+\.\d+)(?:\s*/\s*([\d,]+\.\d+))?"
+    r"[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*(\d[\d,]*\.\d+)(?:\s*/\s*(\d[\d,]*\.\d+))?"
 )
 
 
@@ -725,15 +725,15 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
 # number-vs-vendor conflicts — they are internal identities broken inside
 # ONE report. Deterministic identity checks below; advisory, never rewrite.
 
-_PE_RE = re.compile(r"\bP\s*/\s*E\b\s*:?\s*\**\s*([\d,]+(?:\.\d+)?)")
-_PRICE_RE = re.compile(r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*([\d,]+\.\d{2})|at\s+\$([\d,]+\.\d{2})")
-_TTM_EPS_RE = re.compile(r"(?i)\beps\b[^0-9]{0,40}ttm[^0-9]{0,40}\$\s*\**\s*([\d,]+(?:\.\d+)?)")
+_PE_RE = re.compile(r"\bP\s*/\s*E\b\s*:?\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
+_PRICE_RE = re.compile(r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d{2})|at\s+\$(\d[\d,]*\.\d{2})")
+_TTM_EPS_RE = re.compile(r"(?i)\beps\b[^0-9]{0,40}ttm[^0-9]{0,40}\$\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
 _ROE_RE = re.compile(r"\bROE\b\s*\**\s*~?\s*([\d.]+)\s*%")
 _NET_MARGIN_RE = re.compile(r"net_margin\s*\**\s*([\d.]+)")
 _AT_RE = re.compile(r"asset_turnover\s*\**\s*([\d.]+)")
 _EM_RE = re.compile(r"equity_multiplier\s*\**\s*([\d.]+)")
-_EV_RE = re.compile(r"\bEV\b(?!\s*/)[::]?\s*\**\s*\$?\s*\**\s*([\d,]+)")
-_MCAP_RE = re.compile(r"(?i)market\s*cap[^0-9]{0,45}\$?\s*\**\s*([\d,]+)")
+_EV_RE = re.compile(r"\bEV\b(?!\s*/)[::]?\s*\**\s*\$?\s*\**\s*(\d[\d,]*)")
+_MCAP_RE = re.compile(r"(?i)market\s*cap[^0-9]{0,45}\$?\s*\**\s*(\d[\d,]*)")
 _NET_CASH_RE = re.compile(r"(?i)net\s*cash[^0-9]{0,20}\$?\s*([\d.]+)\s*B")
 
 
@@ -923,10 +923,10 @@ _DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*
 
 
 _FCF_AMT = re.compile(
-    r"(?i)\bfcf\b[^0-9$]{0,12}\$?\s*([\d,]+(?:\.\d+)?)\s*([KMBkmb]?)"
+    r"(?i)\bfcf\b[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)"
 )
 _FCF_AMT_FE = re.compile(
-    r"(?i)free\s+cash\s+flow[^0-9$]{0,12}\$?\s*([\d,]+(?:\.\d+)?)\s*([KMBkmb]?)"
+    r"(?i)free\s+cash\s+flow[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)"
 )
 
 
@@ -1117,10 +1117,10 @@ def _double_digit_streak_identity(report_text: str) -> list[VerifierClaim]:
 
 
 _INS_SOLD_LINE = re.compile(
-    r"(?i)\bsold\s+([\d,]+)\s*(?:sh|shares|shs)?[\s\S]{0,30}?"
+    r"(?i)\bsold\s+(\d[\d,]*)\s*(?:sh|shares|shs)?[\s\S]{0,30}?"
     r"\bat\s+([\d.]+)\s*(?:[-\u2013]\s*([\d.]+))?"
     r"\s*(?:\(|\s)(?:value\s*)?[$]?\s*"
-    r"([\d,]+(?:\.\d+)?)\s*([kmb]?)\b"
+    r"(\d[\d,]*(?:\.\d+)?)\s*([kmb]?)\b"
 )
 
 
@@ -1156,7 +1156,7 @@ def _insider_sold_value_identity(report_text: str) -> list[VerifierClaim]:
     return out
 
 
-_SMA200_VAL_RE = re.compile(r"(?i)200[-\s]?day[^0-9]{0,14}?([\d,]+(?:\.\d+)?)")
+_SMA200_VAL_RE = re.compile(r"(?i)200[-\s]?day[^0-9]{0,14}?(\d[\d,]*(?:\.\d+)?)")
 _SMA_PCT_RE = re.compile(
     r"(?i)(\d+(?:\.\d+)?)\s*%\s*(above|below)\s+(?:the\s+)?"
     r"(price\b|200[-\s]?day\b)")
@@ -1744,13 +1744,13 @@ def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
 # "2R/3R targets 1357.69 / 1521.68" while get_swing_set (evidence) gives
 # entry 1027.77 / stop 862.81 / 2R 1357.6891 / 3R 1522.6486 — the quoted
 # 3R is a 0.06% offset typo (1521.68 vs 1522.65). Catch it deterministically.
-_ENTRY_RE = re.compile(r"(?i)\bentry\b[^0-9]{0,12}\$?\s*\**\s*([\d,]+\.\d+)")
-_STOP_RE = re.compile(r"(?i)\b(?:struct(?:ure)?\s*)?stop\b[^0-9]{0,12}\$?\s*\**\s*([\d,]+\.\d+)")
+_ENTRY_RE = re.compile(r"(?i)\bentry\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)")
+_STOP_RE = re.compile(r"(?i)\b(?:struct(?:ure)?\s*)?stop\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)")
 # "2R" / "3R" / "T1(2R)" / "T2(3R)" label followed by its value(s). A swing
 # line often quotes a pair "2R/3R targets 1357.69 / 1521.68" — group 2 is the
 # label-specific value (the one after "/" for the 3R in a "A / B" pair).
 _RMULT_RE = re.compile(
-    r"\b(2R|3R|T1|T2)\b[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*([\d,]+\.\d+)(?:\s*/\s*([\d,]+\.\d+))?"
+    r"\b(2R|3R|T1|T2)\b[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*(\d[\d,]*\.\d+)(?:\s*/\s*(\d[\d,]*\.\d+))?"
 )
 
 _RMULT_TOL = 0.002  # 0.2% — a real typo (0.06%) is far under; framework drift is not.
@@ -1876,6 +1876,58 @@ def verify_evidence_call(
     return _parse_verdict(text, report_name)
 
 
+def _text_metrics(report_text: str) -> tuple[list[VerifierClaim], list[str]]:
+    """Run every text-only metric family; return (claims, errors).
+
+    One implementation per metric, shared by the per-section pass and any
+    later caller. Each family is isolated: a parser bug in one metric must
+    not delete the whole verification payload (the comma-only ``[\\d,]+``
+    capture — "sub-30 P/E, cheap" in a sentiment report — raised out of
+    ``verify_report_dir`` and left 30 of 35 report trees with no
+    ``verify_flags.json`` at all). A failing family is logged and recorded in
+    the payload's ``metric_errors`` so the degradation is visible, never
+    silent.
+    """
+    metrics = (
+        ("internal_conflicts", _internal_conflicts),
+        ("valuation_identity", _valuation_identity_checks),
+        ("fed_cuts_contradiction", _fed_cuts_contradiction),
+        ("drawdown_identity", _drawdown_identity),
+        ("beat_streak_identity", _beat_streak_identity),
+        ("dividend_yield_sanity", _dividend_yield_sanity),
+        ("sma200_identity", _sma200_identity),
+        ("fcf_unit_slip", _fcf_unit_slip),
+        ("expected_band_identity", _expected_band_identity),
+        ("eps_estimate_duals", _eps_estimate_duals),
+        ("bollinger_band_identity", _bollinger_band_identity),
+        ("sector_rank_identity", _sector_rank_identity),
+        ("self_correction_artifacts", _self_correction_artifacts),
+        ("price_target_identity", _price_target_identity),
+        ("sma200_pct_identity", _sma200_pct_identity),
+        ("garch_cond_identity", _garch_cond_identity),
+        ("chandelier_identity", _chandelier_identity),
+        ("sum_identity", _sum_identity),
+        ("ema_identity", _ema_identity),
+        ("ema_trail_identity", _ema_trail_identity),
+        ("double_digit_streak_identity", _double_digit_streak_identity),
+        ("insider_sold_value_identity", _insider_sold_value_identity),
+        ("vrp_sign_label", _vrp_sign_label),
+    )
+    claims: list[VerifierClaim] = []
+    errors: list[str] = []
+    for name, fn in metrics:
+        try:
+            claims.extend(fn(report_text))
+        except Exception as exc:  # noqa: BLE001 - advisory metric: record, never raise
+            logger.warning(
+                "report_verifier: metric %s failed on this report (%s); "
+                "claim checks from it are unavailable",
+                name, exc,
+            )
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+    return claims, errors
+
+
 def verify_report_dir(
     report_dir: str | Path,
     *,
@@ -1986,40 +2038,28 @@ def verify_report_dir(
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
-        conflicts = _internal_conflicts(report_text)
-        macro_gate = _macro_authority_gate(report_text, evidence, stem)
-        identities = _valuation_identity_checks(report_text)
-        fed_cuts = _fed_cuts_contradiction(report_text)
-        drawdown = _drawdown_identity(report_text)
-        beat_streak = _beat_streak_identity(report_text)
-        dividend_check = _dividend_yield_sanity(report_text)
-        sma200 = _sma200_identity(report_text)
-        fcf_slip = _fcf_unit_slip(report_text)
-        expected_band = _expected_band_identity(report_text)
-        eps_duals = _eps_estimate_duals(report_text)
-        boll_bands = _bollinger_band_identity(report_text)
-        sector_rank = _sector_rank_identity(report_text)
-        self_corr = _self_correction_artifacts(report_text)
-        pt_cons = _price_target_identity(report_text)
-        sma200_pct = _sma200_pct_identity(report_text)
-        garch_cond = _garch_cond_identity(report_text)
-        chand_stop = _chandelier_identity(report_text)
-        sum_ident = _sum_identity(report_text)
-        ema_ident = _ema_identity(report_text)
-        trail_ident = _ema_trail_identity(report_text)
-        dd_streak = _double_digit_streak_identity(report_text)
-        insider_value = _insider_sold_value_identity(report_text)
-        vrp_check = _vrp_sign_label(report_text)
-        all_claims = anchored.claims + conflicts + macro_gate + identities + fed_cuts + drawdown + beat_streak + dividend_check + vrp_check + sma200 + fcf_slip + expected_band + eps_duals + boll_bands + sector_rank + self_corr + pt_cons + sma200_pct + garch_cond + chand_stop + sum_ident + ema_ident + trail_ident + dd_streak + insider_value
+        all_claims, metric_errors = _text_metrics(report_text)
+        all_claims = [
+            *anchored.claims,
+            *_macro_authority_gate(report_text, evidence, stem),
+            *all_claims,
+        ]
         overall = (
             "FLAG"
             if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
             else anchored.overall
         )
-        outcomes[stem] = {
+        entry: dict = {
             "overall": overall,
             "claims": [c.model_dump() for c in all_claims],
         }
+        if metric_errors:
+            # A metric that cannot parse the report is recorded, never silent:
+            # a comma-only regex capture ("P/E," in prose) used to raise out of
+            # this function and lose the WHOLE payload for every section (30 of
+            # 35 report trees had no verify_flags.json).
+            entry["metric_errors"] = metric_errors
+        outcomes[stem] = entry
         stem_succeeded += 1
 
     return {
