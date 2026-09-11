@@ -516,3 +516,34 @@ def test_tool_call_log_dir_resolution(monkeypatch):
         == Path("D:/logs/tc")
     # No cache dir and no override -> None (no write)
     assert _log._log_dir({}) is None
+
+
+def test_evidence_block_carries_the_run_price_basis():
+    """Regression (GOOG 2026-09-11 fact-check): the fundamentals analyst has no
+    market-snapshot tool, so it cannot see that its reference close is a
+    FORMING intraday bar unless the block states it. The basis is recorded by
+    the run OHLCV loader and rendered above the leaves."""
+    from tradingagents.agents.utils import price_consistency as PC
+
+    PC.clear_verified_close_cache()
+    PC.set_price_basis("GOOG", 336.37, as_of="2026-09-11")
+    state = {
+        "company_of_interest": "GOOG",
+        "trade_date": "2026-09-11",
+        TOOL_EVIDENCE_KEY: {},
+    }
+    block, _ = gather_for_analyst_node(
+        state, "fundamentals", list(_tools().values()),
+        config={"analyst_forced_tools": ["get_financials"]},
+    )
+    assert block.startswith("**Reference price: 336.37**")
+    assert "FORMING intraday bar" in block
+
+    # No basis recorded -> no claim about one (never invent a settled close).
+    PC.clear_verified_close_cache()
+    state2 = dict(state)
+    block2, _ = gather_for_analyst_node(
+        state2, "fundamentals", list(_tools().values()),
+        config={"analyst_forced_tools": ["get_financials"]},
+    )
+    assert "Reference price" not in block2

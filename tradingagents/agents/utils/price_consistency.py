@@ -25,6 +25,16 @@ from collections.abc import Sequence
 # verified-market-snapshot builder; read by every _ohlcv-based tool.
 _VERIFIED_CLOSE_CACHE: dict[str, float] = {}
 
+# ticker (upper) -> (as-of date, latest close) of the RUN OHLCV series. Single
+# producer is analysis_tools._ohlcv (the run-series loader every price-derived
+# tool shares), so the basis always describes the series the numbers came from
+# — including the one case where it changes a decision: an intraday run whose
+# last bar is still FORMING (GOOG 2026-09-11: the fundamentals report compared
+# a forming 336.37 close against intrinsic value and a 200-day SMA while the
+# market section flagged the same bar provisional; on the prior settled close
+# the price was BELOW that SMA, so the sign of the structural read flips).
+_PRICE_BASIS_CACHE: dict[str, tuple[str | None, float | None]] = {}
+
 # Relative tolerance for "agrees with the verified close" (1%).
 _SCALE_TOLERANCE = 0.01
 
@@ -39,9 +49,65 @@ def set_verified_close(ticker: str, close: float | None) -> None:
         _VERIFIED_CLOSE_CACHE[str(ticker).upper()] = float(close)
 
 
+def set_price_basis(ticker: str, close: float | None,
+                    as_of: str | None = None) -> None:
+    """Record the run OHLCV series' latest (as-of date, close).
+
+    Called by ``analysis_tools._ohlcv`` — the single run-series loader — so the
+    basis is recorded exactly once per run and always matches the series the
+    price-derived tools computed on. Advisory: never raises.
+    """
+    if not ticker:
+        return
+    from contextlib import suppress
+
+    key = str(ticker).upper()
+    with suppress(TypeError, ValueError):
+        _PRICE_BASIS_CACHE[key] = (
+            str(as_of) if as_of else None,
+            float(close) if close is not None else None,
+        )
+
+
+def price_basis(ticker: str) -> tuple[str | None, float | None] | None:
+    """The run series' (as-of date, latest close), or None when not recorded."""
+    return _PRICE_BASIS_CACHE.get(str(ticker).upper())
+
+
+def price_basis_line(ticker: str, curr_date: str | None = None) -> str:
+    """One-line price basis for the analyst evidence block.
+
+    A bar dated the run's analysis date is still FORMING on an intraday run:
+    its close, and every figure derived from it (margin of safety,
+    DCF-vs-market, PT upside, SMA/EMA distance), is provisional. Rendering the
+    basis next to the evidence is what lets a fundamentals/news analyst label
+    those numbers honestly — they have no market-snapshot tool of their own.
+
+    Returns "" when the run series was never loaded, so no analyst claims a
+    basis it does not have.
+    """
+    basis = price_basis(ticker)
+    if basis is None:
+        return ""
+    as_of, close = basis
+    px = f"{close:,.2f}" if close is not None else "unavailable"
+    if as_of and curr_date and as_of == curr_date:
+        return (
+            f"**Reference price: {px}** ({as_of}, FORMING intraday bar -"
+            " provisional: its close and every price-derived figure"
+            " (margin of safety, DCF-vs-market, PT upside, SMA/EMA distance)"
+            " are provisional until the session closes, and a distance that"
+            " is a fraction of a percent may not hold at the settled close)."
+        )
+    if as_of:
+        return f"**Reference price: {px}** ({as_of} settled close)."
+    return f"**Reference price: {px}** (as-of date unavailable)."
+
+
 def clear_verified_close_cache() -> None:
-    """Drop the run-level verified-close cache (tests / fresh runs)."""
+    """Drop the run-level close/price-basis caches (tests / fresh runs)."""
     _VERIFIED_CLOSE_CACHE.clear()
+    _PRICE_BASIS_CACHE.clear()
 
 
 def verified_close(ticker: str) -> float | None:
@@ -90,4 +156,12 @@ def ohlcv_scale_warning(ticker: str, close: float | Sequence[float] | None) -> s
         "the verified snapshot (get_verified_market_snapshot)."
     )
 
-__all__ = ["set_verified_close", "ohlcv_scale_warning", "verified_close", "clear_verified_close_cache"]
+__all__ = [
+    "clear_verified_close_cache",
+    "ohlcv_scale_warning",
+    "price_basis",
+    "price_basis_line",
+    "set_price_basis",
+    "set_verified_close",
+    "verified_close",
+]

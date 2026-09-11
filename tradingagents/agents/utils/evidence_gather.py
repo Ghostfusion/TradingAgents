@@ -312,12 +312,36 @@ def classify_tool_pools(
     return gather, sorted(model)
 
 
-def _render_evidence(leaves, model_names) -> str:
-    """Evidence block + the model-pool hint (the analyst reduce sees both)."""
+def _render_evidence(leaves, model_names, reference_line: str = "") -> str:
+    """Evidence block + the model-pool hint (the analyst reduce sees both).
+
+    ``reference_line`` (optional): the run's price basis (as-of date + close,
+    with the FORMING/provisional flag on an intraday run) rendered above the
+    leaves. It is not a tool leaf — it is the basis of every price-derived
+    figure in the block, and only the market analyst has a snapshot tool that
+    states it otherwise (GOOG 2026-09-11: the fundamentals report compared a
+    forming close against intrinsic value and an SMA while the market section
+    flagged the same bar provisional).
+    """
     block = format_evidence_block(leaves)
+    if reference_line:
+        block = f"{reference_line}\n\n{block}"
     if model_names:
         block += "\n\n" + MODEL_POOL_HEADER + "\n" + ", ".join(sorted(model_names))
     return block
+
+
+def _reference_price_line(state: dict) -> str:
+    """The run's price basis for the evidence block ("" when unknown)."""
+    try:
+        from tradingagents.agents.utils.price_consistency import price_basis_line
+
+        return price_basis_line(
+            str(state.get("company_of_interest") or ""),
+            str(state.get("trade_date") or "") or None,
+        )
+    except Exception:  # noqa: BLE001 - advisory line, never break the gather
+        return ""
 
 
 def gather_for_analyst_node(
@@ -347,7 +371,9 @@ def gather_for_analyst_node(
 
     pool = (existing.get(MODEL_POOL_KEY) or {}).get(analyst_key) or []
     if analyst_key in existing:
-        return _render_evidence(existing[analyst_key], pool), existing
+        return _render_evidence(
+            existing[analyst_key], pool, reference_line=_reference_price_line(state)
+        ), existing
 
     by_name = {t.name: t for t in tools}
     gather_names, model_names = classify_tool_pools(
@@ -397,7 +423,9 @@ def gather_for_analyst_node(
     pools = dict(existing.get(MODEL_POOL_KEY) or {})
     pools[analyst_key] = model_names
     updated[MODEL_POOL_KEY] = pools
-    return _render_evidence(leaves, model_names), updated
+    return _render_evidence(
+        leaves, model_names, reference_line=_reference_price_line(state)
+    ), updated
 
 
 def _leaf_as_dict(leaf) -> dict:

@@ -194,6 +194,21 @@ def test_fundamentals_prompt_states_gain_substance_and_normalized_provenance():
     assert "cross-basis" in sys_text
 
 
+def test_fundamentals_prompt_states_reference_price_basis():
+    """The rendered fundamentals prompt must require the price basis (as-of +
+    settled vs FORMING) on price-derived lines: GOOG 2026-09-11 compared a
+    forming 336.37 close against intrinsic value and a 200-day SMA (+0.4%) when
+    the prior settled close was BELOW that SMA - a sign flip at the close."""
+    captured: list = []
+    fundamentals_mod.create_fundamentals_analyst(
+        _FakeLLM(["f"], captured), config=None
+    )(_base_state())
+    sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
+    assert "REFERENCE-PRICE BASIS" in sys_text
+    assert "FORMING intraday bar" in sys_text
+    assert "PROVISIONAL" in sys_text
+
+
 def test_evidence_block_render_carries_citation_rule():
     """The shared §Tool Evidence block (all evidence-fed analysts) states the
     same verbatim-copy / conflict-quote rule above the leaves."""

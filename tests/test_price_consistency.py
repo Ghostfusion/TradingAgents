@@ -86,3 +86,65 @@ def test_verified_close_populated_by_snapshot_builder(monkeypatch):
     monkeypatch.setattr(mdv, "_verified_rows", lambda symbol, d: df)
     mdv.build_verified_market_snapshot("INTU", "2026-09-08")
     assert PC.verified_close("INTU") == pytest.approx(314.12)
+
+
+class TestRunPriceBasis:
+    """The evidence block's price basis (GOOG 2026-09-11 fact-check).
+
+    The fundamentals report compared a FORMING 336.37 intraday close against
+    intrinsic value, a PT upside and a 200-day SMA while the market section
+    flagged the same bar provisional - and on the prior settled close the price
+    was BELOW that SMA, so the structural read flips. The fundamentals analyst
+    has no market-snapshot tool, so the basis is recorded once by the run OHLCV
+    loader and rendered above the evidence leaves.
+    """
+
+    def test_set_and_read(self):
+        PC.set_price_basis("goog", 336.37, as_of="2026-09-11")
+        assert PC.price_basis("GOOG") == ("2026-09-11", 336.37)
+
+    def test_forming_bar_is_labelled_provisional(self):
+        PC.set_price_basis("GOOG", 336.37, as_of="2026-09-11")
+        line = PC.price_basis_line("GOOG", curr_date="2026-09-11")
+        assert "336.37" in line
+        assert "FORMING intraday bar" in line
+        assert "provisional" in line
+
+    def test_settled_close_is_labelled_settled(self):
+        PC.set_price_basis("GOOG", 330.39, as_of="2026-09-10")
+        line = PC.price_basis_line("GOOG", curr_date="2026-09-11")
+        assert "330.39" in line
+        assert "settled close" in line
+        assert "FORMING" not in line
+
+    def test_unknown_basis_says_nothing(self):
+        assert PC.price_basis_line("GOOG", curr_date="2026-09-11") == ""
+
+    def test_clear_drops_the_basis_too(self):
+        PC.set_price_basis("GOOG", 336.37, as_of="2026-09-11")
+        clear_verified_close_cache()
+        assert PC.price_basis("GOOG") is None
+
+
+def test_ohlcv_loader_records_the_price_basis(monkeypatch):
+    """The run-series loader is the single producer: whatever the price-derived
+    tools computed on is what the evidence block states."""
+    import pandas as pd
+
+    from tradingagents.agents.utils import analysis_tools as AT
+
+    df = pd.DataFrame(
+        {
+            "Date": ["2026-09-09", "2026-09-10", "2026-09-11"],
+            "Close": [331.0, 330.39, 336.37],
+            "High": [333.0, 332.0, 339.95],
+            "Low": [329.0, 328.38, 332.74],
+            "Open": [330.0, 331.0, 333.0],
+            "Volume": [1_000_000.0, 1_100_000.0, 900_000.0],
+        }
+    )
+    AT._clear_ohlcv_cache()
+    monkeypatch.setattr(AT, "_load_ohlcv_df", lambda ticker: df)
+    AT._ohlcv("GOOG")
+    assert PC.price_basis("GOOG") == ("2026-09-11", 336.37)
+    AT._clear_ohlcv_cache()

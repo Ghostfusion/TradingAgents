@@ -141,6 +141,23 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "opens": opens,
             "absence": absence,
         }
+        # Single producer of the run's price basis (as-of date + latest close):
+        # every price-derived tool reads THIS series, so recording here means
+        # the basis always describes the series the numbers came from, and the
+        # analyst evidence block can label a FORMING intraday bar as
+        # provisional. Advisory - never break a tool over the basis.
+        try:
+            from tradingagents.agents.utils.price_consistency import (
+                set_price_basis,
+            )
+
+            set_price_basis(
+                ticker,
+                closes[-1] if closes else None,
+                as_of=dates[-1] if dates else None,
+            )
+        except Exception:  # noqa: BLE001 - advisory only
+            pass
         _RUN_OHLCV_CACHE[key] = result
         return result
     except Exception:  # noqa: BLE001 - a fetch failure degrades, never raises
