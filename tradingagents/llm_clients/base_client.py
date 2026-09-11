@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-def normalize_content(response):
+def content_to_text(content) -> str:
     """Normalize LLM response content to a plain string.
 
     Multiple providers (OpenAI Responses API, Google Gemini 3) return content
@@ -13,8 +13,15 @@ def normalize_content(response):
     captures ``refusal`` blocks (OpenAI Responses API) and ``content``-keyed
     text blocks so a model refusal or an unusual relay shape never collapses
     to a silent empty string.
+
+    Returns "" for None and for non-text shapes, so callers may use the result
+    with ``.strip()`` without a type guard: a list-valued content used to raise
+    AttributeError inside the retry paths and silently degrade to a fallback.
     """
-    content = response.content
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
     if isinstance(content, list):
         texts = []
         for item in content:
@@ -27,7 +34,16 @@ def normalize_content(response):
                     texts.append(item.get("content"))
             elif isinstance(item, str):
                 texts.append(item)
-        response.content = "\n".join(t for t in texts if t)
+        return "\n".join(t for t in texts if t)
+    return str(content)
+
+
+def normalize_content(response):
+    """Normalize LLM response content to a plain string, in place.
+
+    See ``content_to_text`` for the block shapes handled.
+    """
+    response.content = content_to_text(response.content)
     return response
 
 

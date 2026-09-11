@@ -25,6 +25,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from tradingagents.llm_clients.base_client import content_to_text
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
@@ -170,7 +172,7 @@ def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str,
             )
         try:
             cont = retry_llm.invoke(_continuation_prompt(full))
-            cont_text = cont.content if hasattr(cont, "content") else str(cont)
+            cont_text = content_to_text(getattr(cont, "content", cont))
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("truncation continuation failed: %s", exc)
             break
@@ -266,7 +268,7 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
                 agent_name, _model_name(fallback_llm) or fallback_llm,
             )
             resp = fallback_llm.invoke(_stub_completion_prompt(prompt))
-            nxt = resp.content if hasattr(resp, "content") else str(resp)
+            nxt = content_to_text(getattr(resp, "content", resp))
             attempts += 1
             if nxt and nxt.strip() and not _looks_stub(nxt):
                 return nxt
@@ -287,7 +289,7 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
                 agent_name, _model_name(retry_llm) or retry_llm,
             )
             resp = retry_llm.invoke(_stub_completion_prompt(prompt))
-            nxt = resp.content if hasattr(resp, "content") else str(resp)
+            nxt = content_to_text(getattr(resp, "content", resp))
         except Exception as exc:  # noqa: BLE001 - a failed retry degrades
             logger.warning("%s: backup stub-completion retry failed: %s", agent_name, exc)
             break
@@ -391,7 +393,7 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
 
             history = _deorphan_tool_calls(messages)
             cont = retry_chain.invoke([*history, HumanMessage(content=_STUB_CHAIN_COMPLETION_PROMPT)])
-            text = cont.content if hasattr(cont, "content") else str(cont)
+            text = content_to_text(getattr(cont, "content", cont))
         except Exception as exc:  # noqa: BLE001 - failed retry degrades
             logger.warning("%s: chain stub-completion retry failed: %s", agent_name, exc)
             break
@@ -506,7 +508,7 @@ def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
             # ``_deorphan_tool_calls`` in ``finalize_messages``).
             history = _deorphan_tool_calls(messages)
             cont = cont_chain.invoke([*history, HumanMessage(content=_continuation_prompt(full))])
-            cont_text = cont.content if hasattr(cont, "content") else str(cont)
+            cont_text = content_to_text(getattr(cont, "content", cont))
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("chain truncation continuation failed: %s", exc)
             break
@@ -529,8 +531,40 @@ def retry_llm_if_truncated(llm: Any, prompt: Any, response_text: str,
     return _retry_if_truncated(llm, prompt, response_text, backup_llm=backup_llm)
 
 
+def _terminal_turn_max_tokens() -> int | None:
+    """Output budget to grant a cap-forced repair turn (2x the configured cap).
+
+    Reasoning tokens share ``max_tokens``, so a reasoning model can spend the
+    WHOLE budget on hidden reasoning and emit no content at all - the empty
+    cap-forced terminal turn. Granting the repair turn twice the configured cap
+    leaves room for the reasoning plus the report that follows it.
+
+    Measured (GOOG, deepseek-v4.1-flash, reasoning_effort=high, 44k-token
+    evidence context): at the configured 16000 cap the turn stopped at exactly
+    16000 output tokens with ``finish_reason="length"``; the same input at
+    32000 finished naturally (19696 output tokens, 6691 of them reasoning).
+
+    Returns None when no cap is configured (the provider default applies).
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - advisory; no override when unknown
+        return None
+    cap = cfg.get("max_output_tokens_quick") or cfg.get("max_output_tokens")
+    try:
+        cap = int(cap)
+    except (TypeError, ValueError):
+        return None
+    if cap <= 0:
+        return None
+    return cap * 2
+
+
 def finalize_messages(chain: Any, messages: Any, result: Any,
-                      backup_chain: Any | None = None) -> str:
+                      backup_chain: Any | None = None,
+                      agent_name: str = "") -> str:
     """Force a terminal report turn when an analyst hit its tool-round cap.
 
     The analyst routers force back to the analyst node after
@@ -544,10 +578,21 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
     ``backup_chain`` (optional): the cap-forced terminal turn's truncation
     continuation runs on this chain (backup model) - see
     ``retry_chain_if_truncated``.
+
+    ``agent_name`` (optional): the role whose report this turn produces. Used
+    for the log lines and the forensic journal entry, so an empty terminal turn
+    can be traced to the analyst that burned its budget.
+
+    An EMPTY terminal turn is repaired on a different chain with a doubled
+    output budget before degrading to the unavailable notice. Rationale:
+    reasoning tokens share ``max_tokens``, so the model can spend the whole
+    budget on hidden reasoning and emit no text; re-asking the same question
+    with the same cap on the same chain reproduces the same burn. At most two
+    repair attempts (backup first, then the primary).
     """
     if not getattr(result, "tool_calls", None):
         # No cap turn: normal path unchanged.
-        return result.content if hasattr(result, "content") else str(result)
+        return content_to_text(getattr(result, "content", result))
     try:
         # Strip the dangling tool_calls on the last message so the model must
         # answer with prose, then run one final turn.
@@ -568,34 +613,69 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         # valid history (regression: TSM 2026-09-07 cap retry).
         cleaned_msgs = _deorphan_tool_calls(cleaned_msgs)
         final = chain.invoke(cleaned_msgs)
-        text = final.content if hasattr(final, "content") else str(final)
-        if text and text.strip():
+        text = content_to_text(getattr(final, "content", final))
+        if text.strip():
             return _retry_if_truncated(chain, cleaned_msgs, text, backup_llm=backup_chain)
         # Cap-forced terminal turn came back empty: no usable report text.
-        # Retry ONCE on the backup chain (when configured, else the same chain),
-        # then emit an explicit unavailable notice if still empty - never a
-        # silent "" that downstream would render as a bare report-unavailable
-        # placeholder (QCOM fundamentals / NXPI market 2026-09-07).
+        # Repair on a DIFFERENT chain with a RAISED output budget (see
+        # ``_terminal_turn_max_tokens``); only then emit the explicit
+        # unavailable notice - never a silent "" that downstream would render
+        # as a bare report-unavailable placeholder (QCOM fundamentals / NXPI
+        # market 2026-09-07).
         from langchain_core.messages import HumanMessage
 
-        cont_chain = chain
+        repair_msgs = [*cleaned_msgs, HumanMessage(content=_EMPTY_CAP_PROMPT)]
+        raised_cap = _terminal_turn_max_tokens()
+        attempts: list[tuple[str, Any]] = []
         if backup_chain is not None and backup_chain is not chain:
-            cont_chain = backup_chain
-            logger.info(
-                "cap-forced terminal turn returned empty; retrying on backup model %r",
-                _model_name(backup_chain) or backup_chain,
+            attempts.append(
+                (f"backup model {_model_name(backup_chain) or backup_chain}", backup_chain)
             )
-        retry_msgs = [*cleaned_msgs, HumanMessage(content=_EMPTY_CAP_PROMPT)]
-        try:
-            resp = cont_chain.invoke(retry_msgs)
-            nxt = resp.content if hasattr(resp, "content") else str(resp)
-            if nxt and nxt.strip():
-                return _retry_if_truncated(cont_chain, retry_msgs, nxt)
-        except Exception as exc:  # noqa: BLE001 - degrade, never raise
-            logger.warning("final-report empty retry after tool cap failed: %s", exc)
+        attempts.append(("primary model", chain))
+        outcomes: list[str] = []
+        first_meta: dict[str, Any] = {}
+        first = True
+        for label, repair_chain in attempts:
+            kwargs = {"max_tokens": raised_cap} if raised_cap else {}
+            logger.info(
+                "cap-forced terminal turn returned empty%s; repairing on %s "
+                "(max_tokens=%s)",
+                f" ({agent_name})" if agent_name else "", label,
+                raised_cap or "default",
+            )
+            try:
+                resp = repair_chain.invoke(repair_msgs, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - degrade, never raise
+                logger.warning("final-report empty repair on %s failed: %s", label, exc)
+                outcomes.append(f"{label}: raised {type(exc).__name__}: {exc}")
+                first = False
+                continue
+            nxt = content_to_text(getattr(resp, "content", resp))
+            if first:
+                meta = getattr(resp, "response_metadata", None) or {}
+                usage = getattr(resp, "usage_metadata", None) or {}
+                first_meta = {
+                    "repair_finish_reason": meta.get("finish_reason"),
+                    "repair_output_tokens": usage.get("output_tokens"),
+                    "repair_reasoning_tokens": (
+                        usage.get("output_token_details") or {}
+                    ).get("reasoning"),
+                }
+                first = False
+            if nxt.strip():
+                outcomes.append(f"{label}: {len(nxt)} chars")
+                _journal_terminal_turn(agent_name, final, first_meta, outcomes,
+                                       repaired=True, raised_cap=raised_cap)
+                return _retry_if_truncated(repair_chain, repair_msgs, nxt,
+                                           backup_llm=backup_chain)
+            outcomes.append(f"{label}: empty")
         logger.warning(
-            "cap-forced final report turn returned empty; emitting unavailable notice"
+            "cap-forced final report turn returned empty after %d repair "
+            "attempt(s); emitting unavailable notice",
+            len(attempts),
         )
+        _journal_terminal_turn(agent_name, final, first_meta, outcomes,
+                               repaired=False, raised_cap=raised_cap)
         return (
             "**Report unavailable** - the analyst's cap-forced terminal turn"
             " returned empty content (the model burned its output budget before"
@@ -604,7 +684,42 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         )
     except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-run
         logger.warning("final-report turn after tool cap failed: %s", exc)
-        return result.content if hasattr(result, "content") else str(result)
+        return content_to_text(getattr(result, "content", result))
+
+
+def _journal_terminal_turn(agent_name: str, final: Any, first_meta: dict,
+                           outcomes: list[str], *, repaired: bool,
+                           raised_cap: int | None) -> None:
+    """Record an empty cap-forced terminal turn (advisory; never raises).
+
+    The unavailable notice is the one failure this pipeline emits with no other
+    trace: the empty turn does not raise, so nothing reaches the LLM failure
+    journal unless it is written here. Without this entry the notice cannot be
+    diagnosed (observed live 2026-09-11: a news report replaced by the notice,
+    with no record of the model, the finish reason or the token split).
+    """
+    usage = getattr(final, "usage_metadata", None) or {}
+    details = usage.get("output_token_details") or {}
+    meta = getattr(final, "response_metadata", None) or {}
+    try:
+        from tradingagents.agents.utils.llm_failure_journal import (
+            journal_llm_note,
+        )
+
+        journal_llm_note(
+            f"finalize_messages/{agent_name or 'analyst'}",
+            "cap-forced terminal turn returned empty content",
+            repaired=repaired,
+            finish_reason=meta.get("finish_reason"),
+            output_tokens=usage.get("output_tokens"),
+            reasoning_tokens=details.get("reasoning"),
+            input_tokens=usage.get("input_tokens"),
+            raised_max_tokens=raised_cap,
+            repair_outcomes=outcomes,
+            **first_meta,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory only
+        logger.debug("terminal-turn journal write skipped: %s", exc)
 
 
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
@@ -694,7 +809,7 @@ def invoke_structured_or_freetext(
             )
 
     response = plain_llm.invoke(prompt)
-    response_text = response.content if hasattr(response, "content") else str(response)
+    response_text = content_to_text(getattr(response, "content", response))
     # Enforce completeness: cut-at-cap -> continuation merge.
     response_text = _retry_if_truncated(plain_llm, prompt, response_text, backup_llm=backup_llm)
     # Harden: a bare header/stub is not a usable decision. Regenerate once;

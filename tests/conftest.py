@@ -73,6 +73,31 @@ def _isolate_config():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_forensics(_isolate_config, tmp_path_factory):
+    """Point the LLM failure journal and tool-call log at a temp dir.
+
+    Both directories resolve from config, and a developer's ``.env`` points
+    them at the real ``<repo>/FailureLog`` and ``<repo>/ToolCallLog``. Test
+    doubles (a fake ``_LLM``, the ``structured/t`` stage from
+    test_structured_agents) were therefore landing in the production journal,
+    polluting the one forensic trail a live failure is diagnosed from — the
+    381 entries in that directory could not be told apart from real events.
+    Every test now journals into its own tmp dir; a test that needs the
+    journal asserts on the path it set itself.
+    """
+    import tradingagents.dataflows.config as config_module
+
+    tmp = tmp_path_factory.mktemp("forensics")
+    config_module.set_config(
+        {
+            "llm_failure_journal_dir": str(tmp / "llm_failures"),
+            "tool_call_log_dir": str(tmp / "tool_calls"),
+        }
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _disable_reddit_killswitch(monkeypatch):
     """Force the Reddit fetch path during tests.
 

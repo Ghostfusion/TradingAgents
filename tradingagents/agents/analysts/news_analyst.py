@@ -168,7 +168,7 @@ def create_news_analyst(llm, backup_llm=None, config=None):
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain)
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="News Analyst")
             return {
                 "messages": [_CapAIMessage(content=_report, id="news-cap-report")],
                 "news_report": _report,
@@ -197,7 +197,7 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain)
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="News Analyst")
 
         return {
             "messages": [result],

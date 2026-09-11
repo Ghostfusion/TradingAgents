@@ -242,7 +242,7 @@ def run_tool_loop(
                 backup_chain = backup_llm.bind_tools(tools)
             except Exception:  # noqa: BLE001 - provider without tool binding
                 backup_chain = None
-        text = finalize_messages(chain, messages, result, backup_chain=backup_chain)
+        text = finalize_messages(chain, messages, result, backup_chain=backup_chain, agent_name="Risk Debators")
     else:
         text = result.content if hasattr(result, "content") else str(result)
     return str(text or ""), transcript

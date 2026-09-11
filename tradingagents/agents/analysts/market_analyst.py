@@ -327,7 +327,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
         _cap_msg = state["messages"][-1]
         if getattr(_cap_msg, "tool_calls", None):
-            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain)
+            _report = finalize_messages(chain, state["messages"], _cap_msg, backup_chain=backup_chain, agent_name="Market Analyst")
             return {
                 "messages": [_CapAIMessage(content=_report, id="market-cap-report")],
                 "market_report": _report,
@@ -359,7 +359,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             # terminal LLM call) so the report is never left empty.
             from tradingagents.agents.utils.structured import finalize_messages
 
-            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain)
+            report = finalize_messages(chain, state["messages"], result, backup_chain=backup_chain, agent_name="Market Analyst")
 
         return {
             "messages": [result],

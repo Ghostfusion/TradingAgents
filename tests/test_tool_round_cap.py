@@ -230,7 +230,8 @@ def test_finalize_messages_empty_turn_emits_unavailable_when_still_empty():
     out = finalize_messages(chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(), backup_chain=backup)
     assert out.startswith("**Report unavailable**")
     assert "**Report unavailable**" in out
-    assert chain.invoke.call_count == 1
+    # backup first, then the primary - the terminal turn plus two repairs.
+    assert chain.invoke.call_count == 2
     assert backup.invoke.call_count == 1
 
     # Without a backup the same chain gets the retry and still degrades cleanly.
@@ -656,3 +657,186 @@ def test_toolnode_handle_errors_keeps_sibling_call_when_one_raises():
         by_id["boom-1"].content
     ).lower()
     assert final["market_report"] == "END"  # round did NOT abort the graph
+
+
+# Empty cap-forced terminal turn: repair with a raised output budget
+# ------------------------------------------------------------------
+# Live failure 2026-09-11 (GOOG, news): the cap-forced terminal turn returned
+# no text at all and the news report was replaced by the unavailable notice.
+# Cause class: reasoning tokens share max_tokens, so a reasoning model can
+# spend the whole budget on hidden reasoning before writing a word - and the
+# old repair re-asked the SAME question with the SAME cap on the SAME chain,
+# reproducing the burn. Measured on the real config (deepseek-v4.1-flash,
+# reasoning_effort=high, 44k-token evidence context): 16000 cap -> the turn
+# stopped at exactly 16000 output tokens (finish_reason="length"); the same
+# input at 32000 finished naturally. The repair now doubles the cap and tries
+# the backup chain first, then the primary.
+
+
+def test_terminal_turn_max_tokens_doubles_the_configured_cap(monkeypatch):
+    from tradingagents.agents.utils.structured import _terminal_turn_max_tokens
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens_quick": 16000},
+    )
+    assert _terminal_turn_max_tokens() == 32000
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens": 8000},
+    )
+    assert _terminal_turn_max_tokens() == 16000
+    monkeypatch.setattr("tradingagents.dataflows.config.get_config", lambda: {})
+    assert _terminal_turn_max_tokens() is None
+
+
+def test_empty_terminal_turn_repair_raises_the_output_budget(monkeypatch):
+    """The repair turn is granted the doubled cap, not the cap that just burned."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens_quick": 16000},
+    )
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(content="")
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="Final news report from backup.")
+
+    out = finalize_messages(
+        chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        backup_chain=backup, agent_name="News Analyst",
+    )
+    assert out == "Final news report from backup."
+    assert backup.invoke.call_args[1] == {"max_tokens": 32000}
+
+
+def test_empty_terminal_turn_repair_falls_back_to_the_primary(monkeypatch):
+    """Backup empty -> the primary is asked too (raised cap), instead of the
+    notice. The old code gave up after the single backup attempt."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens_quick": 16000},
+    )
+    chain = mock.MagicMock()
+    chain.invoke.side_effect = [
+        mock.MagicMock(content=""),                       # cap-forced terminal turn
+        mock.MagicMock(content="News report from primary."),  # repair on primary
+    ]
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="")
+
+    out = finalize_messages(
+        chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        backup_chain=backup, agent_name="News Analyst",
+    )
+    assert out == "News report from primary."
+    assert backup.invoke.call_count == 1
+    assert chain.invoke.call_count == 2
+    assert backup.invoke.call_args[1] == {"max_tokens": 32000}
+    assert chain.invoke.call_args_list[1][1] == {"max_tokens": 32000}
+
+
+def test_empty_terminal_turn_repair_survives_a_backup_exception(monkeypatch):
+    """A backup chain that raises (e.g. its model rejects the tool-bearing
+    history) must not lose the repair: the primary is still asked."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"max_output_tokens_quick": 16000},
+    )
+    chain = mock.MagicMock()
+    chain.invoke.side_effect = [
+        mock.MagicMock(content=""),
+        mock.MagicMock(content="News report from primary."),
+    ]
+    backup = mock.MagicMock()
+    backup.invoke.side_effect = RuntimeError("400 tool history unsupported")
+
+    out = finalize_messages(
+        chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        backup_chain=backup, agent_name="News Analyst",
+    )
+    assert out == "News report from primary."
+
+
+def test_empty_terminal_turn_journals_the_forensics(monkeypatch, tmp_path):
+    """The unavailable notice must leave a record: the empty turn raises
+    nothing, so without this entry the notice is undiagnosable (the live
+    2026-09-11 GOOG news failure could not be attributed to a model, a finish
+    reason or a token split)."""
+    import json
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    journal_dir = tmp_path / "journal"
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"llm_failure_journal_dir": str(journal_dir)},
+    )
+    empty_turn = AIMessage(
+        content="",
+        response_metadata={"finish_reason": "length"},
+        usage_metadata={
+            "input_tokens": 44042,
+            "output_tokens": 16000,
+            "total_tokens": 60042,
+            "output_token_details": {"reasoning": 15980},
+        },
+    )
+    chain = mock.MagicMock()
+    chain.invoke.return_value = empty_turn
+    backup = mock.MagicMock()
+    backup.invoke.return_value = mock.MagicMock(content="")
+
+    out = finalize_messages(
+        chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        backup_chain=backup, agent_name="News Analyst",
+    )
+    assert out.startswith("**Report unavailable**")
+    files = list(journal_dir.glob("*.json"))
+    assert len(files) == 1, f"expected one forensic entry, got {files}"
+    entry = json.loads(files[0].read_text(encoding="utf-8"))
+    assert entry["stage"] == "finalize_messages/News Analyst"
+    assert entry["finish_reason"] == "length"
+    assert entry["output_tokens"] == 16000
+    assert entry["reasoning_tokens"] == 15980
+    assert entry["repaired"] is False
+    assert entry["raised_max_tokens"] == 2 * 16000 or entry["raised_max_tokens"] is None
+    assert len(entry["repair_outcomes"]) == 2
+
+
+def test_terminal_turn_reads_block_shaped_content(monkeypatch):
+    """A relay that returns content as typed blocks must not be read as empty:
+    the old extraction passed the list to ``.strip()``, which raised inside the
+    retry path and degraded a real report to the notice."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.structured import finalize_messages
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.config.get_config", lambda: {},
+    )
+    chain = mock.MagicMock()
+    chain.invoke.return_value = mock.MagicMock(
+        content=[
+            {"type": "reasoning", "text": "hidden chain of thought"},
+            {"type": "text", "text": "News report body. End."},
+        ]
+    )
+
+    out = finalize_messages(
+        chain, _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
+        agent_name="News Analyst",
+    )
+    assert out == "News report body. End."

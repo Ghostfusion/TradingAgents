@@ -22,6 +22,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,54 @@ def _completion_payload(completion) -> dict | None:
     return {"repr": str(completion)}
 
 
+def _write_payload(journal_dir: Path, payload: dict) -> None:
+    """Write one journal entry (advisory; never raises)."""
+    name = (
+        f"llm_failure_{time.strftime('%Y%m%d_%H%M%S')}"
+        f"_{int(time.time() * 1000) % 100000}.json"
+    )
+    try:
+        (journal_dir / name).write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+        logger.warning("llm_failure_journal: wrote %s/%s", journal_dir, name)
+    except Exception as exc2:  # noqa: BLE001 - must never break the caller
+        logger.warning("llm_failure_journal: write failed: %s", exc2)  # noqa: TRY400
+
+
+def journal_llm_note(stage: str, message: str, **fields: Any) -> None:
+    """Persist a diagnostic note that carries no provider completion.
+
+    Same journal, same advisory contract as ``journal_llm_failure``: for
+    failures that degrade instead of raising (the cap-forced terminal turn that
+    came back empty writes an unavailable report and raises nothing), this is
+    the only record. ``fields`` are merged into the payload verbatim so a
+    reader sees the model, finish reason, token split and repair outcomes.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    journal_dir = _journal_dir(cfg)
+    if journal_dir is None:
+        return
+    try:
+        journal_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # noqa: BLE001
+        logger.debug("llm_failure_journal: cannot create %s: %s", journal_dir, exc)
+        return
+    payload = {
+        "ts": time.time(),
+        "stage": stage,
+        "exception": None,
+        "message": str(message)[:2000],
+        **fields,
+    }
+    _write_payload(journal_dir, payload)
+
+
 def journal_llm_failure(stage: str, exc: BaseException) -> None:
     """Persist one failed structured-LLM completion (advisory; never raises)."""
     try:
@@ -92,13 +141,7 @@ def journal_llm_failure(stage: str, exc: BaseException) -> None:
         "completion": completion,
         "body": getattr(exc, "body", None),
     }
-    name = f"llm_failure_{time.strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 100000}.json"
-    try:
-        (journal_dir / name).write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
-        logger.warning("llm_failure_journal: wrote %s/%s", journal_dir, name)
-    except Exception as exc2:  # noqa: BLE001 - must never break the caller
-        logger.warning("llm_failure_journal: write failed: %s", exc2)  # noqa: TRY400
+    _write_payload(journal_dir, payload)
 
-__all__ = ["journal_llm_failure"]
+
+__all__ = ["journal_llm_failure", "journal_llm_note"]
