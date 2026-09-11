@@ -394,17 +394,18 @@ def test_variance_premium_tool_degrades_honestly(monkeypatch):
 
 
 def test_new_tools_bound_to_market_analyst():
-    # The full graph's market ToolNode must carry the new advisory tools; the
-    # graph imports cleanly (import guard) and the tools are re-exported.
+    # The market analyst's bound toolset must carry the new advisory tools; the
+    # graph imports cleanly (import guard) and the tools are in the toolset that
+    # both the analyst and its ToolNode read.
     import tradingagents.agents.analysts.market_analyst as _ma
+    from tradingagents.agents.toolsets import market_tools
     from tradingagents.graph.trading_graph import TradingAgentsGraph  # noqa: F401
 
+    bound = {t.name for t in market_tools()}
     assert hasattr(_ma, "create_market_analyst")
-    assert hasattr(_ma, "get_ts_momentum_weights")
-    assert hasattr(_ma, "get_pair_trade_signal")
-    assert hasattr(_ma, "get_event_pnl_response")
-    assert hasattr(_ma, "get_book_depth_read")
-    assert hasattr(_ma, "get_merton_distance")
+    for name in ("get_ts_momentum_weights", "get_pair_trade_signal",
+                 "get_event_pnl_response", "get_book_depth_read", "get_merton_distance"):
+        assert name in bound, f"{name} is not bound to the market analyst"
 
 
 def test_all_new_tools_importable_and_callable():

@@ -16,6 +16,7 @@ from tradingagents.agents.analysts import (
     market_analyst as market_mod,
     news_analyst as news_mod,
 )
+from tradingagents.agents import toolsets as toolsets_mod
 from tradingagents.agents.utils.evidence_gather import (
     EVIDENCE_SECTION_HEADER,
     TOOL_EVIDENCE_KEY,
@@ -65,7 +66,7 @@ def test_analyst_node_reduces_from_evidence_once(monkeypatch):
         calls["n"] += 1
         return f"FAKE_FIN_OK_{ticker}"
 
-    monkeypatch.setattr(fundamentals_mod, "get_basic_financials", get_basic_financials)
+    monkeypatch.setattr(toolsets_mod, "get_basic_financials", get_basic_financials)
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(
@@ -102,7 +103,7 @@ def test_analyst_node_skips_regather_on_reentry(monkeypatch):
         calls["n"] += 1
         return f"FAKE_FIN_OK_{ticker}"
 
-    monkeypatch.setattr(fundamentals_mod, "get_basic_financials", get_basic_financials)
+    monkeypatch.setattr(toolsets_mod, "get_basic_financials", get_basic_financials)
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(
@@ -136,7 +137,7 @@ def test_analyst_without_forced_config_is_unchanged(monkeypatch):
         calls["n"] += 1
         return f"FIN_{ticker}"
 
-    monkeypatch.setattr(fundamentals_mod, "get_basic_financials", get_basic_financials)
+    monkeypatch.setattr(toolsets_mod, "get_basic_financials", get_basic_financials)
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(

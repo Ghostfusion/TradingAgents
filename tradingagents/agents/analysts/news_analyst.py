@@ -1,34 +1,10 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from tradingagents.agents.toolsets import news_tools
 from tradingagents.agents.utils.agent_utils import (
-    get_beat_miss_sizing,
-    get_catalyst_scale,
-    get_credit_spread_read,
-    get_earnings_calendar,
-    get_earnings_catalyst,
-    get_earnings_event_read,
-    get_economic_calendar,
-    get_fed_watch,
-    get_fx_snapshot,
-    get_gdelt_sentiment,
-    get_global_news,
-    get_insider_transactions,
     get_instrument_context_from_state,
-    get_ipos,
     get_language_instruction,
-    get_macro_indicators,
-    get_market_breadth,
-    get_massive_news,
-    get_news,
-    get_news_relevance_read,
-    get_news_sentiment,
-    get_news_sentiment_series,
     get_output_budget,
-    get_prediction_markets,
-    get_sec_filings,
-    get_share_buyback_authorization,
-    get_taylor_read,
-    get_tga_balance,
 )
 
 
@@ -39,33 +15,7 @@ def create_news_analyst(llm, backup_llm=None, config=None):
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
 
-        tools = [
-            get_news,
-            get_massive_news,
-            get_news_relevance_read,
-            get_gdelt_sentiment,
-            get_news_sentiment_series,
-            get_global_news,
-            get_macro_indicators,
-            get_tga_balance,
-            get_fx_snapshot,
-            get_prediction_markets,
-            get_earnings_calendar,
-            get_sec_filings,
-            get_share_buyback_authorization,
-            get_ipos,
-            get_insider_transactions,
-            get_economic_calendar,
-            get_taylor_read,
-            get_fed_watch,
-            get_market_breadth,
-            get_earnings_catalyst,
-            get_catalyst_scale,
-            get_earnings_event_read,
-            get_beat_miss_sizing,
-            get_news_sentiment,
-            get_credit_spread_read,
-        ]
+        tools = news_tools()
 
         # Forced-tool evidence (map-reduce): gather deterministically once
         # when analyst_forced_tools is set; skipped on tool-loop re-entries.

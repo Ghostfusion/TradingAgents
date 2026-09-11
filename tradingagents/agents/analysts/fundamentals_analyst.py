@@ -1,88 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from tradingagents.agents.toolsets import fundamentals_tools
 from tradingagents.agents.utils.agent_utils import (
-    get_allocation,
-    get_allocation_black_litterman,
-    get_alpha_scoring,
-    get_analyst_ratings,
-    get_analyst_verdict,
-    get_balance_sheet,
-    get_balance_sheet_health,
-    get_basic_financials,
-    get_capex_quality,
-    get_cashflow,
-    get_company_peers,
-    get_composite_rank,
-    get_congress_trades,
-    get_constituent_cap_weights,
-    get_corporate_actions,
-    get_dcf_valuation,
-    get_decline_driver_check,
-    get_dividends,
-    get_dupont_read,
-    get_earnings_quality,
-    get_earnings_quality_verdict,
-    get_earnings_surprise,
-    get_earnings_surprise_history,
-    get_earnings_transcript,
-    get_edgar_fulltext_search,
-    get_etf_decline_driver,
-    get_etf_mechanics,
-    get_etf_relative_strength,
-    get_etf_risk,
-    get_etf_valuation,
-    get_fcf_yield,
-    get_financial_history,
-    get_fixed_income_risk,
-    get_form4_insider,
-    get_fundamentals,
-    get_income_statement,
-    get_insider_activity,
-    get_institution_holdings,
     get_instrument_context_from_state,
-    get_kalman_spread,
     get_language_instruction,
-    get_margin_of_safety,
-    get_normalized_cycle_dcf,
     get_output_budget,
-    get_ownership_concentration,
-    get_patent_activity,
-    get_portfolio_weights,
-    get_position_risk_multiplier,
-    get_ratios,
-    get_regime_state,
-    get_revenue_breakdown,
-    get_scenario_dcf,
-    get_smart_money,
-    get_valuation_z_score,
-    get_value_dip_setup,
-    get_value_floors,
 )
-
-
-def _etf_toolset():
-    """The ETF-appropriate tool set (docs/design_etf_fundamental_valuation.md).
-
-    Company statement tools (get_balance_sheet, get_cashflow,
-    get_dcf_valuation, ...) are expected to return 'unavailable' for a fund
-    wrapper — they are excluded so their absence is never a verdict input;
-    the analyst instead values the ETF from its underlying basket.
-    """
-    return [
-        get_fundamentals,
-        get_basic_financials,
-        get_etf_valuation,
-        get_etf_decline_driver,
-        get_etf_relative_strength,
-        get_etf_risk,
-        get_etf_mechanics,
-        get_corporate_actions,
-        get_congress_trades,
-        get_regime_state,
-        get_edgar_fulltext_search,
-        get_position_risk_multiplier,
-    ]
-
 
 _ETF_SYSTEM_TAIL = (
     " SECURITY-TYPE: ETF/FUND. This is an index or exchange-traded fund "
@@ -131,59 +54,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 security_type = "UNKNOWN"
         is_etf = security_type == "ETF"
 
-        if is_etf:
-            tools = _etf_toolset()
-        else:
-            tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
-            get_analyst_ratings,
-            get_smart_money,
-            get_revenue_breakdown,
-            get_corporate_actions,
-            get_dividends,
-            get_analyst_verdict,
-            get_earnings_surprise,
-            get_earnings_surprise_history,
-            get_institution_holdings,
-            get_earnings_quality,
-            get_financial_history,
-            get_congress_trades,
-            get_earnings_transcript,
-            get_edgar_fulltext_search,
-            get_patent_activity,
-            get_portfolio_weights,
-            get_basic_financials,
-            get_insider_activity,
-            get_company_peers,
-            get_form4_insider,
-            get_ratios,
-            get_allocation,
-            get_constituent_cap_weights,
-            get_dcf_valuation,
-            get_normalized_cycle_dcf,
-            get_scenario_dcf,
-            get_dupont_read,
-            get_earnings_quality_verdict,
-            get_margin_of_safety,
-            get_composite_rank,
-            get_fcf_yield,
-            get_capex_quality,
-            get_valuation_z_score,
-            get_value_dip_setup,
-            get_balance_sheet_health,
-            get_decline_driver_check,
-            get_ownership_concentration,
-            get_value_floors,
-            get_fixed_income_risk,
-            get_alpha_scoring,
-            get_regime_state,
-            get_kalman_spread,
-            get_allocation_black_litterman,
-            get_position_risk_multiplier,
-        ]
+        tools = fundamentals_tools(is_etf)
 
         # Forced-tool evidence (map-reduce): when analyst_forced_tools is set,
         # gather the fixed tool set once (skipped on tool-loop re-entries via

@@ -167,7 +167,32 @@ TOOL_BINDING_BLOB = "\n".join(
 
 # Tools bound only inside their own module (no agent-side binding) -> must be
 # whitelisted with a reason (e.g. internal helpers a wrapper calls directly).
-TOOL_LEGACY_BINDING = {}
+TOOL_LEGACY_BINDING = {
+    # @tool functions that no analyst binds and that are not wired into the
+    # risk loop. They were previously "bound" only by appearing in a graph
+    # ToolNode list, which satisfied this gate while leaving them uncallable
+    # by any LLM (the model can only emit calls for tools it was bound).
+    # S1 now derives every ToolNode from the analyst's own toolset, so the
+    # truth is visible: these are library/registry reads with no agent
+    # surface. Each entry states its real consumers; revisit as either
+    # "bind + document in the analyst prompt" or "delete".
+    "get_consensus": "advisory consensus read; docs/api_reference.md + AGENT_ONBOARDING; exercised by test_analysis_tools.py",
+    "get_enhanced_index_tilt": "index-tilt read; docs/design_qlib_integration.md; exercised by test_qlib_wiring.py",
+    "get_kelly_alloc": "allocation read documented in api_reference.md; no code/test consumer",
+    "get_kyle_lambda": "liquidity read documented in api_reference.md; no code/test consumer",
+    "get_macro_regime_read": "macro-regime read documented in README/api_reference; no code/test consumer",
+    "get_no_trade_guard_band": "rebalance guard read documented in README; no code/test consumer",
+    "get_pair_risk": "pair-risk read; docs/design_risk_calculations_agent_wiring.md; exercised by test_risk_agent_wiring.py",
+    "get_prediction_ledger_score": "ledger-score read documented in README/api_reference; no code/test consumer",
+    "get_prompt_injection_read": "injection-scan read; no consumer anywhere (docs, tests or code) - bind-or-delete candidate",
+    "get_stress_grid_read": "stress-grid read documented in README/api_reference; no code/test consumer",
+    "get_thesis_evidence_matrix": "thesis-evidence read; no consumer anywhere (docs, tests or code) - bind-or-delete candidate",
+    "get_topk_drop_plan": "drop-plan read; docs/implementation_qlib_integration.md; exercised by test_qlib_wiring.py",
+    "get_trade_excursions": "excursion read; docs/design_risk_calculations_agent_wiring.md; exercised by test_risk_agent_wiring.py",
+    "get_trade_outcome_metrics": "outcome-metric read documented in README/api_reference; no code/test consumer",
+    "get_vif_read": "multicollinearity read; docs/design_risk_calculations_agent_wiring.md; exercised by test_risk_agent_wiring.py",
+    "screen_equities": "equity screener; called by scripts/screener.py (CLI-facing), not an analyst tool",
+}
 
 
 def _tool_names(path: Path):

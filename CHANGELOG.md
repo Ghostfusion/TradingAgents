@@ -8,6 +8,8 @@ Breaking changes within the 0.x line are called out explicitly.
 
 ### Added
 
+Agent tool binding has one source of truth (S1; audit 2026-09-10): new `tradingagents/agents/toolsets.py` owns each analyst's bound toolset and `TradingAgentsGraph._create_tool_nodes` now derives every ToolNode from it, so the bound list and its executor can no longer drift. Fixes the ETF gap: the fundamentals analyst bound `get_etf_valuation` / `get_etf_decline_driver` / `get_etf_relative_strength` / `get_etf_risk` / `get_etf_mechanics` that no ToolNode could execute, so langgraph rejected every ETF-path call as "not a valid tool" (the fundamentals node is now the union of the company and ETF toolsets). Removes 22 hand-maintained ToolNode entries no analyst could bind (market 14, fundamentals 5, news 1, social 2 incl. the unreachable social node); the nodes now carry exactly what their analyst binds (market 125->111, news 26->25, social 2->0, fundamentals 53 unchanged). 16 `@tool` functions with no agent surface are declared in `TOOL_LEGACY_BINDING` with their real consumers (two are bind-or-delete candidates). Three source-text-pinning wiring tests were converted to behavioural checks over the toolset objects. Tests: `tests/test_tool_binding_single_source.py` +4.
+
 DELL fundamentals review-loop fixes (2026-09-10): negative-equity D/E gate fails-open fix; scenario-DCF dual-bear conflict metric; beat-streak identity (table or inline; words or digits).
 
 DELL market.md review-loop fixes (2026-09-10): close_200_sma dual-value flag (258.98 vs 238.98); ema20 trail dual-value flag (481.74 vs 503.74); T1 tolerance tightened to 0.05% (611.43 vs.611.85); ATR excludes dash-multiplier forms (1-ATR); market prompt pins close-vs-high label rule.

@@ -36,75 +36,41 @@ pytestmark = pytest.mark.timeout(120)
 # ---------------------------------------------------------------------------
 
 TOOLNODE_KEYS = ("market", "news", "fundamentals")
-ANALYST_FILES = {
-    "market": "tradingagents/agents/analysts/market_analyst.py",
-    "news": "tradingagents/agents/analysts/news_analyst.py",
-    "fundamentals": "tradingagents/agents/analysts/fundamentals_analyst.py",
-}
 
 
 @pytest.mark.unit
 def test_every_bound_analyst_tool_is_a_langchain_tool():
     """Regression for the interactive-CLI crash ('function' object has no
-    attribute 'name'): every tool in an analyst's ``tools = [...]`` list must
-    be a LangChain tool object (StructuredTool) - a bare def (e.g. a @tool
-    decorator dropped) breaks ``[tool.name for tool in tools]`` when the
-    prompt is assembled."""
-    import inspect
-    import re
+    attribute 'name'): every tool an analyst can bind must be a LangChain tool
+    object (StructuredTool) - a bare def (e.g. a dropped @tool decorator)
+    breaks ``[tool.name for tool in tools]`` when the prompt is assembled.
 
-    from tradingagents.agents.utils import agent_utils as au
+    The sets are read from ``tradingagents.agents.toolsets`` (the single source
+    both the analyst and its ToolNode use) rather than from analyst source
+    text, so this checks the object contract instead of a literal list.
+    """
+    from langchain_core.tools import BaseTool
 
-    mods = [
-        "tradingagents.agents.analysts.market_analyst",
-        "tradingagents.agents.analysts.news_analyst",
-        "tradingagents.agents.analysts.fundamentals_analyst",
-        # sentiment_analyst is a plain LLM (no tools list).
-    ]
-    for modname in mods:
-        mod = __import__(modname, fromlist=["x"])
-        src = inspect.getsource(mod)
-        m = re.search(r"tools = \[(.*?)\]\n", src, re.S)
-        assert m, f"no tools list in {modname}"
-        names = set(re.findall(r"get_[a-z_0-9]+", m.group(1)))
-        for n in names:
-            obj = getattr(mod, n, None) or getattr(au, n, None)
-            assert obj is not None, f"{modname}:{n} missing"
-            assert hasattr(obj, "name") and obj.name, (
-                f"{modname} binds {n} which is not a LangChain tool "
-                f"(type={type(obj).__name__})"
+    from tradingagents.agents.toolsets import analyst_toolset
+
+    for key in ("market", "news", "fundamentals"):
+        tools = analyst_toolset(key)
+        assert tools, f"{key} has an empty toolset"
+        for tool in tools:
+            assert isinstance(tool, BaseTool), (
+                f"{key} binds {getattr(tool, '__name__', tool)!r} which is not a "
+                f"LangChain tool (type={type(tool).__name__})"
             )
-
-
-def test_analyst_bound_tools_all_executable_in_toolnode():
-    """Regression guard for the Phase-1 18-tool gap: no analyst may bind a
-    tool the ToolNode cannot execute (the LLM would error 'not a valid tool')."""
-    import re
-
-    from tradingagents.graph.trading_graph import TradingAgentsGraph
-
-    nodes = TradingAgentsGraph._create_tool_nodes(None)
-    for key, path in ANALYST_FILES.items():
-        with open(path, encoding="utf-8") as fh:
-            src = fh.read()
-        m = re.search(r"tools = \[(.*?)\]\n", src, re.S)
-        assert m, f"no tools list in {path}"
-        bound = set(re.findall(r"get_[a-z_0-9]+", m.group(1)))
-        node = set(nodes[key].tools_by_name)
-        missing = sorted(bound - node)
-        assert not missing, f"{key} analyst binds tools missing from its ToolNode: {missing}"
+            assert tool.name, f"{key} binds a tool with no name: {tool!r}"
 
 
 @pytest.mark.unit
 def test_market_analyst_reaches_quant_risk_tools():
     """The previously-unreachable quant-risk tools are bound to the market
     LLM (Phase-1 audit fix)."""
-    import re
+    from tradingagents.agents.toolsets import market_tools
 
-    with open("tradingagents/agents/analysts/market_analyst.py", encoding="utf-8") as fh:
-        src = fh.read()
-    m = re.search(r"tools = \[(.*?)\]\n", src, re.S)
-    bound = set(re.findall(r"get_[a-z_0-9]+", m.group(1)))
+    bound = {t.name for t in market_tools()}
     expected = {
         "get_horizon_var",
         "get_downside_read",

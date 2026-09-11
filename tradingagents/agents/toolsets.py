@@ -1,0 +1,484 @@
+"""Single source of truth for each analyst's bound toolset (S1).
+
+Both sides of the tool contract read these functions:
+
+* the analyst node, to ``bind_tools`` the list the LLM may call, and
+* ``TradingAgentsGraph._create_tool_nodes``, to build the ToolNode that
+  executes those calls.
+
+One definition per analyst means the two cannot drift. That drift is how the
+ETF toolset came to be bound but not executable (P0-4): the fundamentals
+ToolNode is now the union of the company and ETF lists, so every tool the
+analyst can bind in either mode has an executor, and an analyst's node carries
+exactly the tools that analyst may bind -- never a hand-maintained extra.
+
+The sentiment analyst prefetches its data into the prompt and binds no tools,
+so ``social_tools`` is empty and its ToolNode is a no-op.
+"""
+
+from __future__ import annotations
+
+from tradingagents.agents.utils.agent_utils import (
+    get_allocation,
+    get_allocation_black_litterman,
+    get_alpha_scoring,
+    get_analyst_ratings,
+    get_analyst_verdict,
+    get_balance_sheet,
+    get_balance_sheet_health,
+    get_basic_financials,
+    get_beat_miss_sizing,
+    get_bollinger_pct_b,
+    get_book_correlation,
+    get_book_depth_read,
+    get_book_tail_risk,
+    get_bsm_option_quote,
+    get_candlestick_patterns,
+    get_capex_quality,
+    get_capital_flow,
+    get_capm_risk,
+    get_cashflow,
+    get_catalyst_scale,
+    get_clenow_momentum,
+    get_company_peers,
+    get_composed_risk_gate,
+    get_composite_rank,
+    get_congress_trades,
+    get_constituent_cap_weights,
+    get_corporate_actions,
+    get_cost_models,
+    get_credit_spread_read,
+    get_crypto_prices,
+    get_cycle_tilt,
+    get_dark_pool_flow,
+    get_dcf_valuation,
+    get_debate_claims_verdict,
+    get_decline_driver_check,
+    get_derivatives_flow,
+    get_dip_technical,
+    get_dividends,
+    get_downside_read,
+    get_dupont_read,
+    get_earnings_calendar,
+    get_earnings_catalyst,
+    get_earnings_event_read,
+    get_earnings_quality,
+    get_earnings_quality_verdict,
+    get_earnings_surprise,
+    get_earnings_surprise_history,
+    get_earnings_transcript,
+    get_economic_calendar,
+    get_edgar_fulltext_search,
+    get_etf_decline_driver,
+    get_etf_mechanics,
+    get_etf_relative_strength,
+    get_etf_risk,
+    get_etf_valuation,
+    get_event_pnl_response,
+    get_execution_schedule,
+    get_exit_check,
+    get_exit_plan,
+    get_expected_move,
+    get_extended_indicators,
+    get_factor_profile,
+    get_fcf_yield,
+    get_fed_watch,
+    get_financial_history,
+    get_fixed_income_risk,
+    get_form4_insider,
+    get_fundamentals,
+    get_fx_snapshot,
+    get_gamma_profile,
+    get_gap_type,
+    get_garch_volatility,
+    get_gdelt_sentiment,
+    get_global_news,
+    get_horizon_var,
+    get_hrp_alloc,
+    get_income_statement,
+    get_indicators,
+    get_insider_activity,
+    get_insider_transactions,
+    get_institution_holdings,
+    get_ipos,
+    get_kalman_spread,
+    get_liquidation_days,
+    get_liquidity_risk,
+    get_live_price_sanity,
+    get_lottery_factors,
+    get_macd_divergence,
+    get_macro_indicators,
+    get_margin_of_safety,
+    get_market_breadth,
+    get_market_movers,
+    get_market_snapshot,
+    get_massive_news,
+    get_mean_reversion_quality,
+    get_mean_reversion_tech,
+    get_merton_distance,
+    get_momentum_12_1,
+    get_momentum_detail,
+    get_news,
+    get_news_relevance_read,
+    get_news_sentiment,
+    get_news_sentiment_series,
+    get_normality,
+    get_normalized_cycle_dcf,
+    get_opening_range,
+    get_opex_read,
+    get_option_breakeven,
+    get_options_chain,
+    get_options_iv_read,
+    get_options_surface,
+    get_order_imbalance,
+    get_orderflow_read,
+    get_ownership_concentration,
+    get_pair_trade_signal,
+    get_parity_screen,
+    get_patent_activity,
+    get_payoff_asymmetry,
+    get_portfolio_weights,
+    get_position_risk_multiplier,
+    get_position_sizing,
+    get_post_close_confirmation,
+    get_prediction_markets,
+    get_premarket_liquidity,
+    get_premarket_review,
+    get_ratios,
+    get_regime_components,
+    get_regime_read,
+    get_regime_state,
+    get_relative_rotation,
+    get_relative_strength,
+    get_revenue_breakdown,
+    get_risk_gate,
+    get_risk_overlay,
+    get_risk_parity_alloc,
+    get_scaleout_plan,
+    get_scenario_dcf,
+    get_sec_filings,
+    get_sector_rank,
+    get_sector_rotation_screen,
+    get_sentiment_computed,
+    get_sentiment_lead_lag,
+    get_session_discipline,
+    get_share_buyback_authorization,
+    get_shift_detection,
+    get_short_interest,
+    get_short_sale_volume,
+    get_short_volume,
+    get_signal_quality,
+    get_skill_read,
+    get_smart_money,
+    get_sofr_curve,
+    get_stock_data,
+    get_strategy_quality,
+    get_support_structure,
+    get_swing_exits,
+    get_swing_set,
+    get_tail_decomposition,
+    get_tail_risk,
+    get_taylor_read,
+    get_technical_factors,
+    get_tga_balance,
+    get_top_movers,
+    get_trade_expectancy,
+    get_trailing_exit,
+    get_tranche_plan,
+    get_treasury_curve,
+    get_ts_momentum_weights,
+    get_unit_root,
+    get_universe_membership,
+    get_valuation_z_score,
+    get_value_dip_setup,
+    get_value_floors,
+    get_variance_premium,
+    get_vdu_entry_setup,
+    get_verified_market_snapshot,
+    get_vol_surface_shape,
+    get_volatility_contraction,
+    get_volatility_estimators,
+)
+from tradingagents.agents.utils.alpaca_tools import (
+    get_market_snapshot_alpaca,
+)
+from tradingagents.agents.utils.momentum_tools import (
+    get_momentum_scan,
+)
+
+
+def market_tools() -> list:
+    """Tools bound by the market analyst and executed by its ToolNode."""
+    return     [
+                get_stock_data,
+                get_indicators,
+                get_verified_market_snapshot,
+                get_live_price_sanity,
+                get_market_snapshot,
+                get_crypto_prices,
+                get_top_movers,
+                get_option_breakeven,
+                get_options_chain,
+                get_gamma_profile,
+                get_vol_surface_shape,
+                get_parity_screen,
+                get_derivatives_flow,
+                get_opex_read,
+                get_short_interest,
+                get_short_sale_volume,
+                get_dark_pool_flow,
+                get_short_volume,
+                get_liquidity_risk,
+                get_cost_models,
+                get_debate_claims_verdict,
+                get_universe_membership,
+                get_capital_flow,
+                get_swing_set,
+                get_skill_read,
+                get_swing_exits,
+                get_dip_technical,
+                get_mean_reversion_tech,
+                get_opening_range,
+                get_gap_type,
+                get_order_imbalance,
+                get_premarket_liquidity,
+                get_post_close_confirmation,
+                get_relative_strength,
+                get_position_sizing,
+                get_position_risk_multiplier,
+                get_risk_gate,
+                get_regime_read,
+                get_shift_detection,
+                get_regime_components,
+                get_regime_state,
+                get_exit_check,
+                get_momentum_detail,
+                get_volatility_contraction,
+                get_orderflow_read,
+                get_sector_rank,
+                get_sector_rotation_screen,
+                get_cycle_tilt,
+                get_session_discipline,
+                get_news_sentiment_series,
+                get_sentiment_lead_lag,
+                get_strategy_quality,
+                get_lottery_factors,
+                get_execution_schedule,
+                get_risk_overlay,
+                get_tail_risk,
+                get_credit_spread_read,
+                get_bollinger_pct_b,
+                get_tranche_plan,
+                get_trade_expectancy,
+                get_macd_divergence,
+                get_vdu_entry_setup,
+                get_support_structure,
+                get_technical_factors,
+                get_extended_indicators,
+                get_candlestick_patterns,
+                get_volatility_estimators,
+                get_garch_volatility,
+                get_tail_decomposition,
+                get_mean_reversion_quality,
+                get_book_tail_risk,
+                get_composed_risk_gate,
+                get_liquidation_days,
+                get_premarket_review,
+                get_expected_move,
+                get_momentum_scan,
+                get_market_snapshot_alpaca,
+                get_book_correlation,
+                get_capm_risk,
+                get_clenow_momentum,
+                get_downside_read,
+                get_exit_plan,
+                get_horizon_var,
+                get_hrp_alloc,
+                get_dupont_read,
+                get_scenario_dcf,
+                get_earnings_quality_verdict,
+                get_momentum_12_1,
+                get_market_movers,
+                get_normality,
+                get_options_surface,
+                get_payoff_asymmetry,
+                get_relative_rotation,
+                get_risk_parity_alloc,
+                get_scaleout_plan,
+                get_sentiment_computed,
+                get_sofr_curve,
+                get_trailing_exit,
+                get_treasury_curve,
+                get_unit_root,
+                get_variance_premium,
+                get_event_pnl_response,
+                get_book_depth_read,
+                get_ts_momentum_weights,
+                get_pair_trade_signal,
+                get_merton_distance,
+                get_signal_quality,
+                get_bsm_option_quote,
+                get_options_iv_read,
+                get_taylor_read,
+                get_factor_profile,
+            ]
+
+
+def news_tools() -> list:
+    """Tools bound by the news analyst and executed by its ToolNode."""
+    return     [
+                get_news,
+                get_massive_news,
+                get_news_relevance_read,
+                get_gdelt_sentiment,
+                get_news_sentiment_series,
+                get_global_news,
+                get_macro_indicators,
+                get_tga_balance,
+                get_fx_snapshot,
+                get_prediction_markets,
+                get_earnings_calendar,
+                get_sec_filings,
+                get_share_buyback_authorization,
+                get_ipos,
+                get_insider_transactions,
+                get_economic_calendar,
+                get_taylor_read,
+                get_fed_watch,
+                get_market_breadth,
+                get_earnings_catalyst,
+                get_catalyst_scale,
+                get_earnings_event_read,
+                get_beat_miss_sizing,
+                get_news_sentiment,
+                get_credit_spread_read,
+            ]
+
+
+def fundamentals_company_tools() -> list:
+    """Company-path tools for the fundamentals analyst (statements, DCF, ...)."""
+    return     [
+                get_fundamentals,
+                get_balance_sheet,
+                get_cashflow,
+                get_income_statement,
+                get_analyst_ratings,
+                get_smart_money,
+                get_revenue_breakdown,
+                get_corporate_actions,
+                get_dividends,
+                get_analyst_verdict,
+                get_earnings_surprise,
+                get_earnings_surprise_history,
+                get_institution_holdings,
+                get_earnings_quality,
+                get_financial_history,
+                get_congress_trades,
+                get_earnings_transcript,
+                get_edgar_fulltext_search,
+                get_patent_activity,
+                get_portfolio_weights,
+                get_basic_financials,
+                get_insider_activity,
+                get_company_peers,
+                get_form4_insider,
+                get_ratios,
+                get_allocation,
+                get_constituent_cap_weights,
+                get_dcf_valuation,
+                get_normalized_cycle_dcf,
+                get_scenario_dcf,
+                get_dupont_read,
+                get_earnings_quality_verdict,
+                get_margin_of_safety,
+                get_composite_rank,
+                get_fcf_yield,
+                get_capex_quality,
+                get_valuation_z_score,
+                get_value_dip_setup,
+                get_balance_sheet_health,
+                get_decline_driver_check,
+                get_ownership_concentration,
+                get_value_floors,
+                get_fixed_income_risk,
+                get_alpha_scoring,
+                get_regime_state,
+                get_kalman_spread,
+                get_allocation_black_litterman,
+                get_position_risk_multiplier,
+            ]
+
+
+def fundamentals_etf_tools() -> list:
+    """ETF-path tools for the fundamentals analyst (basket valuation, ...).
+
+    Company statement tools are deliberately absent: a fund wrapper has no
+    company statements, and their absence must never read as a verdict
+    (docs/design_etf_fundamental_valuation.md).
+    """
+    return     [
+            get_fundamentals,
+            get_basic_financials,
+            get_etf_valuation,
+            get_etf_decline_driver,
+            get_etf_relative_strength,
+            get_etf_risk,
+            get_etf_mechanics,
+            get_corporate_actions,
+            get_congress_trades,
+            get_regime_state,
+            get_edgar_fulltext_search,
+            get_position_risk_multiplier,
+        ]
+
+
+def fundamentals_tools(is_etf: bool) -> list:
+    """The fundamentals toolset for the security type being analysed."""
+    return fundamentals_etf_tools() if is_etf else fundamentals_company_tools()
+
+
+def social_tools() -> list:
+    """The sentiment analyst binds no tools (its data is prefetched)."""
+    return []
+
+
+def _dedupe(tools: list) -> list:
+    """Order-preserving dedupe by tool name (the fundamentals lists overlap)."""
+    seen: set[str] = set()
+    out: list = []
+    for tool in tools:
+        name = getattr(tool, "name", None) or repr(tool)
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(tool)
+    return out
+
+
+def analyst_toolset(key: str) -> list:
+    """The ToolNode toolset for an analyst key: every tool it may bind.
+
+    For ``fundamentals`` this is the union of both security-type variants; the
+    analyst binds only the variant matching the classified security type and
+    the node accepts either, so a bound call can never be rejected as unknown.
+    """
+    if key == "market":
+        return market_tools()
+    if key == "news":
+        return news_tools()
+    if key == "social":
+        return social_tools()
+    if key == "fundamentals":
+        return _dedupe(fundamentals_company_tools() + fundamentals_etf_tools())
+    raise KeyError(f"unknown analyst key: {key!r}")
+
+
+__all__ = [
+    "analyst_toolset",
+    "fundamentals_company_tools",
+    "fundamentals_etf_tools",
+    "fundamentals_tools",
+    "market_tools",
+    "news_tools",
+    "social_tools",
+]
