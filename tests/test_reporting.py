@@ -72,6 +72,33 @@ def test_risk_gate_renders_both_cvars(tmp_path):
     assert "Analyzed-name CVaR: 1.23%" in report
 
 
+def test_risk_gate_renders_book_drawdown_and_mismatch(tmp_path):
+    # IREN 2026-09-10 decision.md review: the veto's drawdown must surface in
+    # the computed block, and a PASS header beside a drawdown-over-limit veto
+    # must flag the mismatch (61.64% > 10% limit). REJECT + drawdown must
+    # render the drawdown without the mismatch note.
+    state = _state(
+        verdict="PASS",
+        reasons=[],
+        risk_ctx={"book_cvar": 0.0121, "book_drawdown": 0.6164, "drawdown_limit": 0.10},
+    )
+    write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Book drawdown: 61.64%" in decision
+    assert "limit 10.00%" in decision
+    assert "mismatch" in decision
+    # REJECT + drawdown-over-limit -> the veto is coherent, no mismatch note.
+    state2 = _state(
+        verdict="REJECT",
+        reasons=["portfolio drawdown"],
+        risk_ctx={"book_drawdown": 0.6164, "drawdown_limit": 0.10},
+    )
+    write_report_tree(state2, "TST", tmp_path)
+    d2 = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Book drawdown: 61.64%" in d2
+    assert "mismatch" not in d2
+
+
 def test_iv_a_computed_decision_context_surfaces_in_report(tmp_path):
     """The advisory decision context is surfaced as IVa when a plan card is
     present (Phase A-E wiring; the context must reach final_state to render)."""

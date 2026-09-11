@@ -226,6 +226,11 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 - Set `confidence` (0–1) from how strongly the evidence converged and how robust the data was. Set `consensus` to `low` when the aggressive/conservative/neutral analysts materially disagreed (a dissent flag), and `high` when they broadly aligned.
 - Prefer a clear `Hold`/`Underweight`/`Sell` (with `position_size` `0%` or a reduction) over an ambiguous call when the debate is split — a decision to do nothing is a decision.
 
+**Label consistency (IREN 2026-09-10 decision.md review):**
+- STOP BASIS: when the computed Position contract stop and your narrative Stop Loss differ (e.g. a risk-engine hard stop vs the chandelier trailing stop), state which one governs — never present two different stop values for the same current position without saying they are different mechanisms (contract stop vs trailing chandelier).
+- SIZE BASIS: distinguish a computed NEW-ENTRY size from a TARGET BOOK WEIGHT for an existing position being trimmed down. A `0.4%` incremental/new-add size and a `5.0%` residual target weight are different things — label them as such, never let them read as conflicting values of one size.
+- GATE HEADER: if the computed risk gate or the risk context reports a portfolio-veto (drawdown over limit → new risk blocked), your header Verdict must not read `PASS`/`TRADE_ALLOWED` while the body says the house gate REJECTs new risk. Reconcile the header with the gate (e.g. `TRADE_ALLOWED` only for exit/trim actions; buys gated) or state the gate status explicitly.
+
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}{get_output_budget("portfolio")}"""
 
         def _guardrail_hook(result):

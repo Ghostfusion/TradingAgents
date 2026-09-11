@@ -390,6 +390,22 @@ def _risk_gate_block(final_state: dict) -> str:
         parts.append(f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}")
     if ctx.get("book_cvar") is not None:
         parts.append(f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%} — this fed the gate")
+    # Decision-gate auditability (IREN 2026-09-10 decision.md review): the
+    # realized book drawdown that actually drives the portfolio veto must be
+    # visible next to the verdict - a PASS header beside 'REJECT new risk' in
+    # the body is a labeling bug a reader cannot resolve without the number.
+    if ctx.get("book_drawdown") is not None:
+        dd = ctx["book_drawdown"]
+        lim = ctx.get("drawdown_limit")
+        dd_reject = lim is not None and dd > lim
+        line = f"Book drawdown: {dd:.2%}"
+        if lim is not None:
+            line += f" (limit {lim:.2%})"
+        line += " — funds the portfolio gate" if dd_reject else ""
+        if dd_reject and verdict.upper() != "REJECT":
+            line += "  [verdict/label mismatch: drawdown exceeds limit but gate read " \
+                    f"{verdict} - check the gate source]"
+        parts.append(line)
     # Item 2: book-level correlated stress - the whole basket shocked together
     # (real firms stress the book, not just single names).
     if ctx.get("book_stress") is not None:

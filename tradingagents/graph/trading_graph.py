@@ -1573,6 +1573,11 @@ class TradingAgentsGraph:
                             "numbers": "catalyst-hard-block",
                         }
                     final_state["risk_gate"] = verdict
+                    if basket_dd is not None:
+                        risk_ctx.setdefault("book_drawdown", basket_dd)
+                        risk_ctx["drawdown_limit"] = float(
+                            (self.config or {}).get("risk_max_drawdown_pct", 0.10) or 0.10
+                        )
                     if verdict["verdict"] in ("WARN", "REJECT"):
                         final_state["risk_snapshot"] = build_risk_snapshot(
                             verdict,
