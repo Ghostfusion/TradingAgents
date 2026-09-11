@@ -46,7 +46,7 @@ the only one — which is where the deepest gaps are.
 |---|---|---|---|
 | `get_pair_risk` | market | Granger x→y with per-lag p-values is returned by **no** bound tool (`get_pair_trade_signal` gives only cointegration/β/half-life) | slot after the `get_pair_trade_signal` bullet: "`get_pair_risk(x, y)` … cite `granger(x→y)` with its p-values before calling either name the leader" |
 | `get_macro_regime_read` | news | composite Risk-On / Liquidity-Contraction / Stagflation label from the 5 inputs news already cites; no bound tool produces the composite | after the `get_credit_spread_read` sentence: "…folds the same fed/curve/credit/DXY/vol markers into ONE cross-asset label — cite it before any 'the tape is risk-on / liquidity crunch / stagflation' claim" |
-| `get_vif_read` | market | no bound tool measures regressor collinearity; the prompt already demands non-redundant indicators (`market_analyst.py:55`) | after that instruction: "`get_vif_read({rsi: [...], stochrsi: [...]})` … call it before presenting two like measures as independent evidence" |
+| `get_vif_read` | market | no bound tool measures regressor collinearity; the prompt already demands non-redundant indicators (`market_analyst.py:55`) | **prerequisite (W2.0):** make the tool take `ticker` + indicator names and fetch/compute the series itself. Then, after that instruction: "`get_vif_read(ticker, indicators=[…])` … call it before presenting two like measures as independent evidence" |
 | `get_trade_outcome_metrics` | risk debators (`RISK_DEBATOR_TOOLS`) | entry-anchored MAE/MFE + stop/target hits for the plan the debators are arguing; the market-bound `get_post_close_confirmation` gives only a stopped-out/target-hit verdict from the newest decision.md | append to the shared debator risk-tool line: "`get_trade_outcome_metrics(ticker, entry, stop?, target?)` — the measured MAE/MFE + stop/target hits for the plan entry" |
 
 **A2 — already covered (6)** — declare with the covering tool named, do **not** bind:
@@ -125,8 +125,13 @@ the blob-scan, and `TOOL_LEGACY_BINDING` as the escape hatch for exactly the 16 
 
 ## 4. Decisions I need from you (product calls, not defects)
 
-1. **Accept the 4 binds** (A1)? All four add a new LLM-callable read. `get_vif_read` is the weakest: it needs
-   the model to transcribe indicator series into the call. Alternative: declare it a factor-modelling QA read.
+1. **RESOLVED (2026-09-10): accept the 4 binds, with `get_vif_read` made self-sufficient first (option b).**
+   The other three are bound as-is. `get_vif_read` must not be bound in its current shape: its input is a dict
+   of raw indicator series, and no tool hands the model those numbers as data (`get_indicators` returns a
+   rendered table), so a call would require re-typing ~60-90 digits — a confident wrong answer if any value
+   is dropped, rounded or invented, which is exactly what the suite's never-fabricate rule forbids. Instead:
+   change the tool to take `ticker` + indicator names, fetch/compute the series internally (run OHLCV cache +
+   the existing indicator path), and only then bind it to the market analyst. See W2.0.
 2. **`get_pair_risk` / `get_trade_outcome_metrics`**: bind (my recommendation) or declare, given each has a
    partial overlap with a bound tool (`get_pair_trade_signal`, `get_post_close_confirmation`)?
 3. **The 6 already-covered**: accept as declared (recommended), or upgrade any to a real bind (each has a
@@ -159,8 +164,17 @@ binding that does not exist.
 
 ### W2 — The binds (A1)
 
-Per tool: add to the toolset/loop → add the prompt line → extend the gate test that the tool is bound *and*
-guided. Four files for toolsets/prompts + `risk_tool_loop.py` + the debator prompts; remove the
+**W2.0 (prerequisite for `get_vif_read` only):** make the tool self-sufficient before binding it. New shape:
+`get_vif_read(ticker, indicators=[...])` — resolve each requested indicator to its series internally using the
+run OHLCV cache (`_ohlcv`) plus the existing indicator computation the vendor path already uses, then run the
+existing `variance_inflation_factor` calc. Keep the series-dict form as an internal/advanced path if a caller
+needs it, but the LLM-facing arg must be names, not numbers. Regression test: a call with indicator names on a
+stubbed OHLCV seam returns the VIF table and never asks the model for data; a missing/unknown indicator name
+degrades to an explicit 'unavailable' rather than a fabricated column. Only after this lands does the market
+prompt line reference `get_vif_read(ticker, indicators=[…])`.
+
+Per tool (the other three): add to the toolset/loop → add the prompt line → extend the gate test that the tool
+is bound *and* guided. Four files for toolsets/prompts + `risk_tool_loop.py` + the debator prompts; remove the
 `TOOL_LEGACY_BINDING` entries for the bound names.
 
 **Acceptance:** each new tool is in the toolset, mentioned with a trigger, executed by its ToolNode (an
@@ -220,8 +234,10 @@ to avoid churn in the same prompts. `W5` closes what W2/W4 changed. `W6` last.
 
 - **Prompt bloat**: the market prompt already carries ~100 guided tools; four more lines plus 11 trigger
   phrases is real token weight. W3 includes the budget check, and the house style is one clause per tool.
-- **Binding a tool the model can't drive**: `get_vif_read`/`get_pair_risk` need the model to supply series;
-  the mitigation is the prompt naming the exact call (as `get_book_correlation`/`get_hrp_alloc` already do).
+- **Binding a tool the model can't drive**: `get_pair_risk` needs the model to supply two price series; the
+  mitigation is the prompt naming the exact call, as the already-bound `get_book_correlation` / `get_hrp_alloc` /
+  `get_pair_trade_signal` do. For `get_vif_read` the mitigation is structural instead — W2.0 removes the series
+  argument from the LLM-facing signature, so there is nothing left to transcribe.
 - **PM pre-graph gating** changes what the decision can act on; if you choose "soften the prompt" instead,
   the PM keeps its current behaviour and only the honesty of the instruction changes.
 - **Docs are load-bearing here**: correcting them is part of the deliverable, because the false claims are
