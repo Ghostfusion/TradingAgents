@@ -238,7 +238,6 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 "messages": [_CapAIMessage(content=_report, id="fundamentals-cap-report")],
                 "fundamentals_report": _report,
                 "tool_evidence": tool_evidence,
-                "security_type": security_type,
             }
 
         result = chain.invoke(state["messages"])
@@ -270,7 +269,6 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             "messages": [result],
             "fundamentals_report": report,
             "tool_evidence": tool_evidence,
-            "security_type": security_type,
         }
 
     return fundamentals_analyst_node

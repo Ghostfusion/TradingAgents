@@ -124,3 +124,34 @@ Dependencies: S1 before Batch D's ToolNode deletions; S4/S5 with Batch B; S2/S3/
 - Scout findings marked **[S]** are code-read with quoted evidence but not reproduced; each gets a reproduction step before its fix (the batches above name the assertion).
 - `[S]` items I could not test live (vendor-key or OpenD dependent): moomoo ctx eviction, GDELT native-tone field, live Massive 429 behaviour, GDELT date-key join with real data.
 - Not covered by this audit: `tradingagents/llm_clients/*` internals beyond config wiring, `trading_web/` (absent), and the ~10% of `analysis_tools.py`/`report_verifier.py` regions the scouts time-boxed (listed in their coverage notes).
+
+---
+
+## 10. Status (2026-09-10, after remediation)
+
+Implemented in `892ade2` (A1/S1), `c82524c` (P0 + look-ahead + dead code + test hygiene) and the
+part-2 commit (remaining contracts, routing config, honesty renders, test-quality gate).
+Full suite at the end of remediation: **3638 passed, 0 failed** (start of audit: 3441 passed with
+13 known failures plus the defects below). Live smoke on the fixed surfaces: `get_regime_gate_read`
+returns a verdict (was "not callable"), `get_etf_mechanics` renders the vendor's corporate-actions
+payload (was always `n/a`), `classify_security` returns ETF for IGV/SPY and UNKNOWN for JPM.
+
+Class-killers landed: S1 single-source tool binding, S2 advertised-prompt-signature, S3
+`@tool`-called-as-a-function, S4 vendor-signature, S5 config-contract, S6 test-quality gate.
+
+### Deliberately left open (with the reason)
+
+- **`TOOL_LEGACY_BINDING` (16 tools).** The audit's orphan-ToolNode entries are gone, but 16
+  `@tool` functions no analyst binds remain defined and are declared in the gate's exemption map
+  with their real consumers. Two have *no* consumer anywhere (`get_prompt_injection_read`,
+  `get_thesis_evidence_matrix`): binding them needs prompt guidance (the prompts never mention
+  them) and deleting them removes capability, so this is a product call, not a defect fix.
+- **`security_type` is node-local.** The undeclared state channel was removed rather than
+  declared, because nothing consumed it (LangGraph filtered it out anyway). If reporting should
+  ever show "ETF run", declare the channel *and* consume it in the same change.
+- **Not covered by the audit:** `llm_clients/*` internals beyond config wiring and the ~10% of
+  `analysis_tools.py`/`report_verifier.py` the scouts time-boxed.
+- **Scout findings marked `[S]` that were never reproduced** were fixed only where a batch owner
+  could reproduce them; the vendored-SDK paths that need live credentials/OpenD (moomoo context
+  eviction behaviour under real throttling, GDELT native tone, live Massive 429s) are covered by
+  hermetic tests of the classification logic, not by a live vendor run.

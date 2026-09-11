@@ -108,7 +108,13 @@ class TestNullishFloatCoercion:
         fields (risk_cap / consensus / data_quality) with the JSON STRING
         'null' instead of the JSON null; that string must coerce to None or
         the whole PortfolioDecision fails pydantic (Literal error) and the PM
-        reverts to free text (2026-09-07 run)."""
+        reverts to free text (2026-09-07 run).
+
+        'unknown' is in this nullish set ON PURPOSE: the data-quality contract
+        treats a placeholder 'unknown' as "not reported" (None), never as a
+        degraded read — see tests/test_schema_contract.py for the end-to-end
+        contract (only 'stale'/'partial' cap confidence / block a position).
+        """
         for field in ("risk_cap", "consensus", "data_quality"):
             for sentinel in ("null", "None", "N/A", "", "unknown"):
                 d = PortfolioDecision(
@@ -119,6 +125,18 @@ class TestNullishFloatCoercion:
                 )
                 assert getattr(d, field) is None, f"{field}={sentinel!r} -> {getattr(d, field)!r}"
                 assert d.risk_cap is None or d.risk_cap == "Hold"
+
+    def test_pm_reported_data_quality_preserved(self):
+        """The real reported values must survive validation untouched — the
+        nullish coercion only swallows placeholders."""
+        for value in ("fresh", "stale", "partial"):
+            d = PortfolioDecision(
+                rating=PortfolioRating.OVERWEIGHT,
+                executive_summary="s",
+                investment_thesis="t",
+                data_quality=value,
+            )
+            assert d.data_quality == value
 
     def test_pm_risk_cap_real_value_preserved(self):
         """A genuine Literal value must pass through untouched (only nullish

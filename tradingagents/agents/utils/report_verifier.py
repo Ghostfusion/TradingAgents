@@ -1053,16 +1053,21 @@ def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
 _DD_CLAIM = re.compile(
     r"\b(?:the\s+)?(\d+|[a-z]+)\s+(?:straight|consecutive)\s+"
     r"double[- ]digit\s+(?:eps\s+)?beats?\b", re.I)
-_DD_WORDS = {"three": 3, "third": 3, "four": 4, "fourth": 4,
-             "five": 5, "fifth": 5, "six": 6, "sixth": 6,
-             "seven": 7, "seventh": 7, "eight": 8, "eighth": 8}
+# Shared word->count map for streak claims ('seven straight >40% beats' must
+# parse the same way 'the seventh consecutive double-digit beat' does). An
+# unparsed word silently disables the check, so cover at least two..ten.
+_COUNT_WORDS = {
+    "two": 2, "second": 2, "three": 3, "third": 3, "four": 4, "fourth": 4,
+    "five": 5, "fifth": 5, "six": 6, "sixth": 6, "seven": 7, "seventh": 7,
+    "eight": 8, "eighth": 8, "nine": 9, "ninth": 9, "ten": 10, "tenth": 10,
+}
 _DD_PCT = re.compile(r"surprise_pct\s*=\s*([\d.]+)|\+\s*([\d.]+)%")
 
 
 def _parse_dd_count(raw: str) -> int | None:
     if raw.isdigit():
         return int(raw)
-    return _DD_WORDS.get(raw.lower())
+    return _COUNT_WORDS.get(raw.lower())
 
 
 def _double_digit_streak_identity(report_text: str) -> list[VerifierClaim]:
@@ -1694,9 +1699,8 @@ def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
     m = _BEAT_STREAK_RE.search(report_text)
     if not m:
         return []
-    _NUM_WORDS = {"two":2,"three":3,"four":4,"five":5,"six":6}
     g = m.group(1)
-    claimed = int(g) if g.isdigit() else _NUM_WORDS.get(g.lower())
+    claimed = int(g) if g.isdigit() else _COUNT_WORDS.get(g.lower())
     if claimed is None:
         return []
     threshold = float(m.group(2))

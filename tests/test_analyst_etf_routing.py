@@ -3,8 +3,10 @@
 Phase 5: when enable_etf_engine is on and the security classifies as an ETF,
 the fundamentals analyst swaps the company statement toolset for the ETF one
 (get_etf_valuation / get_etf_decline_driver / get_etf_relative_strength /
-get_etf_risk / get_etf_mechanics) and appends the ETF system tail; state is
-stamped with security_type. Default-off: a UNKNOWN classification keeps the
+get_etf_risk / get_etf_mechanics) and appends the ETF system tail. The
+classification only selects the toolset: it is a node-local, not an AgentState
+channel, so the node must not stamp it onto state (LangGraph would drop the
+undeclared key anyway). Default-off: a UNKNOWN classification keeps the
 company path unchanged.
 """
 
@@ -65,8 +67,8 @@ def test_etf_classification_uses_etf_toolset(monkeypatch):
     assert "get_etf_mechanics" in names
     assert "get_balance_sheet" not in names
     assert "get_dcf_valuation" not in names
-    # security_type stamped on state
-    assert out.get("security_type") == "ETF"
+    # The classification selects the toolset only; it is not a state channel.
+    assert set(out) == {"messages", "fundamentals_report", TOOL_EVIDENCE_KEY}
 
 
 def test_etf_disabled_uses_company_toolset(monkeypatch):
@@ -77,7 +79,7 @@ def test_etf_disabled_uses_company_toolset(monkeypatch):
     names = llm.captured_tools or set()
     assert "get_etf_valuation" not in names
     assert "get_balance_sheet" in names
-    assert out.get("security_type") == "UNKNOWN"
+    assert "security_type" not in out
 
 
 def test_etf_engine_requires_flag(monkeypatch):
@@ -89,4 +91,4 @@ def test_etf_engine_requires_flag(monkeypatch):
     names = llm.captured_tools or set()
     assert "get_etf_valuation" not in names
     assert "get_balance_sheet" in names
-    assert out.get("security_type") == "UNKNOWN"
+    assert "security_type" not in out

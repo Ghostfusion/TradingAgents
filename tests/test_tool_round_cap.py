@@ -79,9 +79,9 @@ def test_news_and_fundamentals_router_at_cap():
     state = {"messages": _msgs(MAX_TOOL_ROUNDS - 1, tail="tools")}
     assert logic.should_continue_news(state) == "News Analyst"
     assert logic.should_continue_fundamentals(state) == "Fundamentals Analyst"
-    # Sentiment binds no tools; it has no loop to cap, so a tool call on its
-    # pool still routes to the (nonexistent) tool node - unchanged behavior.
-    assert logic.should_continue_social(state) == "tools_social"
+    # Sentiment binds no tools and has no tool node: its router always goes to
+    # the clear node, even if the pool somehow carries a tool call.
+    assert logic.should_continue_social(state) == "Msg Clear Sentiment"
 
 
 def test_router_below_cap_news_fundamentals():

@@ -50,14 +50,16 @@ def market_for_symbol(symbol: str) -> str:
 
 
 def resolve_market_priority(market: str, config: dict | None,
-                            default_chain: list[str]) -> list[str]:
+                            default_chain: list[str],
+                            available_vendors: list[str] | None = None) -> list[str]:
     """Per-market vendor priority; unconfigured -> the default (bit-identical).
 
     ``config`` is the resolved `market_source_priority` dict (market ->
     comma-separated vendor list, e.g. ``{"US": "eodhd,tiingo,yfinance,moomoo"}``).
-    Unconfigured vendors in the list are skipped; the default chain is used
-    as the tail when an explicit list names vendors the config also needs
-    (never silently drops a vendor the user configured elsewhere).
+    Names not in ``available_vendors`` (the vendors actually registered for the
+    method; defaults to ``default_chain``) are skipped, so a priority list can
+    never name a vendor the router has no implementation for; when it yields no
+    registered vendor the ``default_chain`` is returned unchanged.
     """
     if not config:
         return list(default_chain)
@@ -76,7 +78,14 @@ def resolve_market_priority(market: str, config: dict | None,
         names = [str(v).strip() for v in (raw or []) if str(v).strip()]
     if not names:
         return list(default_chain)
-    return names
+    available = set(default_chain if available_vendors is None else available_vendors)
+    filtered: list[str] = []
+    for name in names:
+        if name in available and name not in filtered:
+            filtered.append(name)
+    if not filtered:
+        return list(default_chain)
+    return filtered
 
 
 # Verified price-caliber table (vendor, market) -> caliber. Grounded in the

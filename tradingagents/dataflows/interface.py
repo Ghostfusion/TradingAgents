@@ -338,25 +338,9 @@ TOOLS_CATEGORIES = {
     },
 }
 
-VENDOR_LIST = [
-    "yfinance",
-    "fred",
-    "polymarket",
-    "alpha_vantage",
-    "finnhub",
-    "sec_edgar",
-    "moomoo",
-    "massive",
-    "eodhd",
-    "cboe",
-    "federal_reserve",
-    "tiingo",
-    "twelve_data",
-    "stockdata",
-    "gdelt",
-    "benzinga",
-    "newsapi",
-]
+# The flat vendor registry is derived from VENDOR_METHODS (below) so it can
+# never drift from what route_to_vendor dispatches to. It used to be a
+# hand-maintained literal that omitted every vendor registered since.
 
 # Optional enrichment categories. These add macro/event context to the news
 # analyst but are not core to a decision, so a vendor failure here degrades to a
@@ -642,6 +626,12 @@ VENDOR_METHODS = {
     },
 }
 
+# Single source of truth for the vendor registry: every vendor the router can
+# dispatch to. Derived, never hand-maintained (audit 2026-09-10: the old
+# literal omitted seekingalpha/fmp/congress/patentsview/finra/fx/
+# treasury_fiscal while docs still described them as direct-only).
+VENDOR_LIST = sorted({vendor for impls in VENDOR_METHODS.values() for vendor in impls})
+
 
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
@@ -733,7 +723,12 @@ def route_to_vendor(method: str, *args, **kwargs):
         try:
             routed_market = market_for_symbol(args[0])
             prio = get_config().get("market_source_priority") or {}
-            vendor_chain = resolve_market_priority(routed_market, prio, vendor_chain)
+            # Pass the vendors registered for THIS method so a priority list
+            # naming an unregistered vendor is skipped instead of KeyError-ing
+            # on VENDOR_METHODS[method][vendor] below.
+            vendor_chain = resolve_market_priority(
+                routed_market, prio, vendor_chain, all_available_vendors
+            )
         except Exception:  # noqa: BLE001 - routing is advisory
             routed_market = None
 

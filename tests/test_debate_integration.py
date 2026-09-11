@@ -16,7 +16,6 @@ from tradingagents.agents.arbiters.debate_judge import (
 )
 from tradingagents.agents.schemas import (
     DebaterTurnPayload,
-    L1DeterministicResult,
     L1ExecutionContext,
     L2JudgeDimensionedRubric,
     QuantitativeClaim,
@@ -123,8 +122,6 @@ class TestWireSchemas:
         assert d["quantitative_claims"][0]["asserted_value"] == 38.0
 
     def test_l1_and_rubric_and_context(self):
-        l1 = L1DeterministicResult(verdict="PASS", hard_gate_passed=True)
-        assert l1.verdict.value == "PASS"
         r = L2JudgeDimensionedRubric(
             judge_model_id="j", round_evaluated=1, evaluated_agent_alias="Candidate_X"
         )

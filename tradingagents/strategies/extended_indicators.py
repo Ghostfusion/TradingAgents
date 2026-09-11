@@ -19,24 +19,13 @@ tools unchanged.
 
 from __future__ import annotations
 
+from .technical_factors import ema
+
 
 def _sma(series: list, n: int) -> list:
     out = [None] * (n - 1)
     for i in range(n - 1, len(series)):
         out.append(sum(series[i - n + 1 : i + 1]) / n)
-    return out
-
-
-def _ema(series: list, n: int) -> list:
-    if not series or n <= 0:
-        return [None] * len(series)
-    k = 2.0 / (n + 1)
-    out = [None] * (n - 1)
-    ema = sum(series[:n]) / n
-    out.append(ema)
-    for v in series[n:]:
-        ema = float(v) * k + ema * (1 - k)
-        out.append(ema)
     return out
 
 
@@ -190,9 +179,9 @@ def trix(closes, n: int = 15, signal: int = 9) -> dict:
     f = [_f(x) for x in closes]
     if any(x is None for x in f):
         return {"trix": None, "signal": None, "cross": None}
-    e1 = _ema(f, n)
-    e2 = _ema([x for x in e1 if x is not None], n)
-    e3 = _ema([x for x in e2 if x is not None], n)
+    e1 = ema(f, n)
+    e2 = ema([x for x in e1 if x is not None], n)
+    e3 = ema([x for x in e2 if x is not None], n)
     e3 = [x for x in e3 if x is not None]
     if len(e3) < signal + 2:
         return {"trix": None, "signal": None, "cross": None}
@@ -225,7 +214,7 @@ def force_index(closes, volumes, n: int = 13) -> float | None:
             diffs.append((c - c_prev) * v)
     if len(diffs) < n:
         return None
-    e = _ema(diffs, min(n, len(diffs)))
+    e = ema(diffs, min(n, len(diffs)))
     e = [x for x in e if x is not None]
     return round(e[-1], 2) if e else None
 

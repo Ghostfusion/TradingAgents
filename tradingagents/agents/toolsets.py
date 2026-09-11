@@ -13,7 +13,7 @@ analyst can bind in either mode has an executor, and an analyst's node carries
 exactly the tools that analyst may bind -- never a hand-maintained extra.
 
 The sentiment analyst prefetches its data into the prompt and binds no tools,
-so ``social_tools`` is empty and its ToolNode is a no-op.
+so it has no toolset and no ToolNode at all.
 """
 
 from __future__ import annotations
@@ -437,11 +437,6 @@ def fundamentals_tools(is_etf: bool) -> list:
     return fundamentals_etf_tools() if is_etf else fundamentals_company_tools()
 
 
-def social_tools() -> list:
-    """The sentiment analyst binds no tools (its data is prefetched)."""
-    return []
-
-
 def _dedupe(tools: list) -> list:
     """Order-preserving dedupe by tool name (the fundamentals lists overlap)."""
     seen: set[str] = set()
@@ -466,8 +461,6 @@ def analyst_toolset(key: str) -> list:
         return market_tools()
     if key == "news":
         return news_tools()
-    if key == "social":
-        return social_tools()
     if key == "fundamentals":
         return _dedupe(fundamentals_company_tools() + fundamentals_etf_tools())
     raise KeyError(f"unknown analyst key: {key!r}")
@@ -480,5 +473,4 @@ __all__ = [
     "fundamentals_tools",
     "market_tools",
     "news_tools",
-    "social_tools",
 ]

@@ -108,6 +108,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
             "Research Manager",
             fallback_llm=fallback_llm,
             backup_llm=backup_llm,
+            # Required ResearchPlan fields: a parsed plan with an empty mandatory
+            # field must be repaired, never rendered as a blank plan.
+            mandatory_fields=("recommendation", "rationale", "strategic_actions"),
         )
 
         new_investment_debate_state = {

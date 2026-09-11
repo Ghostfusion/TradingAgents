@@ -158,9 +158,6 @@ def get_sec_filings(
     Args:
         ticker (str): Ticker symbol of the company
         limit (int): Max filings to return; omit for a default of 10
-        start_date (str): Input for the Massive form-4 fallback window (default:
-            one year ago today)
-        end_date (str): End of the massive form-4 fallback window (default: today)
 
     Returns:
         str: SEC EDGAR filings, or a clearly-labelled Massive insider-activity

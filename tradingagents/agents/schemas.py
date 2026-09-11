@@ -269,12 +269,17 @@ class PortfolioDecision(BaseModel):
             "should reduce confidence and position size)."
         ),
     )
-    data_quality: Literal["fresh", "stale", "partial", "unknown"] | None = Field(
+    data_quality: Literal["fresh", "stale", "partial"] | None = Field(
         default=None,
         description=(
-            "Advisory determinism flag: 'fresh' when the quoted/bar data used "
-            "was not stale/fallback/missing for this name; 'stale'/'partial'/"
-            "'unknown' when a data slice degraded (confidence MUST be lowered)."
+            "Advisory determinism flag for the quoted/bar data used by this "
+            "name. POSITIVELY report 'fresh' (nothing stale/fallback/missing), "
+            "'stale' (a fallback/stale feed), or 'partial' (a missing slice). A "
+            "'stale'/'partial' verdict is a degraded read: the guardrail caps "
+            "confidence and the hard-guard blocks the position. OMIT the field "
+            "when quality was not assessed — an omitted (or placeholder "
+            "'unknown') value is 'not reported', never a degraded read, so it "
+            "must not block the decision."
         ),
     )
     guardrail_reason: str | None = Field(
@@ -289,7 +294,9 @@ class PortfolioDecision(BaseModel):
         default=None,
         description=(
             "When a high-severity risk row caps this decision, the guardrail sets "
-            "this to 'Hold' — the displayed recommendation never exceeds it."
+            "this to 'Hold' and downgrades ``rating`` to Hold; the rendered "
+            "decision carries a **Risk Cap** footer so the displayed "
+            "recommendation never reads above the cap."
         ),
     )
 
@@ -331,6 +338,11 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         parts.extend(["", f"**Stop Loss**: {decision.stop_loss}"])
     if decision.consensus is not None:
         parts.extend(["", f"**Consensus**: {decision.consensus.capitalize()}"])
+    if decision.risk_cap is not None:
+        # Consume the guardrail's declared cap: the rendered recommendation must
+        # never read above it, so surface the cap alongside the (already
+        # downgraded) rating for downstream parsers and the CLI.
+        parts.extend(["", f"**Risk Cap**: {decision.risk_cap}"])
     return "\n".join(parts)
 
 
@@ -647,7 +659,15 @@ def render_action_condition_verdict(verdict: ActionConditionVerdict) -> str:
 # ---------------------------------------------------------------------------
 # Structured multi-agent debate — canonical wire schemas
 # (design docs/design_multi_agent_debate.md §4.7, rev v3; pydantic mirrors of
-#  the source doc Strategies/Multi_Agents_Debate.md's four JSON schemas)
+#  the source doc Strategies/Multi_Agents_Debate.md's JSON schemas)
+#
+# L1's emitted result is NOT a pydantic model: ``create_debate_l1`` writes and
+# consumers read the plain dict produced by ``strategies.debate_score
+# .classify_severity`` — ``{side, severity_tier, l1_action, penalty_score,
+# hard_gate_passed, reasons}``. That dict plus ``L1SeverityTier``/``L1Action``
+# below (and ``L1ExecutionContext`` for the recovery-path record) ARE the
+# canonical L1 vocabulary; the old PASS/FAIL_HARD_GATE/FAIL_DATA_MISMATCH
+# mirror was never constructed and has been removed.
 # ---------------------------------------------------------------------------
 
 
@@ -828,41 +848,6 @@ class RiskDebaterTurnPayload(DebaterTurnPayload):
             }
             return mapping.get(s, s)
         return v
-
-
-class MetricVerification(BaseModel):
-    """One L1 metric check (l1_eval_result.json metric_verification[])."""
-
-    metric_name: str
-    asserted_value: float
-    ground_truth_value: float | None = None
-    error_margin_pct: float | None = None
-    is_valid: bool = False
-
-
-class RiskGateEvaluation(BaseModel):
-    """L1 risk-gate evaluation (l1_eval_result.json risk_gate_evaluation)."""
-
-    max_drawdown_compliant: bool = False
-    allocation_bound_compliant: bool = False
-    calculated_var_95: float | None = None
-
-
-class L1Verdict(str, Enum):
-    PASS = "PASS"
-    FAIL_HARD_GATE = "FAIL_HARD_GATE"
-    FAIL_DATA_MISMATCH = "FAIL_DATA_MISMATCH"
-
-
-class L1DeterministicResult(BaseModel):
-    """L1 deterministic evaluation (source schema l1_eval_result.json)."""
-
-    evaluation_timestamp: str = ""
-    verdict: L1Verdict
-    hard_gate_passed: bool = False
-    metric_verification: list[MetricVerification] = Field(default_factory=list)
-    risk_gate_evaluation: RiskGateEvaluation = Field(default_factory=RiskGateEvaluation)
-    penalty_score: float = Field(ge=0.0, le=100.0, default=0.0)
 
 
 class JudgeDimension(str, Enum):

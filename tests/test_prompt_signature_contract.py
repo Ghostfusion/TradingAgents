@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from tests.prompt_text import prompt_strings
 from tradingagents.agents.utils import analysis_tools as analysis_tools_mod
 
 REPO = Path(__file__).resolve().parents[1]
@@ -60,40 +61,6 @@ for _name in ("get_regime_gate_read",):
     _fn = getattr(analysis_tools_mod, _name, None)
     if _fn is not None and hasattr(_fn, "func"):
         _TOOLS.setdefault(_name, _fn)
-
-
-def _prompt_text(path: Path) -> str:
-    """Concatenated str literals from the module's system_message building."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError):
-        return ""
-    out: list[str] = []
-
-    def collect(node) -> None:
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            out.append(node.value)
-        elif isinstance(node, ast.JoinedStr):
-            for v in node.values:
-                if isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    out.append(v.value)
-        elif isinstance(node, ast.BinOp):
-            collect(node.left)
-            collect(node.right)
-        elif isinstance(node, ast.Tuple):
-            for e in node.elts:
-                collect(e)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id in {"system_message", "_ETF_SYSTEM_TAIL"} for t in node.targets
-        ):
-            collect(node.value)
-        if isinstance(node, ast.FunctionDef):
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Return) and sub.value is not None:
-                    collect(sub.value)
-    return "\n".join(out)
 
 
 def _advertised_calls(text: str) -> list[tuple[str, str]]:
@@ -128,8 +95,8 @@ CASES: list[tuple[str, str, str]] = []
 for _f in sorted(ANALYSTS.rglob("*.py")):
     if _f.name == "__init__.py":
         continue
-    _text = _prompt_text(_f)
-    if not _text:
+    _text = prompt_strings(_f)
+    if not _text.strip():
         continue
     for _name, _args in _advertised_calls(_text):
         _given = len([a for a in _args.split(",") if a.strip()])
@@ -156,5 +123,5 @@ def test_gate_has_coverage():
     for f in sorted(ANALYSTS.rglob("*.py")):
         if f.name == "__init__.py":
             continue
-        total += len(_advertised_calls(_prompt_text(f)))
+        total += len(_advertised_calls(prompt_strings(f)))
     assert total > 50, f"only {total} advertised tool calls found - the prompt scan broke"

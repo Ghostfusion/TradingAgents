@@ -8,7 +8,10 @@ class AnalystNodeSpec:
     key: str
     agent_node: str
     clear_node: str
-    tool_node: str
+    # ToolNode name, or None for an analyst that binds no tools (the sentiment
+    # analyst prefetches its data into the prompt) — such a spec has no tool
+    # node and its router never returns one.
+    tool_node: str | None
     report_key: str
 
 
@@ -33,7 +36,9 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         key="social",
         agent_node="Sentiment Analyst",
         clear_node="Msg Clear Sentiment",
-        tool_node="tools_social",
+        # Binds no tools: its data is prefetched into the prompt, so there is
+        # no ToolNode and the router goes straight to the clear node.
+        tool_node=None,
         report_key="sentiment_report",
     ),
     "news": AnalystNodeSpec(

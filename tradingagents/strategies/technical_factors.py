@@ -25,17 +25,22 @@ def _sma(series: list, n: int) -> list:
     return out
 
 
-def _ema(series: list, n: int) -> list:
-    """EMA series; None for the first n-1 positions."""
+def ema(series: list, n: int) -> list:
+    """EMA series (SMA-seeded); None for the first n-1 positions.
+
+    The single EMA implementation in the package: ``extended_indicators`` and
+    ``value_dip`` import this function rather than re-defining it, so a change
+    to the EMA convention can never diverge between them.
+    """
     if not series or n <= 0:
         return [None] * len(series)
     k = 2.0 / (n + 1)
     out = [None] * (n - 1)
-    ema = sum(series[:n]) / n
-    out.append(ema)
+    ema_value = sum(series[:n]) / n
+    out.append(ema_value)
     for v in series[n:]:
-        ema = float(v) * k + ema * (1 - k)
-        out.append(ema)
+        ema_value = float(v) * k + ema_value * (1 - k)
+        out.append(ema_value)
     return out
 
 
@@ -252,6 +257,7 @@ def pivot_points(
 
 
 __all__ = [
+    "ema",
     "kst",
     "mf_index",
     "stochastic_oscillator",
@@ -567,8 +573,8 @@ def chaikin_oscillator(highs, lows, closes, volumes, fast: int = 3, slow: int = 
             mfm = 0.0 if hi == lo else ((c - lo) - (hi - c)) / (hi - lo)
             ad += mfm * v
             ad_series.append(ad)
-        ema_fast = _ema(ad_series, fast)
-        ema_slow = _ema(ad_series, slow)
+        ema_fast = ema(ad_series, fast)
+        ema_slow = ema(ad_series, slow)
         if ema_fast[-1] is None or ema_slow[-1] is None:
             return None
         return round(float(ema_fast[-1]) - float(ema_slow[-1]), 4)
@@ -585,14 +591,14 @@ def elder_ray(highs, lows, closes, n: int = 13) -> dict:
     if len(highs) < n or len(lows) < n or len(closes) < n:
         return {"bull_power": None, "bear_power": None, "verdict": None}
     try:
-        ema = _ema([float(c) for c in closes], n)
-        if ema[-1] is None:
+        ema_vals = ema([float(c) for c in closes], n)
+        if ema_vals[-1] is None:
             return {"bull_power": None, "bear_power": None, "verdict": None}
-        e = ema[-1]
+        e = ema_vals[-1]
         bull = float(highs[-1]) - e
         bear = float(lows[-1]) - e
         # compare to the prior bar for the trend of each power line
-        ema_prev = ema[-2] if len(ema) >= 2 else None
+        ema_prev = ema_vals[-2] if len(ema_vals) >= 2 else None
         if ema_prev is None:
             return {"bull_power": round(bull, 4), "bear_power": round(bear, 4), "verdict": None}
         bull_prev = float(highs[-2]) - ema_prev

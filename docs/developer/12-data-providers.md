@@ -8,22 +8,27 @@ a developer exactly which vendor supplies which signal and how each is wired
 
 | Tier | Count |
 | --- | --- |
-| Routed vendors (`VENDOR_LIST`) | 17 |
-| Direct-but-not-routed sources | 5 |
-| **Total distinct providers** | 22 |
+| Routed vendors (`VENDOR_LIST`, derived from `VENDOR_METHODS`) | 24 |
+| Direct-but-not-routed sources | 4 |
+| **Total distinct providers** | 28 |
+
+(`fx` is a thin adapter over yfinance quotes; the rest are distinct providers.)
 
 ---
 
-## Tier 1 — the 17 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
+## Tier 1 — the 24 routed vendors (`route_to_vendor`, `dataflows/interface.py`)
 
 These sit behind the analyst `@tool` calls and are chosen per-category via
 `data_vendors` chains (see `docs/developer/03-dataflow-vendors.md`).
 
 ```python
-VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage', 'finnhub',
-               'sec_edgar', 'moomoo', 'massive', 'eodhd', 'cboe',
-               'federal_reserve', 'tiingo', 'twelve_data', 'stockdata',
-               'gdelt', 'benzinga', 'newsapi']
+# VENDOR_LIST is DERIVED from VENDOR_METHODS (single source of truth), sorted;
+# it is never hand-maintained. Displayed content:
+VENDOR_LIST = ['alpha_vantage', 'benzinga', 'cboe', 'congress', 'eodhd',
+               'federal_reserve', 'finnhub', 'finra', 'fmp', 'fred', 'fx',
+               'gdelt', 'massive', 'moomoo', 'newsapi', 'patentsview',
+               'polymarket', 'sec_edgar', 'seekingalpha', 'stockdata',
+               'tiingo', 'treasury_fiscal', 'twelve_data', 'yfinance']
 ```
 
 | # | Vendor | Provider | What it supplies |
@@ -45,6 +50,13 @@ VENDOR_LIST = ['yfinance', 'fred', 'polymarket', 'alpha_vantage', 'finnhub',
 | 15 | **gdelt** | GDELT DOC 2.0 (added in this fork) | keyless global news + native daily tone (`get_news_gdelt`, `get_gdelt_tone_series`, `get_gdelt_sentiment` news tool); **NOT in default `news_data` chain** - endpoint is network-flaky, opt-in via `...,gdelt` |
 | 16 | **benzinga** | Benzinga (added in this fork) | free Basic Financial News API: headline + teaser + link, ticker-scoped (`get_news_benzinga`); `BENZINGA_API_KEY`; opt-in (no real key registered yet) |
 | 17 | **newsapi** | NewsAPI.org (added in this fork) | free Developer 100 req/day: `get_news_newsapi` (ticker) + `get_global_news_newsapi` (macro headlines); `NEWSAPI_API_KEY`; tail of `news_data` + `get_global_news` |
+| 18 | **seekingalpha** | Seeking Alpha public RSS (added in this fork) | keyless per-ticker feed (titles/authors only, opinion-pinned): `get_news_seekingalpha`; **last** in `get_news`, serves only when every newswire vendor fails |
+| 19 | **fmp** | Financial Modeling Prep (added in this fork) | free-tier earnings-call transcripts (`get_earnings_transcript`); its other enrich (5y fundamentals/EV/surprises/prices) is still imported directly by the screener |
+| 20 | **congress** | House / Senate Stock Watcher mirrors (added in this fork) | keyless congressional per-transaction reports (`get_congress_trades`); bulk JSON cached in-process |
+| 21 | **patentsview** | USPTO PatentsView (added in this fork) | free key `PATENTSVIEW_API_KEY`: patent counts/titles per assignee (`get_patent_activity`); degrades to explicit "unavailable" |
+| 22 | **finra** | FINRA official public tier (added in this fork) | keyless Reg SHO daily short-sale volume (`get_short_sale_volume`) + weekly ATS dark-pool flow (`get_dark_pool_flow`); as-of dates rendered + staleness-gated |
+| 23 | **fx** | yfinance FX pairs (added in this fork) | keyless DXY + major-pair snapshot (`get_fx_snapshot`) for the macro/news strategist |
+| 24 | **treasury_fiscal** | US Treasury Fiscal Data (added in this fork) | keyless Daily Treasury Statement operating cash balance / TGA (`get_tga_balance`) for macro liquidity reads |
 
 ### Default chains per category (from `data_vendors`)
 
@@ -78,26 +90,22 @@ They are optional / key-gated or pre-fetch sources.
 | Provider | Module | Consumed by | Gate |
 | --- | --- | --- | --- |
 | **Alpaca** | `dataflows/alpaca.py` | `get_market_snapshot_alpaca` (market analyst); screener `_fetch_ohlcv` fallback | `enable_alpaca` |
-| **FMP** | `dataflows/fmp.py` | optional multi-year fundamentals/EV/surprise enrich in the screener | `fmp_api_key` |
 | **Reddit** | `dataflows/reddit.py` | `fetch_reddit_posts` -> pre-fetched into the sentiment analyst | optional |
 | **StockTwits** | `dataflows/stocktwits.py` | `fetch_stocktwits_messages` -> pre-fetched into the sentiment analyst | optional |
 | **float_shares** | `dataflows/float_shares.py` | `fetch_float_shares` -> screener `--enable-float` momentum pillar | `--enable-float` |
 
 ### Why these are direct, not routed
 
-These five are **not** in `VENDOR_LIST` / `VENDOR_METHODS`, so `route_to_vendor`
-does not know about them (verified against `dataflows/interface.py`). They are
-**imported and called directly** instead. The reason is architectural: they do
-not fit the "per-category chain with fallback" model that `route_to_vendor`
-provides.
+These four are **not** in `VENDOR_METHODS`, so `route_to_vendor` does not know
+about them (`VENDOR_LIST` is derived from `VENDOR_METHODS`, so they are absent
+there too). They are **imported and called directly** instead. The reason is
+architectural: they do not fit the "per-category chain with fallback" model that
+`route_to_vendor` provides.
 
 - **Alpaca** — optional, opt-in analysis source (`enable_alpaca`). It returns a
   **live snapshot** (distinct shape) rather than a category-method result, and
   there is no chain/fallback — you either enable Alpaca or you don't. So it is
   wrapped as its own `get_market_snapshot_alpaca` tool and called directly.
-- **FMP** — optional enrich (`fmp_api_key`); a *supplement* to the fundamental
-  chain, not a first-class fallback vendor. The screener calls it directly to
-  fill multi-year fundamentals/EV/surprises when the core chain is thin.
 - **Reddit / StockTwits** — **pre-fetched as raw text directly into the
   sentiment analyst's prompt** (turn 0), not fetched on-demand by a tool call.
   They are prompt-injected content, not per-category methods.
@@ -105,8 +113,12 @@ provides.
   by the screener `--enable-float` momentum pillar. No category, no fallback
   needed.
 
+(FMP straddles both: `get_earnings_transcript` is a routed `fmp` vendor, while
+its multi-year fundamentals/EV/surprise enrich is still imported directly by the
+screener — see Tier 1 row 19.)
+
 The routed vendors are the well-behaved *core* feeds (prices, fundamentals,
-news) where resilience (fallback / TTL cache / typed errors) matters; the 5
+news) where resilience (fallback / TTL cache / typed errors) matters; the 4
 direct sources are one-off / optional / special-purpose inputs that do not need
 that resilience.
 
@@ -146,8 +158,9 @@ that resilience.
 - **US-centric non-routed** sources (Yahoo, FRED, Finnhub, Massive, SEC)
   supplement; **moomoo** is the primary across US/HK/JP/SG/SS etc.
 - **Crypto** (`BTC-USD`) auto-disables ratings/earnings/A-series tools.
-- Adding a new provider = vendor contract (add to `VENDOR_LIST`,
-  `TOOLS_CATEGORIES`, `VENDOR_METHODS`, `data_vendors`, wrap as `@tool`).
+- Adding a new provider = vendor contract (add to `VENDOR_METHODS`,
+  `TOOLS_CATEGORIES`, `data_vendors`, wrap as `@tool`; `VENDOR_LIST` derives
+  from `VENDOR_METHODS` automatically).
 
 ---
 

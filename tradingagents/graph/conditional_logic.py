@@ -50,19 +50,15 @@ class ConditionalLogic:
         return "Msg Clear Market"
 
     def should_continue_social(self, state: AgentState):
-        """Determine if sentiment-analyst tool round should continue.
+        """Route the sentiment analyst to its clear node.
 
         Method name keeps the legacy ``social`` suffix to match the
         ``AnalystType.SOCIAL = "social"`` wire value (saved-config
         back-compat); the returned ``clear_node`` label uses the v0.2.5
         rename so it matches the node registered by the execution plan.
-        The sentiment analyst binds no tools (data is in the prompt), so the
-        tool-round cap never applies here.
+        The sentiment analyst binds no tools (data is in the prompt) and has
+        no tool node, so this router never returns one.
         """
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_social"
         return "Msg Clear Sentiment"
 
     def should_continue_news(self, state: AgentState):

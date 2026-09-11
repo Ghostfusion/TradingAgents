@@ -55,13 +55,18 @@ def _build_analyst_subgraph(spec, analyst_factory, tool_node, conditional_logic)
     in-flight output (the shared ``messages[-1]`` routers would otherwise
     mis-route across analysts). The subgraph mirrors the sequential edges:
     analyst → (tools loop | done) — the clear step is a no-op here because
-    each thread starts from the same base messages.
+    each thread starts from the same base messages. An analyst with no tool
+    node (``spec.tool_node is None``: the sentiment analyst, which binds no
+    tools) gets the router's clear target only and no tool edge.
     """
     sub = StateGraph(AgentState)
     sub.add_node(spec.agent_node, analyst_factory())
-    sub.add_node(spec.tool_node, tool_node)
     sub.add_edge(START, spec.agent_node)
     router = getattr(conditional_logic, f"should_continue_{spec.key}")
+    if spec.tool_node is None:
+        sub.add_conditional_edges(spec.agent_node, router, {spec.clear_node: END})
+        return sub.compile()
+    sub.add_node(spec.tool_node, tool_node)
     sub.add_conditional_edges(
         spec.agent_node,
         router,
@@ -241,7 +246,7 @@ class GraphSetup:
                 spec.key: _build_analyst_subgraph(
                     spec,
                     analyst_factories[spec.key],
-                    self.tool_nodes[spec.key],
+                    self.tool_nodes.get(spec.key),
                     self.conditional_logic,
                 )
                 for spec in plan.specs
@@ -254,7 +259,8 @@ class GraphSetup:
             for spec in plan.specs:
                 workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
                 workflow.add_node(spec.clear_node, create_msg_delete())
-                workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+                if spec.tool_node is not None:
+                    workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
 
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
@@ -386,23 +392,30 @@ class GraphSetup:
                 current_tools = spec.tool_node
                 current_clear = spec.clear_node
 
-                # Add conditional edges for current analyst
-                workflow.add_conditional_edges(
-                    current_analyst,
-                    getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                    # The tool-round-cap routers return the ANALYST node (the
-                    # analyst finalizes its report with dangling tool_calls
-                    # stripped); it must be a registered target or LangGraph
-                    # raises KeyError '<Analyst>' on the cap turn.
-                    [current_analyst, current_tools, current_clear],
-                )
-                # Analyst tool loop: ToolNode feeds back into the analyst node
-                # (re-run with the tool results). Without this edge the
-                # ToolNode has no outgoing target and LangGraph terminates the
-                # graph right after the first tool round - the analyst report
-                # stays empty and the debate chain never runs (regression
-                # guard: tests/test_graph_tool_loop.py).
-                workflow.add_edge(current_tools, current_analyst)
+                router = getattr(self.conditional_logic, f"should_continue_{spec.key}")
+                if current_tools is None:
+                    # Tool-less analyst (sentiment): router -> clear node only.
+                    workflow.add_conditional_edges(
+                        current_analyst, router, [current_clear]
+                    )
+                else:
+                    # Add conditional edges for current analyst
+                    workflow.add_conditional_edges(
+                        current_analyst,
+                        router,
+                        # The tool-round-cap routers return the ANALYST node (the
+                        # analyst finalizes its report with dangling tool_calls
+                        # stripped); it must be a registered target or LangGraph
+                        # raises KeyError '<Analyst>' on the cap turn.
+                        [current_analyst, current_tools, current_clear],
+                    )
+                    # Analyst tool loop: ToolNode feeds back into the analyst node
+                    # (re-run with the tool results). Without this edge the
+                    # ToolNode has no outgoing target and LangGraph terminates the
+                    # graph right after the first tool round - the analyst report
+                    # stays empty and the debate chain never runs (regression
+                    # guard: tests/test_graph_tool_loop.py).
+                    workflow.add_edge(current_tools, current_analyst)
                 # Connect to next analyst or to Bull Researcher if this is the last analyst
                 if i < len(plan.specs) - 1:
                     workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)

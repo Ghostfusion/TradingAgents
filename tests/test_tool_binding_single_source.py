@@ -21,7 +21,6 @@ from tradingagents.agents.toolsets import (
     fundamentals_etf_tools,
     market_tools,
     news_tools,
-    social_tools,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
@@ -48,7 +47,7 @@ def _names(tools):
 def test_toolnode_matches_analyst_toolset():
     """A ToolNode carries exactly the tools its analyst may bind."""
     nodes = _nodes()
-    assert set(nodes) == {"market", "news", "fundamentals", "social"}
+    assert set(nodes) == {"market", "news", "fundamentals"}
     for key, node in nodes.items():
         expected = _names(analyst_toolset(key))
         actual = set(node.tools_by_name)
@@ -65,8 +64,9 @@ def test_every_bound_tool_has_an_executor():
         "market": market_tools(),
         "news": news_tools(),
         "fundamentals": fundamentals_company_tools() + fundamentals_etf_tools(),
-        "social": social_tools(),
     }
+    # The sentiment analyst prefetches its data and binds no tools, so it has
+    # no ToolNode and is absent from the node map on purpose.
     for key, tools in bound.items():
         missing = _names(tools) - set(nodes[key].tools_by_name)
         assert not missing, (

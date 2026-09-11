@@ -30,6 +30,7 @@ import math
 from .risk_sizing import riskable_money  # noqa: E402 (lazy single-primitive sizer)
 from .size import atr as _atr
 from .swing import rsi as _rsi
+from .technical_factors import ema
 
 __all__ = [
     "bollinger_pct_b",
@@ -466,20 +467,6 @@ def _sma(series: list, n: int) -> float | None:
     return sum(series[-n:]) / n
 
 
-def _ema_series(values: list, n: int) -> list:
-    """Full EMA series aligned to ``values`` (None for the first n-1 bars)."""
-    if not values or n <= 0:
-        return [None] * len(values)
-    k = 2.0 / (n + 1)
-    out = [None] * (n - 1)
-    ema = sum(values[:n]) / n
-    out.append(ema)
-    for v in values[n:]:
-        ema = float(v) * k + ema * (1 - k)
-        out.append(ema)
-    return out
-
-
 def _rsi_series(closes: list, n: int = 14) -> list:
     """Wilder RSI series aligned to ``closes`` (None for the first n bars)."""
     if len(closes) <= n:
@@ -518,8 +505,8 @@ def _macd_hist(closes, fast=12, slow=26, signal=9):
     """
     if not closes or len(closes) < slow + signal + 2:
         return None
-    ema_f = _ema_series(closes, fast)
-    ema_s = _ema_series(closes, slow)
+    ema_f = ema(closes, fast)
+    ema_s = ema(closes, slow)
     line = [
         (fl - sl) if (fl is not None and sl is not None) else None
         for fl, sl in zip(ema_f, ema_s, strict=False)
@@ -528,7 +515,7 @@ def _macd_hist(closes, fast=12, slow=26, signal=9):
     if start is None:
         return None
     valid = line[start:]
-    sig_valid = _ema_series(valid, signal)
+    sig_valid = ema(valid, signal)
     sig = [None] * start + sig_valid
     hist = [
         (lv - s) if (lv is not None and s is not None) else None
@@ -955,20 +942,20 @@ def range_expansion_guard(
     if not a or a <= 0:
         return None
     span = float(highs[-1]) - float(lows[-1])
-    ema = None
+    ema_val = None
     if len(closes) >= ema_window:
         try:
-            ema = _ema_series(closes, ema_window)[-1]
+            ema_val = ema(closes, ema_window)[-1]
         except Exception:  # noqa: BLE001
-            ema = None
+            ema_val = None
     mult = span / a
-    close_below = ema is not None and float(closes[-1]) < ema
+    close_below = ema_val is not None and float(closes[-1]) < ema_val
     return {
         "active": bool(mult > float(max_mult) and close_below),
         "range_atr_mult": round(mult, 2),
         "max_mult": float(max_mult),
         "close_below_ema": close_below,
-        "ema": round(ema, 4) if ema is not None else None,
+        "ema": round(ema_val, 4) if ema_val is not None else None,
     }
 
 

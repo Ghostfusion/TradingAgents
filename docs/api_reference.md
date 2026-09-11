@@ -147,6 +147,8 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_OPTIONS_SURFACE` | `enable_options_surface` | CBOE delayed options chain -> IV/greeks surface (default OFF) |
 | `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | `enable_risk_free_curve` | NY Fed SOFR + Treasury par-yield curve (default OFF) |
 | `TRADINGAGENTS_ENABLE_SCREENER` | `enable_screener` | yfinance universe screener (symbol/PE/EPS/beta/mkt-cap) (default OFF) |
+| `TRADINGAGENTS_ENABLE_MARKET_ROUTING` | `enable_market_routing` | DSA §3.4 market-classified routing on (default OFF; the chain is bit-identical when off) |
+| `TRADINGAGENTS_MARKET_SOURCE_PRIORITY` | `market_source_priority` | JSON market -> comma-separated vendor list, e.g. `{"US": "eodhd,tiingo,yfinance,moomoo"}`; reorders that method's chain for the market (takes effect with `enable_market_routing`; unregistered vendors in the list are skipped) |
 | `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | `enable_market_movers` | yfinance gainers/losers/actives (default OFF) |
 | — | `enable_sector_multifactor` | sector-rotation P1: `get_sector_rank` adds a multi-factor score — momentum composite + RS vs benchmark + trend + risk, tie-aware cross-sectional percentiles (default OFF; `strategies/formulas/sector_rotation.md`) |
 | — | `enable_sector_industry` | sector-rotation P2: industry-ETF layer ranked only inside the parent sector (default OFF) |
@@ -169,6 +171,12 @@ in `batch.py`).
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)
+
+`DEFAULT_CONFIG` is range-checked by `default_config.validate_config()` when it
+is built, so a well-typed but out-of-range override (e.g.
+`TRADINGAGENTS_TOP_P=1.5`, tranche weights that do not sum to ~1) raises a
+`ValueError` listing every violation at config load instead of silently skewing
+an unattended run.
 
 ### 1.2 All `DEFAULT_CONFIG` keys
 
@@ -194,7 +202,9 @@ benchmarks: `.NS->^NSEI`, `.BO->^BSESN`, `.T->^N225`, `.HK->^HSI`, `.L->^FTSE`,
 `global_news_lookback_days=7`, `global_news_queries` (macro headlines).
 
 **Data vendors** - `data_vendors: dict` (per-category chains), `tool_vendors: dict`
-(per-tool overrides), `finnhub_api_key`, `fmp_api_key`, `alpaca_api_key_id`,
+(per-tool overrides), `enable_market_routing` + `market_source_priority`
+(opt-in DSA §3.4 per-market priority chains; see §6),
+`finnhub_api_key`, `fmp_api_key`, `alpaca_api_key_id`,
 `alpaca_api_secret`, `enable_alpaca`, `moomoo_host/port/account/autostart/
 opend_path/max_connections/call_timeout` (`moomoo_call_timeout` = per-call
 wall-clock timeout in seconds, default 5.0; the SDK's own `ReqInfo.wait()`
@@ -343,7 +353,7 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Prediction ledger + cost | `enable_prediction_ledger` (F) + `prediction_horizon_days` | `strategies/prediction_ledger.py` + `llm_cost.py` | log every decision as a scorable prediction (rating/direction/levels/confidence/horizon); score against realized closes at N days (return, hit, MAE/MFE, stop/target); provider cost estimate for quality-per-dollar |
 | Report disclosure + invalidation | `enable_report_attribution` (F) | `strategies/report_disclosure.py` + `reporting.write_report_tree` | computed driver attribution (sum-100), consensus support/oppose, watch_conditions/next_check_time, >=1 invalidation per decision (stop/tp/data-quality/manual fallback), sources-used-vs-empty + models footers |
 | News relevance + coalescing | `enable_news_relevance` (F) | `strategies/news_relevance.py` + `dataflows/news_cache.py` | deterministic relevance scoring (code/company/official +8, macro -12, clamp), spam admission, degrade triple (all_failed/empty/unavailable), owner-wait coalescing TTL cache |
-| Market routing + health | `market_source_priority` / `vendor_breaker_*` (F) | `dataflows/market_router.py` + `vendor_breaker.py` + `effective_date.py` | market-classified priority chains (opt-in `MARKET_SOURCE_PRIORITY`), 3-fail/300s breaker + half-open probe + negative capability cache, `VendorResult` honesty fields (fallback_from/stale/data_quality/missing_fields), effective-trading-date + all-closed skip (fail-open) |
+| Market routing + health | `enable_market_routing` + `market_source_priority` / `vendor_breaker_*` (F) | `dataflows/market_router.py` + `vendor_breaker.py` + `effective_date.py` | market-classified priority chains (opt-in `TRADINGAGENTS_ENABLE_MARKET_ROUTING` + `TRADINGAGENTS_MARKET_SOURCE_PRIORITY`), 3-fail/300s breaker + half-open probe + negative capability cache, `VendorResult` honesty fields (fallback_from/stale/data_quality/missing_fields), effective-trading-date + all-closed skip (fail-open) |
 | Decision guardrail | `enable_decision_guardrail` (F) | `strategies/decision_guardrail.py` | post-PM downgrade-only stabilizer (risk-cap at Hold, near-resistance/no-flow, near-support/no-outflow) with recorded `guardrail_reason`; versioned 0-100 <-> rating consistency check; PM `data_quality`/`guardrail_reason`/`risk_cap` fields + confidence cap on stale data; per-field integrity retry in `structured.retry_structured_missing_fields` |
 | Backtest tradability | `backtest_limit_threshold` / `backtest_volume_participation` / `backtest_deal_price` | `strategies/market_tradability.py` | limit-up/down gates, suspended days (NaN close), participation caps, deal-price selector; wired into `scripts/backtest_strategy.py` fills (flags `--limit-threshold` etc.) + `fill_model` honesty block |
 
@@ -438,7 +448,7 @@ deliberate step with a vendor-suite re-run.
 ### 6.2 Vendor implementations per tool (exact)
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
-- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `massive`, `stockdata`, `gdelt`, `benzinga`, `newsapi` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier - GDELT/Benzinga opt-in via `news_data` chain, not default)
+- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `moomoo`, `massive`, `eodhd`, `stockdata`, `gdelt`, `benzinga`, `newsapi`, `seekingalpha` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier; seekingalpha = keyless opinion-only tail served last — GDELT/Benzinga opt-in via `news_data` chain, not default)
 - news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` tone
 - quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/YZ/EWMA/GARCH), `get_garch_volatility`, `get_covariance_read` (Ledoit-Wolf shrunk + EWMA covariance), `get_concentration_read` (active share / effective holdings / HHI / entropy), `get_tail_decomposition` (incremental/component VaR), `get_tail_extreme_var` (EVT/GPD extreme-quantile VaR/ES), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread + Kyle lambda (`get_liquidity_risk`/`get_kyle_lambda`), `get_kelly_alloc` (multi-asset fractional Kelly), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
@@ -460,10 +470,21 @@ deliberate step with a vendor-suite re-run.
   Form-4 insider-activity data, returned under an explicit label so the agent
   does not mistake it for the full 8-K/10-K set)
 - short interest: `yfinance`, `moomoo`, `massive`
-- short volume (daily short-sale ratio, Massive-only): `massive`
+- short-sale volume (Reg SHO daily) + ATS dark-pool flow: `finra` (official
+  public tier, keyless, as-of dates rendered + staleness-gated)
+- congressional trades: `congress` (keyless House/Senate Stock Watcher mirrors)
+- patent activity: `patentsview` (free key `PATENTSVIEW_API_KEY`)
+- FX snapshot: `fx` (keyless yfinance DXY/pairs)
+- TGA balance: `treasury_fiscal` (keyless Treasury Fiscal Data)
+- earnings transcripts: `fmp` (free tier)
 - all A-series/tier tools: `moomoo` only (optional)
 
-`VENDOR_LIST = yfinance, fred, polymarket, alpha_vantage, finnhub, sec_edgar, moomoo, massive, eodhd, cboe, federal_reserve, tiingo, twelve_data, stockdata, gdelt, benzinga, newsapi`.
+`VENDOR_LIST` is derived from `VENDOR_METHODS` (single source of truth) and is
+therefore exactly the set of registered vendors, sorted:
+`alpha_vantage, benzinga, cboe, congress, eodhd, federal_reserve, finnhub,
+finra, fmp, fred, fx, gdelt, massive, moomoo, newsapi, patentsview, polymarket,
+sec_edgar, seekingalpha, stockdata, tiingo, treasury_fiscal, twelve_data,
+yfinance`.
 
 **EODHD** (`TRADINGAGENTS_EODHD_API_KEY`, key-gated) — the **primary OHLCV
 vendor** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years):

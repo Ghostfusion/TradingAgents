@@ -320,6 +320,17 @@ def _fmt_pct(v) -> str:
         return str(v)
 
 
+def _fmt_metric(v, spec: str) -> str:
+    """Render a float-or-None metric; ``None`` means unmeasured, never zero.
+
+    Producers document these fields as float-or-None (e.g. "fewer than 2
+    downside returns", "test raised"), so coercing None to 0 would claim a
+    measurement that does not exist and invert the meaning (0% shortfall reads
+    as "no downside risk"). Render the absence explicitly instead.
+    """
+    return format(float(v), spec) if v is not None else "n/a"
+
+
 @tool
 def get_relative_strength(
     ticker: Annotated[str, "ticker symbol"],
@@ -2086,11 +2097,26 @@ def _dcf_market_cap(fund):
 
 
 def _dcf_beta(fund):
-    return _dcf_latest(fund.get("beta")) or 1.0
+    """Provider beta as a float, or None when the vendor has no value.
+
+    Never fabricate 1.0 here: a defaulted beta silently changes WACC/fair
+    value and is indistinguishable from a measured one. The caller supplies
+    the 1.0 assumption explicitly and labels it as an assumption.
+    """
+    v = _dcf_latest(fund.get("beta"))
+    return float(v) if v is not None else None
 
 
 def _dcf_cash_debt(bal):
-    return _dcf_latest(bal.get("cash")) or 0.0, _dcf_latest(bal.get("total_debt")) or 0.0
+    """(cash, total_debt) as provider-reported floats, or None when absent.
+
+    The caller substitutes 0.0 for the EV->equity bridge and labels it as an
+    assumption, so a missing vendor line is never rendered as a measurement.
+    """
+    cash = _dcf_latest(bal.get("cash"))
+    debt = _dcf_latest(bal.get("total_debt"))
+    return (float(cash) if cash is not None else None,
+            float(debt) if debt is not None else None)
 
 
 def _dcf_shares(fund, bal, market_cap, ticker):
@@ -2190,7 +2216,23 @@ def get_dcf_valuation(
         fin = fetch_ticker(ticker, current_date) or {}
         market_cap = _dcf_market_cap(fin)
         beta = _dcf_beta(fin)
+        beta_assumed = beta is None
+        if beta_assumed:
+            beta = 1.0
         cash, debt = _dcf_cash_debt(fin)
+        cash_assumed = cash is None
+        debt_assumed = debt is None
+        cash = 0.0 if cash_assumed else cash
+        debt = 0.0 if debt_assumed else debt
+        # A missing vendor line is substituted for the bridge but must be
+        # reported as an assumption, never as provider-derived data.
+        cash_debt_note = ""
+        if cash_assumed or debt_assumed:
+            missing = "/".join(
+                name for name, absent in (("cash", cash_assumed), ("debt", debt_assumed))
+                if absent
+            )
+            cash_debt_note = f"; {missing} assumed 0 (not reported)"
         shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
         price = market_cap / shares if (market_cap and shares) else 0.0
         if not shares:
@@ -2225,11 +2267,12 @@ def get_dcf_valuation(
         f"ev={res['ev']:.2f} pv_explicit={res['pv_explicit']:.2f} "
         f"pv_terminal={res['pv_tv']:.2f} terminal_share={res['terminal_share']:.0%} "
         f"wacc={res['wacc']:.2%} g={res['growth']:.2%} "
-        f"rf={rf:.2%} beta={beta if beta is not None else 'n/a'} "
+        f"rf={rf:.2%} beta={beta:.2f}"
+        f"{' (assumed, no provider beta)' if beta_assumed else ''} "
         f"erp={erp:.2%} (wacc = CAPM rf + beta*erp) "
         f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
         f"share_basis={shares_basis or 'n/a'} "
-        f"(provider-derived; growth/ERP are analyst overrides)"
+        f"(provider-derived; growth/ERP are analyst overrides{cash_debt_note})"
     )
 
 
@@ -3318,10 +3361,10 @@ def get_downside_read(
     kap2 = kappa_ratio(returns, target, 2.0)
     lpm2 = lower_partial_moment(returns, target, 2.0)
     return (
-        f"downside {ticker}: semi_dev={(d['semi_deviation'] or 0):.2%} "
-        f"downside_dev={(d['downside_deviation'] or 0):.2%} "
-        f"shortfall_prob={(d['shortfall_prob'] or 0):.1%} "
-        f"avg_shortfall={(d['avg_shortfall'] or 0):.2%} "
+        f"downside {ticker}: semi_dev={_fmt_metric(d['semi_deviation'], '.2%')} "
+        f"downside_dev={_fmt_metric(d['downside_deviation'], '.2%')} "
+        f"shortfall_prob={_fmt_metric(d['shortfall_prob'], '.1%')} "
+        f"avg_shortfall={_fmt_metric(d['avg_shortfall'], '.2%')} "
         f"kappa(2)={kap2 if kap2 is not None else 'n/a'} "
         f"lpm(2)={lpm2 if lpm2 is not None else 'n/a'} n={d['n']}"
     )
@@ -3352,9 +3395,9 @@ def get_horizon_var(
         return f"horizon var unavailable for {ticker}: no returns."
     valid = "valid" if r["scaling_valid"] else "NOT-iid"
     return (
-        f"horizon_var {ticker} {horizon_days}d: emp_var={(r['emp_var'] or 0):.2%} "
-        f"emp_cvar={(r['emp_cvar'] or 0):.2%} "
-        f"param_var={(r['param_var'] or 0):.2%} scaling={valid} n={r['n']}"
+        f"horizon_var {ticker} {horizon_days}d: emp_var={_fmt_metric(r['emp_var'], '.2%')} "
+        f"emp_cvar={_fmt_metric(r['emp_cvar'], '.2%')} "
+        f"param_var={_fmt_metric(r['param_var'], '.2%')} scaling={valid} n={r['n']}"
     )
 
 
@@ -6159,8 +6202,9 @@ def get_normality(
     jb = n.get("jarque_bera") or {}
     sw = n.get("shapiro_wilk") or {}
     return (
-        f"normality {ticker}: jarque_bera_p={(jb.get('p_value') or 0):.3f} "
-        f"shapiro_p={(sw.get('p_value') or 0):.3f} normal={'yes' if n.get('normal') else 'no'} n={len(rets)}"
+        f"normality {ticker}: jarque_bera_p={_fmt_metric(jb.get('p_value'), '.3f')} "
+        f"shapiro_p={_fmt_metric(sw.get('p_value'), '.3f')} "
+        f"normal={'yes' if n.get('normal') else 'no'} n={len(rets)}"
     )
 
 

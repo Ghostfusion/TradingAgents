@@ -106,23 +106,34 @@ def test_every_analyst_tool_node_loops_back_to_analyst():
 
     Regression: the `ToolNode -> analyst` edge was dropped, turning the ToolNode
     into a Graph-trim dead end. Every analyst's tool node must feed back into its
-    analyst node.
+    analyst node. The sentiment analyst binds no tools, so it has no tool node
+    at all (only its analyst -> clear edge) and is skipped here.
     """
     from tradingagents.graph.analyst_execution import build_analyst_execution_plan
     from tradingagents.graph.conditional_logic import ConditionalLogic
     from tradingagents.graph.setup import GraphSetup
 
     mock = MagicMock()
-    tool_nodes = {k: MagicMock() for k in ("market", "social", "news", "fundamentals")}
+    tool_nodes = {k: MagicMock() for k in ("market", "news", "fundamentals")}
     gs = GraphSetup(mock, mock, tool_nodes, ConditionalLogic(1, 1), analyst_concurrency=1)
     wf = gs.setup_graph(("market", "social", "news", "fundamentals"))
-    edges = {(e.source, e.target) for e in wf.compile().get_graph().edges}
+    graph = wf.compile().get_graph()
+    edges = {(e.source, e.target) for e in graph.edges}
+    nodes = set(graph.nodes)
 
     plan = build_analyst_execution_plan(("market", "social", "news", "fundamentals"))
     for spec in plan.specs:
+        if spec.tool_node is None:
+            # Tool-less analyst (sentiment): no tool node is registered, and the
+            # router cannot name one.
+            assert "tools_social" not in nodes
+            assert "tools_social" not in {t for _, t in edges}
+            continue
         assert (spec.tool_node, spec.agent_node) in edges, (
             f"missing analyst tool-loop edge {spec.tool_node} -> {spec.agent_node}"
         )
+    # The tool-less sentiment analyst still completes: analyst -> clear node.
+    assert ("Sentiment Analyst", "Msg Clear Sentiment") in edges
 
 
 @pytest.mark.unit

@@ -634,6 +634,7 @@ def invoke_structured_or_freetext(
     result_hook: Callable[[Any], None] | None = None,
     fallback_llm: Any | None = None,
     backup_llm: Any | None = None,
+    mandatory_fields: tuple[str, ...] | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -644,6 +645,12 @@ def invoke_structured_or_freetext(
 
     ``backup_llm`` (optional): cut-at-cap continuation runs on this model
     instead of the truncated one (see ``_retry_if_truncated``).
+
+    ``mandatory_fields`` (optional): the required field names of the schema.
+    When the parsed result has one of them empty, the DSA per-field integrity
+    retry rebuilds it before rendering (see
+    ``retry_structured_missing_fields``) instead of rendering an empty
+    mandatory field as-is.
     """
     if structured_llm is not None:
         try:
@@ -655,7 +662,18 @@ def invoke_structured_or_freetext(
                 raise ValueError("structured output returned no parsed result")
             if result_hook is not None:
                 result_hook(result)
-            rendered = render(result)
+            if mandatory_fields:
+                rendered = retry_structured_missing_fields(
+                    structured_llm,
+                    prompt,
+                    result,
+                    render,
+                    agent_name,
+                    mandatory_fields,
+                    backup_llm=backup_llm,
+                )
+            else:
+                rendered = render(result)
             # Enforce completeness on the structured-success path too: a model
             # can hit max_tokens mid-render and still parse into the schema,
             # in which case render() ends mid-sentence and only the report
@@ -707,15 +725,20 @@ def retry_structured_missing_fields(
     field appears absent after retry, so the pipeline never blocks).
 
     ``backup_llm`` (optional): the repair re-invocation runs on this model
-    (``TRADINGAGENTS_BACKUP_LLM``) instead of the original — a model that
-    keeps dropping fields must never be re-paid for the repair. The swap is
-    skipped when the backup is the same object.
+    (``TRADINGAGENTS_BACKUP_LLM``) when one is configured — a model that keeps
+    dropping fields must never be re-paid for the repair. Without a backup the
+    repair runs on ``structured_llm`` itself: a targeted rebuild on the same
+    model is still better than rendering an empty mandatory field as-is.
     """
     missing = [f for f in mandatory_fields if getattr(result, f, None) in (None, "", [])]
     if not missing:
         return render(result)
     current = result
-    retry_llm = backup_llm if (backup_llm is not None and backup_llm is not structured_llm) else None
+    retry_llm = (
+        backup_llm
+        if backup_llm is not None and backup_llm is not structured_llm
+        else structured_llm
+    )
     for _ in range(max_retries):
         still = [f for f in missing if getattr(current, f, None) in (None, "", [])]
         if not still:

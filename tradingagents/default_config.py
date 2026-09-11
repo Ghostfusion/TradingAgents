@@ -255,6 +255,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE": "enable_risk_free_curve",
     "TRADINGAGENTS_ENABLE_SCREENER": "enable_screener",
     "TRADINGAGENTS_ENABLE_MARKET_MOVERS": "enable_market_movers",
+    # DSA §3.4 market-classified routing (docs/api_reference.md §6.3; ships in
+    # .env.example as JSON): opt-in per-market vendor chains + the health
+    # breaker. Both default off/empty, so the chain is unchanged unless set.
+    "TRADINGAGENTS_ENABLE_MARKET_ROUTING": "enable_market_routing",
+    "TRADINGAGENTS_MARKET_SOURCE_PRIORITY": "market_source_priority",
 }
 
 
@@ -597,6 +602,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "tool_vendors": {
             # Example: "get_stock_data": "alpha_vantage",  # Override category default
         },
+        # DSA §3.4 market-classified vendor routing (opt-in). When
+        # ``enable_market_routing`` is on, ``market_source_priority`` maps a
+        # market ("US"/"CA"/"EU"/"JP"/...) to a comma-separated vendor list
+        # that reorders that category's chain, the vendor health breaker skips
+        # open vendors, and dict results gap-fill / carry a caliber warning.
+        # Default off + empty {} -> the chain is untouched (bit-identical), and
+        # the documented env knob TRADINGAGENTS_MARKET_SOURCE_PRIORITY works.
+        "enable_market_routing": False,
+        "market_source_priority": {},
         "finnhub_api_key": None,
         "fmp_api_key": None,  # FMP optional enrichment (fmp.py)
         "eodhd_api_key": None,  # EODHD daily OHLCV (eodhd.py)
@@ -927,10 +941,13 @@ def validate_config(config: dict) -> list[str]:
     The env overrides coerce `TRADINGAGENTS_*` to the default's *type*, but a
     well-typed value can still be nonsense (negative window, fraction > 1,
     tranche weights that do not sum to ~1), which silently skews every run.
-    This collects all violations so they can be logged once at startup -
-    advisory, never raised, missing keys are simply skipped (a caller may pass
-    a config sub-slice). Mirrors NautilusTrader's ConfigErrorCollector pattern
-    (collect every field violation instead of failing on the first).
+    This collects all violations so they can be reported together; the module
+    itself calls it on ``DEFAULT_CONFIG`` and raises ``ValueError`` listing them
+    (see the startup gate at the end of this file), while callers that only
+    want the list can call this directly - missing keys are simply skipped (a
+    caller may pass a config sub-slice). Mirrors NautilusTrader's
+    ConfigErrorCollector pattern (collect every field violation instead of
+    failing on the first).
     """
     violations: list[str] = []
 
@@ -1059,3 +1076,16 @@ def validate_config(config: dict) -> list[str]:
                     violations.append(f"tranche_weights sum to {total:.4f}, expected ~1.0")
 
     return violations
+
+
+# Startup gate (audit 2026-09-10): DEFAULT_CONFIG is the config every entry
+# point loads (CLI, batch, TradingAgentsGraph via dataflows.config), so
+# range-check it right here. A well-typed but out-of-range env override (e.g.
+# TRADINGAGENTS_TOP_P=1.5, a tranche weights list that does not sum to 1) used
+# to be accepted silently and skew every unattended run; now config load fails
+# loudly with ALL violations instead of the first.
+_DEFAULT_CONFIG_VIOLATIONS = validate_config(DEFAULT_CONFIG)
+if _DEFAULT_CONFIG_VIOLATIONS:
+    raise ValueError(
+        "Invalid DEFAULT_CONFIG: " + "; ".join(_DEFAULT_CONFIG_VIOLATIONS)
+    )

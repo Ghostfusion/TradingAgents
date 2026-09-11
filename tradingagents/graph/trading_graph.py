@@ -68,6 +68,20 @@ def _fetch_cached_history(symbol: str, start: str, end: str):
     return frame
 
 
+def _data_quality_blocks_position(pm_decision: dict | None) -> bool:
+    """True only when the PM POSITIVELY reported a degraded data slice.
+
+    Contract (PortfolioDecision.data_quality): 'fresh' is clean, 'stale'/
+    'partial' are degraded reads that block a new position, and an OMITTED
+    field (or the placeholder string 'unknown', coerced to None at the schema
+    boundary) means "not reported" — never a reason to block. Reading the
+    field with a blanket ``or "unknown"`` default used to block every decision
+    whose model left the optional field out.
+    """
+    dq = str((pm_decision or {}).get("data_quality") or "").strip().lower()
+    return dq in ("stale", "partial")
+
+
 def _coerce_max_retries(value):
     """Validate an ``llm_max_retries`` value to a non-negative int.
 
@@ -338,7 +352,7 @@ class TradingAgentsGraph:
             # a bound tool can never be rejected as unknown and a node can
             # never carry a tool no analyst binds (P0-4 / S1).
             key: ToolNode(analyst_toolset(key), handle_tool_errors=True)
-            for key in ("market", "social", "news", "fundamentals")
+            for key in ("market", "news", "fundamentals")
         }
         from tradingagents.agents.utils.evidence_gather import (
             make_short_circuit_tool_node,
@@ -884,8 +898,7 @@ class TradingAgentsGraph:
                         _verdict = str(_rg.get("verdict") or "")
                         if _verdict == "REJECT":
                             _hard_guards.append("max_portfolio_risk")
-                        _dq = str((final_state.get("pm_decision") or {}).get("data_quality") or "unknown").lower()
-                        if _dq in ("stale", "unknown"):
+                        if _data_quality_blocks_position(final_state.get("pm_decision")):
                             _hard_guards.append("data_quality_failure")
                         _liq = (final_state.get("risk_snapshot") or {}).get("liquidity_verdict")
                         if _liq == "ILLIQUID":

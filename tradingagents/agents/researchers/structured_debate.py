@@ -487,6 +487,15 @@ def create_debate_l1(
 ) -> Callable:
     """Node factory: pure L1 claim verification + severity triage + termination.
 
+    Canonical L1 wire contract: ``ds[L1_KEY]`` is the dict returned by
+    ``strategies.debate_score.classify_severity`` — ``{side, severity_tier,
+    l1_action, penalty_score, hard_gate_passed, reasons[, regen_requested]}``
+    with the ``GREEN/SOFT_WARNING/RETRYABLE_ERROR/HARD_BREACH`` tier and
+    ``PROCEED/APPLY_PENALTY_AND_PROCEED/TRIGGER_REGEN/ABORT_TO_BASELINE``
+    action vocabulary (mirrored by ``schemas.L1SeverityTier``/``schemas
+    .L1Action``/``schemas.L1ExecutionContext``). Consumers (reporting, the
+    judge evidence renderer) read these dict keys directly.
+
     ``section`` picks the channel (debate_state / structured_risk_state) and
     the round-complete role (bear for research, neutral for risk).
     """

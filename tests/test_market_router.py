@@ -33,6 +33,12 @@ class TestMarketRouter:
         chain = ["eodhd", "tiingo", "yfinance", "moomoo"]
         cfg = {"US": "eodhd,yfinance"}
         assert mr.resolve_market_priority("US", cfg, chain) == ["eodhd", "yfinance"]
+        # Names not registered for the method are skipped (never returned, so
+        # the router can no longer KeyError on VENDOR_METHODS[method][vendor]);
+        # when none of the configured names is registered, the default chain
+        # is used unchanged.
+        assert mr.resolve_market_priority("US", {"US": "bogus,eodhd"}, chain, chain) == ["eodhd"]
+        assert mr.resolve_market_priority("US", {"US": "bogus"}, chain, chain) == chain
         # unconfigured market -> default (bit-identical)
         assert mr.resolve_market_priority("JP", None, chain) == chain
         assert mr.resolve_market_priority("JP", cfg, chain) == chain

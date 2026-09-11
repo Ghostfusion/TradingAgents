@@ -10,7 +10,6 @@ sends, not merely that the constant is referenced in the module.
 """
 from __future__ import annotations
 
-import inspect
 from unittest.mock import MagicMock
 
 import pytest
@@ -433,8 +432,10 @@ def test_tool_using_analysts_keep_their_date_guidance():
     # tool date ranges (#836) — this fix is scoped to no-tool agents.
     import tradingagents.agents.analysts.market_analyst as market
     import tradingagents.agents.analysts.news_analyst as news
+    from tests.prompt_text import prompt_strings
+
     for module in (market, news):
-        assert "tool-call date ranges" in inspect.getsource(module)
+        assert "tool-call date ranges" in prompt_strings(module.__file__)
 
 
 @pytest.mark.unit
