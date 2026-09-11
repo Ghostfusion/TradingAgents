@@ -351,6 +351,43 @@ system then contradicts.
   (`tests/test_doc_binding_claims.py`) checks every row against the toolsets. README's 2026-09-04 entry carries
   the correction; the CHANGELOG entry is kept as history with a dated correction appended.
 
+**W2 landed (2026-09-11).** `get_vif_read` takes `ticker` + `factors=[...]` and builds each column from the run OHLCV
+via `strategies.factor_expressions` (rsi/mom/bias/zscore/std/vol/range), trimming the common warm-up prefix; unknown
+factors and too-few-usable-columns degrade explicitly. **A second defect surfaced while reshaping it:** the read looked
+for a `{"columns": ...}` envelope that `statistical.variance_inflation_factor` never returns, so it answered
+"singular fit / no result" for every well-formed input — the tool had never produced a read. `get_pair_risk` takes
+`ticker_x`/`ticker_y` and fetches both series itself (the series-level math stays as a private helper).
+`get_macro_regime_read` → news, `get_trade_outcome_metrics` → the three debators, both with trigger lines; all four
+left `TOOL_LEGACY_BINDING`, and the argument-shape gate records `get_vif_read` as names-only while `get_pair_risk`'s
+debt entry is deleted (its argument is no longer complex).
+
+**W3 landed (2026-09-11).** All **28** trigger gaps closed (the gate's `PENDING` map is empty and still fails if a
+tool loses its trigger). Two prompt defects fixed with it: the news "three computed-analysis tools" miscount, and the
+fundamentals ETF-tooling paragraph that was emitted on company runs (it duplicated `_ETF_SYSTEM_TAIL`, which the ETF
+path already carries). Market prompt grew by ~14 clauses and stays under the budget ceilings.
+
+**W4 landed (2026-09-11).** `_precompute_risk_context` is the single producer of the PM's pre-decision inputs (CVaR +
+liquidity + measured book drawdown vs limit + size cap + CVaR budget); the post-graph governor block consumes those
+values instead of recomputing (a call-count test pins exactly one `_basket_drawdown`). The PM renders a limits line and
+its rules cite pre-decision sources. **Found en route:** the old post-graph liquidity read pulled
+`final_state["closes"]`/`["volumes"]`, which nothing ever writes — the liquidity gate always saw empty series — and
+the `insufficient_liquidity` guard called `.get()` on a `str` `risk_snapshot`, so it could never fire; both fixed. The
+trade-plan card is now fed by `trade_plan.measured_inputs` (one helper, both callers) instead of rendering
+"unavailable", and the judge sees per-claim rows. The write-only `computed_context` chain
+(`strategies/debate_context.py`, its config key + env var + test) is deleted.
+
+**W5 landed (2026-09-11), with one deliberate deviation.** `TOOL_LEGACY_BINDING` now holds 11 entries, each naming the
+covering bound tool or the real consumer. `get_thesis_evidence_matrix` is deleted as planned (tool + `agent_utils`
+export + `api_reference` row). Deviation: the underlying `strategies/integrity_tools.thesis_evidence_matrix` calc is
+**kept**, not deleted — its two behaviour tests are the only coverage of the matrix logic, and deleting the calc would
+delete working, tested code to satisfy a wording. It is unreachable from any agent surface. `clear_expr_cache` needed no
+whitelist entry: with `factor_expressions` now referenced by the reshaped VIF tool, the module-level reachability check
+treats it as an internal helper of a reachable module.
+
+**W6 (verification).** Full suite + `ruff` clean; live smokes: `get_etf_mechanics(IGV)` (NAV premium + distributions),
+`get_vif_read(AAPL, [...])` (real VIF, HIGH flags), `get_pair_risk(AAPL, MSFT)` (real cointegration + Granger),
+unknown-factor degradation, and the hermetic PM-render / card / judge tests from W4.
+
 ## 6. Sequencing & dependencies
 
 `W1 → W2 → W3` are strictly ordered (the gate must be honest before binds, and binds before guidance can be
