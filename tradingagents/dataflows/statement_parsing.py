@@ -146,6 +146,19 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 
+def _label(key: str) -> str:
+    """Vendor key -> human row label, splitting snake_case and camelCase.
+
+    Alpha Vantage's OVERVIEW payload uses camelCase (``MarketCapitalization``)
+    and its statements use snake_case (``totalRevenue``); ``_norm`` does not
+    insert word boundaries, so storing the raw key left ``sharesoutstanding``
+    unmatched against the ``shares outstanding`` alias. Splitting on both
+    boundaries makes every alias form comparable.
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", key.replace("_", " "))
+    return re.sub(r"\s+", " ", spaced).strip()
+
+
 def _match_row(rows: dict, canonical: str):
     """Return the (label, value) for the best matching row, or None.
 
@@ -323,18 +336,29 @@ def _parse_json_statements(payload: str) -> dict:
     if not isinstance(data, dict):
         return rows
     # Company-overview keys are single-level; statements are per-report.
+    reports = data.get("annualReports") or data.get("quarterlyReports") or []
     for key, value in data.items():
-        if key in ("fiscalDateEnding", "reportedCurrency"):
+        if key in ("fiscalDateEnding", "reportedCurrency", "annualReports", "quarterlyReports"):
+            continue
+        if isinstance(value, dict):
             continue
         if key.lower() == "sector" and isinstance(value, str) and value.strip():
             rows["Sector"] = value.strip()
-    for report in data.get("annualReports", []) or data.get("quarterlyReports", []):
+            continue
+        # Single-level numeric fields (MarketCapitalization, SharesOutstanding,
+        # Beta, DividendYield, ...). Dropping them left market_cap/shares/beta
+        # unparsed whenever Alpha Vantage served, degrading EV/earnings-yield/
+        # Altman/net-net to n/a for no reason.
+        parsed = _first_number(value)
+        if parsed is not None:
+            rows[_label(key)] = parsed
+    for report in reports:
         for key, value in report.items():
             if key in ("fiscalDateEnding", "reportedCurrency"):
                 continue
             parsed = _first_number(value)
-            if parsed is not None and key not in rows:
-                rows[key.replace("_", " ")] = parsed
+            if parsed is not None and _label(key) not in rows:
+                rows[_label(key)] = parsed
     return rows
 
 

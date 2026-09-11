@@ -111,3 +111,44 @@ def test_canonicalize_omits_liabilities_for_combined_line_only():
     canonical = _canonicalize(payload)
     assert "total_liabilities" not in canonical
     assert canonical["total_assets"] == 900.0
+
+
+def test_alpha_vantage_overview_keeps_single_level_numeric_fields():
+    """AV's OVERVIEW payload is flat camelCase; its numeric fields must survive.
+
+    Dropping them left market_cap / shares / beta unparsed whenever Alpha
+    Vantage served (EV, earnings yield, Altman and the net-net test all degrade
+    to n/a), and the raw camelCase labels could not match the space-separated
+    aliases even when they were kept.
+    """
+    import json
+
+    from tradingagents.dataflows.statement_parsing import (
+        _canonicalize,
+        _parse_json_statements,
+    )
+
+    payload = json.dumps({
+        "Symbol": "AAPL",
+        "Sector": "TECHNOLOGY",
+        "MarketCapitalization": "3000000000000",
+        "SharesOutstanding": "15000000000",
+        "Beta": "1.24",
+        "DividendYield": "0.0055",
+        "fiscalDateEnding": "2026-06-30",
+        "reportedCurrency": "USD",
+        "annualReports": [{"fiscalDateEnding": "2026-06-30", "totalRevenue": "400000000000",
+                           "netIncome": "100000000000"}],
+    })
+    rows = _parse_json_statements(payload)
+
+    # The single-level numeric fields are no longer dropped.
+    assert rows["Market Capitalization"] == 3000000000000.0
+    assert rows["Shares Outstanding"] == 15000000000.0
+    assert rows["Beta"] == 1.24
+
+    canon = _canonicalize(payload)
+    assert canon.get("market_cap") == 3000000000000.0      # matched via the camelCase alias
+    assert canon.get("shares") == 15000000000.0            # needed the camel-case split
+    assert canon.get("beta") == 1.24
+    assert canon.get("revenue") == 400000000000.0          # snake_case report key
