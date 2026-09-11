@@ -338,6 +338,20 @@ def test_internal_conflict_eps_single_value_clean():
     assert rv._internal_conflicts(t) == []
 
 
+def test_internal_conflict_eps_estimate_clean_lines_dual_values():
+    # Two conflicting EPS ESTIMATEs on otherwise clean lines. The old metric
+    # required the literal words "eps actual" ahead of the estimate, so these
+    # lines were never compared (and it only re-ran the "eps actual" trigger).
+    t = "EPS estimate 4.72 for the quarter.\nThe forward calendar lists EPS estimate 4.16."
+    hit = [c for c in rv._internal_conflicts(t) if "'eps estimate'" in c.claim]
+    assert hit and hit[0].status == "INTERNAL_CONFLICT"
+    assert "4.72" in hit[0].claim and "4.16" in hit[0].claim
+    # Same estimate twice is one cluster -> no false positive.
+    assert rv._internal_conflicts(
+        "EPS estimate 4.72 for the quarter.\nConsensus EPS estimate 4.72 confirmed."
+    ) == []
+
+
 def test_internal_conflict_close_200_sma_dual_values():
     # DELL 2026-09-10 market.md: body 258.98 vs summary 238.98 ona
     # the SAME 'close_200_sma' label must flag (not hidden by the missing
@@ -366,6 +380,34 @@ def test_internal_conflict_t1_transcription_slip():
     out = rv._internal_conflicts(t)
     assert any("'t1'" in c.claim for c in out)
     assert rv._internal_conflicts("T1 611.85 ... T1 612.00") == []
+
+
+def test_internal_conflict_t2_pair_leg_not_2r_price():
+    # The "2R/3R targets **A / B**" shape (bold, as the repo's own market.md
+    # writes it): the 3R leg is the value AFTER '/', not the first number in the
+    # window. Before this, t1 read the "3" of "3R" and t2 read the 2R price
+    # (1357.69), so an inconsistent 3R in the summary was never compared
+    # (MU 2026-09-09 review loop).
+    body = "entry 1027.77, structure stop 862.81, 2R/3R targets **1357.69 / 1521.68**"
+    hit = [
+        c
+        for c in rv._internal_conflicts(
+            body + "\nsummary 2R/3R targets **1357.69 / 1541.68**"
+        )
+        if "'t2'" in c.claim
+    ]
+    assert hit and hit[0].status == "INTERNAL_CONFLICT"
+    assert "1521.68" in hit[0].claim and "1541.68" in hit[0].claim
+    # The same pair in body and summary is ONE cluster -> no false positive.
+    assert rv._internal_conflicts(
+        body + "\nsummary 2R/3R targets **1357.69 / 1521.68**"
+    ) == []
+    # The "xR" spelling is the same label, and a lone 3xR with its own value is
+    # still compared against the pair's 3R leg.
+    assert any(
+        "'t2'" in c.claim
+        for c in rv._internal_conflicts("2xR/3xR targets 120.00 / 130.00\n3xR = 125.00")
+    )
 
 
 def test_internal_conflict_ev_ebit_dual_values():
@@ -725,6 +767,44 @@ def test_ema_identity_hpe_dual():
 def test_ema_identity_clean_single_value():
     assert rv._ema_identity("Above the 10-EMA 54.66 (+1.5%)") == []
     assert rv._ema_identity("retake of the 10-EMA (graph 55.54)") == []
+
+
+def test_ema_identity_equals_form_dual_values():
+    # The "10-EMA = NN.NN" form is the common written shape, but the old
+    # pattern only bound the space/paren forms, so a report quoting the 10-EMA
+    # at two values this way produced no claim at all and the report passed.
+    t = "The 10-EMA = 54.66 caps the tape.\nSummary: 10-EMA = 55.54 - retake needed."
+    cs = rv._ema_identity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "54.66" in cs[0].claim and "55.54" in cs[0].claim
+    # The other separator spellings bind the value too.
+    cs3 = rv._ema_identity("10-EMA: 1.11 / the 10-EMA is 2.22 / the 10-EMA at 3.33")
+    assert "1.11" in cs3[0].claim and "2.22" in cs3[0].claim and "3.33" in cs3[0].claim
+    # One value, however spelled, stays clean.
+    assert rv._ema_identity("the 10-EMA is 54.66 all session") == []
+
+
+def test_ema_conflict_flags_report_dir_overall(tmp_path):
+    # The identity check must reach the reported verdict: a market report whose
+    # body and summary disagree on the 10-EMA cannot come back PASS.
+    d = _mk_report_dir(
+        tmp_path,
+        reports={
+            "market": (
+                "Above the 10-EMA = 54.66 (+1.5%).\n"
+                "Summary: retake of the 10-EMA = 55.54 first.\n"
+            )
+        },
+    )
+    payload = rv.verify_report_dir(
+        d,
+        stems=("market",),
+        llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'),
+    )
+    market = payload["verification"]["market"]
+    assert market["overall"] == "FLAG"
+    assert any(c["status"] == "INTERNAL_CONFLICT" for c in market["claims"])
 
 
 def test_ema_trail_identity_hpe_dual():

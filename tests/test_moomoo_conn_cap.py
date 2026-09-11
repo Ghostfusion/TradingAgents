@@ -34,29 +34,46 @@ def test_cap_below_limit_noop():
 
 
 def test_close_all_ctxs_uses_daemon_thread_timeout():
-    """Regression: _close_all_ctxs must close every live context on a daemon
-    thread joined with a timeout, so a stuck ctx.close() (dead receive loop)
-    can never hold the interpreter alive at exit. The shadowing duplicate that
-    called ctx.close() directly was removed."""
-    import inspect
+    """Regression: _close_all_ctxs must hand every live ctx.close to a daemon
+    thread joined with the passed timeout, so a stuck ctx.close() (dead receive
+    loop) can never hold the interpreter alive at exit. The shadowing duplicate
+    that called ctx.close() directly was removed.
 
-    src = inspect.getsource(moomoo._close_all_ctxs)
-    assert "timeout: float = 3.0" in src
-    assert "daemon=True" in src
-    assert "join(timeout)" in src
-    # a ctx whose close() blocks forever must not block the call
-    class _Stuck:
-        def close(self):
-            import time
+    The thread is faked so the assertion is on the call the code makes
+    (daemon=True, join(timeout)) rather than on wall-clock timing: a direct
+    close on the calling thread would call ``ctx.close`` and fail here.
+    """
+    created = []
 
-            time.sleep(60)
+    class _FakeThread:
+        def __init__(self, target=None, daemon=None, **kwargs):
+            self.target = target
+            self.daemon = daemon
+            self.started = False
+            self.joins = []
+            created.append(self)
 
+        def start(self):
+            self.started = True
+
+        def join(self, timeout=None):
+            # Return immediately: the join times out while close() is stuck.
+            self.joins.append(timeout)
+
+    ctx = mock.Mock()  # a direct ctx.close() would run on this thread
     with moomoo._ctx_lock:
         moomoo._live_ctxs.clear()
-        moomoo._live_ctxs.add(_Stuck())
-    import time
+        moomoo._live_ctxs.add(ctx)
 
-    t0 = time.time()
-    moomoo._close_all_ctxs(timeout=0.2)
-    assert time.time() - t0 < 5  # returned despite the stuck close
-    moomoo._live_ctxs.clear()
+    with mock.patch.object(moomoo, "threading", mock.Mock(Thread=_FakeThread)):
+        moomoo._close_all_ctxs(timeout=0.25)  # returns despite the stuck close
+
+    assert len(created) == 1
+    thread = created[0]
+    assert thread.daemon is True
+    assert thread.target is ctx.close
+    assert thread.started is True
+    assert thread.joins == [0.25]  # bounded by the passed timeout
+    with moomoo._ctx_lock:
+        assert moomoo._live_ctxs == set()
+    ctx.close.assert_not_called()  # close runs only via the (faked) thread

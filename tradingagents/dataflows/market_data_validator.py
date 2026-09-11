@@ -79,12 +79,14 @@ def _fmt(value) -> str:
 
 def live_price_sanity(live_price: float | None, day_low: float | None,
                       day_high: float | None, buffer_pct: float = 0.05) -> str:
-    """Label a live print that falls OUTSIDE the verified day's bar.
+    """Label a live print against the verified day's bar and its tolerance buffer.
 
-    Guards the reconciliation path: a real-time quote far outside the
-    verified OHLC bar (by ``buffer_pct`` on either side) is far more likely a
-    stale feed / symbol-mismatch than a genuine move. Returns a one-line
-    advisory so reports can flag it instead of presenting it as a clean read.
+    Guards the reconciliation path: a real-time quote outside the verified OHLC
+    range is far more likely a stale feed / symbol-mismatch than a genuine move.
+    Bands: INSIDE (within ``[low, high]``); OUTSIDE (past the bar edge but within
+    the ``buffer_pct`` tolerance - the mild advisory); BELOW / ABOVE (beyond the
+    tolerance, the strong mismatch). Returns a one-line advisory so reports can
+    flag it instead of presenting it as a clean read.
     Unknown inputs -> 'no bar to compare' (never fabricates).
     """
     if live_price is None or day_low is None or day_high is None:
@@ -93,21 +95,24 @@ def live_price_sanity(live_price: float | None, day_low: float | None,
     lv = float(live_price)
     lo_buf = low * (1.0 - abs(float(buffer_pct)))
     hi_buf = high * (1.0 + abs(float(buffer_pct)))
-    if lv < low:
+    # Four explicit bands, so the OUTSIDE advisory is reachable: a print past the
+    # bar edge but inside the stale-print buffer is not "INSIDE the bar", and a
+    # print beyond the buffer is the strong below/above mismatch.
+    if lv < lo_buf:
         return (
             f"live price sanity: BELOW verified day-low - live {lv:.2f} < "
             f"verified low {low:.2f} (buffer {buffer_pct:.0%} => threshold "
             f"{lo_buf:.2f}); likely stale feed / symbol mismatch - do not "
             f"reconcile as a true print"
         )
-    if lv > high:
+    if lv > hi_buf:
         return (
             f"live price sanity: ABOVE verified day-high - live {lv:.2f} > "
             f"verified high {high:.2f} (buffer {buffer_pct:.0%} => threshold "
             f"{hi_buf:.2f}); likely stale feed / symbol mismatch - do not "
             f"reconcile as a true print"
         )
-    if lo_buf <= lv <= hi_buf:
+    if low <= lv <= high:
         return f"live price sanity: INSIDE verified bar ({lv:.2f} within the verified day's range [{low:.2f},{high:.2f}]; stale-print tolerance +-{buffer_pct:.0%})"
     return (
         f"live price sanity: OUTSIDE verified bar - live {lv:.2f} vs "

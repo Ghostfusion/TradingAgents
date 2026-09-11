@@ -18,6 +18,7 @@ body); the render reflects that honestly.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 import requests as _requests
@@ -30,6 +31,27 @@ BASE = "https://api.benzinga.com/api/v2"
 TIMEOUT = 20
 _MAX_RETRIES = 2
 _ARTICLE_LIMIT = 10
+_BACKOFF_BASE = 2.0
+_BACKOFF_CAP = 8.0
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """Bounded exponential backoff for retry ``attempt`` (0-based)."""
+    return min(_BACKOFF_BASE * (2 ** attempt), _BACKOFF_CAP)
+
+
+def _error_detail(resp) -> str:
+    """Human detail for a failed response; the body is used as text only."""
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        msg = data.get("error") or data.get("message")
+        if msg:
+            return str(msg)[:200]
+    text = str(getattr(resp, "text", "") or "").strip().replace("\n", " ")
+    return text[:200] if text else f"HTTP {resp.status_code}"
 
 
 def benzinga_api_key() -> str | None:
@@ -49,7 +71,14 @@ def benzinga_api_key() -> str | None:
 
 
 def _benzinga_get(path: str, params: dict | None = None) -> list | None:
-    """Authenticated GET ``BASE/{path}`` with token; parsed list or None."""
+    """Authenticated GET ``BASE/{path}`` with token; parsed list or None.
+
+    The HTTP status is classified *before* the body is parsed: parsing first
+    turned an HTML 429/5xx page (proxy/Cloudflare) into a permanent
+    ``NoMarketDataError``, i.e. a rate limit typed as "no data". Only
+    transient statuses (429/5xx) and network errors are retried, with bounded
+    exponential backoff.
+    """
     key = benzinga_api_key()
     if not key:
         raise VendorNotConfiguredError(
@@ -63,27 +92,31 @@ def _benzinga_get(path: str, params: dict | None = None) -> list | None:
             resp = _requests.get(url, params=query, timeout=TIMEOUT)
         except Exception as exc:  # noqa: BLE001 - network failure degrades
             if attempt < _MAX_RETRIES:
+                time.sleep(_backoff_seconds(attempt))
                 continue
             raise VendorRateLimitError(f"Benzinga network error: {exc}") from exc
+
+        status = resp.status_code
+        if status in (401, 403):
+            raise VendorNotConfiguredError(
+                f"Benzinga auth/forbidden (check BENZINGA_API_KEY): {status}"
+            )
+        if status == 429 or status >= 500:
+            if attempt < _MAX_RETRIES:
+                time.sleep(_backoff_seconds(attempt))
+                continue
+            raise VendorRateLimitError(
+                f"Benzinga {path}: status {status} - {_error_detail(resp)}"
+            )
+        if status != 200:
+            # Non-retryable client error (400/404/...): permanent no-data.
+            raise NoMarketDataError(
+                "benzinga", path, detail=f"HTTP {status}: {_error_detail(resp)}"
+            )
         try:
             data = resp.json()
         except ValueError:
             raise NoMarketDataError("benzinga", path, detail="non-JSON response") from None
-        if resp.status_code == 429:
-            if attempt < _MAX_RETRIES:
-                import time
-
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise VendorRateLimitError(f"Benzinga rate limit (429) on {path}")
-        if resp.status_code in (401, 403):
-            raise VendorNotConfiguredError(
-                f"Benzinga auth/forbidden (check BENZINGA_API_KEY): {resp.status_code}"
-            )
-        if resp.status_code != 200:
-            if attempt < _MAX_RETRIES:
-                continue
-            raise VendorRateLimitError(f"Benzinga {path}: status {resp.status_code}")
         if isinstance(data, list):
             return data
         # Some errors come as {"error": "..."} on 200.

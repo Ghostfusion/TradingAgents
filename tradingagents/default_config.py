@@ -323,8 +323,31 @@ def _coerce(value: str, reference):
     return value
 
 
+def _validate_env_override_targets(config: dict) -> None:
+    """Raise when an ``_ENV_OVERRIDES`` row names a key absent from ``config``.
+
+    A missing target leaves :func:`_coerce` without a type reference, so the
+    raw env-var string is stored verbatim — ``TRADINGAGENTS_ENABLE_PRE_MARKET_
+    REVIEW=false`` then reads back as the truthy string ``"false"`` and the
+    feature the user disabled still runs (P0-7). Failing at import makes that
+    misconfiguration impossible instead of silent.
+    """
+    missing = [
+        (env_var, key) for env_var, key in _ENV_OVERRIDES.items() if key not in config
+    ]
+    if missing:
+        detail = "; ".join(f"{env_var} -> {key!r}" for env_var, key in missing)
+        raise ValueError(
+            "_ENV_OVERRIDES targets missing from DEFAULT_CONFIG: "
+            f"{detail}. Add the key(s) to DEFAULT_CONFIG, or remove the override row."
+        )
+
+
 def _apply_env_overrides(config: dict) -> dict:
     """Apply TRADINGAGENTS_* env vars to the config dict in-place."""
+    # Validate BEFORE the loop: a missing target would otherwise be created by
+    # this very loop (env var set -> raw string stored), hiding the defect.
+    _validate_env_override_targets(config)
     for env_var, key in _ENV_OVERRIDES.items():
         raw = os.environ.get(env_var)
         if raw is None or raw == "":
@@ -658,6 +681,19 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "catalyst_hard_block_days": 5,  # >0: REJECT new risk within N calendar days before a scheduled print (forward-looking; 5 = earnings-blackout)
         #   days of a scheduled earnings print (framework Phase-4 hard rule)
         "enable_reflection": True,  # Phase 5: post-trade analyst critique
+        # Strategy overlays + order flow (graph._apply_strategy_overlays):
+        # their _ENV_OVERRIDES rows existed without a matching default, so an
+        # env value was stored as a raw string ('false' -> truthy). Defaults
+        # mirror docs/api_reference.md (overlays/sentiment on; orderflow off).
+        "enable_strategy_overlays": True,  # regime/vol-target size fold (advisory)
+        "enable_orderflow": False,  # distribution/divergence flow fold (advisory)
+        # Computed sentiment (StockTwits score + surprise velocity) folded into
+        # the sentiment analyst's report; on by default (docs/api_reference.md).
+        "enable_sentiment": True,
+        # ETF engine (docs/design_etf_fundamental_valuation.md, default off):
+        # when on, the fundamentals analyst routes fund/ETF tickers to the ETF
+        # valuation/decline-driver/mechanics toolset instead of company tools.
+        "enable_etf_engine": False,
         # News-sentiment factor overlay (News_Sentiment.md): position scale
         # x 1 ± max_scale ONLY when the name's measured rank IC >= min_ic
         # (else neutral 1.0, never blocks). Volatility estimator for the
@@ -745,6 +781,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
 
 
 
+        # Point-in-time registry (dataflows/pit_registry.py): when on, the
+        # market analyst records/reads as-of OHLCV snapshots so a later
+        # re-analysis sees the same point-in-time view. Advisory, opt-in.
+        "enable_pit_registry": False,
         "enable_factor_model": False,  # Q5: advisory factor-model score (gated research artifact)
         "enable_decision_guardrail": False,  # DSA-1: post-decision downgrade-only stabilizer (advisory)
         "enable_skill_overlays": False,  # DSA-3: YAML strategy skills + regime-from-opinion (advisory folds)
@@ -833,6 +873,8 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # batch.py writes a same-night catalyst/quality re-check
         # (pre_market_review_<date>.md) next to each report. The pre-open gap /
         # re-anchor path stays the standalone scripts/pre_market_review.py.
+        # Opt-in - off by default, so a batch runs as before unless enabled.
+        "enable_pre_market_review": False,
         # OpenBB Phase-3 free-tier data surfaces. Each is keyless/free and
         # analysis-only; all default OFF. Flip an env override (e.g.
         # TRADINGAGENTS_ENABLE_OPTIONS_SURFACE=true) to let its @tool fetch

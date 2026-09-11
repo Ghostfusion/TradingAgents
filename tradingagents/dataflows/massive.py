@@ -727,7 +727,10 @@ def get_ratios_massive(ticker: str, curr_date: str | None = None) -> str:
             "/stocks/financials/v1/ratios",
             {"ticker": ticker, "limit": 1},
         )
-    except Exception as exc:  # noqa: BLE001
+    except MassiveNotConfiguredError as exc:
+        # Only an entitlement/plan gap becomes the advisory string; a 429/5xx/
+        # timeout must propagate so the router degrades to the next vendor
+        # instead of counting this message as a served result.
         return _not_entitled("ratios", exc)
     results = payload if isinstance(payload, list) else (payload or {}).get("results")
     if not isinstance(results, list) or not results:
@@ -832,7 +835,8 @@ def get_market_snapshot_massive(ticker: str) -> str:
             f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
             {},
         )
-    except Exception as exc:  # noqa: BLE001
+    except MassiveNotConfiguredError as exc:
+        # Entitlement/plan gap only; throttle/transport errors propagate.
         return _not_entitled("snapshot", exc)
     t = (payload or {}).get("ticker") if isinstance(payload, dict) else None
     if not t:
@@ -877,7 +881,8 @@ def get_top_movers_massive(direction: str = "gainers", count: int = 10) -> str:
             f"/v2/snapshot/locale/us/markets/stocks/{direction}",
             {"limit": count},
         )
-    except Exception as exc:  # noqa: BLE001
+    except MassiveNotConfiguredError as exc:
+        # Entitlement/plan gap only; throttle/transport errors propagate.
         return _not_entitled("top movers", exc)
     rows = payload if isinstance(payload, list) else (payload or {}).get("results")
     if not isinstance(rows, list) or not rows:

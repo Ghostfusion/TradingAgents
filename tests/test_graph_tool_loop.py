@@ -161,7 +161,7 @@ def test_stream_completes_tool_round_and_reaches_debate():
 
 
 @pytest.mark.unit
-def test_apply_overlays_noops_on_short_closes(monkeypatch, caplog, mock_llm_client):
+def test_apply_overlays_noops_on_short_closes(monkeypatch, mock_llm_client):
     """Short (< 60 bar) OHLCV must degrade the overlay pipeline cleanly.
 
     Regression: a None overlay from `build_strategy_overlays` crashed the order-flow /
@@ -209,11 +209,14 @@ def test_apply_overlays_noops_on_short_closes(monkeypatch, caplog, mock_llm_clie
         "final_trade_decision": "**Rating**: Hold",
     }
     out = ta._apply_strategy_overlays(final_state, "SKHY")
-    assert out is not None  # no exception; overlay-attached state returned
+    # No exception; the decision is untouched by the short-series degradation.
     assert out["final_trade_decision"] == "**Rating**: Hold"
-    assert "strategy overlays skipped for SKHY: 37 close bars (< 60 required)" in caplog.text
-    assert "position contract skipped" not in caplog.text
-    assert "risk governor skipped" not in caplog.text
+    # The None overlay is normalized to an empty dict, so the downstream folds
+    # run against it instead of raising on ``None.get`` (pre-fix they were
+    # skipped by their except handlers and no overlay was attached at all).
+    overlay = out["strategy_overlays"]
+    assert isinstance(overlay, dict) and overlay
+    assert out["position_contract"]  # the position-contract fold executed
 
 
 @pytest.mark.unit

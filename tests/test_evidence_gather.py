@@ -9,7 +9,7 @@ the vendor on the analyst's gap-fill loop).
 
 from __future__ import annotations
 
-from time import monotonic
+import threading
 
 from langchain_core.tools import tool
 
@@ -124,13 +124,31 @@ def test_gather_no_data_sentinel():
     assert leaves[0].status == "no_data"
 
 
-def test_gather_timeout_returns_quickly_and_marks_timeout():
-    start = monotonic()
-    leaves = gather_evidence(_tools(), ["get_slow"], timeout_s=0.05)
-    elapsed = monotonic() - start
-    assert elapsed < 0.3  # far below the 0.4s fake hang
+def test_gather_timeout_marks_timeout_not_a_late_result():
+    """A tool still running at the deadline is recorded as ``timeout``; its late
+    result must never be served as if it finished in time.
+
+    Uses an event-blocked fake (not a sleep) so the verdict does not depend on
+    wall-clock elapsed bounds, which flake on a loaded box.
+    """
+    release = threading.Event()
+
+    @tool
+    def get_blocked() -> str:
+        """Fake tool that outlives the gather deadline."""
+        release.wait(timeout=10)
+        return "late"
+
+    try:
+        leaves = gather_evidence(
+            {get_blocked.name: get_blocked}, ["get_blocked"], timeout_s=0.05
+        )
+    finally:
+        release.set()  # let the daemon drain thread exit
+
+    assert len(leaves) == 1
     assert leaves[0].status == "timeout"
-    assert "timed out after" in leaves[0].content
+    assert "timed out after 0.05s" in leaves[0].content
 
 
 def test_gather_missing_resolver_name_is_skipped():
@@ -138,18 +156,18 @@ def test_gather_missing_resolver_name_is_skipped():
     assert leaves == []
 
 
-def test_gather_max_parallel_runs_concurrently():
+def test_gather_max_parallel_returns_all_timeouts_in_spec_order():
+    """All three requested names come back as ``timeout`` leaves in request
+    order when they outlive the deadline (deterministic composition)."""
     reg = {
         "get_slow": get_slow,
         "get_slow2": get_slow,
         "get_slow3": get_slow,
     }
-    start = monotonic()
-    leaves = gather_evidence(reg, ["get_slow", "get_slow2", "get_slow3"], timeout_s=0.2)
-    elapsed = monotonic() - start
-    # Three 0.4s sleeps in parallel at max_parallel=3 => well under 1.2s
-    # sequential; the join caps at timeout 0.2 so this runs ~0.2s.
-    assert elapsed < 0.9
+    leaves = gather_evidence(
+        reg, ["get_slow", "get_slow2", "get_slow3"], timeout_s=0.05, max_parallel=3
+    )
+    assert [leaf.tool for leaf in leaves] == ["get_slow", "get_slow2", "get_slow3"]
     assert all(leaf.status == "timeout" for leaf in leaves)
 
 
@@ -433,7 +451,7 @@ def test_short_circuit_passes_through_model_pool_calls():
     # see what the analyst actually received (macro/prediction gap on JPM/GS
     # 2026-09-08 was unverifiable because model-pool results were transcript-only).
     leaves = out.get("tool_evidence", {}).get("market")
-    assert leaves and any(l["tool"] == "get_financials" for l in leaves)
+    assert leaves and any(leaf["tool"] == "get_financials" for leaf in leaves)
 
 
 # --------------------------------------------------------------------------

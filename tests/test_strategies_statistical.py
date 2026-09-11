@@ -127,10 +127,11 @@ def test_cointegration_linear_pair():
 
 
 def test_cointegration_unrelated_not():
-    # two independent random walks are not cointegrated (often False)
+    # two independent seeded random walks are not cointegrated: the residual
+    # ADF cannot reject the unit root (p well above 0.05).
     out = statistical.cointegration_pair(_random_walk(200), _random_walk(200, seed=7))
-    # not guaranteed; just assert it runs and returns a bool or None
-    assert out["cointegrated"] in (True, False, None)
+    assert out["cointegrated"] is False
+    assert out["residual_p_approx"] > 0.05
 
 
 def test_granger_causality_detects_lag():

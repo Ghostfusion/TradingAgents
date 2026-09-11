@@ -36,11 +36,26 @@ def parse_markdown_fence(text: str) -> str | None:
         if stripped.startswith("{"):
             return stripped
     # Fallback: a bare {...} anywhere in the text. Deepseek often rambles
-    # prose BEFORE emitting the JSON, so prefer the LARGEST balanced-block
-    # candidate (the real payload dwarfs inline junk braces) among matches
-    # scanning from the END of the text; fall back to the first.
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    return m.group(0) if m else None
+    # prose BEFORE emitting the JSON, and that prose may itself contain a
+    # stray '{', so no single greedy brace span is trustworthy: try every
+    # '{' as a balanced-block start and keep the LARGEST object that
+    # ``raw_decode`` accepts (the real payload dwarfs inline junk braces).
+    # Candidates are visited in order and ties keep the last, so a nested
+    # sub-object never wins over the enclosing payload.
+    decoder = json.JSONDecoder()
+    best: str | None = None
+    for m in re.finditer(r"\{", text):
+        start = m.start()
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        candidate = text[start:end]
+        if best is None or len(candidate) >= len(best):
+            best = candidate
+    return best
 
 
 def parse_and_validate(
@@ -72,8 +87,6 @@ def repair_and_validate(
     the original prompt, asking for a corrected JSON block. Returns
     ``(model, error)``; error is a string when the budget is exhausted.
     """
-    _, first_error = parse_and_validate(prompt, schema)  # prime (unused)
-    del first_error
     return _repair(llm, prompt, schema, max_repairs)
 
 

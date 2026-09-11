@@ -11,12 +11,12 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
+from tradingagents.agents import toolsets as toolsets_mod
 from tradingagents.agents.analysts import (
     fundamentals_analyst as fundamentals_mod,
     market_analyst as market_mod,
     news_analyst as news_mod,
 )
-from tradingagents.agents import toolsets as toolsets_mod
 from tradingagents.agents.utils.evidence_gather import (
     EVIDENCE_SECTION_HEADER,
     TOOL_EVIDENCE_KEY,

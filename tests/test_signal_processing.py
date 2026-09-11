@@ -10,7 +10,11 @@ to it.
 
 import pytest
 
-from tradingagents.agents.utils.rating import RATINGS_5_TIER, parse_rating
+from tradingagents.agents.utils.rating import (
+    RATINGS_5_TIER,
+    REVIEW_SENTINEL,
+    parse_rating,
+)
 from tradingagents.graph.signal_processing import SignalProcessor
 
 # ---------------------------------------------------------------------------
@@ -50,8 +54,10 @@ class TestParseRating:
         )
         assert parse_rating(text) == "Sell"
 
-    def test_no_rating_returns_default(self):
-        assert parse_rating("No clear directional signal at this time.") == "Hold"
+    def test_no_rating_returns_review_not_a_tradeable_default(self):
+        # P0-8: nothing parseable means an unavailable decision — never a
+        # silent tradeable Hold.
+        assert parse_rating("No clear directional signal at this time.") == REVIEW_SENTINEL
 
     def test_no_rating_custom_default(self):
         assert parse_rating("Plain prose.", default="Underweight") == "Underweight"
@@ -64,15 +70,14 @@ class TestParseRating:
         # Upstream TradingAgents 0.4.0 #1170: an unparseable PM rating (e.g.
         # fullwidth-colon label with a non-tier value) must surface REVIEW
         # rather than silently degrade to a tradeable Hold.
-        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
-
         assert parse_rating("Rating：⭐⭐⭐\n待人工审阅") == REVIEW_SENTINEL
         assert parse_rating("**Rating**: Mekanell\nPosition: trim.") == REVIEW_SENTINEL
         # A genuine 5-tier value still parses through the same fullwidth label.
         assert parse_rating("Rating：Hold\nDetails.") == "Hold"
         # A word-only mention of "rating" in ordinary prose is NOT a garbled
-        # rating label (no colon-separated value): stay with the default.
-        assert parse_rating("The report offers no rating here.") == "Hold"
+        # rating label (no colon-separated value); with no rating at all the
+        # parser must not invent a tradeable Hold either (P0-8).
+        assert parse_rating("The report offers no rating here.") == REVIEW_SENTINEL
 
     def test_garbled_with_non_tradeable_default_stays_default(self):
         # Callers that already pass a non-tradeable fallback keep it; REVIEW is
@@ -82,13 +87,9 @@ class TestParseRating:
     def test_garbled_with_custom_tradeable_default_hardened(self):
         # Even an explicit tradeable default is hardened: garbage never
         # coerces to a tier the caller would act on.
-        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
-
         assert parse_rating("Rating：maybe", default="Underweight") == REVIEW_SENTINEL
 
     def test_signal_processor_surfaces_review(self):
-        from tradingagents.agents.utils.rating import REVIEW_SENTINEL
-
         md = "**Rating**: pending confirmation\nDecision: await clearance."
         assert SignalProcessor().process_signal(md) == REVIEW_SENTINEL
 
@@ -116,6 +117,8 @@ class TestSignalProcessor:
         llm.invoke.assert_not_called()
         llm.with_structured_output.assert_not_called()
 
-    def test_default_when_no_rating_present(self):
+    def test_review_when_no_rating_present(self):
+        # P0-8: a decision with no extractable rating is unavailable, not a
+        # tradeable Hold, at the SignalProcessor call site too.
         sp = SignalProcessor()
-        assert sp.process_signal("Plain prose without a recommendation.") == "Hold"
+        assert sp.process_signal("Plain prose without a recommendation.") == REVIEW_SENTINEL

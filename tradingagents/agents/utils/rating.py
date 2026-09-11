@@ -8,13 +8,15 @@ The same five-tier scale (Buy, Overweight, Hold, Underweight, Sell) is used by:
 
 Centralising it here avoids drift between those call sites.
 
-Garbled ratings never coerce to a tradeable tier: when the text contains
-rating-like content but its value does not parse as one of the five tiers, the
-parser returns the ``REVIEW`` sentinel instead of silently defaulting
-(upstream TradingAgents 0.4.0 #1170 — an unparseable Portfolio Manager rating
-used to degrade to a tradeable Hold). Callers that pass an explicit
-non-tradeable default (e.g. ``"n/a"``) keep it: only the implicit tradeable
-``Hold`` fallback is hardened.
+Garbled or missing ratings never coerce to a tradeable tier: when the text
+contains rating-like content but its value does not parse as one of the five
+tiers — or when no rating is found at all and the caller passed no explicit
+default — the parser returns the ``REVIEW`` sentinel instead of silently
+defaulting (upstream TradingAgents 0.4.0 #1170: an unparseable Portfolio
+Manager rating used to degrade to a tradeable Hold; P0-8: an
+unavailable/degenerate decision used to do the same). Callers that pass an
+explicit non-tradeable default (e.g. ``"n/a"``) keep it: only the implicit
+tradeable fallback is hardened.
 """
 
 from __future__ import annotations
@@ -26,9 +28,10 @@ RATINGS_5_TIER: tuple[str, ...] = (
     "Buy", "Overweight", "Hold", "Underweight", "Sell",
 )
 
-# "REVIEW" — human review needed: the text has rating-like content but no
-# 5-tier value parses. NEVER a tradeable tier; consumers that act on a rating
-# must treat REVIEW as "do not trade on this decision".
+# "REVIEW" — human review needed: no tradeable 5-tier value could be extracted
+# (the text has rating-like content that does not parse, or carries no rating
+# at all). NEVER a tradeable tier; consumers that act on a rating must treat
+# REVIEW as "do not trade on this decision".
 REVIEW_SENTINEL = "REVIEW"
 
 _RATING_SET = {r.lower() for r in RATINGS_5_TIER}
@@ -72,10 +75,11 @@ def parse_rating(text: str, default: str | None = None) -> str:
     2. Fall back to the first 5-tier rating word found anywhere in the text.
 
     Returns a Title-cased rating string. When ``text`` contains rating-like
-    content but no 5-tier value parses, returns ``REVIEW_SENTINEL`` instead of
-    the default (never a silent tradeable Hold). When ``text`` has no
-    rating-like content at all, returns ``default``, or ``"Hold"`` when
-    ``default`` is not given.
+    content but no 5-tier value parses, or when nothing parses at all and the
+    caller passed no ``default``, returns ``REVIEW_SENTINEL`` (never a silent
+    tradeable Hold). An explicit ``default`` is returned verbatim when nothing
+    parses — except that a *tradeable* default is hardened to
+    ``REVIEW_SENTINEL`` when the text attempted a rating it could not parse.
     """
     value = None
     for line in text.splitlines():
@@ -97,7 +101,12 @@ def parse_rating(text: str, default: str | None = None) -> str:
     if value is not None:
         return value
 
-    resolved_default = "Hold" if default is None else default
-    if _has_garbled_rating_label(text) and resolved_default.lower() in _RATING_SET:
+    # Nothing parsed. With no caller-supplied fallback this is an
+    # unavailable/degenerate decision (empty response, "unavailable" notice):
+    # never invent a tradeable tier — the old implicit "Hold" let a failed
+    # decision be stored and acted on as a tradeable Hold (P0-8).
+    if default is None:
         return REVIEW_SENTINEL
-    return resolved_default
+    if _has_garbled_rating_label(text) and default.lower() in _RATING_SET:
+        return REVIEW_SENTINEL
+    return default

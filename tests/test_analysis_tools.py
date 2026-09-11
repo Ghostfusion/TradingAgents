@@ -2276,7 +2276,8 @@ def test_candlestick_patterns_no_ohlcv_degrades(monkeypatch):
 
 def test_indicator_tools_bound_to_market_analyst():
     """Both new tools must be importable via agent_utils and present in the
-    market analyst's ToolNode list (wiring Phase 3)."""
+    market analyst's bound toolset (wiring Phase 3)."""
+    from tradingagents.agents.toolsets import market_tools
     from tradingagents.agents.utils.agent_utils import (
         get_candlestick_patterns as gcp,
         get_extended_indicators as gei,
@@ -2284,12 +2285,10 @@ def test_indicator_tools_bound_to_market_analyst():
     assert callable(getattr(gei, "invoke", None))
     assert callable(getattr(gcp, "invoke", None))
 
-    import inspect
-
-    import tradingagents.agents.analysts.market_analyst as ma
-    src = inspect.getsource(ma)
-    assert "get_extended_indicators" in src
-    assert "get_candlestick_patterns" in src
+    # The analyst binds market_tools() and the graph builds its ToolNode from
+    # the same function, so presence here is the observable binding contract.
+    bound = {getattr(t, "name", None) for t in market_tools()}
+    assert {"get_extended_indicators", "get_candlestick_patterns"} <= bound
 
 
 def test_signal_quality_computes_metrics():

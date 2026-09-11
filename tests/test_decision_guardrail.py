@@ -2,15 +2,26 @@
 
 - INVARIANT (property): stabilize_decision NEVER upgrades — the output
   rating's strength is always <= the input's, per the 5-tier scale.
-- risk-cap: a high-severity risk row caps an Overweight/Buy at Hold.
+- risk-cap: a high-severity risk row caps an Overweight/Buy at Hold
+  (severity >= HIGH, so CRITICAL caps too).
 - near-resistance without inflow caps a buy; near-support without outflow
   softens a bearish call one tier.
 - score<->rating validator flags documented mismatches, passes matches.
 - confidence cap on degraded data quality.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
+from tradingagents.agents.schemas import (
+    PortfolioDecision,
+    PortfolioRating,
+    RiskDebaterTurnPayload,
+    RiskSeverity,
+)
+from tradingagents.dataflows.config import reset_config, set_config
 from tradingagents.strategies import decision_guardrail as dg
 
 pytestmark = pytest.mark.timeout(30)
@@ -43,6 +54,30 @@ class TestRiskCap:
         out = dg.stabilize_decision("Buy", risk_rows=[{"severity": "high"}])
         assert out["rating"] == "Hold"
         assert out["overrides"][0]["reason"].startswith("risk-cap")
+
+    def test_critical_risk_caps_at_hold(self):
+        # CRITICAL is >= HIGH in the debate's LOW/MEDIUM/HIGH/CRITICAL
+        # vocabulary, so it must cap exactly like HIGH (rule 1's documented
+        # threshold). Pre-fix the predicate compared == "high", so a CRITICAL
+        # row left a Buy untouched.
+        out = dg.stabilize_decision("Buy", risk_rows=[{"severity": "critical"}])
+        assert out["rating"] == "Hold"
+        assert out["overrides"][0]["reason"].startswith("risk-cap")
+
+    def test_critical_risk_enum_member_caps_at_hold(self):
+        # Stored debate payloads keep the RiskSeverity MEMBER, whose str() is
+        # "RiskSeverity.CRITICAL" — the predicate must read .value.
+        out = dg.stabilize_decision("Overweight", risk_rows=[{"severity": RiskSeverity.CRITICAL}])
+        assert out["rating"] == "Hold"
+        assert out["overrides"][0]["reason"].startswith("risk-cap")
+
+    def test_high_risk_enum_member_caps_at_hold(self):
+        out = dg.stabilize_decision("Buy", risk_rows=[{"severity": RiskSeverity.HIGH}])
+        assert out["rating"] == "Hold"
+
+    def test_medium_risk_unchanged(self):
+        out = dg.stabilize_decision("Buy", risk_rows=[{"severity": "medium"}])
+        assert out["rating"] == "Buy" and out["overrides"] == []
 
     def test_low_risk_unchanged(self):
         out = dg.stabilize_decision("Buy", risk_rows=[{"severity": "low"}])
@@ -160,6 +195,118 @@ class TestJudgeReliabilityConfidenceGate:
     def test_never_raises_on_clean_with_missing_fields(self):
         # Missing judge fields (legacy state) must not trigger a cap.
         assert dg.cap_pm_confidence_on_judge(0.9) == (0.9, None)
+
+
+# ---------------------------------------------------------------------------
+# P0-5: the PM's deterministic guardrail must consult the risk-debate state.
+# Pre-fix the hook fed `stabilize_decision` a row from the risk MATRIX STRING
+# (`risk_matrix_block and [{}] or []`), i.e. always `[{}]` with severity "",
+# so rule 1 (risk-cap) could never fire on a real HIGH/CRITICAL risk factor.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def guardrail_on():
+    set_config({"enable_decision_guardrail": True})
+    yield
+    reset_config()
+
+
+def _pm_state(risk_factors):
+    """Minimal Portfolio-Manager state carrying one structured risk round.
+
+    The round payload is built through the real schema + ``model_dump()``, so
+    the state matches what ``create_debater_turn`` stores (RiskSeverity
+    members, not strings).
+    """
+    payload = RiskDebaterTurnPayload(
+        round_index=1,
+        stance="AGGRESSIVE",
+        core_thesis="Momentum intact.",
+        quantitative_claims=[],
+        risk_factors=risk_factors,
+        recommended_allocation_pct=5.0,
+    ).model_dump()
+    return {
+        "company_of_interest": "NVDA",
+        "risk_debate_state": {
+            "history": "Risk debate history.",
+            "aggressive_history": "a",
+            "conservative_history": "c",
+            "neutral_history": "n",
+            "judge_decision": "",
+            "current_aggressive_response": "",
+            "current_conservative_response": "",
+            "current_neutral_response": "",
+            "count": 1,
+        },
+        "investment_plan": "Research plan.",
+        "trader_investment_plan": "Trader plan.",
+        "structured_risk_state": {"round_records": [{"aggressive": payload}]},
+    }
+
+
+def _pm_llm(rating):
+    """Structured LLM stub returning `rating` (no network)."""
+    decision = PortfolioDecision(
+        rating=rating,
+        executive_summary="Synthesized view.",
+        investment_thesis="Grounded in the risk debate.",
+    )
+    structured = MagicMock()
+    structured.invoke.return_value = decision
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    return llm
+
+
+class TestPortfolioManagerRiskCapWiring:
+    def test_high_risk_factor_caps_rating_at_hold(self, guardrail_on):
+        # The stored shape: `DebaterTurnPayload.model_dump()` keeps the
+        # RiskSeverity MEMBER (str(member) == "RiskSeverity.HIGH").
+        state = _pm_state(
+            [
+                {
+                    "risk_id": "margin_compression",
+                    "severity": RiskSeverity.HIGH,
+                    "mitigation_stated": False,
+                }
+            ]
+        )
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.BUY))(state)
+        assert out["pm_decision"]["rating"] == "Hold"
+        assert "risk-cap" in out["pm_decision"]["guardrail_reason"]
+        assert out["pm_decision"]["risk_cap"] == "Hold"
+        # the rendered decision the pipeline stores carries the capped rating
+        assert out["final_trade_decision"].startswith("**Rating**: Hold")
+
+    def test_critical_risk_factor_caps_rating_at_hold(self, guardrail_on):
+        # CRITICAL is >= HIGH in the debate's severity vocabulary.
+        state = _pm_state(
+            [
+                {
+                    "risk_id": "going_concern",
+                    "severity": RiskSeverity.CRITICAL,
+                    "mitigation_stated": False,
+                }
+            ]
+        )
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.OVERWEIGHT))(state)
+        assert out["pm_decision"]["rating"] == "Hold"
+        assert "risk-cap" in out["pm_decision"]["guardrail_reason"]
+
+    def test_medium_risk_factor_does_not_cap(self, guardrail_on):
+        state = _pm_state(
+            [{"risk_id": "fx", "severity": "medium", "mitigation_stated": True}]
+        )
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.BUY))(state)
+        assert out["pm_decision"]["rating"] == "Buy"
+        assert not out["pm_decision"]["guardrail_reason"]
+
+    def test_no_risk_factors_does_not_cap(self, guardrail_on):
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.BUY))(_pm_state([]))
+        assert out["pm_decision"]["rating"] == "Buy"
+        assert not out["pm_decision"]["guardrail_reason"]
 
 
 if __name__ == "__main__":

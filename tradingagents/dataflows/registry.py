@@ -24,8 +24,13 @@ _PROVIDER_CREDENTIAL_KEYS: dict[str, tuple[str, ...]] = {
     "alpha_vantage": ("alpha_vantage_api_key",),
     "fred": ("fred_api_key",),
     "alpaca": ("alpaca_api_key_id", "alpaca_api_secret"),
-    # yfinance / moomoo(OpenD) / sec_edgar / polymarket need no config key
-    # (OpenD login or anonymous) -> no entries.
+    "tiingo": ("tiingo_api_key",),
+    "twelve_data": ("twelve_data_api_key",),
+    "stockdata": ("stockdata_api_key",),
+    "newsapi": ("newsapi_api_key",),
+    "benzinga": ("benzinga_api_key",),
+    # yfinance / moomoo(OpenD) / sec_edgar / polymarket / gdelt need no config
+    # key (OpenD login, anonymous or open API) -> no entries.
 }
 
 
@@ -54,11 +59,23 @@ def missing_credentials(provider: str, cfg: dict | None = None) -> list[str]:
     return [k for k in required_credentials(provider) if not cfg.get(k)]
 
 
-def method_requires_credentials(method: str) -> dict[str, list[str]]:
-    """vendor -> missing credential keys for the given method (based on cfg)."""
+def method_requires_credentials(
+    method: str, cfg: dict | None = None
+) -> dict[str, list[str]]:
+    """vendor -> missing credential keys for the given method (based on cfg).
+
+    ``cfg`` defaults to the live config; passing ``{}`` keeps the
+    "nothing configured" reading. Previously config-blind: it coerced to
+    ``{}`` internally, so every credentialed vendor was reported as missing
+    every key regardless of the live configuration.
+    """
+    if cfg is None:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config()
     out: dict[str, list[str]] = {}
     for v in coverage(method):
-        missing = missing_credentials(v)
+        missing = missing_credentials(v, cfg)
         if missing:
             out[v] = missing
     return out

@@ -127,9 +127,14 @@ class TestTierRouter:
 
 
 class TestMonitor:
-    def test_noop_when_unconfigured(self):
-        notify("test", "x", {})  # must not raise
-        assert True
+    def test_noop_when_unconfigured(self, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            notify("test", "x", {})  # must not raise
+        # Unconfigured -> no alert record is emitted (the sibling test covers
+        # the enabled path, so presence/absence together pin the gate).
+        assert not [r for r in caplog.records if "MONITOR" in r.getMessage()]
 
     def test_logpath_when_enabled_no_webhook(self, caplog):
         import logging

@@ -22,6 +22,7 @@ from tradingagents.agents import (
     create_trader,
 )
 from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
 from tradingagents.agents.utils.independent_vote import (
     create_independent_stance_node,
 )
@@ -79,9 +80,13 @@ def make_parallel_analyst_node(plan, subgraphs, concurrency: int):
 
     Each thread invokes its analyst's compiled subgraph on an isolated copy of
     the messages; results are merged back (per-analyst report keys, messages
-    deduped by id). The debate chain downstream sees the same reports the
-    sequential path produces — only the wall-clock is parallel.
+    deduped by id, plus every other channel a subgraph wrote — notably
+    ``tool_evidence``, which has no reducer and is merged per analyst key, so
+    the parallel mode writes the same evidence the sequential chain does). The
+    debate chain downstream sees the same reports the sequential path produces —
+    only the wall-clock is parallel.
     """
+    report_keys = {spec.report_key for spec in plan.specs}
 
     def run_analysts_parallel(state):
         base = list(state.get("messages", []))
@@ -114,6 +119,20 @@ def make_parallel_analyst_node(plan, subgraphs, concurrency: int):
         out["messages"] = merged
         for spec in plan.specs:
             out[spec.report_key] = results[spec.key].get(spec.report_key, "")
+
+        # Carry back the remaining channels the subgraphs wrote. Each subgraph
+        # echoes the whole input state, so untouched channels are the same
+        # objects — only copy what a subgraph actually replaced.
+        for spec in plan.specs:
+            for key, value in results[spec.key].items():
+                if key == "messages" or key in report_keys:
+                    continue
+                if key == TOOL_EVIDENCE_KEY:
+                    evidence = dict(out.get(key) or {})
+                    evidence.update(value or {})
+                    out[key] = evidence
+                elif key not in state or value is not state[key]:
+                    out[key] = value
         return out
 
     return run_analysts_parallel

@@ -338,7 +338,7 @@ for f in sorted((REPO / "tradingagents" / "agents" / "analysts").rglob("*.py")):
 @pytest.mark.parametrize("case", PROMPT_CASES, ids=[c[0] for c in PROMPT_CASES])
 def test_bound_tool_has_prompt_guidance(case):
     key, name, analyst = case
-    assert False, (
+    raise AssertionError(
         f"@tool {key} is in {analyst}'s tool list but is never mentioned in its "
         "system_message - the LLM has no guidance for when to call it. Add a "
         "'cite it before any X claim' line for this tool to that analyst's prompt."

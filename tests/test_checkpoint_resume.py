@@ -209,6 +209,10 @@ class TestCheckpointSignature(unittest.TestCase):
         self.assertNotEqual(base, g._run_signature("stock"))      # debate depth
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 5}
         self.assertNotEqual(base, g._run_signature("stock"))      # risk depth
+        # enable_debate swaps the whole research-debate node set.
+        g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1,
+                    "enable_debate": True}
+        self.assertNotEqual(base, g._run_signature("stock"))      # debate mode
         # Stable for identical inputs.
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         self.assertEqual(base, g._run_signature("stock"))

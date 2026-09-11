@@ -9,6 +9,7 @@ same node set when it is off.
 """
 
 import pytest
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -16,14 +17,25 @@ from tradingagents.default_config import DEFAULT_CONFIG
 pytestmark = pytest.mark.timeout(120)
 
 
+class _StubLLM(RunnableLambda):
+    """Stub LLM runnable: satisfies the analyst chain's ``llm.bind_tools(tools)``
+    shape and emits a real ``AIMessage`` (no tool calls)."""
+
+    def bind_tools(self, tools=None, **kwargs):
+        return self
+
+
 def _stub_llm_factory(**kwargs):
     """Return a LangChain RunnableLambda wrapping a stub (usable as an LLM)."""
 
     class _S:
         def __call__(self, prompt):
-            return type("R", (), {"content": "stub response", "tool_calls": []})()
+            return AIMessage(
+                content="stub response with enough body to pass the stub guard.",
+                tool_calls=[],
+            )
 
-    return RunnableLambda(_S())
+    return _StubLLM(_S())
 
 
 @pytest.mark.unit
@@ -101,8 +113,11 @@ def test_legacy_path_unchanged_with_flag_off(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_full_stream_reaches_research_manager_when_structured_on(tmp_path, monkeypatch):
-    """With enable_debate ON and stub LLMs, a full propagate() completes and
-    the Research Manager plan is present (back-compat key)."""
+    """With enable_debate ON and stub LLMs, a full graph stream runs the
+    structured debate chain end-to-end and the Research Manager plan is present
+    (back-compat key). Stub LLMs emit no tool calls, so no vendor is touched."""
+    from langchain_core.messages import HumanMessage
+
     from tradingagents.graph.trading_graph import TradingAgentsGraph
 
     monkeypatch.setattr(
@@ -128,17 +143,41 @@ def test_full_stream_reaches_research_manager_when_structured_on(tmp_path, monke
     cfg = dict(DEFAULT_CONFIG)
     cfg["enable_debate"] = True
     cfg["debate_max_rounds"] = 1
+    cfg["max_debate_rounds"] = 1
+    cfg["enable_independent_vote"] = False
     ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
-    # Compile (not full invoke: the stub cannot run the analyst tool loop
-    # bind_tools, and we never call live vendors in hermetic tests). The
-    # compiled graph must expose the structured debate chain with the SD
-    # nodes and the Research Manager as the SD-Finalize destination.
-    compiled = ta.graph
-    assert compiled is not None
-    # The structured debate nodes + the Research Manager all compile into the
-    # graph; the full-stream edge target (SD Finalize -> Research Manager) is
-    # asserted structurally below.
-    graph = compiled.get_graph()
-    node_ids = {getattr(n, "id", str(n)) for n in graph.nodes}
-    for needed in ("SD Bull", "SD Bear", "SD L1", "SD Finalize", "Research Manager"):
-        assert needed in node_ids or any(needed in str(n) for n in graph.nodes), f"missing {needed}"
+
+    state = {
+        "company_of_interest": "AAA",
+        "company_name": "AAA",
+        "asset_type": "stock",
+        "instrument_context": "AAA (Test Corp)",
+        "trade_date": "2026-08-30",
+        "messages": [HumanMessage(content="AAA")],
+        "market_report": "",
+        "sentiment_report": "",
+        "news_report": "",
+        "fundamentals_report": "",
+        "past_context": "",
+        "investment_debate_state": {
+            "bull_history": "",
+            "bear_history": "",
+            "history": "",
+            "current_response": "",
+            "judge_decision": "",
+            "count": 0,
+        },
+    }
+
+    nodes_seen: list[str] = []
+    research_plan = None
+    for chunk in ta.graph.stream(state, stream_mode="updates"):
+        for node, update in chunk.items():
+            nodes_seen.append(node)
+            if isinstance(update, dict) and update.get("investment_plan"):
+                research_plan = update["investment_plan"]
+
+    # The structured chain actually ran, then handed off to the Research Manager.
+    for node in ("SD Bull", "SD L1", "SD Bear", "SD Finalize", "Research Manager"):
+        assert node in nodes_seen, f"{node} never ran; saw {nodes_seen}"
+    assert research_plan, "Research Manager produced no investment_plan"

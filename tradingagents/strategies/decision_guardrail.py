@@ -85,6 +85,23 @@ def _soften_one_tier(strength: int) -> int:
     return strength - 1 if strength > 0 else strength + 1
 
 
+# Risk-cap tier: the debate's severity vocabulary is LOW < MEDIUM < HIGH <
+# CRITICAL, so the documented ">= high" threshold is exactly this set.
+_HIGH_RISK_SEVERITIES = frozenset({"high", "critical"})
+
+
+def _severity_tier(severity: object) -> str:
+    """Normalise one raw severity value to its lowercase tier name.
+
+    Stored debate payloads carry ``RiskSeverity`` members — ``str`` subclasses
+    whose ``str()`` is ``"RiskSeverity.HIGH"`` — while other callers pass plain
+    strings (``"high"``, ``"CRITICAL"``). Reading ``.value`` first makes both
+    land on ``"high"`` / ``"critical"``; unknown/absent values normalise to "".
+    """
+    raw = getattr(severity, "value", severity)
+    return str(raw or "").strip().lower()
+
+
 def stabilize_decision(
     rating: str,
     risk_rows: list | None = None,
@@ -96,8 +113,9 @@ def stabilize_decision(
 
     Returns ``{"rating": <maybe-changed>, "overrides": [{reason, from, to}]}``
     (``overrides`` is appended to the caller's list when provided). Rules:
-      1. risk-cap: any risk row with severity >= "high" caps the rating at
-         Hold (never forces a sell by risk alone).
+      1. risk-cap: any risk row with severity >= "high" (i.e. "high" or
+         "critical", as a plain string or a ``RiskSeverity`` member) caps the
+         rating at Hold (never forces a sell by risk alone).
       2. near resistance (price within 2% below a resistance level) WITHOUT
          confirmed inflow -> cap at Hold (buy w/o confirmation near the top).
       3. near support (price within 2% above a support level) WITHOUT confirmed
@@ -124,7 +142,8 @@ def stabilize_decision(
     # Rule 1: risk cap at Hold.
     risk_rows = risk_rows or []
     high_risk = any(
-        isinstance(r, dict) and str(r.get("severity", "")).lower() == "high"
+        isinstance(r, dict)
+        and _severity_tier(r.get("severity")) in _HIGH_RISK_SEVERITIES
         for r in risk_rows
     )
     if high_risk and cur > 0:

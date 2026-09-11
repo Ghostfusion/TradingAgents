@@ -22,9 +22,12 @@ def to_utc(dt: datetime) -> datetime:
 def in_window(pub_dt: datetime | None, start_dt: datetime, end_dt: datetime) -> bool:
     """Whether an item belongs in the half-open window ``[start, end + 1 day)``.
 
-    ``pub_dt`` None means undated: kept only when the window reaches the present.
+    ``pub_dt`` None means undated: kept only when the window still reaches the
+    present DAY (its end date is today or later). A window that ended on an
+    earlier day cannot prove an undated item isn't future, so it is dropped -
+    the old "within the last 24h" slack admitted a prior-session backtest window.
     """
     end = to_utc(end_dt)
     if pub_dt is not None:
         return to_utc(start_dt) <= to_utc(pub_dt) < end + timedelta(days=1)
-    return end >= datetime.now(timezone.utc) - timedelta(days=1)
+    return end.date() >= datetime.now(timezone.utc).date()

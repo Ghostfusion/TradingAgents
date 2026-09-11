@@ -58,11 +58,13 @@ class TestNextBarFill:
 
 
 class TestLookaheadSentinel:
-    def test_lookahead_close_signal_nets_zero_under_next_bar(self):
+    def test_lookahead_close_signal_cannot_capture_the_gap(self):
         """The deterministic malicious signal: buy at close, 'knowing' the next
-        day's close is higher. Under next-bar fill the strategy must net zero
-        (the fill IS the signal bar's next close), under legacy same-bar it
-        would bank the full gap."""
+        day's close is higher. Under next-bar fill the strategy cannot bank the
+        signal-bar -> fill-bar gap (it enters at the next close, not the close
+        it signalled on), so its PnL is the ordinary hold from entry to the
+        final close; under legacy same-bar fill it would bank the full gap
+        including the lookahead point."""
         closes = [100.0, 101.0, 102.0, 103.0, 104.0]
         bars = _bars(closes)
         # enter at the first opportunity, exit at the last close
@@ -72,8 +74,11 @@ class TestLookaheadSentinel:
         r = eng.run(bars, fill_on_next_bar=True)
         entry = r.fills[0].price
         assert entry == closes[1]  # filled at bar-1 close, never at bar-0 close
-        # net PnL from entry close to final close = 0 (holding the series)
-        assert entry == closes[-1] or (closes[1] == closes[-1]) or True
+        # Net PnL is the actual price difference from the fill bar to the final
+        # close; the lookahead point (closes[0] -> closes[1]) is never captured.
+        pnl = (closes[-1] - entry) * 1.0
+        assert pnl == 3.0
+        assert pnl != (closes[-1] - closes[0]) * 1.0
 
     def test_sentinel_alpha_zero(self):
         closes = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]

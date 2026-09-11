@@ -47,7 +47,7 @@ from .finnhub import (
 from .finra import get_dark_pool_flow, get_short_sale_volume
 from .fred import get_macro_data as get_fred_macro_data
 from .fx import get_fx_snapshot
-from .gdelt import get_news_gdelt, get_news_sentiment_gdelt
+from .gdelt import get_global_news_gdelt, get_news_gdelt, get_news_sentiment_gdelt
 from .market_router import (
     caliber_consistency,
     gap_fill,
@@ -497,7 +497,7 @@ VENDOR_METHODS = {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
         "finnhub": get_global_news_finnhub,
-        "gdelt": get_news_gdelt,
+        "gdelt": get_global_news_gdelt,
         "newsapi": get_global_news_newsapi,
     },
     # news_sentiment (optional)

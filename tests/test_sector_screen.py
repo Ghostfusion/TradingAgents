@@ -222,7 +222,14 @@ def test_constituent_screens_breadth_ewcw():
     cs = constituent_screens(_closes_map(seed=27), parents)
     blk = cs["XLK"]
     assert isinstance(blk["breadth"]["pct"], float)  # computable
-    assert blk["leadership"] is not None or blk["leadership"] is None
+    # EW/CW leadership: the equal-weight basket's total return over the shared
+    # window vs the parent ETF's cap-weighted total return (SectorRank rule).
+    nvda, amd, xlk = _gen(seed=21), _gen(seed=24), _closes_map(seed=27)["XLK"]
+    n = min(len(nvda), len(amd), len(xlk))
+    ew_ret = ((nvda[-1] / nvda[-n] - 1.0) + (amd[-1] / amd[-n] - 1.0)) / 2.0
+    cw_ret = xlk[-1] / xlk[-n] - 1.0
+    assert blk["leadership"] == pytest.approx(round((1.0 + ew_ret) / (1.0 + cw_ret), 3))
+    assert blk["members"] == 2
     assert len(blk["setups"]) == 2
     assert all("setup_a" in s and "setup_b" in s for s in blk["setups"])
 

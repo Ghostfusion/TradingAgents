@@ -10,15 +10,20 @@ _REPURCHASE_KEY = re.compile(r"(?i)repurchase|buyback|treasury\s+stock")
 _SHARE_ROW = re.compile(r"(?i)ordinary\s*shares?\s*number|share\s*issued|shares?\s*outstanding")
 
 
-def _row_series(rows: "list[tuple[str, list[float]]]", key_re: re.Pattern) -> list[float]:
+def _row_series(rows: "list[tuple[str, list[float | None]]]", key_re: re.Pattern) -> "list[float | None]":
     for key, values in rows:
         if key_re.search(key):
             return values
     return []
 
 
-def _parse_statement_rows(text: str) -> "list[tuple[str, list[float]]]":
-    """CSV-style vendor rows -> [(key, [period values ...]), ...]."""
+def _parse_statement_rows(text: str) -> "list[tuple[str, list[float | None]]]":
+    """CSV-style vendor rows -> [(key, [period values ...]), ...].
+
+    A cell the vendor does not publish as a number (``N/A``, ``--``, ...) becomes
+    ``None``, never a fabricated ``0.0``: a missing quarter must not enter a sum
+    or a period-over-period difference as a real zero. Callers filter ``None``.
+    """
     out = []
     for line in text.splitlines():
         parts = line.split(",")
@@ -27,7 +32,7 @@ def _parse_statement_rows(text: str) -> "list[tuple[str, list[float]]]":
         key = parts[0].strip()
         if not key:
             continue
-        nums = []
+        nums: list[float | None] = []
         for p in parts[1:]:
             p = p.strip()
             if not p:
@@ -35,7 +40,7 @@ def _parse_statement_rows(text: str) -> "list[tuple[str, list[float]]]":
             try:
                 nums.append(float(p.replace(",", "")))
             except ValueError:
-                nums.append(0.0)
+                nums.append(None)
         out.append((key, nums))
     return out
 
@@ -97,8 +102,10 @@ def get_share_buyback_authorization(
                 f"- Ordinary shares (latest {nums[0]:,.0f}): 4-quarter change "
                 f"{delta:,.0f} shares ({'' if delta <= 0 else '+'}{delta/1e6:,.1f}M)"
             )
-        else:
+        elif nums:
             lines.append(f"- Ordinary shares row: latest {nums[0]:,.0f} (series too short)")
+        else:
+            lines.append("- Ordinary shares row present but no numeric quarters")
     else:
         lines.append("- No ordinary-shares row in the vendor balance-sheet.")
 

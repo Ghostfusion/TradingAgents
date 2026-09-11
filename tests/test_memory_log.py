@@ -183,10 +183,14 @@ class TestTradingMemoryLogCore:
         log.store_decision("AAPL", "2026-01-11", DECISION_OVERWEIGHT)
         assert log.load_entries()[0]["rating"] == "Overweight"
 
-    def test_rating_fallback_hold(self, tmp_path):
+    def test_unavailable_decision_not_stored_as_tradeable(self, tmp_path):
+        # P0-8: DECISION_NO_RATING carries no parseable rating -> the decision
+        # is unavailable, so nothing tradeable is recorded (it previously
+        # became a pending "Hold" and was fed to reflection).
         log = make_log(tmp_path)
         log.store_decision("MSFT", "2026-01-12", DECISION_NO_RATING)
-        assert log.load_entries()[0]["rating"] == "Hold"
+        assert log.load_entries() == []
+        assert log.get_pending_entries() == []
 
     def test_rating_priority_over_prose(self, tmp_path):
         """'Rating: X' label wins even when an opposing rating word appears earlier in prose."""
@@ -247,10 +251,12 @@ class TestTradingMemoryLogCore:
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.store_decision("AAPL", "2026-01-11", DECISION_OVERWEIGHT)
+        # An unavailable decision is not stored (P0-8), so only the two rated
+        # decisions load - in file order.
         log.store_decision("MSFT", "2026-01-12", DECISION_NO_RATING)
         entries = log.load_entries()
-        assert len(entries) == 3
-        assert [e["ticker"] for e in entries] == ["NVDA", "AAPL", "MSFT"]
+        assert [e["ticker"] for e in entries] == ["NVDA", "AAPL"]
+        assert [e["rating"] for e in entries] == ["Buy", "Overweight"]
 
     def test_decision_content_preserved(self, tmp_path):
         log = make_log(tmp_path)
@@ -918,14 +924,23 @@ class TestLegacyRemoval:
         mock_graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "mem.md")})
         mock_graph.log_states_dict = {}
         mock_graph.debug = False
+        # A bare MagicMock auto-creates _checkpoint_scope as a Mock, which
+        # propagate() cannot unpack; pin the real object's shape (None unless a
+        # checkpointed run is in flight).
+        mock_graph._checkpoint_scope = None
         mock_graph.config = {"results_dir": str(tmp_path)}
         mock_graph.graph.invoke.return_value = fake_state
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         mock_graph.signal_processor.process_signal.return_value = "Buy"
         # Bind the real _run_graph so propagate's call to self._run_graph executes
-        # the actual write path instead of the auto-MagicMock.
+        # the actual write path instead of the auto-MagicMock. The overlays hook
+        # it calls must be bound too - a bare MagicMock would auto-create it and
+        # feed a Mock decision into store_decision.
         mock_graph._run_graph = functools.partial(TradingAgentsGraph._run_graph, mock_graph)
+        mock_graph._apply_strategy_overlays = functools.partial(
+            TradingAgentsGraph._apply_strategy_overlays, mock_graph
+        )
         TradingAgentsGraph.propagate(mock_graph, "NVDA", "2026-01-10")
         entries = mock_graph.memory_log.load_entries()
         assert len(entries) == 1

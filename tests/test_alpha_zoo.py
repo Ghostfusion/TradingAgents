@@ -57,9 +57,22 @@ class TestBench:
         assert out[0]["rank_ic"] is not None  # monotone close -> IC 1.0
         assert out[2]["error"]  # unknown op flagged
 
-    def test_bench_never_raises(self):
+    def test_bench_empty_records_returns_placeholder_row(self):
+        # With no records there is nothing to correlate: the bench must still
+        # emit one row per expression (no raise), with a null rank_ic and no
+        # error, so a caller can render the miss instead of crashing.
         out = bench_zoo(["close"], [])
-        assert out == [{"expr": "close", "rank_ic": None, "error": None}] or out
+        assert out == [
+            {
+                "expr": "close",
+                "rank_ic": None,
+                "error": None,
+                "oos_rank_ic": None,
+                "wf_ic": None,
+                "cpcv_overfit": None,
+                "deflated_ic": None,
+            }
+        ]
 
 
 if __name__ == "__main__":

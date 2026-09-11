@@ -69,7 +69,10 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     price_cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]
     data[price_cols] = data[price_cols].apply(pd.to_numeric, errors="coerce")
     data = data.dropna(subset=["Close"])
-    data[price_cols] = data[price_cols].ffill().bfill()
+    # Forward-fill only. A bfill would pull a leading gap's value from a LATER
+    # row, which may be dated after the run's as-of date (this cleaning runs
+    # before load_ohlcv's curr_date filter) - future data leaking into a backtest.
+    data[price_cols] = data[price_cols].ffill()
 
     return data
 

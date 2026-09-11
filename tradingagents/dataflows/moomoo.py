@@ -45,12 +45,13 @@ import os
 import socket
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from .config import get_config
+from .date_window import in_window as _in_window
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -273,21 +274,38 @@ def _cap_open_ctxs():
     Parallel batch workers each spawn their own thread-local OpenQuoteContext;
     without a cap the gateway hits its 128-connection limit and new contexts
     fail with 'The number of connections exceeds 128'.
+
+    A victim is marked (``_moomoo_evicted``) before it is closed: its owning
+    thread's thread-local can't be written from here, so ``_ensure_ctx`` must
+    reject the stale handle and build a fresh context — otherwise every later
+    call on that thread would use a closed context and fail untyped.
     """
     limit = _max_open_ctxs()
+    evicted = []
     with _ctx_lock:
         while len(_live_ctxs) > limit:
             victim = next(iter(_live_ctxs))
             _live_ctxs.discard(victim)
             with contextlib.suppress(Exception):
+                victim._moomoo_evicted = True
+            with contextlib.suppress(Exception):
                 victim.close()
+            evicted.append(victim)
+    # Same-thread eviction: drop the stale handle so the next ``_ensure_ctx``
+    # rebuilds immediately (cross-thread victims are caught by the flag above).
+    if any(victim is getattr(_tls, "moomoo_ctx", None) for victim in evicted):
+        _tls.moomoo_ctx = None
 
 
 def _ensure_ctx():
     """Return a thread-local ``OpenQuoteContext``, or raise ``MoomooNotConfiguredError``."""
     ctx = getattr(_tls, "moomoo_ctx", None)
     if ctx is not None:
-        return ctx
+        if not getattr(ctx, "_moomoo_evicted", False):
+            return ctx
+        # The connection cap evicted this thread's context; never hand out the
+        # closed handle again (every call on it would fail untyped).
+        _tls.moomoo_ctx = None
     cfg = _get_moomoo_config()
     host, port = cfg["host"], cfg["port"]
     if not _probe_or_use_cache(host, port):
@@ -414,10 +432,29 @@ def _check_ret(ret_code, data, symbol: str, canonical: str, action: str = "reque
     # Error path — data is an error string
     msg = str(data) if data is not None else str(ret_code)
     msg_lower = msg.lower()
+    # Rate limit / quota exhaustion — classified FIRST, before login/permission:
+    # a throttle message can also contain login/account or "no available"
+    # phrasing, and a transient throttle must be retryable
+    # (VendorRateLimitError) so the router falls back to the next vendor — never
+    # a permanent "not configured" / "no-data" verdict. Includes moomoo's
+    # Chinese throttle phrasing (请求过于频繁).
+    rate_keywords = (
+        "429",
+        "too many",
+        "rate limit",
+        "throttle",
+        "quota",
+        "请求过于频繁",
+        "访问过于频繁",
+        "调用过于频繁",
+        "请求频率",
+    )
+    if any(kw in msg_lower for kw in rate_keywords):
+        raise VendorRateLimitError(f"moomoo rate limit: {msg}")
     # Login / account errors
     login_keywords = (
         "login",
-        "no available",
+        "no available account",
         "unlock",
         "unauthorized",
         "not logged in",
@@ -443,24 +480,6 @@ def _check_ret(ret_code, data, symbol: str, canonical: str, action: str = "reque
     )
     if any(kw in msg_lower for kw in perm_keywords):
         raise NoMarketDataError(symbol, canonical, detail=f"quote permission: {msg}")
-    # Rate limit / quota exhaustion — classified BEFORE the permission check,
-    # which previously swallowed "quota" as a permanent "no-data" verdict. A
-    # throttled/quota-exhausted vendor is retryable and must let the router
-    # fall back to the next vendor (VendorRateLimitError), not report "symbol
-    # not covered". Includes moomoo's Chinese throttle phrasing (请求过于频繁).
-    rate_keywords = (
-        "429",
-        "too many",
-        "rate limit",
-        "throttle",
-        "quota",
-        "请求过于频繁",
-        "访问过于频繁",
-        "调用过于频繁",
-        "请求频率",
-    )
-    if any(kw in msg_lower for kw in rate_keywords):
-        raise VendorRateLimitError(f"moomoo rate limit: {msg}")
     # Everything else — treat as "no data" so the router falls back
     raise NoMarketDataError(symbol, canonical, detail=msg)
 
@@ -758,18 +777,27 @@ def _report_date(rpt) -> datetime.date | None:
         return None
 
 
-def _format_financials(code: str, data: dict, label: str, curr_date: str = None) -> str:
+def _format_financials(
+    code: str, data: dict, label: str, curr_date: str = None, symbol: str = None
+) -> str:
     """Format the dict returned by get_financials_statements into a markdown table.
 
     When ``curr_date`` is given, reports published after it are dropped so the
     analyst never sees statements dated past the trading day (look-ahead guard,
     mirroring the alpha_vantage vendor). Reports whose date cannot be parsed are
     kept rather than risk hiding a usable statement.
+
+    An empty report list (or one fully filtered out by ``curr_date``) raises
+    ``NoMarketDataError`` like every sibling vendor: returning a placeholder
+    string here would make the router treat it as a served result, cache it,
+    and never consult the yfinance/tiingo/alpha_vantage fallbacks.
     """
     structure = data.get("structure_list") or []
     reports = data.get("report_list") or []
     if not reports:
-        return f"No {label} data available for {code}"
+        raise NoMarketDataError(
+            symbol or code, code, detail=f"no {label} reports returned by moomoo"
+        )
     if curr_date:
         try:
             cutoff = datetime.strptime(curr_date, "%Y-%m-%d").date()
@@ -783,7 +811,11 @@ def _format_financials(code: str, data: dict, label: str, curr_date: str = None)
                     kept.append(rpt)
             reports = kept
             if not reports:
-                return f"No {label} data available for {code} on or before {curr_date}"
+                raise NoMarketDataError(
+                    symbol or code,
+                    code,
+                    detail=f"no {label} reports on or before {curr_date}",
+                )
     id_to_name = {e["field_id"]: e.get("display_name", f"field_{e['field_id']}") for e in structure}
     lines = [f"## {label} — {code}", ""]
     for rpt in reports[:4]:  # most recent 4 periods
@@ -861,7 +893,7 @@ def _get_financials(
         num=8,
     )
     _check_ret(ret, data, symbol, code, f"get_financials ({label})")
-    return _format_financials(code, data, label, curr_date=curr_date)
+    return _format_financials(code, data, label, curr_date=curr_date, symbol=symbol)
 
 
 def get_fundamentals_moomoo(symbol: str, curr_date: str = None) -> str:
@@ -896,26 +928,84 @@ def get_income_statement_moomoo(symbol: str, freq: str = "quarterly", curr_date:
 # ---------------------------------------------------------------------------
 
 
+def _news_row_time(row) -> datetime | None:
+    """Parse a news row's ``time``/``date`` cell, or None when undated.
+
+    moomoo's ``get_search_news`` returns ``time`` as a string (``2025-05-20
+    09:15:00``); epoch seconds and datetimes are accepted defensively.
+    """
+    for key in ("time", "date"):
+        raw = row.get(key)
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            continue
+        if isinstance(raw, str):
+            raw = raw.strip()
+            if not raw:
+                continue
+        if isinstance(raw, datetime):
+            return raw
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            with contextlib.suppress(OSError, OverflowError, ValueError):
+                return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+            continue
+        if isinstance(raw, str) and raw.isdigit() and len(raw) in (10, 13):
+            # Epoch seconds / millis handed back as a string (mirrors
+            # ``_report_date``); a 10-digit value is never a YYYYMMDD date.
+            seconds = int(raw[:10])
+            with contextlib.suppress(OSError, OverflowError, ValueError):
+                return datetime.fromtimestamp(seconds, tz=timezone.utc)
+            continue
+        try:
+            return pd.to_datetime(raw, errors="raise").to_pydatetime()
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def get_news_moomoo(symbol: str, start_date: str, end_date: str) -> str:
-    """Search news for the ticker via ``get_search_news``."""
+    """Search news for the ticker via ``get_search_news``.
+
+    ``get_search_news`` has no server-side date filter, so the frame is trimmed
+    to the requested window with the shared look-ahead guard (#1126/#1220). A
+    window with no items raises ``NoMarketDataError`` so the router falls
+    through to the next vendor instead of caching a moomoo placeholder.
+    """
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
     ret, data = _sdk_call(ctx.get_search_news, code, max_count=20)
     _check_ret(ret, data, symbol, code, "get_search_news")
     df: pd.DataFrame = data
-    if df.empty:
-        return f"No news found for {symbol} (moomoo)"
+    start_dt = end_dt = None
+    if start_date and end_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            start_dt = end_dt = None
     lines = [f"## {symbol} News — Moomoo", ""]
-    for _, row in df.iterrows():
-        title = row.get("title") or "(no title)"
-        content = row.get("content") or ""
-        news_time = row.get("time") or row.get("date") or ""
-        source = row.get("source") or ""
-        if content:
-            content = str(content).replace("\n", " ").strip()[:200]
-        lines.append(f"- **{title}**  ({news_time} {source})")
-        if content:
-            lines.append(f"  {content}")
+    kept = 0
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            # Look-ahead guard: only items inside the requested window.
+            if start_dt is not None and not _in_window(_news_row_time(row), start_dt, end_dt):
+                continue
+            kept += 1
+            title = row.get("title") or "(no title)"
+            content = row.get("content") or ""
+            news_time = row.get("time") or row.get("date") or ""
+            source = row.get("source") or ""
+            if content:
+                content = str(content).replace("\n", " ").strip()[:200]
+            lines.append(f"- **{title}**  ({news_time} {source})")
+            if content:
+                lines.append(f"  {content}")
+    if kept == 0:
+        in_window_msg = (
+            f"no moomoo news between {start_date} and {end_date}"
+            if start_dt is not None
+            else "no moomoo news returned"
+        )
+        raise NoMarketDataError(symbol, code, detail=in_window_msg)
     return "\n".join(lines)
 
 

@@ -334,24 +334,4 @@ You also have `get_news(ticker, start_date, end_date)` - the headline feed for t
 {get_language_instruction()}{get_output_budget("analyst")}"""
 
 
-# ---------------------------------------------------------------------------
-# Backwards-compatibility shim
-# ---------------------------------------------------------------------------
-def create_social_media_analyst(llm):
-    """Deprecated alias for :func:`create_sentiment_analyst`.
 
-    Kept so existing code that imports ``create_social_media_analyst``
-    continues to work.
-
-    .. deprecated::
-        Import :func:`create_sentiment_analyst` directly instead.
-    """
-    import warnings
-
-    warnings.warn(
-        "create_social_media_analyst is deprecated and will be removed in a "
-        "future version. Use create_sentiment_analyst instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return create_sentiment_analyst(llm)

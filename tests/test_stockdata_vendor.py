@@ -98,13 +98,31 @@ def test_stock_data_csv_reversed_oldest_first(monkeypatch):
     assert "Date,Open,High,Low,Close,Volume" in out
 
 
-def test_stock_data_no_date_param(monkeypatch):
+def test_stock_data_request_carries_date_window(monkeypatch):
     with mock.patch.object(module, "_requests", spec=True) as mreq:
         mreq.get.return_value = _resp(200, _eod_payload())
         module.get_stock_data_stockdata("AAPL", "2026-01-01", "2026-08-30")
     params = mreq.get.call_args[1]["params"]
     assert params["symbols"] == "AAPL"
-    assert "date" not in params  # date param returns empty on free tier
+    # The validated window must actually reach the vendor (it used to be dropped).
+    assert params["date_from"] == "2026-01-01"
+    assert params["date_to"] == "2026-08-30"
+
+
+def test_stock_data_drops_rows_outside_the_window(monkeypatch):
+    payload = {
+        "data": [
+            {"date": "2026-09-05T00:00:00.000Z", "open": 1, "high": 1, "low": 1,
+             "close": 1, "volume": 1},  # after end_date
+            {"date": "2026-08-27T00:00:00.000Z", "open": 2, "high": 2, "low": 2,
+             "close": 2, "volume": 2},  # inside
+        ]
+    }
+    with mock.patch.object(module, "_requests", spec=True) as mreq:
+        mreq.get.return_value = _resp(200, payload)
+        out = module.get_stock_data_stockdata("AAPL", "2026-08-01", "2026-08-30")
+    assert "2026-08-27" in out
+    assert "2026-09-05" not in out
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from tradingagents.agents.utils.rating import parse_rating
+from tradingagents.agents.utils.rating import REVIEW_SENTINEL, parse_rating
 
 
 class TradingMemoryLog:
@@ -45,12 +45,24 @@ class TradingMemoryLog:
     ) -> None:
         """Append pending entry at end of propagate(). No LLM call.
 
+        An unavailable/degenerate decision (no tradeable rating: empty text,
+        an "unavailable" notice, or an unparseable label) is NOT recorded — the
+        log only holds decisions that can be resolved against the market and
+        reflected on. Storing one as pending let a failed decision be treated
+        as a tradeable Hold downstream (P0-8).
+
         ``sleeve`` (D1) tags the decision's style - value-dip / swing / vcp /
         momentum / hold - so the strategy-quality report can attribute results
         per style. The graph cannot always know the screener's scan label, so
         this is best-effort (None = 'hold'/untagged, never fabricated).
         """
         if not self._log_path:
+            return
+        rating = parse_rating(final_trade_decision)
+        if rating == REVIEW_SENTINEL:
+            # REVIEW = do not trade on this decision: no direction to resolve
+            # against the market and nothing to reflect on. Skip the pending
+            # entry entirely so get_pending_entries() never feeds reflection.
             return
         self._invalidate_cache()
         # Idempotency guard: fast raw-text scan instead of full parse
@@ -59,7 +71,6 @@ class TradingMemoryLog:
             for line in raw.splitlines():
                 if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
                     return
-        rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
         # Sleeve (D1) rides as an HTML comment so it can never collide with LLM
         # prose, and is parsed back by _parse_entry.

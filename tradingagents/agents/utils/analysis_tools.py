@@ -25,6 +25,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.errors import VendorError
 from tradingagents.dataflows.interface import route_to_vendor
 
 # ---------------------------------------------------------------------------
@@ -142,7 +143,11 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
         _RUN_OHLCV_CACHE[key] = result
         return result
     except Exception:  # noqa: BLE001 - a fetch failure degrades, never raises
-        result = {
+        # Do NOT cache a failure: it is retryable, and caching it would degrade
+        # every OHLCV-based tool for this ticker for the rest of the process
+        # after one transient vendor error. Return the absence dict so this
+        # caller degrades; a later call re-fetches.
+        return {
             "dates": [],
             "closes": [],
             "opens": [],
@@ -151,8 +156,6 @@ def _ohlcv(ticker: str, days: int = 320) -> dict:
             "volumes": [],
             "absence": absence or {"reason": "error", "retryable": True},
         }
-        _RUN_OHLCV_CACHE[key] = result
-        return result
 
 
 def _benchmark_closes() -> list:
@@ -189,16 +192,20 @@ def _daily_returns(closes) -> list:
 # ---------------------------------------------------------------------------
 
 
-@tool
-
 def _cfg_idx() -> str:
-    """Index symbol for the market-stress leg (config market_stress_index)."""
+    """Index symbol for the market-stress leg (config market_stress_index).
+
+    Module-private helper (NOT a @tool): the regime-gate tool calls it directly
+    in Python, and a langchain StructuredTool has no __call__.
+    """
     try:
         from tradingagents.dataflows.config import get_config
 
         return str(get_config().get("market_stress_index") or "").strip()
     except Exception:  # noqa: BLE001
         return ""
+
+
 @tool
 def get_swing_set(
     ticker: str,
@@ -1576,15 +1583,18 @@ def get_etf_mechanics(
             lines.append("- NAV premium/discount: n/a")
     else:
         lines.append("- NAV premium/discount: n/a (no NAV feed)")
-    # Distribution yield + frequency from the corporate-actions tool.
+    # Distribution yield + frequency via the vendor router. Do NOT call
+    # moomoo_extra_tools.get_corporate_actions here: that name is a langchain
+    # @tool (StructuredTool has no __call__), so calling it raised TypeError
+    # and silently degraded this row to 'n/a' on every call.
     try:
-        from tradingagents.agents.utils.moomoo_extra_tools import get_corporate_actions
-
-        ca = get_corporate_actions(t)
-        first = (ca.splitlines() or [""])[0]
+        ca = str(route_to_vendor("get_corporate_actions", t) or "")
+        first = (ca.splitlines() or [""])[0].strip()
         lines.append(f"- Distributions: {first if first else 'n/a'}")
-    except Exception:  # noqa: BLE001
-        lines.append("- Distributions: n/a")
+    except (VendorError, ValueError) as exc:
+        # Typed vendor failure / bad routing config: surface the reason instead
+        # of fabricating a distribution.
+        lines.append(f"- Distributions: n/a ({exc})")
     lines.append(
         "Interpretation: fund-level mechanics — distributions are ETF "
         "distributions, not corporate dividends; NAV premium/discount and "
@@ -1596,6 +1606,7 @@ def get_etf_mechanics(
 @tool
 def get_insider_activity(
     ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str | None, "the run's trading date (YYYY-mm-dd); omit for the live window"] = None,
 ) -> str:
     """Insider net activity + trend for a ticker (Finnhub, computed).
 
@@ -1606,6 +1617,9 @@ def get_insider_activity(
 
     Args:
         ticker: single ticker symbol.
+        curr_date: the run's trading date (YYYY-mm-dd) so a historical run is
+            anchored on that date and never sees insider rows after it; when
+            omitted the vendor falls back to its now()-anchored window.
 
     Returns:
         window summary lines, or an explicit 'unavailable' message when
@@ -1614,6 +1628,8 @@ def get_insider_activity(
     try:
         from tradingagents.dataflows.finnhub import get_insider_activity_finnhub
 
+        if curr_date:
+            return get_insider_activity_finnhub(ticker, curr_date)
         return get_insider_activity_finnhub(ticker)
     except Exception as exc:  # noqa: BLE001
         return f"insider activity unavailable for {ticker}: {exc}"
@@ -3596,8 +3612,11 @@ def _dcf_fcf_series_all(cashflow_payload):
     if not by_year:
         try:
             from tradingagents.agents.utils.analysis_tools import _dcf_yf_rows as _r
-        except Exception:  # noqa: BLE001
-            _r = lambda p: {}
+        except Exception:  # noqa: BLE001 - optional helper; no rows on failure
+
+            def _r(payload):
+                return {}
+
         for label, vals in (_r(cashflow_payload) or {}).items():
             low = str(label).lower()
             if "free cash flow" not in low and "operating cash flow" not in low:
@@ -6828,10 +6847,10 @@ def get_fixed_income_risk(
         if years is not None and float(years) > 0:
             ytm = preferred_ytm(div, price, 100.0, float(years))
             cashflows = [{"t": float(years), "amount": price * float(years)}]
-            mac = macaulay_duration(cashflows, iy / 100.0)
-            mod = modified_duration(mac, iy / 100.0) if mac else None
+            mac = macaulay_duration(cashflows, iy)
+            mod = modified_duration(mac, iy) if mac else None
             d01 = dv01(mod, price) if mod else None
-            cv = bond_convexity(cashflows, iy / 100.0)
+            cv = bond_convexity(cashflows, iy)
             lines.append(f"  ytm={ytm:.2%}" if ytm is not None else "  ytm=n/a")
             lines.append(f"  macaulay={mac:.2f}y" if mac is not None else "  macaulay=n/a")
             lines.append(f"  modified={mod:.2f}" if mod is not None else "  modified=n/a")

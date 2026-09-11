@@ -13,17 +13,20 @@ Endpoints used:
 
 News asset = ticker keywords OR the company name; GDELT is keyword-based (no
 legal-entity ticker map), so we pass the ticker verbatim and let the tone be
-the signal. Missing / malformed data degrades to the typed errors the router
-understands (never a fabricated value).
+the signal. ``get_global_news_gdelt`` serves the router's macro
+``get_global_news(curr_date, look_back_days, limit)`` contract from the
+configured ``global_news_queries``. Missing / malformed data degrades to the
+typed errors the router understands (never a fabricated value).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests as _requests
 
+from .config import get_config
 from .errors import NoMarketDataError, VendorRateLimitError
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,8 @@ BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
 TIMEOUT = 8
 _MAX_RETRIES = 1
 _ARTICLE_LIMIT = 8
+# GDELT DOC 2.0 accepts at most 250 records per request.
+_MAXARTICLE_LIMIT = 250
 
 
 def _gdelt_get(params: dict) -> list | None:
@@ -86,6 +91,33 @@ def _fmt_name(ticker: str) -> str:
     return f'"{ticker}"'
 
 
+def _render_articles(header: str, articles: list, limit: int) -> str:
+    """Headline/date/source/URL + native tone block for each GDELT article.
+
+    Shared by the ticker-news and global-news surfaces so both cite the same
+    computed tone fields (avg/pos/neg/neutral) in one format.
+    """
+    lines = [f"## {header}", ""]
+    for index, article in enumerate(articles):
+        if index >= limit:
+            break
+        title = str(article.get("title") or "(no title)")[:120]
+        url = str(article.get("url") or "")
+        source = str(article.get("source") or "").split("/")[-1] or ""
+        date = str(article.get("seendate") or "")[:8]
+        # GDELT native tone fields.
+        tone = article.get("tone")  # "avg_tone,pos,neg,neutral"
+        tone_str = "n/a"
+        if isinstance(tone, str) and "," in tone:
+            t = [x.strip() for x in tone.split(",")]
+            tone_str = f"avg={t[0]} pos={t[1] if len(t) > 1 else '?'} neg={t[2] if len(t) > 2 else '?'} neu={t[3] if len(t) > 3 else '?'}"
+        lines.append(f"- **{title}**  ({date} {source})")
+        lines.append(f"  tone: {tone_str}")
+        if url:
+            lines.append(f"  url: {url}")
+    return "\n".join(lines)
+
+
 def get_news_gdelt(ticker: str, start_date: str, end_date: str) -> str:
     """News + native GDELT tone for a ticker over [start_date, end_date].
 
@@ -108,25 +140,64 @@ def get_news_gdelt(ticker: str, start_date: str, end_date: str) -> str:
         raise NoMarketDataError(
             ticker, "doc", detail=f"no articles between {start_date} and {end_date}"
         )
-    lines = [f"## {ticker} News — GDELT (native tone)", ""]
-    for _shown, a in enumerate(articles):
-        if _shown >= _ARTICLE_LIMIT:
-            break
-        title = str(a.get("title") or "(no title)")[:120]
-        url = str(a.get("url") or "")
-        source = str(a.get("source") or "").split("/")[-1] or ""
-        date = str(a.get("seendate") or "")[:8]
-        # GDELT native tone fields.
-        tone = a.get("tone")  # "avg_tone,pos,neg,neutral"
-        tone_str = "n/a"
-        if isinstance(tone, str) and "," in tone:
-            t = [x.strip() for x in tone.split(",")]
-            tone_str = f"avg={t[0]} pos={t[1] if len(t) > 1 else '?'} neg={t[2] if len(t) > 2 else '?'} neu={t[3] if len(t) > 3 else '?'}"
-        lines.append(f"- **{title}**  ({date} {source})")
-        lines.append(f"  tone: {tone_str}")
-        if url:
-            lines.append(f"  url: {url}")
-    return "\n".join(lines)
+    return _render_articles(
+        f"{ticker} News — GDELT (native tone)", articles, _ARTICLE_LIMIT
+    )
+
+
+def _fmt_query(query: str) -> str:
+    """One macro search phrase -> a GDELT query term (spaces -> phrase)."""
+    text = str(query or "").strip()
+    if not text:
+        return ""
+    return f'"{text}"' if " " in text else text
+
+
+def get_global_news_gdelt(curr_date: str, look_back_days: int | None = None,
+                          limit: int | None = None) -> str:
+    """Global/macro headlines + native tone for the router's ``get_global_news``
+    contract ``(curr_date, look_back_days, limit)``.
+
+    GDELT has no macro feed (it is a keyword engine), so coverage comes from the
+    configured ``global_news_queries`` OR-joined into one query over the
+    trailing window ending at ``curr_date``; ``look_back_days`` / ``limit``
+    default to ``global_news_lookback_days`` / ``global_news_article_limit``.
+    No coverage degrades to NoMarketDataError -> the router tries the next
+    vendor (never a fabricated headline).
+    """
+    datetime.strptime(curr_date, "%Y-%m-%d")
+    config = get_config()
+    if look_back_days is None:
+        look_back_days = config["global_news_lookback_days"]
+    if limit is None:
+        limit = config["global_news_article_limit"]
+    query = " OR ".join(
+        q for q in (_fmt_query(q) for q in config["global_news_queries"]) if q
+    )
+    if not query:
+        raise NoMarketDataError(
+            curr_date, "doc", detail="no global_news_queries configured"
+        )
+    start = (
+        datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=int(look_back_days))
+    ).strftime("%Y-%m-%d")
+    articles = _gdelt_get(
+        {
+            "query": query,
+            "startdatetime": start + "000000",
+            "enddatetime": curr_date + "235959",
+            "maxrecords": max(1, min(int(limit), _MAXARTICLE_LIMIT)),
+        }
+    )
+    if not articles:
+        raise NoMarketDataError(
+            curr_date, "doc", detail=f"no macro articles between {start} and {curr_date}"
+        )
+    return _render_articles(
+        f"Global Macro News {start} to {curr_date} — GDELT (native tone)",
+        articles,
+        int(limit),
+    )
 
 
 def get_gdelt_tone_series(ticker: str, look_back_days: int = 7) -> str:
@@ -134,7 +205,7 @@ def get_gdelt_tone_series(ticker: str, look_back_days: int = 7) -> str:
     trailing ``look_back_days``. A computed sentiment series the sentiment
     analyst can cite (trend + latest)."""
     end = datetime.now()
-    start = end - __import__("datetime").timedelta(days=look_back_days + 1)
+    start = end - timedelta(days=look_back_days + 1)
     s = start.strftime("%Y-%m-%d")
     e = end.strftime("%Y-%m-%d")
     articles = _gdelt_get(
@@ -241,5 +312,6 @@ def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str
 
 __all__ = [
     "get_news_gdelt",
+    "get_global_news_gdelt",
     "get_gdelt_tone_series",
 ]

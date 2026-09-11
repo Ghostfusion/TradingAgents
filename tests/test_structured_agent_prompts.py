@@ -275,6 +275,73 @@ def test_portfolio_manager_falls_back_to_legacy_consensus_without_independent_vo
 
 
 @pytest.mark.unit
+def test_pm_consensus_line_parses_a_string_history_and_never_fabricates_hold():
+    """The legacy consensus line must survive both history shapes and must not
+    invent a stance.
+
+    The graph stores ``risk_debate_state[key]`` as a list of chunks, but a
+    hand-built or legacy state may carry a plain string. Slicing the last three
+    CHARACTERS off a string produced garbage "ratings" which the old implicit
+    Hold default silently turned into a fabricated consensus; now a string is
+    one chunk, so the three real stances are parsed (Buy/Sell/Hold -> a defined
+    agreement score), while an unparseable history degrades to no line instead
+    of a made-up Hold.
+    """
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    def _run(risk_histories: dict) -> str:
+        captured = {}
+        llm = _capturing_llm(
+            captured,
+            PortfolioDecision(
+                rating=PortfolioRating.HOLD,
+                executive_summary="x",
+                investment_thesis="y",
+            ),
+        )
+        risk = {
+            "history": "h",
+            "current_aggressive_response": "",
+            "current_conservative_response": "",
+            "current_neutral_response": "",
+            "latest_speaker": "Neutral",
+            "count": 1,
+            **risk_histories,
+        }
+        create_portfolio_manager(llm)({
+            "company_of_interest": "NVDA",
+            "risk_debate_state": risk,
+            "investment_plan": "plan",
+            "trader_investment_plan": "trader plan",
+        })
+        return _prompt_text(captured["prompt"])
+
+    # String-valued histories (one chunk each): the stances are parsed.
+    text = _run({
+        "aggressive_history": "Aggressive Analyst: Rating Buy, high risk.",
+        "conservative_history": "Conservative Analyst: Rating Sell.",
+        "neutral_history": "Neutral Analyst: Rating Hold.",
+    })
+    assert "**Computed risk-consensus** (deterministic): agreement=" in text
+
+    # List-valued histories (the graph shape) behave the same.
+    text = _run({
+        "aggressive_history": ["Aggressive Analyst: Rating Buy."],
+        "conservative_history": ["Conservative Analyst: Rating Sell."],
+        "neutral_history": ["Neutral Analyst: Rating Hold."],
+    })
+    assert "**Computed risk-consensus** (deterministic): agreement=" in text
+
+    # Nothing parseable -> no consensus line, never a fabricated Hold.
+    text = _run({
+        "aggressive_history": "no rating stated.",
+        "conservative_history": "no rating stated.",
+        "neutral_history": "no rating stated.",
+    })
+    assert "**Computed risk-consensus**" not in text
+
+
+@pytest.mark.unit
 def test_portfolio_manager_prompt_injects_computed_cvar():
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
 

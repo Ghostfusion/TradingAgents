@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -13,6 +14,8 @@ from .stockstats_utils import (
     yf_retry,
 )
 from .symbol_utils import NoMarketDataError, require_symbol
+
+logger = logging.getLogger(__name__)
 
 
 def get_YFin_data_online(
@@ -152,8 +155,17 @@ def get_stock_stats_indicators_window(
     }
 
     if indicator not in best_ind_params:
-        raise ValueError(
-            f"Indicator {indicator} is not supported. Please choose from: {list(best_ind_params.keys())}"
+        # This vendor cannot produce the requested indicator (a bad
+        # LLM-supplied name, or one stockstats has no description for). Raise
+        # the typed no-data error so the router falls through to another
+        # vendor / emits the sentinel instead of caching a report of blank
+        # "date: " rows as if it were real data.
+        raise NoMarketDataError(
+            symbol,
+            detail=(
+                f"indicator {indicator!r} is not supported by yfinance/stockstats "
+                f"(choose from: {list(best_ind_params.keys())})"
+            ),
         )
 
     end_date = curr_date
@@ -187,11 +199,19 @@ def get_stock_stats_indicators_window(
 
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
-    except Exception as e:
-        print(f"Error getting bulk stockstats data: {e}")
-        # Fallback to original implementation if bulk method fails
+    except Exception:
+        # The bulk path failed (bad indicator name, stockstats error, upstream
+        # data problem). Log the real cause — never print — then fall back to
+        # the per-date implementation, which raises the typed error on failure
+        # so the computation degrades through the router's no-data channel
+        # instead of being returned as a report of blank "date: " rows that the
+        # vendor cache would freeze for its TTL.
+        logger.exception(
+            "Bulk stockstats computation failed for %s (%s); falling back to per-date",
+            symbol,
+            indicator,
+        )
         ind_string = ""
-        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         while curr_date_dt >= before:
             indicator_value = get_stockstats_indicator(
                 symbol, indicator, curr_date_dt.strftime("%Y-%m-%d")
@@ -262,11 +282,18 @@ def get_stockstats_indicator(
         )
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
-    except Exception as e:
-        print(
-            f"Error getting stockstats indicator data for indicator {indicator} on {curr_date}: {e}"
+    except Exception as exc:
+        # Log the real cause (never print) and raise the typed error: a failed
+        # computation must degrade through the router's no-data channel, not be
+        # returned as a blank success string the vendor cache would serve for
+        # its whole TTL.
+        logger.exception(
+            "stockstats indicator %s failed for %s on %s", indicator, symbol, curr_date
         )
-        return ""
+        raise NoMarketDataError(
+            symbol,
+            detail=f"stockstats indicator {indicator!r} computation failed: {exc}",
+        ) from exc
 
     return str(indicator_value)
 

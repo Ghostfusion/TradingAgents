@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
 
@@ -247,45 +247,109 @@ def get_stock_data_tiingo(symbol: str, start_date: str, end_date: str,
     return header + "\n".join(lines)
 
 
-def get_income_statement_tiingo(symbol: str, start_date: str, end_date: str) -> str:
-    """Income statement via Tiingo, rendered as canonical-friendly text."""
+# Lookback per reporting frequency for the router contract (ticker, freq,
+# curr_date): Tiingo's statements endpoint takes an explicit [startDate,
+# endDate] window, so ``freq`` only selects how far back the window opens.
+_STATEMENT_LOOKBACK_DAYS = {"annual": 6 * 365, "quarterly": 2 * 365}
+_DEFAULT_LOOKBACK_DAYS = 3 * 365
+
+
+def _as_date(value) -> str | None:
+    """``value`` when it is a ``YYYY-MM-DD`` date string, else None."""
+    text = str(value or "")
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+    return text
+
+
+def _statement_window(freq, curr_date) -> tuple[str, str]:
+    """Tiingo ``(startDate, endDate)`` for a router-style statement call.
+
+    ``route_to_vendor`` passes ``(ticker, freq, curr_date)``; Tiingo reports
+    only an explicit date window, so ``freq`` picks the lookback (``annual`` ->
+    6y, ``quarterly`` -> 2y) ending at ``curr_date`` - today when the caller
+    supplies none. A ``freq`` that is itself a ``YYYY-MM-DD`` date is honored as
+    the window start with ``curr_date`` as the end (the vendor's native
+    explicit-window form, kept for direct callers).
+    """
+    end = _as_date(curr_date) or datetime.now().strftime("%Y-%m-%d")
+    explicit_start = _as_date(freq)
+    if explicit_start:
+        return explicit_start, end
+    days = _STATEMENT_LOOKBACK_DAYS.get(str(freq or "").lower(), _DEFAULT_LOOKBACK_DAYS)
+    start = datetime.strptime(end, "%Y-%m-%d") - timedelta(days=days)
+    return start.strftime("%Y-%m-%d"), end
+
+
+def _statement(symbol: str, statement_type: str, codes: dict,
+               start_date: str, end_date: str) -> str:
+    """Fetch one Tiingo statement over an explicit window and render it."""
     _validate(start_date, end_date)
     data = _tiingo_get(
         f"tiingo/fundamentals/{symbol}/statements",
-        {"statementType": "incomeStatement", "startDate": start_date, "endDate": end_date},
+        {"statementType": statement_type, "startDate": start_date, "endDate": end_date},
     ) or []
-    return _render_statements(data, "incomeStatement", _INCOME_CODES, symbol)
+    return _render_statements(data, statement_type, codes, symbol)
 
 
-def get_balance_sheet_tiingo(symbol: str, start_date: str, end_date: str) -> str:
-    """Balance sheet via Tiingo, rendered as canonical-friendly text."""
-    _validate(start_date, end_date)
-    data = _tiingo_get(
-        f"tiingo/fundamentals/{symbol}/statements",
-        {"statementType": "balanceSheet", "startDate": start_date, "endDate": end_date},
-    ) or []
-    return _render_statements(data, "balanceSheet", _BALANCE_CODES, symbol)
+def get_income_statement_tiingo(symbol: str, freq: str = "quarterly",
+                                curr_date: str | None = None) -> str:
+    """Income statement via Tiingo, rendered as canonical-friendly text.
+
+    Matches the ``get_income_statement(ticker, freq, curr_date)`` tool contract
+    (see ``_statement_window``).
+    """
+    start, end = _statement_window(freq, curr_date)
+    return _statement(symbol, "incomeStatement", _INCOME_CODES, start, end)
 
 
-def get_cashflow_tiingo(symbol: str, start_date: str, end_date: str) -> str:
-    """Cash-flow statement via Tiingo, rendered as canonical-friendly text."""
-    _validate(start_date, end_date)
-    data = _tiingo_get(
-        f"tiingo/fundamentals/{symbol}/statements",
-        {"statementType": "cashFlow", "startDate": start_date, "endDate": end_date},
-    ) or []
-    return _render_statements(data, "cashFlow", _CASHFLOW_CODES, symbol)
+def get_balance_sheet_tiingo(symbol: str, freq: str = "quarterly",
+                             curr_date: str | None = None) -> str:
+    """Balance sheet via Tiingo, rendered as canonical-friendly text.
+
+    Matches the ``get_balance_sheet(ticker, freq, curr_date)`` tool contract
+    (see ``_statement_window``).
+    """
+    start, end = _statement_window(freq, curr_date)
+    return _statement(symbol, "balanceSheet", _BALANCE_CODES, start, end)
 
 
-def get_fundamentals_tiingo(symbol: str, start_date: str, end_date: str) -> str:
-    """Combined fundamentals (income + balance + cashflow) for a ticker."""
+def get_cashflow_tiingo(symbol: str, freq: str = "quarterly",
+                        curr_date: str | None = None) -> str:
+    """Cash-flow statement via Tiingo, rendered as canonical-friendly text.
+
+    Matches the ``get_cashflow(ticker, freq, curr_date)`` tool contract (see
+    ``_statement_window``).
+    """
+    start, end = _statement_window(freq, curr_date)
+    return _statement(symbol, "cashFlow", _CASHFLOW_CODES, start, end)
+
+
+def get_fundamentals_tiingo(symbol: str, curr_date: str | None = None,
+                            end_date: str | None = None) -> str:
+    """Combined fundamentals (income + balance + cashflow) for a ticker.
+
+    Matches the ``get_fundamentals(ticker, curr_date)`` tool contract: the
+    window ends at ``curr_date`` and opens far enough back to cover several
+    reporting periods. An explicit ``end_date`` (with ``curr_date`` as the
+    window start) is the vendor's native form, kept for direct callers.
+    """
+    if _as_date(end_date):
+        start, end = _statement_window(curr_date, end_date)
+    else:
+        start, end = _statement_window(None, curr_date)
     parts = []
-    for fn in (get_income_statement_tiingo, get_balance_sheet_tiingo,
-               get_cashflow_tiingo):
+    for statement_type, codes in (
+        ("incomeStatement", _INCOME_CODES),
+        ("balanceSheet", _BALANCE_CODES),
+        ("cashFlow", _CASHFLOW_CODES),
+    ):
         try:
-            parts.append(fn(symbol, start_date, end_date))
+            parts.append(_statement(symbol, statement_type, codes, start, end))
         except Exception as exc:  # noqa: BLE001 - partial statements degrade
-            logger.debug("Tiingo %s %s: %s", symbol, fn.__name__, exc)
+            logger.debug("Tiingo %s %s: %s", symbol, statement_type, exc)
     if not parts:
         raise NoMarketDataError(
             symbol, symbol, detail=f"no fundamentals for {symbol}"

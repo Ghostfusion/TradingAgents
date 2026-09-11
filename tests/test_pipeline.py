@@ -35,12 +35,6 @@ class _FakeScreener:
     def composite_scores(results, closes_map):
         return {r["ticker"]: r["earnings_yield"] for r in results}
 
-    @staticmethod
-    def _fetch_closes(ticker):
-        return _FakeScreener._score_closes(ticker) if False else [100.0 + i for i in range(120)]
-
-    _score_closes = staticmethod(lambda t: [100.0 + i for i in range(120)])
-
 
 class PipelineUnitTests(unittest.TestCase):
     def test_build_universe_from_tickers(self):
@@ -135,59 +129,49 @@ class PipelineUnitTests(unittest.TestCase):
         def fake_analyze(symbol, date, analysts, depth, vendor):
             return (symbol, "Buy", f"reports/{symbol}_x", 1.2, "Buy")
 
-        results = (
-            pipeline._run_batch(
-                [{"ticker": "AAPL"}, {"ticker": "MSFT"}],
-                mock.Mock(
-                    date="2026-08-19", analysts=["market"], depth="deep", workers=2, vendor="moomoo"
-                ),
-            )
-            if False
-            else None
+        args = mock.Mock(
+            date="2026-08-19", analysts=["market"], depth="deep", workers=2, vendor="moomoo"
         )
-        # call directly with a patched batch.analyze
         with (
             mock.patch("pipeline.batch.analyze", side_effect=fake_analyze),
-            mock.patch("pipeline.DEPTH_LEVELS", {"deep": 5}),
+            mock.patch("pipeline.batch.effective_workers", return_value=2),
         ):
-            args = mock.Mock(
-                date="2026-08-19", analysts=["market"], depth="deep", workers=2, vendor="moomoo"
-            )
             results = pipeline._run_batch([{"ticker": "AAPL"}, {"ticker": "MSFT"}], args)
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(r.get("report_dir") for r in results))
+        self.assertEqual({r["ticker"] for r in results}, {"AAPL", "MSFT"})
+        for row in results:
+            self.assertEqual(row["decision"], "Buy")
+            self.assertEqual(row["rating"], "Buy")
+            self.assertTrue(row["report_dir"])
+            self.assertEqual(row["wall_seconds"], 1.2)
 
-    def test_write_summary_creates_files(self, tmp_path=None):
-        import tempfile
-        from pathlib import Path
 
-        with tempfile.TemporaryDirectory() as d:
-            old = Path.cwd()
-            try:
-                import os
-
-                os.chdir(d)
-                md, jl = pipeline._write_summary(
-                    [{"ticker": "AAPL", "rating": "buy", "decision": "D", "report_dir": "r"}],
-                    [{"ticker": "AAPL", "earnings_yield": 0.08, "ev_ebit": 20.0}],
-                    ["AAPL"],
-                    mock.Mock(
-                        date="2026-08-19",
-                        universe="tickers",
-                        vendor="moomoo",
-                        depth="deep",
-                        analysts=["market"],
-                        top=5,
-                    ),
-                    "T1",
-                )
-                self.assertTrue(md.exists())
-                self.assertTrue(jl.exists())
-                self.assertIn("AAPL", md.read_text(encoding="utf-8"))
-            finally:
-                import os
-
-                os.chdir(old)
+def test_write_summary_creates_files(tmp_path, monkeypatch):
+    """_write_summary writes pipeline_<stamp>.md/.jsonl under the resolved
+    output dir and lists the screened candidates."""
+    monkeypatch.chdir(tmp_path)
+    # resolve_output_path anchors to the repo root, so point it at tmp_path:
+    # otherwise the test writes into the real <repo>/reports.
+    monkeypatch.setattr(
+        "tradingagents.dataflows.utils.resolve_output_path",
+        lambda _which: tmp_path / "reports",
+    )
+    md, jl = pipeline._write_summary(
+        [{"ticker": "AAPL", "rating": "buy", "decision": "D", "report_dir": "r"}],
+        [{"ticker": "AAPL", "earnings_yield": 0.08, "ev_ebit": 20.0}],
+        ["AAPL"],
+        mock.Mock(
+            date="2026-08-19",
+            universe="tickers",
+            vendor="moomoo",
+            depth="deep",
+            analysts=["market"],
+            top=5,
+        ),
+        "T1",
+    )
+    assert md.exists() and md.name == "pipeline_T1.md"
+    assert jl.exists() and jl.name == "pipeline_T1.jsonl"
+    assert "AAPL" in md.read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

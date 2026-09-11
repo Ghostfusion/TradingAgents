@@ -139,14 +139,13 @@ def fake_hot(count=50, market="US", min_market_cap=0.0):
 @pytest.fixture(autouse=True)
 def _patch_vendors():
     # Module-level exchange caches leak across tests (a fake symbol cached
-    # as '' / 'US_NYSE' in one test pollutes the next); reset per test.
-    vs._EODHD_EXCH_CACHE.clear()
-    try:
-        from tradingagents.dataflows import moomoo as _mm
+    # as '' / 'US_NYSE' in one test pollutes the next); reset per test. The
+    # reset must not be swallowed: a broken cache attribute would otherwise
+    # leak state between tests with no signal.
+    from tradingagents.dataflows import moomoo as _mm
 
-        _mm._EXCHANGE_CACHE.clear()
-    except Exception:  # noqa: BLE001
-        pass
+    vs._EODHD_EXCH_CACHE.clear()
+    _mm._EXCHANGE_CACHE.clear()
     with (
         _patched_router(fake_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
@@ -168,12 +167,30 @@ def test_top_losers_adds_name_and_daychg_columns(capsys):
 
 
 def test_min_mcap_floor_gates_universe(capsys):
-    """Default $100B floor: only mega-cap losers survive (float cap <= total)."""
-    vs.main(["--universe", "top-losers", "-n", "2", "-d", "2026-01-02"])
-    out = capsys.readouterr().out
-    assert "Apple Inc." in out and "Microsoft Corp." in out  # both > $100B
-    vs.main(["--universe", "top-losers", "-n", "2", "-d", "2026-01-02", "--min-mcap", "0"])
-    out = capsys.readouterr().out
+    """Default $10B floor: only mega-cap losers survive; --min-mcap 0 keeps a
+    sub-floor name."""
+    movers = list(_LOSERS) + [
+        {
+            "symbol": "TINY",
+            "name": "Tiny Corp.",
+            "cur_price": 42.0,
+            "change_ratio": -0.025,
+            "pe_ttm": 12.0,
+            "market_cap": 5.0e9,
+        }
+    ]
+    with mock.patch(
+        "tradingagents.dataflows.moomoo.get_top_movers_moomoo",
+        side_effect=lambda **kw: list(movers),
+    ):
+        vs.main(["--universe", "top-losers", "-n", "3", "-d", "2026-01-02"])
+        out = capsys.readouterr().out
+        assert "Apple Inc." in out and "Microsoft Corp." in out  # both > $10B
+        assert "Tiny Corp." not in out  # $5B < default $10B floor -> gated
+
+        vs.main(["--universe", "top-losers", "-n", "3", "-d", "2026-01-02", "--min-mcap", "0"])
+        out = capsys.readouterr().out
+        assert "Tiny Corp." in out  # 0 disables the floor
 
 
 def test_save_watchlist_writes_md(tmp_path):

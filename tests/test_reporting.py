@@ -339,21 +339,75 @@ def test_risk_gate_renders_liquidity_block(tmp_path):
     assert "Liquidity verdict" not in clean.read_text(encoding="utf-8")
 
 
-def test_pm_prompt_injects_liquidity_line():
-    """The PM prompt (printed at agent creation) names the liquidity verdict
-    ground rule when the state carries a computed liquidity block."""
+def _pm_state(**overrides):
+    state = {
+        "company_of_interest": "NVDA",
+        "risk_debate_state": {
+            "history": "h",
+            "aggressive_history": "aggressive",
+            "conservative_history": "conservative",
+            "neutral_history": "neutral",
+            "current_aggressive_response": "",
+            "current_conservative_response": "",
+            "current_neutral_response": "",
+            "count": 1,
+        },
+        "investment_plan": "plan",
+        "trader_investment_plan": "trader plan",
+        "risk_context": {},
+    }
+    state.update(overrides)
+    return state
 
 
-    # The prompt template contains the literal placeholder; assert the source
-    # includes the computed-liquidity directive so the wiring can't be lost.
-    from pathlib import Path
+def _pm_prompt(state):
+    """Run the real PM node with a capturing structured LLM; return the prompt
+    it actually hands to the model."""
+    from unittest.mock import MagicMock
 
-    src = Path("tradingagents/agents/managers/portfolio_manager.py").read_text(
-        encoding="utf-8"
+    from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
+    from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+    captured = {}
+    structured = MagicMock()
+    structured.invoke.side_effect = lambda prompt: (
+        captured.__setitem__("prompt", prompt)
+        or PortfolioDecision(
+            rating=PortfolioRating.HOLD, executive_summary="x", investment_thesis="y"
+        )
     )
-    assert "Computed liquidity" in src
-    assert "liq_line" in src
-    assert "{liq_line}" in src
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    create_portfolio_manager(llm)(state)
+    return captured["prompt"]
+
+
+def test_pm_prompt_injects_liquidity_line():
+    """The PM prompt the agent actually sends names the computed liquidity
+    verdict when the state carries a liquidity block (and not otherwise)."""
+    prompt = _pm_prompt(
+        _pm_state(
+            risk_context={
+                "liquidity": {
+                    "verdict": "illiquid",
+                    "illiq": 1.2e-6,
+                    "float_turnover": 0.02,
+                    "iwf": 0.3,
+                    "dangers": ["ILLIQ=0.0000 (high price impact)"],
+                }
+            }
+        )
+    )
+    assert "**Computed liquidity risk**" in prompt
+    assert "verdict=ILLIQUID" in prompt
+    assert "ILLIQ=1.20e-06" in prompt
+    assert "float-turnover=2.00%" in prompt
+    assert "IWF=30.00%" in prompt
+    assert "ILLIQ=0.0000 (high price impact)" in prompt
+
+    # no liquidity context -> no line (backward compatible)
+    clean = _pm_prompt(_pm_state())
+    assert "Computed liquidity risk" not in clean
 
 
 def test_collapse_repeated_tables_keeps_last_per_header():

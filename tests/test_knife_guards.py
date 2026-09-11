@@ -12,6 +12,7 @@ from tradingagents.strategies.value_dip import (
     price_velocity_z,
     range_expansion_guard,
     value_dip_setup,
+    volume_dry_up,
 )
 
 pytestmark = pytest.mark.timeout(120)
@@ -89,6 +90,36 @@ def test_velocity_z_short_history_none():
 
 def test_velocity_z_degenerate_vol_none():
     assert price_velocity_z([100.0] * 40) is None  # zero variance
+
+
+def test_velocity_z_sigma_uses_trailing_window():
+    """Wild OLD bars must not inflate sigma for a calm RECENT tape."""
+    closes = [80.0 if i % 2 == 0 else 130.0 for i in range(10)]  # wild regime
+    closes += [100.0 + (i % 2) * 0.02 for i in range(25)]  # calm regime
+    z = price_velocity_z(closes)
+    assert z is not None
+    # Independently recompute sigma_daily from the trailing window returns.
+    tail = closes[-21:]
+    rets = [tail[i] / tail[i - 1] - 1.0 for i in range(1, len(tail))]
+    mean = sum(rets) / len(rets)
+    sd = (sum((r - mean) ** 2 for r in rets) / len(rets)) ** 0.5
+    expected = (closes[-1] - closes[-4]) / (closes[-1] * sd * (3 ** 0.5))
+    assert z == pytest.approx(expected, rel=1e-9)
+    # Old (leading-window) sigma would have made this move look ~0.
+    assert abs(z) > 0.1
+
+
+# --- volume dry-up baseline ---
+
+
+def test_volume_dry_up_baseline_is_prior_20_bars():
+    """Baseline is the 20 bars before the lookback window; a 5-bar slice
+    would read only the oldest five bars (10s) here."""
+    volumes = [10.0] * 5 + [1000.0] * 15 + [500.0] * 5 + [9999.0]
+    out = volume_dry_up(volumes)
+    assert out["dry_up"] is True
+    # (5 * 10 + 15 * 1000) / 20 = 752.5; 500 / 752.5 = 0.6645.
+    assert out["vdu_ratio"] == round(500.0 / 752.5, 4)
 
 
 # --- #3: ATR range expansion ---

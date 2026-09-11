@@ -111,24 +111,110 @@ def test_analyze_no_save_no_display_flags(monkeypatch):
     assert captured["save_path_arg"] is None
 
 
-def test_cli_applies_strategy_overlays_and_seeds_risk_context():
+def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_path):
     """The interactive CLI must mirror propagate(): seed risk_context before
-    the Portfolio Manager and apply the strategy overlays before saving, so a
-    CLI report carries the same Risk Gate block / position contract that the
+    the graph streams and apply the strategy overlays before saving, so a CLI
+    report carries the same Risk Gate block / position contract that the
     batch/API path renders (a former CLI-vs-batch divergence - a 12:02 batch
     NVDA report showed a Risk Gate PASS while a 13:48 CLI report showed none
     and a materially different decision)."""
-    src = Path("cli/main.py").read_text(encoding="utf-8")
+    import types
 
-    # 1) risk_context seeded into the initial state before the graph streams.
-    assert "_precompute_risk_context(" in src
-    assert 'init_agent_state["risk_context"]' in src
-    seed_pos = src.index("_precompute_risk_context(")
-    stream_pos = src.index("graph.graph.stream(")
-    assert seed_pos < stream_pos, "risk_context must be seeded before the graph runs"
+    calls: list[str] = []
+    seen_state: dict = {}
+    saved: list = []
 
-    # 2) overlays applied to the merged final_state before saving.
-    assert "_apply_strategy_overlays(" in src
-    overlay_pos = src.index("_apply_strategy_overlays(")
-    save_pos = src.rindex("save_report_to_disk(")
-    assert overlay_pos < save_pos, "overlays must run before the report is saved"
+    class _Propagator:
+        @staticmethod
+        def create_initial_state(*a, **k):
+            return {"company_of_interest": "NVDA"}
+
+        @staticmethod
+        def get_graph_args(**k):
+            return {}
+
+    class _Stream:
+        @staticmethod
+        def stream(state, **k):
+            calls.append("stream")
+            seen_state.update(state)
+            return iter([{"market_report": "m", "final_trade_decision": "**Rating**: Hold"}])
+
+    class _FakeGraph:
+        propagator = _Propagator
+        graph = _Stream
+
+        def resolve_instrument_context(self, ticker, asset_type):
+            return "NVDA (NVIDIA Corp)"
+
+        def _precompute_risk_context(self, ticker):
+            calls.append("risk_context")
+            return {"cvar_95": -0.03}
+
+        def _apply_strategy_overlays(self, state, ticker):
+            calls.append("overlays")
+            return {**state, "strategy_overlays": {"position_contract": "2.0%"}}
+
+    class _NullLive:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(m, "TradingAgentsGraph", lambda *a, **k: _FakeGraph())
+    monkeypatch.setattr(
+        m,
+        "get_user_selections",
+        lambda symbol=None: {
+            "ticker": "NVDA",
+            "analysis_date": "2026-09-10",
+            "asset_type": "stock",
+            "analysts": [types.SimpleNamespace(value="market")],
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "_build_run_config",
+        lambda selections, checkpoint: {
+            "results_dir": str(tmp_path),
+            "enable_risk_governor": True,
+        },
+    )
+    # Keep the TUI inert: no Rich rendering, no report path resolution.
+    monkeypatch.setattr(m, "create_layout", lambda: object())
+    monkeypatch.setattr(m, "update_display", lambda *a, **k: None)
+    monkeypatch.setattr(m, "update_analyst_statuses", lambda *a, **k: None)
+    monkeypatch.setattr(m, "display_complete_report", lambda *a, **k: None)
+    monkeypatch.setattr(m, "Live", _NullLive)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.utils.resolve_output_path", lambda *a, **k: tmp_path
+    )
+
+    def _fake_save(state, ticker, save_path):
+        calls.append("save")
+        saved.append((state, ticker))
+        return Path(save_path) / "decision.md"
+
+    monkeypatch.setattr(m, "save_report_to_disk", _fake_save)
+    # run_analysis rebinds these methods on the module-level buffer; let
+    # monkeypatch (not the run) own that global mutation.
+    monkeypatch.setattr(m.message_buffer, "add_message", m.message_buffer.add_message)
+    monkeypatch.setattr(m.message_buffer, "add_tool_call", m.message_buffer.add_tool_call)
+    monkeypatch.setattr(
+        m.message_buffer, "update_report_section", m.message_buffer.update_report_section
+    )
+
+    m.run_analysis(save_report=True, display_report=False, save_path_arg=tmp_path / "out")
+
+    # 1) risk_context is computed and seeded into the state the graph streams.
+    assert calls == ["risk_context", "stream", "overlays", "save"]
+    assert seen_state["risk_context"] == {"cvar_95": -0.03}
+    # 2) the saved state is the overlay-applied one, not the raw merged stream.
+    saved_state, saved_ticker = saved[0]
+    assert saved_ticker == "NVDA"
+    assert saved_state["strategy_overlays"] == {"position_contract": "2.0%"}
+    assert saved_state["final_trade_decision"] == "**Rating**: Hold"

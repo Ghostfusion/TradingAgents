@@ -123,11 +123,29 @@ class TestTool:
 
 
 def test_live_price_sanity_below_day_low_flags():
-    # a live print below the verified day low must be flagged, not reconciled
+    # A live print below the verified day low must be flagged, not reconciled.
+    # 334.35 is past the low but inside the 5% stale-print buffer, so the correct
+    # band is the OUTSIDE advisory (the old code labelled this band BELOW and the
+    # OUTSIDE branch was unreachable).
     from tradingagents.dataflows.market_data_validator import live_price_sanity
     out = live_price_sanity(334.35, 342.3305, 359.40)
-    assert "BELOW verified day-low" in out
+    assert "OUTSIDE verified bar" in out
     assert "do not reconcile" in out
+
+
+@pytest.mark.parametrize(
+    ("live", "band"),
+    [
+        (357.16, "INSIDE verified bar"),      # within [low, high]
+        (334.35, "OUTSIDE verified bar"),     # below low, inside the 5% buffer
+        (376.00, "OUTSIDE verified bar"),     # above high, inside the 5% buffer
+        (320.00, "BELOW verified day-low"),   # beyond the buffer (low*0.95 = 325.21)
+        (380.00, "ABOVE verified day-high"),  # beyond the buffer (high*1.05 = 377.37)
+    ],
+)
+def test_live_price_sanity_bands(live, band):
+    from tradingagents.dataflows.market_data_validator import live_price_sanity
+    assert band in live_price_sanity(live, 342.3305, 359.40)
 
 
 def test_live_price_sanity_inside_bar_ok():

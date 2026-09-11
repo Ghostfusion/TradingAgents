@@ -18,6 +18,7 @@ from datetime import datetime
 
 import requests as _requests
 
+from .date_window import in_window
 from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,23 @@ def _fmt(v) -> str:
         return "n/a"
 
 
+def _parse_dt(value) -> datetime | None:
+    """Parse a StockData.org date/timestamp; None when absent or unparseable."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def get_stock_data_stockdata(symbol: str, start_date: str, end_date: str) -> str:
     """End-of-day OHLCV via StockData.org ``/v1/data/eod``, as CSV.
 
@@ -118,17 +136,31 @@ def get_stock_data_stockdata(symbol: str, start_date: str, end_date: str) -> str
     capped to that window honestly (no fabrication). Matches the yfinance/moomoo
     CSV shape.
     """
-    datetime.strptime(start_date, "%Y-%m-%d")
-    datetime.strptime(end_date, "%Y-%m-%d")
-    data = _stockdata_get("v1/data/eod", {"symbols": symbol})
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    data = _stockdata_get(
+        "v1/data/eod",
+        {"symbols": symbol, "date_from": start_date, "date_to": end_date},
+    )
     if not isinstance(data, dict):
         raise NoMarketDataError(symbol, "eod", detail="no response")
     raw = data.get("data")
     rows = raw if isinstance(raw, list) else []
+    # Enforce the window locally too: a vendor that ignores date_from/date_to (or
+    # answers with its default/max range) must not leak rows dated after the run's
+    # as-of date into a backtest. An EOD row with no usable date is not a price row.
+    windowed = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        dt = _parse_dt(r.get("date"))
+        if dt is not None and in_window(dt, start_dt, end_dt):
+            windowed.append(r)
+    rows = windowed
     if not rows:
-        raise NoMarketDataError(symbol, "eod", detail="no EOD rows (free tier = ~1 month)")
+        raise NoMarketDataError(symbol, "eod", detail="no EOD rows in the requested window")
     lines = ["Date,Open,High,Low,Close,Volume"]
-        # StockData.org returns newest-first; the yfinance/moomoo/eodhd CSV is
+    # StockData.org returns newest-first; the yfinance/moomoo/eodhd CSV is
     # oldest-first, so reverse to keep downstream time-series consumers in order.
     for r in reversed(rows):
         date = str(r.get("date") or "")[:10]
@@ -185,13 +217,31 @@ def get_news_stockdata(symbol: str, start_date: str, end_date: str) -> str:
     Free tier returns 2 articles per request; we render them with headline,
     date, source and a snippet - the same shape the other news vendors produce.
     """
-    datetime.strptime(start_date, "%Y-%m-%d")
-    datetime.strptime(end_date, "%Y-%m-%d")
-    data = _stockdata_get("v1/news/all", {"symbols": symbol, "limit": 2})
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    data = _stockdata_get(
+        "v1/news/all",
+        {
+            "symbols": symbol,
+            "limit": 2,
+            "published_after": start_date,
+            "published_before": end_date,
+        },
+    )
     if not isinstance(data, dict):
         raise NoMarketDataError(symbol, "news", detail="no response")
     raw = data.get("data")
     articles = raw if isinstance(raw, list) else []
+    # Keep only articles inside the requested window; the vendor's default
+    # recency range would otherwise leak future headlines into a backtest. An
+    # undated article is left to in_window's live-vs-backtest rule.
+    windowed = []
+    for article in articles:
+        if not isinstance(article, dict):
+            continue
+        if in_window(_parse_dt(article.get("date")), start_dt, end_dt):
+            windowed.append(article)
+    articles = windowed
     if not articles:
         return f"No news found for {symbol} around {end_date} (StockData.org)"
     lines = [f"## {symbol} News — StockData.org", ""]

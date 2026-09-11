@@ -25,7 +25,6 @@ from tradingagents.agents.utils.debate_roles import (
     resolve_role_llm,
     role_fallback_models,
     role_model_spec,
-    role_tools,
 )
 from tradingagents.agents.utils.debate_structured import (
     invoke_structured_turn,
@@ -78,10 +77,6 @@ class TestRoleResolution:
         }
         assert role_fallback_models(cfg, "bull") == ("openai", "gpt-4o-mini")
         assert role_fallback_models(cfg, "judge") == ("openai", "gpt-4o")
-
-    def test_tool_surfaces_distinct(self):
-        assert set(role_tools("bull")) != set(role_tools("bear"))
-        assert role_tools("judge") == role_tools("neutral")
 
     def test_resolve_role_uses_factory(self):
         calls = {}
@@ -156,6 +151,19 @@ class TestDualModeAdapter:
     def test_parse_markdown_fence(self):
         block = parse_markdown_fence("```json\n{\"a\": 1}\n```")
         assert json.loads(block) == {"a": 1}
+
+    def test_parse_markdown_fence_ignores_stray_brace_in_prose(self):
+        """Deepseek rambles prose before the payload and the prose may hold a
+        stray '{' — the greedy first-brace-to-last-brace span is not the
+        payload, so the parser must recover the largest valid object."""
+        text = 'The bull {see the table below} argues:\n{"a": 1}'
+        assert json.loads(parse_markdown_fence(text)) == {"a": 1}
+
+    def test_parse_markdown_fence_keeps_nested_payload_whole(self):
+        """The largest accepted balanced block wins, so a payload is never
+        truncated to one of its nested sub-objects."""
+        text = 'prose {"outer": {"inner": 1}, "n": 2} trailing'
+        assert json.loads(parse_markdown_fence(text)) == {"outer": {"inner": 1}, "n": 2}
 
     def test_parse_and_validate_turn(self):
         payload = {
@@ -388,18 +396,31 @@ class TestGraphWiring:
         state["debate_state"] = {"pending_regen_role": "bear"}
         assert cl.should_continue_structured_debate(state) == "SD Bear"
 
-    def test_structured_debate_nodes_registered(self):
+    def test_structured_debate_nodes_registered(self, monkeypatch):
         from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.graph.trading_graph import TradingAgentsGraph
 
+        # Offline stub: graph construction must not depend on a live LLM
+        # factory or an API key (the SD placeholders are registered regardless
+        # of the flag). Any construction error is a real regression, not a
+        # reason to skip.
+        stub = type(
+            "L",
+            (),
+            {
+                "invoke": lambda s, p: type("R", (), {"content": "", "tool_calls": []})(),
+                "bind_tools": lambda s, *a, **k: s,
+            },
+        )()
+        monkeypatch.setattr(
+            "tradingagents.graph.trading_graph.create_llm_client",
+            lambda *a, **k: type("C", (), {"get_llm": lambda self: stub})(),
+        )
         cfg = dict(DEFAULT_CONFIG)
         cfg["enable_debate"] = False
         # Building the graph with the flag OFF must keep the legacy chain and
         # register the SD nodes as no-op placeholders (targets always exist).
-        try:
-            ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
-        except Exception:  # noqa: BLE001 - live LLM factory may be unavailable in tests
-            pytest.skip("LLM factory unavailable in this environment")
+        ta = TradingAgentsGraph(config=cfg, selected_analysts=("market",))
         nodes = set(ta.workflow.nodes)
         for n in ("SD Bull", "SD Bear", "SD L1", "SD Finalize"):
             assert n in nodes, f"missing node {n}"

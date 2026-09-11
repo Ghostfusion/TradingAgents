@@ -28,6 +28,7 @@ class SignalProcessor:
 
     def process_signal(self, full_signal: str) -> str:
         """Return one of Buy / Overweight / Hold / Underweight / Sell, or
-        REVIEW when the PM rating is unparseable (never a silent tradeable
-        Hold — upstream 0.4.0 #1170)."""
+        REVIEW when no tradeable rating could be extracted — an unparseable
+        PM rating or absent/unavailable decision text (never a silent
+        tradeable Hold: upstream 0.4.0 #1170, P0-8)."""
         return parse_rating(full_signal)

@@ -14,8 +14,11 @@ Sources, in order of authority:
    state.
 2. Known ETF universe lists (``sector_rank.INDUSTRY_ETFS``,
    ``sector_rank.SPDR_SECTORS``, ``sector_screener.EW_CW_ETFS``).
-3. Fund-trust name patterns in the resolved company name (iShares Trust,
-   Vanguard, State Street, Invesco, ...).
+3. Wrapper name patterns in the resolved company name that carry
+   fund-specific evidence: a literal ``ETF``/``Fund`` token, or a pure
+   fund-sponsor brand next to a ``Trust``/``Index`` structure. A bare issuer
+   name (JPMorgan, BlackRock, State Street, Invesco, ...) is NOT evidence -
+   those are listed operating companies and must never be classified ETF.
 4. Fallback: UNKNOWN -> current company path (no behavior change).
 
 Advisory by contract: never blocks, never raises; a classification failure
@@ -28,22 +31,23 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-# Fund-trust / issuer name patterns that identify a wrapper even when the
-# provider quote_type is missing (EDGAR CIK 0001100663 = iShares Trust for
-# IGV; the issuer names below are the standard US ETF sponsors).
-_FUND_ISSUER_RE = re.compile(
-    r"iShares|Vanguard|State Street|SPDR|Invesco|ProShares|Global X|ARK|"
-    r"VanEck|First Trust|Direxion|Amplify|Roundhill|Simplify|GraniteShares|"
-    r"YieldMax|Defiance|Tidal|Pacer|Innovator|FT Vest|JPMorgan|BlackRock|"
-    r"Fidelity|Schwab|Goldman|Morgan Stanley|BNY|Nuveen|PIMCO|WisdomTree|"
-    r"Franklin|Columbia|Hartford|Principal|American Century|Dimensional|"
-    r"Avantis|T. Rowe|Janus|Victory|Nationwide|Putnam|MFS|Federated|"
-    r"Guggenheim|ALPS|KraneShares|Sprott|Aberdeen|Valkyrie|Bitwise|"
-    r"Fidelity Covington|Trust",
+# A name may only prove a wrapper when it names one. "ETF"/"Fund" alone are
+# unambiguous wrapper words; "Trust"/"Index" are not (Northern Trust
+# Corporation is a bank holding company), so they count only next to a pure
+# fund-sponsor brand.
+_FUND_WRAPPER_RE = re.compile(r"\bETF\b|\bFund\b", re.I)
+_FUND_STRUCTURE_RE = re.compile(r"\bTrust\b|\bIndex\b", re.I)
+# ETF sponsors that are *not* also listed operating companies (EDGAR CIK
+# 0001100663 = iShares Trust for IGV). Firms like JPMorgan/BlackRock/Invesco
+# are deliberately absent: their names would otherwise re-classify the
+# operating company itself as a fund.
+_FUND_BRAND_RE = re.compile(
+    r"iShares|SPDR|Vanguard|ProShares|Global X|VanEck|Direxion|Amplify|"
+    r"Roundhill|Simplify|GraniteShares|YieldMax|Defiance|Pacer|Innovator|"
+    r"KraneShares|ALPS|Sprott|Aberdeen|Valkyrie|Bitwise|WisdomTree|"
+    r"First Trust|Tidal|FT Vest",
     re.I,
 )
-# A name that literally says it is a fund/ETF wrapper.
-_FUND_NAME_RE = re.compile(r"\bETF\b|\bFund\b|\bTrust\b|\bIndex\b", re.I)
 
 
 def _known_etf_universe() -> set[str]:
@@ -105,15 +109,19 @@ def classify_security(
         evidence.append("member of the repo's ETF universe lists")
         return {"security_type": "ETF", "confidence": "high", "evidence": evidence}
 
-    # 3. Fund-trust issuer / wrapper name patterns.
+    # 3. Wrapper name patterns. Evidence must be fund-specific: either a
+    #    literal ETF/Fund token, or an unambiguous fund brand next to a
+    #    Trust/Index structure. A bare issuer name (JPMorgan, BlackRock,
+    #    State Street, ...) is never fund evidence - those are listed
+    #    operating companies.
     name = ""
     if identity:
         name = str(identity.get("company_name") or identity.get("name") or "")
-    if name and _FUND_ISSUER_RE.search(name):
-        evidence.append(f"fund issuer name: {name[:60]}")
+    if name and _FUND_WRAPPER_RE.search(name):
+        evidence.append(f"fund wrapper name: {name[:60]}")
         return {"security_type": "ETF", "confidence": "medium", "evidence": evidence}
-    if name and _FUND_NAME_RE.search(name):
-        evidence.append(f"wrapper name pattern: {name[:60]}")
+    if name and _FUND_STRUCTURE_RE.search(name) and _FUND_BRAND_RE.search(name):
+        evidence.append(f"fund trust name: {name[:60]}")
         return {"security_type": "ETF", "confidence": "medium", "evidence": evidence}
 
     # 4. Fallback: unknown -> current company path.

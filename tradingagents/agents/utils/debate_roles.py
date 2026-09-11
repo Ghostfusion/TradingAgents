@@ -1,4 +1,4 @@
-"""P3 — Heterogeneous per-role LLM resolution + tool surfaces for the debate.
+"""P3 — Heterogeneous per-role LLM resolution for the debate.
 
 ``resolve_role_llm`` rides the existing ``create_llm_client`` registry: a
 ``debate_*_model`` config value of ``"family:id"`` (or ``"provider:model"``)
@@ -129,53 +129,10 @@ def resolve_role_llm(
     return client
 
 
-# Per-role tool surfaces (design §4.1): DIFFERENT tool sets per role.
-BULL_TOOLS = (
-    "get_swing_set",
-    "get_relative_strength",
-    "get_growth_metrics",
-    "get_insider_activity",
-    "get_momentum_scan",
-    "get_extended_indicators",
-    "get_analyst_verdict",
-    "get_earnings_surprise",
-    "get_dcf_valuation",
-)
-BEAR_TOOLS = (
-    "get_tail_risk",
-    "get_liquidity_risk",
-    "get_credit_spread_read",
-    "get_short_interest",
-    "get_horizon_var",
-    "get_book_tail_risk",
-    "get_regime_gate_read",
-    "get_fixed_income_risk",
-    "get_vol_cones",
-)
-NEUTRAL_EVIDENCE_TOOLS = (
-    "get_verified_market_snapshot",
-    "get_trade_plan",
-    "get_risk_gate",
-)
-
-
-def role_tools(role: str) -> tuple[str, ...]:
-    """Tool surface for a role; judge + neutral evidence share the neutral set."""
-    if role == "bull":
-        return BULL_TOOLS
-    if role == "bear":
-        return BEAR_TOOLS
-    return NEUTRAL_EVIDENCE_TOOLS
-
-
 __all__ = [
     "DEFAULT_TIER",
     "role_fallback_models",
     "role_model_spec",
     "build_role_llm_kwargs",
     "resolve_role_llm",
-    "BULL_TOOLS",
-    "BEAR_TOOLS",
-    "NEUTRAL_EVIDENCE_TOOLS",
-    "role_tools",
 ]

@@ -636,6 +636,14 @@ class ActionConditionVerdict(BaseModel):
     )
 
 
+def render_action_condition_verdict(verdict: ActionConditionVerdict) -> str:
+    """Render an ActionConditionVerdict to the compact line the report uses."""
+    parts = [f"**Verdict**: {verdict.verdict}"]
+    if verdict.reasons:
+        parts.append("**Reasons**: " + "; ".join(verdict.reasons))
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Structured multi-agent debate — canonical wire schemas
 # (design docs/design_multi_agent_debate.md §4.7, rev v3; pydantic mirrors of

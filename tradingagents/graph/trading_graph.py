@@ -27,7 +27,14 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.reporting import write_report_tree
 
-from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
+from .checkpointer import (
+    checkpoint_step,
+    clear_checkpoint,
+    forget_run,
+    get_checkpointer,
+    resolve_run_id,
+    thread_id,
+)
 from .conditional_logic import ConditionalLogic
 from .propagation import Propagator
 from .reflection import Reflector
@@ -266,6 +273,8 @@ class TradingAgentsGraph:
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
+        # (signature, run_id) of the in-flight checkpointed run; set by propagate.
+        self._checkpoint_scope: tuple[str, str] | None = None
 
     def _get_provider_kwargs(self, provider: str | None = None) -> dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation.
@@ -510,8 +519,12 @@ class TradingAgentsGraph:
         """Graph-shape inputs that must invalidate a checkpoint if changed.
 
         Keyed into the checkpoint thread ID so a resume under a different analyst
-        selection, debate/risk depth, or asset mode starts fresh instead of
-        silently continuing the previous graph (#1089).
+        selection, debate/risk depth, debate mode, or asset mode starts fresh
+        instead of silently continuing the previous graph (#1089). ``enable_debate``
+        swaps the whole research-debate node set (structured Bull/Bear/L1/
+        Finalize vs the legacy Bull/Bear/Aggressive/Conservative/Neutral), so a
+        checkpoint from the other mode would replay a pending node the resumed
+        graph does not contain.
         """
         return "|".join(
             [
@@ -520,6 +533,7 @@ class TradingAgentsGraph:
                 f"risk={self.config['max_risk_discuss_rounds']}",
                 f"asset={asset_type}",
                 f"conc={self.config.get('analyst_concurrency', 1)}",
+                f"debate_mode={bool(self.config.get('enable_debate', False))}",
             ]
         )
 
@@ -532,6 +546,9 @@ class TradingAgentsGraph:
         ``checkpoint_enabled`` is set in config, the graph is recompiled with
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
+        Each run checkpoints under its own thread id (``config["run_id"]`` when
+        given, else an id resolved by ``checkpointer.resolve_run_id``) so two
+        concurrent runs of the same ticker+date never clear each other's rows.
         """
         self.ticker = company_name
 
@@ -540,16 +557,21 @@ class TradingAgentsGraph:
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
-            self._checkpointer_ctx = get_checkpointer(self.config["data_cache_dir"], company_name)
+            data_dir = self.config["data_cache_dir"]
+            self._checkpointer_ctx = get_checkpointer(data_dir, company_name)
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
-            step = checkpoint_step(
-                self.config["data_cache_dir"],
+            signature = self._run_signature(asset_type)
+            run_id = resolve_run_id(
+                data_dir,
                 company_name,
                 str(trade_date),
-                self._run_signature(asset_type),
+                signature,
+                str(self.config.get("run_id") or ""),
             )
+            self._checkpoint_scope = (signature, run_id)
+            step = checkpoint_step(data_dir, company_name, str(trade_date), signature, run_id)
             if step is not None:
                 logger.info("Resuming from step %d for %s on %s", step, company_name, trade_date)
             else:
@@ -569,6 +591,7 @@ class TradingAgentsGraph:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
+                self._checkpoint_scope = None
                 self.graph = self.workflow.compile()
 
     def save_reports(self, final_state, ticker, save_path=None) -> Path:
@@ -624,10 +647,11 @@ class TradingAgentsGraph:
         )
         args = self.propagator.get_graph_args()
 
-        # Inject thread_id so same ticker+date+graph-shape resumes; a different
-        # date or graph shape starts fresh (#1089).
-        if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
+        # Inject thread_id so same ticker+date+graph-shape+run resumes; a
+        # different date, graph shape or run starts fresh (#1089).
+        if self._checkpoint_scope is not None:
+            signature, run_id = self._checkpoint_scope
+            tid = thread_id(company_name, str(trade_date), signature, run_id)
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         if self.debug:
@@ -687,13 +711,23 @@ class TradingAgentsGraph:
             final_trade_decision=final_state["final_trade_decision"],
         )
 
-        # Clear checkpoint on successful completion to avoid stale state.
-        if self.config.get("checkpoint_enabled"):
+        # Clear this run's checkpoint on successful completion to avoid stale
+        # state; never a concurrent run's thread.
+        if self._checkpoint_scope is not None:
+            signature, run_id = self._checkpoint_scope
             clear_checkpoint(
                 self.config["data_cache_dir"],
                 company_name,
                 str(trade_date),
-                self._run_signature(asset_type),
+                signature,
+                run_id,
+            )
+            forget_run(
+                self.config["data_cache_dir"],
+                company_name,
+                str(trade_date),
+                signature,
+                run_id,
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])

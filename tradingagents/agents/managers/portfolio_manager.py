@@ -23,6 +23,37 @@ from tradingagents.agents.utils.structured import (
 )
 
 
+def _risk_rows_from_rounds(ds: dict) -> list[dict]:
+    """Structured risk factors from the risk-debate rounds, as guardrail rows.
+
+    ``stabilize_decision`` caps at Hold on any row whose severity is high
+    (rule 1); the debate's severity vocabulary is LOW/MEDIUM/HIGH/CRITICAL.
+    Stored payloads carry ``RiskSeverity`` members - a ``str`` subclass whose
+    ``str()`` is ``"RiskSeverity.HIGH"`` - so read ``.value`` before
+    normalising.  HIGH and CRITICAL are emitted as the ``"high"`` tier the
+    rule compares against, so the documented ``>= high`` threshold holds
+    without widening the guardrail's predicate.  Deterministic: rows follow
+    round / payload / factor order.
+    """
+    rows: list[dict] = []
+    for record in ds.get("round_records") or []:
+        if not isinstance(record, dict):
+            continue
+        for payload in record.values():
+            if not isinstance(payload, dict):
+                continue
+            for factor in payload.get("risk_factors") or []:
+                if not isinstance(factor, dict):
+                    continue
+                raw = getattr(factor.get("severity"), "value", factor.get("severity"))
+                severity = str(raw or "").strip().lower()
+                if severity:
+                    rows.append(
+                        {"severity": "high" if severity in ("high", "critical") else severity}
+                    )
+    return rows
+
+
 def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
 
@@ -52,8 +83,15 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
                 )
                 stances = []
                 for key in ("aggressive_history", "conservative_history", "neutral_history"):
-                    for chunk in (risk_debate_state.get(key) or [])[-3:]:
-                        if isinstance(chunk, str):
+                    hist = risk_debate_state.get(key) or []
+                    # The graph stores a list of chunks, but a hand-built or
+                    # legacy state can carry a plain string - treat that as a
+                    # single chunk. Slicing characters out of a string would
+                    # otherwise yield garbage "ratings" (masked for a long time
+                    # by parse_rating's old implicit Hold default).
+                    chunks = [hist] if isinstance(hist, str) else list(hist)
+                    for chunk in chunks[-3:]:
+                        if isinstance(chunk, str) and chunk.strip():
                             stances.append(parse_rating(chunk))
                 score = agreement_score(stances)
                 # Weighted stance + threshold-HOLD (advisory, deterministic):
@@ -255,12 +293,12 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
                 if not get_config().get("enable_decision_guardrail"):
                     return
                 rating = result.rating.value
-                risk_rows = [
-                    {"severity": "high"} if (
-                        isinstance(v, dict) and str(v.get("severity", "")).lower() == "high"
-                    ) else {}
-                    for v in (risk_matrix_block and [{}] or [])
-                ]
+                # Risk rows come from the structured risk-debate state - the
+                # same source the matrix/judge blocks above consume. The old
+                # `risk_matrix_block and [{}] or []` iterable was a non-empty
+                # STRING, so it always yielded [{}] (severity "") and rule 1
+                # could never fire.
+                risk_rows = _risk_rows_from_rounds(rds)
                 out = stabilize_decision(rating, risk_rows=risk_rows)
                 if out["rating"] != rating:
                     result.rating = type(result.rating)(out["rating"])

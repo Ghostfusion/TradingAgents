@@ -394,7 +394,12 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 
 
         "eps actual":(re.compile(r"\beps\s+actual\b", re.I), 0.005),
-        "eps estimate":(re.compile(r"\beps\s+actual\b.*?\best(?:imate)?\b", re.I), 0.002),
+        # Keyed on the ESTIMATE token, not on the literal "eps actual" that was
+        # required to precede it: that requirement meant two conflicting EPS
+        # estimates on otherwise clean lines were never compared, and it merely
+        # re-ran the separate "eps actual" trigger. Matches "EPS estimate/est"
+        # and an "EPS ... estimate/est" pairing on one line.
+        "eps estimate": (re.compile(r"\beps\b[^\n]{0,40}?\best(?:imate)?\b", re.I), 0.002),
     "earnings power value": (re.compile(r"earnings\s*power\s*value|epv", re.I), 0.01),
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
@@ -410,7 +415,9 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "ema20":(re.compile(r"\bema\s*20\b(?=[^0-9|]{0,20}?\d)", re.I), 0.005),
         "atr":(re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),0.005),
     # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
-    # real conflict, so level-type metrics use a 0.1% bucket.
+    # real conflict, so level-type metrics use a 0.1% bucket. Their values come
+    # from the pair-aware reader (_METRIC_VALUE_READERS); these patterns are the
+    # fallback for the "2xR" / "T 1(2R)" spellings.
     "t1": (re.compile(r"\bT1\b|2R|2xR|T\s*1\s*(?:\(|2R)", re.I), 0.0005),
     "t2": (re.compile(r"\bT2\b|3R|3xR", re.I), 0.001),
     # MU 2026-09-10 fundamentals review loop: EV/EBIT quoted at 65.2 (analyst verdict) and 66.65 (get_ratios) while the leaves show 113.91 / 113.80 - the pair must surface as one conflict.
@@ -458,8 +465,11 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 
 # A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
 # "$80.60", "79.78B", "5.7B". Used to extract the numeric value attached to a
-# metric. Returns (value, unit_multiplier) or None.
-_DOLLAR_RE = re.compile(r"(?<![\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?")
+# metric. Returns (value, unit_multiplier) or None. A digit carrying an
+# R-multiple suffix ("3R", "2xR") is NOT a figure: reading the "3" of
+# "3R targets ..." as a price is what let a wrong 3R go uncompared
+# (MU 2026-09-09 review loop).
+_DOLLAR_RE = re.compile(r"(?<![\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?(?![xX]?R\b)")
 
 # ---------------------------------------------------------------------------
 # Macro-authority gate (deterministic; SKHY 2026-09-09 review loop)
@@ -574,6 +584,48 @@ def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, floa
     return out
 
 
+# R-multiple labels as a swing line writes them: a chained pair sharing one
+# target list ("2R/3R targets **1357.69 / 1521.68**" — the lead label owns the
+# first value, the trailing label the second) or a lone label with its own
+# value ("T1 611.85"). The window reader above cannot bind the chained form
+# (the "2R" is followed by "/3R", not by a number), so it read the "3" of
+# "3R" as T1 and the 2R price as T2 — a genuinely wrong 3R was never compared
+# against its twin (MU 2026-09-09 review loop).
+_R_LABEL_PAIR_RE = re.compile(
+    r"\b(?:(2R|2xR|3R|3xR|T1|T2)\s*/\s*)?(2R|2xR|3R|3xR|T1|T2)\b"
+    r"[^0-9]{0,8}\s*:?\s*\$?\s*\**\s*([\d,]+\.\d+)(?:\s*/\s*([\d,]+\.\d+))?"
+)
+
+
+# Labels whose value is the SECOND leg of a quoted pair.
+_R_SECOND_LEG = {"3R", "3XR", "T2"}
+
+
+def _rmult_metric_values(text: str, labels: tuple[str, ...]) -> list[tuple[str, float]]:
+    """``(raw, value)`` for the R-label legs named in ``labels`` (pair-aware)."""
+    out: list[tuple[str, float]] = []
+    for line in text.splitlines():
+        for m in _R_LABEL_PAIR_RE.finditer(line):
+            lead, trail, first, second = m.groups()
+            for label in (lead, trail):
+                if not label or label.upper() not in labels:
+                    continue
+                # The 3R/T2-style label owns the second leg of a quoted pair
+                # ("3R targets A / B"); every other spelling owns the first
+                # (also when no pair is present at all).
+                raw = second if second and label.upper() in _R_SECOND_LEG else first
+                out.append((raw, float(raw.replace(",", ""))))
+    return out
+
+
+# Per-metric value reader: t1/t2 are R-multiple legs whose values only make
+# sense under the pair semantics above ("xR" is the same label as "R").
+_METRIC_VALUE_READERS = {
+    "t1": lambda text: _rmult_metric_values(text, ("2R", "2XR", "T1")),
+    "t2": lambda text: _rmult_metric_values(text, ("3R", "3XR", "T2")),
+}
+
+
 _FED_CUTS_LABEL_RE = re.compile(r"(?i)fed\s*rate?\s*cuts?\s+in\s+2026|will\s*fed\s*rate\s*cuts?|no\s*fed\s*rate\s*cuts|fed\s*cuts\s+2026|no\s*rate\s*cuts")
 _PCT_OF = re.compile(r"\b(Yes|No)\b[^0-9]{0,14}?(\d{1,3})%?")
 
@@ -627,7 +679,12 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
         return []
     conflicts: list[VerifierClaim] = []
     for label, (regex, tol) in _INTERNAL_CONFLICT_METRICS.items():
-        vals = _extract_metric_values(report_text, regex)
+        # R-multiple legs (t1/t2) read the value bound to their own label; the
+        # label regex stays as the fallback for its other spellings.
+        reader = _METRIC_VALUE_READERS.get(label)
+        vals = reader(report_text) if reader else []
+        if not vals:
+            vals = _extract_metric_values(report_text, regex)
         # Group near-equal values; flag when >1 distinct cluster.
         distinct: list[tuple[float, str]] = []
         for raw, v in vals:
@@ -1146,7 +1203,13 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             ))
     return out
 
-_TEMA_VAL = re.compile(r"10\s*-?\s*EMA\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I)
+# A separator ("=", ":", "is", "at") may sit between the label and the value:
+# "10-EMA = 54.66" is the common written form and the old pattern only matched
+# the space/paren shapes ("10-EMA 54.66", "10-EMA (graph 55.54)"), so a report
+# that quoted the 10-EMA as "= NN.NN" never entered the identity check at all.
+_TEMA_VAL = re.compile(
+    r"10\s*-?\s*EMA\s*(?:=|:|is|at)?\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I
+)
 _TRAIL_VAL = re.compile(r"EMA\s*-?\s?trail[^0-9]{0,12}?([0-9]+\.?[0-9]*)", re.I)
 
 

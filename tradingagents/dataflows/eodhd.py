@@ -43,12 +43,13 @@ def eodhd_api_key() -> str | None:
     return os.environ.get("EODHD_API_KEY") or os.environ.get("TRADINGAGENTS_EODHD_API_KEY")
 
 
-def _eodhd_get(path: str, params: dict | None = None) -> dict | list | None:
-    """GET ``BASE/{path}`` with api_token; parsed JSON or None on any failure.
+def _eodhd_get(path: str, params: dict | None = None) -> dict | list:
+    """GET ``BASE/{path}`` with api_token; parsed JSON on success.
 
     EODHD returns HTTP 200 with a JSON error body (``{"code": ..., "message":
     ...}``) for most failures, and HTTP 429 for rate limits. This helper
-    classifies both so the router can fall through cleanly.
+    classifies both (raising a typed vendor error) so the router can fall
+    through cleanly.
     """
     import requests as _requests
 
@@ -98,7 +99,6 @@ def _eodhd_get(path: str, params: dict | None = None) -> dict | list | None:
                 raise VendorRateLimitError(f"EODHD rate limit: {msg}")
             raise NoMarketDataError("eodhd", path, detail=msg)
         return data
-    return None
 
 
 def get_stock_data_eodhd(symbol: str, start_date: str, end_date: str) -> str:

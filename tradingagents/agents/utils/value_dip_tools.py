@@ -21,75 +21,8 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.agents.utils.analysis_tools import _ohlcv, _scale_note
 from tradingagents.dataflows.interface import route_to_vendor
-
-# ---------------------------------------------------------------------------
-# Shared data helpers (mirror analysis_tools.py conventions)
-# ---------------------------------------------------------------------------
-
-
-def _load_ohlcv_df(ticker: str) -> object:
-    """Fetch the verified OHLCV frame (test seam; prod uses load_ohlcv)."""
-    from datetime import datetime
-
-    from tradingagents.dataflows.stockstats_utils import load_ohlcv
-
-    return load_ohlcv(ticker, datetime.now().strftime("%Y-%m-%d"))
-
-
-def _scale_note(ticker: str, closes: list) -> str:
-    """Price-scale/staleness advisory vs the run's verified close."""
-    from tradingagents.agents.utils.price_consistency import ohlcv_scale_warning
-
-    warn = ohlcv_scale_warning(ticker, closes[-1] if closes else None)
-    return ("\n" + warn) if warn else ""
-
-
-def _ohlcv(ticker: str, days: int = 320) -> dict:
-    """Daily OHLCV via the verified-snapshot source (date-aware, look-ahead-safe).
-
-    Returns {"dates", "closes", "highs", "lows", "volumes", "opens"} (all
-    empty on failure). Uses ``stockstats_utils.load_ohlcv`` — the same
-    date-aware, look-ahead-filtered source as the verified market snapshot —
-    so value-dip / support / bollinger tools compute on the same day's prices
-    as the verified close (N21: the old vendor chain lagged a session or
-    returned a ~2x-scale series, e.g. MSTR 284.92 vs verified 136.68).
-    """
-    try:
-        _df = _load_ohlcv_df(ticker)
-        if _df is None or _df.empty:
-            raise ValueError("no rows")
-        dates = [str(x)[:10] for x in _df["Date"].tolist()]
-        closes = [float(x) for x in _df["Close"].tolist()]
-        opens = [float(x) for x in _df["Open"].tolist()]
-        highs = [float(x) for x in _df["High"].tolist()]
-        lows = [float(x) for x in _df["Low"].tolist()]
-        volumes = [float(x) for x in _df["Volume"].tolist()]
-        if days and len(closes) > days:
-            tail = len(closes) - int(days)
-            dates = dates[tail:]
-            opens = opens[tail:]
-            highs = highs[tail:]
-            lows = lows[tail:]
-            closes = closes[tail:]
-            volumes = volumes[tail:]
-        return {
-            "dates": dates,
-            "closes": closes,
-            "highs": highs,
-            "lows": lows,
-            "volumes": volumes,
-            "opens": opens,
-        }
-    except Exception:  # noqa: BLE001 - a fetch failure degrades, never raises
-        return {
-            "dates": [],
-            "closes": [],
-            "opens": [],
-            "highs": [],
-            "lows": [],
-            "volumes": [],
-        }
 
 
 def _period_price_series(dates: list, closes: list) -> dict:
@@ -779,9 +712,7 @@ def get_value_dip_setup(
         _idx_closes = []
         if _idx_sym:
             try:
-                from tradingagents.agents.utils.analysis_tools import _ohlcv as _ot_ohlcv
-
-                _idx_closes = _ot_ohlcv(_idx_sym).get("closes") or []
+                _idx_closes = _ohlcv(_idx_sym).get("closes") or []
             except Exception:  # noqa: BLE001
                 _idx_closes = []
         regime_row = regime_gate_read(
@@ -1353,8 +1284,6 @@ def get_value_floors(
     fin = _canonical_financials(ticker, current_date)
     price = None
     try:
-        from tradingagents.agents.utils.analysis_tools import _ohlcv
-
         closes = _ohlcv(ticker).get("closes") or []
         price = float(closes[-1]) if closes else None
     except Exception:  # noqa: BLE001

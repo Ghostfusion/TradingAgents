@@ -617,15 +617,16 @@ def volume_dry_up(
     lookback: int = 5,
     ratio: float = 0.7,
 ) -> dict:
-    """Volume dry-up (VDU): selling volume drops below 70% of the 20-day
-    average near support (§2). ``lookback`` bars before the trigger day are
-    compared against the prior ``window`` bars, so the trigger candle's own
-    volume does not count against the dry-up.
+    """Volume dry-up (VDU): selling volume drops below 70% of the ``window``
+    -day average near support (§2). The ``lookback`` bars before the trigger
+    day are compared against the ``window`` bars ending immediately before
+    them, so the trigger candle's own volume does not count against the
+    dry-up.
     """
     if not volumes or len(volumes) < window + lookback + 1:
         return {"dry_up": None, "vdu_ratio": None}
     recent = volumes[-lookback - 1 : -1]
-    prior = volumes[-window - lookback - 1 : -window - 1]
+    prior = volumes[-window - lookback - 1 : -lookback - 1]
     pm = sum(prior) / len(prior) if prior else 0.0
     if pm <= 0:
         return {"dry_up": None, "vdu_ratio": None}
@@ -885,7 +886,8 @@ def price_velocity_z(
     """Normalized price-velocity z-score (knife-guard read).
 
     ``v = (P_t - P_{t-tau}) / (P_t * sigma_daily * sqrt(tau))`` where
-    ``sigma_daily`` is the rolling std of daily returns over ``window``. An
+    ``sigma_daily`` is the realized std of daily returns over the TRAILING
+    ``window`` bars (the same regime as the move being scored). An
     unresolved cascade prints a large negative z; a healthy pullback in a
     calm tape stays mild. Returns None when history is too short or vol is
     degenerate (never fabricates).
@@ -904,7 +906,7 @@ def price_velocity_z(
     price = float(closes[-1])
     past = float(closes[-1 - lookback])
     rets = []
-    for i in range(1, window + 1):
+    for i in range(max(1, len(closes) - window), len(closes)):
         if closes[i] > 0 and closes[i - 1] > 0:
             rets.append(closes[i] / closes[i - 1] - 1.0)
     if len(rets) < window * 0.6:

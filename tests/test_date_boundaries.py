@@ -42,11 +42,15 @@ def test_get_yfin_requests_inclusive_end(monkeypatch):
 @pytest.mark.unit
 def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
     set_config({"data_cache_dir": str(tmp_path)})
+    frozen = pd.Timestamp("2025-06-10")
+    # Pin the clock: the cache window and the requested end are both derived
+    # from "today", so an unfrozen test silently changes meaning each day.
+    monkeypatch.setattr(pd.Timestamp, "today", classmethod(lambda cls: frozen))
     captured = {}
 
     def fake_download(symbol, start, end, **kwargs):
         captured["end"] = end
-        idx = pd.to_datetime([pd.Timestamp.today().normalize()])
+        idx = pd.to_datetime([frozen.normalize()])
         return pd.DataFrame(
             {"Open": [100.0], "High": [100.0], "Low": [100.0],
              "Close": [100.0], "Volume": [1]},
@@ -54,8 +58,7 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(su.yf, "download", fake_download)
-    today = pd.Timestamp.today().strftime("%Y-%m-%d")
-    su.load_ohlcv("AAPL", today)
+    su.load_ohlcv("AAPL", "2025-06-10")
 
-    expected_end = (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    assert captured["end"] == expected_end  # tomorrow -> today's row included (#986)
+    # One day past the current day, so the current day's row is included (#986).
+    assert captured["end"] == "2025-06-11"

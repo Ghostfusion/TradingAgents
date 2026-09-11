@@ -7,7 +7,8 @@ most decision-relevant fundamental/event datasets Finnhub provides beyond news:
   1. ``get_analyst_ratings``  — recommendation trends + price targets
      (a consensus benchmark the fundamental analyst should argue against).
   2. ``get_earnings_calendar`` — upcoming earnings dates (the dominant
-     single-day price catalyst), plus the last reported EPS surprise.
+     single-day price catalyst) over a forward window from the as-of date,
+     plus any reported EPS figures the vendor returns for it.
 
 Both follow the vendor taxonomy in ``errors.py``: a missing key raises
 ``FinnhubNotConfiguredError`` so the routing layer treats the vendor as
@@ -18,11 +19,12 @@ so the router emits an honest "no data" signal rather than an empty string.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import finnhub
 
 from .config import get_config
+from .date_window import in_window
 from .errors import NoMarketDataError, VendorNotConfiguredError
 
 logger = logging.getLogger(__name__)
@@ -49,11 +51,13 @@ def _client() -> finnhub.Client:
     return finnhub.Client(api_key=api_key)
 
 
-def _date_window(end_date: str, look_back_days: int) -> tuple[str, str]:
-    """Return (start_date, end_date) as yyyy-mm-dd strings."""
-    end = datetime.strptime(end_date, "%Y-%m-%d")
-    start = (end - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
-    return start, end_date
+def _article_published(article) -> datetime | None:
+    """Finnhub article publish time: the ``datetime`` epoch (seconds) as UTC."""
+    ts = article.get("datetime") if isinstance(article, dict) else None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 def get_news_finnhub(ticker, start_date, end_date):
@@ -81,15 +85,40 @@ def get_news_finnhub(ticker, start_date, end_date):
 
 
 def get_global_news_finnhub(curr_date, look_back_days=None, limit=None):
+    """Global market news trimmed to ``[curr_date - look_back_days, curr_date]``.
+
+    Finnhub's ``general_news`` feed is live-only, so a historical/backtest run
+    must filter it or it sees today's headlines (look-ahead). ``look_back_days``
+    and ``limit`` default to the configured ``global_news_lookback_days`` /
+    ``global_news_article_limit``, the same defaults the yfinance and
+    alpha_vantage siblings use.
+    """
+    config = get_config()
+    if look_back_days is None:
+        look_back_days = config["global_news_lookback_days"]
+    if limit is None:
+        limit = config["global_news_article_limit"]
+
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_dt = end_dt - timedelta(days=int(look_back_days))
+
     finnhub_client = _client()
+    news = finnhub_client.general_news("general", min_id=0) or []
 
-    news = finnhub_client.general_news("general", min_id=0)
+    kept = []
+    for article in news:
+        if len(kept) >= int(limit):
+            break
+        if not isinstance(article, dict):
+            continue
+        if in_window(_article_published(article), start_dt, end_dt):
+            kept.append(article)
 
-    if not news:
-        return "No global news found"
+    if not kept:
+        return f"No global news found between {start_dt:%Y-%m-%d} and {curr_date}"
 
     news_str = ""
-    for article in news:
+    for article in kept:
         headline = article.get("headline", "No Title")
         summary = article.get("summary", "")
         url = article.get("url", "")
@@ -161,20 +190,23 @@ def get_earnings_calendar_finnhub(
     curr_date: str,
     look_back_days: int | None = None,
 ) -> str:
-    """Fetch upcoming earnings dates + last reported EPS surprise for a ticker.
+    """Fetch upcoming earnings dates for a ticker (forward-looking window).
 
-    ``earnings_calendar`` returns the next earnings date (and, for some
-    symbols, the previous quarter's estimate/actual/surprise). Raises
-    ``NoMarketDataError`` when no upcoming earnings entry is returned.
+    ``earnings_calendar`` is queried over ``[curr_date, curr_date +
+    look_back_days]``: the tool's purpose is the next scheduled catalyst, so a
+    backward window could never return it. Any EPS estimate/actual/surprise
+    the vendor reports for those dates is rendered too. Raises
+    ``NoMarketDataError`` when no earnings entry is returned in the window.
     """
     if look_back_days is None:
         look_back_days = 30
 
-    start_date, end_date = _date_window(curr_date, look_back_days)
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    end_date = (end_dt + timedelta(days=int(look_back_days))).strftime("%Y-%m-%d")
     finnhub_client = _client()
 
     earnings = finnhub_client.earnings_calendar(
-        _from=start_date, to=end_date, symbol=ticker, international=False
+        _from=curr_date, to=end_date, symbol=ticker, international=False
     )
 
     if not earnings or not isinstance(earnings, dict):
@@ -262,7 +294,7 @@ def get_company_peers_finnhub(ticker: str) -> str:
     finnhub_client = _client()
     peers = finnhub_client.company_peers(ticker) or []
     if not peers:
-        raise NoMarketDataError(ticker, "no peer data returned")
+        raise NoMarketDataError(ticker, detail="no peer data returned")
     canon, seen = [], set()
     for p in peers[:24]:
         n = _normalize_peer(p)
@@ -275,28 +307,32 @@ def get_company_peers_finnhub(ticker: str) -> str:
     return "Peers: " + ", ".join(canon)
 
 
-def get_insider_activity_finnhub(ticker: str, months: int = 12) -> str:
+_INSIDER_WINDOW_MONTHS = 12
+
+
+def get_insider_activity_finnhub(symbol: str, curr_date: str | None = None) -> str:
     """Finnhub insider sentiment (free tier) -> deterministic numeric read.
 
-    ``stock/insider-sentiment`` requires explicit from/to dates; we use the
-    last ``months``. Returns the summed net insider change, the recent-vs-prior
-    trend, and the latest month's mspr (the proprietary score) so the analyst
-    gets a handful of numbers, not a row dump.
+    ``stock/insider-sentiment`` requires explicit from/to dates. ``curr_date``
+    (yyyy-mm-dd) is the analysis as-of date and ends the window, so a
+    historical/backtest run never sees insider activity published after it.
+    ``curr_date=None`` falls back to the wall clock for live callers that have
+    no as-of date - a backtest MUST pass ``curr_date``.
+
+    Returns the summed net insider change, the recent-vs-prior trend, and the
+    latest month's mspr (the proprietary score) so the analyst gets a handful
+    of numbers, not a row dump.
     """
     finnhub_client = _client()
 
-    def _window():
-        from datetime import datetime, timedelta
+    end = datetime.strptime(curr_date, "%Y-%m-%d") if curr_date else datetime.now()
+    start = end - timedelta(days=_INSIDER_WINDOW_MONTHS * 30)
+    _from, to = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
-        end = datetime.now()
-        start = end - timedelta(days=int(months) * 30)
-        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-
-    _from, to = _window()
-    data = finnhub_client.stock_insider_sentiment(ticker, _from=_from, to=to) or {}
+    data = finnhub_client.stock_insider_sentiment(symbol, _from=_from, to=to) or {}
     rows = data.get("data") or []
     if not rows:
-        raise NoMarketDataError(ticker, detail="no insider sentiment in window")
+        raise NoMarketDataError(symbol, detail="no insider sentiment in window")
     net = sum(float(r.get("change") or 0.0) for r in rows)
     n = len(rows)
     last = rows[0]
@@ -305,8 +341,8 @@ def get_insider_activity_finnhub(ticker: str, months: int = 12) -> str:
     prior = sum(float(r.get("change") or 0.0) for r in rows[half:]) if len(rows) > half else 0.0
     trend = "accelerating" if recent > prior else ("decelerating" if prior > 0 else "flat")
     lines = [
-        f"## Insider Sentiment — {ticker.upper()} (Finnhub)",
-        f"- Window: last {months} months, {n} periods",
+        f"## Insider Sentiment — {symbol.upper()} (Finnhub)",
+        f"- Window: last {_INSIDER_WINDOW_MONTHS} months, {n} periods",
         f"- Net change (sum, shares): {net:,.0f}",
         f"- Recent {half} vs prior {len(rows) - half}: {recent:,.0f} vs {prior:,.0f}",
         f"- Trend: {trend}",

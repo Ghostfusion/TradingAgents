@@ -33,6 +33,8 @@ def _nearest_expiry(expiries: list[str], curr_date: str) -> str | None:
 
     Options at/inside a few days of expiry are dominated by pin/expiry noise and
     thin liquidity; prefer the first expiry comfortably beyond the trade date.
+    When nothing clears the cutoff, fall back to the NEAREST available expiry
+    (yfinance returns expiries ascending), never the farthest.
     """
     if not expiries:
         return None
@@ -40,13 +42,18 @@ def _nearest_expiry(expiries: list[str], curr_date: str) -> str | None:
         cutoff = datetime.strptime(curr_date, "%Y-%m-%d") + timedelta(days=3)
     except ValueError:
         cutoff = datetime.now() + timedelta(days=3)
+    dated = []
     for exp in sorted(expiries):
         try:
-            if datetime.strptime(exp, "%Y-%m-%d") >= cutoff:
-                return exp
+            dated.append((datetime.strptime(exp, "%Y-%m-%d"), exp))
         except ValueError:
             continue
-    return expiries[-1]
+    if not dated:
+        return None
+    for exp_dt, exp in dated:
+        if exp_dt >= cutoff:
+            return exp
+    return dated[0][1]
 
 
 def _option_greeks_row(row) -> dict:

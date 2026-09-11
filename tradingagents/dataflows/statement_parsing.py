@@ -33,8 +33,23 @@ from tradingagents.dataflows.quantitative_scores import (
 
 logger = logging.getLogger("statement_parsing")
 
+# Labels that must never stand in for a canonical item even though one of its
+# aliases matches them as a substring. Order within ``_ROW_ALIASES`` alone
+# cannot express these: ``'ebit' in 'ebitda'`` matches the EBITDA line for
+# ``operating_income``, and the combined "Total Liabilities And Equity" balance
+# line matches the ``total_liabilities`` / ``total_debt`` aliases although it
+# also carries shareholders' equity. Excluded labels are skipped and the alias
+# scan continues, so a real standalone row still wins when one exists.
+_ROW_LABEL_EXCLUDES = {
+    "operating_income": ("ebitda",),
+    "total_liabilities": ("equity",),
+    "total_debt": ("equity",),
+}
+
 _ROW_ALIASES = {
-    "revenue": ["total revenue", "revenue", "operating income", "sales"],
+    # ``sales`` must precede the ``operating income`` last-resort alias, else a
+    # payload carrying both reports operating income as revenue (P0-10).
+    "revenue": ["total revenue", "revenue", "sales", "operating income"],
     "cogs": ["cost of revenue", "cost of goods sold"],
     "sga": ["selling general", "sg&a", "sga expense", "selling and admin"],
     "depreciation": [
@@ -136,18 +151,27 @@ def _match_row(rows: dict, canonical: str):
 
     Aliases are tried in ``_ROW_ALIASES`` order (most specific first) and the
     first alias that matches any row wins - so ``total_debt`` prefers a
-    dedicated debt row over the catch-all ``total_liabilities`` row. Rows whose
-    label starts with ``-`` are moomoo sub-item / contra-account breakdowns
-    (e.g. ``-Accumulated Depreciation``, ``-Cash and Cash Equivalents``) and
-    are skipped so the canonical value always comes from the aggregate line
-    that precedes them.
+    dedicated debt row over the catch-all ``total_liabilities`` row, and
+    ``revenue`` prefers an explicit ``sales`` row over the ``operating income``
+    last-resort alias. A row is only eligible when its normalized label avoids
+    every needle in ``_ROW_LABEL_EXCLUDES`` for the canonical item: 'ebit' is a
+    substring of 'EBITDA' and the combined "Total Liabilities And Equity" line
+    is neither liabilities nor debt, so those labels are skipped even though an
+    alias matches them. Rows whose label starts with ``-`` are moomoo sub-item /
+    contra-account breakdowns (e.g. ``-Accumulated Depreciation``, ``-Cash and
+    Cash Equivalents``) and are skipped so the canonical value always comes from
+    the aggregate line that precedes them.
     """
+    excludes = _ROW_LABEL_EXCLUDES.get(canonical, ())
     for alias in _ROW_ALIASES.get(canonical, []):
         key = _norm(alias)
         for label, value in rows.items():
             if label.startswith("-"):
                 continue
-            if key and key in _norm(label):
+            norm_label = _norm(label)
+            if any(needle in norm_label for needle in excludes):
+                continue
+            if key and key in norm_label:
                 return (label, value)
     return None
 
@@ -315,7 +339,16 @@ def _parse_json_statements(payload: str) -> dict:
 
 
 def _parse_text_report(payload: str) -> dict:
-    """Parse yfinance fundamentals-style text (``Label: value`` lines)."""
+    """Parse yfinance fundamentals-style text (``Label: value`` lines).
+
+    Statement payloads repeat the same labels once per reported period and are
+    ordered newest-first (Tiingo's ``statements`` endpoint returns the latest
+    quarter first; yfinance fundamentals text carries one period). The FIRST
+    occurrence therefore wins, matching ``_parse_csv_statements`` (newest column
+    first), ``_parse_json_statements`` and ``_parse_markdown_financials``
+    (newest period table); the previous last-write-wins kept the OLDEST period's
+    values - the same bug already fixed for moomoo markdown.
+    """
     rows = {}
     for line in payload.splitlines():
         if line.lstrip().startswith("#"):
@@ -325,7 +358,7 @@ def _parse_text_report(payload: str) -> dict:
         label, _, rest = line.partition(":")
         parsed = _first_number(rest)
         if label.strip() and parsed is not None:
-            rows[label.strip()] = parsed
+            rows.setdefault(label.strip(), parsed)
         elif label.strip().lower() == "sector" and rest.strip():
             # non-numeric attributes (sector/industry) are kept as strings
             rows["Sector"] = rest.strip()
