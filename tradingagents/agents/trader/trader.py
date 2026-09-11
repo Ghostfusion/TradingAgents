@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import re as _re
+
 from langchain_core.messages import AIMessage
 
 from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
@@ -15,6 +18,36 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+
+logger = logging.getLogger(__name__)
+
+
+_VERIFY_ASSIGNMENT_RE = _re.compile(r"\b[a-z_]{2,}\s*=\s*[-+]?\d", _re.IGNORECASE)
+_VERIFY_ANNOUNCEMENT_RE = _re.compile(
+    r"\b(let me|i'?ll|i will|will verify|next,? i|i'?m going to)\b", _re.IGNORECASE
+)
+
+
+def _verification_is_stub(text: object) -> bool:
+    """True when the post-proposal verification pass produced no trade spec.
+
+    The verify prompt asks for a compact spec (`entry=… stop=… size_pct=… rr=…`)
+    plus cited reasons. A reply that *announces* the checks is a status turn, not
+    a verification — GOOG 2026-09-11 trader.md appended, under the heading
+    "**Computed verification (deterministic tools):**", the text "Key finding
+    already: … Let me verify the exit arithm and the stop validity." with no
+    numbers, no spec and no tool citation. Reject: no digits at all, or an
+    announcement carrying no ``field=value`` assignment (naming a field in prose
+    — "the stop validity" — is not a spec).
+    """
+    t = str(text or "").strip()
+    if not t:
+        return True
+    if not any(ch.isdigit() for ch in t):
+        return True
+    if _VERIFY_ASSIGNMENT_RE.search(t):
+        return False
+    return bool(_VERIFY_ANNOUNCEMENT_RE.search(t))
 
 
 def create_trader(llm, backup_llm=None):
@@ -107,8 +140,37 @@ def create_trader(llm, backup_llm=None):
                 ),
                 max_rounds=2,  # bound runtime: 2 tool rounds per verification
             )
+            if _verification_is_stub(verification):
+                # A reply that ANNOUNCES the checks instead of reporting them is
+                # a status turn, not a verification (GOOG 2026-09-11 trader.md:
+                # the appended block read "Key finding already: … Let me verify
+                # the exit arithm and the stop validity." with no numbers). Ask
+                # once more for the spec the prompt already specified.
+                logger.info("trader verification returned a status turn; asking once for the spec")
+                verification, _t = run_tool_loop(
+                    llm,
+                    verify_prompt
+                    + "\n\nOutput the compact spec NOW - one line, no preamble, "
+                    "no description of what you intend to check: "
+                    "entry=… stop=… size_pct=… rr=… + one reason per cited tool. "
+                    "If nothing can be verified, output exactly 'verification unavailable'.",
+                    TRADER_TOOLS,
+                    system_text=(
+                        "You are a trade-risk verifier. Only the deterministic "
+                        "tools may produce numbers; never invent a price or size."
+                    ),
+                    max_rounds=2,
+                )
         except Exception as exc:  # noqa: BLE001 - verification is advisory
             verification = f"verification unavailable: {exc}"
+        if _verification_is_stub(verification) and "unavailable" not in verification[:40].lower():
+            # Never append a promise under a heading that claims a computed
+            # check: report it unavailable instead, so the PM/risk readers know
+            # no deterministic verification happened.
+            logger.warning(
+                "trader verification produced no computed spec; reporting unavailable"
+            )
+            verification = "verification unavailable: the verifier returned no computed spec"
         if (
             verification
             and "unavailable" not in verification[:40].lower()

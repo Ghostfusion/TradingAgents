@@ -295,3 +295,44 @@ def test_graph_no_backup_when_unset(monkeypatch):
     # are all the clients this environment's config produces).
     models = [k.get("model", "") for k in seen]
     assert all("backup" not in str(m) for m in models)
+
+
+def test_integrity_retry_rebuilds_a_cut_mandatory_field():
+    """GOOG 2026-09-11 trader.md: the TraderProposal's `reasoning` was cut
+    mid-word ("…is elite — so t") and the rendered-text truncation guard never
+    saw it — the render ends with the mandatory FINAL TRANSACTION PROPOSAL banner
+    and a single-line field starts with its own "**Reasoning**:" label, both of
+    which `_looks_truncated` exempts. Probing the FIELD value detects the cut, so
+    the per-field integrity retry must rebuild it."""
+    from unittest import mock
+
+    from tradingagents.agents.schemas import TraderAction, TraderProposal, render_trader_proposal
+    from tradingagents.agents.utils.structured import (
+        _looks_truncated,
+        retry_structured_missing_fields,
+    )
+
+    cut_text = (
+        "The bear won the round on the load-bearing variable - price - and the "
+        "composed risk gate is REJECT with a 20.75% portfolio drawdown, so the "
+        "balance sheet is genuinely elite (ROE 31.83%) but so"
+    )
+    complete_text = (
+        "The bear won the round on price and the composed risk gate is REJECT; "
+        "trim to a residual 1.0% and exit on a daily close below 335.1665."
+    )
+    cut = TraderProposal(action=TraderAction.SELL, reasoning=cut_text)
+    fixed = TraderProposal(action=TraderAction.SELL, reasoning=complete_text)
+    rendered = render_trader_proposal(cut)
+    # The rendered artifact ends with the banner -> the cut is invisible there.
+    assert not _looks_truncated(rendered)
+
+    structured = mock.MagicMock()
+    structured.invoke.return_value = fixed
+    out = retry_structured_missing_fields(
+        structured, "prompt", cut, render_trader_proposal, "Trader",
+        ("action", "reasoning"),
+    )
+    assert structured.invoke.call_count == 1, "a cut mandatory field must trigger the rebuild"
+    assert complete_text[:60] in out
+    assert "so\n\nFINAL TRANSACTION PROPOSAL" not in out

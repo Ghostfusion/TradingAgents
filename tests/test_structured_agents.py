@@ -697,3 +697,65 @@ class TestSentimentAnalystAgent:
         # cut to the window before it.
         assert "...[truncated at 12 chars]" in leaves[0]["content"]
         assert "ok" in [leaf["status"] for leaf in leaves]
+
+
+class TestTraderVerificationBlock:
+    """The post-proposal "Computed verification" block must contain a computed
+    spec, never a promise (GOOG 2026-09-11 trader.md appended "Key finding
+    already: … Let me verify the exit arithm and the stop validity." under a
+    heading that claims deterministic verification)."""
+
+    _STATE = {
+        "company_of_interest": "GOOG",
+        "investment_plan": "Trim to a 1.0% residual; the portfolio gate is REJECT.",
+        "computed_decision_context": "regime=neutral",
+        "messages": [],
+    }
+
+    def _llm(self):
+        from tradingagents.agents.schemas import TraderAction, TraderProposal
+
+        structured = MagicMock()
+        structured.invoke.return_value = TraderProposal(
+            action=TraderAction.SELL,
+            reasoning="The bear won on price and the portfolio gate REJECTs new risk.",
+            entry_price=336.25,
+            stop_loss=335.1665,
+        )
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured
+        return llm
+
+    def _patch_loop(self, returns):
+        import tradingagents.agents.utils.risk_tool_loop as rtl
+
+        seq = list(returns)
+        return MagicMock(side_effect=lambda *a, **k: (seq.pop(0) if len(seq) > 1 else seq[0], [])), rtl
+
+    def test_status_turn_verification_is_not_appended_as_computed(self, monkeypatch):
+        from tradingagents.agents.trader.trader import create_trader
+
+        stub = (
+            "Key finding already: even the proposed 1.0% residual REJECTs the risk "
+            "gate on the 20.8% drawdown. Let me verify the exit arithm and the stop "
+            "validity."
+        )
+        calls, rtl = self._patch_loop([stub])
+        monkeypatch.setattr(rtl, "run_tool_loop", calls)
+        out = create_trader(self._llm())(dict(self._STATE))
+        plan = out["trader_investment_plan"]
+        assert "Computed verification" not in plan
+        assert "let me verify" not in plan.lower()
+        assert calls.call_count == 2, "a stub verification must be re-asked once"
+
+    def test_real_spec_verification_is_appended(self, monkeypatch):
+        from tradingagents.agents.trader.trader import create_trader
+
+        spec = "entry=336.25 stop=334.50 size_pct=1.0 rr=2.4 — get_risk_gate REJECT at 3.0%"
+        calls, rtl = self._patch_loop([spec])
+        monkeypatch.setattr(rtl, "run_tool_loop", calls)
+        out = create_trader(self._llm())(dict(self._STATE))
+        plan = out["trader_investment_plan"]
+        assert "**Computed verification (deterministic tools):**" in plan
+        assert "entry=336.25" in plan
+        assert calls.call_count == 1

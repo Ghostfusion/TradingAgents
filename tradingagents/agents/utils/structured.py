@@ -885,6 +885,21 @@ def retry_structured_missing_fields(
     model is still better than rendering an empty mandatory field as-is.
     """
     missing = [f for f in mandatory_fields if getattr(result, f, None) in (None, "", [])]
+    # A mandatory field that was CUT mid-sentence (max_tokens) is as unusable as
+    # an empty one, and the rendered-text truncation guard cannot see it: the
+    # trader's render ends with the mandatory "FINAL TRANSACTION PROPOSAL" banner
+    # AND a single-line field starts with its own "**Reasoning**:" label — both
+    # trip `_looks_truncated`'s exemptions, so the cut survived into the artifact
+    # (GOOG 2026-09-11 trader.md: reasoning ended "…is elite — so t"). Probing the
+    # FIELD value sees the bare cut (no banner, no label), so it is detected here.
+    cut = [
+        f for f in mandatory_fields
+        if isinstance(getattr(result, f, None), str)
+        and _looks_truncated(getattr(result, f))
+    ]
+    for f in cut:
+        if f not in missing:
+            missing.append(f)
     if not missing:
         return render(result)
     current = result
@@ -894,17 +909,27 @@ def retry_structured_missing_fields(
         else structured_llm
     )
     for _ in range(max_retries):
-        still = [f for f in missing if getattr(current, f, None) in (None, "", [])]
+        still = [
+            f for f in missing
+            if getattr(current, f, None) in (None, "", [])
+            or (
+                isinstance(getattr(current, f, None), str)
+                and _looks_truncated(getattr(current, f))
+            )
+        ]
         if not still:
             break
         if retry_llm is None:
             break
-        spec = "; ".join(f"{f} must be present and non-empty" for f in still)
+        spec = "; ".join(
+            f"{f} must be present, non-empty and COMPLETE (not cut mid-sentence)"
+            for f in still
+        )
         retry_prompt = (
             f"{prompt}\n\n---\nYour previous response was parsed into the "
             f"schema but is missing required field(s): {spec}.\nPrevious "
             f"response:\n{render(current)}\n\nRe-send the COMPLETE decision "
-            f"including the missing field(s)."
+            f"including the missing field(s), each finished - never cut off."
         )
         try:
             repaired = retry_llm.invoke(retry_prompt)
