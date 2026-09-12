@@ -137,3 +137,37 @@ def test_contract_exits_fields_when_enabled():
     assert c is not None
     assert c.breakeven_stop is not None and c.target is not None
     assert "exits:" in (c.exit_note or "")
+
+
+def test_fetch_ohlcv_returns_opens_from_the_vendor_chain():
+    """W-P1-8: the vendor path parsed Open and then dropped it from the payload.
+
+    Open is deliberately different from Close here, so the assertion cannot pass
+    by accident (the shared 140-row fixture sets them equal).
+    """
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    for i in range(40):
+        close = 100.0 + i
+        rows.append(
+            f"2026-01-{i % 28 + 1:02d},{close - 1.5:.2f},{close + 3:.2f},"
+            f"{close - 3:.2f},{close:.2f},1000000"
+        )
+    csv = "\n".join(rows) + "\n"
+
+    def route(*_a, **_k):
+        return csv
+
+    with (
+        mock.patch.object(vs, "route_to_vendor", side_effect=route),
+        mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route),
+        mock.patch(
+            "tradingagents.dataflows.config.get_config",
+            return_value={"enable_massive_flat": False, "enable_alpaca": False},
+        ),
+    ):
+        out = vs._fetch_ohlcv("AAPL")
+
+    assert len(out["opens"]) == len(out["closes"]) == 40
+    assert out["opens"][0] == pytest.approx(out["closes"][0] - 1.5)
+    assert out["highs"][0] == pytest.approx(out["closes"][0] + 3)
+    assert out["lows"][0] == pytest.approx(out["closes"][0] - 3)

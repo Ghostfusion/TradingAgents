@@ -77,3 +77,14 @@ def test_close_all_ctxs_uses_daemon_thread_timeout():
     with moomoo._ctx_lock:
         assert moomoo._live_ctxs == set()
     ctx.close.assert_not_called()  # close runs only via the (faked) thread
+
+
+def test_public_close_all_contexts_delegates():
+    """The web app closes in-process SDK clients through this public wrapper.
+
+    (Its session-end fixture and jobs.shutdown() both call it: the SDK's threads
+    are non-daemon and only end via close or a timeout.)
+    """
+    with mock.patch.object(moomoo, "_close_all_ctxs") as inner:
+        moomoo.close_all_contexts(timeout=0.5)
+    inner.assert_called_once_with(timeout=0.5)

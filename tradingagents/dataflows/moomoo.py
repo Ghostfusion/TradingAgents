@@ -393,6 +393,19 @@ def _sdk_call(fn, *args, timeout: float | None = None, **kwargs):
     return result["ret"]
 
 
+def close_all_contexts(timeout: float = 3.0) -> None:
+    """Public: close every live OpenQuoteContext in this process.
+
+    The SDK's receive-loop threads are non-daemon and only end through its own
+    close or a hard timeout, so a process that ran an in-process capability
+    (the web app's run_batch / run_value_tools) must close them by code:
+    otherwise the process cannot exit and every wrapper waiting on its stdout
+    waits for the timeout instead. Best-effort and non-blocking (see
+    _close_all_ctxs: each close runs on a daemon thread).
+    """
+    _close_all_ctxs(timeout=timeout)
+
+
 def _close_all_ctxs(timeout: float = 3.0):
     """Close every live context; never blocks process exit.
 

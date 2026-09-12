@@ -458,7 +458,18 @@ def _fetch_ohlcv(ticker: str, days: int = 320) -> dict:
             except ValueError:
                 pass
         if closes:
-            return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes}
+            # `opens` is parsed above and used to be dropped here, so every
+            # consumer that reads o.c. ohlcv["opens"] got nothing (the alpaca
+            # path below returns them, so the two paths also disagreed on
+            # shape). The web chart (trading_web GET /api/history/ohlcv) reads
+            # ohlcv["opens"] and rendered a null open for every bar.
+            return {
+                "closes": closes,
+                "opens": opens,
+                "highs": highs,
+                "lows": lows,
+                "volumes": volumes,
+            }
     except Exception:
         pass
     try:
