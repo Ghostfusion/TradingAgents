@@ -365,7 +365,9 @@ and the sibling app found out when a human ran its test suite. Nothing in either
    from both repos, so the surface the engine promises the app has never been written down.
 2. **The engine's own convention is manual.** `CHANGELOG.md` entries say "no trading_web change (LLM-facing
    tool)" — a human judgement, unenforced. The W5 deletion that broke the app did not carry such a note.
-3. **No CI in either repo** (`.github/workflows` absent on both sides), so the app's own suite — which *did*
+3. **No CI in the app's repo** (CORRECTED in X8: the engine repo *does* have `.github/workflows/ci.yml` —
+   the audit's "absent on both sides" was wrong; the app repo had none, and X8 adds
+   `.github/workflows/web.yml` to the parent), so the app's own suite — which *did*
    detect the break, 8 failures — is only run when someone remembers.
 4. **The app duplicates the engine's "what is callable" decision** (`capabilities.py` imports a symbol list and a
    54-name dispatch map) instead of resolving through the engine's single source (`agents/toolsets.py`,
@@ -398,6 +400,9 @@ it. Recommendations recorded 2026-09-11; **no code changed** — the audit's sta
 
 1. **Job timeout value and semantics** — a batch can legitimately run for hours.
    **Recommended:** `JOB_TIMEOUT_SECONDS` default **7200 s for `run_batch`**, **900 s for `run_value_tools`**, env-overridable; for the *existing* subprocess tier keep 900 s but move `run_screener` to the existing **2400 s** tier. **Timeout semantics: kill the process tree, mark the row `failed` with `error="timed out after Ns"`, and do NOT auto-retry** — a batch may already have written part of a report tree, so a retry duplicates side effects; `cancel` stays the manual escape hatch. **Plus a stall rule:** the wall clock is only a backstop — the worst row in the store (`run_batch`, 134.8 min) was killed *by hand* with `killed by user (stalled: no output after 2h14m, 0 cpu, idle)`, which a 2 h ceiling would barely have caught; the watchdog should fail a job that reports no progress for N minutes (the batch already pauses between tickers, so a per-ticker heartbeat is cheap) and the reaper should run at boot **and** periodically.
+   **Correction (X8, code-read):** the subprocess tier already gave `run_screener` 2400 s, so the six
+   `>900s` rows in the store predate that change — the recommendation to "move it" was redundant; what
+   was actually missing is the two in-process bounds and the stall rule.
    **Why not the originally proposed 3600/900:** measured against the live store — the only two **successful** `run_batch` runs took **64.8 and 63.4 min**, so a 1 h default would have killed the longest *good* run; and 900 s is already killing work whose status is unknown: **4 `run_screener` and 2 `run_action_report` rows** carry `capability timed out (>900s)` at exactly 15.0 min (against a heaviest *successful* screener of 9.0 min). Whether those six were slow-but-working or wedged is **not knowable from the store** — one adjacent screener failure is a moomoo `open_context_base` error, i.e. gateway trouble — so the recommendation is to **measure first**: emit per-stage progress, then move `run_screener` to the 2400 s tier only if the log shows real work past 900 s. Halving the pool's throughput is the *cost* of too-tight ceilings; a phantom 2 h row is the cost of too-loose ones. Item 1 is a **blocker for X2**.
 
 2. **Credential precedence** — make `trading_web/.env` authoritative (`override=True`), or keep the engine's precedence and write to the defining file.
@@ -428,9 +433,24 @@ it. Recommendations recorded 2026-09-11; **no code changed** — the audit's sta
 
 ## 11. Status
 
-| phase | state | notes |
+Implemented 2026-09-11 in the sibling repos (the parent `TradingNew` repo for the app, this repo for the
+engine side). Every gate was demonstrated failing before it was trusted; suites are green at each commit.
+
+| phase | state | evidence |
 |---|---|---|
-| X1 … X8 | **not started** | no code changed by this audit |
+| X1 unbreak + contract `(W-P0-1)` | **done** | the deleted tool is gone from the declaration/dispatch/UI; the surface is declared data resolved PER TOOL (`VALUE_TOOL_SPECS`), so one bad name degrades one entry instead of all 54; `tests/test_engine_contract.py` +5. Suite went 8 failed → 0. |
+| X2 job lifecycle `(W-P0-2, W-P2-1..3)` | **done** | per-capability `JOB_TIMEOUTS` is the single source (watchdog + subprocess deadline), `watchdog_tick` fails a job past its deadline and sets its cooperative cancel flag, `POST /api/jobs/{id}/cancel`, `reap_stale` at boot and periodically, WAL + busy_timeout + a bounded finish write, duplicate 409 / pending 429, one global batch-symbol semaphore. The live 70 h zombie row was reaped with the new code. `tests/test_job_lifecycle.py` +13. |
+| X3 ship the chart library `(W-P0-3)` | **done** | Plotly is a same-origin bundled chunk (lazy `import()`), fulfilled-only promise cache; `e2e/chart.spec.js` runs against the real CSP-bearing backend and fails on the pre-fix build. |
+| X4 argument validation `(W-P1-1, W-P2-9)` | **done** | every path argument is WRITE (repo-relative) or READ (repo or the engine's data dir), `limits` is typed and allow-listed, `--journal` deleted, `--skip-llm` pinned, ints clamped, `resolve_under` resolves before checking; `tests/test_arg_validation.py` 30 gates. |
+| X5 results & leaks `(W-P1-5,8,9, W-P2-4..8)` | **done** | job `message` + flagged element-truncation, structural masking of errors/results, JSON 404 for unknown `/api/*`, docs behind auth, config allowlist, audit rotation + tail reads + real user on logout, bounded CSRF store, ASGI lifespan (the documented uvicorn entry point now boots a working app), and the engine's `close_all_contexts` called on shutdown. +15 gates. |
+| W-P1-7 (unassigned in §6) | **done** | per-IP lockout dimension, bounded map, credential length bounds. +3 gates. |
+| X6 frontend correctness `(W-P1-2,3,4,6, W-P2-10..16)` | **done** | 401 hook + best-effort logout, `usePolledFetch` (sequence-guarded, stops when nothing is running), error-state resets, preset round-trip + the two missing controls, worker cap from the API, URL crash containment, dev proxy, role from `/api/me`, submit guards. 36 vitest + 3 Playwright gates. |
+| X7 docs & claims `(W-P2-17..19)` | **done** | the false counts/claims corrected and made machine-checked (`tests/test_doc_claims.py`, 8 gates); CLI flags the web dropped are forwarded (nightly `--force-run`/`--regions`, backtest cost/fill flags, `--verify-chain`); a flag-like value can no longer reach argv; the stale comments corrected. |
+| X8 cross-repo contract | **done** | `trading_web/docs/web_TOPICS.md` (generated from the declarations, staleness-checked), the engine's CHANGELOG states the web impact of the two seams it changed, the engine runs the same-night pre-market re-check in `analyze()` so the web gets the same artefacts as the CLI, and the parent repo gains `.github/workflows/web.yml` (app suite + vitest + build + the browser gate). |
+
+**Engine-side changes made for this plan** (each with the web impact in its CHANGELOG entry):
+`_fetch_ohlcv` now returns `opens`; `close_all_contexts()` is public and every moomoo close/creation is
+bounded (the 70 h zombie's mechanism); the batch pre-market re-check moved into `analyze()`.
 
 *Filed 2026-09-11; §9 recommendations added 2026-09-11 (evidence: the live job store, read-only). Sources: three read-only audits (backend / frontend / engine-integration) with `file:line`
 evidence on both sides, plus main-thread verification of every P0 and the live job store, audit log and engine
