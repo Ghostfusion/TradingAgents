@@ -72,6 +72,7 @@ def _build_lists() -> None:
         get_volatility_estimators,
     )
     from tradingagents.agents.utils.market_position_tools import get_liquidity_risk
+    from tradingagents.agents.utils.quant_formula_tools import get_book_risk_budget
     from tradingagents.agents.utils.value_dip_tools import (
         get_trade_expectancy,
         get_tranche_plan,
@@ -101,6 +102,7 @@ def _build_lists() -> None:
         get_exit_check,
         get_trailing_exit,
         get_liquidity_risk,
+        get_book_risk_budget,
         get_premarket_review,
         get_ledger_risk_state,
         get_exit_overrides,

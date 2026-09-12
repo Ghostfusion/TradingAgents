@@ -208,6 +208,14 @@ from tradingagents.agents.utils.quant_adds_tools import (
     get_position_risk_multiplier,
     get_regime_state,
 )
+from tradingagents.agents.utils.quant_formula_tools import (
+    get_book_risk_budget,
+    get_disclosure_tone,
+    get_quality_factors,
+    get_return_decomposition,
+    get_spread_estimate,
+    get_valuation_band,
+)
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 from tradingagents.agents.utils.value_dip_tools import (
     get_balance_sheet_health,
@@ -237,6 +245,12 @@ __all__ = [
     "get_kalman_spread",
     "get_position_risk_multiplier",
     "get_regime_state",
+    "get_spread_estimate",
+    "get_return_decomposition",
+    "get_quality_factors",
+    "get_valuation_band",
+    "get_disclosure_tone",
+    "get_book_risk_budget",
     "get_option_breakeven",
     "get_options_iv_read",
     "get_vol_surface_shape",

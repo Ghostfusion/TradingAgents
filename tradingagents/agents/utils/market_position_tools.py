@@ -412,6 +412,24 @@ def get_liquidity_risk(
         lines.append(
             f"  roll_spread={spread:.4f} (px)" if spread is not None else "  roll_spread=n/a"
         )
+        # Q1 (docs/implementation_plan_quant_formula_additions.md): quote-free
+        # spread FLOOR from the same daily OHLC, for names with no quoted spread.
+        try:
+            from tradingagents.agents.utils.quant_formula_tools import _flag
+
+            if _flag("enable_spread_estimator"):
+                from tradingagents.strategies.liquidity_risk import spread_estimate as _sp_est
+
+                est = _sp_est(closes, ohlcv.get("highs") or [], ohlcv.get("lows") or [])
+                if est:
+                    lines.append(
+                        f"  spread_estimate={est['spread'] * 100:.3f}% of price "
+                        f"(basis={est['basis']}, n={est['n']}, high-low FLOOR not a quote)"
+                    )
+                else:
+                    lines.append("  spread_estimate=n/a (high-low correction negative)")
+        except Exception:  # noqa: BLE001 - a spread read must never break the tool
+            lines.append("  spread_estimate=n/a")
         if lv["dangers"]:
             lines.append("  dangers: " + "; ".join(lv["dangers"]))
         return "\n".join(lines)

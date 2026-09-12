@@ -6103,6 +6103,33 @@ def get_shift_detection(
     if lzc is not None:
         lines.append(f"- LZ complexity (returns): {lzc:.3f} "
                      f"({'random/inefficient' if lzc > 0.9 else 'structured'})")
+    # Q8 (docs/implementation_plan_quant_formula_additions.md): the Bayesian
+    # run-length posterior complements the frequentist CUSUM/EWMA read with a
+    # CALIBRATED changepoint probability. Opt-in; a shift invalidates the
+    # window-based reads (Hurst / variance-ratio / half-life) for the next call.
+    try:
+        from tradingagents.agents.utils.quant_formula_tools import _flag
+
+        if _flag("enable_bocpd"):
+            from tradingagents.strategies.regime import bocpd as _bocpd
+
+            bc = _bocpd(series)
+            if bc:
+                lines.append(
+                    f"- BOCPD: zero_run_prob={bc['zero_run_prob']:.3f} "
+                    f"map_run={bc['map_run_length']} shift={bc['shift']} "
+                    f"(hazard={bc['hazard']:.4f}, n={bc['n']})"
+                )
+                if bc["shift"]:
+                    lines.append(
+                        "  (shift=true: window-based reads - Hurst / variance-ratio "
+                        "/ half-life - straddle the break; recompute after the "
+                        "segment restarts)"
+                    )
+            else:
+                lines.append("- BOCPD: n/a (needs a longer, non-degenerate series)")
+    except Exception:  # noqa: BLE001 - an optional read must not break the tool
+        lines.append("- BOCPD: n/a")
     lines.append("")
     lines.append("Interpretation: a CUSUM/EWMA up-signal right after a calm "
                  "stretch = the regime may just have shifted; confirm with "

@@ -259,6 +259,15 @@ _ENV_OVERRIDES = {
     # breaker. Both default off/empty, so the chain is unchanged unless set.
     "TRADINGAGENTS_ENABLE_MARKET_ROUTING": "enable_market_routing",
     "TRADINGAGENTS_MARKET_SOURCE_PRIORITY": "market_source_priority",
+    # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md,
+    # docs/implementation_plan_quant_formula_additions.md). Each gates one read;
+    # all default off so a run's outputs cannot change silently.
+    "TRADINGAGENTS_ENABLE_SPREAD_ESTIMATOR": "enable_spread_estimator",
+    "TRADINGAGENTS_ENABLE_BOOK_RISK_SIZING": "enable_book_risk_sizing",
+    "TRADINGAGENTS_ENABLE_CONFORMAL_BANDS": "enable_conformal_bands",
+    "TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION": "enable_return_decomposition",
+    "TRADINGAGENTS_ENABLE_TEXT_FACTORS": "enable_text_factors",
+    "TRADINGAGENTS_ENABLE_BOCPD": "enable_bocpd",
 }
 
 
@@ -887,6 +896,34 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # re-anchor path stays the standalone scripts/pre_market_review.py.
         # Opt-in - off by default, so a batch runs as before unless enabled.
         "enable_pre_market_review": False,
+        # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md).
+        # Every read is additive and default-off: a run's artefacts cannot change
+        # unless the flag is set. Each names the tool the agent must cite.
+        # Q1 quote-free spread floor: Corwin-Schultz / Abdi-Ranaldo high-low
+        # estimators on the daily OHLC the repo already fetches (no quotes
+        # needed), plus the Almgren-Chriss temporary-impact default.
+        "enable_spread_estimator": False,
+        # Q2 book sizing under the existing CVaR/drawdown budget: a
+        # Rockafellar-Uryasev minimum-CVaR solve (advisory weights, never an
+        # order) in place of a verdict-only gate, with copula joint-tail
+        # scenarios replacing the single fixed -10% shock as its input.
+        "enable_book_risk_sizing": False,
+        "book_risk_sizing_min_scenarios": 60,
+        "book_risk_sizing_max_delta": 0.05,
+        # Q3 conformalised valuation bands: calibrated low/high around a model
+        # value, with the realized coverage printed next to the nominal level.
+        "enable_conformal_bands": False,
+        "conformal_alpha": 0.1,
+        "conformal_min_pairs": 40,
+        "conformal_window": 250,
+        # Q5 overnight-vs-intraday return decomposition (needs the vendor
+        # chain's `opens`, which the OHLCV path returns).
+        "enable_return_decomposition": False,
+        # Q6 Loughran-McDonald tone / readability / call-vs-filing divergence.
+        "enable_text_factors": False,
+        # Q8 Bayesian online changepoint detection - complements the landed
+        # CUSUM/EWMA shift read with a calibrated changepoint probability.
+        "enable_bocpd": False,
         # OpenBB Phase-3 free-tier data surfaces. Each is keyless/free and
         # analysis-only; all default OFF. Flip an env override (e.g.
         # TRADINGAGENTS_ENABLE_OPTIONS_SURFACE=true) to let its @tool fetch

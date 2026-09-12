@@ -1008,6 +1008,145 @@ def _vrp_sign_label(report_text: str) -> list[VerifierClaim]:
     )]
 
 
+# ---------------------------------------------------------------------------
+# Round-2 formula families (docs/implementation_plan_quant_formula_additions.md)
+# ---------------------------------------------------------------------------
+# Q6: a qualitative tone claim about a disclosure must agree with the cited
+# deterministic tone read. Only sentences that attribute a tone to a document
+# count, so generic prose ("we are confident in the dip thesis") never fires.
+_TONE_CITED_RE = re.compile(r"tone=(zero_hits|[+-]?\d+\.\d+)")
+_DISCLOSURE_WORD_RE = re.compile(
+    r"disclosure|filing|10-k|10-q|transcript|call|language|tone|management sounded", re.I
+)
+_POSITIVE_TONE_CLAIM_RE = re.compile(
+    r"confiden|optimis|upbeat|positive tone|reassur|bullish language", re.I
+)
+_NEGATIVE_TONE_CLAIM_RE = re.compile(
+    r"cautious|wary|pessimis|downbeat|negative tone|defensive|hedged language", re.I
+)
+# Q3: a quoted conformal band must carry its realized coverage, and the
+# INSIDE/OUTSIDE verdict printed next to a point value must be arithmetically
+# true against the band bounds on the same line.
+_BAND_PAIR_RE = re.compile(r"\[\s*([\d.,]+)\s*,\s*([\d.,]+)\s*\]")
+_BAND_NOMINAL_RE = re.compile(r"nominal\s+(\d+(?:\.\d+)?)\s*%")
+_BAND_REALIZED_RE = re.compile(r"realized\s+(\d+(?:\.\d+)?)\s*%")
+_BAND_POINT_RE = re.compile(r"point value\s+([\d.,]+)\s+is\s+(INSIDE|OUTSIDE)")
+_BAND_COVERAGE_SLACK = 0.25
+
+
+def _tone_claim_conflict(report_text: str) -> list[VerifierClaim]:
+    """A disclosure tone claim must agree with the cited tone read (Q6).
+
+    The prompt rule requires the analyst to cite `get_disclosure_tone` before
+    a 'management sounded confident / the language turned cautious' claim, so
+    the two can be checked against each other. A zero-hit read is NO SIGNAL:
+    asserting a direction on top of it is the same conflict as a sign flip.
+    """
+    if not report_text:
+        return []
+    text = report_text.replace("\u2212", "-")
+    cited_match = _TONE_CITED_RE.search(text)
+    if not cited_match:
+        return []
+    raw = cited_match.group(1)
+    cited = None if raw == "zero_hits" else float(raw)
+    out: list[VerifierClaim] = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+        if not _DISCLOSURE_WORD_RE.search(sentence):
+            continue
+        positive = bool(_POSITIVE_TONE_CLAIM_RE.search(sentence))
+        negative = bool(_NEGATIVE_TONE_CLAIM_RE.search(sentence))
+        if positive == negative:
+            continue
+        if cited is None:
+            out.append(VerifierClaim(
+                claim="a disclosure tone direction asserted over a zero-hit tone read",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The cited disclosure-tone read reports zero dictionary hits "
+                    "(no signal found), so no direction is supported. State the "
+                    "counts, or cite a document that carries tone words."
+                ),
+            ))
+            continue
+        if positive and cited < 0:
+            out.append(VerifierClaim(
+                claim=f"disclosure described as confident while the cited tone is {cited:+.4f}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A positive tone claim cannot stand on a negative cited tone "
+                    "(Q6: the deterministic read is the second opinion the claim "
+                    "must be consistent with)."
+                ),
+            ))
+        elif negative and cited > 0:
+            out.append(VerifierClaim(
+                claim=f"disclosure described as cautious while the cited tone is {cited:+.4f}",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A negative tone claim cannot stand on a positive cited tone "
+                    "(Q6: the deterministic read is the second opinion the claim "
+                    "must be consistent with)."
+                ),
+            ))
+    return out
+
+
+def _valuation_band_conflict(report_text: str) -> list[VerifierClaim]:
+    """A quoted valuation band must carry its realized coverage and be
+    arithmetically true about the point value it places (Q3)."""
+    if not report_text:
+        return []
+    out: list[VerifierClaim] = []
+    for line in report_text.splitlines():
+        if "band" not in line.lower():
+            continue
+        pair = _BAND_PAIR_RE.search(line)
+        if not pair:
+            continue
+        low, high = (float(v.replace(",", "")) for v in pair.groups())
+        realized = _BAND_REALIZED_RE.search(line)
+        if not realized:
+            out.append(VerifierClaim(
+                claim=f"valuation band [{low:g}, {high:g}] quoted without realized coverage",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A conformal band without its realized coverage overclaims: the "
+                    "coverage guarantee is marginal and only under exchangeability, "
+                    "so the measured coverage must be printed beside the nominal level."
+                ),
+            ))
+            continue
+        nominal = _BAND_NOMINAL_RE.search(line)
+        cov = float(realized.group(1)) / 100.0
+        if nominal is not None:
+            nom = float(nominal.group(1)) / 100.0
+            if cov < nom - _BAND_COVERAGE_SLACK:
+                out.append(VerifierClaim(
+                    claim=f"valuation band nominal {nom:.0%} but realized coverage {cov:.1%}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The measured coverage is far below the nominal level; the "
+                        "band is not doing what its label claims on this name."
+                    ),
+                ))
+        pt = _BAND_POINT_RE.search(line)
+        if pt:
+            value = float(pt.group(1).replace(",", ""))
+            verdict = pt.group(2)
+            truth = low <= value <= high
+            if truth != (verdict == "INSIDE"):
+                out.append(VerifierClaim(
+                    claim=(
+                        f"point value {value:g} labeled {verdict} a band "
+                        f"[{low:g}, {high:g}]"
+                    ),
+                    status="INTERNAL_CONFLICT",
+                    reason=("The INSIDE/OUTSIDE verdict contradicts the band bounds on the same line."),
+                ))
+    return out
+
+
 def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
     """A quoted dividend yield must not contradict the same report's
     dividend-per-share and price.
@@ -1912,6 +2051,8 @@ def _text_metrics(report_text: str) -> tuple[list[VerifierClaim], list[str]]:
         ("double_digit_streak_identity", _double_digit_streak_identity),
         ("insider_sold_value_identity", _insider_sold_value_identity),
         ("vrp_sign_label", _vrp_sign_label),
+        ("tone_claim_conflict", _tone_claim_conflict),
+        ("valuation_band_conflict", _valuation_band_conflict),
     )
     claims: list[VerifierClaim] = []
     errors: list[str] = []
