@@ -298,6 +298,15 @@ def analyze(
         / f"{safe_ticker_component(symbol).upper()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     ta.save_reports(final_state, symbol, save_path=report_dir)
+    # Same-night pre-market re-check (choice (a) of the design): a
+    # catalyst/quality re-read of the just-written decision, not a gap
+    # re-anchor (that is the pre-open standalone script). It runs HERE, right
+    # after save_reports, so the CLI batch and the in-process web caller
+    # (trading_web's run_batch, which calls analyze directly) both write
+    # pre_market_review_<trade_date>.md — it used to live in main()'s
+    # as_completed loop, so the web path silently skipped it.
+    if DEFAULT_CONFIG.get("enable_pre_market_review"):
+        _batch_pre_market_check(symbol, report_dir, trade_date)
     return symbol, decision, report_dir, wall_seconds, rating
 
 
@@ -412,11 +421,6 @@ def main() -> int:
                 results.append((sym, decision, report_dir))
                 print(f"[done] {sym} -> {decision}")
                 print(f"       report: {report_dir}")
-                # Same-night pre-market re-check (choice (a) of the design):
-                # a catalyst/quality re-read of the just-written decision, not
-                # a gap re-anchor (that is the pre-open standalone script).
-                if DEFAULT_CONFIG.get("enable_pre_market_review"):
-                    _batch_pre_market_check(sym, report_dir, args.date)
                 # Advisory LLM report-verification pass (--verify): checks each
                 # analyst report against its tool_evidence leaves; writes
                 # verify_flags.json. Never fails the symbol.

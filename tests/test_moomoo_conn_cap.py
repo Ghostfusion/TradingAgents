@@ -165,7 +165,13 @@ def test_cap_eviction_does_not_hold_the_lock_across_a_hung_close(monkeypatch):
 
     worker = threading.Thread(target=moomoo._cap_open_ctxs, daemon=True)
     worker.start()
-    assert hung[0].close_started.wait(5), "the eviction never reached its close"
+    # WHICH context is evicted first is a set-iteration detail; wait for any of
+    # them to park, not for a specific one (the first version asserted hung[0]
+    # and passed in isolation while failing in the full suite).
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not any(c.close_started.is_set() for c in hung):
+        time.sleep(0.02)
+    assert any(c.close_started.is_set() for c in hung), "the eviction never reached a close"
     # While that close is parked, the registry lock must be free for other threads.
     acquired = moomoo._ctx_lock.acquire(timeout=0.2)
     if acquired:

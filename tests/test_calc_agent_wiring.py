@@ -27,6 +27,10 @@ REFERENCE_DOMAINS = (
 
 # Audited legacy/dead set: module:function -> why it is exempt from wiring.
 LEGACY_WHITELIST = {
+    "dataflows/moomoo.py:close_all_contexts": (
+        "lifecycle helper, not a computed read: closes the SDK's OpenQuoteContexts "
+        "by code (the web app's jobs.shutdown() and its test suite call it)"
+    ),
     "strategies/backtest_engine.py:is_filled": "harness internals (backtest engine)",
     "strategies/backtest_engine.py:cancel": "harness internals (backtest engine)",
     "strategies/capital_income.py:indicated_yield_from_rate": "dead helper (capital_income screener path)",
