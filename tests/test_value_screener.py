@@ -1,9 +1,12 @@
 """Value screener: universe sources (top-losers, heat-proxy) + screen gates.
 
-Offline: moomoo ranks and vendor statements are mocked; nothing hits the
-network or OpenD.
+Offline: moomoo ranks, vendor statements, and the FMP/Finnhub HTTP seams are
+mocked, and a non-loopback socket connect fails the test (see _patch_vendors).
+Nothing reaches a vendor network.
 """
 
+import socket
+import sys
 from contextlib import ExitStack, contextmanager
 from unittest import mock
 
@@ -12,32 +15,71 @@ import pytest
 import scripts.value_screener as vs
 from tradingagents.dataflows import statement_parsing as _sp_parsing
 
+#: The real connect, captured once so the offline guard can delegate to it.
+_REAL_SOCKET_CONNECT = socket.socket.connect
+
+#: Non-loopback hosts a test tried to reach. Recorded as well as raised: the
+#: vendors degrade via ``except Exception``, which would swallow the guard's
+#: error and let a live seam pass silently. The fixture asserts this is empty.
+_OFFLINE_VIOLATIONS: list[str] = []
+
+
+def _offline_connect(self, address):
+    """Refuse non-loopback connections: this module is documented offline.
+
+    A live vendor call does not fail here, it *stalls* - a blackholed host
+    blocks past every pytest timeout and hangs the whole suite (observed:
+    35 minutes, no CPU, no failure). Refusing the connect makes the call
+    degrade instantly, and the recorded host fails the test at teardown.
+    """
+    if not isinstance(address, tuple):  # AF_UNIX paths never leave the box
+        return _REAL_SOCKET_CONNECT(self, address)
+    host = address[0]
+    if host in ("localhost", "::1") or str(host).startswith("127."):
+        return _REAL_SOCKET_CONNECT(self, address)
+    _OFFLINE_VIOLATIONS.append(f"{host}:{address[1]}")
+    raise AssertionError(
+        f"test_value_screener is offline: refused a connection to {host!r}. "
+        "Mock the vendor seam instead of reaching the network."
+    )
+
+
+def _router_holders():
+    """Every module holding a ``route_to_vendor`` binding the screener reaches.
+
+    Three, and each is load-bearing:
+
+    * ``interface`` - the source. Modules that import it *inside* a function
+      (``_value_dip_scan``, ``fmp.normalized_score``) read this attribute at
+      call time, so patching it is what stops their live calls.
+    * ``vs`` - the screener's own module-level ``from ... import
+      route_to_vendor``.
+    * ``statement_parsing`` - ``fetch_ticker``'s copy (the installed-CLI
+      contract).
+
+    Miss one and that leg goes to the real vendor - which is how this file
+    reached EODHD, Tiingo and Alpha Vantage from tests documented as offline.
+    The socket guard below is the backstop for any binding not listed here.
+    """
+    from tradingagents.dataflows import interface as _iface
+
+    return [_iface, vs, _sp_parsing]
+
 
 @contextmanager
 def _patched_router(route):
-    """Patch the vendor router wherever this module reaches it.
-
-    ``fetch_ticker`` now lives in ``statement_parsing`` (the installed-CLI
-    contract), so patching only ``vs.route_to_vendor`` leaks live vendor
-    calls; patch both bindings.
-    """
+    """Patch every router binding for the duration of the test."""
     with ExitStack() as stack:
-        stack.enter_context(mock.patch.object(vs, "route_to_vendor", side_effect=route))
-        stack.enter_context(
-            mock.patch.object(_sp_parsing, "route_to_vendor", side_effect=route)
-        )
+        for mod in _router_holders():
+            stack.enter_context(mock.patch.object(mod, "route_to_vendor", side_effect=route))
         yield
 
 
-
-
-
-
-# Several tests drive vs.main() end-to-end, which fetches real OHLCV/statements
-# (benchmark SPDR closes, scan bases) through the vendor chain; those calls can
-# take 15-60s per test under a slow network and must not hit the global 180s
-# default. Keep the no-hang guarantee but allow a generous per-test budget.
-pytestmark = pytest.mark.timeout(600)
+# The file is offline (see _patch_vendors): every vendor seam is mocked and a
+# non-loopback connect fails the test. The marker is therefore pure hang-safety
+# - it exists so a seam someone forgot to mock fails in two minutes instead of
+# stalling the suite for half an hour (which is what a 600s budget did).
+pytestmark = pytest.mark.timeout(120)
 
 FUND = "Market Cap: 3.2T\n"
 BS = (
@@ -146,6 +188,21 @@ def _patch_vendors():
 
     vs._EODHD_EXCH_CACHE.clear()
     _mm._EXCHANGE_CACHE.clear()
+    # Every run-level cache, not just the exchange ones. main() clears these
+    # itself, but a direct _value_dip_scan/_compute_scan_row call skips that,
+    # so a stale (ticker, date) entry from an earlier test silently supplies
+    # the wrong fundamentals - one test used to pass only because the leaked
+    # entry came from live data instead of its own fake.
+    for _cache in (
+        vs._FIN_CACHE,
+        vs._CASHFLOW_CACHE,
+        vs._RUN_OHLCV_CACHE,
+        vs._RUN_FLOAT_CACHE,
+        vs._BENCHMARK_CACHE,
+        vs._SECTOR_RANK_CACHE,
+    ):
+        _cache.clear()
+    _OFFLINE_VIOLATIONS.clear()
     with (
         _patched_router(fake_route),
         mock.patch("tradingagents.dataflows.moomoo.get_top_movers_moomoo", side_effect=fake_losers),
@@ -154,8 +211,68 @@ def _patch_vendors():
         # fakes are exchange-less, so report them NYSE-listed to keep the
         # universe tests deterministic.
         mock.patch("tradingagents.dataflows.moomoo.get_exchange_moomoo", return_value="US_NYSE"),
+        # FMP is enrichment, reached directly (not through route_to_vendor) by
+        # ``vs.main`` -> ``fmp.normalized_score``; unpatched it makes live
+        # HTTPS calls that cost 15-56s per test here (20s socket timeout x
+        # retries) and hang outright when the host blackholes. Both bindings:
+        # ``fmp_common.fmp_get`` and the name ``fmp.py`` imported from it.
+        mock.patch("tradingagents.dataflows.fmp_common.fmp_get", return_value=None),
+        mock.patch("tradingagents.dataflows.fmp.fmp_get", return_value=None),
+        # Same shape again: ``statement_parsing.fetch_ticker`` imports finnhub
+        # inside the function and swallows failures, so an unpatched key turns
+        # every fundamentals parse into a live HTTPS call.
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+            return_value=None,
+        ),
+        # Backstop for any other live seam: fail at the test, not in 35 min.
+        mock.patch.object(socket.socket, "connect", _offline_connect),
     ):
         yield
+    # Teardown gate: the guard's raise is swallowed by the vendors' own
+    # ``except Exception``, so the record - not the exception - is what proves
+    # this file stayed offline. Never fires on a mocked seam.
+    if _OFFLINE_VIOLATIONS:
+        reached = ", ".join(sorted(set(_OFFLINE_VIOLATIONS)))
+        raise AssertionError(
+            f"test_value_screener reached the network: {reached}. "
+            "Mock that vendor seam - a live call here can hang the whole suite."
+        )
+
+
+def test_offline_tripwire_blocks_remote_hosts():
+    """The offline guard must refuse *and* record a non-loopback connect.
+
+    This is the gate on the guard itself: refusal makes the call degrade now
+    instead of stalling, and the record is what survives the vendor's
+    ``except Exception`` to fail the test. If either half stops working the
+    suite goes quietly back to live calls.
+    """
+    _OFFLINE_VIOLATIONS.clear()
+    sock = socket.socket()
+    try:
+        with pytest.raises(AssertionError, match="offline"):
+            sock.connect(("93.184.216.34", 80))
+    finally:
+        sock.close()
+    assert _OFFLINE_VIOLATIONS == ["93.184.216.34:80"]
+    _OFFLINE_VIOLATIONS.clear()  # deliberate attempt, not a leaked seam
+
+
+def test_offline_tripwire_delegates_loopback(monkeypatch):
+    """Loopback (OpenD, local sockets) must still pass through untouched."""
+    calls = []
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_REAL_SOCKET_CONNECT",
+        lambda self, address: calls.append(address),
+    )
+    sock = socket.socket()
+    try:
+        sock.connect(("127.0.0.1", 11111))
+    finally:
+        sock.close()
+    assert calls == [("127.0.0.1", 11111)]
 
 
 def test_top_losers_adds_name_and_daychg_columns(capsys):
@@ -665,21 +782,6 @@ def test_eodhd_losers_loose_near_miss_renders(monkeypatch, capsys):
     assert "value_floor" in out
 
 
-def _patch_all_routes(monkeypatch, route):
-    """Patch the vendor router at every binding the screener reaches.
-
-    ``_value_dip_scan`` re-imports ``route_to_vendor`` from the interface
-    module inside the function, so patching only ``vs.route_to_vendor`` would
-    leak a live vendor call for the cashflow leg. Patch the interface module
-    attr (the source), plus the two re-export bindings.
-    """
-    from tradingagents.dataflows import interface as _iface
-
-    monkeypatch.setattr(vs, "route_to_vendor", route)
-    monkeypatch.setattr(_sp_parsing, "route_to_vendor", route)
-    monkeypatch.setattr(_iface, "route_to_vendor", route)
-
-
 def _gentle_dip_csv(ticker, drop=-0.85, dip_bars=3):
     """Calm series (mild ±0.3 noise) with a trailing 3-bar -2.5% cascade.
 
@@ -703,7 +805,7 @@ def _gentle_dip_csv(ticker, drop=-0.85, dip_bars=3):
     return "\n".join(out_rows) + "\n"
 
 
-def test_value_dip_scan_knife_z_blocks_velocity_guard(monkeypatch):
+def test_value_dip_scan_knife_z_blocks_velocity_guard():
     """--knife-z wiring: the same inputs flip candidate True -> False when the
     falling-knife velocity-z guard is enforced. Calm tape + 3-day -2.5% dip:
     RSI/%b + trade-risk gates pass, but the velocity z (≈-8) is far below the
@@ -713,7 +815,6 @@ def test_value_dip_scan_knife_z_blocks_velocity_guard(monkeypatch):
     def _route(method, *a, **k):
         return cashflow if method == "get_cashflow" else "NO_DATA"
 
-    _patch_all_routes(monkeypatch, _route)
     ohlcv = {"closes": [], "highs": [], "lows": [], "volumes": []}
     closes = [100.0]
     import random as _r
@@ -729,8 +830,9 @@ def test_value_dip_scan_knife_z_blocks_velocity_guard(monkeypatch):
     ohlcv["volumes"] = [1_000_000] * len(closes)
     fin = {"market_cap": 1_000_000_000}
 
-    vd_off = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=0.0)
-    vd_on = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=-2.5)
+    with _patched_router(_route):
+        vd_off = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=0.0)
+        vd_on = vs._value_dip_scan("AAPL", ohlcv, fin, "2026-01-02", loose=False, knife_z=-2.5)
     assert vd_off is not None and vd_on is not None
     assert vd_off["candidate"] is True  # advisory rows only by default
     assert vd_on["candidate"] is False
@@ -757,14 +859,17 @@ def test_knife_z_flag_reaches_scan_seam(monkeypatch, capsys):
         return {"candidate": True, "gates": {}, "missing": [], "reasons": []}
 
     monkeypatch.setattr(vs, "_value_dip_scan", _stub_scan)
-    _patch_all_routes(monkeypatch, lambda method, *a, **k: _gentle_dip_csv(a[0]) if method == "get_stock_data" else "NO_DATA")
 
-    vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0", "--knife-z", "-2.5"])
-    assert seen == {"symbol": "AAPL", "knife_z": -2.5}
+    def _route(method, *a, **k):
+        return _gentle_dip_csv(a[0]) if method == "get_stock_data" else "NO_DATA"
 
-    seen.clear()
-    vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0"])
-    assert seen == {"symbol": "AAPL", "knife_z": 0.0}  # default: guard disabled
+    with _patched_router(_route):
+        vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0", "--knife-z", "-2.5"])
+        assert seen == {"symbol": "AAPL", "knife_z": -2.5}
+
+        seen.clear()
+        vs.main(["-u", "eodhd-losers", "-n", "1", "-d", "2026-01-02", "--exchanges", "", "--scan", "value-dip", "--min-mcap", "0"])
+        assert seen == {"symbol": "AAPL", "knife_z": 0.0}  # default: guard disabled
     out = capsys.readouterr().out
     assert "AAPL" in out
 

@@ -14,6 +14,44 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+Screener tests are actually offline now (2026-09-12; `tests/test_value_screener.py`). The file's
+docstring promised "nothing hits the network" while `vs.main` reached EODHD, Tiingo, Alpha Vantage and
+Finnhub for real. It surfaced as a full-suite run that stalled for 35 minutes with no CPU and no
+failure; a `faulthandler` dump landed inside `fmp_common.fmp_get`. Three causes stacked:
+
+**A router patch that missed a binding.** `route_to_vendor` is imported *by name* into three modules.
+The fixture patched `vs` and `statement_parsing`, but `fmp.normalized_score` imports it inside the
+function, so it read the unpatched interface attribute and went live - 18 of 39 tests reached a vendor
+(and `statement_parsing.fetch_ticker` calls Finnhub the same way, swallowing the failure, so nothing
+said so). All three bindings are now patched from one shared list; dropping any one of them is proven
+to fail the suite. The FMP and Finnhub HTTP seams are mocked explicitly.
+
+**No guard, so it could not be noticed.** A non-loopback socket connect is now refused *and recorded*.
+Refusing alone is not enough - the vendors degrade via `except Exception`, which would swallow the
+guard's error and let a live seam pass quietly (mutation proved it), so the autouse fixture asserts the
+record is empty at teardown and names the offending host:port.
+
+**A 600s marker where a hang should have failed.** `pytestmark = pytest.mark.timeout(600)` was there
+for "15-60s per test under a slow network"; the thread-based timeout cannot interrupt a blocking socket
+read, so the stall simply sat there. With every seam mocked the marker is pure hang-safety: 120s.
+
+Also fixed while gating it: all six run-level screener caches are cleared per test (`_FIN_CACHE`,
+`_CASHFLOW_CACHE`, `_RUN_OHLCV_CACHE`, `_RUN_FLOAT_CACHE`, `_BENCHMARK_CACHE`, `_SECTOR_RANK_CACHE`).
+`main()` clears these itself, but a direct `_value_dip_scan` call does not, and a stale `(AAPL, date)`
+entry was passing one test on live data rather than its own fake.
+
+**A mock that outlived its test.** `_patch_all_routes` patched those same three attributes through
+`monkeypatch`, whose teardown runs *after* the autouse fixture's - so it restored the fixture's mock
+rather than the real function, and the router stayed patched for every later test. That leak had been
+invisible because it never touched `interface` (the binding the vendor-routing tests read); patching
+`interface` exposed it as 7 failures in `tests/test_vendor_routing.py`. Both call sites now use the
+context-managed helper, which unwinds inside the test, and the duplicate helper is gone.
+
+Numbers: the file 295.93s -> 13.71s, the previously hung test 56.46s -> 2.43s, 39 passed, zero live
+hosts. Mutation proofs: dropping the interface binding -> 8 teardown errors naming the hosts; dropping
+`statement_parsing`'s -> 2; removing the record -> the guard's own gate test fails. No web impact
+(tests only).
+
 Round-2 quant formula additions: eight deterministic reads, their agent tools, and the prompt
 rules that make the agents cite them (2026-09-11; `docs/design_quant_formulas_research_round2.md`,
 plan `docs/implementation_plan_quant_formula_additions.md`). The round-1 scan
