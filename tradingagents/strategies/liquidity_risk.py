@@ -20,9 +20,15 @@ vendors (ADV, days-to-cover), and institution-holdings vendors (% of float).
 No-fabrication rule: every metric returns ``None`` when an input is missing;
 a composite read reports unknown rather than guessing. All functions are pure
 and unit-testable with no network.
+
+The high-low spread estimators (Corwin-Schultz / Abdi-Ranaldo) give a name's
+daily proportional cost floor from OHLC alone; the liquidity gate treats that
+as a *floor*, and a quoted spread stays authoritative when the caller has one.
 """
 
 from __future__ import annotations
+
+_MIN_SPREAD_BARS = 5
 
 
 def free_float_factor(
@@ -330,3 +336,135 @@ def roll_spread(closes: list, min_obs: int = 30) -> float | None:
         return None
     spread = 2.0 * _math.sqrt(-cov)
     return round(spread, 6) if _math.isfinite(spread) and spread > 0 else None
+
+
+def _spread_bars(closes, highs, lows) -> list[tuple[float, float, float]] | None:
+    """Align (close, high, low) bars for the high-low spread estimators.
+
+    Requires three same-length series of at least ``_MIN_SPREAD_BARS`` bars
+    with positive close/high/low and high >= low on every bar. Ragged /
+    misaligned lengths, non-numeric entries, or a short sample return ``None``
+    (never raise).
+    """
+    if closes is None or highs is None or lows is None:
+        return None
+    try:
+        n = len(closes)
+        if n != len(highs) or n != len(lows) or n < _MIN_SPREAD_BARS:
+            return None
+        bars = [(float(closes[i]), float(highs[i]), float(lows[i])) for i in range(n)]
+    except (TypeError, ValueError):
+        return None
+    if any(c <= 0 or h <= 0 or lo <= 0 or h < lo for c, h, lo in bars):
+        return None
+    return bars
+
+
+def corwin_schultz(closes: list, highs: list, lows: list) -> dict | None:
+    """Corwin & Schultz (2012) proportional spread from daily high/low ranges.
+
+    ``beta = ln(H_t/L_t)^2 + ln(H_{t+1}/L_{t+1})^2`` (single-day ranges),
+    ``gamma = ln(H^(2)/L^(2))^2`` (the two-day range), ``alpha =
+    (sqrt(2*beta)-sqrt(beta))/(3-2*sqrt(2)) - sqrt(gamma/(3-2*sqrt(2)))``,
+    ``S = 2*(exp(alpha)-1)/(1+exp(alpha))`` averaged over overlapping two-day
+    windows. If any window's corrected spread is negative (the two-day range
+    correction, e.g. a gap day) the estimate is unavailable -> ``None``; the
+    negative is never clamped to a fake spread. ``closes`` anchor the sample
+    length/alignment, though only the high/low ranges enter the formula.
+
+    The result is a **daily proportional cost floor**; the liquidity gate uses
+    it as a floor and keeps a quoted spread authoritative when one exists (the
+    caller decides which wins). ``n`` is the bar count.
+    """
+    import math as _math
+
+    bars = _spread_bars(closes, highs, lows)
+    if bars is None:
+        return None
+    denom = 3.0 - 2.0 * _math.sqrt(2.0)
+    estimates: list[float] = []
+    for t in range(len(bars) - 1):
+        _, h0, l0 = bars[t]
+        _, h1, l1 = bars[t + 1]
+        beta = _math.log(h0 / l0) ** 2 + _math.log(h1 / l1) ** 2
+        if beta <= 0:
+            return None
+        gamma = _math.log(max(h0, h1) / min(l0, l1)) ** 2
+        alpha = (
+            (_math.sqrt(2.0 * beta) - _math.sqrt(beta)) / denom
+            - _math.sqrt(gamma / denom)
+        )
+        s = 2.0 * (_math.exp(alpha) - 1.0) / (1.0 + _math.exp(alpha))
+        if not _math.isfinite(s) or s < 0:
+            return None
+        estimates.append(s)
+    if not estimates:
+        return None
+    return {"spread": sum(estimates) / len(estimates),
+            "basis": "corwin-schultz", "n": len(bars)}
+
+
+def abdi_ranaldo(closes: list, highs: list, lows: list) -> dict | None:
+    """Abdi & Ranaldo (2017) proportional spread from close/high/low.
+
+    Two-moment form: ``S = sqrt(4 * mean_t[(c_t - eta_t)(c_t - eta_{t+1})])``
+    with log close ``c_t`` and log mid-range ``eta_t = (ln H_t + ln L_t)/2``
+    (Abdi & Ranaldo, *A Simple Estimation of Bid-Ask Spreads from Daily Close,
+    High, and Low Prices*, Review of Financial Studies 30(12), 2017). When the
+    term under the square root is negative the paper's published treatment
+    floors it at zero; here the estimate is instead unavailable -> ``None``
+    (never a clamped or fabricated spread).
+
+    Same no-fabrication contract as :func:`corwin_schultz`: a **daily
+    proportional cost floor**, with quoted spreads authoritative when the
+    caller has them. ``n`` is the bar count.
+    """
+    import math as _math
+
+    bars = _spread_bars(closes, highs, lows)
+    if bars is None:
+        return None
+    moments = []
+    for t in range(len(bars) - 1):
+        c0, h0, l0 = bars[t]
+        _, h1, l1 = bars[t + 1]
+        c = _math.log(c0)
+        eta_t = 0.5 * (_math.log(h0) + _math.log(l0))
+        eta_next = 0.5 * (_math.log(h1) + _math.log(l1))
+        moments.append((c - eta_t) * (c - eta_next))
+    term = 4.0 * sum(moments) / len(moments)
+    if not _math.isfinite(term) or term < 0:
+        return None
+    spread = _math.sqrt(term)
+    return {"spread": spread, "basis": "abdi-ranaldo", "n": len(bars)}
+
+
+def spread_estimate(closes: list, highs: list, lows: list) -> dict | None:
+    """Aggregate daily proportional spread from both high-low estimators.
+
+    Runs :func:`corwin_schultz` and :func:`abdi_ranaldo` on the same bars and
+    returns ``{"spread", "basis", "n", "components"}``. The aggregate is the
+    median of the available component spreads (the single one when only one
+    survives); ``basis`` is ``"median(both)"``, ``"corwin-schultz"`` or
+    ``"abdi-ranaldo"``. ``None`` when neither estimator is defined. The number
+    is a **daily cost floor** for the liquidity gate, not a quote substitute:
+    a quoted spread stays authoritative when available (the caller decides).
+    """
+    import statistics as _stats
+
+    cs = corwin_schultz(closes, highs, lows)
+    ar = abdi_ranaldo(closes, highs, lows)
+    cs_spread = cs["spread"] if cs else None
+    ar_spread = ar["spread"] if ar else None
+    components = {"corwin-schultz": cs_spread, "abdi-ranaldo": ar_spread}
+    available = [(name, v) for name, v in components.items() if v is not None]
+    if not available:
+        return None
+    if len(available) == 1:
+        basis, spread = available[0]
+        n = (cs or ar)["n"]
+    else:
+        basis = "median(both)"
+        spread = _stats.median([cs_spread, ar_spread])
+        n = min(cs["n"], ar["n"])
+    return {"spread": spread, "basis": basis, "n": n, "components": components}

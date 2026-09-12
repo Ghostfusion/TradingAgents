@@ -96,6 +96,8 @@ _WATCHLIST_LEGEND = (
     ("M", "Beneish M-Score (earnings-manipulation likelihood > -1.78 elevated)"),
     ("Z", "Altman Z-Score (bankruptcy risk; < 1.8 distress zone)"),
     ("NetNet", "net-net flag: market cap < 2/3 x (current assets - total liabilities)"),
+    ("GP/A", "Novy-Marx gross profitability = (revenue - COGS) / total assets (higher = better)"),
+    ("NOA", "net operating assets = (operating assets - operating liabilities) / prior total assets (higher = bloat risk)"),
     ("Pills", "momentum 5-pillar score passed (0-5 day-trade prefilter)"),
     ("Pull", "momentum first-pullback candidate (yes/no)"),
     ("RR", "momentum reward/risk ratio"),
@@ -258,7 +260,7 @@ def _watchlist_markdown(results: list) -> str:
 
     heads = [
         "Rank", "Ticker", "Name",
-        "EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet",
+        "EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet", "GP/A", "NOA",
         "Pills", "Pull", "RR",
         "L1Px", "VWAP1m", "1mVol",
         "NEV/EBIT", "PE5Y",
@@ -290,6 +292,7 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("ev_ebit")), cell(r.get("ev")),
             cell(r.get("f_score")), cell(r.get("beneish_m")), cell(r.get("altman_z")),
             flag(r.get("net_net")),
+            cell(r.get("gp_a"), "{:.3f}"), cell(r.get("noa"), "{:.3f}"),
             cell(r.get("pills")), flag(r.get("pullback")), cell(r.get("mom_rr")),
             cell(r.get("line_price")), cell(r.get("line_vwap")), cell(r.get("line_vol")),
             cell(r.get("nebit_ev_ebit")), cell(r.get("pe_pct5"), "{:.0%}"),

@@ -19,6 +19,12 @@ from statistics import pstdev
 #: dimension of feature tuple: (vol_percentile, trend, choppiness)
 FREQ_PER_DAY = 252.0
 
+#: Posterior mass on run length 0 (the newest point begins a new segment) at
+#: which BOCPD raises the change alarm. 0.5 is the Bayes cut under 0-1 loss:
+#: "more likely a fresh segment than a continuation". Raise it for fewer false
+#: alarms, lower it for a faster (noisier) reaction.
+BOCPD_SHIFT_THRESHOLD = 0.5
+
 
 def realized_vol(
     close_prices: list[float], window: int = 21, periods: float = FREQ_PER_DAY
@@ -365,6 +371,120 @@ def ewma_control(series: list, lambd: float = 0.2, l_width: float = 3.0) -> dict
             "signal": signal, "signal_at": signal_at, "last_z": round(z, 6)}
 
 
+def _student_t_pdf(x: float, df: float, loc: float, scale: float) -> float:
+    """Student-t density (the Normal-Inverse-Gamma predictive law)."""
+    if df <= 0.0 or scale <= 0.0:
+        return 0.0
+    z = (x - loc) / scale
+    log_pdf = (
+        math.lgamma((df + 1.0) / 2.0)
+        - math.lgamma(df / 2.0)
+        - 0.5 * math.log(df * math.pi)
+        - math.log(scale)
+        - ((df + 1.0) / 2.0) * math.log1p(z * z / df)
+    )
+    return math.exp(log_pdf)
+
+
+def bocpd(
+    series: list,
+    hazard: float = 1.0 / 60.0,
+    mu_prior: float = 0.0,
+    kappa: float = 1.0,
+    alpha_prior: float = 1.0,
+    beta_prior: float = 1.0,
+    warmup: int = 20,
+) -> dict | None:
+    """Bayesian online change-point detection (Adams & MacKay 2007, arXiv:0710.3742).
+
+    Models the series as piecewise i.i.d. Normal with an unknown mean and
+    variance per segment; conjugate Normal-Inverse-Gamma prior
+    ``NIG(mu_prior, kappa, alpha_prior, beta_prior)`` with a constant hazard
+    ``1/hazard`` expected run length. Predictives are Student-t; the run-length
+    posterior is updated online in O(n^2) time, deterministically (no sampling).
+
+    Units: the input is standardised *internally* against the first ``warmup``
+    observations (``z = (x - mean) / pstdev``) and BOCPD runs on those z-scores.
+    This is causal (baseline uses only past points, never future ones) and lets
+    the unit-scale NIG defaults apply unchanged to raw returns of any small
+    magnitude; without it the diffuse default prior cannot see a mean shift in
+    a percent-scale return series. Pass returns, not prices: the i.i.d.-within-
+    segment assumption is what makes the level shift meaningful.
+
+    ``shift`` is ``zero_run_prob >= BOCPD_SHIFT_THRESHOLD`` (module constant,
+    0.5). A ``True`` read invalidates window-based statistics for the NEXT read:
+    Hurst, variance-ratio and half-life are estimated on a window that straddles
+    the break, so recompute them after the segment restarts (this function does
+    not touch them).
+
+    Returns ``{zero_run_prob, map_run_length, expected_run_length, shift, n,
+    hazard, basis}`` or ``None`` for degenerate input (fewer than ``warmup``
+    points, non-positive hazard, or a zero-variance warmup baseline).
+    """
+    vals = [float(v) for v in series if v is not None]
+    n = len(vals)
+    h = float(hazard)
+    if int(warmup) < 2 or n < int(warmup) or not (0.0 < h < 1.0):
+        return None
+    base = vals[: int(warmup)]
+    b_mean = sum(base) / len(base)
+    b_std = pstdev(base)
+    if b_std <= 1e-12:
+        return None
+    z = [(v - b_mean) / b_std for v in vals]
+
+    prior = (float(mu_prior), float(kappa), float(alpha_prior), float(beta_prior))
+    # prior predictive of the first point of a fresh segment (no data yet)
+    prior_df = 2.0 * alpha_prior
+    prior_scale = math.sqrt(beta_prior * (kappa + 1.0) / (alpha_prior * kappa))
+    probs = {0: 1.0}
+    params = {0: prior}
+    for x in z:
+        grown_probs: dict[int, float] = {}
+        grown_params: dict[int, tuple[float, float, float, float]] = {}
+        change_mass = h * _student_t_pdf(x, prior_df, mu_prior, prior_scale)
+        for r, p in probs.items():
+            mu, kap, alpha, beta = params[r]
+            df = 2.0 * alpha
+            scale = math.sqrt(beta * (kap + 1.0) / (alpha * kap))
+            pred = _student_t_pdf(x, df, mu, scale)
+            if pred <= 0.0:
+                continue
+            growth = p * pred * (1.0 - h)
+            new_kappa = kap + 1.0
+            new_mu = (kap * mu + x) / new_kappa
+            new_beta = beta + kap * (x - mu) ** 2 / (2.0 * new_kappa)
+            grown_probs[r + 1] = grown_probs.get(r + 1, 0.0) + growth
+            grown_params[r + 1] = (new_mu, new_kappa, alpha + 0.5, new_beta)
+        grown_probs[0] = change_mass
+        grown_params[0] = prior
+        total = sum(grown_probs.values())
+        if total <= 0.0:
+            probs = {0: 1.0}
+            params = {0: prior}
+            continue
+        probs = {r: p / total for r, p in grown_probs.items()}
+        params = grown_params
+
+    zero_run_prob = float(probs.get(0, 0.0))
+    map_run_length = max(probs, key=probs.get)
+    expected_run_length = sum(r * p for r, p in probs.items())
+    basis = (
+        f"Adams-MacKay BOCPD, NIG prior mu={mu_prior},kappa={kappa},"
+        f"alpha={alpha_prior},beta={beta_prior}, hazard={h:.6g}; "
+        f"{n} standardized returns (baseline mean/std from first {int(warmup)} obs)"
+    )
+    return {
+        "zero_run_prob": round(zero_run_prob, 6),
+        "map_run_length": int(map_run_length),
+        "expected_run_length": round(float(expected_run_length), 4),
+        "shift": bool(zero_run_prob >= BOCPD_SHIFT_THRESHOLD),
+        "n": n,
+        "hazard": h,
+        "basis": basis,
+    }
+
+
 __all__ = [
     "realized_vol",
     "vol_percentile",
@@ -378,6 +498,8 @@ __all__ = [
     "regime_factor",
     "cusum",
     "ewma_control",
+    "bocpd",
+    "BOCPD_SHIFT_THRESHOLD",
 ]
 
 

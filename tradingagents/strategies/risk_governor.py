@@ -12,6 +12,8 @@ Pure and unit-testable; the graph calls it after the position contract.
 
 from __future__ import annotations
 
+import json
+
 LIMITS_KEYS = (
     "max_position_pct",  # per-trade size cap
     "max_book_position_pct",  # total book cap
@@ -48,6 +50,7 @@ def govern(
     risk_cap_pct: float | None = None,
     liquidity_verdict: str | None = None,
     liquidity_dangers: list[str] | None = None,
+    sizing: dict | None = None,
 ) -> dict:
     """Evaluate decision size against limits; PASS/WARN/REJECT + reasons.
 
@@ -66,16 +69,26 @@ def govern(
     CAUTION verdict WARNs. Only active when the caller passes a verdict (the
     graph enables it via ``enable_liquidity_gate``); default None -> skipped,
     preserving current behavior.
+
+    ``sizing`` (keyword-only, optional) is an advisory remedy mapping (e.g.
+    :func:`book_risk.min_cvar_weights` output). When supplied it is stored
+    verbatim on the returned dict; it is purely additive and never changes the
+    verdict - default None -> the returned dict is byte-identical to today.
     """
     limits = default_limits(cfg)
     reasons = []
     touches = []
 
+    def _out(result: dict) -> dict:
+        if sizing is not None:
+            result["sizing"] = sizing
+        return result
+
     if halted:
-        return {"verdict": "REJECT", "reasons": ["risk halt active"], "numbers": "halt=on"}
+        return _out({"verdict": "REJECT", "reasons": ["risk halt active"], "numbers": "halt=on"})
 
     if size_pct is None:
-        return {"verdict": "PASS", "reasons": [], "numbers": "size unknown"}
+        return _out({"verdict": "PASS", "reasons": [], "numbers": "size unknown"})
 
     max_pos = limits["max_position_pct"]
     if size_pct > max_pos:
@@ -146,10 +159,10 @@ def govern(
                 touches.append("liquidity: " + "; ".join(liquidity_dangers))
 
     if reasons:
-        return {"verdict": "REJECT", "reasons": reasons, "touches": touches}
+        return _out({"verdict": "REJECT", "reasons": reasons, "touches": touches})
     if touches:
-        return {"verdict": "WARN", "reasons": [], "touches": touches}
-    return {"verdict": "PASS", "reasons": [], "touches": []}
+        return _out({"verdict": "WARN", "reasons": [], "touches": touches})
+    return _out({"verdict": "PASS", "reasons": [], "touches": []})
 
 
 def build_risk_snapshot(
@@ -159,8 +172,14 @@ def build_risk_snapshot(
     cvar_pct: float | None = None,
     drawdown_pct: float | None = None,
     capital_at_risk_pct: float | None = None,
+    sizing: dict | None = None,
 ) -> str:
-    """Compact numbers-only snapshot for the risk debate (kills prose)."""
+    """Compact numbers-only snapshot for the risk debate (kills prose).
+
+    ``sizing`` (optional) is an advisory remedy mapping; when supplied it is
+    appended verbatim (JSON) to the snapshot. Default None -> byte-identical
+    output to today. Verdict logic is untouched either way.
+    """
     parts = [f"verdict={verdict.get('verdict', '?')}"]
     if size_pct is not None:
         parts.append(f"size={size_pct:.1%}")
@@ -174,6 +193,8 @@ def build_risk_snapshot(
         parts.append(f"dd={drawdown_pct:.1%}")
     if verdict.get("reasons"):
         parts.append("reasons=" + " | ".join(verdict["reasons"]))
+    if sizing is not None:
+        parts.append("sizing=" + json.dumps(sizing, default=str, separators=(",", ":")))
     return "risk snapshot: " + "; ".join(parts)
 
 

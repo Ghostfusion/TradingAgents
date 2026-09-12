@@ -16,6 +16,9 @@ no-fabrication rule). No network, no state.
 
 from __future__ import annotations
 
+import math
+import statistics
+
 
 def book_depth_read(
     bid: float | None,
@@ -61,6 +64,8 @@ __all__ = [
     "premarket_liquidity",
     "post_close_confirmation",
     "book_depth_read",
+    "decompose_returns",
+    "decompose_returns_text",
 ]
 
 
@@ -262,3 +267,89 @@ def post_close_confirmation(close: float | None, stop: float | None, target: flo
     if target is not None and c > float(target):
         return {"verdict": "target-hit", "action": "take-profit"}
     return {"verdict": "holding", "action": "hold"}
+
+
+def decompose_returns(opens, closes) -> dict | None:
+    """Overnight / intraday log-return decomposition (N8).
+
+    For each pair ``t`` (1-based, needs the prior close):
+      ``intraday_t = ln(close_t / open_t)``
+      ``overnight_t = ln(open_t / close_{t-1})``
+    so the two legs sum to the close-to-close log return
+    ``ln(close_t / close_{t-1})``.
+
+    This is a **decomposition** of where the move sat (the session vs the
+    overnight gap), not an attribution to any news or cause.
+
+    Returns ``{intraday_mean, intraday_vol, overnight_mean, overnight_vol,
+    intraday_var_share, n, basis}`` where the means and stdevs are per-period
+    in raw log-return units (``vol`` is a sample stdev, ``n-1`` denominator,
+    *not* annualised) and ``intraday_var_share = var(intraday) /
+    (var(intraday) + var(overnight))`` over the same pairs. ``n`` is the number
+    of return pairs used. ``None`` when fewer than 3 pairs remain, any price is
+    non-positive / non-finite, ``opens`` is missing, ragged (length mismatch or
+    a ``None`` entry), or the total variance is zero.
+    """
+    if opens is None or closes is None:
+        return None
+    try:
+        o = list(opens)
+        c = list(closes)
+    except TypeError:
+        return None
+    if len(o) != len(c) or len(o) < 4:
+        return None
+    intraday: list[float] = []
+    overnight: list[float] = []
+    for t in range(1, len(c)):
+        o_t, c_t, c_prev = o[t], c[t], c[t - 1]
+        if o_t is None or c_t is None or c_prev is None:
+            return None
+        try:
+            o_t = float(o_t)
+            c_t = float(c_t)
+            c_prev = float(c_prev)
+        except (TypeError, ValueError):
+            return None
+        if min(o_t, c_t, c_prev) <= 0 or not (
+            math.isfinite(o_t) and math.isfinite(c_t) and math.isfinite(c_prev)
+        ):
+            return None
+        intraday.append(math.log(c_t / o_t))
+        overnight.append(math.log(o_t / c_prev))
+    n = len(intraday)
+    if n < 3:
+        return None
+    v_intraday = statistics.variance(intraday)
+    v_overnight = statistics.variance(overnight)
+    total = v_intraday + v_overnight
+    if total <= 0:
+        return None
+    return {
+        "intraday_mean": statistics.fmean(intraday),
+        "intraday_vol": math.sqrt(v_intraday),
+        "overnight_mean": statistics.fmean(overnight),
+        "overnight_vol": math.sqrt(v_overnight),
+        "intraday_var_share": v_intraday / total,
+        "n": n,
+        "basis": (
+            "intraday=ln(C/O), overnight=ln(O/C_prev); "
+            f"{n} pairs; raw per-period log-return mean/stdev (not annualised)"
+        ),
+    }
+
+
+def decompose_returns_text(read: dict | None) -> str:
+    """Render a ``decompose_returns`` read as one compact line.
+
+    States the decomposition (which leg carried the move), never a cause.
+    ``None`` -> ``"return decomposition unavailable"``.
+    """
+    if not read:
+        return "return decomposition unavailable"
+    return (
+        f"intraday {read['intraday_mean']:+.4f} (sd {read['intraday_vol']:.4f}) | "
+        f"overnight {read['overnight_mean']:+.4f} (sd {read['overnight_vol']:.4f}) | "
+        f"intraday var share {read['intraday_var_share']:.1%} | "
+        f"n={read['n']} | {read['basis']}"
+    )

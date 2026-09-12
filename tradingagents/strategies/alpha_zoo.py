@@ -205,13 +205,55 @@ def evaluate_expr(expr: str, records: list[dict]) -> tuple[list | None, str]:
         return None, f"evaluation failed: {exc}"
 
 
+def _zoo_reality_check(series_list: list, fwd: list, seed: int) -> dict:
+    """Universe-level White RC + Hansen SPA over the bench expressions.
+
+    Each expression's standardised signal times the forward return is its
+    candidate return series and buy&hold forward return is the benchmark.
+    Returns ``{"reality_check": ..., "spa": ...}`` (both None when the bench
+    cannot supply two usable candidates over a common window).
+    """
+    from tradingagents.strategies.evaluate import (
+        reality_check as _white_rc,
+        spa as _hansen_spa,
+    )
+
+    valid = [(name, s) for name, s in series_list if s is not None]
+    if len(valid) < 2:
+        return {"reality_check": None, "spa": None}
+    idx = [i for i in range(len(fwd))
+           if fwd[i] is not None and all(s[i] is not None for _, s in valid)]
+    if len(idx) < 2:
+        return {"reality_check": None, "spa": None}
+    bench = [fwd[i] for i in idx]
+    cands: dict[str, list] = {}
+    for k, (name, s) in enumerate(valid):
+        vals = [s[i] for i in idx]
+        m = sum(vals) / len(vals)
+        sd = (sum((v - m) ** 2 for v in vals) / (len(vals) - 1)) ** 0.5
+        if sd <= 0:
+            continue
+        cands[f"{name}#{k}"] = [((v - m) / sd) * bench[t] for t, v in enumerate(vals)]
+    if len(cands) < 2:
+        return {"reality_check": None, "spa": None}
+    return {"reality_check": _white_rc(cands, bench, seed=seed),
+            "spa": _hansen_spa(cands, bench, seed=seed)}
+
+
 def bench_zoo(exprs: list[str], records: list[dict],
               forward_days: int = 1, n_trials: int = 1,
-              walk_forward: bool = False, cpcv_folds: int = 0) -> list[dict]:
+              walk_forward: bool = False, cpcv_folds: int = 0, *,
+              reality_check: bool = False, seed: int = 0) -> list[dict]:
     """Rank-IC of each gated expression vs forward returns + validation
     (W2): includes out-of-sample rank IC (leading-train split), walk-forward
     across rolling train/test folds, CPCV overfit flag, and a deflated-Sharpe
-    adjusted IC when ``n_trials`` > 1. never raises."""
+    adjusted IC when ``n_trials`` > 1. never raises.
+
+    With ``reality_check=True`` every row gains one extra ``reality_check``
+    key holding the universe-level ``{"reality_check": ..., "spa": ...}``
+    results (White's RC and Hansen's SPA over the bench expressions vs the
+    forward-return benchmark); the default path is unchanged.
+    """
     from tradingagents.strategies.evaluate import (
         cpcv_overfit_mask,
         deflated_sharpe,
@@ -229,13 +271,15 @@ def bench_zoo(exprs: list[str], records: list[dict],
         return None
 
     out = []
+    fwd_all = [_fwd(i) for i in range(n)]
+    series_list: list = []
     for expr in exprs:
         series, err = evaluate_expr(expr, records)
         row = {"expr": expr, "rank_ic": None, "error": err or None,
                "oos_rank_ic": None, "wf_ic": None, "cpcv_overfit": None,
                "deflated_ic": None}
         if series is not None and err == "":
-            fwd = [_fwd(i) for i in range(n)]
+            fwd = fwd_all
             ic = rank_ic(series, fwd)
             row["rank_ic"] = ic
             # OOS rank IC on the trailing 30% (W2-4)
@@ -276,7 +320,12 @@ def bench_zoo(exprs: list[str], records: list[dict],
                     if fwd[i] is not None and series[i] is not None:
                         dr[i] = series[i] * fwd[i]
                 row["deflated_ic"] = round(deflated_sharpe(dr, n_trials), 4)
+        series_list.append((expr, series))
         out.append(row)
+    if reality_check:
+        universe = _zoo_reality_check(series_list, fwd_all, seed)
+        for row in out:
+            row["reality_check"] = universe
     return out
 
 

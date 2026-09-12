@@ -16,6 +16,7 @@ offline on synthetic data and on exported memory-log returns.
 from __future__ import annotations
 
 import math
+import random
 
 
 def _clean(values: list) -> list[float]:
@@ -227,6 +228,175 @@ def pbo_flag(results_by_trial: list[float], test_results: list[float],
         return False
     best_idx = max(range(len(results_by_trial)), key=lambda i: results_by_trial[i])
     return test_results[best_idx] < threshold
+
+
+def _mean_var(values: list[float]) -> tuple[float, float]:
+    n = len(values)
+    m = sum(values) / n
+    if n < 2:
+        return m, 0.0
+    return m, sum((v - m) ** 2 for v in values) / (n - 1)
+
+
+def _rc_metric(values: list[float], metric: str) -> float:
+    """Per-period performance of a relative series: mean or mean/std."""
+    m, var = _mean_var(values)
+    if metric == "sharpe":
+        sd = math.sqrt(var)
+        return m / sd if sd > 0 else 0.0
+    return m
+
+
+def _rc_prepare(candidates, benchmark, block_len) -> tuple | None:
+    """Align candidates vs benchmark; None on any degrading condition.
+
+    Degrades when there are fewer than 2 candidates, any series is ragged or
+    holds a non-finite value, the window (``len(benchmark)``) is shorter than
+    ``2 * block_len``, or every candidate has zero variance (a flat universe
+    cannot be distinguished from anything).
+    """
+    if not isinstance(candidates, dict) or len(candidates) < 2:
+        return None
+    if not isinstance(benchmark, (list, tuple)) or int(block_len) < 1:
+        return None
+    n = len(benchmark)
+    if n < int(block_len) * 2:
+        return None
+    bench = _clean(benchmark)
+    if len(bench) != n:
+        return None
+    names: list[str] = []
+    rel: list[list[float]] = []
+    any_variance = False
+    for name, series in candidates.items():
+        if not isinstance(series, (list, tuple)) or len(series) != n:
+            return None
+        vals = _clean(series)
+        if len(vals) != n:
+            return None
+        if _mean_var(vals)[1] > 0.0:
+            any_variance = True
+        names.append(str(name))
+        rel.append([vals[i] - bench[i] for i in range(n)])
+    if not any_variance:
+        return None
+    return names, rel, n
+
+
+def _stationary_indices(n: int, block_len: int, rng: random.Random) -> list[int]:
+    """Index draw for the stationary (polychromatic) bootstrap: geometric
+    blocks of mean length ``block_len`` with wraparound, preserving serial
+    dependence that an i.i.d. draw would destroy."""
+    p = 1.0 / max(1, int(block_len))
+    idx = [rng.randrange(n)]
+    while len(idx) < n:
+        if rng.random() < p:
+            idx.append(rng.randrange(n))
+        else:
+            idx.append((idx[-1] + 1) % n)
+    return idx
+
+
+def reality_check(candidates, benchmark, n_boot: int = 1000, block_len: int = 5,
+                  seed: int = 0, metric: str = "mean") -> dict | None:
+    """White's Reality Check over a universe of candidates vs one benchmark.
+
+    The null is that the best candidate's relative performance does not exceed
+    the benchmark's: the statistic is ``max_k`` of the (bootstrap-centred)
+    relative mean (or Sharpe when ``metric="sharpe"``), and the p-value is the
+    share of stationary-bootstrap maxima at least as large. ``candidates`` is a
+    ``{name: [returns]}`` mapping aligned with ``benchmark``. None on <2
+    candidates, ragged/non-finite series, a window under ``2*block_len``, or
+    zero variance in every candidate. Deterministic given ``seed``.
+    """
+    prepared = _rc_prepare(candidates, benchmark, block_len)
+    if prepared is None or metric not in ("mean", "sharpe"):
+        return None
+    names, rel, n = prepared
+    observed = [_rc_metric(row, metric) for row in rel]
+    stat = max(observed)
+    n_boot = int(n_boot)
+    rng = random.Random(seed)
+    exceed = 0
+    for _ in range(n_boot):
+        idx = _stationary_indices(n, block_len, rng)
+        boot_max = max(_rc_metric([row[j] for j in idx], metric) - observed[k]
+                       for k, row in enumerate(rel))
+        if boot_max >= stat:
+            exceed += 1
+    basis = (f"white reality check (stationary bootstrap, mean block {block_len}, "
+             f"n_boot={n_boot}, seed={seed}, metric={metric}) on "
+             f"{len(names)} candidates x {n} obs")
+    return {
+        "stat": round(stat, 6),
+        "p_value": round((1.0 + exceed) / (n_boot + 1.0), 6),
+        "block_len": int(block_len),
+        "n_candidates": len(names),
+        "n_obs": n,
+        "basis": basis,
+    }
+
+
+def spa(candidates, benchmark, n_boot: int = 1000, block_len: int = 5,
+        seed: int = 0) -> dict | None:
+    """Hansen's studentised SPA test over a universe vs one benchmark.
+
+    Same null and stationary bootstrap as ``reality_check`` but the statistic
+    is studentised (``sqrt(n) * mean / std``) and candidates whose relative
+    mean is significantly below the benchmark (below ``-sqrt(2 log log n / n)``
+    standard errors) are recentred to zero in the null, so only plausible
+    contenders set the critical value. The ``recentring`` key counts the
+    candidates recentred. Same degradation rules as ``reality_check``.
+    """
+    prepared = _rc_prepare(candidates, benchmark, block_len)
+    if prepared is None:
+        return None
+    names, rel, n = prepared
+    stats: list[tuple[float, float]] = []
+    for row in rel:
+        m, var = _mean_var(row)
+        sd = math.sqrt(var)
+        if sd > 0:
+            stats.append((m, sd))
+    if not stats:
+        return None
+    root_n = math.sqrt(n)
+    t_obs = max(root_n * m / sd for m, sd in stats)
+    a_n = 2.0 * math.log(math.log(n)) if n > math.e else 0.0
+    cutoff = -math.sqrt(a_n / n)
+    mus: list[float] = []
+    recentred = 0
+    for m, sd in stats:
+        if m / sd < cutoff:
+            mus.append(0.0)
+            recentred += 1
+        else:
+            mus.append(m)
+    n_boot = int(n_boot)
+    rng = random.Random(seed)
+    student_rows = [(rel[k], stats[k][1], mus[k]) for k in range(len(stats))]
+    exceed = 0
+    for _ in range(n_boot):
+        idx = _stationary_indices(n, block_len, rng)
+        boot_max = float("-inf")
+        for row, sd, mu in student_rows:
+            t = root_n * (_rc_metric([row[j] for j in idx], "mean") - mu) / sd
+            if t > boot_max:
+                boot_max = t
+        if boot_max >= t_obs:
+            exceed += 1
+    basis = (f"hansen spa (stationary bootstrap, studentised, mean block "
+             f"{block_len}, n_boot={n_boot}, seed={seed}) on {len(names)} "
+             f"candidates x {n} obs, {recentred} recentred")
+    return {
+        "stat": round(t_obs, 6),
+        "p_value": round((1.0 + exceed) / (n_boot + 1.0), 6),
+        "block_len": int(block_len),
+        "n_candidates": len(names),
+        "n_obs": n,
+        "recentring": recentred,
+        "basis": basis,
+    }
 
 
 def skewness(returns: list[float]) -> float | None:
@@ -822,6 +992,7 @@ __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
+    "reality_check", "spa",
     "benchmark_table",
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",

@@ -28,6 +28,8 @@ from tradingagents.dataflows.quantitative_scores import (
     beneish_m_score,
     earnings_yield,
     enterprise_value,
+    gross_profitability,
+    net_operating_assets,
     piotroski_f_score,
 )
 
@@ -867,6 +869,11 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     m_score = beneish_m_score(fin)
     z_score = altman_z_score(fin) if usd else None
     f_score = piotroski_f_score(fin)
+    # Quality rows (informational): Novy-Marx gross profitability and
+    # Hirshleifer et al. net operating assets. They feed the watchlist columns
+    # only - no score, ranking or filter reads them.
+    gp_a_row = gross_profitability(fin)
+    noa_row = net_operating_assets(fin)
     mc = _latest(fin.get("market_cap"))
     ca = _latest(fin.get("current_assets"))
     tl = _latest(fin.get("total_liabilities"))
@@ -897,6 +904,10 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "altman_z": round(z_score, 3) if z_score is not None else None,
         "net_net": net_net,
         "trap": trap,
+        "gp_a": round(gp_a_row["value"], 4) if gp_a_row else None,
+        "noa": round(noa_row["value"], 4) if noa_row else None,
+        "gp_a_classification": gp_a_row["classification"] if gp_a_row else None,
+        "noa_classification": noa_row["classification"] if noa_row else None,
         "roe": round(roe, 4) if roe is not None else None,
         "eps_yoy": sane_eps_yoy(fin),
         "revenue_yoy": sane_revenue_yoy(fin),

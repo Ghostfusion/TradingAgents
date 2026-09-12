@@ -14,14 +14,47 @@ from __future__ import annotations
 
 import math
 
+# Reference clip (shares) at which the linear temporary-impact term equals the
+# quoted half-spread in price units; eta = (spread / 2) * price / clip.
+_IMPACT_REFERENCE_CLIP = 1e6
+
+
+def default_temp_impact(price: float, spread: float) -> float | None:
+    """Temporary-impact coefficient (``eta``) implied by a proportional spread.
+
+    Almgren-Chriss charges ``eta * v`` per share for an interval trade of ``v``
+    shares. A clip crossing the book pays the half-spread in price units,
+    ``(spread / 2) * price``; normalising to this module's coefficient units --
+    the reference clip ``_IMPACT_REFERENCE_CLIP`` (1e6 shares), at which the
+    linear term equals that half-spread -- gives
+    ``eta = (spread / 2) * price / 1e6``. ``spread`` is the *proportional*
+    (decimal) spread, e.g. from a quote or from
+    ``strategies.liquidity_risk.spread_estimate``; ``price`` anchors the price
+    level. Returns ``None`` when either input is missing, non-positive or
+    non-finite.
+    """
+    try:
+        p = float(price)
+        s = float(spread)
+    except (TypeError, ValueError):
+        return None
+    if p <= 0.0 or s <= 0.0 or not math.isfinite(p + s):
+        return None
+    eta = 0.5 * s * p / _IMPACT_REFERENCE_CLIP
+    return eta if math.isfinite(eta) and eta > 0.0 else None
+
 
 def almgren_chriss(
     X: float,
     T: int,
     sigma: float,
-    eta: float,
-    lam: float,
+    eta: float | None = None,
+    lam: float | None = None,
     gamma: float = 0.0,
+    *,
+    temp_impact: float | None = None,
+    price: float | None = None,
+    spread: float | None = None,
 ) -> dict:
     """Optimal liquidation trajectory (Almgren-Chriss, linear impact).
 
@@ -30,14 +63,25 @@ def almgren_chriss(
     ``{'schedule': [(t, x_remaining, v_t), ...], 'kappa', 'e_is', 'var_is',
     'lambda', 'n'}`` with expected shortfall ``0.5*gamma*X^2 +
     eta*sum(v_t^2)`` and variance ``sigma^2 * sum(x_t^2)`` (AC formulas;
-    gamma=0 drops the permanent-impact term). None-safe: bad inputs -> all
-    None. Advisory (never an order).
+    gamma=0 drops the permanent-impact term).
+
+    Temporary impact resolution: an explicit ``temp_impact`` always wins; when
+    it is omitted but ``price`` and ``spread`` are supplied the default
+    ``default_temp_impact(price, spread)`` is used; otherwise the positional
+    ``eta`` is used unchanged (an absent/degenerate ``eta`` keeps the old
+    empty-schedule fallback). None-safe: bad inputs -> all None. Advisory
+    (never an order).
     """
     try:
         X = float(X)
         T = int(T)
         sig = float(sigma)
-        et = float(eta)
+        et_raw = temp_impact
+        if et_raw is None and price is not None and spread is not None:
+            et_raw = default_temp_impact(price, spread)
+        if et_raw is None:
+            et_raw = eta
+        et = float(et_raw)
         L = float(lam)
         ga = float(gamma)
     except (TypeError, ValueError):
@@ -123,4 +167,5 @@ def pov_schedule(X: float, volume_each_interval: float, participation: float = 0
     return {"schedule": sched, "n": t}
 
 
-__all__ = ["almgren_chriss", "twap_schedule", "vwap_schedule", "pov_schedule"]
+__all__ = ["almgren_chriss", "twap_schedule", "vwap_schedule", "pov_schedule",
+           "default_temp_impact"]

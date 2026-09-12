@@ -261,3 +261,60 @@ def acquirers_multiple(fin):
     if ev is None or ebit is None:
         return None
     return _ratio(ev, ebit)
+
+
+def gross_profitability(fin):
+    """Novy-Marx GP/A = (revenue - COGS) / total assets.
+
+    Missing revenue, COGS or total assets returns ``None`` (never substitute
+    operating income for COGS). Returns ``{"value", "basis", "classification"}``
+    where ``classification`` records the COGS line used.
+    """
+    rev = _num(fin.get("revenue"))
+    ta = _num(fin.get("total_assets"))
+    cogs = _num(fin.get("cogs"))
+    src = "cogs"
+    if cogs is None:
+        cogs = _num(fin.get("cost_of_revenue"))
+        src = "cost_of_revenue"
+    if rev is None or cogs is None or ta is None or ta == 0:
+        return None
+    return {
+        "value": (rev - cogs) / ta,
+        "basis": f"GP/A = (revenue - {src}) / total_assets; latest period",
+        "classification": f"cogs line: {src}",
+    }
+
+
+def net_operating_assets(fin):
+    """Hirshleifer et al. NOA = (operating assets - operating liabilities) / TA_prev.
+
+    Operating assets = total assets minus financial assets (cash +
+    marketable securities); operating liabilities = total liabilities minus
+    total debt. The prior-year total assets is the denominator - a missing
+    prior balance sheet returns ``None``. ``classification`` records the
+    operating/financial split actually used (hybrids are ambiguous, so the
+    split is stated, never inferred silently).
+    """
+    ta = _num(fin.get("total_assets"))
+    ta_prev = _num(_prv(fin.get("total_assets")))
+    tl = _num(fin.get("total_liabilities"))
+    if ta is None or ta_prev is None or tl is None or ta_prev == 0:
+        return None
+    cash = _num(fin.get("cash"))
+    sec = _num(fin.get("marketable_securities"))
+    debt = _num(fin.get("total_debt"))
+    fin_assets = (cash or 0.0) + (sec or 0.0)
+    assets_desc = "+".join(
+        n for n, v in (("cash", cash), ("marketable_securities", sec)) if v is not None
+    ) or "none"
+    operating_assets = ta - fin_assets
+    operating_liabilities = tl - (debt or 0.0)
+    debt_desc = "total_debt" if debt is not None else "no debt line"
+    return {
+        "value": (operating_assets - operating_liabilities) / ta_prev,
+        "basis": "NOA = (operating assets - operating liabilities) / total_assets_prev; "
+        "operating assets = total_assets - financial assets, "
+        "operating liabilities = total_liabilities - total_debt",
+        "classification": f"financial assets: {assets_desc}; debt line: {debt_desc}",
+    }

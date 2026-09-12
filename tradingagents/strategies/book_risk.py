@@ -512,5 +512,340 @@ def extreme_quantile_var(
     }
 
 
+# ---------------------------------------------------------------------------
+# Minimum-CVaR sizing + copula scenarios (quants.md N5 / C4)
+# ---------------------------------------------------------------------------
+
+
+def _align_finite_series(returns_by_name: dict) -> tuple[list[str], list[list[float]], int]:
+    """Usable names + finite return lists aligned to their common tail length.
+
+    Non-finite/non-numeric points are dropped (never fabricated), each name
+    needs at least two points, and every retained series is truncated to the
+    shortest so ``returns_by_name`` may be ragged without raising.
+    """
+    usable: dict[str, list[float]] = {}
+    for name, series in (returns_by_name or {}).items():
+        vals: list[float] = []
+        for v in series or []:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(f):
+                vals.append(f)
+        if len(vals) >= 2:
+            usable[str(name)] = vals
+    names = list(usable)
+    if len(names) < 2:
+        return [], [], 0
+    t = min(len(v) for v in usable.values())
+    return names, [usable[n][-t:] for n in names], t
+
+
+def _project_box_simplex(v: list[float], lo: list[float], hi: list[float],
+                         total: float = 1.0) -> list[float]:
+    """Euclidean projection of ``v`` onto ``{sum=total, lo <= w <= hi}``.
+
+    Bisection on the shift ``tau`` (``w_i = clip(v_i - tau, lo_i, hi_i)``,
+    sum monotone decreasing in ``tau``) - deterministic, no RNG.
+    """
+    a = max(v[i] - hi[i] for i in range(len(v)))
+    b = min(v[i] - lo[i] for i in range(len(v)))
+    for _ in range(80):
+        mid = 0.5 * (a + b)
+        s = sum(min(hi[i], max(lo[i], v[i] - mid)) for i in range(len(v)))
+        if s > total:
+            a = mid
+        else:
+            b = mid
+    tau = 0.5 * (a + b)
+    return [min(hi[i], max(lo[i], v[i] - tau)) for i in range(len(v))]
+
+
+def _min_cvar_fallback(y: list[list[float]], alpha: float, lo: list[float],
+                       hi: list[float], iters: int = 3000) -> list[float]:
+    """Deterministic projected subgradient solver for :func:`min_cvar_weights`.
+
+    Used only when scipy is unavailable. Fixed start (the box/simplex
+    projection of equal weight) and a decaying step ``0.5/sqrt(k+1)`` on the
+    CVaR subgradient; no RNG, so reruns are identical.
+    """
+    k = len(y)
+    t = len(y[0])
+    share = 1.0 / ((1.0 - alpha) * t)
+    w = _project_box_simplex([1.0 / k] * k, lo, hi)
+    ktail = max(1, int(alpha * t))
+    for it in range(iters):
+        losses = sorted(-sum(y[i][s] * w[i] for i in range(k)) for s in range(t))
+        zeta = losses[t - ktail]
+        grad = [0.0] * k
+        for s in range(t):
+            loss = -sum(y[i][s] * w[i] for i in range(k))
+            if loss > zeta:
+                for i in range(k):
+                    grad[i] -= y[i][s]
+        step = 0.5 / math.sqrt(it + 1.0)
+        w = _project_box_simplex(
+            [w[i] - step * share * grad[i] for i in range(k)], lo, hi)
+    return w
+
+
+def _solve_min_cvar(y: list[list[float]], alpha: float, lo: list[float],
+                    hi: list[float]) -> tuple[list[float] | None, str]:
+    """Rockafellar-Uryasev sample-average LP, HiGHS when scipy is importable."""
+    k = len(y)
+    t = len(y[0])
+    try:
+        import numpy as np
+        from scipy.optimize import linprog
+    except ImportError:
+        return _min_cvar_fallback(y, alpha, lo, hi), "projected subgradient fallback"
+    # Variables: w (k), zeta, u_t (t). Constraint
+    # u_t + sum_i r_it w_i + zeta >= 0  ->  -sum_i r_it w_i - zeta - u_t <= 0.
+    c = np.zeros(k + 1 + t)
+    c[k] = 1.0
+    c[k + 1:] = 1.0 / ((1.0 - alpha) * t)
+    a_ub = np.zeros((t, k + 1 + t))
+    for s in range(t):
+        for i in range(k):
+            a_ub[s, i] = -y[i][s]
+        a_ub[s, k] = -1.0
+        a_ub[s, k + 1 + s] = -1.0
+    a_eq = np.zeros((1, k + 1 + t))
+    a_eq[0, :k] = 1.0
+    bounds = [(lo[i], hi[i]) for i in range(k)] + [(None, None)] + [(0.0, None)] * t
+    try:
+        res = linprog(c, A_ub=a_ub, b_ub=np.zeros(t), A_eq=a_eq, b_eq=np.array([1.0]),
+                      bounds=bounds, method="highs")
+    except Exception:  # noqa: BLE001 - a solver failure must not fabricate weights
+        return None, ""
+    if not res.success or res.x is None:
+        return None, ""
+    return [float(x) for x in res.x[:k]], "scipy.optimize.linprog (HiGHS)"
+
+
+def min_cvar_weights(
+    returns_by_name: dict,
+    alpha: float = 0.05,
+    cap: float = 0.30,
+    max_delta: float = 0.05,
+    current: dict | None = None,
+    min_scenarios: int = 60,
+) -> dict | None:
+    """Minimum-CVaR long-only sizing (Rockafellar-Uryasev sample-average LP).
+
+    Solves ``min_{w,zeta} zeta + 1/((1-alpha)T) * sum_t max(L_t(w) - zeta, 0)``
+    with ``L_t(w) = -sum_i w_i r_it``, fully invested (``sum_i w_i = 1``),
+    long-only (``0 <= w_i <= cap``) and, when ``current`` is supplied, within
+    ``max_delta`` of the current book.
+
+    Returns ``{"weights", "cvar", "cdar", "binding", "n", "alpha", "basis"}``
+    with ``cvar`` the resulting book CVaR as a **positive loss fraction** and
+    ``binding`` naming the active constraint (``'cap'`` / ``'max_delta'`` /
+    ``'unconstrained'`` / ``'min_cvar'``). Returns None - never fabricated
+    weights - below the ``min_scenarios`` floor, with fewer than two usable
+    series, when ``sum_i w_i = 1`` is infeasible under ``cap``/``max_delta``,
+    or for ``cap <= 0`` / ``alpha`` outside (0, 1) / non-finite parameters.
+
+    **Advisory sizing only**: these are numbers to reason about, never an
+    order, ticket or trade instruction.
+    """
+    try:
+        alpha = float(alpha)
+        cap = float(cap)
+        max_delta = float(max_delta)
+        min_scenarios = int(min_scenarios)
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 < alpha < 1.0) or not math.isfinite(cap) or cap <= 0.0:
+        return None
+    if not math.isfinite(max_delta) or max_delta <= 0.0 or min_scenarios < 2:
+        return None
+    names, y, t = _align_finite_series(returns_by_name)
+    if len(names) < 2 or t < min_scenarios:
+        return None
+    k = len(names)
+    if cap * k < 1.0:
+        return None  # sum_i w_i = 1 infeasible under the per-name cap
+    lo = [0.0] * k
+    hi = [cap] * k
+    cur: list[float] | None = None
+    if current is not None:
+        if not isinstance(current, dict):
+            return None
+        try:
+            cur = [float(current.get(name, 0.0)) for name in names]
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(c) for c in cur):
+            return None
+        lo = [max(0.0, cur[i] - max_delta) for i in range(k)]
+        hi = [min(cap, cur[i] + max_delta) for i in range(k)]
+        if any(lo[i] > hi[i] + 1e-12 for i in range(k)):
+            return None
+        if sum(lo) > 1.0 + 1e-9 or sum(hi) < 1.0 - 1e-9:
+            return None
+    wv, method = _solve_min_cvar(y, alpha, lo, hi)
+    if wv is None:
+        return None
+    mixed = [sum(wv[i] * y[i][s] for i in range(k)) for s in range(t)]
+    cv = cvar(mixed, alpha)
+    if cv is None:
+        return None
+    eq = []
+    acc = 1.0
+    for r in mixed:
+        acc *= 1.0 + r
+        eq.append(acc)
+    dd = cdar(eq, alpha)
+    tol = 1e-6
+    if any(wv[i] >= cap - tol for i in range(k)):
+        binding = "cap"
+    elif cur is not None and any(abs(wv[i] - cur[i]) >= max_delta - tol for i in range(k)):
+        binding = "max_delta"
+    elif cur is not None and all(abs(wv[i] - cur[i]) <= tol for i in range(k)):
+        binding = "unconstrained"
+    else:
+        binding = "min_cvar"
+    return {
+        "weights": {names[i]: round(wv[i], 6) for i in range(k)},
+        "cvar": round(-cv, 6),
+        "cdar": round(dd["cdar"], 6) if dd else None,
+        "binding": binding,
+        "n": t,
+        "alpha": alpha,
+        "basis": (f"sample-average min-CVaR LP ({method}); T={t} aligned daily "
+                  f"returns, alpha={alpha}, cap={cap}, max_delta={max_delta}"),
+    }
+
+
+def _copula_uniforms(mat, rng, fam: str, nu: int, k: int, n: int, t: int):
+    """Simulated copula uniforms (n x k) for the requested family, or None."""
+    import numpy as np
+
+    if fam == "independent":
+        return rng.random((n, k))
+    ranks = (np.argsort(np.argsort(mat, axis=1), axis=1) + 1.0) / (t + 1.0)
+    if fam == "clayton":
+        try:
+            from scipy.stats import kendalltau
+        except ImportError:
+            return None
+        taus = []
+        for i in range(k):
+            for j in range(i + 1, k):
+                tau = kendalltau(mat[i], mat[j]).statistic
+                if tau is not None and math.isfinite(float(tau)):
+                    taus.append(float(tau))
+        tau = sum(taus) / len(taus) if taus else 0.0
+        theta = 2.0 * tau / (1.0 - tau) if 0.0 < tau < 1.0 else 1e-4
+        v = rng.gamma(1.0 / theta, 1.0, size=n)
+        e = rng.exponential(1.0, size=(n, k))
+        return (1.0 + e / v[:, None]) ** (-1.0 / theta)
+    try:
+        from scipy import stats
+    except ImportError:
+        return None
+    z = stats.t.ppf(ranks, nu) if fam == "t" else stats.norm.ppf(ranks)
+    corr = np.atleast_2d(np.corrcoef(z)) + np.eye(k) * 1e-8
+    try:
+        chol = np.linalg.cholesky(corr)
+    except np.linalg.LinAlgError:
+        vals, vecs = np.linalg.eigh(corr)
+        chol = vecs @ np.diag(np.sqrt(np.clip(vals, 1e-10, None)))
+    zs = rng.standard_normal((n, k)) @ chol.T
+    if fam == "t":
+        chi = rng.chisquare(nu, size=n)
+        return stats.t.cdf(zs * np.sqrt(nu / chi)[:, None], nu)
+    return stats.norm.cdf(zs)
+
+
+def _tail_dependence(u, names: list[str], quantile: float) -> dict:
+    """Empirical lower-tail dependence at ``quantile`` (per pair + aggregate)."""
+    k = u.shape[1]
+    pairs = {}
+    vals = []
+    for i in range(k):
+        mask = u[:, i] <= quantile
+        if not mask.any():
+            continue
+        for j in range(i + 1, k):
+            v = float((u[mask, j] <= quantile).mean())
+            pairs[f"{names[i]}|{names[j]}"] = round(v, 6)
+            vals.append(v)
+    return {
+        "quantile": quantile,
+        "aggregate": round(sum(vals) / len(vals), 6) if vals else None,
+        "pairs": pairs,
+    }
+
+
+def copula_scenarios(
+    returns_by_name: dict,
+    n: int = 2000,
+    nu: int = 5,
+    family: str = "t",
+    seed: int = 0,
+) -> dict | None:
+    """Joint daily scenario returns from an empirical-marginal copula.
+
+    Fits each marginal **empirically** (the sorted return sample), fits a rank
+    copula - Student-t (``family='t'``, dof ``nu``), Gaussian
+    (``'gaussian'``), Clayton (``'clayton'``) or independence
+    (``'independent'``) - and draws ``n`` joint daily scenarios remapped
+    through the marginals. ``scenarios`` is a list of ``{name: daily_return}``
+    rows (loss = ``-return``).
+
+    ``tail_dependence`` reports the empirical lower-tail dependence at
+    ``quantile=0.1``: ``aggregate`` = mean over name pairs of
+    ``P(U_j <= q | U_i <= q)``, plus the per-pair values. A low-``nu`` t or
+    Clayton copula on a dependent input reads well above the ``q`` (= 0.1)
+    independence baseline; Gaussian / independent inputs sit at it.
+
+    Deterministic for a given ``seed``. Returns None with fewer than two
+    usable series or a common length below two - never fabricated scenarios.
+    """
+    try:
+        n = int(n)
+        nu = int(nu)
+        seed = int(seed)
+    except (TypeError, ValueError):
+        return None
+    fam = str(family).lower()
+    if fam not in ("t", "gaussian", "clayton", "independent") or n < 1 or nu < 1:
+        return None
+    names, y, t = _align_finite_series(returns_by_name)
+    if len(names) < 2 or t < 2:
+        return None
+    import numpy as np
+
+    k = len(names)
+    mat = np.array(y, dtype=float)
+    rng = np.random.default_rng(seed)
+    u = _copula_uniforms(mat, rng, fam, nu, k, n, t)
+    if u is None:
+        return None
+    sorted_ret = [np.sort(row) for row in mat]
+    cols = [np.quantile(sorted_ret[i], u[:, i]) for i in range(k)]
+    scenarios = [
+        {names[i]: float(cols[i][j]) for i in range(k)} for j in range(n)
+    ]
+    nu_out = nu if fam == "t" else None
+    basis = (f"{fam}-copula on empirical marginals; T={t} aligned daily returns, "
+             f"n={n} scenarios, seed={seed}")
+    if nu_out is not None:
+        basis += f", nu={nu_out}"
+    return {
+        "scenarios": scenarios,
+        "family": fam,
+        "nu": nu_out,
+        "n": n,
+        "tail_dependence": _tail_dependence(u, names, 0.1),
+        "basis": basis,
+    }
+
+
 __all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
-           "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var"]
+           "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var",
+           "min_cvar_weights", "copula_scenarios"]
