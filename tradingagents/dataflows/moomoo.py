@@ -288,9 +288,12 @@ def _cap_open_ctxs():
             _live_ctxs.discard(victim)
             with contextlib.suppress(Exception):
                 victim._moomoo_evicted = True
-            with contextlib.suppress(Exception):
-                victim.close()
             evicted.append(victim)
+    # Close OUTSIDE the lock, and bounded. ctx.close() joins the SDK's receive
+    # loop, which can block on a half-open socket; holding _ctx_lock across that
+    # would freeze every other thread's context work, not just this eviction.
+    for victim in evicted:
+        _bounded_close(victim)
     # Same-thread eviction: drop the stale handle so the next ``_ensure_ctx``
     # rebuilds immediately (cross-thread victims are caught by the flag above).
     if any(victim is getattr(_tls, "moomoo_ctx", None) for victim in evicted):
@@ -320,7 +323,17 @@ def _ensure_ctx():
     try:
         from moomoo import OpenQuoteContext
 
-        ctx = OpenQuoteContext(host=host, port=port, ai_type=1)
+        # Bounded: a reachable-but-wedged OpenD accepts the TCP connection and
+        # then never completes the handshake, and the constructor has no
+        # deadline - the caller would freeze for the life of the process.
+        init_timeout = _timeout_setting("moomoo_init_timeout", 5.0)
+        created = _bounded(OpenQuoteContext, init_timeout, host=host, port=port, ai_type=1)
+        if created is _TIMED_OUT:
+            raise MoomooNotConfiguredError(
+                f"OpenQuoteContext did not finish within {init_timeout}s: OpenD at "
+                f"{host}:{port} accepted the connection but never completed the handshake"
+            )
+        ctx = created
     except ImportError as exc:
         raise MoomooNotConfiguredError(
             "mozmo-api SDK is not installed. Run: pip install moomoo-api"
@@ -338,11 +351,8 @@ def _close_ctx():
     """Close the current thread's context (e.g. on shutdown or reconnect)."""
     ctx = getattr(_tls, "moomoo_ctx", None)
     if ctx is not None:
-        with contextlib.suppress(Exception):
-            ctx.close()
-        _tls.moomoo_ctx = None
-        with _ctx_lock:
-            _live_ctxs.discard(ctx)
+        _bounded_close(ctx)
+        _drop_ctx(ctx)
 
 
 def close_context():
@@ -353,6 +363,73 @@ def close_context():
     now-dead receive loop).
     """
     _close_ctx()
+
+
+#: Sentinel: an interaction was abandoned because it exceeded its wall clock.
+_TIMED_OUT = object()
+
+
+def _timeout_setting(key: str, default: float) -> float:
+    """Read a seconds setting defensively (config may be absent or a string)."""
+    try:
+        return float(get_config().get(key, default) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _bounded(fn, timeout: float, **kwargs):
+    """Run one SDK interaction that has no deadline of its own.
+
+    Both ends of a context's life can park forever: the constructor performs a
+    TCP connect and handshake, and ``close()`` joins the SDK's receive loop
+    (their own docs note it "can block indefinitely if the context's receive
+    loop is already gone"). Neither accepts a timeout, so each runs on a daemon
+    thread joined with a wall clock here. Returns ``_TIMED_OUT`` when it had to
+    be abandoned; re-raises whatever the call raised.
+    """
+    box: dict = {}
+
+    def _run():
+        try:
+            box["value"] = fn(**kwargs)
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller below
+            box["exc"] = exc
+
+    t = threading.Thread(target=_run, daemon=True, name="moomoo-bounded")
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        return _TIMED_OUT
+    if "exc" in box:
+        raise box["exc"]
+    return box.get("value")
+
+
+def _bounded_close(ctx, timeout: float | None = None) -> bool:
+    """Close a context without ever blocking; False if it had to be abandoned.
+
+    Every close path goes through here - a timeout handler that hangs inside
+    ``ctx.close()`` never raises, which is exactly how a web job sat 'running'
+    for 70 h with no error recorded.
+    """
+    if ctx is None:
+        return True
+    if timeout is None:
+        timeout = _timeout_setting("moomoo_close_timeout", 3.0)
+    try:
+        return _bounded(ctx.close, timeout) is not _TIMED_OUT
+    except Exception:  # noqa: BLE001 - a close failure is not the caller's problem
+        return False
+
+
+def _drop_ctx(ctx) -> None:
+    """Forget a context that has been closed (thread-local + live registry)."""
+    if ctx is None:
+        return
+    if getattr(_tls, "moomoo_ctx", None) is ctx:
+        _tls.moomoo_ctx = None
+    with _ctx_lock:
+        _live_ctxs.discard(ctx)
 
 
 def _sdk_call(fn, *args, timeout: float | None = None, **kwargs):
@@ -384,9 +461,13 @@ def _sdk_call(fn, *args, timeout: float | None = None, **kwargs):
     t.join(timeout)
     if t.is_alive():
         # Close the context to unblock the in-flight request; the daemon thread
-        # is abandoned (it exits when the process exits).
-        with contextlib.suppress(Exception):
-            _close_ctx()
+        # is abandoned (it exits when the process exits). The close MUST be
+        # bounded: this branch runs because the receive loop is suspect, and an
+        # unbounded close here hangs inside the timeout handler - the call then
+        # never raises, which is how a web job sat 'running' for 70 h with no
+        # error text at all.
+        _bounded_close(getattr(_tls, "moomoo_ctx", None))
+        _drop_ctx(getattr(_tls, "moomoo_ctx", None))
         raise VendorRateLimitError(f"moomoo SDK call timed out after {timeout}s")
     if "exc" in result:
         raise result["exc"]
@@ -411,17 +492,15 @@ def _close_all_ctxs(timeout: float = 3.0):
 
     ``ctx.close()`` performs a network round-trip that can block indefinitely
     if the context's receive loop is already gone (interpreter shutdown). Each
-    close runs on a *daemon* thread joined with ``timeout``, so a stuck close
-    cannot hold the interpreter alive.
+    close goes through ``_bounded_close``: a daemon thread joined with
+    ``timeout``, so a stuck close cannot hold the interpreter alive.
     """
     with _ctx_lock:
         live = list(_live_ctxs)
         _live_ctxs.clear()
         _tls.moomoo_ctx = None
     for ctx in live:
-        closer = threading.Thread(target=ctx.close, daemon=True)
-        closer.start()
-        closer.join(timeout)
+        _bounded_close(ctx, timeout)
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,10 @@
 """Moomoo connection cap: parallel workers must not exceed the gateway limit."""
 
+import threading
+import time
 from unittest import mock
+
+import pytest
 
 import tradingagents.dataflows.moomoo as moomoo
 
@@ -34,49 +38,33 @@ def test_cap_below_limit_noop():
 
 
 def test_close_all_ctxs_uses_daemon_thread_timeout():
-    """Regression: _close_all_ctxs must hand every live ctx.close to a daemon
-    thread joined with the passed timeout, so a stuck ctx.close() (dead receive
-    loop) can never hold the interpreter alive at exit. The shadowing duplicate
-    that called ctx.close() directly was removed.
+    """Regression: a stuck ctx.close() must not hold the interpreter alive.
 
-    The thread is faked so the assertion is on the call the code makes
-    (daemon=True, join(timeout)) rather than on wall-clock timing: a direct
-    close on the calling thread would call ``ctx.close`` and fail here.
+    Asserted as BEHAVIOUR: the call returns within its timeout although the
+    close parks forever, the close was attempted, the registry is cleared, and
+    the parked close is running on a daemon thread (which is what "cannot hold
+    the interpreter alive" means). The previous version pinned the wiring
+    instead - it asserted ``thread.target is ctx.close`` - so it failed the
+    moment every close started going through one bounded helper, without any
+    behaviour changing.
     """
-    created = []
-
-    class _FakeThread:
-        def __init__(self, target=None, daemon=None, **kwargs):
-            self.target = target
-            self.daemon = daemon
-            self.started = False
-            self.joins = []
-            created.append(self)
-
-        def start(self):
-            self.started = True
-
-        def join(self, timeout=None):
-            # Return immediately: the join times out while close() is stuck.
-            self.joins.append(timeout)
-
-    ctx = mock.Mock()  # a direct ctx.close() would run on this thread
+    ctx = _HungCtx()
     with moomoo._ctx_lock:
         moomoo._live_ctxs.clear()
         moomoo._live_ctxs.add(ctx)
 
-    with mock.patch.object(moomoo, "threading", mock.Mock(Thread=_FakeThread)):
-        moomoo._close_all_ctxs(timeout=0.25)  # returns despite the stuck close
+    t0 = time.monotonic()
+    moomoo._close_all_ctxs(timeout=0.25)
+    elapsed = time.monotonic() - t0
 
-    assert len(created) == 1
-    thread = created[0]
-    assert thread.daemon is True
-    assert thread.target is ctx.close
-    assert thread.started is True
-    assert thread.joins == [0.25]  # bounded by the passed timeout
+    assert elapsed < 5.0, "a stuck close must not block the caller"
+    assert ctx.close_started.is_set(), "the close must still be attempted"
     with moomoo._ctx_lock:
-        assert moomoo._live_ctxs == set()
-    ctx.close.assert_not_called()  # close runs only via the (faked) thread
+        assert ctx not in moomoo._live_ctxs, "a closed context must leave the registry"
+    parked = [
+        t for t in threading.enumerate() if t.is_alive() and t.daemon and t.name == "moomoo-bounded"
+    ]
+    assert parked, "the abandoned close must run on a daemon thread"
 
 
 def test_public_close_all_contexts_delegates():
@@ -88,3 +76,101 @@ def test_public_close_all_contexts_delegates():
     with mock.patch.object(moomoo, "_close_all_ctxs") as inner:
         moomoo.close_all_contexts(timeout=0.5)
     inner.assert_called_once_with(timeout=0.5)
+
+
+# ---------------------------------------------------------------------------
+# W-P0-2 (engine side): every SDK interaction that can park forever is bounded
+# ---------------------------------------------------------------------------
+
+
+class _HungCtx:
+    """A context whose ``close()`` never returns (the dead receive loop)."""
+
+    def __init__(self):
+        self.close_started = threading.Event()
+
+    def close(self, *_a, **_k):
+        self.close_started.set()
+        threading.Event().wait(5)
+
+    def __getattr__(self, _name):  # any other SDK call: no-op
+        return lambda *_a, **_k: None
+
+
+def test_ensure_ctx_bounds_a_blocking_constructor(monkeypatch):
+    """A reachable-but-wedged OpenD must not freeze the caller for good.
+
+    The constructor does the TCP connect + handshake and takes no deadline; the
+    probe passes (the port is open) while the handshake never completes.
+    """
+    import moomoo as sdk
+
+    def blocking_ctor(**_kwargs):
+        threading.Event().wait(5)
+
+    monkeypatch.setattr(moomoo, "_get_moomoo_config", lambda: {"host": "127.0.0.1", "port": 11111})
+    monkeypatch.setattr(moomoo, "_probe_or_use_cache", lambda _h, _p: True)
+    monkeypatch.setattr(moomoo, "_timeout_setting", lambda _k, _d: 0.2)
+    monkeypatch.setattr(sdk, "OpenQuoteContext", blocking_ctor, raising=False)
+    monkeypatch.setattr(moomoo._tls, "moomoo_ctx", None, raising=False)
+
+    t0 = time.monotonic()
+    with pytest.raises(moomoo.MoomooNotConfiguredError) as exc:
+        moomoo._ensure_ctx()
+    assert time.monotonic() - t0 < 5.0, "the constructor must be abandoned on time"
+    assert "handshake" in str(exc.value)
+
+
+def test_sdk_call_timeout_is_not_blocked_by_a_hung_close(monkeypatch):
+    """The 70 h zombie: the timeout handler hung inside ctx.close().
+
+    The branch runs *because* the receive loop is suspect; an unbounded close
+    there means the call never raises and nothing records an error at all.
+    """
+    ctx = _HungCtx()
+    monkeypatch.setattr(moomoo._tls, "moomoo_ctx", ctx, raising=False)
+    monkeypatch.setattr(moomoo, "_timeout_setting", lambda _k, _d: 0.2)
+
+    def slow(*_a, **_k):
+        threading.Event().wait(5)
+
+    t0 = time.monotonic()
+    with pytest.raises(moomoo.VendorRateLimitError):
+        moomoo._sdk_call(slow, timeout=0.2)
+    assert time.monotonic() - t0 < 5.0, "the timeout path must still return"
+
+
+def test_close_ctx_is_bounded_and_forgets_a_hung_context(monkeypatch):
+    ctx = _HungCtx()
+    monkeypatch.setattr(moomoo._tls, "moomoo_ctx", ctx, raising=False)
+    monkeypatch.setattr(moomoo, "_timeout_setting", lambda _k, _d: 0.2)
+    with moomoo._ctx_lock:
+        moomoo._live_ctxs.add(ctx)
+
+    t0 = time.monotonic()
+    moomoo._close_ctx()
+    assert time.monotonic() - t0 < 5.0
+    assert ctx not in moomoo._live_ctxs
+    assert getattr(moomoo._tls, "moomoo_ctx", None) is None
+
+
+def test_cap_eviction_does_not_hold_the_lock_across_a_hung_close(monkeypatch):
+    """Eviction closes OUTSIDE _ctx_lock, or one hung close freezes every thread."""
+    hung = [_HungCtx() for _ in range(3)]
+    monkeypatch.setattr(moomoo, "_timeout_setting", lambda _k, _d: 1.0)
+    monkeypatch.setattr(moomoo, "_max_open_ctxs", lambda: 1)
+    with moomoo._ctx_lock:
+        for ctx in hung:
+            moomoo._live_ctxs.add(ctx)
+
+    worker = threading.Thread(target=moomoo._cap_open_ctxs, daemon=True)
+    worker.start()
+    assert hung[0].close_started.wait(5), "the eviction never reached its close"
+    # While that close is parked, the registry lock must be free for other threads.
+    acquired = moomoo._ctx_lock.acquire(timeout=0.2)
+    if acquired:
+        moomoo._ctx_lock.release()
+    worker.join(timeout=5)
+    assert acquired, "the registry lock was held across a blocking close"
+    with moomoo._ctx_lock:
+        moomoo._live_ctxs.difference_update(hung)

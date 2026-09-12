@@ -856,14 +856,22 @@ class MoomooSdkCallTimeoutTests(unittest.TestCase):
         self.assertLess(time.time() - t0, 5.0)
 
     def test_timeout_closes_context(self):
+        """On timeout the thread's context is CLOSED and forgotten.
+
+        Asserted on the context itself, not on the helper that does it: the
+        close must not block (that is the whole point of the timeout path), so
+        it now goes through the bounded close helper rather than _close_ctx.
+        """
         import time
 
+        ctx = mock.Mock()
         with (
-            mock.patch.object(moomoo, "_close_ctx") as close_mock,
+            mock.patch.object(moomoo._tls, "moomoo_ctx", ctx, create=True),
             self.assertRaises(VendorRateLimitError),
         ):
             moomoo._sdk_call(lambda: time.sleep(10), timeout=0.2)
-        close_mock.assert_called_once()
+        ctx.close.assert_called_once()
+        self.assertIsNone(getattr(moomoo._tls, "moomoo_ctx", None))
 
 
 if __name__ == "__main__":
