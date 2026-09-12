@@ -133,6 +133,12 @@ Not flippable by design — they are integrity checks, not policy:
   GROUNDED / UNSUPPORTED / CONTRADICTED / INTERNAL_CONFLICT verdicts, including
   `tone_claim_conflict` and `valuation_band_conflict`
   (`test_verifier_formula_checks.py`, `test_report_verify.py`).
+- **The Moomoo SDK cannot hold the interpreter open**: `dataflows/moomoo.py::_daemonise_sdk_threads`
+  sets the SDK's `SysConfig.ALL_THREAD_DAEMON` before the first context is constructed, and
+  `_close_orphan_executor` stops the executor the SDK installs while closing one
+  (`open_context_base._close_callback_executor`). Both exist because a full test run printed its
+  summary and then hung ~50 min: MainThread parked in `threading._shutdown` joining two non-daemon
+  `callback_executor` threads. `test_moomoo_conn_cap.py`.
 - **Debate degradation is recorded and flagged**: `reporting.py::_run_card_debate`
   writes a `debate` block into `run_card.json` (`enabled` / `evidence` /
   `degraded` / `reason`) and prints a named stderr line when `enable_debate` is

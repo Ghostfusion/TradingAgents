@@ -323,6 +323,10 @@ def _ensure_ctx():
     try:
         from moomoo import OpenQuoteContext
 
+        # Before the first context exists: the SDK's callback-executor threads
+        # are non-daemon by default and an orphan blocks interpreter exit.
+        _daemonise_sdk_threads()
+
         # Bounded: a reachable-but-wedged OpenD accepts the TCP connection and
         # then never completes the handshake, and the constructor has no
         # deadline - the caller would freeze for the life of the process.
@@ -405,6 +409,49 @@ def _bounded(fn, timeout: float, **kwargs):
     return box.get("value")
 
 
+def _daemonise_sdk_threads() -> None:
+    """Make every SDK-internal thread a daemon (moomoo ``SysConfig``).
+
+    The SDK's ``CallbackExecutor`` threads are NON-daemon by default
+    (``SysConfig.ALL_THREAD_DAEMON = False``), and
+    ``open_context_base._close_callback_executor`` installs a *fresh* executor
+    while closing the old one whenever auto-reconnect is on — so a closed
+    context leaves a thread idling in ``queue.get()`` with nothing left to stop
+    it. Non-daemon orphans block ``threading._shutdown``: a full test run
+    printed its summary and then sat for ~50 minutes with MainThread parked in
+    ``_shutdown`` joining two ``callback_executor`` threads (2026-09-12, exit
+    probe). Daemon threads are reaped at interpreter exit; the connection and
+    every call path are unchanged.
+
+    Call before the FIRST context is constructed: the flag is read by
+    ``CallbackExecutor.__init__`` when it starts its thread.
+    """
+    try:
+        from moomoo.common.sys_config import SysConfig
+
+        SysConfig.set_all_thread_daemon(True)
+    except Exception as exc:  # noqa: BLE001 - advisory: only affects exit latency
+        logger.debug("moomoo: cannot daemonise SDK threads: %s", exc)
+
+
+def _close_orphan_executor(ctx) -> None:
+    """Stop the callback executor a close leaves behind (see the daemoniser).
+
+    ``_close_callback_executor`` replaces ``ctx._callback_executor`` with a new
+    executor before closing the old one, so the handle still owns a live thread
+    after ``ctx.close()``. Long-lived processes (the web app) would leak one
+    thread and queue per closed context; at exit they are daemon now, but
+    stopping them keeps the thread count honest. Best-effort: the handle is a
+    private SDK attribute, so this must never raise.
+    """
+    executor = getattr(ctx, "_callback_executor", None)
+    closer = getattr(executor, "close", None)
+    if closer is None:
+        return
+    with contextlib.suppress(Exception):  # noqa: BLE001 - orphan cleanup is best-effort
+        closer()
+
+
 def _bounded_close(ctx, timeout: float | None = None) -> bool:
     """Close a context without ever blocking; False if it had to be abandoned.
 
@@ -417,9 +464,11 @@ def _bounded_close(ctx, timeout: float | None = None) -> bool:
     if timeout is None:
         timeout = _timeout_setting("moomoo_close_timeout", 3.0)
     try:
-        return _bounded(ctx.close, timeout) is not _TIMED_OUT
+        ok = _bounded(ctx.close, timeout) is not _TIMED_OUT
     except Exception:  # noqa: BLE001 - a close failure is not the caller's problem
-        return False
+        ok = False
+    _close_orphan_executor(ctx)
+    return ok
 
 
 def _drop_ctx(ctx) -> None:

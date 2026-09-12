@@ -131,11 +131,15 @@ py -3.12 -m ruff check tradingagents/ ...
 3. **Port 11111 quirk:** OpenD (moomoo gateway) at `127.0.0.1:11111`. When it
    is DOWN the TCP probe **times out** (not refuses), so tests must mock the
    probe to stay fast; the vendor caches the negative probe 20s.
-4. **A running OpenD leaks non-daemon threads** — never leave an
-   `OpenQuoteContext` open at interpreter exit (the process hangs). Contexts
-   are closed at the end of `propagate()`, in the test teardown
-   (`tests/conftest.py` -> `_close_all_ctxs()`), and via a daemon-guarded
-   atexit in `dataflows/moomoo.py`.
+4. **OpenD threads and interpreter exit.** The SDK's `CallbackExecutor` threads
+   are non-daemon by default, and `open_context_base._close_callback_executor`
+   installs a *fresh* executor while closing one, so a closed context can leave
+   an orphan thread idling in `queue.get()`. `dataflows/moomoo.py` now sets
+   `SysConfig.set_all_thread_daemon(True)` before the first context is built and
+   stops the orphan on every close (`_close_orphan_executor`), so the process
+   always exits. Contexts are still closed eagerly: at the end of `propagate()`,
+   in the test teardown (`tests/conftest.py` -> `_close_all_ctxs()`), and via a
+   daemon-guarded atexit.
 5. **OpenD (moomoo gateway)** runs on the dev machine, logged into a free
    moomoo account ("remember password"). Live moomoo calls work as long as
    the gateway is up. The account is a US-market account (not SG/MY): US

@@ -180,3 +180,70 @@ def test_cap_eviction_does_not_hold_the_lock_across_a_hung_close(monkeypatch):
     assert acquired, "the registry lock was held across a blocking close"
     with moomoo._ctx_lock:
         moomoo._live_ctxs.difference_update(hung)
+
+
+# ---------------------------------------------------------------------------
+# Interpreter exit: the SDK's non-daemon threads must not outlive the process
+# ---------------------------------------------------------------------------
+
+
+class _FakeExecutor:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _OrphanCtx:
+    """A context that behaves like the SDK's: closing installs a NEW executor.
+
+    ``open_context_base._close_callback_executor`` does exactly this when
+    auto-reconnect is on (it closes the old executor and replaces
+    ``self._callback_executor`` with a fresh one), which is how a close leaves
+    a thread behind with nothing left to stop it. The attribute name matters:
+    the cleanup reads ``ctx._callback_executor`` like the SDK writes it.
+    """
+
+    def __init__(self):
+        self._callback_executor = _FakeExecutor()
+
+    def close(self, *_a, **_k):
+        self._callback_executor.close()
+        self._callback_executor = _FakeExecutor()
+
+
+def test_bounded_close_stops_the_orphan_executor():
+    """Regression: a full suite printed its summary and then hung ~50 min.
+
+    The exit probe showed MainThread parked in ``threading._shutdown`` joining
+    two non-daemon ``callback_executor`` threads; the SDK installs a fresh
+    executor while closing the old one, so nothing was left to stop it.
+    """
+    ctx = _OrphanCtx()
+    stale = ctx._callback_executor
+    assert moomoo._bounded_close(ctx, timeout=1.0) is True
+    assert stale.closed is True, "the SDK's own close must still run"
+    assert ctx._callback_executor.closed is True, (
+        "the executor the close installed must be stopped, or its thread idles "
+        "in queue.get() forever and holds the interpreter open"
+    )
+
+
+def test_orphan_executor_cleanup_never_raises():
+    class _Bad:
+        def close(self):
+            raise RuntimeError("nope")
+
+    assert moomoo._close_orphan_executor(_Bad()) is None
+    assert moomoo._close_orphan_executor(object()) is None
+    assert moomoo._close_orphan_executor(None) is None
+
+
+def test_daemonise_sdk_threads_sets_the_sdk_flag():
+    """Every SDK thread created afterwards is a daemon, so an orphan cannot
+    block interpreter exit (the flag is read when the thread starts)."""
+    sys_config = pytest.importorskip("moomoo.common.sys_config")
+    sys_config.SysConfig.set_all_thread_daemon(False)
+    moomoo._daemonise_sdk_threads()
+    assert sys_config.SysConfig.get_all_thread_daemon() is True

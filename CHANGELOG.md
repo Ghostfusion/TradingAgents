@@ -12,6 +12,34 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Fixed
+
+The engine test suite could no longer exit (2026-09-12; `dataflows/moomoo.py`). A full run printed
+`3856 passed … in 512.38s` and then the process sat for ~50 minutes until an external timeout killed
+it — a green run that wastes an hour, and a CI job that reads as a failure. An exit probe (a plugin
+that dumps all thread stacks if the interpreter is still alive 30s after `pytest_sessionfinish`) named
+it exactly: `MainThread` parked in `threading._shutdown`, joining **two non-daemon
+`CallbackExecutor` threads** from the Moomoo SDK, both idling in `queue.get()` on the receive loop.
+
+Two SDK facts combine into the leak:
+
+- `CallbackExecutor.__init__` starts its thread with `daemon = SysConfig.ALL_THREAD_DAEMON`, and that
+  class default is **False**;
+- `open_context_base._close_callback_executor` installs a **fresh** executor *while* closing the old
+  one when auto-reconnect is on, so a closed context leaves a thread behind that nothing will stop —
+  the two orphaned threads match the two `on_disconnect … reason=CallClose` events in the run log.
+
+`_ensure_ctx` now calls `_daemonise_sdk_threads()` (the SDK's own `SysConfig.set_all_thread_daemon(True)`)
+immediately before the first `OpenQuoteContext` is constructed — the flag is read when a thread starts,
+so this is the only place it can take effect — and every close path additionally stops the orphaned
+executor (`_close_orphan_executor`, best-effort, so a long-lived process does not accumulate one thread
+and queue per closed context). `_ensure_ctx` is the only construction site in the repo, so no path
+escapes it. Nothing about the connection or the call path changes; daemon threads are simply reaped at
+interpreter exit.
+
+Mutation proof: dropping the orphan cleanup from `_bounded_close` -> `test_bounded_close_stops_the_orphan_executor`
+fails. Tests: 3 new. No web impact.
+
 ### Added
 
 Two follow-ups on the debate flags above (2026-09-12; `strategies/debate_capability.py`,
