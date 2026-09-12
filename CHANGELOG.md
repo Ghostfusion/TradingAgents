@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+**Cross-repo rule (the sibling web app).** `trading_web` consumes this repo's tools, CLI flags and JSON
+shapes. A change that removes, renames or reshapes something the app uses **must state its web impact in its
+entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohlcv['opens']`". The registry of
+what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
+`tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
+
 ### Fixed
 
 Batch pre-market re-check moved into `analyze()`, so the CLI and the web app write the same artefacts (2026-09-11; audit `docs/implementation_plan_web_app_defects.md` W-P2-18). The opt-in same-night step (`_batch_pre_market_check`, which writes `pre_market_review_<trade_date>.md` next to the report) lived in `batch.main()`'s `as_completed` loop. **Web impact:** `trading_web`'s `run_batch` calls `batch.analyze` in-process and never goes through `main()`, so with `enable_pre_market_review` on the CLI wrote `pre_market_review_<date>.md` for every symbol while the web job wrote none — the same job produced different artefacts depending on which entry point ran it, and a web-run symbol read as reviewed with no review file behind it. The call now sits in `analyze()` immediately after `ta.save_reports(...)`, under the same `DEFAULT_CONFIG.get("enable_pre_market_review")` guard and with the same best-effort semantics; the `main()` copy is gone so exactly **one** call site remains (leaving both would have written the review twice per symbol). CLI-visible behaviour is otherwise unchanged — identical argument values (`symbol`, `report_dir`, and `analyze`'s own `trade_date`, which is `args.date` on the CLI path). Tests: `tests/test_batch_pre_market_parity.py` +3 (analyze calls the re-check once with `(symbol, report_dir, trade_date)`; flag off → zero calls; `main()` with `analyze` stubbed → zero calls, proving the loop no longer runs it).
