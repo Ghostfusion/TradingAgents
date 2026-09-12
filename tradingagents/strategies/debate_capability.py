@@ -150,23 +150,33 @@ def capability_gate(
 def assess_role_capabilities(
     config: dict, roles: Sequence[str] | None = None
 ) -> dict[str, ModelCapability]:
-    """Role -> capability map from the configured ``debate_*_model`` keys.
+    """Role -> capability map for every requested debate role.
 
-    Advisory and best-effort: a role with no configured spec is skipped (the
-    matrix refuses only on evidence), and a resolver failure is skipped rather
-    than taking down graph construction. The role import is local to keep this
-    pure module free of an agents -> strategies import edge.
+    A role with an explicit ``debate_*_model`` is assessed on that model; a role
+    without one is assessed on the model it *actually* runs on - the tier
+    fallback from ``role_fallback_models`` (quick for bull/bear and the risk
+    debators, deep for the judge). Skipping unspecced roles, as this did first,
+    left the gate blind to exactly the roles the fallback tier serves: a
+    ``neutral`` debator inherits the quick tier, so an incapable quick tier was
+    never checked.
+
+    Advisory and best-effort: a role whose spec cannot be resolved is skipped
+    rather than taking down graph construction. The role import is local to keep
+    this pure module free of an agents -> strategies import edge.
     """
-    from tradingagents.agents.utils.debate_roles import role_model_spec
+    from tradingagents.agents.utils.debate_roles import (
+        role_fallback_models,
+        role_model_spec,
+    )
 
     caps: dict[str, ModelCapability] = {}
     for role in roles if roles is not None else tuple(ROLE_FLOORS):
         try:
-            spec = role_model_spec(config, role)
+            spec = role_model_spec(config, role) or role_fallback_models(config, role)
+            provider, model = spec
         except Exception:  # noqa: BLE001 - advisory: an unresolvable role is skipped
             continue
-        if spec:
-            provider, model = spec
+        if provider:
             caps[role] = assess_model_capability(provider, model)
     return caps
 

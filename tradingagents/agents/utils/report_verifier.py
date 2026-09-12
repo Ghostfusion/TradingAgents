@@ -194,6 +194,54 @@ def _load_report(report_dir: Path, stem: str) -> str | None:
     return p.read_text(encoding="utf-8", errors="ignore")
 
 
+def _debate_degradation(report_dir: Path) -> dict:
+    """Tree-level check: did the advertised structured debate actually run?
+
+    ``enable_debate`` promises the claim-verified debate, and ``run_card.json``
+    (written by ``reporting.write_report_tree``) records whether it happened. A
+    tree that says enabled with no ``2_research/structured_debate.md`` ran the
+    baseline / legacy path instead - the report looks normal and only the prose
+    differs (NVDA 2026-09-12), which is why this is a flag rather than a note.
+
+    Pure file inspection: no config, no LLM, no live run. Returns
+    ``{enabled, evidence, degraded, reason}``. ``enabled`` is None for a tree
+    written before the run-card block existed, and an unknown is NOT a
+    degradation - only a tree that positively claims the structured debate
+    while lacking its evidence is flagged. ``evidence`` complements the run
+    card's own record (a tree can carry the artifact without the card).
+    """
+    tree = Path(report_dir)
+    evidence = (tree / "2_research" / "structured_debate.md").exists()
+    card: dict = {}
+    try:
+        card_path = tree / "run_card.json"
+        if card_path.exists():
+            loaded = json.loads(card_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                card = loaded.get("debate") or {}
+    except (OSError, ValueError) as exc:
+        logger.warning("report_verifier: cannot read %s: %s", tree / "run_card.json", exc)
+    if not isinstance(card, dict):  # older/odd shape: fall back to the artifact
+        card = {}
+    enabled = card.get("enabled")
+    enabled = bool(enabled) if enabled is not None else None
+    # The run card is authoritative when it carries the verdict (it was
+    # computed with the config in hand); otherwise derive from the artifact -
+    # a tree that positively claims the structured debate while lacking its
+    # evidence is degraded, an unknown is not.
+    degraded = (
+        bool(card["degraded"])
+        if "degraded" in card
+        else (enabled is True and not evidence)
+    )
+    return {
+        "enabled": enabled,
+        "evidence": evidence,
+        "degraded": degraded,
+        "reason": str(card.get("reason") or ""),
+    }
+
+
 # ---------------------------------------------------------------------------
 # LLM pass (reuses the repo's structured-invoke hardening)
 # ---------------------------------------------------------------------------
@@ -2208,5 +2256,9 @@ def verify_report_dir(
         "model": model or str(cfg.get("report_verify_model") or "") or str(
             cfg.get("quick_think_llm") or ""
         ),
+        # Tree-level (no LLM): did the advertised structured debate actually
+        # run? A degraded tree must be visible in verify_flags.json, not only
+        # inferable from the prose.
+        "debate": _debate_degradation(Path(report_dir)),
         "verification": outcomes,
     }

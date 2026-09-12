@@ -80,7 +80,7 @@ live run wrote a legacy free-form debate with the matrix "required").
 
 | Key | Env var | What it can do | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
-| `debate_require_capability_matrix` | `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | **raises** `DebateCapabilityError` at graph compile time when a routed debate model cannot meet its role floor (context / structured output / tool binding); advisory warning when off | `strategies/debate_capability.py::check_debate_capabilities` (called from `graph/trading_graph.py`) | `test_debate_fail_closed.py::TestCapabilityMatrixFailsClosed` | wired |
+| `debate_require_capability_matrix` | `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | **raises** `DebateCapabilityError` at graph compile time when any debate role's model cannot meet its role floor (context / structured output / tool binding) — each role is assessed on the model it actually runs on, its `debate_*_model` or the tier fallback (quick for bull/bear/risk, deep for judge); advisory warning when off | `strategies/debate_capability.py::check_debate_capabilities` (called from `graph/trading_graph.py`) | `test_debate_fail_closed.py::TestCapabilityMatrixFailsClosed` | wired |
 | `debate_baseline_fallback` | `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | on (default) terminates an unverifiable debate and the pre-debate baseline stances stand; **off raises** `DebateBaselineFallbackError` with the L1 reason instead of writing an unverified debate | `agents/researchers/structured_debate.py::_baseline_termination` (`create_debate_l1`, research + risk) | `test_debate_fail_closed.py::TestBaselineFallbackFailsClosed` | wired |
 
 ## 3. Numeric limits the gates read
@@ -133,11 +133,14 @@ Not flippable by design — they are integrity checks, not policy:
   GROUNDED / UNSUPPORTED / CONTRADICTED / INTERNAL_CONFLICT verdicts, including
   `tone_claim_conflict` and `valuation_band_conflict`
   (`test_verifier_formula_checks.py`, `test_report_verify.py`).
-- **Debate degradation is recorded**: `reporting.py::_run_card_debate` writes a
-  `debate` block into `run_card.json` (`enabled` / `evidence` / `degraded` /
-  `reason`) and prints a named stderr line when `enable_debate` is on but
-  `2_research/structured_debate.md` was not written — a degraded run is
-  auditable from the tree instead of inferred from prose (`test_reporting.py`).
+- **Debate degradation is recorded and flagged**: `reporting.py::_run_card_debate`
+  writes a `debate` block into `run_card.json` (`enabled` / `evidence` /
+  `degraded` / `reason`) and prints a named stderr line when `enable_debate` is
+  on but `2_research/structured_debate.md` was not written (`test_reporting.py`);
+  `report_verifier.py::_debate_degradation` re-checks it tree-level so
+  `scripts/report_verify.py` prints `debate DEGRADED` and exits non-zero
+  (`test_report_verify.py`). A degraded run is thus auditable from the tree and
+  from the verifier, instead of inferred from prose.
 
 ## 6. Adding a gate — the rule
 

@@ -42,7 +42,7 @@ in `batch.py`).
 | `TRADINGAGENTS_DEBATE_ENTRENCH_THRESH` | `debate_entrench_thresh` | I_entrench above this -> penalty (0.8) |
 | `TRADINGAGENTS_DEBATE_DIVERGENCE_MIN` | `debate_divergence_min` | |bull−bear| below → artificial-consensus flag (0.15) |
 | `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | `debate_baseline_fallback` | R1': an unverifiable debate degrades to the baseline stances (true, default); **false stops the run** with `DebateBaselineFallbackError` |
-| `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 startup check: **raises** `DebateCapabilityError` for a routed role that cannot meet its floor (default false = warn only) |
+| `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 startup check: **raises** `DebateCapabilityError` for a debate role (assessed on its `debate_*_model` or the tier fallback) that cannot meet its floor (default false = warn only) |
 | `TRADINGAGENTS_CHECKPOINT_ENABLED` | `checkpoint_enabled` |
 | `TRADINGAGENTS_BENCHMARK_TICKER` | `benchmark_ticker` |
 | `TRADINGAGENTS_TEMPERATURE` | `temperature` |

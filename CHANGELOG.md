@@ -14,6 +14,27 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+Two follow-ups on the debate flags above (2026-09-12; `strategies/debate_capability.py`,
+`agents/utils/report_verifier.py`, `scripts/report_verify.py`):
+
+**The matrix now assesses the tier fallback, not only explicit models.** It read only the roles with a
+`debate_*_model`, so a role that inherits the quick tier (the `neutral` risk debator always does) was
+never checked — a gate with a blind spot for exactly the models it exists to vet. `assess_role_capabilities`
+now assesses every requested role on the model it actually runs on: its `debate_*_model`, else
+`role_fallback_models` (quick for bull/bear/aggressive/conservative/neutral, deep for judge). An
+unresolvable role is still skipped.
+
+**`report_verify.py` flags a degraded tree.** `report_verifier.py::_debate_degradation` re-checks
+`run_card.json` + `2_research/structured_debate.md` at tree level (no config, no LLM, no live run), the
+payload gains a `debate` block, and the CLI prints `debate DEGRADED` with the reason and returns
+non-zero — so a silent fallback is a named failure in `verify_flags.json`, not something to notice in
+the prose. `enabled` is null for a tree written before the block existed, and unknown is NOT a
+degradation: only a tree that positively claims the structured debate while lacking its evidence is
+flagged. Mutation proofs: dropping the fallback branch in `assess_role_capabilities` -> the two
+fallback-coverage tests fail; forcing `"degraded": False` in `_debate_degradation` -> the degraded-tree
+tests fail; forcing it True -> the disabled-tree test fails. Tests: 8 new (2 capability, 6 verifier).
+No web impact (the app does not run the verifier).
+
 Two debate flags that could not do anything now stop the run, and a degraded debate is recorded
 (2026-09-12; `strategies/debate_capability.py`, `agents/researchers/structured_debate.py`,
 `reporting.py`). A live NVDA run wrote a legacy free-form debate while the config said the structured

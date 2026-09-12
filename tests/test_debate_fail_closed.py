@@ -61,12 +61,40 @@ class TestCapabilityMatrixFailsClosed:
         cfg = {**_CAPABLE, "debate_require_capability_matrix": True}
         assert check_debate_capabilities(cfg) == []
 
-    def test_roles_without_an_explicit_model_are_not_assessed(self):
-        """Documented coverage limit: a role with no ``debate_*_model`` is
-        skipped, so the matrix refuses only on evidence for the explicitly
-        routed roles (the tier fallback is outside it)."""
-        cfg = {**_INCAPABLE, "debate_require_capability_matrix": True}
-        assert check_debate_capabilities(cfg, roles=("bull",)) == []
+    def test_roles_without_an_explicit_model_use_the_tier_fallback(self):
+        """Coverage: a role with no ``debate_*_model`` runs on the tier fallback
+        (quick for bull/bear/risk, deep for judge), so that is what it is
+        assessed on. Skipping it left the gate blind to the roles the fallback
+        tier serves."""
+        from tradingagents.strategies.debate_capability import (
+            assess_role_capabilities,
+        )
+
+        cfg = {
+            "llm_provider": "openrouter",
+            "quick_think_llm": "some/quick",
+            "deep_think_llm": "some/deep",
+        }
+        caps = assess_role_capabilities(cfg)
+        assert set(caps) == {"bull", "bear", "judge", "aggressive", "conservative", "neutral"}
+        assert caps["judge"].provider == "openrouter"  # deep tier
+        assert caps["neutral"].provider == "openrouter"  # quick tier
+        # Capable quick/deep tiers: nothing to refuse.
+        cfg["debate_require_capability_matrix"] = True
+        assert check_debate_capabilities(cfg) == []
+
+    def test_an_incapable_fallback_tier_is_refused(self):
+        """The other direction: the fallback tier is really checked, so an
+        incapable judge tier refuses even with no ``debate_judge_model``."""
+        cfg = {
+            "llm_provider": "unknown",
+            "quick_think_llm": "m",
+            "deep_think_llm": "m",
+            "debate_require_capability_matrix": True,
+        }
+        with pytest.raises(DebateCapabilityError) as exc:
+            check_debate_capabilities(cfg, roles=("judge",))
+        assert "judge" in str(exc.value)
 
 
 class TestBaselineFallbackFailsClosed:

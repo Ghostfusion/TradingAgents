@@ -74,6 +74,16 @@ def main() -> int:
 
     flags = 0
     print(f"report-verify: {report_dir}")
+    debate = payload.get("debate") or {}
+    if debate.get("degraded"):
+        flags += 1
+        reason = f" (reason: {debate['reason']})" if debate.get("reason") else ""
+        print(
+            "  debate        DEGRADED  the run card says the structured debate was "
+            "enabled but 2_research/structured_debate.md is missing" + reason
+        )
+    elif debate.get("enabled") is True:
+        print("  debate        OK        structured-debate evidence present")
     verification = payload.get("verification") or {}
     for stem in REPORT_STEMS:
         entry = verification.get(stem)

@@ -1314,3 +1314,70 @@ def test_verify_report_dir_records_a_failing_metric(tmp_path, monkeypatch):
     entry = payload["verification"]["market"]
     assert entry["overall"] in ("PASS", "UNKNOWN", "FLAG")
     assert any(e.startswith("sma200_identity: ValueError") for e in entry["metric_errors"])
+
+
+# ---------------------------------------------------------------------------
+# Tree-level debate check (no LLM): did the advertised structured debate run?
+# ---------------------------------------------------------------------------
+
+
+def _write_card(tmp_path, debate):
+    (tmp_path / "run_card.json").write_text(
+        json.dumps({"ticker": "TST", "debate": debate}), encoding="utf-8"
+    )
+
+
+def test_debate_flag_fires_on_a_degraded_tree(tmp_path):
+    """enable_debate on + no evidence file -> FLAG (NVDA 2026-09-12: the tree
+    looked normal while the structured debate had fallen back to the legacy
+    path, and nothing in verify_flags.json said so)."""
+    _write_card(
+        tmp_path,
+        {"enabled": True, "degraded": True, "reason": "L1 hard breach; baseline fallback"},
+    )
+    out = rv._debate_degradation(tmp_path)
+    assert out["degraded"] is True
+    assert out["evidence"] is False
+    assert "baseline fallback" in out["reason"]
+
+
+def test_debate_flag_ok_when_the_evidence_is_on_disk(tmp_path):
+    (tmp_path / "2_research").mkdir(parents=True)
+    (tmp_path / "2_research" / "structured_debate.md").write_text("## x\n", encoding="utf-8")
+    _write_card(tmp_path, {"enabled": True, "degraded": False, "reason": "hard cap (5 rounds)"})
+    out = rv._debate_degradation(tmp_path)
+    assert out["degraded"] is False
+    assert out["evidence"] is True
+
+
+def test_debate_flag_is_silent_when_debate_was_disabled(tmp_path):
+    """The legacy path is not a degradation when the SD debate was never asked
+    for - the flag must not fire on every non-debate tree."""
+    _write_card(tmp_path, {"enabled": False, "degraded": False, "reason": ""})
+    assert rv._debate_degradation(tmp_path)["degraded"] is False
+
+
+def test_debate_flag_ignores_a_tree_without_the_run_card_block(tmp_path):
+    """A tree written before the run-card block existed has no verdict to
+    check: unknown is not a degradation, and the artifact still counts."""
+    out = rv._debate_degradation(tmp_path)
+    assert out == {"enabled": None, "evidence": False, "degraded": False, "reason": ""}
+
+
+def test_debate_flag_falls_back_to_the_artifact_when_the_card_lacks_the_verdict(tmp_path):
+    """A card with `enabled` but no `degraded` (an older writer, or a hand-made
+    card) is judged on the artifact itself."""
+    (tmp_path / "2_research").mkdir(parents=True)
+    (tmp_path / "2_research" / "structured_debate.md").write_text("## x\n", encoding="utf-8")
+    _write_card(tmp_path, {"enabled": True})
+    assert rv._debate_degradation(tmp_path)["degraded"] is False
+    (tmp_path / "2_research" / "structured_debate.md").unlink()
+    assert rv._debate_degradation(tmp_path)["degraded"] is True
+
+
+def test_verify_report_dir_carries_the_debate_block(tmp_path):
+    d = _mk_report_dir(tmp_path)
+    _write_card(d, {"enabled": True, "degraded": True, "reason": "no turns"})
+    payload = rv.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
+    assert payload["debate"]["degraded"] is True
+    assert payload["debate"]["reason"] == "no turns"
