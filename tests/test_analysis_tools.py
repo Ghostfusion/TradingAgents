@@ -2080,23 +2080,26 @@ def test_technical_factors_insufficient_history():
     assert "fewer than 30 bars" in out
 
 
-def test_book_tail_risk_computes():
-    """get_book_tail_risk wraps portfolio CVaR + correlated stress + drawdown."""
+def test_book_tail_risk_computes(monkeypatch):
+    """get_book_tail_risk wraps portfolio CVaR + correlated stress + drawdown,
+    and says which book the mix came from (the configured basket, not the
+    analyzed name - NVDA 2026-09-12 reported 20.21% as the book)."""
     closes = _uptrend(260)
-    with mock.patch(
-        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
-        side_effect=_ohlcv_df({"AAPL": closes}),
-    ):
-        out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": closes})
+    out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
     assert "book tail risk AAPL" in out
     assert "portfolio_cvar=" in out and "correlated_stress_-10pct=" in out
-    assert "drawdown(book realized)=" in out and "drawdown_gate=" in out
+    assert "mix=configured basket (8/8 names)" in out
+    assert "drawdown(realized book)=" in out and "source=" in out
+    assert "drawdown_gate=" in out
 
 
-def test_book_tail_risk_no_series():
+def test_book_tail_risk_no_series(monkeypatch):
+    """No series anywhere -> unavailable, never an invented number."""
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": []})
     with mock.patch(
-        "tradingagents.dataflows.interface.route_to_vendor",
-        side_effect=_route({}),
+        "tradingagents.dataflows.config.get_config",
+        lambda: {"risk_basket_tickers": ["AAA", "BBB"], "risk_basket_weights": {}},
     ):
         out = T.get_book_tail_risk.invoke({"ticker": "ZZZZ"})
     assert "unavailable" in out.lower()
@@ -2431,7 +2434,7 @@ def test_drawdown_measures_labeled_distinct():
     from tradingagents.agents.utils import analysis_tools as _T
     src = Path(_T.__file__).read_text(encoding='utf-8')
     assert "52w_distance(drawdown vs 52-wk high)" in src
-    assert "drawdown(book realized)" in src
+    assert "drawdown(realized book)=" in src
     assert "max_dd(backtest)" in src
 
 

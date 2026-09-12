@@ -948,6 +948,15 @@ class TradingAgentsGraph:
                     contract = build_position_contract(
                         cfg=self.config,
                         closes=closes,
+                        # Pass the real H/L so the contract's ATR (and therefore
+                        # its stop) is the true range. Without them
+                        # _atr_or_proxy fell back to a close-to-close proxy -
+                        # NVDA 2026-09-12: contract stop 207.8845 from a proxy
+                        # ATR 5.20 while the swing tools, using the real ATR
+                        # 7.6672 that was sitting in this same state, said
+                        # 207.19. Two stops, two ATRs, one report.
+                        high=(final_state.get("ohlcv") or {}).get("highs") or None,
+                        low=(final_state.get("ohlcv") or {}).get("lows") or None,
                         flow_summary=flow_use,
                         agreement=agreement,
                         calibrated_p=calibrated_p,
@@ -1291,6 +1300,18 @@ class TradingAgentsGraph:
                 line += f"book CVaR {rctx['book_cvar']:.2%}; "
             if rctx.get("book_stress") is not None:
                 line += f"book stress {rctx['book_stress']:.2%}; "
+            # The measured book drawdown is a STATE input, not something a
+            # model may supply: without it here the trader invented a
+            # drawdown for its get_risk_gate call (NVDA 2026-09-12 verified
+            # against 20.2% while the gate measured 7.24%).
+            if rctx.get("book_drawdown") is not None:
+                _dd = rctx["book_drawdown"]
+                _lim = rctx.get("drawdown_limit")
+                line += f"book drawdown {_dd:.2%}"
+                if _lim is not None:
+                    line += f" (limit {_lim:.0%})"
+                    line += " - new risk blocked" if _dd > _lim else " - within limit"
+                line += "; "
             if line.endswith(": "):
                 line += "no CVaR measured"
             out.append(line)
@@ -1657,35 +1678,18 @@ class TradingAgentsGraph:
         """Measured drawdown of the weighted book, or None (unknown never
         fails the gate).
 
-        Resolves the configured risk basket exactly like ``_basket_cvar`` /
-        ``_basket_stress`` (same names + weights + fetch pattern), mixes the
-        daily returns and returns the max peak-to-trough drop of the equity
-        curve (``book_risk.portfolio_drawdown``). This is the *measured* book
-        drawdown - the governor compares it against ``risk_max_drawdown_pct``
-        so a realized >limit drawdown actually blocks new risk. None when the
-        basket is unconfigured or unresolvable.
+        Delegates to :func:`strategies.book_context.measured_book_drawdown`,
+        the single resolver shared with the analyst/trader tools: same
+        configured basket, same weights, same log-return conversion, so the
+        number the governor gates on is the number every tool reports. The
+        governor compares it against ``risk_max_drawdown_pct`` so a realized
+        >limit drawdown actually blocks new risk. None when the basket is
+        unconfigured or unresolvable.
         """
-        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
-        if len(tickers) < 2:
-            return None
-        weights = self.config.get("risk_basket_weights") or {}
-        returns_by_name: dict[str, list] = {}
-        for name in tickers:
-            try:
-                closes = self._try_fetch_closes(str(name))
-                rets = self._log_returns_from_closes(closes)
-                if len(rets) >= 5:
-                    returns_by_name[str(name)] = rets
-            except Exception:  # noqa: BLE001 - a missing name just drops out
-                continue
-        if len(returns_by_name) < 2:
-            return None
-        try:
-            from tradingagents.strategies.book_risk import portfolio_drawdown
+        from tradingagents.strategies.book_context import measured_book_drawdown
 
-            return portfolio_drawdown(weights, returns_by_name)
-        except Exception:  # noqa: BLE001 - fall back gracefully
-            return None
+        drawdown, _meta = measured_book_drawdown(self.config, self._try_fetch_closes)
+        return drawdown
 
     def _maybe_record_reflection_outcome(self, ticker, trade_date, alpha):
         if not self.config.get("enable_reflection") or alpha is None:

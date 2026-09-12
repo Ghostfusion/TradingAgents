@@ -134,7 +134,23 @@ def rebuild_report(dirpath: Path) -> Path:
         state["risk_gate"] = gate
         state.update(extra)
 
-    return write_report_tree(state, ticker, path, config={"risk_compact_report": False})
+    # Markdown only. This state is reconstructed from markdown and never holds
+    # ``pm_decision``, so emitting the run-scoped JSON here would overwrite a
+    # real run's ``research_decision.json``/``run_card.json`` with nulls (and
+    # stamp today's config on an old run) - which is exactly what the
+    # 2026-09-12 web rebuild did across the report trees.
+    skipped = [
+        name
+        for name in ("run_card.json", "research_decision.json", "tool_evidence.json")
+        if (path / name).exists()
+    ]
+    if skipped:
+        print(f"[rebuild] {path}: preserved {', '.join(skipped)} (markdown-only rebuild)")
+    return write_report_tree(
+        state, ticker, path,
+        config={"risk_compact_report": False},
+        emit_run_artifacts=False,
+    )
 
 
 def main() -> int:

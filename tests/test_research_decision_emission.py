@@ -58,7 +58,47 @@ def test_unproducible_fields_are_null(tmp_path):
     assert doc["direction"] is None
     assert doc["recommended_allocation_pct"] is None
     assert doc["position"]["target_notional"] is None
-    assert doc["invalidations"] == []
+    # invalidations are produced from the contract levels (>= 1 by
+    # construction: stop breach / degraded data quality / manual reassessment),
+    # never left as an empty placeholder.
+    assert doc["invalidations"] and any("stop_loss" in s for s in doc["invalidations"])
+
+
+def test_evidence_fields_come_from_the_forced_tool_leaves(tmp_path):
+    """data_quality/sources are derived from the evidence that actually ran;
+    the artifact is the executor's only input, so placeholders are unusable."""
+    fs = _final_state()
+    fs["pm_decision"].pop("data_quality")
+    fs["tool_evidence"] = {
+        "market": [
+            {"tool": "get_swing_exits", "status": "ok"},
+            {"tool": "get_orderflow_read", "status": "ok"},
+        ],
+        "news": [{"tool": "get_news", "status": "timeout"}],
+    }
+    write_research_decision(fs, "nvda", tmp_path)
+    doc = _read(tmp_path)
+    assert doc["data_quality"] == "partial"
+    assert doc["disclosure"]["sources_used"] == ["get_orderflow_read", "get_swing_exits"]
+    assert doc["disclosure"]["sources_empty"] == ["get_news"]
+
+
+def test_all_ok_evidence_is_fresh_quality(tmp_path):
+    fs = _final_state()
+    fs["pm_decision"].pop("data_quality")
+    fs["tool_evidence"] = {"market": [{"tool": "get_swing_exits", "status": "ok"}]}
+    write_research_decision(fs, "nvda", tmp_path)
+    assert _read(tmp_path)["data_quality"] == "fresh"
+
+
+def test_risk_context_sets_the_binding_gate(tmp_path):
+    fs = _final_state()
+    fs["risk_context"] = {"book_drawdown": 0.2021, "drawdown_limit": 0.10}
+    write_research_decision(fs, "nvda", tmp_path)
+    doc = _read(tmp_path)
+    assert doc["binding_gate"] == "book_drawdown"
+    assert doc["action_basis"] == "risk_reduction"
+    assert "20.21%" in doc["binding_reason"]
 
 
 def test_rating_from_dict_contract(tmp_path):

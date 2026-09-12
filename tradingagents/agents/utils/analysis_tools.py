@@ -666,7 +666,9 @@ def get_risk_gate(
         float | None, "portfolio-level CVaR (tail loss) as a fraction, if known"
     ] = None,
     drawdown_pct: Annotated[
-        float | None, "current realized drawdown as a fraction, if known"
+        float | None,
+        "hypothetical drawdown for a what-if line only; it does NOT change this "
+        "verdict (the measured book drawdown is owned by get_composed_risk_gate)",
     ] = None,
     book_total_pct: Annotated[
         float | None, "current book exposure as a fraction, if known"
@@ -694,11 +696,17 @@ def get_risk_gate(
     """House risk-gate verdict for a proposed position (deterministic).
 
     Applies the project's risk governor limits (max_position_pct, book cap,
-    CVaR budget, drawdown, daily-loss budget, high-water-mark tiers, sector
-    cap, tranche capital-at-risk, liquidity verdict) to a proposed size and
-    returns PASS / WARN / REJECT with the numeric reasons. Use this when
-    evaluating any proposed size (including the Trader's), instead of
-    asserting a size is 'reasonable' in prose.
+    CVaR budget, daily-loss budget, high-water-mark tiers, sector cap, tranche
+    capital-at-risk, liquidity verdict) to a proposed size and returns
+    PASS / WARN / REJECT with the numeric reasons. Use this when evaluating any
+    proposed size (including the Trader's), instead of asserting a size is
+    'reasonable' in prose.
+
+    Book drawdown is NOT checked here: it is a measured input, so the portfolio
+    gate (including the realized book drawdown and the kill > portfolio > trade
+    precedence) is ``get_composed_risk_gate`` - cite that one for any drawdown
+    or 'can we open this risk' claim. A ``drawdown_pct`` passed here is
+    reported as a labelled hypothetical and never changes the verdict.
 
     Args:
         size_pct: the proposed position size (0..1).
@@ -724,12 +732,19 @@ def get_risk_gate(
         from tradingagents.strategies.risk_governor import build_risk_snapshot, govern
     except Exception as exc:  # noqa: BLE001
         return f"risk gate unavailable: {exc}"
+    # ``drawdown_pct`` is a STATE input, not a proposal, and this tool cannot
+    # read the run's measured book drawdown - so a caller-supplied value never
+    # decides the verdict here. It used to: NVDA 2026-09-12 the model passed
+    # 20.2% and the report cited a REJECT the composed gate never issued (the
+    # measured book drawdown was 7.24%). The measured portfolio gate lives in
+    # ``get_composed_risk_gate`` (configured basket) - cite that one for any
+    # drawdown / "can we open risk" claim.
     verdict = govern(
         size_pct,
         get_config(),
         book_total_pct=book_total_pct,
         cvar_pct=cvar_pct,
-        drawdown_pct=drawdown_pct,
+        drawdown_pct=None,
         daily_loss_pct=daily_loss_pct,
         hwm_drawdown_pct=hwm_drawdown_pct,
         sector_pct=sector_pct,
@@ -746,11 +761,21 @@ def get_risk_gate(
                 verdict,
                 size_pct,
                 cvar_pct=cvar_pct,
-                drawdown_pct=drawdown_pct,
                 capital_at_risk_pct=capital_at_risk_pct,
             )
         ]
     extra = []
+    if drawdown_pct is not None:
+        # Explicitly a hypothetical, and explicitly not the house verdict: the
+        # verdict above was computed without it.
+        whatif = govern(size_pct, get_config(), drawdown_pct=float(drawdown_pct))
+        extra.append(
+            f"drawdown_whatif={float(drawdown_pct):.2%} -> {whatif.get('verdict')} "
+            "(hypothetical, NOT the house verdict)"
+        )
+        extra.append(
+            "drawdown: call get_composed_risk_gate(ticker) for the measured book gate"
+        )
     if daily_loss_pct is not None:
         extra.append(f"daily_loss={daily_loss_pct:.2%}")
     if hwm_drawdown_pct is not None:
@@ -4765,31 +4790,51 @@ def get_book_tail_risk(
             book_correlated_stress as _stress,
             drawdown_gate as _gate,
             portfolio_cvar as _pcvar,
-            portfolio_drawdown as _pdd,
         )
     except Exception as exc:  # noqa: BLE001
         return f"book tail risk unavailable for {ticker}: {exc}"
     try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.book_context import (
+            configured_basket,
+            describe_source,
+            measured_book_drawdown,
+        )
+
         w = dict(weights or {})
         if not w:
-            w = {ticker: 1.0}
+            w = configured_basket(get_config()) or {}
         returns_by_name = {}
         for name in w:
             closes = _ohlcv(name).get("closes") or []
             rets = _daily_returns(closes)
             if len(rets) >= 30:
                 returns_by_name[name] = rets
+        mix_source = "configured_basket"
+        if len(returns_by_name) < 2:
+            # The configured book could not be measured (fewer than two legs
+            # with usable history): fall back to the analyzed name and SAY so -
+            # never print a name-level number as the book. A run with no basket
+            # configured is the same code path with mix_source="single_name".
+            mix_source = "single_name_fallback" if w else "single_name"
+            w = {ticker: 1.0}
+            rets = _daily_returns(_ohlcv(ticker).get("closes") or [])
+            returns_by_name = {ticker: rets} if len(rets) >= 30 else {}
         if not returns_by_name:
             return f"book tail risk unavailable for {ticker}: no return series."
+        mix_meta = {
+            "source": mix_source,
+            "names": list(w),
+            "resolved": sorted(returns_by_name),
+        }
         pcvar = _pcvar(returns_by_name, weights=w)
         stress = _stress(returns_by_name, weights=w, shock=-0.10)
-        # realized drawdown of the weighted book (best-effort) - shared helper
-        # with the governor's measured-drawdown feed (book_risk.portfolio_drawdown)
-        dd = None
-        try:
-            dd = _pdd(w, returns_by_name)
-        except Exception:
-            dd = None
+        # The realized drawdown comes from the ONE resolver the governor gates
+        # with, so this tool can never report a different "book drawdown" than
+        # the report's Risk Gate block.
+        dd, dd_meta = measured_book_drawdown(
+            get_config(), lambda name: _ohlcv(name).get("closes") or [], fallback_symbol=ticker
+        )
         gate = _gate(dd) if dd is not None else None
         pcvar_s = f"{abs(pcvar):.2%}" if pcvar is not None else "n/a"
         stress_s = f"{stress:.2%}" if stress is not None else "n/a"
@@ -4797,8 +4842,9 @@ def get_book_tail_risk(
         gate_s = str(gate) if gate is not None else "n/a"
         return (
             f"book tail risk {ticker}: portfolio_cvar={pcvar_s} "
-            f"correlated_stress_-10pct={stress_s} "
-            f"drawdown(book realized)={dd_s} drawdown_gate={gate_s} (True=block new risk)"
+            f"correlated_stress_-10pct={stress_s} mix={describe_source(mix_meta)} "
+            f"drawdown(realized book)={dd_s} source={describe_source(dd_meta)} "
+            f"drawdown_gate={gate_s} (True=block new risk)"
         )
     except Exception as exc:  # noqa: BLE001
         return f"book tail risk unavailable for {ticker}: {exc}"
@@ -4844,29 +4890,30 @@ def get_composed_risk_gate(
     """
     try:
         from tradingagents.dataflows.config import get_config
-        from tradingagents.strategies.book_risk import (
-            drawdown_gate as _gate,
-            portfolio_drawdown as _pdd,
+        from tradingagents.strategies.book_context import (
+            configured_basket,
+            describe_source,
+            measured_book_drawdown,
         )
+        from tradingagents.strategies.book_risk import drawdown_gate as _gate
         from tradingagents.strategies.risk_governor import govern
     except Exception as exc:  # noqa: BLE001
         return f"composed risk gate unavailable for {ticker}: {exc}"
     try:
         w = dict(weights or {})
         if not w:
-            w = {ticker: 1.0}
-        returns_by_name = {}
-        for name in w:
-            closes = _ohlcv(name).get("closes") or []
-            rets = _daily_returns(closes)
-            if len(rets) >= 30:
-                returns_by_name[name] = rets
-        dd = None
-        if returns_by_name:
-            try:
-                dd = _pdd(w, returns_by_name)
-            except Exception:
-                dd = None
+            # Same resolution as every other book surface: the CONFIGURED
+            # basket when one exists, else the analyzed name - and the source
+            # is printed so a name-level number is never read as the book.
+            w = configured_basket(get_config()) or {ticker: 1.0}
+        # ONE resolver for the drawdown the portfolio gate decides on: the same
+        # call the governor's own gate makes, so this tool cannot issue a
+        # REJECT the composed gate never issued (NVDA 2026-09-12: a
+        # single-name 20.21% was reported as the realized book drawdown while
+        # the gate measured 7.24% on the configured basket).
+        dd, dd_meta = measured_book_drawdown(
+            get_config(), lambda name: _ohlcv(name).get("closes") or [], fallback_symbol=ticker
+        )
         gate = _gate(dd) if dd is not None else None
 
         verdict = govern(
@@ -4894,16 +4941,17 @@ def get_composed_risk_gate(
         )
         lines = [f"composed risk gate {ticker}: {render_hierarchy(resolved)}"]
         dd_s = f"{dd:.2%}" if dd is not None else "n/a"
+        dd_src = describe_source(dd_meta)
         if resolved.get("blocker"):
             lines.append(
-                f"detail=realized book drawdown={dd_s} "
+                f"detail=realized book drawdown={dd_s} (source {dd_src}) "
                 f"precedence=kill>portfolio>trade>liquidity>regime; "
                 f"blocked by {resolved['blocker']}; trade-level risk (risk_ok) "
                 f"does not override a higher gate"
             )
         else:
             lines.append(
-                f"detail=portfolio_drawdown={dd_s} gate_ok"
+                f"detail=portfolio_drawdown={dd_s} (source {dd_src}) gate_ok"
                 + (f" trade_gate={verdict.get('verdict', 'PASS').upper()}" if size_pct is not None else "")
             )
         if verdict.get("reasons"):

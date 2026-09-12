@@ -114,6 +114,8 @@ def _build_lists() -> None:
     ])
 
     from tradingagents.agents.utils.analysis_tools import (
+        get_book_tail_risk,
+        get_composed_risk_gate,
         get_exit_plan,
         get_scaleout_plan,
         get_swing_exits,
@@ -124,6 +126,13 @@ def _build_lists() -> None:
         get_position_sizing,
         get_composite_sizing,
         get_risk_gate,
+        # The composed (portfolio-gate > trade-gate) verdict and the book tail:
+        # without these the trader's verification pass could only reach
+        # get_risk_gate, so it "verified" the book drawdown with a
+        # model-supplied number instead of the gate's measured one
+        # (NVDA 2026-09-12).
+        get_composed_risk_gate,
+        get_book_tail_risk,
         get_fixed_risk_size,
         get_exit_check,
         get_exit_plan,

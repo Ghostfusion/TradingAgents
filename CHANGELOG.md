@@ -14,6 +14,69 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Number and label integrity in the decision path (2026-09-12; NVDA report comparison).** Comparing the two
+NVDA trees for the same session (`reports/NVDA_20260912_005957` vs `NVDA_20260912_160416`) surfaced five
+defects where a report or artifact carried a number under a name that did not mean what a reader (or the
+downstream execution layer) would assume. All five are fixed at the source, not in the renderer.
+
+**(1) Two numbers called "book drawdown".** The rendered block said `Book drawdown: 7.24% (limit 10.00%)` —
+the configured 8-name `risk_basket_*` book, which is what the governor gated on — while
+`get_book_tail_risk`/`get_composed_risk_gate` silently defaulted to `weights={ticker: 1.0}` and computed
+NVDA's **own** 20.21%, printed as "realized book drawdown". The trader copied that number into its
+verification and called `get_risk_gate(dd=20.2%)`, producing a REJECT the composed gate never issued (and
+the trader's own tool allow-list could not reach the composed gate to check). Now: one resolver,
+`strategies/book_context.py::measured_book_drawdown` (configured basket, one log-return conversion, a
+labelled source), used by the graph's governor feed, both tools and the report; the composed gate and the
+tail-risk tool print `source=configured basket (n/m names)` or `… alone (no basket configured / configured
+basket unresolved)`; the trader can call `get_composed_risk_gate`/`get_book_tail_risk`; the pre-decision
+context now carries the measured book drawdown so it need not be invented.
+
+**(2) A caller-supplied state value could decide a gate.** `get_risk_gate` passed the model's
+`drawdown_pct` straight into `govern`, so a hypothetical became a house verdict (the 20.2% above). The
+drawdown check is no longer a caller input: a `drawdown_pct` is echoed as
+`drawdown_whatif=… -> VERDICT (hypothetical, NOT the house verdict)` and never moves the verdict; the
+docstring/annotation say so, and the market-analyst guidance points drawdown claims at
+`get_composed_risk_gate`.
+
+**(3) Three stops, two ATR bases, one report.** The decision printed `Stop Loss: 207.19` (the trader's
+structural stop) while `research_decision.json` and the `Position contract` line carried `207.8845` — and
+that contract stop was built from a **close-to-close ATR proxy (5.20)** because the contract call site
+never passed the highs/lows that were already in state, while the swing tools used the true ATR (7.6672).
+`build_position_contract` now receives the state's real H/L, `PositionContract` records `atr` +
+`atr_source` (`h/l` vs `proxy`) and prints them (`stop 207.8845 (from entry 218.29, atr 7.67 (h/l))`), and
+`audit_decision_numbers` reconciles the decision's stop with the contract stop at any real difference
+(0.05%) instead of 15% — naming both numbers.
+
+**(4) A risk-driven trim read as a setup call.** The action was trim-only because the analyzed name's CVaR
+(4.83%) exceeded the 3% budget, yet the trader's own verification said the structure tools (`swing_set
+verdict=NO`, trailing exit hold) pointed the other way, and nothing in the artifact said which constraint
+bound it. `reporting.py::_binding_gate` now derives
+`binding_gate` / `action_basis` (`risk_reduction` vs `setup`) / `binding_reason` from `risk_context` and
+`risk_gate` only — never prose — writes them into `research_decision.json`, and the `Risk Gate (computed)`
+block renders `Basis: **risk reduction** (binding: analyzed_name_cvar - 4.83% > 3.00%)`.
+
+**(5) A rebuild could null a real decision.** `scripts/rebuild_complete_report.py` reconstructs state from
+markdown and never has `pm_decision`, so it rewrote `research_decision.json` (rating/thesis/rationale →
+null) and `run_card.json` (today's config on an old run) — the 2026-09-12 web rebuild did exactly that
+across 544 files. `write_report_tree(..., emit_run_artifacts=False)` (used by the rebuild) now leaves the
+run-scoped JSON untouched and prints `[rebuild] … preserved …`; `write_research_decision` additionally
+refuses to write when there is no `pm_decision` and a contract already exists.
+
+Also in the same pass: the artifact's `data_quality` / `disclosure.sources_used` / `sources_empty` /
+`invalidations` are derived from the forced-tool evidence (`ok` vs `error|no_data|timeout` leaves) and the
+contract levels by one owner (`reporting.py::_evidence_sources` / `_evidence_data_quality`), replacing
+hardcoded `[]`/`"unknown"` placeholders and a regex over the decision prose; `price_caliber` stays null
+(no producer reaches report-tree state) with a comment saying so. New fields `binding_gate`,
+`action_basis`, `binding_reason` are additive — old artifacts parse unchanged.
+
+Tests: 10 new in `test_book_context.py`, 6 in `test_reporting.py`, 3 in
+`test_research_decision_emission.py`, 2 in `test_rebuild_gate_recovery.py`, 1 in
+`test_strategies_contract.py` (22 total, 3889 passed on the full suite); 4 existing tests updated where they pinned the replaced behaviour (the 15%
+claim-audit tolerance, the book-tail-risk label, and two book-tail-risk fixtures that relied on the
+single-name default). Web impact: none — no tool name, CLI flag or JSON key was removed or renamed
+(`research_decision.json` gains keys only), and `run_rebuild_report` now re-renders markdown without
+touching the JSON contracts.
+
 The engine test suite could no longer exit (2026-09-12; `dataflows/moomoo.py`). A full run printed
 `3856 passed … in 512.38s` and then the process sat for ~50 minutes until an external timeout killed
 it — a green run that wastes an hour, and a CI job that reads as a failure. An exit probe (a plugin

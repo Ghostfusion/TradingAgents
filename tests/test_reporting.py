@@ -205,14 +205,19 @@ def test_slugify():
 
 
 def test_audit_decision_numbers_flags_mismatch():
-    """Item 6: the claim-vs-computed audit flags a PM decision's Stop Loss
-    that deviates >15% from the computed contract stop; matching values and
-    missing refs produce no note."""
+    """Item 6: the claim-vs-computed audit reconciles a PM decision's Stop Loss
+    with the computed contract stop. A stop is an order level, so any real
+    difference is named (NVDA 2026-09-12: 207.19 sat beside 207.8845 with no
+    note under the old 15% tolerance); identical values and missing refs produce
+    no note."""
     from tradingagents.reporting import audit_decision_numbers
 
     md = "**Stop Loss**: 100.0\n**Price Target**: 150.0\n"
-    # matching ref -> no note
-    assert audit_decision_numbers(md, {"stop": 102.0, "target": 145.0}) == ""
+    # identical stop -> no note
+    assert audit_decision_numbers(md, {"stop": 100.0, "target": 150.0}) == ""
+    # a different stop -> note naming both numbers
+    note = audit_decision_numbers(md, {"stop": 102.0, "target": 145.0})
+    assert "Claim audit" in note and "100.0" in note and "102.0" in note
     # far stop -> note
     note = audit_decision_numbers(md, {"stop": 80.0, "target": 145.0})
     assert "Claim audit" in note and "100.0" in note
@@ -702,3 +707,92 @@ def test_run_card_still_written_when_the_debate_block_fails(tmp_path):
     card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
     assert card["debate"]["enabled"] is True
     assert "RuntimeError: boom" in card["debate"]["error"]
+
+
+# ---------------------------------------------------------------------------
+# Number/label integrity: the execution contract's evidence-derived fields and
+# the binding-gate label (NVDA 2026-09-12 review).
+# ---------------------------------------------------------------------------
+
+
+def _decision(tmp_path):
+    return json.loads((tmp_path / "research_decision.json").read_text(encoding="utf-8"))
+
+
+def test_decision_derives_quality_and_sources_from_the_tool_evidence(tmp_path):
+    """data_quality / sources_used / sources_empty must come from the evidence
+    that actually ran, not from placeholders or a regex over the prose."""
+    state = _state(risk_ctx={"single_cvar": 0.01, "cvar_budget_pct": 0.03})
+    state["pm_decision"] = {
+        "rating": "Underweight",
+        "investment_thesis": "thesis",
+        "executive_summary": "summary",
+    }
+    state["tool_evidence"] = {
+        "market": [
+            {"tool": "get_orderflow_read", "status": "ok"},
+            {"tool": "get_form4_insider", "status": "no_data"},
+        ]
+    }
+    write_report_tree(state, "NVDA", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["data_quality"] == "partial"
+    assert doc["disclosure"]["sources_used"] == ["get_orderflow_read"]
+    assert doc["disclosure"]["sources_empty"] == ["get_form4_insider"]
+    assert doc["invalidations"]  # >= 1 by construction, from the contract levels
+
+
+def test_decision_records_the_pm_declared_quality_over_the_evidence(tmp_path):
+    state = _state()
+    state["pm_decision"] = {"rating": "Hold", "data_quality": "fresh"}
+    state["tool_evidence"] = {"market": [{"tool": "get_news", "status": "error"}]}
+    write_report_tree(state, "TST", tmp_path)
+    assert _decision(tmp_path)["data_quality"] == "fresh"
+
+
+def test_decision_labels_a_risk_driven_action(tmp_path):
+    """A trim bound by the risk budget must say so, so it does not read as a
+    setup call (the structure tools said hold on NVDA 2026-09-12)."""
+    state = _state(risk_ctx={"single_cvar": 0.0483, "cvar_budget_pct": 0.03})
+    state["pm_decision"] = {"rating": "Underweight"}
+    write_report_tree(state, "NVDA", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_gate"] == "analyzed_name_cvar"
+    assert doc["action_basis"] == "risk_reduction"
+    assert "4.83%" in doc["binding_reason"] and "3.00%" in doc["binding_reason"]
+    block = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Basis: **risk reduction**" in block
+    assert "analyzed_name_cvar" in block
+
+
+def test_decision_marks_a_book_drawdown_block(tmp_path):
+    state = _state(risk_ctx={"book_drawdown": 0.2021, "drawdown_limit": 0.10})
+    state["pm_decision"] = {"rating": "Underweight"}
+    write_report_tree(state, "NVDA", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_gate"] == "book_drawdown"
+    assert doc["action_basis"] == "risk_reduction"
+
+
+def test_decision_has_no_binding_gate_for_a_setup_driven_action(tmp_path):
+    state = _state(risk_ctx={"single_cvar": 0.01, "cvar_budget_pct": 0.03})
+    state["pm_decision"] = {"rating": "Buy"}
+    write_report_tree(state, "TST", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_gate"] is None
+    assert doc["action_basis"] == "setup"
+    block = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Basis:" not in block
+
+
+def test_claim_audit_reconciles_the_stop_against_the_contract():
+    """207.19 (the trader's structural stop) beside a 207.8845 contract stop is
+    a 0.35% gap the old 15% tolerance hid; the note must name both numbers."""
+    from tradingagents.reporting import audit_decision_numbers
+
+    note = audit_decision_numbers(
+        "**Stop Loss**: 207.19\n**Price Target**: 236.0\n",
+        {"stop": 207.8845, "target": 236.0},
+    )
+    assert "207.19" in note and "207.8845" in note and "reconcile" in note
+    assert audit_decision_numbers("**Stop Loss**: 207.8\n", {"stop": 207.8845}) == ""

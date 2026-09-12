@@ -17,6 +17,14 @@ class PositionContract:
     size_pct: float
     stop_loss: float | None
     stop_pct: float
+    # The ATR the stop_pct was measured with, and where it came from: ``h/l``
+    # for a true-range ATR, ``proxy`` for the close-to-close fallback when the
+    # caller supplied no highs/lows. Printed so a reader can reproduce the stop
+    # (and reconcile it with the swing tools' ATR) instead of seeing two
+    # unexplained stops - NVDA 2026-09-12: contract stop 207.8845 off a proxy
+    # ATR 5.20 beside the swing tools' 207.19 off the real ATR 7.6672.
+    atr: float | None = None
+    atr_source: str = "unknown"
     # The entry the stop was measured FROM. Rendered next to the stop: without
     # it a reader cannot reconcile the contract's stop with the report's spot
     # price (GOOG 2026-09-11: contract stop 323.5084 was anchored on the 330.39
@@ -38,9 +46,15 @@ class PositionContract:
         so without it the number cannot be reconciled with the report's spot
         price (GOOG 2026-09-11: stop 323.5084 anchored on the 330.39 close while
         the report's spot was 336.25 - a reader saw two unexplained stops).
+        The ATR basis is printed too: same level of explanation, for the other
+        input that decides the stop.
         """
         anchor = f" (from entry {self.entry_price:.2f})" if self.entry_price else ""
-        return f"size {self.size_pct:.1%}, stop {self.stop_loss}{anchor}, reason: {self.reason()}"
+        basis = f", atr {self.atr:.2f} ({self.atr_source})" if self.atr else ""
+        return (
+            f"size {self.size_pct:.1%}, stop {self.stop_loss}{anchor}{basis}, "
+            f"reason: {self.reason()}"
+        )
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -55,8 +69,15 @@ def _log_returns(closes) -> list:
     return rets
 
 
-def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
-    """ATR from H/L when present; else a close-to-close range proxy."""
+def _atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
+    """ATR plus the basis it came from: ``"h/l"`` (true range) or ``"proxy"``.
+
+    The proxy is a close-to-close range estimate, so it understates the real
+    range of a trending name whenever highs/lows exist but were not passed in.
+    The basis therefore travels with the number instead of being assumed
+    (NVDA 2026-09-12: proxy ATR 5.20 vs true ATR 7.6672 on the same closes,
+    which put the contract's stop 0.7% away from the swing tools' stop).
+    """
     ok = (
         high is not None
         and low is not None
@@ -68,13 +89,18 @@ def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
 
         a = atr(high, low, closes, window=window)
         if a > 0:
-            return a
+            return a, "h/l"
     sample = closes[-window:] if len(closes) > window else closes
     rets = _log_returns(sample)
     if not rets:
-        return 0.0
+        return 0.0, "none"
     avg = sum(abs(r) for r in rets) / len(rets)
-    return avg * closes[-1]
+    return avg * closes[-1], "proxy"
+
+
+def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
+    """ATR from H/L when present; else a close-to-close range proxy."""
+    return _atr_with_source(closes, high, low, window=window)[0]
 
 
 def build_position_contract(
@@ -132,7 +158,7 @@ def build_position_contract(
 
     from tradingagents.strategies.size import position_size_kelly, volatility_target_scale
 
-    a = _atr_or_proxy(closes_f, high, low)
+    a, atr_source = _atr_with_source(closes_f, high, low)
     stop_pct = _clamp(atr_mult * a / last if a > 0 else 0.02, 0.005, 0.50)
 
     # Reference entry for the dollar stop: the weighted tranche entry when a
@@ -159,7 +185,7 @@ def build_position_contract(
     kelly_part = position_size_kelly(p, odds=odds, fraction=kelly_frac, max_size=max_pct)
     risk_part = risk / stop_pct if stop_pct > 0 else max_pct
     size_base = min(kelly_part, risk_part)
-    reasons = [f"kelly={kelly_part:.3f}", f"risk/stop={risk_part:.3f}"]
+    reasons = [f"atr={a:.4f} ({atr_source})", f"kelly={kelly_part:.3f}", f"risk/stop={risk_part:.3f}"]
 
     rets = _log_returns(closes_f)
     vol_s = 1.0
@@ -258,6 +284,8 @@ def build_position_contract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
         stop_loss=round(stop, 4),
         stop_pct=round(stop_pct, 4),
+        atr=round(a, 4) if a > 0 else None,
+        atr_source=atr_source,
         entry_price=round(float(entry), 4),
         reason_parts=reasons + reasons_extra + (["tranche weighted entry"] if entry is not last else []),
         breakeven_stop=round(be_stop, 4) if be_stop is not None else None,

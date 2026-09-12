@@ -682,7 +682,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |
-| `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` | market | book-level portfolio CVaR + correlated -10% stress + drawdown gate |
+| `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` + `book_context` resolver | market/trader | book-level portfolio CVaR + correlated -10% stress + the measured book drawdown, each labelled with the mix it came from (configured basket vs the analyzed name alone - a name-level drawdown is never printed as "the book") |
 | `get_covariance_read(tickers)` | `covariance_models.ledoit_wolf_shrink` + `ewma_covariance` | risk debators | Ledoit-Wolf shrunk covariance (delta = b2/d2) + EWMA vol for a name list |
 | `get_concentration_read(weights, benchmark_weights?)` | `portfolio.active_share` + `weight_hhi` + `effective_holdings` + `weight_entropy` | risk debators | how concentrated a proposed book is (active share vs benchmark, HHI, entropy) |
 | `get_tail_extreme_var(ticker, alpha?)` | `book_risk.extreme_quantile_var` | risk debators | EVT/GPD extreme-quantile VaR/ES (extrapolates beyond the observed worst day) |
@@ -698,7 +698,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_earnings_event_read(ticker, date)` | `events.post_earnings_play` + `catalyst.last_earnings_surprise` | news | surprise %, drift side, print-day move, PEAD setup |
 | `get_catalyst_scale(ticker, date)` | `catalyst.build_catalyst_snapshot` | news | 0..1 scale + verdict + reasons |
 | `get_position_sizing(confidence, stop_dist_pct, ...)` | `size.kelly + risk-budget` | market | min(kelly_quarter, risk/stop, cap) |
-| `get_risk_gate(size_pct, ...)` | `risk_governor.govern` | market | PASS / WARN / REJECT |
+| `get_risk_gate(size_pct, ...)` | `risk_governor.govern` | market/trader | PASS / WARN / REJECT for the trade-level limits. The measured book drawdown is NOT a caller input: a `drawdown_pct` passed here is reported as a hypothetical and never moves the verdict - the portfolio drawdown gate is `get_composed_risk_gate` (one resolver: `strategies/book_context.py`) |
 | `get_regime_read(ticker)` | `overlays.build_strategy_overlays` | market | regime label + position scale + momentum/52w |
 | `get_volatility_contraction(ticker)` | `swing.vcp_setup` | market | VCP base depths + contraction + near-breakout |
 | `get_orderflow_read(ticker)` | `orderflow.summarize` (+ guarded fetch) | market | inst/retail net, distribution, divergence, alignment |
@@ -784,10 +784,16 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
   proposal (sizing / exit / tranche / expectancy / plan-card tools).
 - The **Research Manager** and **Bull/Bear researchers** receive the computed
   decision context (regime gate, plan card, risk snapshot, factsheet).
-- `get_risk_gate` exposes the full governor surface: `book_total_pct`,
+- `get_risk_gate` exposes the trade-level governor surface: `book_total_pct`,
   `daily_loss_pct` (daily-loss budget), `hwm_drawdown_pct` (soft/hard
   high-water-mark tiers), `sector_pct` (sector cap), `capital_at_risk_pct` /
   `risk_cap_pct` (tranche capital-at-risk), `liquidity_verdict`, `halted`.
+  **Not** the realized book drawdown: that is a measured state input owned by
+  `strategies/book_context.py::measured_book_drawdown` (the same resolver the
+  governor's gate and the report's `Book drawdown` line use), and
+  `get_composed_risk_gate` is the tool that applies it. A `drawdown_pct`
+  passed to `get_risk_gate` is echoed as a labelled hypothetical only, so a
+  model can no longer produce a REJECT the composed gate never issued.
 
 
 

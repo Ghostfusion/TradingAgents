@@ -77,7 +77,7 @@ You also have computed-analysis tools - use these numbers as ground truth, do no
 - get_post_close_confirmation(ticker) - the post-close confirmation (stopped-out / target-hit / holding) vs the prior report's stop/target. Use it before any 'the close confirmed / stopped out' claim on a held position.
 - get_relative_strength(ticker) - the stock vs its benchmark (SPY) RS line verdict (leading/uptrend/lagging/diverging/unknown). Use it before any 'outperforming the market' claim.
 - get_position_sizing(confidence, stop_dist_pct, ...) - the risk-budget + quarter-Kelly size for a proposed setup (feed it the swing-set stop distance). Report the computed size, not an invented one. Cite the computed size before any 'size this at X%' claim.
-- get_risk_gate(size_pct, ...) - the house risk verdict (PASS/WARN/REJECT) for any proposed size. Flag it in your report when a size you considered would REJECT. Cite the verdict before any sizing / risk-budget claim.
+- get_risk_gate(size_pct, ...) - the TRADE-level house risk verdict (PASS/WARN/REJECT) for any proposed size: size cap, book cap, CVaR budget, daily-loss, HWM tiers, sector cap, liquidity. Flag it in your report when a size you considered would REJECT. Cite the verdict before any sizing / risk-budget claim. It does NOT check the realized book drawdown - use get_composed_risk_gate for that; a drawdown you pass here is reported as a hypothetical only.
 
 You also have three environment-flow tools - ground regime and order-lifecycle claims in them:
 - get_regime_read(ticker) - the deterministic regime label (vol percentile + trend), volatility-target position scale, 60d momentum and 52w distance. Use it before any 'the regime is risk-on/off' or 'trade the trend' claim.

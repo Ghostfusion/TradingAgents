@@ -90,7 +90,7 @@ live run wrote a legacy free-form debate with the matrix "required").
 | `max_position_pct` | `TRADINGAGENTS_MAX_POSITION_PCT` | single-name position cap (default 30%) | `strategies/risk_governor.py::default_limits` | `test_strategies_risk_governor.py` | wired |
 | `risk_max_position_pct` | `TRADINGAGENTS_RISK_MAX_POSITION_PCT` | whole-book position cap (default 45%) | `strategies/risk_governor.py::default_limits` | `test_risk_agent_wiring.py` | wired |
 | `sector_cap_limit` | `TRADINGAGENTS_SECTOR_CAP_LIMIT` | sector concentration cap (default 35%) | `strategies/risk_governor.py::default_limits` | `test_formulas_p3.py` | wired |
-| `risk_max_drawdown_pct` | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | measured book drawdown that blocks new risk (default 10%) | `strategies/book_risk.py::drawdown_gate`, `risk_governor.py` | `test_risk_governor_measured_drawdown.py`, `test_strategies_book_risk.py` | wired |
+| `risk_max_drawdown_pct` | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | measured book drawdown that blocks new risk (default 10%) | `strategies/book_context.py::measured_book_drawdown` (one resolver), `strategies/book_risk.py::drawdown_gate`, `risk_governor.py` | `test_risk_governor_measured_drawdown.py`, `test_strategies_book_risk.py`, `test_book_context.py` | wired |
 | `risk_daily_cvar_budget_pct` | `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | daily book CVaR budget (default 3%) | `strategies/risk_governor.py::govern` | `test_book_risk_sizing.py`, `test_risk_context_hoist.py` | wired |
 | `risk_daily_loss_budget_pct` | `TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT` | daily loss limit (default 3%) | `strategies/risk_governor.py::govern` | — (no gate test yet) | wired |
 | `risk_hwm_soft_pct` | `TRADINGAGENTS_RISK_HWM_SOFT_PCT` | high-water-mark drawdown → WARN (default 10%) | `strategies/risk_governor.py::govern` | — (no gate test yet) | wired |
@@ -147,6 +147,15 @@ Not flippable by design — they are integrity checks, not policy:
   `scripts/report_verify.py` prints `debate DEGRADED` and exits non-zero
   (`test_report_verify.py`). A degraded run is thus auditable from the tree and
   from the verifier, instead of inferred from prose.
+- **One producer per measured number**: the book drawdown is resolved only by
+  `strategies/book_context.py::measured_book_drawdown` (the configured
+  `risk_basket_*` book, one log-return conversion, a labelled source), and the
+  governor, the report's `Book drawdown` line and the analyst/trader tools all
+  read that one value. A caller-supplied `drawdown_pct` on `get_risk_gate` is a
+  labelled what-if and never decides a verdict; the contract stop records the
+  ATR and its `h/l` vs `proxy` basis; `research_decision.json` derives
+  `data_quality` / `sources_*` / `invalidations` from the tool evidence
+  (`test_book_context.py`, `test_research_decision_emission.py`).
 
 ## 6. Adding a gate — the rule
 

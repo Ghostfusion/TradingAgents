@@ -169,3 +169,25 @@ def test_contract_renders_the_entry_its_stop_was_measured_from():
     assert "stop " in summary and "reason:" in summary
     # The stop is measured FROM the anchor: entry * (1 - risk/risk_part).
     assert contract.stop_loss == pytest.approx(330.39 * (1 - 0.01 / 2.0), rel=1e-3)
+
+
+def test_contract_records_the_atr_basis():
+    """NVDA 2026-09-12: the contract's stop (207.8845) came off a close-to-close
+    ATR proxy (5.20) while the swing tools, using the true ATR (7.6672) that was
+    sitting in the same state, produced 207.19 - two stops, two ATRs, one
+    report, and nothing said which basis was used. The contract now records the
+    ATR and its source, and the state's real highs/lows reach the builder."""
+    closes = _closes(n=40, base=100.0, step=0.5)
+    highs = [c + 2.0 for c in closes]
+    lows = [c - 2.0 for c in closes]
+    with_ranges = build_position_contract(cfg=_cfg(), closes=closes, high=highs, low=lows)
+    proxy_only = build_position_contract(cfg=_cfg(), closes=closes)
+
+    assert with_ranges.atr_source == "h/l"
+    assert proxy_only.atr_source == "proxy"
+    assert with_ranges.atr > proxy_only.atr  # a true range exceeds close-to-close
+    # ...so the same contract config produces a wider stop, which is the
+    # difference the report could not previously explain.
+    assert with_ranges.stop_loss < proxy_only.stop_loss
+    assert "(h/l)" in with_ranges.summary() and "(proxy)" in proxy_only.summary()
+    assert "atr=" in with_ranges.reason()

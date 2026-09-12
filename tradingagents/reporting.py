@@ -239,8 +239,20 @@ def audit_decision_numbers(decision_text: str, refs: dict) -> str:
     stop_ref = refs.get("stop")
     target_ref = refs.get("target")
     notes = []
-    if stop_dec is not None and stop_ref is not None and stop_ref > 0 and abs(stop_dec - stop_ref) / stop_ref > 0.15:
-        notes.append(f"decision Stop Loss {stop_dec} deviates >15% from computed stop {stop_ref:.2f}")
+    # A stop is an order level the executor will use, so the decision's number
+    # and the computed contract stop must be reconciled whenever they differ at
+    # all - not only when they differ by 15%. NVDA 2026-09-12 shipped decision
+    # Stop Loss 207.19 beside a contract stop of 207.8845 (0.33% apart) and the
+    # old blanket tolerance hid it; the note now names both numbers so a reader
+    # can pick the right one. Targets stay loose: a discretionary target is not
+    # an order level.
+    if stop_dec is not None and stop_ref is not None and stop_ref > 0:
+        dev = abs(stop_dec - stop_ref) / stop_ref
+        if dev > 0.0005:
+            notes.append(
+                f"decision Stop Loss {stop_dec} vs computed contract stop {stop_ref:.4f} "
+                f"({dev:.2%} apart) - reconcile before acting"
+            )
     if (
         target_dec is not None
         and target_ref is not None
@@ -449,6 +461,21 @@ def _risk_gate_block(final_state: dict) -> str:
             parts.append(f"IWF: {liq['iwf']:.2%}")
         if liq.get("dangers"):
             parts.append("Liquidity reasons: " + "; ".join(liq["dangers"]))
+    # Which constraint bound the action - read from the same helper the
+    # execution artifact uses, so the report and the JSON agree. A trim driven
+    # by the risk budget must not read as a setup call (NVDA 2026-09-12: the
+    # structure tools said hold, the action was risk reduction, and nothing in
+    # the report said so).
+    try:
+        _bg, _basis, _why = _binding_gate(final_state)
+    except Exception:  # noqa: BLE001 - advisory; never break the block
+        _bg, _basis, _why = None, "setup", ""
+    if _basis == "risk_reduction":
+        parts.append(
+            f"Basis: **risk reduction** (binding: {_bg}"
+            + (f" - {_why}" if _why else "")
+            + ") — the setup/tape is not the trigger"
+        )
     reasons = gate.get("reasons") or []
     if reasons:
         parts.append("Reasons: " + "; ".join(reasons))
@@ -458,6 +485,83 @@ def _risk_gate_block(final_state: dict) -> str:
     if final_state.get("risk_halt"):
         parts.append("**RISK HALT ACTIVE - escalation required**")
     return "\n".join(parts) + "\n"
+
+
+_TOOL_FAILED_STATUSES = {"error", "no_data", "timeout"}
+
+
+def _evidence_sources(final_state: dict) -> tuple[list[str], list[str]]:
+    """``(sources_used, sources_empty)`` from the deterministic tool evidence.
+
+    ``tool_evidence`` records one leaf per forced-tool call with its ``status``:
+    a tool with at least one usable leaf was *used*; a tool whose leaves all
+    failed is *empty*. No evidence at all returns two empty lists - an unproven
+    claim, never an assumed one.
+    """
+    ok: set[str] = set()
+    failed: set[str] = set()
+    for leaves in (final_state.get("tool_evidence") or {}).values():
+        for leaf in leaves or []:
+            name = str((leaf or {}).get("tool") or "").strip()
+            if not name:
+                continue
+            status = str((leaf or {}).get("status") or "").strip().lower()
+            if status == "ok":
+                ok.add(name)
+            elif status in _TOOL_FAILED_STATUSES:
+                failed.add(name)
+    return sorted(ok), sorted(failed - ok)
+
+
+def _evidence_data_quality(final_state: dict) -> str | None:
+    """``fresh`` / ``partial`` / ``unknown`` from the tool evidence, else None.
+
+    The PM's own declaration wins when it made one; when it did not, the
+    evidence is the only honest source: every leaf ok -> fresh, some ok ->
+    partial, none ok -> unknown. None means "no evidence at all" and the caller
+    decides what to record.
+    """
+    used, empty = _evidence_sources(final_state)
+    if not used and not empty:
+        return None
+    if not empty:
+        return "fresh"
+    return "partial" if used else "unknown"
+
+
+def _binding_gate(final_state: dict) -> tuple[str | None, str, str]:
+    """Which constraint bound the action, and whether the action is risk-driven.
+
+    Returns ``(binding_gate, action_basis, reason)``; ``action_basis`` is
+    ``"risk_reduction"`` when a portfolio/name risk constraint (halt, measured
+    book drawdown, analyzed-name CVaR over budget, or a gate REJECT) bound the
+    action, else ``"setup"``. Read from ``risk_context``/``risk_gate`` only,
+    never from prose, so a trim can be labelled as risk-driven instead of being
+    presented as a setup - NVDA 2026-09-12: the structure tools said hold, the
+    trim rested on the risk budget, and nothing in the report said so.
+    """
+    if final_state.get("risk_halt"):
+        return "halt", "risk_reduction", "risk halt active"
+    ctx = final_state.get("risk_context") or {}
+    dd, lim = ctx.get("book_drawdown"), ctx.get("drawdown_limit")
+    if dd is not None and lim is not None and float(dd) > float(lim):
+        return (
+            "book_drawdown",
+            "risk_reduction",
+            f"book drawdown {float(dd):.2%} > limit {float(lim):.2%}",
+        )
+    cvar, budget = ctx.get("single_cvar"), ctx.get("cvar_budget_pct")
+    if cvar is not None and budget is not None and float(cvar) > float(budget):
+        return (
+            "analyzed_name_cvar",
+            "risk_reduction",
+            f"analyzed-name CVaR {float(cvar):.2%} > budget {float(budget):.2%}",
+        )
+    gate = final_state.get("risk_gate") or {}
+    if str(gate.get("verdict") or "").upper() == "REJECT":
+        reasons = "; ".join(str(r) for r in (gate.get("reasons") or [])) or "no reason recorded"
+        return "risk_gate", "risk_reduction", f"risk gate REJECT: {reasons}"
+    return None, "setup", ""
 
 
 def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
@@ -476,6 +580,13 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     from datetime import date as _date
 
     pm = final_state.get("pm_decision") or {}
+    # Never degrade history: a rebuild reconstructs state from markdown and has
+    # no pm_decision, so writing here would null a real rating/thesis (the
+    # 2026-09-12 web rebuild did exactly that across the report trees). An
+    # existing contract is left untouched; the skip is recorded by the caller.
+    target_path = Path(save_path) / "research_decision.json"
+    if not (isinstance(pm, dict) and pm) and target_path.exists():
+        return
     rg = final_state.get("risk_gate") or {}
     contract = final_state.get("position_contract")
     stop = target = size_pct = None
@@ -499,6 +610,22 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     pm_gr = pm.get("guardrail_reason") if isinstance(pm, dict) else None
     rg_verdict = rg.get("verdict") if isinstance(rg, dict) else None
     rg_reasons = rg.get("reasons") or [] if isinstance(rg, dict) else []
+
+    # One owner for the evidence-derived fields, shared with the rendered
+    # disclosure block so the JSON and the markdown cannot disagree (they used
+    # to: this emitter hardcoded empty lists while the renderer regex-scanned
+    # the decision prose for a data-quality word).
+    from tradingagents.strategies.report_disclosure import (
+        invalidation_conditions as _invalidation_conditions,
+    )
+
+    declared_dq = str(pm_dq).strip().lower() if pm_dq else None
+    facts_dq = declared_dq or _evidence_data_quality(final_state) or "unknown"
+    sources_used, sources_empty = _evidence_sources(final_state)
+    binding_gate, action_basis, binding_reason = _binding_gate(final_state)
+    invalidations = _invalidation_conditions(
+        stop_loss=stop, take_profit=target, data_quality=facts_dq
+    )
 
     # Security-signal / portfolio-action split (SKHY 2026-09-09 review loop).
     # The PM's raw rating is the PRE-portfolio signal; the composed risk gate
@@ -532,20 +659,28 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
             "take_profit": target,
             "size_pct_book": size_pct,
         },
-        "data_quality": pm_dq or "unknown",
+        "data_quality": facts_dq,
+        # No producer reaches report-tree state (the caliber is set where the
+        # vendor result is read, dataflows/interface.py): null = unknown,
+        # never assumed "adjusted".
         "price_caliber": None,
-        "invalidations": [],
+        "invalidations": invalidations,
         "guardrail_reason": pm_gr,
         "risk_gate": {"verdict": rg_verdict, "reasons": rg_reasons},
         "security_signal": _split.get("security_signal"),
         "portfolio_action": _split.get("portfolio_action"),
         "combined_action": _split.get("combined_action"),
         "gated": bool(_split.get("gated")),
-        "disclosure": {"sources_used": [], "sources_empty": []},
+        # Which constraint bound the action and whether it is risk-driven or
+        # setup-driven: execution reads binding_gate, the report renders it.
+        "binding_gate": binding_gate,
+        "action_basis": action_basis,
+        "binding_reason": binding_reason or None,
+        "disclosure": {"sources_used": sources_used, "sources_empty": sources_empty},
     }
     body = _rj.dumps(doc, sort_keys=True, default=str)
     doc["decision_hash"] = "sha256:" + _hl.sha256(body.encode("utf-8")).hexdigest()
-    (Path(save_path) / "research_decision.json").write_text(
+    target_path.write_text(
         _rj.dumps(doc, indent=2, sort_keys=True, default=str), encoding="utf-8"
     )
 
@@ -724,9 +859,18 @@ def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
 
 
 def write_report_tree(
-    final_state: dict, ticker: str, save_path, config: "dict | None" = None
+    final_state: dict, ticker: str, save_path, config: "dict | None" = None,
+    *, emit_run_artifacts: bool = True,
 ) -> Path:
-    """Save a completed run's reports to ``save_path``; return the complete-report path."""
+    """Save a completed run's reports to ``save_path``; return the complete-report path.
+
+    ``emit_run_artifacts=False`` re-renders the markdown only and leaves the
+    run-scoped records (``run_card.json``, ``research_decision.json``, the
+    alpha ledger, ``tool_evidence.json``) untouched. A markdown-only rebuild
+    has no ``pm_decision``/risk state, so writing them would replace a real
+    run's decision contract with nulls - the 2026-09-12 web rebuild did exactly
+    that across the report trees.
+    """
     save_path = Path(save_path)
     save_path.mkdir(parents=True, exist_ok=True)
     cfg = _config(config)
@@ -1005,16 +1149,15 @@ def write_report_tree(
                         watch_conditions,
                     )
 
-                    # data_quality: the PM decision's own declared field when
-                    # present (mirrors PortfolioDecision.data_quality), else
-                    # honest "unknown" - never assumed fresh.
-                    dq = "unknown"
-                    m3 = _re.search(
-                        r"data\s*quality[^0-9a-z]{0,6}(fresh|stale|partial|unknown)",
-                        decision_llm, _re.IGNORECASE,
-                    )
-                    if m3:
-                        dq = m3.group(1).lower()
+                    # data_quality + invalidations come from the ONE owner the
+                    # execution artifact uses (PM declaration -> tool evidence ->
+                    # honest "unknown"), never from a regex over the decision
+                    # prose: the JSON and this block must not disagree, and a
+                    # prose regex could only ever guess.
+                    _pm = final_state.get("pm_decision") or {}
+                    _declared = str(_pm.get("data_quality") or "").strip().lower()
+                    dq = _declared or _evidence_data_quality(final_state) or "unknown"
+                    sources_used, sources_empty = _evidence_sources(final_state)
                     invalids = invalidation_conditions(
                         stop_loss=ref_stop, take_profit=ref_target, data_quality=dq,
                     )
@@ -1059,7 +1202,9 @@ def write_report_tree(
                     cons = consensus_readout(_supporting, _opposing)
                     wc = watch_conditions(watch, next_check)
                     attr = signal_attribution()
-                    disc = disclosure_footers([], [], models_used=None)
+                    disc = disclosure_footers(
+                        sources_used, sources_empty, models_used=None
+                    )
                     # W3-1 decision-level data-quality score + W3-7 falsification
                     # conditions (advisory; computed, never guessed).
                     dq_line = "data quality: n/a"
@@ -1161,18 +1306,21 @@ def write_report_tree(
             "debate": debate_card,
             "sections": [],
         }
-        (save_path / "run_card.json").write_text(
-            _json.dumps(card, indent=2, default=str), encoding="utf-8"
-        )
+        if emit_run_artifacts:
+            (save_path / "run_card.json").write_text(
+                _json.dumps(card, indent=2, default=str), encoding="utf-8"
+            )
         # research_decision.json - deterministic execution contract for the
         # TradingExecution layer (Phase A daemon input). Advisory; never gates;
-        # a failure here must never break the report tree.
-        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
-            write_research_decision(final_state, ticker, save_path)
-        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
-            write_alpha_ledger(final_state, ticker, save_path, cfg)
-        with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
-            _write_tool_evidence(final_state, ticker, save_path)
+        # a failure here must never break the report tree. Skipped on a
+        # markdown-only rebuild: it would null a real run's rating/thesis.
+        if emit_run_artifacts:
+            with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+                write_research_decision(final_state, ticker, save_path)
+            with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+                write_alpha_ledger(final_state, ticker, save_path, cfg)
+            with suppress(Exception):  # noqa: BLE001 - advisory; never breaks the report
+                _write_tool_evidence(final_state, ticker, save_path)
     except Exception:  # noqa: BLE001 - card is advisory
         pass
     return save_path / "complete_report.md"
