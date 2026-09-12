@@ -118,6 +118,11 @@ app/router.py, provider/query_executor.py, extensions/platform_api/main.py).
   `PUT /api/config` is a no-op. Add a `trading_web` `Credentials` store + a
   `/api/credentials/required` endpoint (`{provider: [missing_keys]}`) so the SPA
   can show/enter keys and `route_to_vendor` can pre-gate.
+  **Superseded (2026-09-12):** the web-side credential store was built and then
+  removed by decision - provider keys belong to the engine's `.env`, and
+  `trading_web` has no key screen and no key endpoints. Do not revive this gap
+  as written; the "which keys are missing" answer, if wanted, belongs in the
+  engine, and redaction is already the framing for run output.
 
 ---
 
@@ -294,11 +299,16 @@ Verified against `desktop/` (Tauri 2 + React, backend/credential manager),
 - **Add:** `presets(username, name, capability, args_json)` + `GET/PUT/DELETE
   /api/presets`; "Save preset" on every job form + picker back-fill.
 
-### U5. Credential manager (server-side safe)
+### U5. Credential manager (server-side safe) — **removed by decision, 2026-09-12**
 - **Source:** `desktop` `api-keys.tsx`.
 - **Add:** `api-keys` screen (moomoo/fmp/eodhd/alpaca/fred/massive), masked-on-
   read, admin-only, audit-logged; `GET/PUT /api/credentials` + a
   `/api/credentials/required` from P6.
+- **Status:** built (masked reads, admin-only writes, audit-logged, W-P1-10
+  fixed) and then deleted. Keys are the engine's: they come from
+  `TradingAgents/.env`, and the app only consumes data. The screen, its three
+  endpoints, `backend/credentials.py`, the role probe that gated it and the
+  help-page section are all gone - a key is added by editing that file.
 
 ### U6. MCP surface for the strategies (aligns with the P-series P2/P3)
 - **Source:** `extensions/mcp_server` (FastMCP auto-wrap of the FastAPI router →

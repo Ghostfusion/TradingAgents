@@ -186,8 +186,10 @@ late older response must not overwrite fresh data.
 `ResultBox` returns the error branch before the result branch (`App.jsx:40-41`), and `Raw`/`Nightly`
 (`App.jsx:1078-1085`, `918-930`) never reset `error`/`result` on submit (nine sibling pages do). Same class in
 `Watchlist.jsx:18-25`, `JobsTimeline.jsx:17-24`, `ApiKeys.jsx:25-31`, `PresetBar.jsx:17-24`, `App.jsx:1135-1140`:
-a successful `load()` never clears a previous error banner. `ResultBox` also ignores `ok:false` envelopes, so a
-failed capability renders as ordinary output.
+a successful `load()` never clears a previous error banner. (`ApiKeys.jsx` is a historical reference: the
+credential screen was deleted on 2026-09-12 - provider keys belong to the engine's `.env` and the web app
+no longer manages them - but the same defect class was fixed in that file before it went.) `ResultBox` also
+ignores `ok:false` envelopes, so a failed capability renders as ordinary output.
 
 **Fix.** Reset both on every submit, clear the error on every success path, and render `ok === false` with the
 error style.
