@@ -181,3 +181,35 @@ def test_full_stream_reaches_research_manager_when_structured_on(tmp_path, monke
     for node in ("SD Bull", "SD L1", "SD Bear", "SD Finalize", "Research Manager"):
         assert node in nodes_seen, f"{node} never ran; saw {nodes_seen}"
     assert research_plan, "Research Manager produced no investment_plan"
+
+
+@pytest.mark.unit
+def test_graph_refuses_to_build_when_a_required_role_cannot_be_served(tmp_path, monkeypatch):
+    """`debate_require_capability_matrix` must stop construction, not print.
+
+    Regression (2026-09-12): the gate's "ERROR:" lines were printed from a block
+    wrapped in ``except Exception: pass``, so requiring the matrix changed a
+    label on stderr and the run degraded into the legacy debate anyway.
+    """
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+    from tradingagents.strategies.debate_capability import DebateCapabilityError
+
+    monkeypatch.setattr(
+        "tradingagents.graph.trading_graph.create_llm_client",
+        lambda *a, **k: type(
+            "C", (), {"get_llm": lambda self: _stub_llm_factory()}
+        )(),
+    )
+    cfg = dict(DEFAULT_CONFIG)
+    cfg["enable_debate"] = True
+    # A provider the matrix has no evidence for: the judge role needs
+    # structured output, so this role cannot be served.
+    cfg["debate_judge_model"] = "unknown:some-model"
+    cfg["debate_require_capability_matrix"] = True
+    with pytest.raises(DebateCapabilityError) as exc:
+        TradingAgentsGraph(config=cfg, selected_analysts=("market",))
+    assert "judge" in str(exc.value)
+
+    # ...and the same config without the flag is advisory only: it builds.
+    cfg["debate_require_capability_matrix"] = False
+    assert TradingAgentsGraph(config=cfg, selected_analysts=("market",))

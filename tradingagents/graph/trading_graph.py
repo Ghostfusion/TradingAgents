@@ -224,29 +224,18 @@ class TradingAgentsGraph:
                     self.config, _role, factory=create_llm_client
                 )
             # R3 config-time capability matrix (strategies/debate_capability.py):
-            # warn (or fail closed under debate_require_capability_matrix) when a
-            # resolved role model cannot meet its strictness floor (context /
-            # structured-output / tool-binding). Advisory by default - the matrix
-            # only refuses when the flag demands it.
-            try:
-                from tradingagents.agents.utils.debate_roles import role_model_spec
-                from tradingagents.strategies.debate_capability import (
-                    assess_model_capability,
-                    capability_gate,
-                )
+            # warns per role that cannot meet its strictness floor (context /
+            # structured-output / tool-binding) and, under
+            # debate_require_capability_matrix, FAILS CLOSED from inside the
+            # helper. The old wiring printed "ERROR:" lines from a block whose
+            # bare ``except Exception: pass`` swallowed anything else, so the
+            # flag changed a label and the run degraded anyway.
+            from tradingagents.strategies.debate_capability import (
+                check_debate_capabilities,
+            )
 
-                caps = {}
-                for _role in self.debate_llms:
-                    spec = role_model_spec(self.config, _role)
-                    if spec:
-                        provider, model = spec
-                        caps[_role] = assess_model_capability(provider, model)
-                for _msg in capability_gate(
-                    caps, require=bool(self.config.get("debate_require_capability_matrix", False))
-                ):
-                    print(f"[debate-capability] {_msg}", file=sys.stderr)
-            except Exception:  # noqa: BLE001 - advisory startup check
-                pass
+            for _msg in check_debate_capabilities(self.config, tuple(self.debate_llms)):
+                print(f"[debate-capability] {_msg}", file=sys.stderr)
 
         self.memory_log = TradingMemoryLog(self.config)
 

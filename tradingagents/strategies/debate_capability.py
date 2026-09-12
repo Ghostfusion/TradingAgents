@@ -15,9 +15,28 @@ latency probe is a smoke hook called at graph compile time when
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 DEFAULT_CONTEXT_WINDOW = 128_000
+# The gate's message prefixes. ERROR is the fail-closed tier: callers that
+# honour ``debate_require_capability_matrix`` raise on these (see
+# ``check_debate_capabilities``). Defined once so the caller never re-derives
+# what "failed" means.
+ERROR_PREFIX = "ERROR: "
+WARNING_PREFIX = "WARNING: "
+
+
+class DebateCapabilityError(RuntimeError):
+    """A debate role cannot meet its strictness floor and the matrix is required.
+
+    Raised at graph compile time instead of printing: the flag exists to stop a
+    run that cannot produce a verified structured debate, and a printed
+    "ERROR:" line let the run continue straight into the legacy fallback
+    (2026-09-12: a live run ran the free-form debate with the flag set on).
+    """
+
+
 # Minimum context a debater/judge role needs to hold the analysts' reports +
 # computed factsheet + the debate history (advisory floor).
 ROLE_FLOORS = {
@@ -122,17 +141,68 @@ def capability_gate(
         if not ok:
             msg = f"debate role {role!r} (provider={cap.provider}) cannot be served: {'; '.join(reasons)}"
             if require:
-                errors.append(f"ERROR: {msg}")
+                errors.append(f"{ERROR_PREFIX}{msg}")
             else:
-                errors.append(f"WARNING: {msg}")
+                errors.append(f"{WARNING_PREFIX}{msg}")
     return errors
+
+
+def assess_role_capabilities(
+    config: dict, roles: Sequence[str] | None = None
+) -> dict[str, ModelCapability]:
+    """Role -> capability map from the configured ``debate_*_model`` keys.
+
+    Advisory and best-effort: a role with no configured spec is skipped (the
+    matrix refuses only on evidence), and a resolver failure is skipped rather
+    than taking down graph construction. The role import is local to keep this
+    pure module free of an agents -> strategies import edge.
+    """
+    from tradingagents.agents.utils.debate_roles import role_model_spec
+
+    caps: dict[str, ModelCapability] = {}
+    for role in roles if roles is not None else tuple(ROLE_FLOORS):
+        try:
+            spec = role_model_spec(config, role)
+        except Exception:  # noqa: BLE001 - advisory: an unresolvable role is skipped
+            continue
+        if spec:
+            provider, model = spec
+            caps[role] = assess_model_capability(provider, model)
+    return caps
+
+
+def check_debate_capabilities(
+    config: dict, roles: Sequence[str] | None = None
+) -> list[str]:
+    """Enforce the capability matrix at graph compile time (R3).
+
+    Returns the advisory messages the caller should print. When
+    ``debate_require_capability_matrix`` is set and any role fails its floor,
+    raises :class:`DebateCapabilityError` — fail closed, so a run that cannot
+    produce a verified structured debate stops instead of degrading.
+    """
+    messages = capability_gate(
+        assess_role_capabilities(config, roles),
+        require=bool((config or {}).get("debate_require_capability_matrix", False)),
+    )
+    errors = [m for m in messages if m.startswith(ERROR_PREFIX)]
+    if errors:
+        raise DebateCapabilityError(
+            "debate capability matrix: " + "; ".join(errors)
+        )
+    return messages
 
 
 __all__ = [
     "DEFAULT_CONTEXT_WINDOW",
+    "ERROR_PREFIX",
+    "WARNING_PREFIX",
     "ROLE_FLOORS",
+    "DebateCapabilityError",
     "ModelCapability",
     "assess_model_capability",
+    "assess_role_capabilities",
     "can_serve_role",
     "capability_gate",
+    "check_debate_capabilities",
 ]

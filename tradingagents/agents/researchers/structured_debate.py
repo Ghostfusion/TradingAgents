@@ -482,6 +482,36 @@ def create_debater_turn(
     return turn_node
 
 
+class DebateBaselineFallbackError(RuntimeError):
+    """``debate_baseline_fallback`` is off and the debate could not produce a
+    verified verdict.
+
+    The default (on) degrades to the pre-debate independent stances; with it
+    off the run stops with the L1 reason instead of writing a debate that never
+    happened (2026-09-12: a live report looked normal while its structured
+    debate had fallen back to the legacy path, and nothing on disk said so).
+    """
+
+
+def _baseline_termination(ds: dict, reason: str, cfg: dict) -> None:
+    """Terminate the debate as a baseline fallback, or fail closed (R1').
+
+    Mutates ``ds``: the default path marks it TERMINATED with the L1 ``reason``
+    (the established R1' degradation). With ``debate_baseline_fallback`` off it
+    raises instead, so a debate that cannot be verified is a hard error rather
+    than a silently weaker report.
+    """
+    if not bool((cfg or {}).get("debate_baseline_fallback", True)):
+        raise DebateBaselineFallbackError(
+            f"debate aborted to the baseline stances ({reason}) and "
+            "debate_baseline_fallback is off: refusing to write an unverified "
+            "debate. Set TRADINGAGENTS_DEBATE_BASELINE_FALLBACK=true to allow "
+            "the baseline degradation, or fix the L1 breach."
+        )
+    ds[TERMINATED] = True
+    ds[REASON] = reason
+
+
 def create_debate_l1(
     ground_truth: Callable, cfg: dict | None = None, section: str = "research"
 ) -> Callable:
@@ -508,7 +538,9 @@ def create_debate_l1(
         ds = dict(state.get(channel) or {})
         round_records = list(ds.get(ROUND_RECORDS) or [])
         if not round_records:
-            return {channel: {**ds, TERMINATED: True, REASON: "no turns"}}
+            new_ds = dict(ds)
+            _baseline_termination(new_ds, "no turns", cfg)
+            return {channel: new_ds}
         role = ds.get(LAST_SIDE, roles[0])
         latest = round_records[-1].get(role) or {}
         schema = RiskDebaterTurnPayload if section == "risk" else DebaterTurnPayload
@@ -523,8 +555,7 @@ def create_debate_l1(
                 "hard_gate_passed": False,
                 "reasons": [f"schema invalid: {exc}"],
             }
-            new_ds[TERMINATED] = True
-            new_ds[REASON] = "schema hard breach; baseline fallback"
+            _baseline_termination(new_ds, "schema hard breach; baseline fallback", cfg)
             return {channel: new_ds}
 
         claims = claim_records_from_turn(payload, role, len(round_records))
@@ -567,8 +598,7 @@ def create_debate_l1(
             new_ds[REGEN_COUNT] = int(ds.get(REGEN_COUNT, 0)) + 1
             return {channel: new_ds}
         if severity.get("l1_action") == ABORT_TO_BASELINE:
-            new_ds[TERMINATED] = True
-            new_ds[REASON] = "L1 hard breach; baseline fallback"
+            _baseline_termination(new_ds, "L1 hard breach; baseline fallback", cfg)
             return {channel: new_ds}
 
         # Full round (both sides) verified: score + termination check.

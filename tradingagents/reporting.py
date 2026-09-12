@@ -12,6 +12,7 @@ transcripts with a single verdict file (config-gated, off by default).
 """
 
 import re
+import sys
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -670,6 +671,58 @@ def _run_card_data_absence(save_path) -> dict | None:
     return None
 
 
+def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
+    """Debate-integrity block for run_card.json (R1'/R3).
+
+    ``enable_debate`` promises the structured (claim-verified) debate. When it
+    is on and no evidence file exists, the run silently used the baseline /
+    legacy path: the report looks normal and only the prose differs (NVDA
+    2026-09-12 had neither ``2_research/structured_debate.md`` nor
+    ``4_risk/structured_risk_debate.md`` and nothing on disk said so). This
+    block reads the artifacts the run actually wrote instead of re-deriving
+    the condition, so the record cannot disagree with the tree.
+    """
+    cfg = cfg or {}
+    enabled = bool(cfg.get("enable_debate"))
+    block = {
+        "enabled": enabled,
+        "baseline_fallback": bool(cfg.get("debate_baseline_fallback", True)),
+        "require_capability_matrix": bool(
+            cfg.get("debate_require_capability_matrix", False)
+        ),
+        "evidence": {"research": False, "risk": False},
+        "degraded": False,
+        "terminated": False,
+        "reason": "",
+    }
+    try:
+        # Debate-state key names live in agents/researchers/structured_debate.py;
+        # imported here (not at module load) to keep this writer import-light.
+        from tradingagents.agents.researchers.structured_debate import (
+            REASON,
+            TERMINATED,
+        )
+
+        research = (Path(save_path) / "2_research" / "structured_debate.md").exists()
+        risk = (Path(save_path) / "4_risk" / "structured_risk_debate.md").exists()
+        ds = final_state.get("debate_state") or {}
+        block.update(
+            {
+                "evidence": {"research": research, "risk": risk},
+                # The degradation that used to be invisible: the structured
+                # debate was asked for and produced no evidence. Keyed to the
+                # RESEARCH artifact - a research debate that fell back is a
+                # degraded report even when the risk section wrote its own.
+                "degraded": enabled and not research,
+                "terminated": bool(ds.get(TERMINATED)),
+                "reason": str(ds.get(REASON) or ""),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory; must never drop the card
+        block["error"] = f"{type(exc).__name__}: {exc}"
+    return block
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None
 ) -> Path:
@@ -1077,6 +1130,15 @@ def write_report_tree(
         from datetime import timezone as _card_tz
 
         verdict = (final_state.get("risk_gate") or {}).get("verdict")
+        debate_card = _run_card_debate(final_state, save_path, cfg)
+        if debate_card["degraded"]:
+            print(
+                "[debate] enable_debate is on but 2_research/structured_debate.md "
+                "was not written: the structured debate degraded to the baseline/"
+                f"legacy path (reason: {debate_card['reason'] or 'unknown'}). "
+                "The research section is not claim-verified.",
+                file=sys.stderr,
+            )
         card = {
             "ticker": ticker,
             "generated": datetime.now(_card_tz.utc).isoformat(),
@@ -1096,6 +1158,7 @@ def write_report_tree(
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),
             },
+            "debate": debate_card,
             "sections": [],
         }
         (save_path / "run_card.json").write_text(

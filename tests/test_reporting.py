@@ -1,5 +1,7 @@
 """R1b unit tests: risk gate injected into reports; compact risk mode; TOC."""
 
+import json
+
 from tradingagents.reporting import _slugify, write_report_tree
 
 
@@ -633,3 +635,70 @@ def test_tool_evidence_skipped_when_empty(tmp_path):
     _write_tool_evidence({"tool_evidence": {}}, "TSM", tmp_path)
     _write_tool_evidence({}, "TSM", tmp_path)
     assert not (tmp_path / "tool_evidence.json").exists()
+
+
+def test_run_card_flags_a_degraded_structured_debate(tmp_path):
+    """enable_debate on + no evidence file -> the run card names it.
+
+    NVDA 2026-09-12: the tree looked normal while its structured debate had
+    silently fallen back to the legacy path - neither 2_research/
+    structured_debate.md nor 4_risk/structured_risk_debate.md existed and
+    nothing on disk recorded the degradation.
+    """
+    write_report_tree(_state(), "TST", tmp_path, config={"enable_debate": True})
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["debate"]["enabled"] is True
+    assert card["debate"]["degraded"] is True
+    assert card["debate"]["evidence"] == {"research": False, "risk": False}
+
+
+def test_run_card_records_the_debate_that_ran(tmp_path):
+    state = _state()
+    # The SD evidence block is written inside the research section, so a real
+    # run's transcript is present alongside the debate state.
+    state["investment_debate_state"] = {
+        "bull_history": "bull prose\n",
+        "bear_history": "bear prose\n",
+    }
+    state["debate_state"] = {
+        "terminated": True,
+        "reason": "hard cap (5 rounds)",
+        "l1": {
+            "side": "bear",
+            "severity_tier": "GREEN",
+            "l1_action": "PROCEED",
+            "penalty_score": 0.0,
+        },
+    }
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    assert (tmp_path / "2_research" / "structured_debate.md").exists()
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["debate"]["degraded"] is False
+    assert card["debate"]["evidence"]["research"] is True
+    assert card["debate"]["terminated"] is True
+    assert card["debate"]["reason"] == "hard cap (5 rounds)"
+
+
+def test_run_card_degraded_is_false_when_debate_is_disabled(tmp_path):
+    """The legacy path is not a degradation when the SD debate was never asked
+    for - the flag must not cry wolf on every non-debate run."""
+    write_report_tree(_state(), "TST", tmp_path, config={"enable_debate": False})
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["debate"]["enabled"] is False
+    assert card["debate"]["degraded"] is False
+
+
+def test_run_card_still_written_when_the_debate_block_fails(tmp_path):
+    """Advisory means advisory: a failure computing the debate block must not
+    take run_card.json down with it - that would lose the whole card."""
+
+    class _Hostile(dict):
+        def get(self, key, *default):
+            if key == "debate_state":
+                raise RuntimeError("boom")
+            return super().get(key, *default)
+
+    write_report_tree(_Hostile(_state()), "TST", tmp_path, config={"enable_debate": True})
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["debate"]["enabled"] is True
+    assert "RuntimeError: boom" in card["debate"]["error"]

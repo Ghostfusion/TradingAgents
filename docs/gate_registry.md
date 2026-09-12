@@ -70,7 +70,20 @@ same way rather than being stored as a truthy string.
 | `backtest_limit_threshold` | `TRADINGAGENTS_BACKTEST_LIMIT_THRESHOLD` | limit-up/down tradability in backtest fills (0 = off) | `scripts/backtest_strategy.py` | — (no gate test yet) | wired |
 | `backtest_volume_participation` | `TRADINGAGENTS_BACKTEST_VOLUME_PARTICIPATION` | fill capped at a share of the day's volume (0 = off) | `scripts/backtest_strategy.py` | — (no gate test yet) | wired |
 
-## 2. Numeric limits the gates read
+## 2. Debate-integrity gates — these can stop a run
+
+The structured debate (`enable_debate`) verifies every debater claim against
+computed ground truth before the judge scores it. These two flags decide what
+happens when that is impossible — and both used to be **decorative**: one
+printed an `ERROR:` line and ran on, the other was read by nothing at all (a
+live run wrote a legacy free-form debate with the matrix "required").
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `debate_require_capability_matrix` | `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | **raises** `DebateCapabilityError` at graph compile time when a routed debate model cannot meet its role floor (context / structured output / tool binding); advisory warning when off | `strategies/debate_capability.py::check_debate_capabilities` (called from `graph/trading_graph.py`) | `test_debate_fail_closed.py::TestCapabilityMatrixFailsClosed` | wired |
+| `debate_baseline_fallback` | `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | on (default) terminates an unverifiable debate and the pre-debate baseline stances stand; **off raises** `DebateBaselineFallbackError` with the L1 reason instead of writing an unverified debate | `agents/researchers/structured_debate.py::_baseline_termination` (`create_debate_l1`, research + risk) | `test_debate_fail_closed.py::TestBaselineFallbackFailsClosed` | wired |
+
+## 3. Numeric limits the gates read
 
 | Key | Env var | What it bounds | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -86,7 +99,7 @@ same way rather than being stored as a truthy string.
 | `market_stress_vol_cap` | `TRADINGAGENTS_MARKET_STRESS_VOL_CAP` | size cap under market stress (default 0.85) | `strategies/regime.py` | `test_strategies_regime.py` | wired |
 | `value_dip_regime_vol_cap` | `TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP` | volatility above which a dip entry is refused (default 0.8) | `strategies/regime.py` | — (no gate test yet) | wired |
 
-## 3. Inert flags — declared, read by nothing
+## 4. Inert flags — declared, read by nothing
 
 These are in `DEFAULT_CONFIG`, appear in older docs as if they were gates, and are
 now settable from `.env` — but **no code reads them**, so flipping them changes
@@ -105,7 +118,7 @@ force this row to be updated).
 | `enable_regime` | `TRADINGAGENTS_ENABLE_REGIME` | a regime overlay switch | inert |
 | `enable_factors` | `TRADINGAGENTS_ENABLE_FACTORS` | a factor overlay switch | inert |
 
-## 4. Always-on checks (no switch)
+## 5. Always-on checks (no switch)
 
 Not flippable by design — they are integrity checks, not policy:
 
@@ -120,8 +133,13 @@ Not flippable by design — they are integrity checks, not policy:
   GROUNDED / UNSUPPORTED / CONTRADICTED / INTERNAL_CONFLICT verdicts, including
   `tone_claim_conflict` and `valuation_band_conflict`
   (`test_verifier_formula_checks.py`, `test_report_verify.py`).
+- **Debate degradation is recorded**: `reporting.py::_run_card_debate` writes a
+  `debate` block into `run_card.json` (`enabled` / `evidence` / `degraded` /
+  `reason`) and prints a named stderr line when `enable_debate` is on but
+  `2_research/structured_debate.md` was not written — a degraded run is
+  auditable from the tree instead of inferred from prose (`test_reporting.py`).
 
-## 5. Adding a gate — the rule
+## 6. Adding a gate — the rule
 
 A new gate is not done until: (1) it has a key in `DEFAULT_CONFIG`, (2) an
 `_ENV_OVERRIDES` row so it is flippable from `.env`, (3) a row in this file with

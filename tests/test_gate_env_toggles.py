@@ -62,6 +62,9 @@ REGISTRY: dict[str, str] = {
     "enable_bocpd": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
+    # debate-integrity gates
+    "debate_require_capability_matrix": "wired",
+    "debate_baseline_fallback": "wired",
     # numeric limits the gates read
     "max_position_pct": "wired",
     "risk_max_position_pct": "wired",
@@ -74,7 +77,7 @@ REGISTRY: dict[str, str] = {
     "catalyst_hard_block_days": "wired",
     "market_stress_vol_cap": "wired",
     "value_dip_regime_vol_cap": "wired",
-    # declared but read by nothing (see registry section 3)
+    # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",
     "enable_skill_overlays": "inert",
@@ -89,7 +92,7 @@ _ROW_RE = re.compile(r"^\|\s*`([a-z0-9_]+)`\s*\|(.+)\|\s*$")
 
 
 def _doc_rows() -> dict[str, tuple[str, str]]:
-    """{key: (env var, status)} from the registry tables (sections 1-3)."""
+    """{key: (env var, status)} from the registry tables."""
     rows: dict[str, tuple[str, str]] = {}
     for line in DOC.read_text(encoding="utf-8").splitlines():
         m = _ROW_RE.match(line)

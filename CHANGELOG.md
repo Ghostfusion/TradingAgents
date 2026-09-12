@@ -14,6 +14,43 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+Two debate flags that could not do anything now stop the run, and a degraded debate is recorded
+(2026-09-12; `strategies/debate_capability.py`, `agents/researchers/structured_debate.py`,
+`reporting.py`). A live NVDA run wrote a legacy free-form debate while the config said the structured
+one was required, and nothing on disk said so — both flags were decorative:
+
+**`debate_require_capability_matrix` could not fail.** `capability_gate(require=True)` returned
+`"ERROR: ..."` strings and the call site *printed* them, inside a bare `except Exception: pass` that
+would have swallowed a raise anyway. The module docstring promised "fails CLOSED with a clear error
+rather than silently degrading". The decision now lives in
+`strategies/debate_capability.py::check_debate_capabilities` (pure, unit-testable): it builds the
+role→capability map, stays advisory about unresolvable roles, and raises `DebateCapabilityError` on any
+error-tier role. `graph/trading_graph.py` calls it outside any swallowing `try`, so the refusal cannot
+be eaten.
+
+**`debate_baseline_fallback` was read by nothing.** It existed in `DEFAULT_CONFIG` and in
+`_ENV_OVERRIDES` while no code read it, so flipping it changed nothing. It is now honoured at the three
+baseline-fallback sites in `create_debate_l1` (no turns / schema hard breach / L1 hard breach, shared
+by the research and risk sections) through one helper, `_baseline_termination`: on (default) keeps the
+established R1' degradation to the pre-debate stances; off raises `DebateBaselineFallbackError` naming
+the L1 reason.
+
+**A degraded debate is now auditable.** `reporting.py::_run_card_debate` writes a `debate` block into
+`run_card.json` (`enabled` / `baseline_fallback` / `require_capability_matrix` / `evidence` /
+`degraded` / `terminated` / `reason`) and prints a named stderr line when `enable_debate` is on but
+`2_research/structured_debate.md` was not written. It reads the artifacts the run actually wrote rather
+than re-deriving the condition, so the record cannot disagree with the tree; `degraded` stays false
+when the SD debate was never asked for (the legacy path is not a degradation by default).
+
+Registry rows for both flags (new section 2, later sections renumbered); `.env.example` and
+`docs/api_reference.md` now state what flipping each one does. Mutation proofs: `errors = []` in the
+helper -> the require test fails; `if False:` in `_baseline_termination` -> 4 fail-closed tests fail;
+`"degraded": False` -> the run-card degradation test fails; `research = False` -> the positive run-card
+test fails; the old swallow restored at the call site -> the graph-refusal test fails; narrowing the
+advisory `except` -> the card-survival test fails. Tests: 14 new (4 capability / 5 fallback in `test_debate_fail_closed.py`, 4 run-card in
+`test_reporting.py`, 1 call-site refusal in `test_debate_stream_hermetic.py`). No web impact (the app
+never reads `run_card.json`; the new block is additive).
+
 Screener tests are actually offline now (2026-09-12; `tests/test_value_screener.py`). The file's
 docstring promised "nothing hits the network" while `vs.main` reached EODHD, Tiingo, Alpha Vantage and
 Finnhub for real. It surfaced as a full-suite run that stalled for 35 minutes with no CPU and no

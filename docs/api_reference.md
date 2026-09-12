@@ -41,8 +41,8 @@ in `batch.py`).
 | `TRADINGAGENTS_DEBATE_REWEIGHT_TO_BASELINE` | `debate_reweight_to_baseline` | R2' base α toward baseline (0.5) |
 | `TRADINGAGENTS_DEBATE_ENTRENCH_THRESH` | `debate_entrench_thresh` | I_entrench above this -> penalty (0.8) |
 | `TRADINGAGENTS_DEBATE_DIVERGENCE_MIN` | `debate_divergence_min` | |bull−bear| below → artificial-consensus flag (0.15) |
-| `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | `debate_baseline_fallback` |
-| `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 fail-closed startup check (default false) |
+| `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | `debate_baseline_fallback` | R1': an unverifiable debate degrades to the baseline stances (true, default); **false stops the run** with `DebateBaselineFallbackError` |
+| `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 startup check: **raises** `DebateCapabilityError` for a routed role that cannot meet its floor (default false = warn only) |
 | `TRADINGAGENTS_CHECKPOINT_ENABLED` | `checkpoint_enabled` |
 | `TRADINGAGENTS_BENCHMARK_TICKER` | `benchmark_ticker` |
 | `TRADINGAGENTS_TEMPERATURE` | `temperature` |
@@ -173,7 +173,7 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION` | `enable_return_decomposition` | overnight vs intraday return decomposition (Q5) |
 | `TRADINGAGENTS_ENABLE_TEXT_FACTORS` | `enable_text_factors` | Loughran-McDonald tone / readability / divergence (Q6) |
 | `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
-| `TRADINGAGENTS_ENABLE_THRESHOLD_GATE` | `enable_threshold_gate` | **inert** - declared, read by nothing (see `docs/gate_registry.md` §3) |
+| `TRADINGAGENTS_ENABLE_THRESHOLD_GATE` | `enable_threshold_gate` | **inert** - declared, read by nothing (see `docs/gate_registry.md` §4) |
 | `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | **inert** |
 | `TRADINGAGENTS_ENABLE_SKILL_OVERLAYS` | `enable_skill_overlays` | **inert** (docstring-only mentions) |
 | `TRADINGAGENTS_ENABLE_TRAILING_EXIT` | `enable_trailing_exit` | **inert** (the trailing arithmetic is gated by `enable_exits`) |
