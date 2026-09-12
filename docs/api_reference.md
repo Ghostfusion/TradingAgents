@@ -167,6 +167,12 @@ in `batch.py`).
 | `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` |
 | `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` | `enable_massive_flat` |
 | `TRADINGAGENTS_MASSIVE_FLAT_DIR` | `massive_flat_dir` |
+| `TRADINGAGENTS_ENABLE_SPREAD_ESTIMATOR` | `enable_spread_estimator` | quote-free Corwin-Schultz / Abdi-Ranaldo spread FLOOR (Q1) |
+| `TRADINGAGENTS_ENABLE_BOOK_RISK_SIZING` | `enable_book_risk_sizing` | minimum-CVaR book sizing under the CVaR budget (Q2) |
+| `TRADINGAGENTS_ENABLE_CONFORMAL_BANDS` | `enable_conformal_bands` | calibrated valuation bands with realized coverage (Q3) |
+| `TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION` | `enable_return_decomposition` | overnight vs intraday return decomposition (Q5) |
+| `TRADINGAGENTS_ENABLE_TEXT_FACTORS` | `enable_text_factors` | Loughran-McDonald tone / readability / divergence (Q6) |
+| `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)
@@ -247,6 +253,22 @@ caps (risk-parity style concentration control; names without a measurable
 return series are never penalized).
 Catalyst: `catalyst_hard_block_days=0` - when > 0, an earnings print inside
 that many days makes the risk governor **REJECT** new risk (section 5).
+
+**Round-2 quant formula additions** (`docs/design_quant_formulas_research_round2.md`,
+phases Q1-Q8) - every flag defaults to **False** and its tool returns a DISABLED
+sentinel when off, so a run's artefacts cannot change silently:
+`enable_spread_estimator` (quote-free spread FLOOR folded into
+`get_liquidity_risk`, plus the `get_spread_estimate` tool and the
+spread-implied Almgren-Chriss temporary impact),
+`enable_book_risk_sizing` (+ `book_risk_sizing_min_scenarios=60`,
+`book_risk_sizing_max_delta=0.05`) for `get_book_risk_budget`,
+`enable_conformal_bands` (+ `conformal_alpha=0.1`, `conformal_min_pairs=40`,
+`conformal_window=250`) for `get_valuation_band`,
+`enable_return_decomposition` for `get_return_decomposition`,
+`enable_text_factors` for `get_disclosure_tone`, and `enable_bocpd` for the
+Bayesian changepoint line inside `get_shift_detection`. The report verifier
+gains two text-only families with no flag (they only fire on the cited lines):
+`tone_claim_conflict` and `valuation_band_conflict`.
 
 ## 2. LLM providers
 
@@ -607,6 +629,12 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_taylor_read(policy_rate, inflation, output_gap?)` | `strategies.cycle_tilt.taylor_rule` | news | Taylor-rule implied policy rate + actual-vs-rule deviation (tight/easy/neutral stance) |
 | `get_lottery_factors(ticker)` | `strategies.lottery` | market | MAX (largest single-day return in the month) + IVOL (idiosyncratic vol) lottery-tilt screen — high = expected underperformance (quality penalty) |
 | `get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...)` | `strategies.execution_schedule` | market | Almgren-Chriss optimal trajectory + TWAP/VWAP/POV benchmarks (E[IS]/var(IS), per-interval trades) |
+| `get_spread_estimate(ticker, current_date?)` | `strategies.liquidity_risk.corwin_schultz` + `abdi_ranaldo` + `spread_estimate` | market | quote-free high-low spread FLOOR (median of both estimators) for names with no quoted spread; `None` when the two-day correction is negative |
+| `get_return_decomposition(ticker, current_date?)` | `strategies.market_session.decompose_returns` | market | overnight vs intraday log-return legs + intraday share of variance (which leg carried the move, never why) |
+| `get_quality_factors(ticker, current_date?)` | `dataflows.quantitative_scores.gross_profitability` + `net_operating_assets` | fundamentals | GP/A (Novy-Marx) + NOA (Hirshleifer); unavailable when COGS or the prior-year balance sheet is missing |
+| `get_valuation_band(ticker, point_value?, current_date?, alpha?)` | `strategies.conformal.rolling_band` | fundamentals | conformal band around a model value with the REALIZED coverage printed beside the nominal level; needs >= `conformal_min_pairs` model-vs-realized pairs |
+| `get_disclosure_tone(ticker, current_date?)` | `strategies.text_factors.lm_tone` + `readability` + `divergence` | news | Loughran-McDonald tone counts + readability + filing-vs-news tone/complexity gaps; a zero-hit read is NO SIGNAL, not neutral |
+| `get_book_risk_budget(current_date?)` | `strategies.book_risk.min_cvar_weights` + `copula_scenarios` | risk debators | minimum-CVaR weights under the existing budget (advisory sizing only, never an order) |
 | `get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?)` | `strategies.portfolio.cppi_exposure` + `size.volatility_target_scale` | market | CPPI floor-protected risky exposure + vol-targeting scale (advisory overlay) |
 | `get_earnings_transcript(ticker)` | FMP Earnings Transcript API (free tier) | fundamentals | Latest earnings-call transcript: date/quarter + (when served) excerpt — quote only from returned text |
 | `get_congress_trades(ticker)` | House/Senate Stock Watcher mirrors (keyless) | fundamentals | Congressional open-market stock trades: net buys/sells + samples per chamber |

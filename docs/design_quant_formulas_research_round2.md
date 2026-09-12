@@ -1,6 +1,8 @@
 # Quant-Finance Formulas Research, Round 2 — delta scan vs. the landed library
 
-Status: **research/design only (2026-09-11) — no code changed.** Round 2 of
+Status: **adopted and IMPLEMENTED (2026-09-11) — see
+[`implementation_plan_quant_formula_additions.md`](implementation_plan_quant_formula_additions.md)
+for the landed phases, their gates and the one open decision (Q6) as taken.** Round 2 of
 [`design_quant_formulas_research.md`](design_quant_formulas_research.md)
 (2026-09-05). Round 1 produced an adopted list; most of it has since **landed**
 in the library. This round (a) records which round-1 items are now shipped, so

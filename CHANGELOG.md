@@ -12,6 +12,99 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Added
+
+Round-2 quant formula additions: eight deterministic reads, their agent tools, and the prompt
+rules that make the agents cite them (2026-09-11; `docs/design_quant_formulas_research_round2.md`,
+plan `docs/implementation_plan_quant_formula_additions.md`). The round-1 scan
+(`docs/design_quant_formulas_research.md`, 2026-09-05) had largely landed since - variance ratio,
+CUSUM/EWMA, permutation entropy, Ohlson/Zmijewski, Dechow-Dichev, Taylor rule, MAX/IVOL,
+Almgren-Chriss + TWAP/VWAP/POV, vol-target scaling, Cornish-Fisher/Kappa/Burke/ruin - so this round
+first records that ledger and then adds only what was still absent and fit the book's style
+(value-dip swing on daily bars, a gated CVaR/drawdown book, an LLM path whose claims must be
+checkable). Every flag defaults to **False** and every tool returns a DISABLED sentinel when off,
+so a run's artefacts cannot change silently. **Web impact:** the screener row gains two
+informational keys (`gp_a`, `noa`, plus their `*_classification`) - additive, and the watchlist
+markdown gains the matching columns; the app's `run_screener` result envelope passes rows through,
+so nothing it reads is reshaped. Tool JSON shapes it consumes are untouched.
+
+**Q1 quote-free spread floor** (N1). `strategies/liquidity_risk.py`: `corwin_schultz`,
+`abdi_ranaldo`, `spread_estimate` (median of both, `basis` names which survived) over the daily
+high/low the engine already fetches - the usable estimate where no quoted spread exists (mid-caps,
+HK names, sparse bars). The published negative-correction case returns `None` (never clamped to 0).
+`strategies/execution_schedule.py`: `default_temp_impact(price, spread)` = half-spread in price
+units normalised by the documented 1e6-share reference clip, used by `almgren_chriss` **only** when
+the caller passed no `temp_impact` (explicit inputs still win). Folded into `get_liquidity_risk` as
+a `spread_estimate=` line (labelled a FLOOR, not a quote) and exposed as `get_spread_estimate`
+(market). 12 gates, 3 mutations.
+
+**Q2 book sizing under the budget** (N5, absorbing round-1 C4). `strategies/book_risk.py`:
+`min_cvar_weights` (Rockafellar-Uryasev sample-average LP, fully-invested long-only with the
+per-name cap and a `max_delta` bound against the current book, `binding` names the constraint that
+binds) and `copula_scenarios` (t/Clayton/Gaussian/independent joint-tail scenarios in place of the
+single fixed -10% shock, deterministic from a seed). `risk_governor.govern`/`build_risk_snapshot`
+take an optional, purely additive `sizing` mapping; the PASS/WARN/REJECT logic is untouched in
+every branch and existing callers get byte-identical output. The gate could previously only say
+REJECT; this is the sizing remedy. Exposed as `get_book_risk_budget` (risk debators). 16 gates,
+4 mutations. The LP is infeasible when `cap * names < 1` and says so (`None`) rather than
+producing weights.
+
+**Q3 conformal valuation bands** (N2). New `strategies/conformal.py`: `calibrate`,
+`quantile_band`, `rolling_band` (proper-training/calibration split, `realized_coverage` computed
+on the calibration window, `min_n` floor). The guarantee is marginal and only under
+exchangeability, so the realized coverage is always rendered beside the nominal level; a band
+without it is a defect, not a display choice. Exposed as `get_valuation_band` (fundamentals),
+which names its prerequisite (model-vs-realized pairs at
+`<results_dir>/<TICKER>/valuation_pairs.jsonl`) and leaves a point value unbanded rather than
+inventing an interval. 17 gates, 5 mutations.
+
+**Q4 gross profitability + net operating assets** (N3/N4). `dataflows/quantitative_scores.py`:
+`gross_profitability` (GP/A, Novy-Marx 2013) and `net_operating_assets` (NOA, Hirshleifer et al.
+2004), both `None` when COGS or the prior-year balance sheet is missing - never substituted.
+Screen rows carry the values beside `piotroski_f_score` and the screener renders the columns; no
+existing score, rank or filter reads them (proven by a gate). Exposed as `get_quality_factors`
+(fundamentals, no flag - informational). 8 gates, 2 mutations.
+
+**Q5 overnight-vs-intraday decomposition** (N8). `strategies/market_session.py`:
+`decompose_returns` (intraday `ln(C/O)`, overnight `ln(O/C_prev)`, intraday share of variance) plus
+a text renderer. Says WHICH leg carried a move, never why; ragged/missing opens and zero variance
+return `None`. Exposed as `get_return_decomposition` (market). 8 gates, 3 mutations.
+
+**Q6 disclosure text factors** (N6). New `strategies/text_factors.py`: `lm_tone` (reduced
+Loughran-McDonald-style dictionary, version-tagged, counts always reported; a zero-hit passage is
+`zero_hits` with `tone=None`, never neutral), `readability` (Flesch ease / FK grade / fog) and
+`divergence` (tone and complexity gaps kept separate because the 2025 evidence treats their
+persistence differently). Exposed as `get_disclosure_tone` (news). The report verifier gains a
+matching text-only family `tone_claim_conflict`: a disclosure written up as confident over a
+negative cited tone (or over a zero-hit read) is an INTERNAL_CONFLICT. 6 + 5 gates, 4 + 4
+mutations.
+
+**Q7 White Reality Check / Hansen SPA** (N7). `strategies/evaluate.py`: `reality_check` and `spa`
+over a candidate universe, stationary block bootstrap, deterministic from a seed; `None` below the
+sample floors. `alpha_zoo.bench_zoo` gains keyword-only `reality_check=False` adding exactly one
+row key when enabled - the default record's key set is unchanged (asserted). No agent surface:
+this scores a factor universe, not a symbol view. 12 gates, 4 mutations.
+
+**Q8 Bayesian online changepoint detection** (N9). `strategies/regime.py`: `bocpd`
+(Adams-Mackay run-length posterior, Normal-Inverse-Gamma conjugate, standardized causally on the
+warmup window, `shift = zero_run_prob >= BOCPD_SHIFT_THRESHOLD`), an OPTIONAL complement to the
+landed CUSUM/EWMA read - its docstring records that a `shift=True` read invalidates the
+window-based statistics (Hurst / variance-ratio / half-life) for the NEXT read. Appended as an
+opt-in line inside `get_shift_detection` (market); the existing CUSUM/EWMA outputs are pinned
+unchanged in the tests. 10 gates, 3 mutations.
+
+**Verifier (Q3 + Q6 hooks).** Two text-only families joined `_text_metrics`, each isolated so a
+parser bug cannot erase the payload: `valuation_band_conflict` (a band quoted without realized
+coverage, coverage far below nominal, or an INSIDE/OUTSIDE verdict that contradicts the band
+bounds) and `tone_claim_conflict`.
+
+**Wiring.** Six tools live in `agents/utils/quant_formula_tools.py`; `get_spread_estimate` and
+`get_return_decomposition` bind to the market analyst, `get_quality_factors` and
+`get_valuation_band` to fundamentals, `get_disclosure_tone` to news, `get_book_risk_budget` to the
+risk debators. Each analyst prompt gained the matching "cite before the claim" rule, and
+`docs/api_reference.md` records the tools and the six config keys; the tool table is
+machine-checked (`tests/test_doc_binding_claims.py`).
+
 ### Fixed
 
 Batch pre-market re-check moved into `analyze()`, so the CLI and the web app write the same artefacts (2026-09-11; audit `docs/implementation_plan_web_app_defects.md` W-P2-18). The opt-in same-night step (`_batch_pre_market_check`, which writes `pre_market_review_<trade_date>.md` next to the report) lived in `batch.main()`'s `as_completed` loop. **Web impact:** `trading_web`'s `run_batch` calls `batch.analyze` in-process and never goes through `main()`, so with `enable_pre_market_review` on the CLI wrote `pre_market_review_<date>.md` for every symbol while the web job wrote none — the same job produced different artefacts depending on which entry point ran it, and a web-run symbol read as reviewed with no review file behind it. The call now sits in `analyze()` immediately after `ta.save_reports(...)`, under the same `DEFAULT_CONFIG.get("enable_pre_market_review")` guard and with the same best-effort semantics; the `main()` copy is gone so exactly **one** call site remains (leaving both would have written the review twice per symbol). CLI-visible behaviour is otherwise unchanged — identical argument values (`symbol`, `report_dir`, and `analyze`'s own `trade_date`, which is `args.date` on the CLI path). Tests: `tests/test_batch_pre_market_parity.py` +3 (analyze calls the re-check once with `(symbol, report_dir, trade_date)`; flag off → zero calls; `main()` with `analyze` stubbed → zero calls, proving the loop no longer runs it).

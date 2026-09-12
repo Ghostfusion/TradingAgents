@@ -1,12 +1,23 @@
 # Quant Formula Additions - Implementation Plan
 
-Status: **plan only (2026-09-11) - no code written yet.** Implements the adopted
-list in
+Status: **Q1-Q8 IMPLEMENTED (2026-09-11).** Implements the adopted list in
 [`docs/design_quant_formulas_research_round2.md`](design_quant_formulas_research_round2.md)
 (items **N1-N9**). Each phase names target files and symbols, the exact behaviour,
 the config gate, the tests that must be **proven failing first**, and the
 acceptance criteria. Nothing here changes an existing computation: every item is
 additive, default-off, and degrades to `unavailable` when its inputs are missing.
+
+Outcome: all eight phases landed with their regression gates (Q1 12 / Q2 16 / Q3 17 /
+Q4 8 / Q5 8 / Q6 6 / Q7 12 / Q8 10 calculator gates, plus 20 tool-layer gates and 11
+verifier-family gates), each proven to fail under the listed mutations. The agent
+surface is `agents/utils/quant_formula_tools.py` (six tools: market x2,
+fundamentals x2, news x1, risk debators x1) with a citation rule added to each of
+those prompts, and the two verifier families `tone_claim_conflict` /
+`valuation_band_conflict`. **Q6's open decision was taken as recommended**: reuse
+the documents the news path already fetches (`get_news` via the vendor route, plus
+a filing read when the routed source returns prose) rather than adding a vendor -
+`divergence` reports `unavailable` when only one document is present. Q7 is
+deliberately NOT agent-wired: it scores a factor universe, not a symbol view.
 
 ---
 
