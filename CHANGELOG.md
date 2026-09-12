@@ -52,6 +52,41 @@ hosts. Mutation proofs: dropping the interface binding -> 8 teardown errors nami
 `statement_parsing`'s -> 2; removing the record -> the guard's own gate test fails. No web impact
 (tests only).
 
+Gate registry, and every gate flippable from `.env` (2026-09-11; `docs/gate_registry.md`,
+`tests/test_gate_env_toggles.py`). Three audits had found gates that could not fire - a limit compared
+to itself, a guard reading a dict key off a string, a stop measured from the wrong entry - and none of
+those is visible in code review or in a run. The registry writes each gate's claim down next to the
+thing that proves it: switch, what it can block, enforcement site, the test that fires it, and a
+Status column.
+
+**The `.env` gap (fixed).** Five gate keys had **no** `_ENV_OVERRIDES` row, so they could not be set
+from `.env` at all - including three the governor reads on every decision: `max_position_pct` (the
+per-name cap), `risk_max_position_pct` (the book cap) and `sector_cap_limit` (the sector cap), plus
+`risk_audit_enabled` and `enable_threshold_gate`. Seven overlay flags (`enable_regime`,
+`enable_factors`, `enable_preopen_depth`, the four `enable_sector_*`) had the same gap. All now have
+rows; the registry test flips each of the 47 registry keys through the real loader
+(`_apply_env_overrides`, the same path `.env` takes) in **both** directions, and asserts unsetting the
+variable leaves the default untouched. Five duplicate rows introduced while adding them were removed
+(a duplicate key in the dict literal is silently collapsed, so it would have looked fine).
+
+**Eight flags are declared and read by nothing** (`enable_threshold_gate`, `enable_risk_manager`,
+`enable_skill_overlays`, `enable_trailing_exit`, `value_dip_regime_gate`, `volume_share_vol_limit`,
+`enable_regime`, `enable_factors`). They are now documented as **inert** rather than presented as
+gates - `enable_threshold_gate` in particular is named in the decision-hardening spec as if the
+PBO/threshold gate were wired, and it is not. `enable_skill_overlays` appears in two docstrings and
+nowhere else. The registry test machine-checks the claim in both directions: a `wired` gate must have
+a real read site, an `inert` one must have none, so the day one of them gains a reader the suite fails
+and forces the row to be corrected. Not fixed here (out of scope): wiring them is a feature decision,
+not a documentation one.
+
+**Documentation.** `docs/gate_registry.md` (decision gates, the numeric limits they read, the inert
+flags, the always-on integrity checks, and the rule for adding a gate);
+`docs/api_reference.md` §1.1 now carries the missing rows and points at the registry; `.env.example`
+gains a gate block - 25 entries that were undocumented there - marking the inert ones in place so an
+operator does not trust a switch that does nothing. 5 gates, 4 mutations.
+
+### Added
+
 Round-2 quant formula additions: eight deterministic reads, their agent tools, and the prompt
 rules that make the agents cite them (2026-09-11; `docs/design_quant_formulas_research_round2.md`,
 plan `docs/implementation_plan_quant_formula_additions.md`). The round-1 scan

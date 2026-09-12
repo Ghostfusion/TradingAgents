@@ -268,6 +268,25 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION": "enable_return_decomposition",
     "TRADINGAGENTS_ENABLE_TEXT_FACTORS": "enable_text_factors",
     "TRADINGAGENTS_ENABLE_BOCPD": "enable_bocpd",
+    # Gate-registry keys (docs/gate_registry.md). Every gate and every limit a
+    # gate reads must be reachable from .env, so an operator can widen/tighten
+    # or disable a gate without editing code or the config dict. The registry
+    # test (tests/test_gate_env_toggles.py) asserts this row set covers the
+    # whole registry in both directions.
+    "TRADINGAGENTS_ENABLE_THRESHOLD_GATE": "enable_threshold_gate",
+    "TRADINGAGENTS_ENABLE_REGIME": "enable_regime",
+    "TRADINGAGENTS_ENABLE_FACTORS": "enable_factors",
+    "TRADINGAGENTS_ENABLE_PREOPEN_DEPTH": "enable_preopen_depth",
+    "TRADINGAGENTS_ENABLE_SECTOR_MULTIFACTOR": "enable_sector_multifactor",
+    "TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY": "enable_sector_industry",
+    "TRADINGAGENTS_ENABLE_SECTOR_BREADTH": "enable_sector_breadth",
+    "TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS": "enable_sector_eodhd_constituents",
+    "TRADINGAGENTS_RISK_AUDIT_ENABLED": "risk_audit_enabled",
+    # The limits the governor reads. These were config-only: the per-name cap,
+    # the book cap and the sector cap could not be tightened from .env at all.
+    "TRADINGAGENTS_MAX_POSITION_PCT": "max_position_pct",
+    "TRADINGAGENTS_RISK_MAX_POSITION_PCT": "risk_max_position_pct",
+    "TRADINGAGENTS_SECTOR_CAP_LIMIT": "sector_cap_limit",
 }
 
 

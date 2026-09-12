@@ -173,6 +173,28 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION` | `enable_return_decomposition` | overnight vs intraday return decomposition (Q5) |
 | `TRADINGAGENTS_ENABLE_TEXT_FACTORS` | `enable_text_factors` | Loughran-McDonald tone / readability / divergence (Q6) |
 | `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
+| `TRADINGAGENTS_ENABLE_THRESHOLD_GATE` | `enable_threshold_gate` | **inert** - declared, read by nothing (see `docs/gate_registry.md` §3) |
+| `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | **inert** |
+| `TRADINGAGENTS_ENABLE_SKILL_OVERLAYS` | `enable_skill_overlays` | **inert** (docstring-only mentions) |
+| `TRADINGAGENTS_ENABLE_TRAILING_EXIT` | `enable_trailing_exit` | **inert** (the trailing arithmetic is gated by `enable_exits`) |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | **inert** (its paired cap `value_dip_regime_vol_cap` IS read) |
+| `TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT` | `volume_share_vol_limit` | **inert** |
+| `TRADINGAGENTS_ENABLE_REGIME` | `enable_regime` | **inert** |
+| `TRADINGAGENTS_ENABLE_FACTORS` | `enable_factors` | **inert** |
+| `TRADINGAGENTS_ENABLE_HARD_GUARDS` | `enable_hard_guards` | hard-guard labels (`max_portfolio_risk` / `data_quality_failure` / `insufficient_liquidity`) |
+| `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` | consensus/agreement scaling of the size |
+| `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | `enable_kelly_alloc` | portfolio-level fractional-Kelly allocation |
+| `TRADINGAGENTS_RISK_AUDIT_ENABLED` | `risk_audit_enabled` | hash-chained risk audit ledger |
+| `TRADINGAGENTS_REGIME_STATE_ENABLE` | `regime_state_enable` | regime-state size multiplier |
+| `TRADINGAGENTS_VOL_CAP_ENABLE` | `vol_cap_enable` | volatility-cap size multiplier |
+| `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | pre-open depth read |
+| `TRADINGAGENTS_ENABLE_SECTOR_MULTIFACTOR` / `_INDUSTRY` / `_BREADTH` / `_EODHD_CONSTITUENTS` | `enable_sector_multifactor` / `enable_sector_industry` / `enable_sector_breadth` / `enable_sector_eodhd_constituents` | sector-ranking reads (multi-factor, industry group, breadth, vendor constituents) |
+| `TRADINGAGENTS_MAX_POSITION_PCT` | `max_position_pct` | single-name position cap (governor) |
+| `TRADINGAGENTS_RISK_MAX_POSITION_PCT` | `risk_max_position_pct` | whole-book position cap (governor) |
+| `TRADINGAGENTS_SECTOR_CAP_LIMIT` | `sector_cap_limit` | sector concentration cap (governor) |
+| `TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT` | `risk_daily_loss_budget_pct` | daily loss limit (governor) |
+| `TRADINGAGENTS_RISK_HWM_SOFT_PCT` / `_HARD_PCT` | `risk_hwm_soft_pct` / `risk_hwm_hard_pct` | high-water-mark drawdown -> WARN / REJECT |
+| `TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP` | `value_dip_regime_vol_cap` | volatility above which a dip entry is refused |
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)
@@ -182,6 +204,12 @@ is built, so a well-typed but out-of-range override (e.g.
 `TRADINGAGENTS_TOP_P=1.5`, tranche weights that do not sum to ~1) raises a
 `ValueError` listing every violation at config load instead of silently skewing
 an unattended run.
+
+**Every gate is flippable from `.env`.** `docs/gate_registry.md` is the canonical list: each gate
+with its switch, what it can block, where it is enforced, the test that proves it fires, and the
+flags that are declared but **inert** (read by no code). `tests/test_gate_env_toggles.py` keeps that
+document true: it asserts each key exists and has an override row, that flipping it through the real
+loader works in both directions, and that every `wired`/`inert` claim matches the source.
 
 ### 1.2 All `DEFAULT_CONFIG` keys
 
