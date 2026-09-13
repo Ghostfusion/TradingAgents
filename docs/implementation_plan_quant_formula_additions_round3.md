@@ -3,7 +3,9 @@
 Status: **designed, NOT started (2026-09-13); no code changed by this round.**
 Implements the adopted list in
 [`docs/design_quant_formulas_research_round3.md`](design_quant_formulas_research_round3.md)
-(items **S1-S10**). Each phase names its target files and symbols, the exact
+(items **S1-S11**; **S11** is the orchestration/symmetry item from the
+second research pass and is independent of the ten scoring phases). Each phase
+names its target files and symbols, the exact
 behaviour, the config gate, the tests that must be **proven failing first**, and
 the acceptance criteria. Nothing here changes an existing computation: every
 item is additive, default-off, and degrades to `unavailable` when its inputs are
@@ -34,6 +36,10 @@ missing.
 8. **CHANGELOG + web impact.** Each landed phase gets a CHANGELOG entry; when it
    changes a tool output the sibling web app renders, the entry states the
    **web impact** (additive lines on tool cards; no JSON shape removal).
+9. **Symmetry is measured, not assumed.** Any item that changes how evidence is
+   gathered also emits a machine-readable symmetry row, and S11's plan call must
+   **fall back to today's loop** when the plan is empty, invalid, or outside the
+   tool whitelist.
 
 ---
 
@@ -51,11 +57,17 @@ missing.
 | **S8** | Score evaluation rows (IC/deciles/coverage/stability) | `strategies/alpha_health.py` | `enable_score_eval_rows` | S | S3 or any new score |
 | **S7** | Weighted rolling sentiment window + warm-up guard | `strategies/sentiment.py` | `enable_weighted_sentiment_window` | S | — |
 | **S9** | Reduced BW-style market sentiment index | `strategies/market_sentiment_index.py` (new) | `enable_market_sentiment_index` | M | conditional |
+| **S11** | Symmetric evidence for paired roles (a: report, b: deterministic default args, c: mirrored budget, d: plan call) | `agents/utils/evidence_gather.py`, `graph/setup.py`, `scripts/repro_check.py` | `enable_evidence_symmetry` | M | independent of S1-S10 |
 
 Landing order: **S1, S2, S10, S4, S5, S6, S3+S8 (together), S7, S9** — the two
 correctness fixes first, then the new-coverage score, then the sentiment items
 that consume data the pipeline already collects, then the composite **with** its
 evaluation rows, and the conditional index last.
+
+S11 is orthogonal to that order and starts with its **no-LLM** steps (S11a
+symmetry report, S11b deterministic default args), which can land at any point;
+S11c/S11d wait for S11a's measured asymmetry to justify them. Nothing in S11
+touches a scoring path, so it can also ship independently of this round.
 
 ---
 
@@ -294,6 +306,75 @@ pure `_pc1(matrix)` (numpy is already a dependency of `sentiment_research`).
 recovers it and the sign convention is stable across reruns; with one proxy the
 function returns `unavailable`; the loadings and missing-proxy list are rendered.
 
+### S11 - Symmetric evidence for paired roles
+
+Split into four steps so the cheap, non-LLM parts land first and the plan call
+exists only if the measurement justifies it. S11 changes *how evidence is
+gathered*; it does not change how anything is scored.
+
+**S11a - Symmetry report (no LLM, no new vendor calls).**
+
+*Target.* `agents/utils/evidence_gather.py::symmetry_report(evidence, model_pool)`;
+`scripts/repro_check.py --evidence` renders it.
+
+*Behaviour.* Per analyst/role pair: planned vs fired vs leaves vs `unavailable`,
+the arg-**key** diff across the pair, the as-of dates, and the discretionary
+counts read from `_model_pool`. One verdict line - `SYMMETRIC` or
+`ASYMMETRIC - differs on: <tools>` - plus the differing tool names. The same
+block is written into the run's evidence file and the debate state so the web
+panel can render it.
+
+*Acceptance.* A fixture pair with one extra tool on side A reports `ASYMMETRIC`
+and names it; an equal pair reports `SYMMETRIC`; a pair with no leaves renders
+`unavailable` rather than `SYMMETRIC`; the report itself makes **zero** vendor
+calls (asserted by a call counter, not by inspection).
+
+**S11b - Deterministic default args (no LLM).**
+
+*Target.* `evidence_gather.CONTEXT_ARG_KEYS` / `_args_for`, plus declared
+per-tool defaults for enumerable args.
+
+*Behaviour.* Where a model-pool tool has a defensible enumerable default (e.g.
+`indicator`), the default is declared and the tool moves into the deterministic
+gather, so composition becomes deterministic for free. A tool with no defensible
+default **stays** in the model pool - an arg is never invented to force a tool
+in.
+
+*Acceptance.* A fixture tool with a declared default moves pool with its reason
+printed; a tool without one stays; the forced leaf set is byte-identical for a
+single-valued enum.
+
+**S11c - Mirrored discretionary budget (no LLM change).**
+
+*Target.* the analyst tool-loop / `_journal_executed` path.
+
+*Behaviour.* Each paired role gets the same discretionary call allowance; a
+surplus call beyond the mirror is suppressed **and journaled with its args**, so
+the asymmetry is visible rather than hidden. The mirror is per pair, not global.
+
+*Acceptance.* Three discretionary calls on side A against one on side B produce
+journal entries for the two unmatched A calls plus an `ASYMMETRIC` symmetry row;
+the mirrored case is clean; suppression never drops a forced (S11b) leaf.
+
+**S11d - Argument-plan call + pre-debate assertion (LLM, gated off).**
+
+*Target.* `gather_for_analyst_node` (the plan stage) and a `graph/setup.py`
+pre-debate node.
+
+*Behaviour.* One cheap completion per analyst emits a typed
+`{tool: {arg: value}}` plan over the model-pool remainder, validated against each
+tool's own args schema and against a tool whitelist; code then fires it through
+the existing executor (bounded parallel, per-call timeout, error leaves) into the
+same `tool_evidence` reducer. An empty, invalid or out-of-whitelist plan
+**falls back to today's loop** and says so in the run output. The pre-debate node
+asserts the symmetry contract (same whitelist, same arg keys, mirrored counts)
+and records the verdict; it never blocks a debate - it labels one.
+
+*Acceptance.* A plan is journaled and the fired leaves match it 1:1; an invalid
+plan leaves the run on the legacy path with a stated reason, and with the gate
+off the run's outputs are unchanged from `HEAD`; the assertion writes
+`SYMMETRIC`/`ASYMMETRIC` into the debate state without altering any verdict.
+
 ---
 
 ## 3. Cross-cutting wiring
@@ -308,6 +389,7 @@ function returns `unavailable`; the loadings and missing-proxy list are rendered
 | `docs/api_reference.md` | the new keys and tools in the canonical tables **in the same commit** |
 | `docs/developer/04-strategies.md`, `Strategies/index.md` | module/flag/consumer rows per phase |
 | Sibling web app | additive tool-card lines only; **web impact** stated per CHANGELOG entry (no JSON shape removal, no CLI flag change) |
+| S11 | `enable_evidence_symmetry` in `default_config.py`; `repro_check --evidence` gains the symmetry columns; the debate panel renders the symmetry row; `docs/api_reference.md` gets the key and the `symmetry_report` shape |
 
 ---
 
@@ -325,6 +407,7 @@ function returns `unavailable`; the loadings and missing-proxy list are rendered
 | S8 | `tests/test_score_eval_rows.py` | perfect-rank score → monotone deciles + IC≈1; random score → not monotone; coverage on a short panel; min-obs floor | compute IC on the score's own sign only; bucket with a fixed width instead of rank; report coverage as always 1.0 |
 | S7 | `tests/test_sentiment_rolling_window.py` | recency spike > unweighted SMA; `min_history` guard; SMA path unchanged | weight the oldest observations highest; zero-fill missing days; ignore `min_history` |
 | S9 | `tests/test_market_sentiment_index.py` | planted common factor recovered; sign stable; one proxy → `unavailable`; missing-proxy list rendered | skip the macro orthogonalisation; return a one-proxy index; flip the sign convention between runs |
+| S11 | `tests/test_evidence_symmetry.py` | asymmetric fixture → `ASYMMETRIC` + the named tool; equal → `SYMMETRIC`; no-leaf pair → `unavailable`; zero vendor calls in the report; a declared-default tool moves pool; the mirrored budget journals the surplus; an invalid plan falls back with a reason; gate off → run output unchanged | count leaves but not planned tools; drop the budget mirror; let an invalid plan raise; let the plan fire outside the whitelist; report `SYMMETRIC` when a side has no leaves |
 
 Every test file is proven failing under its mutation list before the phase is
 considered landed, and the full suite plus `py -3.12 -m ruff check tradingagents/
@@ -358,6 +441,17 @@ tests/` must be green per commit.
   ML replacement of the additive scores; no new vendor; no change to the
   decision rating contract; no re-implementation of anything in the design
   doc's §3 exclusion table.
+- **Risk: the plan call becomes a new single point of failure.** An empty,
+  invalid or out-of-whitelist plan must fall back to today's loop; the plan is
+  journaled so `repro_check` can diff it, and the gate defaults off.
+- **Risk: symmetry mistaken for correctness.** Equal tool access does not make two
+  arguments equally good, and forcing equal *conclusions* would destroy the
+  debate. S11 mirrors access and budgets only, and never gates a verdict; the
+  existing order rotation and pre-debate independent stances stay the
+  countermeasures for the anchoring half (`arXiv:2406.07791`).
+- **Non-goal: binding tools to the debaters.** Both sides read one shared report
+  set today; giving them their own tools would *create* the per-side selection
+  imbalance S11 exists to remove.
 - **Open decision (owner):** the peer universe for S3/S10 — reuse the screener's
   `--rank composite` peer set, or the sector map's constituents? Recommended:
   the screener peer set (it already exists, is test-covered, and matches the

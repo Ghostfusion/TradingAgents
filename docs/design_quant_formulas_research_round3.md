@@ -11,6 +11,16 @@ Rounds 1-2 swept **return-prediction and risk formulas**; this round sweeps
 crowd scores, news-NLP aggregation, and the normalisation/composite/validation
 machinery that turns a metric into a score.
 
+**Added 2026-09-13 (second pass): one orchestration item, S11 — symmetric
+evidence for paired roles.** §2 now also carries the staged gathering pattern for
+the debate's *inputs*: a plan call, then code-fired deterministic fetches, then
+the unchanged reduce. It sits in a *scoring* round on purpose — the judge's L2
+dimension scores (`agents/arbiters/debate_judge.py::aggregate_scores`), the
+`strategies/debate_score.py` rows and the calibration buckets are *measurements
+of two sides*, and a measurement taken over asymmetric evidence is not
+comparable. The discipline this round demands of scores (stated basis, stated
+coverage, `unavailable` instead of a guess) is demanded there of *evidence*.
+
 Companion: [`docs/implementation_plan_quant_formula_additions_round3.md`](implementation_plan_quant_formula_additions_round3.md)
 (the phased plan for the adopted list; designed, not started).
 
@@ -20,8 +30,9 @@ Companion: [`docs/implementation_plan_quant_formula_additions_round3.md`](implem
 
 ### 0.1 Source set
 
-25 distinct URLs (33 list entries — the second batch repeated 8 market/crowd
-URLs from the first). All retrieved except two, both handled explicitly:
+25 distinct URLs from the brief (33 list entries — the second batch repeated
+8 market/crowd URLs from the first), plus 5 orchestration / judge-bias sources
+added in the second pass for **S11** (ledger rows 26-30). All retrieved except two, both handled explicitly:
 
 - `researchgate.net/publication/371311096` → **HTTP 403**; the identical paper
   was recovered from its arXiv primary (`arXiv:2306.02136v3`).
@@ -61,6 +72,9 @@ round-2 exclusion rule:
 | Analyst ratings/price targets (yfinance, Finnhub trends + PT, moomoo consensus); **upgrade/downgrade counts** `{up, down, net}` | `dataflows/y_finance.py`, `finnhub.py`, `moomoo.py`, `yfinance_sector.py::fetch_revision_actions` |
 | Security-type routing (operating company / ETF / CEF / …) | `strategies/security_type.py` |
 | Sentiment-into-overlay fold behind an IC gate | `strategies/overlays.py::fold_sentiment_into_overlay`, `graph/trading_graph.py::_sentiment_factor_read` |
+| **Debate evidence**: bull/bear are prompt-only over the four analyst reports — neither side has a tool bound | `agents/researchers/bull_researcher.py`, `bear_researcher.py` (`llm.invoke`, no `bind_tools`); `graph/setup.py` registers them as plain nodes (only the analysts get a `ToolNode`) |
+| **Analyst evidence split**: *forced* (code-fired, args derived from run context) vs *model pool* (args only the model can supply) | `agents/utils/evidence_gather.py::classify_tool_pools`, `gather_for_analyst_node`, `_ShortCircuitToolNode`; design in `docs/design_mapreduce_forced_tool_gathering.md` |
+| **Order/anchoring countermeasures already shipped** | pre-debate `researcher_independent_stances` (`enable_independent_vote`), anonymised + seeded order rotation (`agents/arbiters/debate_judge.py`), `strategies/debate_claim.py`, `strategies/debate_score.py` |
 
 **Two facts drive this whole round.** (1) The repo computes many *point*
 scores but no consumer ranks or filters on them — the statement layer says so
@@ -107,6 +121,8 @@ additional rules apply to scores specifically:
 | Score-based portfolio evidence (Nature review) | **absent as an evaluation row** | `alpha_health`/`evaluate` cover ratings, DSR/PBO/CPCV — not *score* deciles | **score IC/decile/coverage/stability rows** for any new composite → **S8** |
 | G-Score / C-Score (Mohanram / Montier) | **absent** | — | **S10** |
 | fffinstill / CFI / AlphaSense / SMA / Adanos / FMP / Lycore / Zenodo / MarketGrader | design templates | nothing landed | patterns only; the quantitative parts are excluded in §3 with the reason |
+| Evidence symmetry across the debate's paired roles | **partially present** | the debate reads ONE shared set of four analyst reports (both sides byte-identical), the forced gather is deterministic in composition, and the judge is anonymised + order-rotated | the **model-pool remainder** is neither measured nor mirrored (**33 model-discretionary tools** on the audited QQQI run), and no symmetry row/assertion exists → **S11** |
+| Staged orchestration (plan → code-fired fetch → reduce) | **present for the analysts** | `docs/design_mapreduce_forced_tool_gathering.md` §2-§3 + `evidence_gather.gather_evidence` | the plan call that turns model-pool args into code-fired fetches, and a mirrored discretionary budget → **S11** |
 
 ---
 
@@ -546,6 +562,71 @@ $$G=\sum_{j=1}^{8}G_j\in[0,8]\qquad C=\sum_{j=1}^{6}C_j\in[0,6]$$
   `unavailable`, never to 0; the C-score is a **risk screen, not a short
   signal**.
 
+### S11 — Symmetric evidence for paired roles (orchestration; added for score comparability)
+
+Three stages, grafted onto the machinery that already exists — the analyst stage
+gains a *plan* call for the tools whose args only a model can supply, then code
+fires it, then the analyst/debater reduces:
+
+$$\text{plan} = \text{LLM}_{\text{cheap}}(\text{role}, \text{schemas}) \rightarrow \{(tool, \{arg: value\})\}$$
+$$\text{leaves} = \text{code-execute}(\text{plan})\quad(\text{bounded parallel, per-call timeout, error leaves})$$
+$$\text{report} = \text{LLM}(\text{evidence-block}(\text{leaves}))\quad(\text{shape unchanged})$$
+
+and the contract the paired roles are held to:
+
+$$\text{SYM}(A,B) \iff W_A = W_B \;\wedge\; K_A = K_B \;\wedge\; |D_A| = |D_B|$$
+
+with $W$ the tool whitelist, $K$ the arg *keys* and $D$ the discretionary calls
+used. Symmetry is of **access**, never of conclusion.
+
+- **Provenance:** ReWOO plans with evidence placeholders and executes afterwards —
+  "5x token efficiency and 4% accuracy improvement on HotpotQA", plus explicit
+  robustness "under tool-failure scenarios"
+  ([arXiv:2305.18323](https://arxiv.org/abs/2305.18323)); LLMCompiler splits a
+  Function-Calling Planner / Task-Fetching Unit / Executor for parallel calls — up
+  to 3.7x latency speedup, 6.7x cost saving and ~9% accuracy over ReAct
+  ([arXiv:2312.04511](https://arxiv.org/abs/2312.04511), ICML 2024);
+  plan-then-solve prompting is the prompt-level form of the same staging
+  ([arXiv:2305.04091](https://arxiv.org/abs/2305.04091), ACL 2023). Anthropic's
+  taxonomy names these **prompt chaining**, **parallelisation (sectioning)** and
+  **orchestrator-workers**
+  ([src](https://www.anthropic.com/engineering/building-effective-agents)).
+  For the *other* half of the problem — order and anchoring — pairwise judges show
+  position bias that "is not due to random chance", varies significantly across
+  judges and tasks, is weakly influenced by prompt-component length but
+  **strongly affected by the quality gap** between the compared solutions
+  (15 judges, 22 tasks, >150,000 instances;
+  [arXiv:2406.07791](https://arxiv.org/abs/2406.07791), AACL-IJCNLP 2025) — which
+  is why order counterbalancing is the standard mitigation and why S11 keeps the
+  rotation the repo already has instead of replacing it.
+- **Fit:** the repo already solved the *first* half: bull and bear consume one
+  shared report set, so there is no per-side tool choice to unbalance. What is
+  unbalanced sits upstream — `classify_tool_pools` moves a tool into the
+  deterministic gather only when every required arg is derivable from
+  `{ticker, symbol, current_date, curr_date, start_date, end_date,
+  look_back_days}`, so everything else stays model-discretionary: **33 tools on
+  the audited QQQI run** (market 28, news 4, fundamentals 1). The cost is on
+  record — the news analyst's five `get_macro_indicators` calls produced no
+  evidence leaves, and `report_verifier` then flagged five tool-grounded
+  10Y/RRP/Polymarket lines UNSUPPORTED. Symmetric *firing* is what makes the
+  judge's dimension scores and the calibration buckets comparable; it does not
+  make the two arguments equally good.
+- **Consumer:** `agents/utils/evidence_gather.py` (`gather_for_analyst_node`,
+  `_args_for`, plus a `symmetry_report`), `graph/setup.py` (a pre-debate
+  assertion node), `scripts/repro_check.py --evidence` (symmetry columns),
+  `agents/utils/report_verifier.py` (an advisory `evidence_asymmetry` family),
+  and the web debate panel.
+- **Data:** all of it already exists — `tool_evidence.json` leaves, the
+  `ToolCallLog/*.jsonl` journal, `_model_pool` per analyst, and (since the
+  `_journal_executed` fix) the model-pool call args.
+- **Failure mode:** a bad plan must **fall back to today's loop** — never raise,
+  never silently thin the evidence; **never bind tools to the debaters** (that
+  would *create* the per-side choice this item removes); never force-fire the
+  catalog (the existing design curates ~10-20 tools per analyst with `ALL`
+  opt-in, and the planner selects only within the model-pool remainder); equal
+  access must not be reported as equal merit, and no symmetry row may gate a
+  verdict.
+
 ---
 
 ## 3. Explicitly excluded (present, unbuildable, or evidence-weak)
@@ -575,6 +656,9 @@ level up: **the constraint is not score coverage, it is score *use* and
 or filter consumes, and the sentiment pipeline stores a relevance number it
 never weights. Correspondingly the highest-value items are the ones that turn
 existing measurements into a usable, evaluated score — not new indicators.
+The same logic extends one level up: **S11** turns the *evidence* behind the
+debate's scores into a measured, symmetric input, because a judge's dimension
+scores are only comparable when both sides argued over the same evidence.
 
 Suggested order (detail in the implementation plan):
 
@@ -596,6 +680,11 @@ Suggested order (detail in the implementation plan):
 8. **S7** weighted rolling window + warm-up guard — small.
 9. **S9** reduced market sentiment index — conditional, low; only if a
    market-level consumer appears.
+10. **S11** symmetric evidence for paired roles — start with the **no-LLM** parts
+    (a symmetry report over the leaves the pipeline already journals, and
+    deterministic default args that move enumerable tools out of the model
+    pool); add the mirrored discretionary budget and the stage-1 plan call only
+    if the measured asymmetry still justifies them.
 
 ---
 
@@ -635,3 +724,13 @@ one file per research batch: `piotroski_fundamental.md`,
 | 23 | [Lycore](https://www.lycore.com/blog/financial-news-sentiment-analysis/) | retrieved | LM pre-filter → FinBERT order, <80ms/doc, source-credibility/velocity/cross-source wording, IC/rank-IC walk-forward discipline → S8 |
 | 24 | [Zenodo 17510736](https://zenodo.org/records/17510736) | landing page unreachable; author artifacts used | weekly grouping by concatenation (no weighted formula), GBM on embeddings, test Acc 0.429/F1 0.388 → §3 |
 | 25 | [Berkeley project page](https://www.ischool.berkeley.edu/projects/2024/sentiment-analysis-financial-markets) (dup of #8) · Fidelity/AlphaSense/MarketGrader/MSCI/TradingSim/Adanos/Baker-Wurgler repeated in the second batch | — | no new content |
+
+Second pass (orchestration / judge bias, for S11):
+
+| # | Source | Status | Contributed |
+| --- | --- | --- | --- |
+| 26 | [ReWOO](https://arxiv.org/abs/2305.18323) (arXiv:2305.18323, 2023) | retrieved (abs + abstract) | plan-with-evidence-placeholders before execution; 5x token efficiency, +4% HotpotQA, robustness under tool failure → S11 |
+| 27 | [LLMCompiler](https://arxiv.org/abs/2312.04511) (arXiv:2312.04511, ICML 2024) | retrieved (abs + abstract) | planner / task-fetching unit / executor split for parallel function calls; up to 3.7x latency, 6.7x cost, ~9% accuracy vs ReAct → S11 |
+| 28 | [Plan-and-Solve](https://arxiv.org/abs/2305.04091) (arXiv:2305.04091, ACL 2023) | retrieved (abs + abstract) | devise a plan, then carry out the subtasks; the prompt-level form of the staging → S11 |
+| 29 | [Anthropic — Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) (2024-12-19) | retrieved (full) | the workflow taxonomy that names the pattern: prompt chaining, parallelisation (sectioning/voting), orchestrator-workers, evaluator-optimizer; "workflows are systems where LLMs and tools are orchestrated through predefined code paths" → S11 |
+| 30 | [Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge](https://arxiv.org/abs/2406.07791) (arXiv:2406.07791, AACL-IJCNLP 2025) | retrieved (abs + abstract) | 15 judges, 22 tasks, >150,000 instances; bias "not due to random chance", varies by judge/task, strongly affected by the solution quality gap; repetition stability / position consistency / preference fairness metrics → why S11 keeps order rotation and never treats symmetry as merit |
