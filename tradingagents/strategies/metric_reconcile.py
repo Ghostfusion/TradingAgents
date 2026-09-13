@@ -13,7 +13,12 @@ conflict BEFORE they reduce.
 Pure and unit-testable: no IO, no LLM. The metric mapping is an explicit,
 conservative table (only tools we know produce the same metric), so a new or
 unknown tool never gets merged accidentally; a metric with one vendor is
-quiet (no conflict, no span).
+quiet (no conflict, no span). Values are read from the leaf line that NAMES
+the metric (``TOOL_VALUE_RE``), never from the first number in the leaf:
+QQQI 2026-09-13 quoted a phantom ``market_cap: VALUES CONFLICT range=10 ..
+2026`` because the first-number extractor read a note date (2026) and a
+volume label (10DayAverageTradingVolume) in a leaf set that carried no market
+cap at all.
 """
 
 from __future__ import annotations
@@ -48,10 +53,35 @@ TOOL_METRIC_MAP: dict[str, str] = {
     "get_verified_market_snapshot": "market_snapshot",
 }
 
-# Numeric value extractor: the first decimal / integer "number" token in a
-# line. Kept deliberately simple (values in leaves are formatted like
-# "120.33", "1,234.5", "12.3%", "$80.60").
-_NUM_RE = re.compile(r"-?\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(?:[%MBK])?", re.IGNORECASE)
+# Tool-name -> the regex that pulls THIS tool's reconcildable value from
+# the line that labels it. Label-anchored on purpose: a leaf is a multi-line
+# document (header, note date, dozens of unrelated figures), so "the first
+# number in the leaf" is an artifact generator, not an extractor. A tool NOT
+# in this table has no single scalar (the statement CSVs are tabular) and
+# contributes no value - it can therefore never manufacture a conflict.
+TOOL_VALUE_RE: dict[str, re.Pattern] = {
+    # get_fundamentals: "Market Cap: 99,105,693,696"
+    "get_fundamentals": re.compile(r"(?im)^\s*Market\s*Cap\s*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"),
+    # get_ratios: "- Market cap: 102,260,850,000" ("n/a" yields no match)
+    "get_ratios": re.compile(r"(?im)^\s*-\s*Market\s*cap\s*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"),
+    # get_basic_financials: "marketCapitalization: 3659011800000.0" (+ optional
+    # "(vendor, basis unknown)" qualifier)
+    "get_basic_financials": re.compile(
+        r"(?im)^\s*marketCapitalization[^:\n]{0,40}:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"
+    ),
+    # get_dcf_valuation: "dcf adbe: fair_value=278.71 ev=..."
+    "get_dcf_valuation": re.compile(r"(?i)\bfair_value\s*=\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"),
+    # get_fcf_yield: "fcf yield adbe: 10.37% (floor-pass); fcf=..."
+    "get_fcf_yield": re.compile(r"(?i)\bfcf\s*yield[^:\n]{0,40}:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"),
+    # get_value_floors: "value floors adbe (price 248.80999755859372):"
+    "get_value_floors": re.compile(r"(?i)\(\s*price\s+(\d[\d,]*(?:\.\d+)?)"),
+    # get_market_snapshot: "- Last: 250.27 | O 251.81 H 255 L 247.19 ..."
+    "get_market_snapshot": re.compile(r"(?im)^\s*-\s*Last\s*:\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"),
+    # get_verified_market_snapshot: "| Close | 248.81 |" in the OHLCV table
+    "get_verified_market_snapshot": re.compile(
+        r"(?im)^\s*\|\s*Close\s*\|\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"
+    ),
+}
 
 # Debt/equity extraction: D/E appears in different shapes across tools -
 # get_fundamentals "Debt to Equity: 5.62" (raw vendor), get_ratios "D/E: 0.06"
@@ -81,11 +111,18 @@ def extract_de_value(content: str) -> float | None:
         return None
 
 
-def extract_value(content: str) -> float | None:
-    """First numeric-looking value in a leaf (None if none present)."""
-    if not content:
+def extract_metric_value(tool: str, content: str) -> float | None:
+    """The value this leaf LABELS as the tool's reconcildable metric.
+
+    None when the tool has no scalar label contract (statement CSVs) or when
+    the leaf does not carry the labelled figure at all - e.g. an ETF's
+    ``get_fundamentals`` has no ``Market Cap`` row. There is deliberately no
+    fallback to an unlabelled number.
+    """
+    rx = TOOL_VALUE_RE.get(str(tool or "").strip())
+    if not rx or not content:
         return None
-    m = _NUM_RE.search(content)
+    m = rx.search(content)
     if not m:
         return None
     try:
@@ -107,10 +144,11 @@ def reconcile_metrics(
 
     ``leaves``: list of dicts with at least ``tool`` and ``content`` (the
     persisted leaf shape). Returns ``{metric_id: {values: [...], span:
-    (lo,hi)|None, conflict: bool, leaves: [tool_name,...]}}``. A missing or
-    unparseable value is omitted from ``values`` but the tool still counts
-    toward ``leaves`` (so a vendor that returned no data doesn't hide a
-    conflict between two others).
+    (lo,hi)|None, conflict: bool, vendors: [tool_name,...], labelled: bool}}``.
+    A value the leaf does not label is omitted from ``values`` but the tool
+    still counts toward ``vendors`` (so a vendor that returned no data doesn't
+    hide a conflict between two others); ``labelled`` records whether any
+    vendor for the metric could have carried a value at all.
     """
     buckets: dict[str, dict] = {}
     for leaf in leaves or []:
@@ -127,16 +165,33 @@ def reconcile_metrics(
             if de_v is not None:
                 de_bucket = buckets.setdefault(
                     "debt_to_equity",
-                    {"values": [], "span": None, "conflict": False, "vendors": []},
+                    {
+                        "values": [],
+                        "span": None,
+                        "conflict": False,
+                        "vendors": [],
+                        "labelled": True,
+                    },
                 )
                 de_bucket["vendors"].append(tool)
                 de_bucket["values"].append(de_v)
         metric = metric_for_tool(tool)
         if not metric:
             continue
-        bucket = buckets.setdefault(metric, {"values": [], "span": None, "conflict": False, "vendors": []})
+        bucket = buckets.setdefault(
+            metric,
+            {
+                "values": [],
+                "span": None,
+                "conflict": False,
+                "vendors": [],
+                "labelled": False,
+            },
+        )
         bucket["vendors"].append(tool)
-        v = extract_value(content)
+        if tool in TOOL_VALUE_RE:
+            bucket["labelled"] = True
+        v = extract_metric_value(tool, content)
         if v is not None:
             bucket["values"].append(v)
 
@@ -158,6 +213,7 @@ def reconcile_metrics(
             "span": span,
             "conflict": conflict,
             "vendors": sorted(set(bucket["vendors"])),
+            "labelled": bool(bucket.get("labelled")),
         }
     return out
 
@@ -169,11 +225,27 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
     multi-vendor metric is NOT noise - it's fine). The line tells the analyst
     the metric is conflicted and to treat it as a range, weighted by vendor
     reliability, never pick one silently.
+
+    A metric whose vendors are all silent ON THE LABELLED VALUE gets an
+    explicit "no value in evidence" line instead: staying quiet there invites
+    the analyst to re-derive the figure from unrelated numbers in the leaves
+    (QQQI 2026-09-13 quoted an AUM range that no leaf ever contained).
     """
     lines: list[str] = []
     for metric in sorted(reconciled):
         b = reconciled[metric]
+        vendors = ", ".join(sorted(b["vendors"]))
         if not b["conflict"]:
+            # Only multi-vendor metrics are called out: a single-vendor
+            # metric with no value has nothing to reconcile (its leaf already
+            # says unavailable), while the analyst reading a two-vendor metric
+            # expects a comparison and would otherwise re-derive one.
+            if b.get("labelled") and not b["values"] and len(b["vendors"]) >= 2:
+                lines.append(
+                    f"- metric {metric}: NO VALUE IN EVIDENCE (vendors=[{vendors}] carry "
+                    f"no labelled {metric} figure) — report it unavailable; do NOT quote "
+                    "a single value or a range"
+                )
             continue
         span = b["span"]
         shown = (
@@ -181,7 +253,6 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
             if span is not None
             else "n/a"
         )
-        vendors = ", ".join(sorted(b["vendors"]))
         lines.append(
             f"- metric {metric}: VALUES CONFLICT range={shown} vendors=[{vendors}] — "
             "treat as a range / weight by vendor reliability; do NOT quote a single value"
@@ -192,8 +263,9 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
 __all__ = [
     "MATCH_TOLERANCE",
     "TOOL_METRIC_MAP",
+    "TOOL_VALUE_RE",
     "metric_for_tool",
-    "extract_value",
+    "extract_metric_value",
     "extract_de_value",
     "reconcile_metrics",
     "render_reconcile",

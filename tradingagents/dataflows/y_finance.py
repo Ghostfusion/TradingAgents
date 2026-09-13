@@ -298,6 +298,62 @@ def get_stockstats_indicator(
     return str(indicator_value)
 
 
+# Below this relative gap the vendor dividendYield and the same vendor's
+# trailing-12m dividend record are treated as agreeing (yield endpoints round
+# differently; a 25% gap is a real disagreement, not rounding).
+_YIELD_DIVERGENCE = 0.25
+
+
+def _dividend_yield_note(info: dict, ticker_obj, rendered_pct: float | None) -> str:
+    """Cross-check the vendor ``dividendYield`` against the SAME vendor's own
+    trailing-12-month dividend record, and return a correction note when the
+    two disagree by more than 25%.
+
+    QQQI 2026-09-13 (fundamentals review loop): ``info['dividendYield']`` is
+    0.09, rendered as 9.00%, while ``Ticker.dividends`` pays ~0.63/month - the
+    trailing twelve prints sum to 7.649 = 14.02% at the 54.56 reference price,
+    and EVERY rolling 12-payment window since inception is 13.4-14.0%. The
+    field is unreconcilable with the payment record, not stale, and a report
+    quoting it understates the payout by ~5 points. Advisory: returns "" when
+    the record is missing/empty or agrees; never raises.
+    """
+    if not rendered_pct or rendered_pct <= 0:
+        return ""
+    try:
+        divs = ticker_obj.dividends
+    except Exception:  # noqa: BLE001 - advisory cross-check, never load-bearing
+        return ""
+    if divs is None or len(divs) == 0:
+        return ""
+    price = None
+    for key in ("regularMarketPrice", "previousClose", "navPrice"):
+        try:
+            price = float(info.get(key))
+        except (TypeError, ValueError):
+            price = None
+        if price:
+            break
+    if not price:
+        return ""
+    try:
+        idx = pd.to_datetime(divs.index)
+        cutoff = pd.Timestamp.now(tz=idx.tz) - pd.Timedelta(days=365)
+        ttm = float(pd.Series(divs.to_numpy(), index=idx).loc[idx > cutoff].sum())
+    except Exception:  # noqa: BLE001 - advisory
+        return ""
+    if ttm <= 0:
+        return ""
+    ttm_pct = ttm / price * 100.0
+    if abs(ttm_pct - rendered_pct) / max(ttm_pct, rendered_pct) <= _YIELD_DIVERGENCE:
+        return ""
+    return (
+        f"\n# NOTE: vendor 'Dividend Yield' ({rendered_pct:.2f}%) contradicts the same "
+        f"vendor's trailing-12m dividend record ({ttm:,.4f}/share = {ttm_pct:.2f}% at "
+        f"{price:,.2f}). Treat the payment record as the yield; do not quote the "
+        f"vendor dividendYield field."
+    )
+
+
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
     curr_date: Annotated[str, "current date (not used for yfinance)"] = None
@@ -344,6 +400,7 @@ def get_fundamentals(
         ]
 
         lines = []
+        div_yield_pct: float | None = None
         # yfinance reports ratio fields as decimal fractions (0.24 = 24%); the
         # ratio/margin labels below imply a percentage, so widen to % to avoid
         # a 100x unit drift in the LLM's read (see yfinance_short_interest).
@@ -366,6 +423,8 @@ def get_fundamentals(
                 # rendered 73.00% from a 0.73 input).
                 if label == "Dividend Yield" and y > 0.25:
                     y = y / 100.0
+                if label == "Dividend Yield":
+                    div_yield_pct = y * 100.0
                 lines.append(f"{label}: {y * 100:.2f}%")
             elif label == "Debt to Equity" and float(value) > 10:
                 # A D/E above 10 is a units/scaling artifact, not a real
@@ -385,7 +444,11 @@ def get_fundamentals(
         header = f"# Company Fundamentals for {canonical}\n"
         header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + "\n".join(lines)
+        return (
+            header
+            + "\n".join(lines)
+            + _dividend_yield_note(info, ticker_obj, div_yield_pct)
+        )
 
     except NoMarketDataError:
         raise

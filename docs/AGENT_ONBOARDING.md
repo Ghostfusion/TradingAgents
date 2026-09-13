@@ -338,6 +338,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - QQQI fund-run data-quality loop: metric reconciliation is
+  label-anchored (`TOOL_VALUE_RE` — first-number extraction was reading a note date as
+  `get_fundamentals`' market cap and `10DayAverageTradingVolume` as 10, rendering a phantom
+  `market_cap: VALUES CONFLICT range=10 .. 2026` that the report quoted as AUM), and a
+  multi-vendor metric with no labelled value renders `NO VALUE IN EVIDENCE` instead of a range;
+  `report_verifier._dividend_yield_sanity` parses fund distribution lists (cadence inferred from
+  the dated prints, quarterly never annualized x12) and flags understated quotes (QQQI 9.00% vs
+  14.02% implied by its own monthly prints); `y_finance.get_fundamentals` cross-checks
+  `dividendYield` against `Ticker.dividends` TTM (>25% gap -> correction NOTE in the leaf). A
+  157-report sweep gives exactly two yield-sanity claims, both true positives (MU stale field,
+  QQQI understated). See CHANGELOG.
 - 2026-09-07 `(working tree)` - Map-reduce forced tool gathering DESIGN + IMPLEMENTATION:
   design `docs/design_mapreduce_forced_tool_gathering.md`; plan
   `docs/implementation_plan_mapreduce_forced_tool_gathering.md`; code

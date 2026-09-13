@@ -2181,13 +2181,21 @@ def test_technical_factors_insufficient_history():
 def test_book_tail_risk_computes(monkeypatch):
     """get_book_tail_risk wraps portfolio CVaR + correlated stress + drawdown,
     and says which book the mix came from (the configured basket, not the
-    analyzed name - NVDA 2026-09-12 reported 20.21% as the book)."""
+    analyzed name - NVDA 2026-09-12 reported 20.21% as the book). The basket is
+    injected so the assertion cannot pin the live .env portfolio."""
     closes = _uptrend(260)
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": closes})
-    out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
+    with mock.patch(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {
+            "risk_basket_tickers": ["AAA", "BBB", "CCC"],
+            "risk_basket_weights": {"AAA": 0.5, "BBB": 0.3, "CCC": 0.2},
+        },
+    ):
+        out = T.get_book_tail_risk.invoke({"ticker": "AAPL"})
     assert "book tail risk AAPL" in out
     assert "portfolio_cvar=" in out and "correlated_stress_-10pct=" in out
-    assert "mix=configured basket (8/8 names)" in out
+    assert "mix=configured basket (3/3 names)" in out
     assert "drawdown(realized book)=" in out and "source=" in out
     assert "drawdown_gate=" in out
 

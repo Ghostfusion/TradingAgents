@@ -131,6 +131,56 @@ class TestFundamentalsFormattingGuards(unittest.TestCase):
         self.assertIn("Debt to Equity: n/a (implausible vendor value > 10)", out)
         self.assertIn("Dividend Yield: 0.73%", out)
 
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_dividend_yield_is_cross_checked_against_the_payment_record(self, mock_yf, _):
+        """QQQI 2026-09-13: info.dividendYield 0.09 renders as 9.00% while the
+        SAME vendor's monthly record pays ~0.65/share (14.3% at 54.56). The
+        leaf must carry both figures, so a report cannot quote the bad field
+        as the fund's distribution rate."""
+        info = {
+            "longName": "NEOS NASDAQ-100(R) High Income ETF",
+            "dividendYield": 0.09,
+            "regularMarketPrice": 54.56,
+        }
+        tr = _Ticker()
+        tr.info = info
+        now = pd.Timestamp.now(tz="America/New_York")
+        tr.dividends = pd.Series([0.6518] * 12, index=pd.date_range(end=now, periods=12, freq="30D"))
+        mock_yf.Ticker.return_value = tr
+        out = y_finance.get_fundamentals("QQQI")
+        self.assertIn("Dividend Yield: 9.00%", out)
+        self.assertIn("contradicts the same vendor's trailing-12m dividend record", out)
+        self.assertIn("14.34% at 54.56", out)
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_dividend_yield_note_silent_when_the_record_agrees(self, mock_yf, _):
+        info = {
+            "longName": "TestCorp",
+            "dividendYield": 0.02,
+            "regularMarketPrice": 100.0,
+        }
+        tr = _Ticker()
+        tr.info = info
+        now = pd.Timestamp.now(tz="America/New_York")
+        tr.dividends = pd.Series([0.50] * 4, index=pd.date_range(end=now, periods=4, freq="91D"))
+        mock_yf.Ticker.return_value = tr
+        out = y_finance.get_fundamentals("TST")
+        self.assertIn("Dividend Yield: 2.00%", out)
+        self.assertNotIn("NOTE:", out)
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_dividend_yield_note_absent_without_a_payment_record(self, mock_yf, _):
+        # No dividend history and no live price -> nothing to cross-check.
+        info = {"longName": "TestCorp", "dividendYield": 0.0073}
+        mock_yf.Ticker.return_value = _Ticker()
+        mock_yf.Ticker.return_value.info = info
+        out = y_finance.get_fundamentals("TST")
+        self.assertIn("Dividend Yield: 0.73%", out)
+        self.assertNotIn("NOTE:", out)
+
 
 _NVDA_QUARTERLY_BALANCE_CSV = (
     # Verbatim rows from the 2026-09-12 NVDA run's yfinance quarterly balance

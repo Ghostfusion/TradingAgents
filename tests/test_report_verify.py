@@ -438,6 +438,48 @@ def test_dividend_yield_sanity_clean_when_honest():
     assert rv._dividend_yield_sanity("ttm yield 12.0% but no dividend/share") == []
 
 
+def test_dividend_yield_sanity_flags_understated_fund_yield():
+    # QQQI 2026-09-13: 'Dividend yield: 9.00%' from the vendor field, five lines
+    # above the fund's own dated distribution list (5 monthly prints, mean
+    # 0.6464/share) which annualizes to 14.22% on the same reference price.
+    t = (
+        "**Reference price 54.56 is the 2026-09-11 settled close**\n"
+        "- Distribution cadence is monthly and consistent: 2026-04-22 $0.6297; "
+        "2026-05-20 $0.6589; 2026-06-16 $0.6572; 2026-07-22 $0.6346; "
+        "2026-08-19 $0.6518 USD\n"
+        "- Dividend yield: 9.00%\n"
+    )
+    cs = rv._dividend_yield_sanity(t)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "14.218% implied" in cs[0].claim
+    assert "9.00%" in cs[0].claim
+
+
+def test_dividend_yield_sanity_distribution_cadence_is_inferred():
+    # Quarterly prints annualized x4 (0.50 x4 = 2.00) match the quote, while a
+    # x12 assumption would have flagged a false conflict; an undated list with
+    # no cadence word is not annualized at all.
+    quarterly = (
+        "price 100.00; dividends 2026-03-31 $0.50; 2026-06-30 $0.50; "
+        "2026-09-30 $0.50; ttm yield 2.00%"
+    )
+    assert rv._dividend_yield_sanity(quarterly) == []
+    no_cadence = (
+        "price 100.00; distributions $0.50 / $0.52 / $0.49 / $0.51; ttm yield 2.00%"
+    )
+    assert rv._dividend_yield_sanity(no_cadence) == []
+
+
+def test_dividend_yield_sanity_flags_undated_monthly_list():
+    # Same list with an explicit monthly word: 0.1667 x12 = 2.00 versus a quoted
+    # 0.50% is a 4x understatement.
+    t = "price 100.00; distributions (monthly) $0.166 / $0.167 / $0.167; ttm yield 0.50%"
+    cs = rv._dividend_yield_sanity(t)
+    assert len(cs) == 1
+    assert "2.000% implied" in cs[0].claim
+
+
 def test_internal_conflict_pcr_oi_dual_values():
     # MU 2026-09-10 market.md: put/call OI 4.99-equivalent (3.99) in body vs
     # 3.39 in the summary - same metric, dual value.

@@ -1330,6 +1330,19 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
 # would be an overcount.
 _DPS_RE = re.compile(r"(?i)dividend(?:s)?\s+per\s+share[^0-9]{0,8}\$?\s*([0-9.]+)")
 _DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*([0-9.]+)\s*%")
+# Fund distribution lists (QQQI 2026-09-13 review loop). A fund reports its
+# per-share payments as a dated series ("2026-04-22 $0.6297; 2026-05-20
+# $0.6589; ...") or as a slash list in a table row, not as the single
+# "dividend per share" the DPS regex expects - so the yield sanity check
+# bailed out and let "Dividend yield: 9.00%" stand five lines above its own
+# distribution table paying ~14%. Dated prints let the cadence be INFERRED
+# (a 26-33 day median gap is monthly, 80-100 quarterly) instead of assumed,
+# which is what keeps a quarterly payer from being annualized x12.
+_DIST_DATED_RE = re.compile(
+    r"(?i)(20\d\d-\d\d-\d\d)[^\n$%]{0,12}\$\s*([0-9]+\.[0-9]{2,4})"
+)
+_DIST_AMOUNTS_RE = re.compile(r"\$\s*([0-9]+\.[0-9]{2,4})")
+_DIST_CADENCE_RE = re.compile(r"(?i)\b(monthly|quarterly)\b")
 
 
 _FCF_AMT = re.compile(
@@ -1557,45 +1570,114 @@ def _valuation_band_conflict(report_text: str) -> list[VerifierClaim]:
     return out
 
 
-def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
-    """A quoted dividend yield must not contradict the same report's
-    dividend-per-share and price.
+def _distribution_annual_per_share(report_text: str) -> tuple[float, str] | None:
+    """Annualized per-share distribution rate from the report's OWN payment
+    list, plus a one-line provenance note; None when no list is usable.
 
-    MU 2026-09-10 fundamentals review loop: the report quoted 'TTM yield 4.91%
-    per get_basic_financials' while its own dividend-per-share $0.15 and price
-    ~$983 imply 0.061% (4 x 0.15 / 982.95) - a stale/unit-scaled vendor field.
-    A >5x deviation is an INTERNAL_CONFLICT (quarterly-payment convention).
+    Cadence comes from the dates when they are printed (median gap), else from
+    an explicit monthly/quarterly word next to the amounts; a list whose
+    cadence cannot be established is skipped rather than annualized x12.
+    """
+    pairs = _DIST_DATED_RE.findall(report_text)
+    if len(pairs) >= 3:
+        amounts = [float(a) for _d, a in pairs]
+        try:
+            dates = sorted(datetime.strptime(d, "%Y-%m-%d") for d, _a in pairs)
+        except ValueError:
+            dates = []
+        if len(dates) == len(pairs) and len(dates) >= 3:
+            gaps = sorted((b - a).days for a, b in zip(dates, dates[1:], strict=False))
+            gap = gaps[len(gaps) // 2]
+            per_year = 12.0 if 26 <= gap <= 33 else 4.0 if 80 <= gap <= 100 else None
+            if per_year:
+                mean = sum(amounts) / len(amounts)
+                return (
+                    mean * per_year,
+                    f"{len(amounts)} dated prints, mean {mean:.4f}/share x{per_year:.0f} "
+                    f"(median gap {gap}d)",
+                )
+    # Undated list: only when a cadence word appears with the amounts.
+    for line in report_text.splitlines():
+        if "distribution" not in line.lower():
+            continue
+        amounts = [float(a) for a in _DIST_AMOUNTS_RE.findall(line)]
+        if len(amounts) < 3:
+            continue
+        cad = _DIST_CADENCE_RE.search(line) or _DIST_CADENCE_RE.search(report_text)
+        per_year = {"monthly": 12.0, "quarterly": 4.0}.get(cad.group(1).lower()) if cad else None
+        if per_year:
+            mean = sum(amounts) / len(amounts)
+            return (
+                mean * per_year,
+                f"{len(amounts)} prints, mean {mean:.4f}/share x{per_year:.0f} "
+                f"({cad.group(1).lower()} cadence)",
+            )
+    return None
+
+
+def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
+    """A quoted dividend yield must not contradict the same report's own
+    per-share payments and price.
+
+    Two payment shapes are recognized: one "dividend per share $X" amount
+    (annualized x4, the quarterly convention - the MU 2026-09-10 review loop
+    quoted 'TTM yield 4.91%' against a $0.15/quarter record implying 0.061%)
+    and a fund's dated distribution list (annualized by its own cadence - the
+    QQQI 2026-09-13 loop quoted 9.00% while its prints pay ~14%). Both an
+    overstated (>5x) and an understated (>1.4x) quote are conflicts: the
+    vendor field can be wrong in either direction.
     """
     if not report_text:
         return []
-    dps_m = _DPS_RE.search(report_text)
     price = _dd_price(report_text)
-    if not (dps_m and price is not None):
+    if price is None or price <= 0:
         return []
-    try:
-        dps = float(dps_m.group(1))
-    except ValueError:
+    annual: float | None = None
+    evidence = ""
+    dps_m = _DPS_RE.search(report_text)
+    if dps_m:
+        try:
+            dps = float(dps_m.group(1))
+        except ValueError:
+            dps = 0.0
+        if dps > 0:
+            annual = 4.0 * dps
+            evidence = f"{dps:.4f}/share x4 (quarterly convention)"
+    if annual is None:
+        dist = _distribution_annual_per_share(report_text)
+        if dist is not None:
+            annual, evidence = dist
+    if annual is None or annual <= 0:
         return []
-    annual = 4.0 * dps
     implied = annual / price * 100.0
-    if implied <= 0 or annual <= 0:
+    if implied <= 0 or implied > 60.0:
+        # A >60% implied rate means the price parse is wrong, not the yield:
+        # the first "price|close|last" line of a long report is not always the
+        # reference price. A claim carrying an absurd implied % costs more than
+        # the missed flag, so fail closed.
         return []
     for m in _DIV_YIELD_RE.finditer(report_text):
         try:
             quoted = float(m.group(1))
         except ValueError:
             continue
-        if quoted > 5.0 * implied:
-            return [VerifierClaim(
-                claim=f"dividend yield {quoted:.2f}% vs {annual:.2f}/share / price "
-                      f"{price:,.2f} => {implied:.3f}% implied",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "Quoted dividend yield contradicts the same report's dividend-per-share "
-                    "and price - stale/unit-scaled vendor field (MU 2026-09-10: 4.91% vs "
-                    "0.061% implied)."
-                ),
-            )]
+        overstated = quoted > 5.0 * implied
+        understated = implied > 1.4 * quoted
+        if not (overstated or understated):
+            continue
+        return [VerifierClaim(
+            claim=f"dividend yield {quoted:.2f}% vs {annual:.3f}/share / price "
+                  f"{price:,.2f} => {implied:.3f}% implied ({evidence})",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "Quoted dividend yield is "
+                + ("above" if overstated else "below")
+                + " the rate this report's own per-share payments imply - a stale/"
+                "unit-scaled vendor field (MU 2026-09-10: 4.91% vs 0.061% implied) or an "
+                "understated fund yield field (QQQI 2026-09-13: 9.00% vs 14.02% implied "
+                "by its monthly distribution list)."
+            ),
+        )]
     return []
 
 

@@ -46,6 +46,14 @@ new `strategies/metric_reconcile.py` (pure).
 `CONFLICT` reconcile line; an analyst citing one lone value of a conflicted
 metric becomes verifier-visible. Pure-function tests (no LLM).
 
+**Implemented (2026-09-13, QQQI fund review).** Values are read with a per-tool label regex
+(`TOOL_VALUE_RE`) instead of "the first number in the leaf". The first-number extractor had taken a leaf's note
+date (`2026`) as `get_fundamentals`' market cap and the leading `10` of `10DayAverageTradingVolume` as
+`get_basic_financials`', rendering a phantom `market_cap: VALUES CONFLICT range=10 .. 2026` for a fund whose
+leaves carry no market cap at all. `reconcile_metrics` now reports `labelled` per metric, a multi-vendor metric
+whose vendors carry no labelled value renders `NO VALUE IN EVIDENCE` (never a range), and a tool without a scalar
+label (the statement CSVs) contributes no value - so it can never manufacture a conflict.
+
 ## Phase 2 — Calibrated confidence everywhere (confidence scoring)
 
 **Goal**: make confidence tradable.

@@ -97,8 +97,17 @@ def test_book_tail_risk_reports_which_book_it_measured(monkeypatch):
     from tradingagents.agents.utils import analysis_tools as T
 
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": _crash_closes()})
-    out = T.get_book_tail_risk.invoke({"ticker": "NVDA"})
-    assert "source=configured basket (8/8 names)" in out
+    # The basket is injected so the label assertion cannot pin the live .env
+    # portfolio (it read "8/8 names" until the Sep-13 basket recalc).
+    with mock.patch(
+        "tradingagents.dataflows.config.get_config",
+        lambda: {
+            "risk_basket_tickers": ["AAA", "BBB"],
+            "risk_basket_weights": {"AAA": 0.6, "BBB": 0.4},
+        },
+    ):
+        out = T.get_book_tail_risk.invoke({"ticker": "NVDA"})
+    assert "source=configured basket (2/2 names)" in out
 
     with mock.patch(
         "tradingagents.dataflows.config.get_config",

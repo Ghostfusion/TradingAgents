@@ -30,6 +30,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **Phantom conflicts + understated fund yields** — gather-time metric reconciliation now
+  reads each value from the line that *names* it, so a fund with no market-cap leaf no longer produces
+  `market_cap: VALUES CONFLICT range=10 .. 2026` (it says `NO VALUE IN EVIDENCE` instead), and the same fix
+  removed the phantom `market_snapshot` conflicts on stock runs. The dividend-yield sanity check now also parses
+  fund **distribution lists** (cadence inferred from the dated prints) and flags an understated quote — the QQQI
+  2026-09-13 run quoted `9.00%` against its own record paying 14.02% — and `get_fundamentals` cross-checks the
+  vendor yield field against the trailing-12m payment record. See CHANGELOG.
 - [2026-09-07] **Debate reproducibility toolkit** — judge ensemble
   (`TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE`, now 5), structured-fallback reliability
   flags, field-level consensus in the RM/PM matrix, a deterministic **PM

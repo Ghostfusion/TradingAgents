@@ -14,6 +14,48 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Label-anchored metric values + fund-yield cross-checks (2026-09-13; the QQQI fund review).** A fund run
+(`QQQI_20260913_125516`) shipped two numbers that were not numbers, and neither was analyst arithmetic:
+
+**(1) `market_cap: VALUES CONFLICT range=10 .. 2026` was a parsing artifact.** `strategies/metric_reconcile.py`
+read the FIRST number in each leaf, so it took the note date (`# Data retrieved on: 2026-09-13`) as
+`get_fundamentals`' market cap and the `10DayAverageTradingVolume` label of `get_basic_financials` as 10 - in a
+leaf set that carries no market cap at all. The report then quoted that phantom range as its AUM evidence ("I do
+not state a single AUM figure"). Values now come from the line that NAMES the metric (`TOOL_VALUE_RE`, per tool:
+`Market Cap:` / `- Market cap:` / `marketCapitalization:` / `fair_value=` / `- Last:` / `| Close |`), a tool with
+no scalar label (the statement CSVs) contributes nothing, and a multi-vendor metric whose vendors are all silent
+renders `NO VALUE IN EVIDENCE ... report it unavailable` instead of a range. The same defect had been
+fabricating `market_snapshot` conflicts on stock runs (MU `range=1028 .. 2026`, NXPI `range=223.3 .. 2026`, HPE)
+- those are gone, while real vendor conflicts are unchanged (ADBE market cap 99.1B vs 102.26B, MU 1.148T vs
+1.161T, ARM D/E 5.62 vs 0.055).
+
+**(2) `Dividend yield: 9.00%` stood five lines above a distribution table paying ~14%.** The vendor field
+(yfinance `info['dividendYield'] = 0.09`) is unreconcilable with the SAME vendor's payment record: the trailing
+twelve monthly prints sum to 7.649 = 14.02% at the 54.56 reference price, and every rolling 12-payment window
+since inception is 13.4-14.0%. Three changes. `report_verifier._dividend_yield_sanity` now also parses fund
+**distribution lists** when no "dividend per share" sentence exists, inferring cadence from the printed dates
+(26-33 day median gap = monthly, 80-100 = quarterly; an undated list only with an explicit monthly/quarterly
+word), and flags an **understated** quote (implied > 1.4x quoted) as well as the existing overstated one (>5x).
+`dataflows/y_finance.py::get_fundamentals` cross-checks the field against `Ticker.dividends` TTM and appends a
+correction NOTE when the two disagree by >25% (QQQI: 9.00% vs 14.02%). The yield sanity check refuses to emit a
+claim whose implied rate exceeds 60% - that is a mis-parsed price, not a yield, and a claim carrying an absurd
+number costs more than the missed flag.
+
+Tests: `test_metric_reconcile` +3 (label-anchored extraction, the QQQI ETF no-value case, the MU date-vs-price
+case), `test_report_verify` +3 (understated fund yield, cadence inference incl. a quarterly payer NOT annualized
+x12, undated monthly list), `test_yfinance_keyless_vendor` +3 (cross-check fires / silent when the record agrees
+/ absent without a payment record). Sweeping all 157 analyst reports in `reports/` yields exactly two yield
+sanity claims: the pre-existing MU one and the new QQQI one - no false positives. Web impact: none (the
+reconcile dict is rendered into the evidence text only; the `tool_evidence.json` shape is unchanged).
+
+**Basket-pinned tests unpinned (2026-09-13).** `test_analysis_tools.py::test_book_tail_risk_computes` and
+`test_book_context.py::test_book_tail_risk_reports_which_book_it_measured` asserted `configured basket (8/8
+names)` against the live `.env` portfolio, so the Sep-13 basket recalc (8 -> 6 names: SPY, GLD, GOOG, NVDA, NLR,
+BAC) failed both for a reason that had nothing to do with the code under test. They now inject their own basket
+(3 names / 2 names) like their siblings `test_book_tail_risk_no_series` and the single-name half of the
+book-context test - the property under test (the mix names the configured book, not the analyzed ticker) is
+unchanged.
+
 **Honest degradation for tools a caller has no position for (2026-09-13; the web app's all-tools run).** The
 app's Value tools screen runs any of the 56 value tools on a bare ticker. One such run (`run_value_tools("AAPL",
 tools=<all 56>)`, `ok=true`, 42s) produced five answers that were not answers: a pydantic schema dump
