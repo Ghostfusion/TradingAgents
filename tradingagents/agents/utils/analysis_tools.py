@@ -28,6 +28,7 @@ from langchain_core.tools import tool
 from tradingagents.dataflows.errors import VendorError
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.strategies import factor_expressions as fe
+from tradingagents.strategies.options_math import expiry_days
 
 # ---------------------------------------------------------------------------
 # Shared data helpers (vendor chain CSV, benchmark closes)
@@ -2503,14 +2504,15 @@ def get_option_breakeven(
 def _options_chain_rows_lambda(ticker: str) -> tuple | None:
     """Best-effort chain rows + spot + T for the gamma/iv reads.
 
-    Returns ``(rows, spot, t_years)`` where rows = [{strike, iv, oi, spot,
-    side}] (the shape gex_per_strike consumes), or None when the chain has no
-    usable IV rows. Mirrors get_options_iv_read's builder.
+    Returns ``(rows, spot, t_years, expiry, days)`` where rows = [{strike, iv,
+    oi, spot, side}] (the shape gex_per_strike consumes), or None when the
+    chain has no usable IV rows. Mirrors get_options_iv_read's builder. The
+    expiry and its day count come back with the rows so every leaf can say
+    WHICH chain it measured - gamma scales with T, and an unlabelled horizon is
+    what let the QQQI 2026-09-13 review stack a 68-day ATM IV next to a 5-day
+    chain mean.
     """
     try:
-        import datetime as _dt
-        import re as _re
-
         closes = _ohlcv(ticker).get("closes") or []
         if len(closes) < 30:
             return None
@@ -2523,14 +2525,8 @@ def _options_chain_rows_lambda(ticker: str) -> tuple | None:
         expiry = expiries[min(2, len(expiries) - 1)]
         chain = tk.option_chain(expiry)
         spot = float(closes[-1])
-        m = _re.search(r"(\d{6})", expiry)
-        T = 30.0 / 365.0
-        if m:
-            try:
-                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
-                T = max((exp_d - _dt.datetime.now()).days, 1) / 365.0
-            except ValueError:
-                T = 30.0 / 365.0
+        days = expiry_days(expiry)
+        T = max(days if days is not None else 30, 1) / 365.0
         rows = []
         for side, df in (("call", chain.calls), ("put", chain.puts)):
             for _, r in df.iterrows():
@@ -2548,7 +2544,7 @@ def _options_chain_rows_lambda(ticker: str) -> tuple | None:
                     continue
         if len(rows) < 3:
             return None
-        return rows, spot, T
+        return rows, spot, T, expiry, days
     except Exception:  # noqa: BLE001 - advisory, degrades
         return None
 
@@ -2573,11 +2569,13 @@ def get_gamma_profile(
         out = _options_chain_rows_lambda(ticker)
         if out is None:
             return f"gamma profile unavailable for {ticker}: no usable option chain"
-        rows, spot, T = out
+        rows, spot, T, expiry, days = out
         prof = gex_per_strike(rows, spot, T)
         regime = gamma_regime(prof["net_gamma"])
+        horizon = f"{days}d to expiry" if days is not None else "30d assumed (expiry label unreadable)"
         lines = [f"## Gamma — {ticker}", ""]
         lines.append(f"- spot {spot:.2f}")
+        lines.append(f"- chain {expiry} ({horizon}): gamma scales with this horizon")
         lines.append(f"- gamma regime: {regime if regime else 'n/a'}")
         lines.append(f"- net dealer gamma: {prof['net_gamma']}")
         for wall in ("call_wall", "put_wall"):
@@ -2647,8 +2645,10 @@ def get_derivatives_flow(
         if out is None:
             lines.append("- gamma: n/a (no usable option chain)")
         else:
-            rows, spot, T = out
+            rows, spot, T, expiry, days = out
             prof = gex_per_strike(rows, spot, T)
+            horizon = f"{days}d to expiry" if days is not None else "30d assumed"
+            lines.append(f"- chain {expiry} ({horizon})")
             lines.append(
                 f"- gamma regime: {gamma_regime(prof['net_gamma']) if prof['net_gamma'] is not None else 'n/a'}"
             )
@@ -5357,9 +5357,6 @@ def get_options_iv_read(
     claim. Advisory; degrades to unavailable without a chain.
     """
     try:
-        import datetime as _dt
-        import re as _re
-
         from tradingagents.strategies.options_surface import (
             expected_move_from_chain as _exp_move,
             iv_skew as _iv_skew,
@@ -5381,15 +5378,8 @@ def get_options_iv_read(
         calls, puts = chain.calls, chain.puts
         rows = []
         spot = float(closes[-1])
-        m = _re.search(r"(\d{6})", expiry)
-        T = 30.0 / 365.0
-        if m:
-            try:
-                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
-                now = _dt.datetime.now()
-                T = max((exp_d - now).days, 1) / 365.0
-            except ValueError:
-                T = 30.0 / 365.0
+        days = expiry_days(expiry)
+        T = max(days if days is not None else 30, 1) / 365.0
         for _, r in calls.iterrows():
             try:
                 iv = r.get("impliedVolatility")
@@ -5447,18 +5437,23 @@ def get_options_iv_read(
             speed, zomma = g.get("speed"), g.get("zomma")
         except Exception:  # noqa: BLE001 - advisory greeks
             speed = zomma = None
+        horizon = f"{days}d to expiry" if days is not None else "30d assumed (expiry label unreadable)"
         lines = [f"## Options IV Read — {ticker}", ""]
+        lines.append(f"- chain {expiry} ({horizon})")
         lines.append(f"- ATM-IV: {atm_iv:.2%}")
         if em.get("ten_d_move_pct") is not None:
-            lines.append(f"- expected move ({int(T*365)}d): 1-sigma {em['ten_d_move_pct']:.1f}%")
+            lines.append(
+                f"- expected move ({int(T*365)}d): 1-sigma {em['ten_d_move_pct']:.1f}%"
+            )
         lines.append(
             f"- put:call OI: {poi:.2f} (put/call, ATM+OTM chain-wide; call/put "
             f"{1.0 / poi:.2f})" if poi is not None else "- put:call OI: n/a"
         )
         lines.append(
-            "- OI ratio convention: THIS tool = put/call; the options-chain "
-            "snapshot tool reports call/put. The two are reciprocals of the "
-            "same OI universe - never quote one without its convention."
+            f"- OI ratio convention: THIS tool = put/call on the {expiry} chain; "
+            "the options-chain snapshot reports call/put on ITS OWN (nearest) "
+            "expiry, so the two numbers are NOT reciprocals of one universe - "
+            "quote the expiry with the ratio."
         )
         lines.append(f"- put-skew (OTM P - OTM C)/ATM: {skew:+.3f}" if skew is not None else "- put-skew: n/a")
         # vrp is in PERCENTAGE POINTS (volatility_risk_premium returns
@@ -5499,8 +5494,6 @@ def get_vol_surface_shape(
     unavailable without a two-expiry chain.
     """
     try:
-        import datetime as _dt
-        import re as _re
 
         from tradingagents.strategies.options_surface import (
             surface_shape as _shape,
@@ -5520,15 +5513,8 @@ def get_vol_surface_shape(
 
         def _rows_for(expiry: str) -> tuple[list, float]:
             chain = tk.option_chain(expiry)
-            m = _re.search(r"(\d{6})", expiry)
-            T = 30.0 / 365.0
-            if m:
-                try:
-                    exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
-                    now = _dt.datetime.now()
-                    T = max((exp_d - now).days, 1) / 365.0
-                except ValueError:
-                    T = 30.0 / 365.0
+            days = expiry_days(expiry)
+            T = max(days if days is not None else 30, 1) / 365.0
             rows = []
             for df, side in ((chain.calls, "call"), (chain.puts, "put")):
                 for _, r in df.iterrows():
@@ -5542,8 +5528,10 @@ def get_vol_surface_shape(
                         continue
             return rows, T
 
-        near_rows, _T = _rows_for(expiries[0])
-        far_rows, _ = _rows_for(expiries[min(2, len(expiries) - 1)])
+        near_exp = expiries[0]
+        far_exp = expiries[min(2, len(expiries) - 1)]
+        near_rows, _T = _rows_for(near_exp)
+        far_rows, _ = _rows_for(far_exp)
         shape = _shape(near_rows) if len(near_rows) >= 4 else {"rr25": None, "bf25": None, "n": 0}
 
         def _atm(rows: list) -> float | None:
@@ -5562,7 +5550,7 @@ def get_vol_surface_shape(
                 "backwardation (long-dated vol cheaper)" if ts < 0 else "flat")
             lines.append(
                 f"- term-structure slope (long-short ATM, IV long - IV short): {ts:+.3f} "
-                f"[{ts_note}]"
+                f"[{ts_note}; {far_exp} - {near_exp}]"
             )
         else:
             lines.append("- term-structure slope: n/a")
@@ -5589,8 +5577,6 @@ def get_parity_screen(
     exercise, wide quotes). Advisory.
     """
     try:
-        import datetime as _dt
-        import re as _re
 
         from tradingagents.strategies.options_surface import parity_violation as _parity
 
@@ -5604,15 +5590,8 @@ def get_parity_screen(
         if not expiries:
             return f"parity screen unavailable for {ticker}: no option chain"
         expiry = expiries[0]
-        m = _re.search(r"(\d{6})", expiry)
-        T = 30.0 / 365.0
-        if m:
-            try:
-                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
-                now = _dt.datetime.now()
-                T = max((exp_d - now).days, 1) / 365.0
-            except ValueError:
-                T = 30.0 / 365.0
+        days = expiry_days(expiry)
+        T = max(days if days is not None else 30, 1) / 365.0
         chain = tk.option_chain(expiry)
         spot = float(closes[-1])
         calls = {float(r["strike"]): r.get("lastPrice") for _, r in chain.calls.iterrows()}
@@ -5632,12 +5611,17 @@ def get_parity_screen(
                 worst = (k, bps, v["direction"])
         if not rows_out:
             return f"parity screen unavailable for {ticker}: no usable quotes"
-        lines = [f"## Parity Screen — {ticker} ({expiry})", ""]
+        horizon = f"{days}d to expiry" if days is not None else "30d assumed"
+        lines = [f"## Parity Screen — {ticker} ({expiry}, {horizon})", ""]
         lines.append("| Strike | Violation (bp) | Direction |")
         lines.append("| --- | --- | --- |")
         for k, bps, d in rows_out:
             lines.append(f"| {k:.2f} | {bps:+.2f} | {d} |")
         lines.append("")
+        lines.append(
+            f"Assumptions: r=0, q=0 over the {days if days is not None else 30}d horizon "
+            "(PV(K) = K), last traded prices, no American early-exercise premium."
+        )
         if worst and worst[2] != "fair":
             lines.append(
                 f"Worst: strike {worst[0]:.2f} -> {worst[2]} ({worst[1]:+.2f} bp). "
@@ -6584,7 +6568,6 @@ def _machine_chain_vrp(ticker: str) -> dict | None:
     realized_var, vrp, n, forward}`` or None when the chain is unavailable /
     unusable (honest no-fabrication).
     """
-    import datetime as _dt
     import math as _math
 
     closes = _ohlcv(ticker).get("closes") or []
@@ -6614,18 +6597,10 @@ def _machine_chain_vrp(ticker: str) -> dict | None:
         puts = chain.puts
         if calls is None or puts is None or calls.empty or puts.empty:
             return None
-        # Days to expiry from the contract symbol (or default 30d).
-        import re as _re
-
-        m = _re.search(r"(\d{6})", expiry)
-        T = 30.0 / 365.0
-        if m:
-            try:
-                exp_d = _dt.datetime.strptime(m.group(1), "%y%m%d")
-                now = _dt.datetime.now()
-                T = max((exp_d - now).days, 1) / 365.0
-            except ValueError:
-                T = 30.0 / 365.0
+        # Days to expiry from the vendor's expiry label (ISO date or a
+        # 6-digit contract stamp); 30d is a STATED fallback, never silent.
+        days = expiry_days(expiry)
+        T = max(days if days is not None else 30, 1) / 365.0
         fwd = spot  # q=0 approximation: F = S (no dividend model) - stated
         rows = []
         for _, row in calls.iterrows():
@@ -6665,10 +6640,14 @@ def _machine_chain_vrp(ticker: str) -> dict | None:
             return None
         return {
             "implied_var": float(iv2),
+            "implied_vol": _math.sqrt(float(iv2)),
             "realized_var": float(rv),
+            "realized_vol": _math.sqrt(float(rv)),
             "vrp": float(iv2) - float(rv),
             "n": len(rows),
             "forward": round(float(fwd), 2),
+            "expiry": expiry,
+            "days": days,
         }
     except Exception:  # noqa: BLE001 - no fabrication
         return None
@@ -6691,11 +6670,19 @@ def get_variance_premium(
     """
     v = _machine_chain_vrp(ticker)
     if v is not None:
+        horizon = (
+            f"{v['expiry']} {v['days']}d to expiry"
+            if v.get("days") is not None
+            else f"{v.get('expiry')} (30d assumed)"
+        )
         return (
             f"variance premium {ticker}: implied_var={v['implied_var']:.4f} "
-            f"realized_var={v['realized_var']:.4f} vrp={v['vrp']:+.4f} "
-            f"(model-free, n={v['n']} OTM strikes, fwd~={v['forward']}, "
-            f"r=3% q=0; positive = rich IV)"
+            f"(vol {v['implied_vol']:.2%}) realized_var={v['realized_var']:.4f} "
+            f"(vol {v['realized_vol']:.2%}) vrp={v['vrp']:+.4f} "
+            f"(model-free, {horizon}, n={v['n']} OTM strikes, fwd~={v['forward']}, "
+            f"r=3% q=0; positive = rich IV. IV is quoted as VARIANCE: compare against "
+            f"get_options_iv_read's ATM-IV only after converting - and note that tool "
+            f"reads a different expiry.)"
         )
     try:
         from tradingagents.agents.utils.analysis_tools import get_options_surface

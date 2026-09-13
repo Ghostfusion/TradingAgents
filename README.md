@@ -30,6 +30,12 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **Options horizons** — every yfinance-chain tool parsed an expiry as a 6-digit contract stamp
+  while yfinance returns ISO dates, so all of them silently priced a 68-day chain at 30 days: the model-free
+  implied variance was doubled (0.1034 vs 0.0458), the gamma call wall read 55.0 instead of 56.0, and an expected
+  move was labelled 30d while scaling a 68-day ATM IV. One `expiry_days` helper now reads both spellings, and every
+  options leaf names its expiry + horizon (plus the variance-vs-vol, ATM-vs-mean-IV and OI-expiry conventions). See
+  CHANGELOG.
 - [2026-09-13] **Phantom conflicts + understated fund yields** — gather-time metric reconciliation now
   reads each value from the line that *names* it, so a fund with no market-cap leaf no longer produces
   `market_cap: VALUES CONFLICT range=10 .. 2026` (it says `NO VALUE IN EVIDENCE` instead), and the same fix

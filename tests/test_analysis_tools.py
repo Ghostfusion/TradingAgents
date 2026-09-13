@@ -952,17 +952,91 @@ def test_gamma_profile_unavailable_without_chain(monkeypatch):
     assert "unavailable" in out
 
 
+def test_option_tools_take_the_horizon_from_the_expiry_label(monkeypatch):
+    """QQQI 2026-09-13 review loop: yfinance spells expiries as ISO dates
+    ("2026-11-20") while the tools parsed only a 6-digit contract stamp, so
+    every expiry silently fell back to T=30/365 - the model-free implied
+    variance came out at 0.1034 for a 68-day chain whose correct value is
+    0.0458, and gamma's call wall moved off 56.0 onto 55.0.
+
+    A strip priced off a flat 25% vol at a 67-day horizon must read back a
+    variance near (not 2.2x) that vol squared: the 30-day default returns the
+    inflated number, which is what this pins.
+    """
+    import datetime as _dt
+
+    import pandas as _pd
+    import yfinance as _yf
+
+    from tradingagents.strategies.options_math import black76, expiry_days
+
+    spot, sigma, far_days = 100.0, 0.25, 67
+    far = (_dt.date.today() + _dt.timedelta(days=far_days)).isoformat()
+    t_far = far_days / 365.0
+    strikes = [80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0]
+
+    def _frame(side: str) -> _pd.DataFrame:
+        mids = [round(float(black76(spot, k, t_far, sigma, side, 0.0)["price"]), 4) for k in strikes]
+        return _pd.DataFrame({
+            "strike": strikes,
+            "impliedVolatility": [sigma] * len(strikes),
+            "openInterest": [100.0] * len(strikes),
+            "bid": [max(m - 0.02, 0.01) for m in mids],
+            "ask": [m + 0.02 for m in mids],
+            "lastPrice": mids,
+        })
+
+    calls, puts = _frame("call"), _frame("put")
+
+    class _FakeTk:
+        def __init__(self, expiry):
+            self.options = [expiry, expiry, expiry]
+
+        def option_chain(self, expiry):
+            return SimpleNamespace(calls=calls, puts=puts)
+
+    n = 120
+    closes = [spot] * n
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker, days=320: {
+        "dates": [f"2026-01-{i % 28 + 1:02d}" for i in range(n)],
+        "closes": closes, "opens": closes,
+        "highs": [c + 0.1 for c in closes], "lows": [c - 0.1 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    })
+
+    monkeypatch.setattr(_yf, "Ticker", lambda t: _FakeTk(far))
+    v = T._machine_chain_vrp("ZZZZ")
+    assert v["expiry"] == far
+    assert v["days"] == expiry_days(far) >= 66
+    assert v["implied_vol"] == pytest.approx(v["implied_var"] ** 0.5, rel=1e-9)
+    # Correct horizon: near the priced vol's variance (the OTM strip starts 5%
+    # below the forward, so the Cboe K0 correction shaves it). The 30-day
+    # default would land at ~2.2x that - above the upper bound.
+    assert 0.5 * sigma ** 2 < v["implied_var"] < 0.5 * (sigma ** 2 * far_days / 30.0)
+
+    out = T.get_options_iv_read.invoke({"ticker": "ZZZZ"})
+    assert f"- chain {far} ({expiry_days(far)}d to expiry)" in out
+    assert f"- expected move ({expiry_days(far)}d):" in out
+    assert "30d assumed" not in out
+
+    parity = T.get_parity_screen.invoke({"ticker": "ZZZZ"})
+    assert f"({far}, {expiry_days(far)}d to expiry)" in parity
+    assert "Assumptions: r=0, q=0" in parity
 def test_gamma_profile_renders_regime(monkeypatch):
 
     rows = []
     for k in (90.0, 110.0):
         rows.append({"strike": k, "iv": 0.3, "oi": 200.0, "side": "call"})
         rows.append({"strike": k, "iv": 0.3, "oi": 50.0, "side": "put"})
-    monkeypatch.setattr(T, "_options_chain_rows_lambda", lambda t: (rows, 100.0, 0.0833))
+    monkeypatch.setattr(
+        T, "_options_chain_rows_lambda", lambda t: (rows, 100.0, 0.0833, "2026-09-18", 30)
+    )
     out = T.get_gamma_profile.invoke({"ticker": "AAPL"})
     assert "gamma regime: long" in out  # call-dominated -> long (mainstream GEX)
     assert "call wall" in out and "put wall" in out
     assert "heuristic" in out
+    # The leaf must name the chain it measured (gamma scales with the horizon).
+    assert "chain 2026-09-18 (30d to expiry)" in out
 
 
 def test_opex_read_renders_window():

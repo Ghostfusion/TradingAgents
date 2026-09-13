@@ -338,6 +338,15 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - QQQI market-review options loop: `strategies/options_math.py::expiry_days`
+  reads the vendor's expiry label (ISO date / 6-digit contract stamp / 8-digit basic ISO; None when
+  unreadable) and the five yfinance-chain readers (`_options_chain_rows_lambda`, `get_options_iv_read`,
+  `get_vol_surface_shape`, `get_parity_screen`, `_machine_chain_vrp`) take T from it. Before, all five matched
+  a 6-digit stamp against an ISO date, fell back to T=30/365, and priced a 68-day chain at 30 days - implied
+  variance 0.1034 vs the correct 0.0458, gamma call wall 55.0 vs 56.0, an expected move labelled 30d off a
+  68-day ATM IV, and an OI note claiming two tools' ratios came from one universe when they come from
+  different expiries. Leaves now print expiry + horizon (and implied/realized VOL beside the variances). See
+  CHANGELOG.
 - 2026-09-13 `(working tree)` - QQQI fund-run data-quality loop: metric reconciliation is
   label-anchored (`TOOL_VALUE_RE` — first-number extraction was reading a note date as
   `get_fundamentals`' market cap and `10DayAverageTradingVolume` as 10, rendering a phantom

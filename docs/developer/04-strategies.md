@@ -115,7 +115,9 @@ involved. This is the "compute, don't narrate" core.
   target-vol normalized, gross-leverage capped).
 - `options_math.py` — Black-76 with rho/vanna/vomma/charm + vanilla
   `bsm_equity_surface` + `greek_pnl_response` (delta-gamma-vega-theta P&L) +
-  Cboe/VIX-style `model_free_implied_variance`.
+  Cboe/VIX-style `model_free_implied_variance` + `expiry_days` (vendor expiry
+  label → calendar days; reads both the ISO date yfinance returns and the
+  6-digit yymmdd of a contract symbol).
 - `book_risk.py` — `cdar` (Chekhlov drawdown-at-risk).
 - `portfolio_optimizer.py` — `max_diversification_weights` (Choueifaty).
 - `credit_spread.py` — `merton_distance_to_default` (equity-as-a-call).

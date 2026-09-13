@@ -152,6 +152,11 @@ def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
         f"## {ticker.upper()} Options Snapshot (yfinance, expiry {expiry})",
         "",
     ]
+    lines.append(
+        "- IVs below are MEANS across every strike of this expiry (thin wings "
+        "included), so they sit far above an at-the-money IV for the same expiry - "
+        "compare ATM-IV only against an ATM-IV of the SAME expiry."
+    )
     if call_iv is not None:
         lines.append(f"- Call implied vol (mean): {call_iv:.1%}")
     if put_iv is not None:
@@ -177,9 +182,10 @@ def get_options_chain_yfinance(ticker: str, curr_date: str = None) -> str:
         lines.append(f"- Call/Put volume ratio: {pc_vol:.2f} "
                      f"(put/call = {put_vol / call_vol if call_vol > 0 else float('nan'):.2f})")
     lines.append(
-        "- OI ratio convention: THIS snapshot = call/put; the options-IV-read "
-        "tool reports put/call. They are reciprocals of the same OI universe - "
-        "never quote one without its convention."
+        f"- OI ratio convention: THIS snapshot = call/put on the {expiry} chain; "
+        "the options-IV-read tool reports put/call on ITS OWN expiry (the 3rd "
+        "listed expiry, not the nearest). The two are reciprocals of each other "
+        "only WITHIN one expiry - quote the expiry with the ratio."
     )
 
     lines.append("")

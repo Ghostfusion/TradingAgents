@@ -14,6 +14,44 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Options horizons read from the wrong label: doubled variance + a moved gamma wall (2026-09-13; the QQQI
+market review).** Every yfinance-chain reader parsed an expiry as a 6-digit contract stamp
+(`strptime(expiry, "%y%m%d")`), but `Ticker.options` returns ISO dates (`"2026-11-20"`), so the parse failed
+silently and all five readers priced the chain at the 30-day default `T = 30/365`:
+
+**(1) `get_variance_premium`** priced a 68-day chain at 30 days. Variance scales ~1/T, so `implied_var` came out
+**0.1034** instead of **0.0458** (implied vol 32.2% instead of 21.6%) and the premium read **+0.0928** instead of
+**+0.0358** - a 2.6x overstatement of the "rich IV" edge that a report would have quoted as a cheap-vol call. The
+leaf now prints the implied/realized VOL beside the variances (the figures are variance, which is why a 21% chain
+read as "32% vol"), names the expiry and its day count, and says the ATM-IV tool reads a different expiry.
+
+**(2) `get_gamma_profile` / `get_derivatives_flow`** fed that T to `gex_per_strike`. On the QQQI chain the same
+rows give net dealer gamma 3,488,951 with a **55.0** call wall at T=30/365 and 3,355,519 with a **56.0** call wall
+at the true 68-day horizon - i.e. the report's headline "doji/shooting-star into the 55.0 call wall" was a T
+artifact (the gamma *regime* stayed "long", but walls are strike-ranking reads and a per-strike IV spread makes the
+ranking T-sensitive). Both leaves now name the chain and horizon they measured.
+
+**(3) `get_options_iv_read`** labelled its expected move "30d" while multiplying a 68-day ATM IV by sqrt(30/365):
+2.7% instead of that chain's 4.1% over 67 days. Its "OI ratio convention" note also claimed the put/call and
+call/put ratios were "reciprocals of the same OI universe" - they are not: 0.73 put/call comes from the 2026-11-20
+chain while the chain snapshot's 2.51 (call/put 0.40) comes from the nearest 2026-09-18 expiry, so a report that
+quoted both was comparing two different books. The note now names each tool's expiry, and the chain snapshot states
+that its IVs are strike MEANS (thin wings included) and cannot be compared with an ATM-IV of another expiry.
+
+**(4) `get_parity_screen`** discounted 30 days on a 4-day expiry - the numbers were unaffected only because the
+caller passes `r=0`, so the leaf now states the assumption (`r=0, q=0`, last traded prices, no American early
+exercise) instead of leaving it implicit; `get_vol_surface_shape` carried the same wrong T with no effect on its
+IV-difference outputs.
+
+Root fix: one pure `options_math.expiry_days(label)` that reads ISO dates, 6-digit stamps and 8-digit basic ISO and
+returns None (never a guess) for an unreadable label. All five readers take the horizon from it and print the
+expiry they used.
+
+Tests: `expiry_days` shapes (ISO / stamp / basic ISO / today / garbage) + an ISO-expiry regression that prices a
+flat-25%-vol strip on a 67-day label and fails if a reader returns the 30-day default (correct var 0.0362 vs the
+inflated 0.0805) and that every leaf names its expiry + horizon. Web impact: none (leaf text only; no JSON shape,
+CLI flag or tool name changed).
+
 **Label-anchored metric values + fund-yield cross-checks (2026-09-13; the QQQI fund review).** A fund run
 (`QQQI_20260913_125516`) shipped two numbers that were not numbers, and neither was analyst arithmetic:
 

@@ -12,6 +12,8 @@ out-of-range input). Nothing is invented for the LLM.
 from __future__ import annotations
 
 import math
+import re
+from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Black-76 (futures/forward-style) reference pricing + Greeks
@@ -451,6 +453,42 @@ def model_free_implied_variance(
     return round(max(var, 0.0), 6)
 
 
+def expiry_days(expiry: str, now: datetime | None = None) -> int | None:
+    """Calendar days from ``now`` to an option-expiry label; None if unreadable.
+
+    Vendors spell the same expiry two ways and the difference is SILENT: the
+    yfinance chain list returns ISO dates ("2026-11-20") while a contract
+    symbol carries a 6-digit stamp ("260918"). Parsing only the stamp left every
+    ISO expiry on a 30-day default - the QQQI 2026-09-13 market review read a
+    68-day chain at T=30/365, DOUBLING the model-free implied variance (0.1034
+    instead of 0.0458), inflating the expected move's horizon label, and
+    discounting put-call parity at 6x the true time (the nearest expiry was 5
+    days out).
+
+    Returns 0 for an expiry dated today and None - never a guess - when the
+    label is not a date, so a caller states the horizon it assumed.
+    """
+    s = str(expiry or "").strip()
+    if not s:
+        return None
+    when = now or datetime.now()
+    day: datetime | None = None
+    try:
+        day = datetime.fromisoformat(s[:10])
+    except ValueError:
+        digits = re.sub(r"\D", "", s)
+        for fmt in ("%y%m%d", "%Y%m%d"):
+            if len(digits) == len(when.strftime(fmt)):
+                try:
+                    day = datetime.strptime(digits, fmt)
+                except ValueError:
+                    day = None
+                break
+    if day is None:
+        return None
+    return max((day - when).days, 0)
+
+
 __all__ = ["black76", "implied_vol_and_greeks", "black_vol_surface",
            "variance_swap_strike", "bsm_equity_surface", "greek_pnl_response",
-           "model_free_implied_variance"]
+           "model_free_implied_variance", "expiry_days"]

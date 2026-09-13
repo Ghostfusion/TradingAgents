@@ -3,7 +3,7 @@ put-call parity screen."""
 
 import pytest
 
-from tradingagents.strategies.options_math import black76
+from tradingagents.strategies.options_math import black76, expiry_days
 from tradingagents.strategies.options_surface import (
     parity_violation,
     surface_shape,
@@ -24,6 +24,31 @@ def _mk_rows(call_ivs: list[float], put_ivs: list[float], spot: float = 100.0,
             rows.append({"strike": kk, "iv": iv, "days_to_expiry": days,
                          "spot": spot, "side": side})
     return rows
+
+
+# --- expiry labels ---------------------------------------------------------
+
+
+def test_expiry_days_reads_both_vendor_spellings():
+    """QQQI 2026-09-13 review loop: yfinance lists expiries as ISO dates while
+    contract symbols carry a 6-digit yymmdd stamp. Parsing only the stamp left
+    every ISO expiry on the tools' 30-day default, which doubled the model-free
+    implied variance of a 68-day chain (0.1034 vs 0.0458) and moved the gamma
+    call wall from 56.0 to 55.0."""
+    from datetime import datetime
+
+    now = datetime(2026, 9, 13)
+    assert expiry_days("2026-11-20", now) == 68  # yfinance chain-list form
+    assert expiry_days("261120", now) == 68  # contract-symbol stamp
+    assert expiry_days("20261120", now) == 68  # basic ISO
+    assert expiry_days("2026-09-18", now) == 5
+    assert expiry_days("260918", now) == 5
+    assert expiry_days("2026-11-20T14:00:00", now) == 68
+    assert expiry_days("2026-09-13", now) == 0  # expiry today, never negative
+    # Unreadable labels return None so the caller states the horizon it assumed.
+    assert expiry_days("", now) is None
+    assert expiry_days("garbage", now) is None
+    assert expiry_days(None, now) is None
 
 
 # --- speed / zomma ---------------------------------------------------------
