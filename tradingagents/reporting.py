@@ -467,7 +467,7 @@ def _risk_gate_block(final_state: dict) -> str:
     # structure tools said hold, the action was risk reduction, and nothing in
     # the report said so).
     try:
-        _bg, _basis, _why = _binding_gate(final_state)
+        _bg, _basis, _why = _binding_constraint(final_state)
     except Exception:  # noqa: BLE001 - advisory; never break the block
         _bg, _basis, _why = None, "setup", ""
     if _basis == "risk_reduction":
@@ -529,10 +529,10 @@ def _evidence_data_quality(final_state: dict) -> str | None:
     return "partial" if used else "unknown"
 
 
-def _binding_gate(final_state: dict) -> tuple[str | None, str, str]:
+def _binding_constraint(final_state: dict) -> tuple[str | None, str, str]:
     """Which constraint bound the action, and whether the action is risk-driven.
 
-    Returns ``(binding_gate, action_basis, reason)``; ``action_basis`` is
+    Returns ``(binding_constraint, action_basis, reason)``; ``action_basis`` is
     ``"risk_reduction"`` when a portfolio/name risk constraint (halt, measured
     book drawdown, analyzed-name CVaR over budget, or a gate REJECT) bound the
     action, else ``"setup"``. Read from ``risk_context``/``risk_gate`` only,
@@ -564,20 +564,32 @@ def _binding_gate(final_state: dict) -> tuple[str | None, str, str]:
     return None, "setup", ""
 
 
-def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
+def write_research_decision(
+    final_state: dict, ticker: str, save_path, *, now: datetime | None = None
+) -> None:
     """Emit the deterministic execution contract next to run_card.json.
 
-    Subset of the plan schema (schema_version 1) consumed by the TradingExecution
-    layer: ticker, effective_date, rating, deterministic position levels from the
-    G1 position contract, data_quality/guardrail notes from the PM decision, and
-    the risk_gate verdict. Every unproducible field is ``null`` — the daemon
-    fails closed on anything it cannot validate. The artifact is hash-pinned
-    (``decision_hash``) so the executor can verify and dedupe it. Advisory;
-    never gates; never breaks a report write.
+    The artifact consumed by the TradingExecution layer: ticker, effective_date,
+    rating, deterministic position levels from the G1 position contract,
+    data_quality/guardrail notes from the PM decision, and the risk_gate verdict.
+    Every unproducible field is ``null`` — the executor fails closed on anything
+    it cannot validate. Advisory; never gates; never breaks a report write.
+
+    Declares ``schema_version 1.1.0`` and the envelope that version requires
+    (expiry, producer, idempotency key, body hash); the rules live in
+    ``tradingagents.execution_contract``, the single owner shared with the report
+    verifier, and the acceptance tests are in
+    ``docs/execution_v1_emitter_plan.md``. ``now`` is injectable for tests.
     """
-    import hashlib as _hl
     import json as _rj
     from datetime import date as _date
+
+    from tradingagents.execution_contract import (
+        SCHEMA_VERSION,
+        envelope_fields,
+        run_id_for,
+        seal,
+    )
 
     pm = final_state.get("pm_decision") or {}
     # Never degrade history: a rebuild reconstructs state from markdown and has
@@ -622,7 +634,7 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     declared_dq = str(pm_dq).strip().lower() if pm_dq else None
     facts_dq = declared_dq or _evidence_data_quality(final_state) or "unknown"
     sources_used, sources_empty = _evidence_sources(final_state)
-    binding_gate, action_basis, binding_reason = _binding_gate(final_state)
+    binding_constraint, action_basis, binding_reason = _binding_constraint(final_state)
     invalidations = _invalidation_conditions(
         stop_loss=stop, take_profit=target, data_quality=facts_dq
     )
@@ -644,10 +656,11 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
     except Exception:  # noqa: BLE001 - advisory; never break the artifact
         _split = {"security_signal": None, "portfolio_action": None, "combined_action": None, "gated": False}
 
+    effective = _date.today()
     doc = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "ticker": str(ticker).upper(),
-        "effective_date": _date.today().isoformat(),
+        "effective_date": effective.isoformat(),
         "rating": pm_rating,
         "direction": None,  # derived by the executor from rating
         "thesis": pm.get("investment_thesis") if isinstance(pm, dict) else None,
@@ -672,14 +685,26 @@ def write_research_decision(final_state: dict, ticker: str, save_path) -> None:
         "combined_action": _split.get("combined_action"),
         "gated": bool(_split.get("gated")),
         # Which constraint bound the action and whether it is risk-driven or
-        # setup-driven: execution reads binding_gate, the report renders it.
-        "binding_gate": binding_gate,
+        # setup-driven. Named ``binding_constraint``, NOT ``binding_gate``: the
+        # executor reserves ``binding_gate`` for the label its own gate computes,
+        # so an advisory value under that name would collide the day it matters
+        # (execution_contract.EXECUTOR_OWNED / plan section 0 F2).
+        "binding_constraint": binding_constraint,
         "action_basis": action_basis,
         "binding_reason": binding_reason or None,
         "disclosure": {"sources_used": sources_used, "sources_empty": sources_empty},
     }
-    body = _rj.dumps(doc, sort_keys=True, default=str)
-    doc["decision_hash"] = "sha256:" + _hl.sha256(body.encode("utf-8")).hexdigest()
+    # The v1.1.0 envelope (expiry, provenance, idempotency key) and both hashes
+    # are attached immediately before the write: every field above is final by
+    # now, and the executor recomputes the body, so post-editing a sealed
+    # artifact would dead-letter it. run_id is the report directory's name, which
+    # is stable across a re-emit and therefore keeps the inbox key stable.
+    doc.update(
+        envelope_fields(
+            final_state, run_id=run_id_for(target_path.parent), effective=effective, now=now
+        )
+    )
+    seal(doc)
     target_path.write_text(
         _rj.dumps(doc, indent=2, sort_keys=True, default=str), encoding="utf-8"
     )

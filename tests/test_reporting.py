@@ -757,7 +757,7 @@ def test_decision_labels_a_risk_driven_action(tmp_path):
     state["pm_decision"] = {"rating": "Underweight"}
     write_report_tree(state, "NVDA", tmp_path)
     doc = _decision(tmp_path)
-    assert doc["binding_gate"] == "analyzed_name_cvar"
+    assert doc["binding_constraint"] == "analyzed_name_cvar"
     assert doc["action_basis"] == "risk_reduction"
     assert "4.83%" in doc["binding_reason"] and "3.00%" in doc["binding_reason"]
     block = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
@@ -770,16 +770,16 @@ def test_decision_marks_a_book_drawdown_block(tmp_path):
     state["pm_decision"] = {"rating": "Underweight"}
     write_report_tree(state, "NVDA", tmp_path)
     doc = _decision(tmp_path)
-    assert doc["binding_gate"] == "book_drawdown"
+    assert doc["binding_constraint"] == "book_drawdown"
     assert doc["action_basis"] == "risk_reduction"
 
 
-def test_decision_has_no_binding_gate_for_a_setup_driven_action(tmp_path):
+def test_decision_has_no_binding_constraint_for_a_setup_driven_action(tmp_path):
     state = _state(risk_ctx={"single_cvar": 0.01, "cvar_budget_pct": 0.03})
     state["pm_decision"] = {"rating": "Buy"}
     write_report_tree(state, "TST", tmp_path)
     doc = _decision(tmp_path)
-    assert doc["binding_gate"] is None
+    assert doc["binding_constraint"] is None
     assert doc["action_basis"] == "setup"
     block = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     assert "Basis:" not in block

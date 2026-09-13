@@ -839,6 +839,24 @@ tranche fold on, it additionally shows `Tranche peak-deployed` (cap-ok) and
 `scripts/rebuild_complete_report.py` re-renders folders without a re-run and
 preserves `Risk Gate (computed)` blocks.
 
+`reporting.py::write_research_decision(state, ticker, path)` writes
+`research_decision.json` next to the run card — the **only** input contract of
+the execution layer, which reads it as a versioned envelope. It declares
+`schema_version 1.1.0` with an offset-aware `expires_at` (the close of the
+session following `effective_date`, 20:00 ET), a `producer` block whose
+`run_id` is the report directory name (stable across a re-emit, so the
+executor's inbox key stays stable), a UUIDv4 `idempotency_key`, and two
+self-excluding hashes (`artifact_sha256` over the body, `decision_hash` over
+the body minus itself). It sets **no** executor-owned field: the advisory label
+is `binding_constraint`, never `binding_gate`/`trade_permission` (the executor's
+gate owns those), and `risk_context` is an allow-listed advisory passthrough the
+executor records but never reads as data. `opportunity_score` stays `null`:
+this repo has no deterministic producer for it, and the schema prefers an absent
+score to a fabricated one. The rules live in one module,
+`tradingagents/execution_contract.py`, shared by the emitter and the report
+verifier (`verify_flags.json` gains an `envelope` block; legacy 1.0.0 trees are
+exempt). Contract note and acceptance tests: `docs/execution_v1_emitter_plan.md`.
+
 ## 9. Entry points
 
 | Command | Purpose |

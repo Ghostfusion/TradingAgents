@@ -1,6 +1,12 @@
 # Research-side emitter plan — `research_decision.json` v1.1.0
 
-Status: **plan only — this document writes no code and changes no behaviour.**
+Status: **implemented 2026-09-12** (R1-R5). The rules live in `tradingagents/execution_contract.py`
+(one owner, shared by the emitter and the report verifier); the artifacts of the change are
+`tradingagents/reporting.py::write_research_decision`, `agents/utils/report_verifier.py::_envelope_integrity`,
+`scripts/report_verify.py`, `contracts/research_decision.v1.schema.json`, `tests/test_execution_contract.py`
+(T1-T6) and the `envelope` tests in `tests/test_report_verify.py` (T9). T7/T8 already existed
+(`tests/test_rebuild_gate_recovery.py`). Eight mutations were run against the new gates and all bit; §7 records
+the decisions taken.
 Owner: single operator. Date: 2026-09-12. Interpreter: `py -3.12`. Linter: ruff (E/W/F/I/B/UP/C4/SIM, line 100).
 
 Scope: changes to **this** repo (`TradingAgents`, the research layer) so its artifacts satisfy the execution
@@ -202,16 +208,30 @@ R1 (the version bump), so the two never coexist on the wire:
 
 ---
 
-## 7. Open decisions (owner)
+## 7. Decisions taken (2026-09-12)
 
-1. **`expires_at` policy** — next session's 20:00 ET (proposed), the next session's open, or `effective_date +
-   24h`? The executor only requires "the future", so this is an actionability decision, not a validation one.
-2. **`opportunity_score` source** — the debate/analyst score mapped to 0..100, or the deterministic composite?
-   It must be producer-owned and reproducible; the executor never rescales it.
-3. **`risk_context` contents** — which governor numbers are safe to publish as advisory (the proposals in §2.1
-   are the ones the executor already renders).
-4. **`producer.run_id` lifetime** — the run's uuid (proposed) or the report directory name (`NVDA_20260912_005957`)?
-   The latter is human-traceable; the former is guaranteed unique. The inbox key uses it, so a change is a
-   contract change.
-5. **Vendored schema location** — `contracts/research_decision.v1.schema.json` at the repo root (mirrors the
-   executor's layout) or under `docs/`?
+1. **`expires_at` policy** — the close of the session following `effective_date`, 20:00 ET, converted to UTC
+   (`execution_contract.next_session_expiry`). Weekends are skipped here; the exchange holiday calendar stays
+   the executor's, with its ingest window as the backstop. Always offset-aware: a naive stamp is rejected, not
+   guessed at.
+2. **`opportunity_score` source** — **`null`**, deliberately. This repo has no *deterministic* producer for
+   "attractiveness on its own merits": the only candidates in state are the debate judge's LLM rubric mean
+   (stochastic between runs) and the PM's prose confidence, and publishing either under a numeric field the
+   executor may rank on would dress an estimate up as a measurement — the same defect class as the
+   number/label integrity fixes of 2026-09-12. The schema allows `null` and the artifact still ingests. If a
+   deterministic composite is ever computed on this side, `execution_contract.opportunity_score()` is the one
+   place to change.
+3. **`risk_context` contents** — an explicit allow-list (`ADVISORY_RISK_KEYS`: `book_drawdown`,
+   `drawdown_limit`, `single_cvar`, `book_cvar`, `cvar_budget_pct`, `liquidity`, `regime`) plus the gate
+   verdict; never a passthrough, so a key added to `final_state["risk_context"]` upstream cannot leak by
+   default. `null` when nothing ran — an empty object would read as "the governor ran and had nothing to say".
+4. **`producer.run_id` lifetime** — the **report directory name** (`NVDA_20260912_005957`), with a uuid4
+   fallback when there is no directory to name. The inbox keys on `service:run_id:artifact_sha256`, so a run id
+   that changed on a re-emit would turn a rebuild into a *second signal* for the same decision; the directory
+   name is also the human-traceable one.
+5. **Vendored schema location** — `contracts/research_decision.v1.schema.json` at the repo root, byte-identical
+   to the executor's copy, diffed by a test that skips when the sibling repo is absent.
+
+Also decided: `binding_gate` → `binding_constraint` (§3 R2) shipped **in the same batch** as the version bump,
+so the two never coexisted on the wire; `confidence` travels only when the PM's value validates as 0..1
+(dropped, never clamped — a clamp would present a broken value as a sound one).

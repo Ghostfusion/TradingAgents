@@ -242,6 +242,56 @@ def _debate_degradation(report_dir: Path) -> dict:
     }
 
 
+def _envelope_integrity(report_dir: Path) -> dict:
+    """Tree-level check: does ``research_decision.json`` satisfy its own contract?
+
+    The executor treats the artifact as a versioned envelope and dead-letters
+    what it cannot validate (missing expiry, a naive timestamp, a body hash that
+    does not recompute, an out-of-range ``opportunity_score``) — failures that
+    are invisible in the report prose, and that a rebuild or a hand edit can
+    introduce after the fact. Pure file inspection, no LLM, no live run.
+
+    Legacy artifacts (no version, or < 1.1) are **not** flagged: the executor
+    reads them as 1.0.0 and skips the stricter checks, so flagging them would
+    mark every historical tree as broken. The rules themselves live in
+    ``tradingagents.execution_contract`` — one owner, shared with the emitter, so
+    the two cannot drift. Returns ``{present, version, strict, problems}``.
+    """
+    from datetime import datetime, timezone
+
+    from tradingagents.execution_contract import integrity_problems, is_v11, parse_version
+
+    path = Path(report_dir) / "research_decision.json"
+    if not path.exists():
+        return {"present": False, "version": None, "strict": False, "problems": []}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("report_verifier: cannot read %s: %s", path, exc)
+        return {
+            "present": True,
+            "version": None,
+            "strict": False,
+            "problems": [{"code": "unreadable", "detail": str(exc)}],
+        }
+    if not isinstance(raw, dict):
+        return {
+            "present": True,
+            "version": None,
+            "strict": False,
+            "problems": [
+                {"code": "invalid_artifact", "detail": "the artifact root is not an object"}
+            ],
+        }
+    version = ".".join(str(part) for part in parse_version(raw))
+    return {
+        "present": True,
+        "version": version,
+        "strict": is_v11(raw),
+        "problems": integrity_problems(raw, now=datetime.now(timezone.utc)),
+    }
+
+
 # ---------------------------------------------------------------------------
 # LLM pass (reuses the repo's structured-invoke hardening)
 # ---------------------------------------------------------------------------
@@ -2260,5 +2310,8 @@ def verify_report_dir(
         # run? A degraded tree must be visible in verify_flags.json, not only
         # inferable from the prose.
         "debate": _debate_degradation(Path(report_dir)),
+        # Tree-level (no LLM): does the execution contract still satisfy the
+        # envelope rules the executor enforces? Legacy 1.0.0 trees are exempt.
+        "envelope": _envelope_integrity(Path(report_dir)),
         "verification": outcomes,
     }

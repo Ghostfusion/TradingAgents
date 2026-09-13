@@ -84,6 +84,24 @@ def main() -> int:
         )
     elif debate.get("enabled") is True:
         print("  debate        OK        structured-debate evidence present")
+    envelope = payload.get("envelope") or {}
+    if envelope.get("present"):
+        problems = envelope.get("problems") or []
+        version = envelope.get("version") or "unknown"
+        if problems:
+            flags += 1
+            detail = "; ".join(f"{p['code']}: {p['detail']}" for p in problems)
+            print(f"  envelope      FLAG      research_decision.json {version} — {detail}")
+        elif envelope.get("strict"):
+            print(
+                f"  envelope      OK        research_decision.json {version} "
+                "satisfies the executor's contract"
+            )
+        else:
+            print(
+                f"  envelope      legacy    research_decision.json {version} "
+                "(accepted as 1.0.0; no expiry/hash to check)"
+            )
     verification = payload.get("verification") or {}
     for stem in REPORT_STEMS:
         entry = verification.get(stem)

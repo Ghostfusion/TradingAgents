@@ -1381,3 +1381,141 @@ def test_verify_report_dir_carries_the_debate_block(tmp_path):
     payload = rv.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
     assert payload["debate"]["degraded"] is True
     assert payload["debate"]["reason"] == "no turns"
+
+
+# --- the v1.1 execution envelope (plan R3 / T9) ----------------------------
+# The artifact is the executor's only input, and it dead-letters what it cannot
+# validate. These checks are pure file inspection: no LLM, no config, no run.
+
+
+def _sealed_decision(**overrides):
+    """A conformant 1.1.0 artifact; overrides are applied before sealing."""
+    from datetime import date
+
+    from tradingagents import execution_contract as ec
+
+    doc = {
+        "schema_version": ec.SCHEMA_VERSION,
+        "ticker": "NVDA",
+        "effective_date": "2026-09-12",
+    }
+    doc.update(
+        ec.envelope_fields(
+            {}, run_id="NVDA_20260912_005957", effective=date(2026, 9, 12)
+        )
+    )
+    doc.update(overrides)
+    return ec.seal(doc)
+
+
+def _write_decision(tree, doc):
+    (tree / "research_decision.json").write_text(
+        json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return tree
+
+
+def test_envelope_block_is_ok_for_a_conformant_artifact(tmp_path):
+    _write_decision(tmp_path, _sealed_decision())
+
+    out = R._envelope_integrity(tmp_path)
+    assert out["problems"] == []
+    assert out["version"] == "1.1.0" and out["strict"] is True
+
+
+def test_envelope_flags_a_missing_expiry(tmp_path):
+    from tradingagents import execution_contract as ec
+
+    doc = _sealed_decision()
+    doc.pop("expires_at")
+    _write_decision(tmp_path, ec.seal(doc))
+
+    codes = [p["code"] for p in R._envelope_integrity(tmp_path)["problems"]]
+    assert "missing_field" in codes
+
+
+def test_envelope_flags_an_artifact_whose_session_has_closed(tmp_path):
+    from datetime import date, datetime, timezone
+
+    from tradingagents import execution_contract as ec
+
+    doc = {
+        "schema_version": ec.SCHEMA_VERSION,
+        "ticker": "NVDA",
+        "effective_date": "2026-09-01",
+    }
+    doc.update(
+        ec.envelope_fields(
+            {},
+            run_id="NVDA_20260901_005957",
+            effective=date(2026, 9, 1),
+            now=datetime(2026, 9, 1, 18, 0, tzinfo=timezone.utc),
+        )
+    )
+    _write_decision(tmp_path, ec.seal(doc))
+
+    codes = [p["code"] for p in R._envelope_integrity(tmp_path)["problems"]]
+    assert codes == ["expired"]
+
+
+def test_envelope_flags_a_body_edited_after_the_seal(tmp_path):
+    doc = _sealed_decision()
+    doc["rating"] = "Overweight"  # a rebuild or a hand edit, after the hashes
+    _write_decision(tmp_path, doc)
+
+    codes = [p["code"] for p in R._envelope_integrity(tmp_path)["problems"]]
+    assert codes == ["artifact_hash_mismatch"]
+
+
+def test_envelope_flags_a_reserved_field_and_an_out_of_range_score(tmp_path):
+    _write_decision(tmp_path, _sealed_decision(binding_gate="halt", opportunity_score=142.0))
+
+    codes = sorted(p["code"] for p in R._envelope_integrity(tmp_path)["problems"])
+    assert codes == ["invalid_opportunity_score", "producer_set_reserved_field"]
+
+
+def test_envelope_does_not_flag_a_legacy_artifact(tmp_path):
+    """The executor reads a version-less artifact as 1.0.0 and skips the stricter
+    checks - so flagging it here would mark every historical tree as broken."""
+    _write_decision(tmp_path, {"schema_version": 1, "ticker": "NVDA", "rating": "Hold"})
+
+    out = R._envelope_integrity(tmp_path)
+    assert out == {"present": True, "version": "1.0.0", "strict": False, "problems": []}
+
+
+def test_envelope_reports_a_missing_artifact_without_flagging(tmp_path):
+    assert R._envelope_integrity(tmp_path)["present"] is False
+
+
+def test_envelope_survives_an_unreadable_artifact(tmp_path):
+    """A malformed file is a flag, never an exception: the tree must still render."""
+    (tmp_path / "research_decision.json").write_text("{not json", encoding="utf-8")
+
+    out = R._envelope_integrity(tmp_path)
+    assert [p["code"] for p in out["problems"]] == ["unreadable"]
+
+
+def test_verify_report_dir_carries_the_envelope_block(tmp_path):
+    d = _mk_report_dir(tmp_path)
+    _write_decision(d, _sealed_decision(binding_gate="halt"))
+
+    payload = R.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
+    assert payload["envelope"]["strict"] is True
+    assert [p["code"] for p in payload["envelope"]["problems"]] == [
+        "producer_set_reserved_field"
+    ]
+
+
+def test_the_cli_counts_an_envelope_flag_in_its_exit_code(tmp_path, monkeypatch, capsys):
+    import scripts.report_verify as rvc
+
+    _write_decision(tmp_path, _sealed_decision(opportunity_score=-1.0))
+    payload = R.verify_report_dir(
+        tmp_path, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}')
+    )
+    monkeypatch.setattr(rvc, "verify_report_dir", lambda *a, **k: payload)
+    monkeypatch.setattr("sys.argv", ["report_verify.py", "--report-dir", str(tmp_path)])
+
+    assert rvc.main() == 1
+    printed = capsys.readouterr().out
+    assert "envelope      FLAG" in printed and "invalid_opportunity_score" in printed

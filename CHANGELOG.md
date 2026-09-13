@@ -50,10 +50,11 @@ never passed the highs/lows that were already in state, while the swing tools us
 **(4) A risk-driven trim read as a setup call.** The action was trim-only because the analyzed name's CVaR
 (4.83%) exceeded the 3% budget, yet the trader's own verification said the structure tools (`swing_set
 verdict=NO`, trailing exit hold) pointed the other way, and nothing in the artifact said which constraint
-bound it. `reporting.py::_binding_gate` now derives
-`binding_gate` / `action_basis` (`risk_reduction` vs `setup`) / `binding_reason` from `risk_context` and
-`risk_gate` only — never prose — writes them into `research_decision.json`, and the `Risk Gate (computed)`
-block renders `Basis: **risk reduction** (binding: analyzed_name_cvar - 4.83% > 3.00%)`.
+bound it. `reporting.py::_binding_constraint` (renamed in
+the entry below) now derives `binding_constraint` / `action_basis` (`risk_reduction` vs `setup`) /
+`binding_reason` from `risk_context` and `risk_gate` only — never prose — writes them into
+`research_decision.json`, and the `Risk Gate (computed)` block renders
+`Basis: **risk reduction** (binding: analyzed_name_cvar - 4.83% > 3.00%)`.
 
 **(5) A rebuild could null a real decision.** `scripts/rebuild_complete_report.py` reconstructs state from
 markdown and never has `pm_decision`, so it rewrote `research_decision.json` (rating/thesis/rationale →
@@ -104,6 +105,39 @@ Mutation proof: dropping the orphan cleanup from `_bounded_close` -> `test_bound
 fails. Tests: 3 new. No web impact.
 
 ### Added
+
+**The research→execution artifact now declares the executor's v1.1.0 envelope (2026-09-12; plan R1–R5).**
+`research_decision.json` was a loose blob the execution layer had to read as 1.0.0, so nothing on the far side
+could check provenance, expiry or the body hash. `write_research_decision` now emits
+`schema_version: "1.1.0"` with `produced_at`/`expires_at` (the close of the session following
+`effective_date`, 20:00 ET, always UTC-offset — a naive stamp is rejected there as `naive_timestamp`), a
+`producer` stanza whose `run_id` is the report directory name (stable across a rebuild, so the executor's
+inbox key `service:run_id:artifact_sha256` cannot turn a re-emit into a second signal), a UUIDv4
+`idempotency_key`, and two self-excluding hashes (`artifact_sha256` over the body, `decision_hash` over the
+body minus itself). Field ownership is explicit: this repo sets **no** executor-owned key, and the advisory
+label formerly emitted as `binding_gate` is now `binding_constraint` — the executor reserves `binding_gate`
+for the label its own gate computes, and the two vocabularies collided on `halt` while a `book_drawdown`
+value would have been dead-lettered. `opportunity_score` ships `null`: this repo has no deterministic
+producer for it, and an absent score is honest where a stochastic debate mean dressed as a measurement is
+not. `risk_context` is an allow-listed advisory passthrough (governor numbers + the gate verdict) that the
+executor records and never reads as data. The rules live in one module,
+`tradingagents/execution_contract.py`, shared by the emitter and the verifier: `verify_flags.json` gains an
+`envelope` block (missing expiry, naive/expired stamps, a body that no longer hashes, a reserved field, an
+out-of-range score) counted in the CLI exit code, while legacy 1.0.0 trees stay exempt so no historical tree
+is flagged. The executor's published schema is vendored byte-identical at
+`contracts/research_decision.v1.schema.json`, and a test diffs it against the sibling repo when that repo is
+present — drift fails a test, not a live run. Contract note and acceptance tests T1–T9:
+`docs/execution_v1_emitter_plan.md`.
+Web impact: none — the artifact's JSON keys are not part of the app's contract, and `binding_gate` was
+introduced in this same unpublished batch, so nothing had ever read it.
+
+Tests: 14 new in `test_execution_contract.py` (validation against the vendored contract, both hash recipes,
+the session/expiry policy, run-id stability, the reserved-key and allow-list rules, the null score) and 10 in
+`test_report_verify.py` (each verifier flag, the legacy exemption, an unreadable artifact, the CLI exit code);
+**3913 passed, 5 skipped** on the full suite. Eight mutations were run against the new gates (dropped required
+key, naive stamp, constant idempotency key, fabricated score, re-added reserved key, neutered verifier,
+removed legacy exemption, file-name run id) — every one bit and every file was restored byte-identical; the
+no-op control passed.
 
 Two follow-ups on the debate flags above (2026-09-12; `strategies/debate_capability.py`,
 `agents/utils/report_verifier.py`, `scripts/report_verify.py`):

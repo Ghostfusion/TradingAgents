@@ -91,12 +91,12 @@ def test_all_ok_evidence_is_fresh_quality(tmp_path):
     assert _read(tmp_path)["data_quality"] == "fresh"
 
 
-def test_risk_context_sets_the_binding_gate(tmp_path):
+def test_risk_context_sets_the_binding_constraint(tmp_path):
     fs = _final_state()
     fs["risk_context"] = {"book_drawdown": 0.2021, "drawdown_limit": 0.10}
     write_research_decision(fs, "nvda", tmp_path)
     doc = _read(tmp_path)
-    assert doc["binding_gate"] == "book_drawdown"
+    assert doc["binding_constraint"] == "book_drawdown"
     assert doc["action_basis"] == "risk_reduction"
     assert "20.21%" in doc["binding_reason"]
 
