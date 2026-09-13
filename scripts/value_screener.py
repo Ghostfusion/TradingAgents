@@ -2323,6 +2323,7 @@ def main(argv: list[str] | None = None) -> int:
                     from tradingagents.dataflows.quantitative_scores import (
                         growth_score,
                         overpriced_score,
+                        signal_summary,
                     )
 
                     medians = resolve_growth_medians(fin_by_ticker, sectors, min_n=5)
@@ -2336,11 +2337,11 @@ def main(argv: list[str] | None = None) -> int:
                         g = growth_score(fin, row_medians)
                         if g:
                             label = (g.get("band") or {}).get("label")
-                            r["g_disp"] = f"{g['score']}/8" + (f" {label}" if label else "")
+                            r["g_disp"] = signal_summary(g, 8) + (f" {label}" if label else "")
                         c = overpriced_score(fin)
                         if c:
                             label = (c.get("band") or {}).get("label")
-                            r["c_disp"] = f"{c['score']}/6" + (f" {label}" if label else "")
+                            r["c_disp"] = signal_summary(c, 6) + (f" {label}" if label else "")
                 if args.quality_score:
                     from tradingagents.strategies.factors import (
                         QUALITY_DIRECTIONS,

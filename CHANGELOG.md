@@ -459,6 +459,14 @@ off. Both now default to NO table (gate-on callers pass it), and the ungated spl
 index) stays unscheduled per the plan's Appendix A - it is annual, one-year-lagged and five of its six proxies are
 unavailable, and no market-level consumer with a decision path exists.
 
+A partial G/C sum is **never printed over its full denominator**: with the peer medians absent (the tool
+path) or a 5-year series missing, `growth_score` sums only the computable signals, so `1/8` read as Mohanram's
+G = 1 when one signal was computable. `signal_summary` now prints `<score> of <k> computed signal(s)
+(<n> excluded, not scored 0)` and reserves `x/8` / `x/6` for the complete case (the one that also carries a
+band); the tool also collapses the repeated "industry median unavailable" lines into one line naming the
+excluded metrics (26 lines -> 20 for a median-less call). `signal_summary` is the single implementation, shared
+by the tool row and the screener columns.
+
 The S1/S2 **consumers the plan names** are wired, not just the calculators: `statement_parsing.screen_ticker` now
 computes the gated Altman variant + zone and the F-Score band, feeds them into `trap_verdict` as render-only extras
 (never changing the severity) and exposes them on the row; `get_earnings_quality` renders `altman_zone=` /

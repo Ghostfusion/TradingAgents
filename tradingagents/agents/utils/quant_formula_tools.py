@@ -38,6 +38,30 @@ def _flag(name: str, default: bool = False) -> bool:
         return default
 
 
+def _grouped_deviations(deviations: list) -> list:
+    """Collapse the repeated peer-median exclusions into one evidence line.
+
+    With the tool path's ``medians=None`` every median-fed leg is excluded, and
+    one line per leg costs ~10 lines of the analyst's evidence for a single
+    fact. The metric names are kept, so nothing is hidden - just not repeated.
+    """
+    missing: list = []
+    rest: list = []
+    for d in deviations or []:
+        text = str(d)
+        if "industry median unavailable" in text or "peer group n=" in text:
+            missing.append(text.split(":")[0].strip())
+        else:
+            rest.append(text)
+    out: list = []
+    if missing:
+        out.append(
+            f"{len(missing)} peer-median leg(s) excluded (no median supplied: "
+            f"{', '.join(missing)}) - excluded, not scored 0"
+        )
+    return out + rest
+
+
 def _disabled(tool_name: str, flag: str) -> str:
     return (
         f"{tool_name}: DISABLED (set {flag}=true / "
@@ -223,6 +247,7 @@ def get_quality_factors(
             from tradingagents.dataflows.quantitative_scores import (
                 growth_score,
                 overpriced_score,
+                signal_summary,
             )
 
             g = growth_score(fin, None)
@@ -230,8 +255,8 @@ def get_quality_factors(
                 lines.append("  g_score: unavailable (no computable G signal)")
             else:
                 band = g["band"]["label"] if g["band"] else "unavailable"
-                lines.append(f"  g_score={g['score']}/8 band={band}; {g['basis']}")
-                for d in g["deviations"]:
+                lines.append(f"  g_score={signal_summary(g, 8)} band={band}; {g['basis']}")
+                for d in _grouped_deviations(g["deviations"]):
                     lines.append(f"    g_deviation: {d}")
             c = overpriced_score(fin)
             if c is None:
@@ -239,9 +264,9 @@ def get_quality_factors(
             else:
                 band = c["band"]["label"] if c["band"] else "unavailable"
                 lines.append(
-                    f"  c_score={c['score']}/6 band={band} (risk screen); {c['basis']}"
+                    f"  c_score={signal_summary(c, 6)} band={band} (risk screen); {c['basis']}"
                 )
-                for d in c["deviations"]:
+                for d in _grouped_deviations(c["deviations"]):
                     lines.append(f"    c_deviation: {d}")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001

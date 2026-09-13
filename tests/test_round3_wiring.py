@@ -279,3 +279,50 @@ def test_trap_cell_appends_the_zone_only_when_present() -> None:
     assert vs._trap_cell({"trap": "LOW"}) == "LOW"
     assert vs._trap_cell({"trap": "MEDIUM", "altman_zone": "grey"}) == "MEDIUM (grey)"
     assert vs._trap_cell({}) is None
+
+
+_MEDIAN_KEYS = (
+    "roa", "cfo", "var_roa", "var_sales_growth", "rd_intensity", "capex_intensity", "ad_intensity"
+)
+
+
+def test_partial_g_score_is_never_printed_over_the_full_denominator() -> None:
+    """`1/8` reads as Mohanram's G = 1; the truth was one computable signal."""
+    from tradingagents.dataflows.quantitative_scores import growth_score, signal_summary
+
+    fin = _panel_fins(1)["N0"]
+    partial = growth_score(fin, None)
+    assert partial["band"] is None
+    head = signal_summary(partial, 8)
+    assert "/8" not in head and "computed signal" in head and "not scored 0" in head
+
+    rich = dict(
+        fin,
+        roa_series=[0.05, 0.06, 0.07, 0.08, 0.09],
+        revenue_series=[100.0, 110.0, 120.0, 130.0, 140.0],
+        research_development=8.0,
+        advertising=3.0,
+    )
+    medians = {k: {"median": 0.001, "n": 9} for k in _MEDIAN_KEYS}
+    full = growth_score(rich, medians)
+    assert all(v is not None for v in full["signals"].values())
+    assert signal_summary(full, 8).endswith("/8")
+    assert signal_summary({"score": None, "signals": {}}, 8) == "unavailable"
+
+
+def test_quality_tool_compresses_the_median_exclusions_when_no_panel_is_supplied(
+    r3_gates, monkeypatch
+) -> None:
+    from tradingagents.agents.utils.quant_formula_tools import get_quality_factors
+
+    fin = _panel_fins(1)["N0"]
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda ticker, current_date, **kw: fin,
+    )
+    r3_gates(enable_growth_scores=True)
+    out = get_quality_factors.invoke({"ticker": "AAA", "current_date": "2026-09-13"})
+    assert "peer-median leg(s) excluded" in out
+    assert "industry median unavailable" not in out
+    assert "g_score=" in out and "/8" not in out
+    assert "c_score=" in out and "/6" not in out

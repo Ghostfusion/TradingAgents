@@ -726,6 +726,30 @@ def _series(fin, *keys):
     return None
 
 
+def signal_summary(read, denominator: int) -> str:
+    """Score headline that never prints a partial sum under the full denominator.
+
+    With the peer medians absent (the tool path) or a 5-year series missing, the
+    G/C scores sum only the computable signals - so ``1/8`` reads as Mohanram's
+    G = 1 when in truth ONE signal was computable. The full denominator is only
+    used when every signal is present (the case that also carries a band);
+    otherwise the headline states the computed count and the exclusion. The
+    per-signal reasons live in ``deviations``.
+    """
+    signals = (read or {}).get("signals") or {}
+    computed = [v for v in signals.values() if v is not None]
+    total = len(signals) or int(denominator)
+    score = (read or {}).get("score")
+    if score is None:
+        return "unavailable"
+    if len(computed) == total:
+        return f"{score}/{total}"
+    return (
+        f"{score} of {len(computed)} computed signal(s) "
+        f"({total - len(computed)} excluded, not scored 0)"
+    )
+
+
 def growth_metrics(fin) -> dict:
     """The seven per-name inputs the G-Score's peer medians are built from.
 
