@@ -43,9 +43,12 @@ missing.
 10. **Dark launches are measured, not assumed.** A gate stays `False` in
     `default_config.py` until its phase is proven: flip **one** gate at a time,
     in a labelled run, and diff that run against a gate-off run on the same
-    basket (`scripts/repro_check.py --evidence` for the forced-tool composition,
-    `scripts/verify_sweep.py` for per-claim verdicts). Only additive, declared
-    lines are acceptable, and a new CONFIRMED/SUSPECT claim blocks the flip.
+    basket. Three **pre-existing** scripts do the work: `scripts/repro_check.py
+    --evidence` prints the per-run forced-tool evidence and the cross-run
+    composition diff; `scripts/report_verify.py --report-dir <tree>` writes that
+    tree's `verify_flags.json`; and `scripts/verify_sweep.py` condenses it into
+    per-claim verdicts, read-only, exiting 1 on any CONFIRMED/SUSPECT — which is
+    what blocks the flip. Only additive, declared lines are acceptable.
     `run_card.json` records the commit and a `config_hash`, but that hash's key
     list does **not** cover the round-3 gates yet — so naming the flipped gate in
     the run output, and extending that key list, is part of the phase rather than
@@ -427,6 +430,7 @@ function returns `unavailable`; the loadings and missing-proxy list are rendered
 | `tradingagents/default_config.py` | ten `enable_*` keys from §1, all `False` |
 | `strategies/sentiment.py::__all__` | the three new sentiment functions |
 | Peer universe | `strategies/cross_section.py::resolve_peer_universe` (§1.1) — shared by S3 and S10, prints the peer count and the sector partition; the screener columns read it |
+| Rule-10 tooling | `scripts/repro_check.py --evidence`, `scripts/report_verify.py --report-dir <tree>`, `scripts/verify_sweep.py` — all pre-existing and test-covered (`tests/test_repro_crosscheck.py`, `tests/test_report_verify.py`, `tests/test_verify_sweep.py`), so no rule depends on unwritten code. Caveat found on inspection: `verify_sweep.py`'s own docstring advertises a `scripts/report_verify.py --verify` flag that **does not exist** (`report_verify` takes `--report-dir`, `--model`, `--provider`, `--max-calls`, `--stem`) — use the real flag, and correcting that docstring is a small standalone fix, not part of a phase |
 | Tools | S1/S2/S10 rows on the existing fundamentals tools; `get_analyst_revision_index` (S6); `get_composite_rank` gains the quality score (S3); S4/S5/S7 rows on `get_news_sentiment_series` / `get_sentiment_computed` |
 | Screener | G/C columns (S10), quality composite (S3), revision index (S6) |
 | `scripts/strategy_quality_report.py` | S8 rows |
