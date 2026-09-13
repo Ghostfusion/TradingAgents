@@ -140,6 +140,12 @@ boundary (2.99/3.01, 1.22/1.24, 2.59/2.61, 1.09/1.11); a fund ticker returns
 `HEAD`; a missing book-equity field prints the total-equity proxy and does not
 silently switch variants.
 
+**Consumers (landed).** `statement_parsing.screen_ticker` computes the gated
+variant + zone (via `altman_variant_for`) and the F-Score band, passes both into
+`trap_verdict` and exposes `altman_zone` / `altman_variant` / `f_score_band` on
+the row; `get_earnings_quality` renders them; the screener's `Trap` column shows
+the zone. Gate-off rows keep their previous key set exactly.
+
 ### S2 — Piotroski paper basis, bands, applicability
 
 **Target.** `dataflows/quantitative_scores.py`:

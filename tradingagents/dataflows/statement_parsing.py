@@ -983,6 +983,20 @@ def _usd_consistent(fin: dict) -> bool:
     return not (mc and ta and ta / mc > 1000)
 
 
+def _r3_flag(name: str, default: bool = False) -> bool:
+    """Read an enable_* flag from the live config (never raises).
+
+    The round-3 S1/S2 rows are additive and default-off: with the gate off the
+    screen row and the trap verdict keep exactly their previous shape.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return bool((get_config() or {}).get(name, default))
+    except Exception:  # noqa: BLE001 - a config read must never break a screen
+        return default
+
+
 def screen_ticker(ticker: str, fin: dict) -> dict:
     """Compute every screen for one ticker's canonical items."""
     # Derive the ratio inputs the Screens need that no vendor row provides
@@ -996,6 +1010,40 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     m_score = beneish_m_score(fin)
     z_score = altman_z_score(fin) if usd else None
     f_score = piotroski_f_score(fin)
+    # Round-3 S1/S2 (gated): the Altman variant + its distress zone, and the
+    # F-Score's paper band. Both are render-only extras: with the gates off the
+    # row carries neither key and `trap_verdict` receives neither argument, so
+    # the screen output is byte-identical to before. The zone follows the
+    # SELECTED variant (Z'' for a non-manufacturer), which is why it is not
+    # tied to the USD-consistency check the original market-cap Z uses.
+    sector = fin.get("sector")
+    z_variant = z_zone = f_band = None
+    if _r3_flag("enable_altman_variants"):
+        try:
+            from tradingagents.dataflows.quantitative_scores import (
+                altman_variant,
+                altman_variant_for,
+                altman_zone,
+            )
+
+            asset = altman_variant_for(ticker=ticker, sector=sector, fin=fin)
+            variant = asset.get("variant")
+            if variant:
+                read = altman_variant(fin, variant)
+                if read and read.get("value") is not None:
+                    z_variant = variant
+                    z_zone = altman_zone(read["value"], variant)
+        except Exception:  # noqa: BLE001 - an advisory row must not break the screen
+            z_variant = z_zone = None
+    if _r3_flag("enable_f_score_detail"):
+        try:
+            from tradingagents.dataflows.quantitative_scores import (
+                piotroski_f_score_detailed,
+            )
+
+            f_band = (piotroski_f_score_detailed(fin, sector=sector) or {}).get("band")
+        except Exception:  # noqa: BLE001 - an advisory row must not break the screen
+            f_band = None
     # Quality rows (informational): Novy-Marx gross profitability and
     # Hirshleifer et al. net operating assets. They feed the watchlist columns
     # only - no score, ranking or filter reads them.
@@ -1015,13 +1063,20 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     if any(v is not None for v in (f_score, m_score, z_score)):
         from tradingagents.strategies.normalized import trap_verdict
 
-        trap = trap_verdict(f_score=f_score, m_score=m_score, z_score=z_score)["level"]
+        trap = trap_verdict(
+            f_score=f_score,
+            m_score=m_score,
+            z_score=z_score,
+            z_variant=z_variant,
+            z_zone=z_zone,
+            f_band=f_band,
+        )["level"]
     ne = _latest(fin.get("net_income"))
     te = _latest(fin.get("total_equity"))
     roe = None
     if ne is not None and te is not None and te > 0:
         roe = float(ne) / float(te)
-    return {
+    row = {
         "ticker": ticker,
         "ev_ebit": round(am, 2) if am is not None else None,
         "earnings_yield": round(ey, 4) if ey is not None else None,
@@ -1040,5 +1095,13 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "revenue_yoy": sane_revenue_yoy(fin),
         "sector": fin.get("sector"),
     }
+    # The round-3 keys appear ONLY when their gate supplied a value, so a
+    # gate-off row has exactly the shape it had before this landed.
+    if z_zone:
+        row["altman_zone"] = z_zone["zone"]
+        row["altman_variant"] = z_variant
+    if f_band:
+        row["f_score_band"] = f_band.get("label")
+    return row
 
 

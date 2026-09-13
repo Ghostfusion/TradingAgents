@@ -4455,9 +4455,11 @@ def get_earnings_quality(
             f"fcf={fc if fc is not None else 'n/a'}{_dd_line}"
         )
     m = z = f = None
+    row: dict = {}
     try:
         # Reuse the screener's screens so the trap verdict includes the accrual,
-        # which screen_ticker's own trap call currently omits.
+        # which screen_ticker's own trap call currently omits. The round-3 S1/S2
+        # extras (Altman zone, F-Score band) ride along when their gates are on.
         from tradingagents.dataflows.statement_parsing import screen_ticker
 
         row = screen_ticker(ticker, fin)
@@ -4468,12 +4470,29 @@ def get_earnings_quality(
     if any(v is not None for v in (m, z, f, accrual)):
         import contextlib
 
+        zone = row.get("altman_zone")
+        band = row.get("f_score_band")
         with contextlib.suppress(Exception):
-            trap = trap_verdict(f_score=f, m_score=m, z_score=z, accrual=accrual)
+            trap = trap_verdict(
+                f_score=f,
+                m_score=m,
+                z_score=z,
+                accrual=accrual,
+                z_variant=row.get("altman_variant"),
+                z_zone={"zone": zone} if zone else None,
+                f_band={"label": band} if band else None,
+            )
     if trap:
         lines.append(f"  trap_risk={trap.get('level')}")
         for ev in trap.get("evidence") or []:
             lines.append(f"    - {ev}")
+        if trap.get("altman_zone"):
+            lines.append(
+                f"  altman_zone={trap['altman_zone']} "
+                f"(variant={trap.get('z_variant')}; band table per variant)"
+            )
+        if trap.get("f_score_band"):
+            lines.append(f"  f_score_band={trap['f_score_band']}")
     else:
         lines.append("  trap_risk: insufficient forensic inputs")
     return chr(10).join(lines)

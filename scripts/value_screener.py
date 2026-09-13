@@ -126,7 +126,7 @@ _WATCHLIST_LEGEND = (
     ("RSI", "RSI-14"),
     ("%b", "Bollinger %b (price position inside the band)"),
     ("Stp%", "value-dip stop distance (% of price)"),
-    ("Trap", "forensic trap-risk verdict (low / medium / high)"),
+    ("Trap", "forensic trap-risk verdict (low / medium / high); with enable_altman_variants the selected Altman variant's distress zone is shown beside it"),
     ("Sent7", "7-day news-sentiment SMA (EODHD /sentiments, -1..1)"),
     ("SentZ", "latest news-sentiment innovation (score - 7d SMA)"),
     ("RevIdx", "weighted analyst revision ratio (MSCI weights 3/2/1 over the periods supplied; denominator up+down - a printed deviation from analyst coverage; coverage-guarded, needs >=2 actions)"),
@@ -241,6 +241,15 @@ def _sector_table_markdown(ranking: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _trap_cell(row: dict):
+    """Trap level, plus the round-3 Altman zone when its gate supplied one."""
+    level = row.get("trap")
+    zone = row.get("altman_zone")
+    if level is None:
+        return None
+    return f"{level} ({zone})" if zone else level
+
+
 def _watchlist_markdown(results: list) -> str:
     """Render the ranked watchlist as a complete table.
 
@@ -312,7 +321,7 @@ def _watchlist_markdown(results: list) -> str:
             flag(r.get("vdip_flag")), cell(r.get("vdip_fcfy"), "{:.1%}"),
             cell(r.get("vdip_rsi"), "{:.0f}"), cell(r.get("vdip_pctb"), "{:.0%}"),
             cell(r.get("vdip_stop_pct"), "{:.1%}"),
-            cell(r.get("trap")),
+            cell(_trap_cell(r)),
             cell(r.get("illiq"), "{:.2e}"),
             cell(r.get("float_turnover"), "{:.3%}"),
             cell(r.get("iwf"), "{:.2%}"),

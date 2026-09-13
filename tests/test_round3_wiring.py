@@ -52,13 +52,14 @@ def _panel_fins(n: int = 10) -> dict:
             "cash": 300.0 * k,
             "total_liabilities": 900.0 * k,
             "operating_cashflow": 130.0 * k,
-            "net_income": 100.0 * k,
+            "net_income": {"current": 100.0 * k, "prior": 95.0 * k},
             "interest_expense": 10.0 * k,
             "tax_expense": 20.0 * k,
             "operating_income": 90.0 * k,
             "inventory": {"current": 80.0 * k, "prior": 70.0 * k},
             "long_term_debt": {"current": 200.0 * k, "prior": 190.0 * k},
             "shares_outstanding": 100.0,
+            "shares_issued": 0.0,
             "capex": 40.0 * k,
         }
     return out
@@ -214,3 +215,67 @@ def test_gate_reads_never_raise(flag: str) -> None:
     from tradingagents.agents.utils.analysis_tools import _r3_flag
 
     assert _r3_flag(flag) in (True, False)
+
+
+@pytest.fixture
+def r3_gates():
+    """Flip round-3 gates through the real thread-local config, then restore."""
+    from tradingagents.dataflows.config import set_config
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    def _set(**flags):
+        set_config(flags)
+
+    yield _set
+    set_config({k: DEFAULT_CONFIG[k] for k in ROUND3_GATES})
+
+
+def test_screen_row_has_no_round3_keys_when_the_gates_are_off(r3_gates) -> None:
+    """The consumers the plan names must not change the row until a gate flips."""
+    from tradingagents.dataflows.statement_parsing import screen_ticker
+
+    r3_gates(enable_altman_variants=False, enable_f_score_detail=False)
+    row = screen_ticker("AAA", _panel_fins(1)["N0"])
+    assert {"altman_zone", "altman_variant", "f_score_band"}.isdisjoint(row)
+    assert row["trap"] in {"LOW", "MEDIUM", "HIGH", "n/a"}
+
+
+def test_screen_row_carries_the_zone_and_band_when_the_gates_are_on(r3_gates) -> None:
+    from tradingagents.dataflows.statement_parsing import screen_ticker
+
+    fin = _panel_fins(1)["N0"]
+    r3_gates(enable_altman_variants=False, enable_f_score_detail=False)
+    off = screen_ticker("AAA", fin)
+    r3_gates(enable_altman_variants=True, enable_f_score_detail=True)
+    on = screen_ticker("AAA", fin)
+    assert on["altman_zone"] in {"safe", "grey", "distress"}
+    assert on["altman_variant"] in {"z", "z_double_prime"}
+    assert on["f_score_band"] in {"high", "low", "middle"}
+    assert on["trap"] == off["trap"], "the zone/band are render-only extras"
+    assert on["f_score"] == off["f_score"] and on["altman_z"] == off["altman_z"]
+
+
+def test_earnings_quality_renders_the_zone_and_band_when_on(r3_gates, monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    fin = _panel_fins(1)["N0"]
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda ticker, current_date, **kw: fin,
+    )
+    r3_gates(enable_altman_variants=False, enable_f_score_detail=False)
+    off = at.get_earnings_quality.invoke({"ticker": "AAA", "current_date": "2026-09-13"})
+    assert "altman_zone=" not in off and "f_score_band=" not in off
+    assert "trap_risk=" in off
+    r3_gates(enable_altman_variants=True, enable_f_score_detail=True)
+    on = at.get_earnings_quality.invoke({"ticker": "AAA", "current_date": "2026-09-13"})
+    assert "altman_zone=" in on and "variant=" in on
+    assert "f_score_band=" in on
+
+
+def test_trap_cell_appends_the_zone_only_when_present() -> None:
+    vs = _screener()
+
+    assert vs._trap_cell({"trap": "LOW"}) == "LOW"
+    assert vs._trap_cell({"trap": "MEDIUM", "altman_zone": "grey"}) == "MEDIUM (grey)"
+    assert vs._trap_cell({}) is None

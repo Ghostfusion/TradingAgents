@@ -459,6 +459,12 @@ off. Both now default to NO table (gate-on callers pass it), and the ungated spl
 index) stays unscheduled per the plan's Appendix A - it is annual, one-year-lagged and five of its six proxies are
 unavailable, and no market-level consumer with a decision path exists.
 
+The S1/S2 **consumers the plan names** are wired, not just the calculators: `statement_parsing.screen_ticker` now
+computes the gated Altman variant + zone and the F-Score band, feeds them into `trap_verdict` as render-only extras
+(never changing the severity) and exposes them on the row; `get_earnings_quality` renders `altman_zone=` /
+`f_score_band=` when they are present, and the screener's `Trap` column shows the zone beside the level. With the
+gates off, the row, the trap verdict and the column are byte-identical to before.
+
 **Web impact**: additive tool-card lines only - `tool_evidence.json` gains the S11 `_symmetry` list (the existing
 evidence readers skip a list-valued key) and the tool rows above; no JSON key is removed, renamed or reshaped, and
 no CLI flag changes meaning. The screener's new columns are additive table columns.
