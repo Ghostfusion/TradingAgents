@@ -506,7 +506,8 @@ deliberate step with a vendor-suite re-run.
 - analyst ratings + earnings calendar: `finnhub`, `moomoo`, `yfinance` (keyless
   fallback: `get_analyst_ratings_yfinance` = recommendation summary +
   price-target consensus; `get_earnings_calendar_yfinance` = earnings dates +
-  EPS surprise). Institutional holdings also add a keyless `yfinance` option
+  EPS surprise + the days-to-print countdown, as do the Finnhub/moomoo calendar
+  paths - quote that countdown instead of computing it). Institutional holdings also add a keyless `yfinance` option
   (`get_institution_holdings_yfinance`).
 - finnhub free-tier extra (key-gated): `get_basic_financials` (metrics),
   `get_company_peers`, `get_insider_activity` (insider sentiment);
@@ -870,8 +871,10 @@ tagged with its basis (`roaTTM (TTM, Finnhub)`) with an advisory note when the
 payload's own margin x turnover contradicts its ROA. `write_report_tree` also runs
 the deterministic identity checks at write time and records them in
 `run_card.json` as `analyst_consistency` (`{stem: [{status, claim}]}`) - the
-net-debt sign, current-ratio, ROA and fiscal-quarter-label identities, so a tree
-carries its own consistency record instead of depending on the opt-in
+net-debt sign, current-ratio, ROA, fiscal-quarter-label and date-count
+identities (the last recomputes a stated `N days out` from its own ISO date and
+the run date read off the report directory, and stays silent without an anchor),
+so a tree carries its own consistency record instead of depending on the opt-in
 `scripts/report_verify.py` pass. Advisory: it never blocks or edits a report.
 
 ## 9. Entry points

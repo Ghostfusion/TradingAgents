@@ -596,6 +596,16 @@ def get_earnings_calendar_yfinance(
         dates = yf_retry(lambda: ticker_obj.get_earnings_dates(limit=8))
         if dates is None or dates.empty:
             raise NoMarketDataError(ticker, canonical, "no earnings dates")
+        # Countdown anchor: "in Nd" is the figure a report must quote rather
+        # than compute itself. NVDA 2026-09-12 news.md called the next print
+        # "83 days away" - the gap from the PRIOR print (2026-08-26 ->
+        # 2026-11-17); from the analysis date the count was 66.
+        cur = None
+        if curr_date:
+            try:
+                cur = datetime.strptime(str(curr_date), "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                cur = None
         rows = []
         for index, row in dates.iterrows():
             eps_est = row.get("EPS Estimate")
@@ -608,14 +618,27 @@ def get_earnings_calendar_yfinance(
                 parts.append(f"reported={eps_act:.2f}")
             if surprise is not None and not pd.isna(surprise):
                 parts.append(f"surprise_pct={surprise:.2f}")
-            rows.append(
-                f"{index.strftime('%Y-%m-%d')} "
-                + ("; ".join(parts) if parts else "scheduled")
+            line = f"{index.strftime('%Y-%m-%d')} " + (
+                "; ".join(parts) if parts else "scheduled"
             )
+            if cur is not None:
+                days_out = (index.date() - cur).days
+                if days_out >= 0:
+                    line += f" (in {days_out}d)"
+            rows.append(line)
         if not rows:
             raise NoMarketDataError(ticker, canonical, "no earnings dates")
         header = f"# Earnings calendar for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        # The vendor computes Surprise(%) from EPS it does not expose at full
+        # precision, so it need not equal (reported-estimate)/estimate on the
+        # 2dp pair printed beside it (NVDA 2026-08-26: 6.16% vs 6.22%). Named
+        # so a reader does not take the difference for a slip.
+        header += (
+            "# Note: surprise_pct is the vendor's own figure (from unrounded EPS),"
+            " so it need not equal (reported-estimate)/estimate on the 2dp values"
+            " shown.\n\n"
+        )
         return header + "\n".join(rows)
     except NoMarketDataError:
         raise

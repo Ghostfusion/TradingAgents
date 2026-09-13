@@ -114,6 +114,12 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             " same OAS/yield at two values in one report (SNDK 2026-09-10"
             " HY OAS 2.71 body vs 2.59 table is a cache replication slip)."
 
+            + " DAY COUNTS: quote the tool's own countdown (`in Nd` from"
+            " get_earnings_calendar, `fomc Nd out` / `earnings <date> in Nd` from"
+            " get_catalyst_scale) - never compute days-to-catalyst yourself. The"
+            " wrong base date shifts it silently: NVDA 2026-09-12 news.md called"
+            " the next print '83 days away', which is the gap from the PRIOR print"
+            " (2026-08-26 -> 2026-11-17); from the analysis date the count was 66."
             + " Summary-table figures must MATCH their body figures exactly"
             " (same digits, same units/scales - never drop, substitute or"
             " abbreviate a figure into a stale one. e.g. a Q2 AI-orders row"

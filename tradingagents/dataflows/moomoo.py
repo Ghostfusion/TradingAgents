@@ -1373,7 +1373,19 @@ def get_earnings_calendar_moomoo(symbol: str, curr_date: str, look_back_days: in
         eps_est = row.get("eps_estimate") or row.get("q1_eps_estimate") or ""
         eps_act = row.get("eps_actual") or row.get("q1_eps_actual") or ""
         surprise = row.get("surprise") or ""
-        lines.append(f"- {date}: EPS est={eps_est}, actual={eps_act}, surprise={surprise}")
+        days_txt = ""
+        try:
+            days_out = (
+                datetime.strptime(str(date), "%Y-%m-%d").date() - start_dt.date()
+            ).days
+            if days_out >= 0:
+                # The countdown a report quotes instead of computing it.
+                days_txt = f" (in {days_out}d)"
+        except (TypeError, ValueError):
+            pass
+        lines.append(
+            f"- {date}: EPS est={eps_est}, actual={eps_act}, surprise={surprise}{days_txt}"
+        )
     return "\n".join(lines)
 
 

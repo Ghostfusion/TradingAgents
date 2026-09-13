@@ -876,3 +876,33 @@ class MoomooSdkCallTimeoutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEarningsCountdownMoomoo(unittest.TestCase):
+    """The moomoo calendar carries the same countdown as the other vendors."""
+
+    def test_earnings_row_carries_the_days_out(self):
+        ctx = mock.Mock()
+        df = pd.DataFrame(
+            {"code": ["US.NVDA"], "date": ["2026-11-17"], "eps_estimate": [2.47]}
+        )
+        ctx.get_earnings_calendar.return_value = (RET_OK, df)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.NVDA"),
+        ):
+            out = moomoo.get_earnings_calendar_moomoo("NVDA", "2026-09-12", 7)
+        assert "(in 66d)" in out
+
+    def test_historical_row_has_no_countdown(self):
+        ctx = mock.Mock()
+        df = pd.DataFrame(
+            {"code": ["US.NVDA"], "date": ["2026-08-26"], "eps_estimate": [2.09]}
+        )
+        ctx.get_earnings_calendar.return_value = (RET_OK, df)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.NVDA"),
+        ):
+            out = moomoo.get_earnings_calendar_moomoo("NVDA", "2026-09-12", 7)
+        assert "(in " not in out

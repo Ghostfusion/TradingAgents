@@ -201,8 +201,8 @@ def get_earnings_calendar_finnhub(
     if look_back_days is None:
         look_back_days = 30
 
-    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    end_date = (end_dt + timedelta(days=int(look_back_days))).strftime("%Y-%m-%d")
+    curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    end_date = (curr_dt + timedelta(days=int(look_back_days))).strftime("%Y-%m-%d")
     finnhub_client = _client()
 
     earnings = finnhub_client.earnings_calendar(
@@ -224,12 +224,22 @@ def get_earnings_calendar_finnhub(
 
     lines = [f"## {ticker.upper()} Earnings Calendar (Finnhub)"]
     for row in data[:5]:
+        date_txt = str(row.get("date", "n/a"))
+        days_txt = ""
+        try:
+            days_out = (datetime.strptime(date_txt, "%Y-%m-%d") - curr_dt).days
+            if days_out >= 0:
+                # The countdown a report quotes instead of computing it.
+                days_txt = f" | Days out: {days_out}"
+        except (TypeError, ValueError):
+            pass
         lines.append(
-            f"- Earnings date: {row.get('date', 'n/a')}"
+            f"- Earnings date: {date_txt}"
             f" | EPS estimate: {row.get('epsEstimate', 'n/a')}"
             f" | EPS actual: {row.get('epsActual', 'n/a')}"
             f" | Surprise: {row.get('surprisePercent', 'n/a')}"
             f" | Revenue estimate: {row.get('revenueEstimate', 'n/a')}"
+            f"{days_txt}"
         )
     return "\n".join(lines)
 

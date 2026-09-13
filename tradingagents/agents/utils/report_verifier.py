@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -2375,11 +2376,104 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
     return out
 
 
-def _valuation_identity_checks(report_text: str) -> list[VerifierClaim]:
+_DAYS_OUT_RE = re.compile(
+    r"(?P<date>\d{4}-\d{2}-\d{2})[^\n]{0,160}?"
+    r"(?P<count>\d{1,4})\s*days?\s*(?P<dir>out|away|ago|until|from now|later|hence)",
+    re.IGNORECASE,
+)
+# Only countdown/elapsed phrasings whose direction is unambiguous. A bare
+# "in N days" is NOT one: "worst in 30 days" is a lookback window, and reading
+# it as a countdown flagged TSM 2026-09-09 news.md (30 days vs the -3 it would
+# imply). _text_metrics must never cry wolf.
+_PAST_DIRECTIONS = frozenset({"ago"})
+
+
+def _report_as_of(report_dir) -> str | None:
+    """The analysis date encoded in a run directory name (TICKER_YYYYMMDD_HHMMSS).
+
+    The countdown check needs an anchor and the run directory is the only place
+    that date is recorded verbatim. No anchor -> the check does not run: it must
+    never guess, because a guessed anchor manufactures findings.
+    """
+    m = re.search(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)", Path(report_dir).name)
+    if not m:
+        return None
+    try:
+        return datetime(  # noqa: DTZ001 - a calendar date, not an instant
+            int(m.group(1)), int(m.group(2)), int(m.group(3))
+        ).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _days_countdown_identity(
+    report_text: str, as_of: str | None = None
+) -> list[VerifierClaim]:
+    """A stated day-count that does not follow from its own two dates.
+
+    NVDA 2026-09-12 news.md: "NVDA's earnings optionality is 83 days away" and
+    the summary row "2026-11-17 ... 83 days out". 83 is the gap from the PRIOR
+    print (2026-08-26 -> 2026-11-17); from the analysis date the count was 66,
+    and no tool printed 83 - the model computed it on the wrong base and nothing
+    checked it.
+
+    Runs only with an ``as_of`` anchor and only where one line carries both an
+    ISO date and a spelled-out day count. Tolerance is +/-1 day: the anchor is
+    the run date while a report may date its data to the prior close, and a
+    false positive costs more here than a missed one-day slip (_text_metrics
+    must not cry wolf).
+    """
+    if not report_text or not as_of:
+        return []
+    try:
+        anchor = datetime.strptime(str(as_of), "%Y-%m-%d").date()  # noqa: DTZ007
+    except (TypeError, ValueError):
+        return []
+    claims: list[VerifierClaim] = []
+    seen: set[tuple[str, int, bool]] = set()
+    for m in _DAYS_OUT_RE.finditer(report_text):
+        try:
+            target = datetime.strptime(m.group("date"), "%Y-%m-%d").date()  # noqa: DTZ007
+        except ValueError:
+            continue
+        stated = int(m.group("count"))
+        direction = m.group("dir").lower()
+        future = direction not in _PAST_DIRECTIONS
+        expected = (target - anchor).days if future else (anchor - target).days
+        if abs(stated - expected) <= 1:
+            continue
+        key = (m.group("date"), stated, future)
+        if key in seen:
+            continue
+        seen.add(key)
+        claims.append(VerifierClaim(
+            claim=(
+                f"day count does not follow from its own dates: '{stated} days "
+                f"{direction}' for {m.group('date')} is {expected} days from "
+                f"{as_of}"
+            ),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report states both dates and a day count, and the count "
+                "does not follow from them. Quote the tool's own countdown "
+                "(`in Nd` from get_earnings_calendar) instead of computing it: a "
+                "wrong base date - the prior print instead of today - shifts it "
+                "silently (NVDA 2026-09-12: 83 days quoted, 66 true; 83 was the "
+                "gap from the 2026-08-26 print)."
+            ),
+        ))
+    return claims
+
+
+def _valuation_identity_checks(
+    report_text: str, as_of: str | None = None
+) -> list[VerifierClaim]:
     """Run all identity checks (DuPont, P/E, EV/net-cash, R-multiple, ratios).
 
     The basis-identity family (net debt, current ratio, ROA, quarter labels)
     joins the MU-origin valuation identities; each is additive and advisory.
+    ``as_of`` (the run date, from the report directory) enables the date-count
+    check; without it that one check is skipped, never guessed.
     """
     return (
         _dupont_identity(report_text)
@@ -2390,6 +2484,7 @@ def _valuation_identity_checks(report_text: str) -> list[VerifierClaim]:
         + _current_ratio_identity(report_text)
         + _roa_consistency(report_text)
         + _quarter_label_consistency(report_text)
+        + _days_countdown_identity(report_text, as_of)
     )
 
 
@@ -2432,7 +2527,9 @@ def verify_evidence_call(
     return _parse_verdict(text, report_name)
 
 
-def _text_metrics(report_text: str) -> tuple[list[VerifierClaim], list[str]]:
+def _text_metrics(
+    report_text: str, as_of: str | None = None
+) -> tuple[list[VerifierClaim], list[str]]:
     """Run every text-only metric family; return (claims, errors).
 
     One implementation per metric, shared by the per-section pass and any
@@ -2446,7 +2543,7 @@ def _text_metrics(report_text: str) -> tuple[list[VerifierClaim], list[str]]:
     """
     metrics = (
         ("internal_conflicts", _internal_conflicts),
-        ("valuation_identity", _valuation_identity_checks),
+        ("valuation_identity", lambda t: _valuation_identity_checks(t, as_of)),
         ("fed_cuts_contradiction", _fed_cuts_contradiction),
         ("drawdown_identity", _drawdown_identity),
         ("beat_streak_identity", _beat_streak_identity),
@@ -2567,6 +2664,7 @@ def verify_report_dir(
         except (OSError, ValueError) as exc:
             logger.warning("report_verifier: cannot read %s: %s", evidence_path, exc)
 
+    as_of = _report_as_of(report_dir)
     stem_succeeded = 0
     outcomes: dict[str, dict] = {}
     selected = tuple(stems) if stems else REPORT_STEMS
@@ -2596,7 +2694,7 @@ def verify_report_dir(
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
-        all_claims, metric_errors = _text_metrics(report_text)
+        all_claims, metric_errors = _text_metrics(report_text, as_of=as_of)
         all_claims = [
             *anchored.claims,
             *_macro_authority_gate(report_text, evidence, stem),

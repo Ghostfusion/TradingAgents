@@ -218,3 +218,39 @@ class TestNetDebtSignNote(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEarningsCountdown(unittest.TestCase):
+    """The calendar must carry the countdown a report quotes.
+
+    NVDA 2026-09-12 news.md called the next print "83 days away" - the gap from
+    the PRIOR print; from the analysis date the count was 66 and no tool printed
+    83, so the model computed it and got the base wrong.
+    """
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_counts_down_from_curr_date(self, mock_yf, _):
+        mock_yf.Ticker.return_value = _Ticker()
+        out = y_finance.get_earnings_calendar_yfinance("AAPL", "2026-05-01")
+        assert "(in 97d)" in out  # 2026-05-01 -> 2026-08-06
+        assert "(in 6d)" in out   # 2026-05-01 -> 2026-05-07
+        assert out.count("(in ") == 2  # the 2026-02-05 print is history
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_without_curr_date_there_is_no_countdown(self, mock_yf, _):
+        mock_yf.Ticker.return_value = _Ticker()
+        out = y_finance.get_earnings_calendar_yfinance("AAPL")
+        assert "(in " not in out
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_labels_the_vendor_surprise_basis(self, mock_yf, _):
+        """The printed percent need not reconcile with the 2dp EPS pair beside
+        it (NVDA 2026-08-26: 6.16% printed vs 6.22% from the pair); the header
+        says why so a reader does not take the gap for a slip."""
+        mock_yf.Ticker.return_value = _Ticker()
+        out = y_finance.get_earnings_calendar_yfinance("AAPL")
+        assert "surprise_pct is the vendor's own figure" in out
+        assert "unrounded EPS" in out

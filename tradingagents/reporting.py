@@ -908,14 +908,20 @@ def _run_card_analyst_consistency(save_path) -> dict | None:
     if not analyst_dir.exists():
         return None
     try:
-        from tradingagents.agents.utils.report_verifier import _valuation_identity_checks
+        from tradingagents.agents.utils.report_verifier import (
+            _report_as_of,
+            _valuation_identity_checks,
+        )
     except Exception as exc:  # noqa: BLE001 - advisory; must never break the card
         return {"unavailable": f"{type(exc).__name__}: {exc}"}
+    # The run date anchors the date-count identity; without it that check is
+    # skipped rather than guessed.
+    as_of = _report_as_of(save_path)
     out: dict = {}
     for path in sorted(analyst_dir.glob("*.md")):
         try:
             claims = _valuation_identity_checks(
-                path.read_text(encoding="utf-8", errors="replace")
+                path.read_text(encoding="utf-8", errors="replace"), as_of=as_of
             )
         except Exception as exc:  # noqa: BLE001 - one bad report must not lose the rest
             out[path.stem] = [{"status": "CHECK_FAILED", "claim": str(exc)}]

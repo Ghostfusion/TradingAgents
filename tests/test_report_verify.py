@@ -1648,3 +1648,77 @@ def test_the_identity_fan_out_registers_the_basis_checks():
 
     roa = "ROA TTM 81.41% vs net_margin 0.637 asset_turnover 0.946\n"
     assert any("81.41" in c.claim for c in rv._valuation_identity_checks(roa))
+
+    # The date-count identity is only enabled by the anchor the caller passes
+    # (the run date), so its registration is checked with one.
+    dated = "| Next earnings | 2026-11-17 | get_earnings_calendar | 83 days out |"
+    assert any(
+        "83 days out" in c.claim
+        for c in rv._valuation_identity_checks(dated, as_of="2026-09-12")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Date-count identity (NVDA 2026-09-12 news.md)
+# ---------------------------------------------------------------------------
+
+
+def test_days_countdown_identity_flags_the_nvda_83_day_error():
+    """The report's own two dates contradict its day count.
+
+    "2026-11-17 estimate=2.47 ... 83 days out" - 83 is the gap from the PRIOR
+    print (2026-08-26 -> 2026-11-17); from the analysis date (2026-09-12) the
+    count was 66, and no tool printed 83.
+    """
+    row = (
+        "| Next earnings | 2026-11-17 estimate=2.47 (vendor-estimated) | "
+        "get_earnings_calendar | 83 days out; not a near catalyst |"
+    )
+    claims = rv._days_countdown_identity(row, "2026-09-12")
+    assert len(claims) == 1
+    assert claims[0].status == "INTERNAL_CONFLICT"
+    assert "83 days out" in claims[0].claim and "66 days" in claims[0].claim
+
+
+def test_days_countdown_identity_needs_the_anchor():
+    """No anchor, no claim: an inferred anchor would manufacture findings."""
+    assert rv._days_countdown_identity("2026-11-17 ... 83 days out") == []
+    assert rv._days_countdown_identity("2026-11-17 ... 83 days out", None) == []
+    assert rv._days_countdown_identity("", "2026-09-12") == []
+    # A malformed anchor is as unusable as a missing one: falling back to
+    # "today" would manufacture findings from a caller bug.
+    assert rv._days_countdown_identity("2026-11-17 ... 83 days out", "2026-13-01") == []
+    assert rv._days_countdown_identity("2026-11-17 ... 83 days out", "junk") == []
+
+
+def test_days_countdown_identity_tolerates_one_day():
+    """The anchor is the run date while a report may date its data to the prior
+    close, so a one-day offset is not a defect; two days is."""
+    for stated in (65, 66, 67):
+        assert rv._days_countdown_identity(
+            f"2026-11-17 is {stated} days out", "2026-09-12"
+        ) == [], stated
+    assert rv._days_countdown_identity("2026-11-17 is 68 days out", "2026-09-12")
+
+
+def test_days_countdown_identity_ignores_lookback_windows():
+    """Regression: "worst in 30 days" is a lookback, not a countdown (reading
+    it as one flagged the clean TSM 2026-09-09 news.md)."""
+    t = (
+        "EODHD daily news sentiment: 2026-09-06 printed -0.82 with innovation "
+        "-1.40 (worst in 30 days, 7d SMA fell to +0.33)"
+    )
+    assert rv._days_countdown_identity(t, "2026-09-09") == []
+
+
+def test_days_countdown_identity_reads_elapsed_counts():
+    """An "ago" count answers to the same arithmetic, in the other direction."""
+    assert rv._days_countdown_identity("2026-08-26 print, 17 days ago", "2026-09-12") == []
+    claims = rv._days_countdown_identity("2026-08-26 print, 83 days ago", "2026-09-12")
+    assert len(claims) == 1 and "17 days" in claims[0].claim
+
+
+def test_report_as_of_reads_the_run_directory_name():
+    assert rv._report_as_of("reports/NVDA_20260912_160416") == "2026-09-12"
+    assert rv._report_as_of("reports/NVDA_20261312_160416") is None  # month 13
+    assert rv._report_as_of("reports/scratch") is None

@@ -14,6 +14,42 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**News-report day-count and basis integrity (2026-09-12; NVDA `news.md` review).** An external reviewer validated
+`reports/NVDA_20260912_160416/1_analysts/news.md` and found one real error: the report calls the next print
+(2026-11-17) "**83 days away**" - twice, prose and summary table - where the analysis date (2026-09-12) is 66
+days out. 83 is the gap from the PRIOR print (2026-08-26 -> 2026-11-17), i.e. a right number on the wrong base.
+No tool printed it: `get_earnings_calendar` showed the date and estimate with no countdown, `get_catalyst_scale`
+prints `fomc Nd out` but only covers the Fed, so the model computed it and nothing checked it. Fixed in both
+directions - the number now has a producer, and the class now has a write-time detector.
+
+**(1) The countdown is produced, not computed.** All three earnings-calendar vendors now render the days to the
+next print from `curr_date`: `2026-11-17 estimate=2.47 (in 66d)` (yfinance), `| Days out: 66` (Finnhub),
+`(in 66d)` (moomoo). Historical prints carry no countdown - they are not catalysts. The news-analyst prompt
+gained the matching rule with this precedent.
+
+**(2) The surprise percent states its basis.** NVDA 2026-08-26 shows `estimate=2.09; reported=2.22;
+surprise_pct=6.16`, while (2.22-2.09)/2.09 = 6.22%: the percent is the *vendor's*, computed from EPS it does not
+expose at full precision, so it cannot reconcile with the 2dp pair printed beside it (every row in that table
+shows the same gap). The yfinance calendar header now says so, so a reader does not read a vendor convention as
+a slip.
+
+**(3) Detection: a date-count identity at write time.** `report_verifier._days_countdown_identity` recomputes a
+day count stated on a line that carries both an ISO date and an explicit `N days out|away|ago|until` and flags a
+mismatch beyond +/-1 day (tolerance for the run date vs the prior close). It runs only with an anchor -
+`_report_as_of` reads the run date from the report directory name - and returns nothing without one, because a
+guessed anchor manufactures findings. `_text_metrics`/`_valuation_identity_checks` take the anchor through, so
+`write_report_tree` now records it in `run_card.json["analyst_consistency"]`; replaying the reviewed tree records
+`news.md: day count does not follow from its own dates: '83 days out' for 2026-11-17 is 66 days from 2026-09-12`.
+Deliberately narrow: a bare "in N days" is NOT matched, because "worst in 30 days" is a lookback - reading it as
+a countdown flagged the clean TSM 2026-09-09 tree, and a swept corpus of all 48 report trees yields exactly one
+finding (this NVDA one).
+
+Tests: 13 new (6 `test_report_verify.py`, 3 `test_yfinance_keyless_vendor.py`, 2 `test_moomoo_vendor.py`, 1
+`test_news_window_contract.py`, 1 `test_reporting.py`) and one extended (the identity fan-out registration now
+covers the anchored check). **3981 passed, 5 skipped** on the full suite; ruff clean. Eleven mutations were run against the new
+gates and every one bit, each file restored byte-identical (sha256), no-op control green.
+Web impact: none - additive text in three vendor strings plus one new advisory run-card key.
+
 **Market-report number, scale and OPEX-label integrity (2026-09-12; NVDA `market.md` review).** An external
 reviewer re-derived the arithmetic in `reports/NVDA_20260912_160416/1_analysts/market.md` and found no error in
 it; re-deriving the same figures from the run's own logged OHLCV (92 bars) plus the vendor series the tools use

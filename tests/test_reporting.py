@@ -2,6 +2,7 @@
 
 import json
 
+from tradingagents import reporting
 from tradingagents.reporting import _slugify, write_report_tree
 
 
@@ -843,3 +844,19 @@ def test_run_card_carries_the_analyst_consistency_record(tmp_path, monkeypatch):
     assert card["analyst_consistency"] == {
         "fundamentals": [{"status": "INTERNAL_CONFLICT", "claim": "x"}]
     }
+
+def test_run_card_records_the_day_count_conflict(tmp_path):
+    """The write-time run card is what protects a real run, so it must pass the
+    run date through to the date-count identity: a report that dates its own
+    catalyst and then miscounts the days is recorded, not just unit-tested."""
+    adir = tmp_path / "NVDA_20260912_160416" / "1_analysts"
+    adir.mkdir(parents=True)
+    (adir / "news.md").write_text(
+        "| Next earnings | 2026-11-17 estimate=2.47 | get_earnings_calendar |"
+        " 83 days out |\n",
+        encoding="utf-8",
+    )
+    card = reporting._run_card_analyst_consistency(tmp_path / "NVDA_20260912_160416")
+    assert card is not None
+    assert "83 days out" in card["news"][0]["claim"]
+    assert "66 days" in card["news"][0]["claim"]

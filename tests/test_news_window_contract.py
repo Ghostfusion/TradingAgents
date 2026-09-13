@@ -235,3 +235,16 @@ def test_permanent_client_error_is_not_retried(monkeypatch, mod):
     # A 404 is permanent: one attempt, reported as no-data (not rate limit).
     assert len(attempts) == 1
     assert "404" in ei.value.detail
+
+
+def test_earnings_calendar_prints_the_countdown(monkeypatch):
+    """Finnhub rows carry the days-out figure the report quotes (2026-09-10 ->
+    2026-10-02 = 22d) instead of the model computing it."""
+    client = _EarningsClient(
+        {"earningsCalendar": [{"date": "2026-10-02", "epsEstimate": 1.5}]}
+    )
+    monkeypatch.setattr(finnhub, "_client", lambda: client)
+
+    out = finnhub.get_earnings_calendar_finnhub("AAPL", "2026-09-10")
+
+    assert "Days out: 22" in out
