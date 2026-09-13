@@ -40,6 +40,16 @@ missing.
    gathered also emits a machine-readable symmetry row, and S11's plan call must
    **fall back to today's loop** when the plan is empty, invalid, or outside the
    tool whitelist.
+10. **Dark launches are measured, not assumed.** A gate stays `False` in
+    `default_config.py` until its phase is proven: flip **one** gate at a time,
+    in a labelled run, and diff that run against a gate-off run on the same
+    basket (`scripts/repro_check.py --evidence` for the forced-tool composition,
+    `scripts/verify_sweep.py` for per-claim verdicts). Only additive, declared
+    lines are acceptable, and a new CONFIRMED/SUSPECT claim blocks the flip.
+    `run_card.json` records the commit and a `config_hash`, but that hash's key
+    list does **not** cover the round-3 gates yet — so naming the flipped gate in
+    the run output, and extending that key list, is part of the phase rather than
+    an afterthought.
 
 ---
 
@@ -49,25 +59,51 @@ missing.
 | --- | --- | --- | --- | --- | --- |
 | **S1** | Altman variants + distress zones | `dataflows/quantitative_scores.py`, `strategies/normalized.py` | `enable_altman_variants` | S | — |
 | **S2** | F-Score paper basis, bands, applicability | `dataflows/quantitative_scores.py`, `strategies/normalized.py` | `enable_f_score_detail` | S | — |
-| **S10** | G-Score + C-Score | `dataflows/quantitative_scores.py`, `strategies/cross_section.py` | `enable_growth_scores` | M | peer medians |
+| **S10** | G-Score + C-Score | `dataflows/quantitative_scores.py`, `strategies/cross_section.py` | `enable_growth_scores` | M | peer universe (§1.1, resolved) |
 | **S4** | Weighted/unweighted news aggregation | `strategies/sentiment.py` | `enable_weighted_sentiment_agg` | S-M | — |
 | **S5** | Crowd ratio, dispersion, extreme bands | `strategies/sentiment.py` | `enable_crowd_ratio_bands` | S | — |
 | **S6** | Analyst revision index | `strategies/analyst_revisions.py` (new) | `enable_analyst_revision_index` | S | — |
-| **S3** | Composite quality score 0-100 | `strategies/factors.py`, `strategies/cross_section.py` | `enable_quality_composite` | M | peer universe |
+| **S3** | Composite quality score 0-100 | `strategies/factors.py`, `strategies/cross_section.py` | `enable_quality_composite` | M | peer universe (§1.1, resolved) |
 | **S8** | Score evaluation rows (IC/deciles/coverage/stability) | `strategies/alpha_health.py` | `enable_score_eval_rows` | S | S3 or any new score |
 | **S7** | Weighted rolling sentiment window + warm-up guard | `strategies/sentiment.py` | `enable_weighted_sentiment_window` | S | — |
-| **S9** | Reduced BW-style market sentiment index | `strategies/market_sentiment_index.py` (new) | `enable_market_sentiment_index` | M | conditional |
 | **S11** | Symmetric evidence for paired roles (a: report, b: deterministic default args, c: mirrored budget, d: plan call) | `agents/utils/evidence_gather.py`, `graph/setup.py`, `scripts/repro_check.py` | `enable_evidence_symmetry` | M | independent of S1-S10 |
 
-Landing order: **S1, S2, S10, S4, S5, S6, S3+S8 (together), S7, S9** — the two
+Landing order: **S1, S2, S10, S4, S5, S6, S3+S8 (together), S7** — the two
 correctness fixes first, then the new-coverage score, then the sentiment items
 that consume data the pipeline already collects, then the composite **with** its
-evaluation rows, and the conditional index last.
+evaluation rows. **S9 is not in this order** — it is not a phase any more; its
+research is Appendix A and §5 records what would reopen it.
 
 S11 is orthogonal to that order and starts with its **no-LLM** steps (S11a
 symmetry report, S11b deterministic default args), which can land at any point;
 S11c/S11d wait for S11a's measured asymmetry to justify them. Nothing in S11
 touches a scoring path, so it can also ship independently of this round.
+
+### 1.1 Resolved decisions (2026-09-13 review pass)
+
+These were open decisions. They are settled here so that no phase can start on a
+different assumption than the phase that follows it.
+
+- **Peer universe (S3, S10) — the screener scan universe.** The universe is the
+  set the run actually ranked: `scripts/value_screener.py`'s `--universe`
+  (default `eodhd-us`: the EODHD US common-stock list after the exchange gate,
+  with `--file` and positional tickers overriding), and `--rank composite`
+  selects the composite ordering. That is a genuine cross-section (hundreds of
+  names), which is what a percentile and a median need. **One resolver** returns
+  the metrics panel, the sector labels and the peer count; **S10 lands it** (the
+  first consumer) and S3 reuses it — never a second implementation (rule 2).
+  S10's industry medians are that universe **partitioned by the existing
+  `sector_map` labels** (per-group `min_n=5`), not a separate source.
+  **`get_company_peers` is not the universe.** Today's `get_composite_rank`
+  builds its peer set as `[ticker] + peers[:8]` from Finnhub — nine names at
+  most, which is exactly
+  S3's floor before any metric drops out, and too few for a defensible median.
+  It keeps its current meaning: the narrow tool-level comparison set.
+  Consequence for the order: **no S10 code before the resolver exists**, and S3
+  is written against the same resolver.
+- **S9 — not scheduled.** Removed from the phase map and from the landing order;
+  the research is kept as Appendix A. It reopens only if a market-level consumer
+  with a decision path appears (§5), and then with its own phase entry.
 
 ---
 
@@ -128,12 +164,13 @@ substitution is made without recording it); a fund returns `unavailable`.
 
 **Target.** `dataflows/quantitative_scores.py`: `growth_score(fin, medians)`,
 `overpriced_score(fin)`; `strategies/cross_section.py`:
-`group_median(values_by_key, groups, min_n=5)`.
+`group_median(values_by_key, groups, min_n=5)` and `resolve_peer_universe(...)`
+(§1.1), which lands with this phase and is reused by S3.
 
 **Behaviour.**
 - $G_1..G_8$ and $C_1..C_6$ exactly as specified, with industry medians from the
-  peer set; `medians` carries its own `n` and the test refuses a peer group
-  below `min_n`.
+  resolved peer universe (§1.1) partitioned by sector; `medians` carries its own
+  `n` and the test refuses a peer group below `min_n`.
 - Bands printed from the review's Table 9 (`G 6-8 good / 0-2 poor`,
   `C 0-2 good / 5-6 poor`); the C-score is labelled a **risk screen**.
 - $G_4/G_5$ need a 5-year annual series — sourced from the SEC XBRL history the
@@ -285,28 +322,7 @@ close-time cutoff.
 unweighted SMA and both are printed; a 12-day history with
 `min_history=30` returns `unavailable`; the existing SMA output is unchanged.
 
-### S9 — Reduced BW-style market sentiment index (conditional)
-
-**Target.** new `strategies/market_sentiment_index.py`:
-`bw_style_index(proxies_by_date, macro_by_date, min_proxies=…)` with an internal
-pure `_pc1(matrix)` (numpy is already a dependency of `sentiment_research`).
-
-**Behaviour.**
-- Standardise each proxy → regress on the macro set (industrial production,
-  consumption, employment, recession dummy — all FRED) → PC1 of the residual
-  correlation matrix → sign-normalise so higher = sentiment; print loadings,
-  variance explained, proxy names **and the five published proxies that are
-  missing** (IPO count, IPO first-day returns, equity share in new issues,
-  dividend premium, CEF discount).
-- Fewer than `min_proxies` available → `unavailable` (never a one-proxy
-  "index"); the annual frequency and one-year effective lag are printed with the
-  output, and the index is explicit that it is **not** the BW index.
-
-**Acceptance.** On a synthetic 4-proxy panel with a planted common factor, PC1
-recovers it and the sign convention is stable across reruns; with one proxy the
-function returns `unavailable`; the loadings and missing-proxy list are rendered.
-
-### S11 - Symmetric evidence for paired roles
+### S11 — Symmetric evidence for paired roles
 
 Split into four steps so the cheap, non-LLM parts land first and the plan call
 exists only if the measurement justifies it. S11 changes *how evidence is
@@ -377,12 +393,40 @@ off the run's outputs are unchanged from `HEAD`; the assertion writes
 
 ---
 
+## Appendix A — S9: reduced BW-style market sentiment index (**not scheduled**)
+
+Kept so the research is not lost. This is **not** a phase: it has no row in the
+phase map, no position in the landing order, and no gate until the reopening
+condition in §5 is met.
+
+**Target.** new `strategies/market_sentiment_index.py`:
+`bw_style_index(proxies_by_date, macro_by_date, min_proxies=…)` with an internal
+pure `_pc1(matrix)` (numpy is already a dependency of `sentiment_research`).
+
+**Behaviour.**
+- Standardise each proxy → regress on the macro set (industrial production,
+  consumption, employment, recession dummy — all FRED) → PC1 of the residual
+  correlation matrix → sign-normalise so higher = sentiment; print loadings,
+  variance explained, proxy names **and the five published proxies that are
+  missing** (IPO count, IPO first-day returns, equity share in new issues,
+  dividend premium, CEF discount).
+- Fewer than `min_proxies` available → `unavailable` (never a one-proxy
+  "index"); the annual frequency and one-year effective lag are printed with the
+  output, and the index is explicit that it is **not** the BW index.
+
+**Acceptance.** On a synthetic 4-proxy panel with a planted common factor, PC1
+recovers it and the sign convention is stable across reruns; with one proxy the
+function returns `unavailable`; the loadings and missing-proxy list are rendered.
+
+---
+
 ## 3. Cross-cutting wiring
 
 | Surface | Change |
 | --- | --- |
 | `tradingagents/default_config.py` | ten `enable_*` keys from §1, all `False` |
 | `strategies/sentiment.py::__all__` | the three new sentiment functions |
+| Peer universe | `strategies/cross_section.py::resolve_peer_universe` (§1.1) — shared by S3 and S10, prints the peer count and the sector partition; the screener columns read it |
 | Tools | S1/S2/S10 rows on the existing fundamentals tools; `get_analyst_revision_index` (S6); `get_composite_rank` gains the quality score (S3); S4/S5/S7 rows on `get_news_sentiment_series` / `get_sentiment_computed` |
 | Screener | G/C columns (S10), quality composite (S3), revision index (S6) |
 | `scripts/strategy_quality_report.py` | S8 rows |
@@ -406,7 +450,7 @@ off the run's outputs are unchanged from `HEAD`; the assertion writes
 | S3 | `tests/test_quality_composite.py` | best/worst → 100/0; monotone fixture; coverage-floor behaviour; renormalisation visible; peer floor | skip winsorising; average over the full metric set when one is missing; use the decision rating bands |
 | S8 | `tests/test_score_eval_rows.py` | perfect-rank score → monotone deciles + IC≈1; random score → not monotone; coverage on a short panel; min-obs floor | compute IC on the score's own sign only; bucket with a fixed width instead of rank; report coverage as always 1.0 |
 | S7 | `tests/test_sentiment_rolling_window.py` | recency spike > unweighted SMA; `min_history` guard; SMA path unchanged | weight the oldest observations highest; zero-fill missing days; ignore `min_history` |
-| S9 | `tests/test_market_sentiment_index.py` | planted common factor recovered; sign stable; one proxy → `unavailable`; missing-proxy list rendered | skip the macro orthogonalisation; return a one-proxy index; flip the sign convention between runs |
+| S9 (Appendix A) | `tests/test_market_sentiment_index.py` | planted common factor recovered; sign stable; one proxy → `unavailable`; missing-proxy list rendered | skip the macro orthogonalisation; return a one-proxy index; flip the sign convention between runs |
 | S11 | `tests/test_evidence_symmetry.py` | asymmetric fixture → `ASYMMETRIC` + the named tool; equal → `SYMMETRIC`; no-leaf pair → `unavailable`; zero vendor calls in the report; a declared-default tool moves pool; the mirrored budget journals the surplus; an invalid plan falls back with a reason; gate off → run output unchanged | count leaves but not planned tools; drop the budget mirror; let an invalid plan raise; let the plan fire outside the whitelist; report `SYMMETRIC` when a side has no leaves |
 
 Every test file is proven failing under its mutation list before the phase is
@@ -427,7 +471,20 @@ tests/` must be green per commit.
   coverage line, and the explicit statement that the composite is not a rating.
 - **Risk: peer-set dependence.** Both S3 and S10 are cross-sectional; a small or
   stale peer set makes them meaningless. Both carry a floor and print the peer
-  count.
+  count, and §1.1 fixes *which* set that is.
+- **Risk: new coverage widens the asymmetry surface S11 measures.** The pool
+  split is derived from each tool's own schema (rule 9), so every new tool row
+  joins one of the two pools automatically — and the rows added here (S1/S2/S10
+  on the fundamentals tools, S6's `get_analyst_revision_index`, S4/S5/S7 on the
+  sentiment tools, S3's `get_composite_rank` extension) are exactly the
+  multi-arg, model-fed kind that lands in the model pool. Measured today: **214**
+  `@tool` functions repo-wide, **198 bound** across the three analysts (market
+  115: 87 gather / 28 model; news 27: 23/4; fundamentals 56: 47/9 over the
+  company+ETF union) — i.e. **41 model-pool tools** catalog-wide and **33** for
+  the variants the audited QQQI run actually bound. Not a reason to slow down,
+  but a real interaction: a new tool must either take args the gather context
+  supplies or be counted in the S11a symmetry row, and S8's coverage rows are the
+  other half of the measurement (a score nothing fires is visible there).
 - **Risk: sentiment scores are uncalibrated.** The research is explicit that
   FinBERT-style probabilities are not calibrated and that buzz predicts
   volatility rather than sign. No item here may gate a decision on a sentiment
@@ -452,15 +509,17 @@ tests/` must be green per commit.
 - **Non-goal: binding tools to the debaters.** Both sides read one shared report
   set today; giving them their own tools would *create* the per-side selection
   imbalance S11 exists to remove.
-- **Open decision (owner):** the peer universe for S3/S10 — reuse the screener's
-  `--rank composite` peer set, or the sector map's constituents? Recommended:
-  the screener peer set (it already exists, is test-covered, and matches the
-  watchlist the columns appear on); the sector map is the fallback when the
-  screener set is below the floor.
-- **Open decision (owner):** whether S9 is wanted at all. It is macro-level,
-  annual, one-year-lagged and reduced-proxy; recommended default is **not to
-  build** unless a market-timing consumer appears. It is in this plan so the
-  research is not lost, not because it earns a phase.
+- **Decision (resolved 2026-09-13): the peer universe is the screener scan
+  universe** (§1.1) — one resolver, landed by S10 and reused by S3; S10's medians
+  are that universe partitioned by the existing `sector_map` labels. The earlier
+  second option ("the sector map's constituents") was not buildable as written:
+  `sector_map` is a ticker→sector *label* dict, and the repo has no constituent
+  resolver — which is why the partition is the correct reading of it.
+- **Decision (resolved 2026-09-13): S9 is not scheduled.** It is macro-level,
+  annual, one-year-lagged and reduced-proxy, so it cannot inform a daily decision;
+  the research is kept as Appendix A so it is not lost. It reopens only if a
+  market-level consumer with a decision path appears — and then as its own phase
+  with its own gate.
 
 ---
 

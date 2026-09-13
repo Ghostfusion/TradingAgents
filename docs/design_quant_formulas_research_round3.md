@@ -266,8 +266,12 @@ the tie-aware cross-sectional percentile the repo already has.
   `quality_composite(scores_by_ticker, *, directions, min_coverage)`, reusing
   `percentile_rank` and `cross_section.winsorize`; screener column;
   `get_composite_rank` tool extension for the fundamentals analyst.
-- **Data:** the sub-scores above plus a **peer universe** (the screener's
-  `--rank composite` path and `get_company_peers` already supply one).
+- **Data:** the sub-scores above plus a **peer universe** — resolved: the
+  screener's scan universe (`--universe`, default `eodhd-us`, with
+  `--rank composite`), through **one resolver that lands with S10** and is then
+  reused here (§1.1 of the implementation plan). `get_company_peers` (today
+  `[ticker] + peers[:8]`, nine names at most) keeps its meaning as the narrow
+  tool-level comparison set; it is not the composite's universe.
 - **Failure mode:** peer sets smaller than the stated floor (default 8) →
   `unavailable` (a z over three names is noise); a metric present for fewer
   than `min_coverage` names is dropped with the drop printed; the composite is
@@ -466,7 +470,7 @@ index vs decile mean), and `coverage = scored names / universe`.
   **never a standalone verdict** (DSR/PBO already exist for the multiple-testing
   side); a monotonicity claim requires all deciles populated.
 
-### S9 — Reduced BW-style market sentiment index (conditional, macro-level)
+### S9 — Reduced BW-style market sentiment index (**not scheduled**; kept as Appendix A in the plan)
 
 Standardise each proxy, orthogonalise it against macro, take the first
 principal component of the residual correlation matrix, then sign-normalise so
@@ -552,8 +556,11 @@ $$G=\sum_{j=1}^{8}G_j\in[0,8]\qquad C=\sum_{j=1}^{6}C_j\in[0,6]$$
   (`growth_score(fin, medians)`, `overpriced_score(fin)`),
   `strategies/cross_section.py::group_median(values_by_key, groups)` for the
   industry medians, screener columns, a fundamentals tool row.
-- **Data:** medians from a peer set (`get_company_peers`, screener peers,
-  sector map); R&D is in the statement chain, **advertising usually is not**
+- **Data:** medians from the same resolved universe, partitioned by the
+  existing `sector_map` labels (per-group floor 5) — `sector_map` is a
+  ticker→sector label dict in this repo, not a constituent list, so the
+  partition is what it can supply; R&D is in the statement chain,
+  **advertising usually is not**
   (→ $G_8$ degrades to unavailable, printed); $G_4/G_5$ need a **5-year**
   annual series — available via the free SEC XBRL history tool the
   fundamentals analyst already has.
@@ -678,13 +685,22 @@ Suggested order (detail in the implementation plan):
    only honest together: a composite without IC/coverage/stability rows is
    another unvalidated number.
 8. **S7** weighted rolling window + warm-up guard — small.
-9. **S9** reduced market sentiment index — conditional, low; only if a
-   market-level consumer appears.
+9. **S9** reduced market sentiment index — **not scheduled**: the research is
+   kept as Appendix A in the plan and reopens only if a market-level consumer
+   with a decision path appears.
 10. **S11** symmetric evidence for paired roles — start with the **no-LLM** parts
     (a symmetry report over the leaves the pipeline already journals, and
     deterministic default args that move enumerable tools out of the model
     pool); add the mirrored discretionary budget and the stage-1 plan call only
     if the measured asymmetry still justifies them.
+
+Two dependencies are settled rather than left open. The **peer universe** for S3
+and S10 is the screener scan universe behind one resolver that lands with S10
+(§1.1 of the plan), so the third phase to land and the seventh share one
+implementation instead of two assumptions. And new tool rows grow the
+schema-derived **model pool** that S11 measures — 214 tools repo-wide, 41
+model-pool today (33 on the audited run) — so a coverage item is never neutral
+with respect to the symmetry work.
 
 ---
 
