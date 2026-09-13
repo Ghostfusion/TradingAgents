@@ -14,6 +14,51 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Honest degradation for tools a caller has no position for (2026-09-13; the web app's all-tools run).** The
+app's Value tools screen runs any of the 56 value tools on a bare ticker. One such run (`run_value_tools("AAPL",
+tools=<all 56>)`, `ok=true`, 42s) produced five answers that were not answers: a pydantic schema dump
+(`unavailable: 3 validation errors for get_trailing_exit | entry | Input should be a valid number`), a raw
+arithmetic error (`risk-parity alloc unavailable: float division by zero`), a repr'd Python error (`memory
+ledger: unavailable ('str' object has no attribute 'get')`), a full stress grid headed `base 0.00` with every
+cell `+/-0.00`, and `trade outcome metrics unavailable for AAPL: no valid closes` for a ticker whose close
+series was 319 bars long. Each one is a missing input reported as if it were a result, and four of them leaked
+implementation text into a user-facing line. All six are fixed at the tool - the absent input now names itself:
+
+**(1) `get_trailing_exit`** took `entry`/`peak`/`current` as required floats, so a caller with no position died
+inside the schema. All three are optional now and answer `trailing exit unavailable for X: need entry, peak,
+current (...)` naming only the ones actually missing.
+
+**(2) `get_risk_parity_alloc`** divided by a covariance that did not exist. It now filters the book to series
+with >= 2 points and refuses fewer than two names: `need return series for 2+ names (got 0 of 0 usable)`.
+Together with the web-side book building below, the two-name case computes again.
+
+**(3) `get_ledger_risk_state`** built `TradingMemoryLog(cfg.get("memory_log_path"))` - a *path* where the
+constructor takes the config **dict** - so the memory-ledger half of the read always failed with an
+AttributeError string. It passes `cfg` now, and the real win-rate/`resolved` line appears.
+
+**(4) `get_stress_grid_read`** rendered a 20-cell table of zeros for a zero base - a computed-looking, entirely
+meaningless "robust to a -10% revenue cut" grid. A non-positive or absent base is refused:
+`base value missing - pass the base read the revenue/discount shifts act on`.
+
+**(5) `get_prompt_injection_read`** answered `none detected (n=0)` for empty text: a clean bill of health for a
+document that was never supplied. Empty text now says `nothing to scan (no text supplied).` - detection itself
+is unchanged.
+
+**(6) `get_trade_outcome_metrics`** required an `entry`, and 0 (what the app sent) divided by zero, so the
+excursions were discarded and the message blamed the closes ("no valid closes"). The entry is optional and a
+missing or non-positive one is named: `need the entry price (MAE/MFE are measured from it; 0 or absent is not a
+price)`.
+
+**Web impact (sibling app).** `trading_web` calls all six with empty inputs from its Value tools screen: it now
+sends `entry=None`/`base_value=None` instead of `0.0`, and builds `returns_by_name` for `risk_parity_alloc` from
+the Ticker box's comma-separated names (`backend/capabilities.py::_returns_by_name`), so the book case computes.
+The screen's per-tool "needs ..." markers were reworded to match these messages, and
+`trading_web/tests/test_backend.py` pins both the book-building and the None sentinels. No JSON shape or
+argument *name* changed: the only wire difference is that a caller may now omit `entry`/`base_value`, and
+`get_trailing_exit` accepts omitting all three prices. Six tools still need inputs the screen has no field for
+(name=weight pairs, expected excess returns, macro levels, an entry price, text to scan, the
+`enable_factor_profile` switch) - they say so in one line instead of failing obscurely, and the app labels them.
+
 **News-report day-count and basis integrity (2026-09-12; NVDA `news.md` review).** An external reviewer validated
 `reports/NVDA_20260912_160416/1_analysts/news.md` and found one real error: the report calls the next print
 (2026-11-17) "**83 days away**" - twice, prose and summary table - where the analysis date (2026-09-12) is 66

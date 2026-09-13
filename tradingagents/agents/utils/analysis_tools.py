@@ -3517,9 +3517,9 @@ def get_horizon_var(
 @tool
 def get_trailing_exit(
     ticker: Annotated[str, "ticker symbol"],
-    entry: Annotated[float, "entry price"],
-    peak: Annotated[float, "highest price since entry"],
-    current: Annotated[float, "current price"],
+    entry: Annotated[float | None, "entry price (pass it; absent says what is missing)"] = None,
+    peak: Annotated[float | None, "highest price since entry"] = None,
+    current: Annotated[float | None, "current price"] = None,
     trail_pct: Annotated[float, "trailing-stop % from peak, default 0.05"] = 0.05,
 ) -> str:
     """Peak-trailing / give-back exit arithm (Lean L4).
@@ -3527,7 +3527,21 @@ def get_trailing_exit(
     Reports whether a peak-trail stop is struck and the exit price. Use when
     deciding to hold or take profit on a runner that has given back ground
     from its peak — the fixed ATR rules never force such an exit.
+
+    The three prices are optional so a caller without a position (the web app
+    runs this tool on a bare ticker) gets a sentence naming what is missing
+    instead of a schema validation error.
     """
+    missing = [
+        name
+        for name, value in (("entry", entry), ("peak", peak), ("current", current))
+        if value is None
+    ]
+    if missing:
+        return (
+            f"trailing exit unavailable for {ticker}: need {', '.join(missing)} "
+            "(the entry price, the peak since entry and the current price)."
+        )
     try:
         from tradingagents.strategies.exits import trailing_stop_exit
     except Exception as exc:  # noqa: BLE001
@@ -3685,6 +3699,10 @@ def get_risk_parity_alloc(
     Reports risk-parity weights (equalized risk contribution), minimum-variance
     weights and per-name risk contributions from an actual covariance matrix —
     instead of value-ratio + hard clips. Pass ``returns_by_name`` of the book.
+
+    A book of fewer than two usable series returns a sentence naming what is
+    missing: the optimizers divide by a covariance that does not exist, and a
+    raw ZeroDivisionError ("float division by zero") told the caller nothing.
     """
     try:
         from tradingagents.strategies.portfolio_optimizer import (
@@ -3695,10 +3713,26 @@ def get_risk_parity_alloc(
         )
     except Exception as exc:  # noqa: BLE001
         return f"risk-parity alloc unavailable: {exc}"
-    rp = risk_parity_weights(returns_by_name)
-    mv = min_variance_weights(returns_by_name)
-    md = max_diversification_weights(returns_by_name)
-    rc = risk_contribution(rp["weights"], returns_by_name)
+    usable: dict[str, list[float]] = {}
+    for name, series in (returns_by_name or {}).items():
+        values: list[float] = []
+        for x in series or []:
+            try:
+                values.append(float(x))
+            except (TypeError, ValueError):
+                continue
+        if len(values) >= 2:
+            usable[str(name)] = values
+    if len(usable) < 2:
+        return (
+            "risk-parity alloc unavailable: need return series for 2+ names "
+            f"(got {len(usable)} of {len(returns_by_name or {})} usable) - pass "
+            'returns_by_name={"AAPL": [...], "MSFT": [...]}.'
+        )
+    rp = risk_parity_weights(usable)
+    mv = min_variance_weights(usable)
+    md = max_diversification_weights(usable)
+    rc = risk_contribution(rp["weights"], usable)
     if not rp["weights"]:
         return "risk-parity alloc unavailable: covariance not computable."
     rp_s = ", ".join(f"{k}={v:.1%}" for k, v in rp["weights"].items())
@@ -5628,6 +5662,8 @@ def get_prompt_injection_read(
     so an analyst can strip/flag it before reasoning. Conservative: only
     explicit phrasing trips it - normal prose does not. Use before quoting
     an unvetted source as a model instruction."""
+    if not str(text or "").strip():
+        return "prompt-injection: nothing to scan (no text supplied)."
     from tradingagents.strategies.integrity_tools import detect_injection
 
     r = detect_injection(str(text or ""))
@@ -5641,7 +5677,7 @@ def get_prompt_injection_read(
 
 def get_trade_outcome_metrics(
     ticker: Annotated[str, "ticker symbol"],
-    entry: Annotated[float, "entry price"],
+    entry: Annotated[float | None, "entry price (pass it; absent says what is missing)"] = None,
     stop: Annotated[float | None, "stop-loss price, optional"] = None,
     target: Annotated[float | None, "profit-target price, optional"] = None,
     direction: Annotated[str, "long or short"] = "long",
@@ -5651,22 +5687,36 @@ def get_trade_outcome_metrics(
     favorable excursion % after entry against the trailing closes, whether the
     stop or target was touched. Use before any 'this trade went X against us /
     the stop held' claim - the excursions come from the close series, never
-    the narrative. Advisory."""
+    the narrative. Advisory.
+
+    The entry is required for the arithmetic: without one (or with 0) the
+    excursions against it are division by zero, and the old message blamed the
+    close series ("no valid closes") instead of the missing price.
+    """
     try:
         from tradingagents.strategies.prediction_ledger import outcome_metrics as _om
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"trade outcome metrics unavailable: {exc}"
+    try:
+        entry_px = float(entry) if entry is not None else 0.0
+    except (TypeError, ValueError):
+        entry_px = 0.0
+    if entry_px <= 0:
+        return (
+            f"trade outcome metrics unavailable for {ticker}: need the entry price "
+            "(MAE/MFE are measured from it; 0 or absent is not a price)."
+        )
     closes = _ohlcv(ticker).get("closes") or []
     if len(closes) < 2:
         return f"trade outcome metrics unavailable for {ticker}: insufficient history"
     use = closes[-max(2, int(window)):]
-    r = _om(use, float(entry), stop=stop, target=target, direction=direction)
+    r = _om(use, entry_px, stop=stop, target=target, direction=direction)
     if r.get("n_bars", 0) == 0:
         return f"trade outcome metrics unavailable for {ticker}: no valid closes"
     return (
         f"trade outcome {ticker}: mae_pct={r['mae_pct']:.2f} mfe_pct={r['mfe_pct']:.2f} "
         f"stop_hit={r['stop_hit']} target_hit={r['target_hit']} n={r['n_bars']} "
-        f"(entry {entry}, window {len(use)})"
+        f"(entry {entry_px}, window {len(use)})"
     )
 
 
@@ -5717,7 +5767,7 @@ def get_prediction_ledger_score(
 @tool
 
 def get_stress_grid_read(
-    base_value: Annotated[float, "base read (e.g. DCF fair value)"],
+    base_value: Annotated[float | None, "base read (e.g. DCF fair value); absent says so"] = None,
     revenue_shifts_pct: Annotated[str, "comma-separated revenue shifts in %, default -10,-5,0,5,10"] = "",
     discount_shifts_bps: Annotated[str, "comma-separated discount-rate shifts in bps, default -50,0,50,100"] = "",
 ) -> str:
@@ -5726,7 +5776,21 @@ def get_stress_grid_read(
     rendered as a table. Responsiveness defaults to ±1% of base per unit when
     unmapped (documented approximation). Use before any 'the valuation is
     robust to a -10% revenue cut' claim - show the grid, don't assert it.
-    Advisory."""
+    Advisory.
+
+    A base of 0 (or none) is refused rather than rendered: every cell of such a
+    grid is ±0.00, which reads like a computed, robust answer.
+    """
+    try:
+        base = float(base_value) if base_value is not None else 0.0
+    except (TypeError, ValueError):
+        base = 0.0
+    if base <= 0:
+        return (
+            "stress grid unavailable: base value missing - pass the base read the "
+            "revenue/discount shifts act on (e.g. the DCF fair value); a zero base "
+            "renders a table of zeros, not a result."
+        )
     try:
         from tradingagents.strategies.regime_performance import stress_grid as _sg
     except Exception as exc:  # noqa: BLE001 - degrades
@@ -5738,7 +5802,7 @@ def get_stress_grid_read(
             if discount_shifts_bps else None
     except ValueError as exc:
         return f"stress grid unavailable: bad shift list - {exc}"
-    r = _sg(float(base_value), revenue_shifts_pct=rev, discount_shifts_bps=disc)
+    r = _sg(base, revenue_shifts_pct=rev, discount_shifts_bps=disc)
     if r.get("base") is None:
         return "stress grid unavailable: base value missing"
     rows_out = r["rows"]
@@ -6941,7 +7005,7 @@ def get_ledger_risk_state(
     try:
         from tradingagents.agents.utils.memory import TradingMemoryLog
 
-        mlog = TradingMemoryLog(cfg.get("memory_log_path") or "")
+        mlog = TradingMemoryLog(cfg)
         entries = mlog.load_entries()
         resolved = [e for e in entries if not e.get("pending") and e.get("raw") is not None]
         if len(resolved) >= 5:
