@@ -646,7 +646,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | Tool | Wraps | Bound to | Returns |
 | --- | --- | --- | --- |
 | `get_swing_set(ticker)` | `swing.swing_report` | market | trend stack, RSI band, 1-ATR stop, 2R/3R targets, VCP, trail |
-| `get_swing_exits(ticker)` | `swing.chandelier_exit` + `trail_ema` + `targets_rr` | market | chandelier trailing stop (3x ATR below 22-bar high) + 20-day EMA trail + 2R/3R targets |
+| `get_swing_exits(ticker)` | `swing.chandelier_exit` + `trail_ema` + `targets_rr` | market | chandelier trailing stop (3x ATR(14, simple mean of TR) below the 22-bar high) + 20-day EMA trail + 2R/3R targets **measured to the chandelier stop** (named in the line; `get_swing_set`'s 2R/3R use its structure stop) |
 | `get_dip_technical(ticker)` | `swing.rsi` + `technical_factors` (KST/MFI/Stoch) + `value_dip.bollinger_pct_b` | market | RSI/%b + Stochastic + MFI + KST dip-timing read (OVERSOLD / not-oversold) |
 | `get_mean_reversion_tech(ticker)` | `technical_factors` (StochRSI/RSI2/W%R/Keltner/Donchian/OBV/PSAR/Elder) | market | mean-reversion dip-timing + exit technicals |
 | `get_opening_range(ticker)` | `market_session.opening_range` | market | ORB breakout + 2R stop/target |
@@ -740,7 +740,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
 | `get_session_discipline(ticker, peak_pnl?, current_pnl?)` | `strategies.momentum.session_flags` + `psych_level` + `past_optimal_window` | market | intraday walk-away rules (giveback, max-daily-loss, past 10:00 ET optimal) + nearest psych levels |
 | `get_earnings_quality(ticker, date)` | `strategies.earnings_quality` + `strategies.normalized.trap_verdict` | fundamentals | provider-fed earnings-quality read: consensus CONCERN verdict (cash conversion, accrual ratio, FCF=OCF-|capex|, negative-FCF red flag) + forensic Beneish/Altman/F-Score trap |
-| `get_bollinger_pct_b(ticker)` | `strategies.value_dip.bollinger_pct_b` | market | Bollinger %b (price position inside the 20-day 2-sigma band); %b <= 0 at/piercing the lower band, <= 0.10 the mean-reversion entry zone |
+| `get_bollinger_pct_b(ticker)` | `strategies.value_dip.bollinger_pct_b` | market | Bollinger %b (price position inside the 20-day 2-sigma **population-SD** band; a vendor sample-SD band is 1.026x wider); %b <= 0 at/piercing the lower band, <= 0.10 the mean-reversion entry zone |
 | `get_tranche_plan(ticker, weights?, risk_pct?, account?)` | `strategies.value_dip.tranche_plan` | market | 3-tranche scale-in plan (P1/P2/P3 at 1.0/2.0 ATR, weighted avg entry, composite stop P3-1.5ATR, capital-at-risk check, 1.8R/3.0R targets + blended R:R + breakeven win rate) |
 | `get_trade_expectancy(p_win, avg_win, avg_loss, rr?)` | `strategies.value_dip.expectancy` + `breakeven_win_rate` | market | per-trade expectancy E = p*W - (1-p)*L and breakeven win rate 1/(1+R:R) |
 | `get_fcf_yield(ticker, date)` | `strategies.value_dip.fcf_yield` | fundamentals | FCF / market cap (>= 6% is the value-dip value-floor row) |

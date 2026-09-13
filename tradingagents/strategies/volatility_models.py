@@ -28,6 +28,9 @@ __all__ = [
 ]
 
 _DAYS = 252.0
+# alpha + beta at or above this is an IGARCH fit: no unconditional variance
+# exists, so the long-run vol is not a measurement (see garch11_fit).
+_IGARCH_AB = 0.999
 
 
 def _clean(vals) -> list[float]:
@@ -235,7 +238,8 @@ def garch11_fit(
     Returns ``{"omega", "alpha", "beta", "long_run_vol", "series", "n",
     "converged"}`` (annualized long-run vol, conditional-vol series on the
     last ``min_obs`` scale), or None with < ``min_obs`` returns / no
-    convergence.
+    convergence. ``long_run_vol`` is None on an IGARCH fit (alpha + beta >=
+    ``_IGARCH_AB``), where no finite unconditional variance exists.
     """
     vals = []
     for r in returns:
@@ -286,6 +290,12 @@ def garch11_fit(
         return None
     omega, alpha, beta = [float(x) for x in res.x]
     omega, alpha, beta = max(omega, 1e-12), max(0.0, alpha), max(0.0, beta)
+    # A finite long-run variance VL = omega / (1 - alpha - beta) needs the
+    # persistence below 1 by a real margin. A fit landing ON the boundary
+    # leaves 1 - alpha - beta a floating-point residual, which turns VL into
+    # an artifact: NVDA 2026-09-12 fit alpha=0.006751 beta=0.993249 (sum
+    # 1 - 2.7e-13) and reported a 1,355,146% annualized "long-run vol".
+    identifiable = (alpha + beta) < _IGARCH_AB
     if alpha + beta >= 1.0:
         alpha *= 0.99 / (alpha + beta)
         beta = 1.0 - alpha - 1e-8
@@ -296,12 +306,12 @@ def garch11_fit(
         if t > 0:
             var = omega + alpha * e[t - 1] ** 2 + beta * var
         series.append(math.sqrt(max(var, 0.0) * periods))
-    v_long = omega / max(1e-12, 1.0 - alpha - beta)
+    v_long = omega / (1.0 - alpha - beta) if identifiable else None
     return _Garch11Result(
         omega=round(omega, 8),
         alpha=round(alpha, 6),
         beta=round(beta, 6),
-        long_run_vol=round(math.sqrt(v_long * periods), 4),
+        long_run_vol=round(math.sqrt(v_long * periods), 4) if v_long else None,
         series=[round(x, 6) for x in series],
         n=len(vals),
         converged=True,

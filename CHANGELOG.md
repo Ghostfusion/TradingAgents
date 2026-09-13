@@ -14,6 +14,58 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Market-report number, scale and OPEX-label integrity (2026-09-12; NVDA `market.md` review).** An external
+reviewer re-derived the arithmetic in `reports/NVDA_20260912_160416/1_analysts/market.md` and found no error in
+it; re-deriving the same figures from the run's own logged OHLCV (92 bars) plus the vendor series the tools use
+confirmed every one - and exposed four defects that the review could not see, because they live in the tools
+rather than in the report's arithmetic. Each is fixed at the source with a regression test.
+
+**(1) A date one week early labelled "in OPEX week" - in the reviewed run itself.** `opex_status` used
+`0 <= days_to_expiry <= 6`, which swallows the weekend *before* the expiry week: the run's
+`get_opex_read(current_date=2026-09-12)` - a Saturday whose expiry was Friday 2026-09-18 - returned
+`in_opex_week: True`, and the market report relayed that label in prose, in the body and in the summary table.
+"OPEX week" is the Mon-Fri week that *contains* the expiry, i.e. ISO-week equality. The same weekend leak is
+fixed in `post_opex_unwind` (its docstring says Mon/Tue of the fresh week; the code also fired on Sat/Sun), and
+the unwind note now names the expiry that *passed* instead of the next one - it read "post-OPEX unwind window
+(2026-10-16 passed)" on 2026-09-21.
+
+**(2) A GARCH "long-run vol" of 1,355,146% - two tools, and the sizing path.** `garch11_fit` only guarded
+`alpha + beta >= 1.0`, but the NVDA fit landed at `alpha + beta = 1 - 2.7e-13`: under the guard, so
+`omega / max(1e-12, 1 - alpha - beta)` turned a floating-point residual into ~7.3e5 and the tool published
+`sqrt(VL x 252)` = 1,355,146% annualized. `get_volatility_estimators` printed it a second time, and
+`overlays.build_strategy_overlays` consumes that same field as the `volatility_estimator: garch` override, where
+the `scale <= 0 -> 1.0` guard would silently *maximise* position size rather than de-risk. An IGARCH fit
+(`alpha + beta >= 0.999`) now reports `long_run_vol: None`; both tools render
+`n/a (IGARCH fit: alpha+beta=1.000000 >= 0.999, no finite long-run variance)` and keep the conditional vol
+(41.06%), and the sizing override falls back to the close-based estimator.
+
+**(3) `var` rendered as a raw fraction beside percents.** `get_tail_risk` printed
+`cvar=4.53% var=0.03732170883628583 modified_var=3.42% ...`: a 17-digit fraction on a line whose every sibling is
+a percent, i.e. a 100x reading error for anyone comparing them.
+
+**(4) One word, two units in one tool; an unnamed R reference across two.** `get_swing_set` printed
+`risk=0.0508` (a fraction of the close) in the structure-stop line and `risk=11.0976` (price units) in the next
+line's targets - the report had to convert 0.0508 into 5.08% itself. It now prints `risk=5.08% of close`.
+`get_swing_exits` prints 2R/3R targets whose R is measured to the **chandelier** (NVDA: 1R=6.7941), not to
+`get_swing_set`'s structure stop (1R=11.0976), and named neither; it now renders
+`(R vs chandelier stop 211.4959: 1R=6.7941)` so a report can state which R it quotes. Also labelled: the two ATR
+bases are the vendor's Wilder `atr(14)` (6.8421) vs `strategies.size.atr` (simple mean of TR, 7.6672), and the two
+Bollinger band pairs differ by SD convention (`get_bollinger_pct_b` = population SD; the vendor pair = sample SD,
+sqrt(20/19)=1.026x wider) - the report flagged both discrepancies without being able to name the difference.
+
+Independent re-derivation against the run's own data (all reproduced the tools' printed values): SMA50 212.3562,
+close_10_ema 221.3927, EMA20 219.7151, RSI(14) 49.94, MACD 2.6048/3.1119/-0.5071, pivots 219.48/216.96/220.81,
+ATR(14) 6.8421 (Wilder) and 7.6672 (simple mean), chandelier 211.4959 = 22-bar high 234.4975 - 3xATR, structure
+stop 207.1924 = 10-bar low 214.8596 - 1xATR, 52w distance -7.19% (versus the 52-week high *close* 235.20; the
+week's high 236.00 would give -7.50%), mom60 +6.79% (`closes[-60] -> closes[-1]`) and the 0.37 position scale
+(target vol 15% / 60d vol 40.28%). The reviewer's 19 arithmetic checks re-derive exactly.
+
+Tests: 10 new (3 `test_derivatives_gamma.py`, 3 `test_strategies_volatility_models.py`, 4
+`test_analysis_tools.py`). **3968 passed, 5 skipped** on the full suite; ruff clean. Twelve mutations were run against the new
+gates, every one bit, each file restored byte-identical (sha256) and a no-op control stayed green.
+Web impact: none - one label flips to False on the 2 calendar days before an expiry week, one value becomes
+`None`/`n/a` on an IGARCH fit, and the rest is additive basis text inside tool strings.
+
 **Fundamentals number and label integrity (2026-09-12; NVDA report review).** An external reviewer re-derived
 the disputed figures from two NVDA trees (`reports/NVDA_20260912_160416` = R1, `reports/NVDA_20260912_005957`
 = R2) against live market data. Seven defects, all fixed at the source, each with a regression test.

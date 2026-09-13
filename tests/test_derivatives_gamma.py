@@ -107,3 +107,45 @@ def test_opex_note_renders():
 
     status_week = opex_status(date(2026, 9, 16))
     assert "in OPEX week" in opex_note(status_week)
+
+
+def test_opex_week_is_the_week_that_contains_expiry():
+    """The weekend BEFORE the expiry week is not OPEX week.
+
+    NVDA 2026-09-12 (a Saturday; the expiry was Friday 2026-09-18) was
+    reported as "in OPEX week" by the 0..6-day countdown, and the market
+    report relayed that label. The week belongs to the Mon-Fri that contains
+    the expiry - ISO week equality, not a day countdown.
+    """
+    from datetime import date
+
+    for d in (date(2026, 9, 11), date(2026, 9, 12), date(2026, 9, 13)):
+        assert opex_status(d)["in_opex_week"] is False, d
+    for d in (date(2026, 9, 14), date(2026, 9, 16), date(2026, 9, 18)):
+        assert opex_status(d)["in_opex_week"] is True, d
+    # The weekend after expiry is post-expiry, not OPEX week.
+    for d in (date(2026, 9, 19), date(2026, 9, 20)):
+        assert opex_status(d)["in_opex_week"] is False, d
+
+
+def test_post_opex_unwind_window_is_the_next_two_trading_days():
+    """Mon/Tue after expiry, not the weekend that precedes them (the note
+    announces a de-hedging flow that cannot have started on a Saturday)."""
+    from datetime import date
+
+    assert opex_status(date(2026, 9, 19))["post_opex_unwind"] is False  # Sat
+    assert opex_status(date(2026, 9, 20))["post_opex_unwind"] is False  # Sun
+    assert opex_status(date(2026, 9, 21))["post_opex_unwind"] is True   # Mon
+    assert opex_status(date(2026, 9, 22))["post_opex_unwind"] is True   # Tue
+    assert opex_status(date(2026, 9, 23))["post_opex_unwind"] is False  # Wed
+
+
+def test_opex_note_names_the_expiry_that_passed():
+    """The unwind note must name the expiry that just passed. It read
+    "post-OPEX unwind window (2026-10-16 passed)" on 2026-09-21 - the NEXT
+    expiry, a month in the future."""
+    from datetime import date
+
+    note = opex_note(opex_status(date(2026, 9, 21)))
+    assert "2026-09-18" in note
+    assert "2026-10-16" not in note

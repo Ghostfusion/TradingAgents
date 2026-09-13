@@ -125,31 +125,38 @@ def opex_dates(year: int) -> list[date]:
 
 
 def opex_status(today: date, year: int | None = None) -> dict:
-    """OPEX context for ``today``: {next_opex, days_to_next, in_opex_week,
-    post_opex_unwind, quarterly}.
+    """OPEX context for ``today``: {next_opex, prev_opex, days_to_next,
+    in_opex_week, post_opex_unwind, quarterly}.
     """
     year = year if year is not None else today.year
     dates_all = [d for y in (year - 1, year, year + 1) for d in opex_dates(y)]
     future = [d for d in dates_all if d >= today]
     if not future:
-        return {"next_opex": None, "days_to_next": None,
+        return {"next_opex": None, "prev_opex": None, "days_to_next": None,
                 "in_opex_week": False, "post_opex_unwind": False, "quarterly": False}
     nxt = min(future)
     days = (nxt - today).days
-    # Post-OPEX unwind window: the first two trading days AFTER the most
+    # Post-OPEX unwind window: the first two TRADING days AFTER the most
     # recent OPEX (Mon/Tue of a fresh week, i.e. the previous OPEX was
-    # within the last ~4 days).
+    # within the last ~4 days). The weekday gate matters: the weekend after
+    # expiry belongs to the OPEX week, and its note would otherwise announce
+    # a de-hedging flow that has not started yet.
     past = [d for d in dates_all if d < today]
     prev_opex = max(past) if past else None
     post_window = (
         prev_opex is not None
-        and (today - prev_opex).days <= 4
-        and (today - prev_opex).days >= 1
+        and today.weekday() in (0, 1)
+        and 1 <= (today - prev_opex).days <= 4
     )
     return {
         "next_opex": nxt.isoformat(),
+        "prev_opex": prev_opex.isoformat() if prev_opex else None,
         "days_to_next": days,
-        "in_opex_week": 0 <= days <= 6,
+        # "OPEX week" = the Mon-Fri week that CONTAINS the expiry, which is
+        # exactly ISO (Monday-based) week equality. A 0..6-day countdown also
+        # swallows the weekend BEFORE the expiry week: NVDA 2026-09-12 (a
+        # Saturday, expiry the following Friday) was reported "in OPEX week".
+        "in_opex_week": nxt.isocalendar()[:2] == today.isocalendar()[:2],
         "post_opex_unwind": post_window,
         "quarterly": nxt.month in (3, 6, 9, 12),
     }
@@ -165,8 +172,11 @@ def opex_note(status: dict) -> str | None:
             "pinning can damp moves into Friday close; avoid false breakouts"
         )
     if status.get("post_opex_unwind"):
+        # The expiry that passed, never the next one: naming `next_opex` here
+        # announced "2026-10-16 passed" on 2026-09-21.
+        passed = status.get("prev_opex") or "the last expiry"
         return (
-            f"post-OPEX unwind window ({status['next_opex']} passed) — "
+            f"post-OPEX unwind window ({passed} passed) — "
             "dealer de-hedging can release a directional move"
         )
     return f"next OPEX {status['next_opex']} in {status['days_to_next']}d"

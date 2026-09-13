@@ -7,6 +7,7 @@ exists, explicit 'unavailable' text (never a fabricated figure) otherwise.
 
 import io
 import math
+import re
 from types import SimpleNamespace
 from unittest import mock
 
@@ -2563,3 +2564,100 @@ def test_dcf_sanity_gate_unit_mix_ratio():
     assert res_price / price == pytest.approx(6.83, abs=0.01)
     sane = 520.0 / 429.55
     assert not (sane > 5.0)
+
+
+def test_tail_risk_var_is_rendered_on_the_cvar_scale(monkeypatch):
+    """`var` must be a percent like its siblings on the same line.
+
+    It printed "cvar=4.53% var=0.03732170883628583" - a raw unrounded
+    fraction beside percents, so any reader comparing the two sees a 100x
+    gap (NVDA 2026-09-12 market.md quoted only cvar, which is why it slipped
+    through).
+    """
+    n = 120
+    closes = [100.0 + 0.5 * i + 20.0 * math.sin(i / 3) for i in range(n)]
+    fake = {"closes": closes, "opens": [], "highs": [], "lows": [], "volumes": []}
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_tail_risk.invoke({"ticker": "AAPL", "alpha": 0.05})
+    cvar = re.search(r"(?<![_a-z])cvar=(-?\d+\.\d+)%", out)
+    var = re.search(r"(?<![_a-z])var=(-?\d+\.\d+)%", out)
+    assert cvar and var, out
+    assert float(var.group(1)) <= float(cvar.group(1))  # CVaR is the worse tail
+    assert re.search(r"(?<![_a-z])var=-?\d+\.\d{3,}", out) is None
+
+
+def test_swing_set_labels_the_stop_risk_unit(monkeypatch):
+    """One tool prints two `risk=` fields with different units - the stop
+    distance as a fraction of the close (0.0508, rendered as 5.08%) and the
+    targets' 1R in price units (11.0976). Each must carry its unit."""
+    closes = _uptrend()
+    entry = closes[-1]
+
+    # Monotone business dates: _ohlcv re-sorts by date, so a cycling fixture
+    # would silently hand the tool a different "last" row than closes[-1].
+    def _load(ticker):
+        cl = {"AAPL": closes, "SPY": [200.0] * len(closes)}.get(ticker)
+        if cl is None:
+            return None
+        return pd.DataFrame({
+            "Date": pd.bdate_range("2025-01-01", periods=len(cl)).strftime("%Y-%m-%d"),
+            "Open": cl,
+            "High": [c + 2 for c in cl],
+            "Low": [c - 2 for c in cl],
+            "Close": cl,
+            "Volume": [1_000_000] * len(cl),
+        })
+
+    with mock.patch(
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df", side_effect=_load
+    ):
+        out = T.get_swing_set.invoke({"ticker": "AAPL"})
+    assert f"entry={entry:.4f}" in out, out
+    m = re.search(
+        r"structure_stop: swing_low=([\d.]+) stop=([\d.]+) risk=([\d.]+)% of close", out
+    )
+    assert m, out
+    swing_low, stop, risk_pct = (float(x) for x in m.groups())
+    assert risk_pct == pytest.approx((entry - stop) / entry * 100, abs=0.01)
+    atr_m = re.search(r"ATR\(14, simple mean of TR\)=([\d.]+)", out)
+    assert atr_m, out
+    assert swing_low - stop == pytest.approx(float(atr_m.group(1)), abs=1e-3)
+    # The targets line keeps its price-unit 1R and must not read as a percent.
+    targets = [ln for ln in out.splitlines() if ln.strip().startswith("targets:")]
+    assert len(targets) == 1 and "risk=" in targets[0] and "%" not in targets[0]
+
+
+def test_swing_exits_names_the_r_reference(monkeypatch):
+    """The 2R/3R targets are measured to THIS tool's stop reference (the
+    chandelier), not to get_swing_set's structure stop: NVDA 2026-09-12
+    printed 1R=6.7941 here vs 11.0976 there, from the same close. The line
+    must name the reference, and R must be the distance to it."""
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _uptrend_ohlcv())
+    out = T.get_swing_exits.invoke({"ticker": "AAPL"})
+    ch = re.search(r"chandelier stop=([\d.]+)", out)
+    ref = re.search(r"\(R vs chandelier stop ([\d.]+): 1R=([\d.]+)\)", out)
+    t1 = re.search(r"t1=([\d.]+)", out)
+    assert ch and ref and t1, out
+    close = _uptrend_ohlcv()["closes"][-1]
+    assert float(ref.group(1)) == pytest.approx(float(ch.group(1)))
+    assert float(ref.group(2)) == pytest.approx(close - float(ch.group(1)), abs=1e-4)
+    assert float(t1.group(1)) == pytest.approx(close + 2 * float(ref.group(2)), abs=1e-3)
+
+
+def test_bollinger_pct_b_names_the_sd_convention(monkeypatch):
+    """The deterministic band is the population SD; a vendor band built on the
+    sample SD is sqrt(20/19)=1.026x wider (NVDA 2026-09-12: 231.83/208.05 vs
+    232.14/207.74). The label must match the arithmetic."""
+    closes = _uptrend()
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: {"closes": closes})
+    out = V.get_bollinger_pct_b.invoke({"ticker": "AAPL"})
+    assert "population SD" in out
+    mid = sum(closes[-20:]) / 20
+    pop_sd = math.sqrt(sum((c - mid) ** 2 for c in closes[-20:]) / 20)
+    m = re.search(r"lower=([\d.]+) upper=([\d.]+) mid=([\d.]+)", out)
+    assert m, out
+    lo, up, mid_out = (float(x) for x in m.groups())
+    # The tool prints 2dp, so compare at that precision; the band half-width
+    # is the population SD (a sample-SD band would be 2.6% wider here).
+    assert mid_out == pytest.approx(mid, abs=5e-3)
+    assert (up - mid_out) / 2 == pytest.approx(pop_sd, abs=5e-3)

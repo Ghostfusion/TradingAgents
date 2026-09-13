@@ -168,7 +168,9 @@ def get_bollinger_pct_b(
     )
     return (
         f"bollinger %b {ticker}: {bb['pct_b']:.2%} ({zone}); "
-        f"price={bb['price']:.2f} lower={bb['lower']:.2f} upper={bb['upper']:.2f} mid={bb['mid']:.2f}"
+        f"price={bb['price']:.2f} lower={bb['lower']:.2f} upper={bb['upper']:.2f} mid={bb['mid']:.2f} "
+        "(20-day 2-sigma, population SD; a vendor band built on the sample SD is "
+        "sqrt(20/19)=1.026x wider - flag the pair, never splice it)"
     ) + _scale_note(ticker, closes)
 
 

@@ -292,8 +292,10 @@ def get_swing_set(
         if stop.get("stop") is not None:
             lines.append(
                 f"  structure_stop: swing_low={_txt(stop.get('swing_low'))} "
-                f"stop={_txt(stop.get('stop'))} risk={_txt(stop.get('risk_pct'))} "
-                f"(1 ATR(14) below swing low, ATR(14)={_txt(stop.get('atr'))})"
+                f"stop={_txt(stop.get('stop'))} "
+                f"risk={_pct_text(stop.get('risk_pct'))} of close "
+                f"(1 ATR(14) below swing low, ATR(14, simple mean of TR)="
+                f"{_txt(stop.get('atr'))})"
             )
         if tg.get("t1") is not None:
             lines.append(
@@ -327,6 +329,16 @@ def get_swing_set(
 
 def _txt(v) -> str:
     return "n/a" if v is None else (f"{v:.4f}" if isinstance(v, float) else str(v))
+
+
+def _pct_text(v) -> str:
+    """A fraction rendered as a percent, 'n/a' when absent.
+
+    Tool lines carry several `risk=` fields whose units differ (a stop
+    distance in price units vs a fraction of the close); a raw fraction
+    beside a percent reads as a 100x error.
+    """
+    return f"{float(v):.2%}" if isinstance(v, (int, float)) else _txt(v)
 
 
 def _fmt_pct(v) -> str:
@@ -921,12 +933,19 @@ def get_swing_exits(
         lines = [
             f"swing exits {ticker} (close {last:.2f}):",
             f"  chandelier stop={ch.get('chandelier')} exit={ch.get('exit')} "
-            f"(3x ATR below 22-bar high)",
+            f"(3x ATR(14, simple mean of TR)={atr_v:.4f} below 22-bar high)",
             f"  ema20={tr.get('ema')} trail_exit={tr.get('exit')}",
         ]
         if tg:
+            # R is measured to THIS tool's stop reference (the chandelier),
+            # not to get_swing_set's structure stop: the two tools' 2R/3R
+            # targets are different levels (NVDA 2026-09-12: 1R=6.7941 here
+            # vs 11.0976 there). Name the reference so a report can say which
+            # R it is quoting.
             lines.append(f"  targets: t1={tg.get('t1')} t2={tg.get('t2')} "
-                         f"r1={tg.get('r1')} r2={tg.get('r2')}")
+                         f"r1={tg.get('r1')} r2={tg.get('r2')} "
+                         f"(R vs chandelier stop {ch.get('chandelier')}: "
+                         f"1R={tg.get('risk')})")
         return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"swing exits unavailable for {ticker}: {exc}"
@@ -4005,7 +4024,8 @@ def get_tail_risk(
         pass
     mvar_line = f" modified_var={abs(mvar):.2%}" if mvar is not None else " modified_var=n/a"
     return (
-        f"tail risk {ticker}: cvar={abs(c):.2%} var={abs(var) if var is not None else 'n/a'}"
+        f"tail risk {ticker}: cvar={abs(c):.2%} "
+        f"var={f'{abs(var):.2%}' if var is not None else 'n/a'}"
         f"{mvar_line}{cdar_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
     )
 
@@ -6042,10 +6062,17 @@ def _vol_models_read(ticker: str, model: str) -> str:
         if not fit:
             return f"garch volatility unavailable for {ticker}: fit did not converge"
         recent = fit["series"][-1] if fit.get("series") else None
+        ab = fit["alpha"] + fit["beta"]
+        lr = fit.get("long_run_vol")
         lines = [
             f"## GARCH(1,1) Volatility — {ticker}",
             f"- omega={fit['omega']} alpha={fit['alpha']} beta={fit['beta']}",
-            f"- long-run annualized vol: {fit['long_run_vol']:.2%}",
+            (
+                f"- long-run annualized vol: {lr:.2%}"
+                if lr is not None
+                else f"- long-run annualized vol: n/a (IGARCH fit: alpha+beta={ab:.6f}"
+                " >= 0.999, no finite long-run variance; use the latest conditional vol)"
+            ),
         ]
         if recent is not None:
             lines.append(f"- latest conditional annualized vol: {recent:.2%}")
@@ -6303,11 +6330,19 @@ def get_volatility_estimators(
             ("garch long-run", (garch or {}).get("long_run_vol")),
         ]
         lines = [f"## Volatility Estimators — {ticker}", ""]
+        igarch = bool(garch) and garch.get("long_run_vol") is None
         for name, v in rows:
+            if name == "garch long-run" and igarch:
+                ab = garch["alpha"] + garch["beta"]
+                lines.append(
+                    f"- **{name}**: n/a (IGARCH fit: alpha+beta={ab:.6f} >= 0.999, "
+                    "no finite long-run variance)"
+                )
+                continue
             lines.append(f"- **{name}**: {f'{v:.2%}' if v is not None else 'n/a'}")
         lines.append(
             "\nNote: parkinson / garman-klass are day-only (no overnight gap); "
-            "garch long-run is the conditional mean vol."
+            "garch long-run is the unconditional mean vol (n/a on an IGARCH fit)."
         )
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrades

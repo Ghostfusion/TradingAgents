@@ -147,3 +147,78 @@ def test_volatility_estimator_tools_render(monkeypatch):
         assert "ewma" in out and "garch" in out
     finally:
         _RUN_OHLCV_CACHE.clear()
+
+
+def test_garch_long_run_vol_none_on_an_igarch_fit(monkeypatch):
+    """A fit on the IGARCH boundary has no unconditional variance.
+
+    NVDA 2026-09-12 fitted alpha=0.006751 / beta=0.993249 (sum 1 - 2.7e-13),
+    which left omega/(1-alpha-beta) a floating-point artifact and published a
+    1,355,146% annualized "long-run vol". Nothing finite may be reported
+    there; the conditional series stays a measurement.
+    """
+
+    class _Res:
+        success = True
+        x = [7.3e-07, 0.006751, 0.993249]
+
+    monkeypatch.setattr("scipy.optimize.minimize", lambda *a, **k: _Res())
+    rng = np.random.default_rng(11)
+    rets = list(rng.normal(0.0004, 0.02, 260))
+    fit = garch11_fit(rets)
+    assert fit is not None and fit["converged"] is True
+    assert fit["alpha"] + fit["beta"] >= 0.999
+    assert fit["long_run_vol"] is None
+    assert len(fit["series"]) == len(rets)
+    assert 0.0 < fit["series"][-1] < 5.0
+
+
+def test_garch_long_run_vol_never_publishes_an_igarch_artifact():
+    """Invariant across fits: a finite long-run vol implies a sub-IGARCH
+    persistence (and a number that is a vol, not a float artifact)."""
+    rng = np.random.default_rng(5)
+    for n in (120, 400):
+        fit = garch11_fit(list(rng.normal(0.0004, 0.015, n)))
+        assert fit is not None
+        if fit["long_run_vol"] is not None:
+            assert fit["alpha"] + fit["beta"] < 0.999
+            assert fit["long_run_vol"] < 5.0
+
+
+def test_igarch_long_run_renders_na_in_both_tools(monkeypatch):
+    """get_garch_volatility / get_volatility_estimators must say n/a (with the
+    reason) instead of printing the boundary artifact."""
+    from tradingagents.agents.utils.analysis_tools import (
+        _RUN_OHLCV_CACHE,
+        get_garch_volatility,
+        get_volatility_estimators,
+    )
+    from tradingagents.strategies import volatility_models as _vm
+
+    n = 120
+    closes = [100.0 + 0.05 * i for i in range(n)]
+    _RUN_OHLCV_CACHE[("AAPL", 320)] = {
+        "dates": [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)],
+        "closes": closes,
+        "opens": [c - 0.1 for c in closes],
+        "highs": [c + 1.0 for c in closes],
+        "lows": [c - 1.0 for c in closes],
+        "volumes": [1_000_000.0] * n,
+    }
+
+    def _igarch(_returns, **kw):
+        return _vm._Garch11Result(
+            omega=7.3e-07, alpha=0.006751, beta=0.993249, long_run_vol=None,
+            series=[0.41] * 5, n=319, converged=True,
+        )
+
+    monkeypatch.setattr(_vm, "garch11_fit", _igarch)
+    try:
+        g = get_garch_volatility.invoke({"ticker": "AAPL"})
+        assert "long-run annualized vol: n/a (IGARCH fit" in g
+        assert "latest conditional annualized vol: 41.00%" in g
+        assert "1355146" not in g
+        v = get_volatility_estimators.invoke({"ticker": "AAPL"})
+        assert "**garch long-run**: n/a (IGARCH fit" in v
+    finally:
+        _RUN_OHLCV_CACHE.clear()
