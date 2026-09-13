@@ -31,7 +31,10 @@ URLs from the first). All retrieved except two, both handled explicitly:
   author-hosted model-report PDF). Marked below where it matters.
 
 Per-source extraction (status, exact formulae, aggregation windows,
-normalisation, validation evidence, engine fit) is recorded in §5.
+normalisation, validation evidence, engine fit) is recorded in §5, and the raw
+per-source notes are kept verbatim in
+[`docs/research/scoring_round3/`](research/scoring_round3/) (8 files, one per
+research batch).
 
 ### 0.2 Inventory of the scoring surfaces already in the repo
 
@@ -597,6 +600,13 @@ Suggested order (detail in the implementation plan):
 ---
 
 ## 5. Source ledger
+
+Raw per-source extracts — verbatim, including each retrieval note and every
+`UNVERIFIED` flag — are in [`research/scoring_round3/`](research/scoring_round3/),
+one file per research batch: `piotroski_fundamental.md`,
+`altman_composite.md`, `quality_portfolios_index.md`, `finbert_core.md`,
+`finbert_applied.md`, `news_pipeline_berkeley.md`,
+`vendor_sentiment_scores.md`, `institutional_indices.md`.
 
 | # | Source | Status | Contributed |
 | --- | --- | --- | --- |
