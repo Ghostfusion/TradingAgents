@@ -129,6 +129,10 @@ _WATCHLIST_LEGEND = (
     ("Trap", "forensic trap-risk verdict (low / medium / high)"),
     ("Sent7", "7-day news-sentiment SMA (EODHD /sentiments, -1..1)"),
     ("SentZ", "latest news-sentiment innovation (score - 7d SMA)"),
+    ("RevIdx", "weighted analyst revision ratio (MSCI weights 3/2/1 over the periods supplied; denominator up+down - a printed deviation from analyst coverage; coverage-guarded, needs >=2 actions)"),
+    ("G", "Mohanram G-Score (0-8 growth quality; 6-8 good / 0-2 poor) vs this run's sector medians; a median leg the feed lacks is excluded, never scored 0"),
+    ("C", "Montier C-Score (0-6 overpricing / fragile-accounting RISK screen; 0-2 good / 5-6 poor)"),
+    ("Qual", "composite quality score 0-100: tie-aware percentile of the winsorised-z mean over F / M / Z / O / GP-A / NOA / accruals in this run's scan universe (quality bands - never the decision rating bands)"),
     ("ILLIQ", "Amihud illiquidity (price impact per $ traded; higher = more illiquid)"),
     ("FltTurn", "float turnover = ADV / float shares (daily; <0.5% thin, >100% squeeze)"),
     ("IWF", "free-float factor = float / total shares (<0.5 = passive under-allocation)"),
@@ -270,7 +274,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Sent7", "SentZ",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Sent7", "SentZ", "RevIdx", "G", "C", "Qual",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -334,6 +338,8 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("day_change"), "{:+.2%}"),
             cell(r.get("sent7"), "{:+.2f}"),
             cell(r.get("sentz"), "{:+.2f}"),
+            cell(r.get("rev_index"), "{:+.4f}"),
+            cell(r.get("g_disp")), cell(r.get("c_disp")), cell(r.get("qual_disp")),
         ]
         rows.append(dict(zip(heads, cells, strict=True)))
     if not rows:
@@ -1332,6 +1338,30 @@ def main(argv: list[str] | None = None) -> int:
         "(yfinance proxy for forward earnings revisions); adds RevUp column",
     )
     parser.add_argument(
+        "--revision-index",
+        action="store_true",
+        help="add the RevIdx column: weighted analyst revision ratio "
+        "(strategies/analyst_revisions.revision_ratio; MSCI weights 3/2/1, "
+        "denominator up+down printed as a deviation, coverage-guarded). "
+        "Advisory: it never gates a row.",
+    )
+    parser.add_argument(
+        "--growth-scores",
+        action="store_true",
+        help="add the G/C columns: Mohanram G-Score and Montier C-Score, "
+        "with the G-Score's industry medians computed from this run's own "
+        "scanned cross-section (same sector labels, per-group floor 5). "
+        "Advisory: neither score gates a row.",
+    )
+    parser.add_argument(
+        "--quality-score",
+        action="store_true",
+        help="add the Qual column: the 0-100 winsorised-z quality composite "
+        "(F/M/Z/O/GP-A/NOA/accruals) over this run's scanned universe, with "
+        "its coverage and peer count printed. Advisory, and never the "
+        "decision rating bands.",
+    )
+    parser.add_argument(
         "--inst-accum",
         action="store_true",
         help="require institutional accumulation (last two 13F periods "
@@ -2058,6 +2088,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.enrich_rev:
                 rev = _fetch_revision_guarded(ticker)
                 row["rev_net"] = rev.get("net") if rev else None
+            if args.revision_index:
+                from tradingagents.strategies.analyst_revisions import revision_ratio
+
+                rev = _fetch_revision_guarded(ticker)
+                read = revision_ratio([rev] if rev else [])
+                row["rev_index"] = read.get("index")
+                row["rev_index_basis"] = read.get("basis")
             if args.enrich_inst:
                 inst = _inst_accumulation(route_to_vendor("get_institution_holdings", ticker))
                 row["inst_latest_pp"] = inst.get("latest_pp") if inst else None
@@ -2246,6 +2283,79 @@ def main(argv: list[str] | None = None) -> int:
                     r["line_vol"] = info.get("volume")
         except Exception:
             pass
+    # Round-3 cross-sectional columns (S10 G/C, S3 quality composite). The
+    # peer panel is the run's OWN scanned cross-section: the canonical `fin`
+    # each row was built from is already memoized in _FIN_CACHE, so the shared
+    # resolver re-uses it instead of fetching a second, differently capped
+    # universe. Cross-sectional columns can only be computed after every row is
+    # known, so this pass runs after the loop. Advisory: no row is ever gated by
+    # these values.
+    if (args.growth_scores or args.quality_score) and results:
+        try:
+            from tradingagents.strategies.peer_universe import (
+                resolve_growth_medians,
+                resolve_peer_universe,
+                sector_medians_for,
+            )
+
+            fin_by_ticker = {}
+            for r in results:
+                fin = _FIN_CACHE.get((r["ticker"].upper(), args.date))
+                if isinstance(fin, dict):
+                    fin_by_ticker[r["ticker"]] = fin
+            if len(fin_by_ticker) >= 2:
+                panel = resolve_peer_universe(
+                    tickers=sorted(fin_by_ticker),
+                    financials=fin_by_ticker,
+                    current_date=args.date,
+                )
+                sectors = panel.get("sectors") or {}
+                if args.growth_scores:
+                    from tradingagents.dataflows.quantitative_scores import (
+                        growth_score,
+                        overpriced_score,
+                    )
+
+                    medians = resolve_growth_medians(fin_by_ticker, sectors, min_n=5)
+                    print(f"[quant-round3] {medians['basis']}")
+                    for r in results:
+                        fin = fin_by_ticker.get(r["ticker"])
+                        if not fin:
+                            continue
+                        sector = sectors.get(r["ticker"]) or r.get("sector")
+                        row_medians = sector_medians_for(medians, sector)
+                        g = growth_score(fin, row_medians)
+                        if g:
+                            label = (g.get("band") or {}).get("label")
+                            r["g_disp"] = f"{g['score']}/8" + (f" {label}" if label else "")
+                        c = overpriced_score(fin)
+                        if c:
+                            label = (c.get("band") or {}).get("label")
+                            r["c_disp"] = f"{c['score']}/6" + (f" {label}" if label else "")
+                if args.quality_score:
+                    from tradingagents.strategies.factors import (
+                        QUALITY_DIRECTIONS,
+                        quality_band,
+                        quality_composite,
+                    )
+
+                    qc = quality_composite(
+                        panel.get("metrics") or {},
+                        directions=QUALITY_DIRECTIONS,
+                        min_coverage=3,
+                    )
+                    print(f"[quant-round3] {qc['basis']}")
+                    if qc.get("unavailable"):
+                        print(f"[quant-round3] quality composite {qc['unavailable']}")
+                    for r in results:
+                        score = (qc.get("scores") or {}).get(r["ticker"])
+                        if score is None:
+                            continue
+                        band = quality_band(score)
+                        r["qual_disp"] = f"{score:.0f}" + (f" {band}" if band else "")
+        except Exception as exc:  # noqa: BLE001 - an advisory column must not abort a run
+            logger.warning("round-3 screener columns unavailable: %s", exc)
+
     # Resolve the ranking mode: an explicit --rank wins, else the env/config
     # flag (enable_composite_rank). Previously --rank composite / the config
     # key were parsed but never read — the screener always used value ranking.

@@ -62,11 +62,20 @@ def trap_verdict(
     mom12: float | None = None,
     accrual: float | None = None,
     thresholds: dict = None,
+    z_variant: str | None = None,
+    z_zone: dict | None = None,
+    f_band: dict | None = None,
 ) -> dict:
     """Collapse forensic gates into trap risk LOW/MEDIUM/HIGH + evidence list.
 
     Evidence triggers: Beneish M > -1.78 (manipulation), Altman Z < 1.81
     (distress), negative 12-1m momentum, accrual > 0.06, no F-Score.
+
+    ``z_zone`` (from ``altman_zone``) and ``f_band`` (from
+    ``piotroski_f_score_detailed``) are ADDITIVE render-only keys: the caller
+    supplies them only when its ``enable_altman_variants`` /
+    ``enable_f_score_detail`` gate is on, and they never change the level or
+    the evidence list.
     """
     th = thresholds or {}
     evidence = []
@@ -80,10 +89,16 @@ def trap_verdict(
         evidence.append(f"accruals={accrual:.3f}")
     if f_score is not None and f_score < th.get("f_floor", 4):
         evidence.append(f"f_score={f_score} (< {th.get('f_floor', 4)})")
+    extras: dict = {}
+    if z_zone is not None:
+        extras["altman_zone"] = z_zone.get("zone") if isinstance(z_zone, dict) else z_zone
+        extras["z_variant"] = z_variant
+    if f_band is not None:
+        extras["f_score_band"] = f_band.get("label") if isinstance(f_band, dict) else f_band
     if not evidence:
-        return {"level": "LOW", "evidence": []}
+        return {"level": "LOW", "evidence": [], **extras}
     level = "HIGH" if len(evidence) >= 2 else "MEDIUM"
-    return {"level": level, "evidence": evidence}
+    return {"level": level, "evidence": evidence, **extras}
 
 
 def margin_of_safety(price: float, intrinsic: float | None) -> float | None:

@@ -60,10 +60,15 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
         # gather the fixed tool set once (skipped on tool-loop re-entries via
         # the state key) and reduce from the rendered block instead of the
         # LLM-selected subset. see docs/design_mapreduce_forced_tool_gathering.md.
-        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+        from tradingagents.agents.utils.evidence_gather import (
+            gather_for_analyst_node,
+            make_llm_planner,
+        )
 
+        # S11d: gated inside the gather by enable_evidence_symmetry; inert with
+        # the gate off. See market_analyst for the validation contract.
         evidence_block, tool_evidence = gather_for_analyst_node(
-            state, "fundamentals", tools, config
+            state, "fundamentals", tools, config, planner=make_llm_planner(llm)
         )
 
         system_message = (

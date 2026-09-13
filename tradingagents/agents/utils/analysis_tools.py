@@ -3948,11 +3948,74 @@ def get_margin_of_safety(
 # ---------------------------------------------------------------------------
 
 
+def _r3_flag(name: str, default: bool = False) -> bool:
+    """Read an enable_* flag from the live config (never raises)."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return bool((get_config() or {}).get(name, default))
+    except Exception:  # noqa: BLE001 - a config read must never break a tool
+        return default
+
+
+def _quality_composite_row(ticker: str, peers: list, current_date: str | None) -> str:
+    """Round-3 S3: the 0-100 composite quality row over this tool's peer set.
+
+    Same resolver and same composite as the screener column (one
+    implementation per computation, rule 2), over the narrow tool-level peer
+    set ``[ticker] + peers[:8]``. Advisory: the composite is NOT a rating - its
+    bands are the published quality table, never
+    ``decision_guardrail.SCORE_BANDS``. Prints the metric set, the coverage and
+    the peer count, because a composite without them invites over-reading.
+    """
+    from datetime import datetime
+
+    from tradingagents.strategies.factors import (
+        QUALITY_DIRECTIONS,
+        quality_band,
+        quality_composite,
+    )
+    from tradingagents.strategies.peer_universe import resolve_peer_universe
+
+    date = current_date or datetime.now().strftime("%Y-%m-%d")
+    names = sorted({str(p).upper() for p in (peers or []) if p})
+    panel = resolve_peer_universe(tickers=names, current_date=date)
+    qc = quality_composite(
+        panel.get("metrics") or {}, directions=QUALITY_DIRECTIONS, min_coverage=3
+    )
+    key = str(ticker).upper()
+    score = (qc.get("scores") or {}).get(key)
+    if score is None:
+        reason = (
+            qc.get("unavailable")
+            or (qc.get("withheld") or {}).get(key)
+            or "no score for this name"
+        )
+        dropped = ", ".join(sorted(qc.get("metrics_dropped") or {}))
+        return (
+            f"quality composite {ticker}: unavailable ({reason})"
+            + (f"; metrics dropped: {dropped}" if dropped else "")
+        )
+    band = quality_band(score)
+    cov = (qc.get("coverage") or {}).get(key) or {}
+    dropped = "; ".join(f"{k} ({v})" for k, v in (qc.get("metrics_dropped") or {}).items())
+    return (
+        f"quality composite {ticker}: {score:.0f}/100 ({band}); metrics used: "
+        f"{', '.join(qc.get('metrics_used') or []) or 'none'}"
+        + (f"; metrics dropped: {dropped}" if dropped else "")
+        + f"; coverage {cov.get('n')}/{cov.get('of')}; peers scored "
+        f"{len(qc.get('scores') or {})} of {qc.get('peer_n')} | {qc.get('basis')}"
+    )
+
+
 @tool
 def get_composite_rank(
     ticker: Annotated[str, "ticker symbol"],
     factors: Annotated[
         dict | None, "optional extra factor -> value map (e.g. {'ev_ebit': -1})"
+    ] = None,
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd (quality composite)"
     ] = None,
 ) -> str:
     """Cross-sectional value+momentum composite (percentile-ranked)
@@ -4001,11 +4064,18 @@ def get_composite_rank(
     peers_str = "; ".join(f"{t}={v:.0%}" for t, v in ranked)
     peer_names = sorted(k for k in scores if k != ticker)
     peers_list_str = ", ".join(peer_names) if peer_names else "n/a"
-    return (
+    line = (
         f"composite rank {ticker}: score={scores[ticker]:.2%} "
         f"(vs {len(scores) - 1} peers); {peers_str} | "
         f"peers_ranked: {peers_list_str}"
     )
+    # Round-3 S3 (gated): the composite quality row over the same peer set.
+    if _r3_flag("enable_quality_composite"):
+        try:
+            line += "\n" + _quality_composite_row(ticker, peers, current_date)
+        except Exception as exc:  # noqa: BLE001 - an advisory row must not break the tool
+            line += f"\nquality composite {ticker}: unavailable ({type(exc).__name__}: {exc})"
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -5915,6 +5985,160 @@ def get_premarket_review(
         return f"premarket review unavailable for {ticker}: {exc}"
 
 
+# ---------------------------------------------------------------------------
+# S4/S5/S7 additive sentiment rows (round-3 formula additions). Each gate is
+# read through quant_formula_tools._flag and the rows are appended AFTER the
+# tool's existing rows; a disabled gate or a missing input leaves those rows
+# untouched (the additive row says unavailable rather than inventing a value).
+# ---------------------------------------------------------------------------
+
+
+def _sentiment_flag(name: str) -> bool:
+    try:
+        from tradingagents.agents.utils.quant_formula_tools import _flag
+
+        return bool(_flag(name))
+    except Exception:  # noqa: BLE001 - a config read must never break a tool
+        return False
+
+
+def _av_news_articles(ticker: str, start: str, end: str) -> list:
+    """Raw Alpha Vantage NEWS_SENTIMENT articles (the S4 feed); [] on failure."""
+    try:
+        from tradingagents.dataflows.alpha_vantage_news import get_news
+
+        raw = get_news(ticker, start, end)
+    except Exception:  # noqa: BLE001 - optional rows must not break the tool
+        return []
+    if isinstance(raw, dict):
+        return raw.get("feed") or []
+    return []
+
+
+def _news_sentiment_points(ticker: str, start: str, end: str) -> list:
+    """Daily sentiment points from the EODHD/Alpha-Vantage/GDELT chain (S7)."""
+    try:
+        from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
+
+        points = _sentiment_points_eodhd(ticker, start, end)
+        if points:
+            return points
+    except Exception:  # noqa: BLE001 - try the next feed
+        pass
+    try:
+        from tradingagents.dataflows.alpha_vantage_news import (
+            _sentiment_points_alpha_vantage,
+        )
+
+        points = _sentiment_points_alpha_vantage(ticker, start, end)
+        if points:
+            return points
+    except Exception:  # noqa: BLE001 - try the next feed
+        pass
+    try:
+        from tradingagents.dataflows.gdelt import _sentiment_points_gdelt
+
+        return _sentiment_points_gdelt(ticker, start, end) or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _render_crowd_row(result: dict) -> str:
+    """S5 crowd-ratio row (display-only bands) for get_sentiment_computed."""
+    cr = (result or {}).get("crowd_ratio")
+    disp = (result or {}).get("crowd_dispersion") or {}
+    d_val = disp.get("dispersion")
+    a_val = disp.get("agreement")
+    d_txt = f"{d_val:.3f}" if d_val is not None else "n/a"
+    a_txt = f"{a_val:.3f}" if a_val is not None else "n/a"
+    if not cr:
+        return (
+            "- crowd ratio (crowd counts (StockTwits/Reddit)): unavailable "
+            "(no labeled bullish/bearish messages)"
+        )
+    return (
+        "- crowd ratio (crowd counts (StockTwits/Reddit)): "
+        f"ratio={cr['ratio']:.1f} band={cr['band']} net_share={cr['net_share']:+.3f} "
+        f"dispersion={d_txt} agreement={a_txt}; the bands are display-only "
+        "(not validated; the survey source warns extremes persist for months) "
+        "and never a gate"
+    )
+
+
+def _render_weighted_agg(rows, ticker: str) -> str:
+    if not rows:
+        return (
+            f"### Weighted news aggregation - {ticker}\n"
+            "weighted news aggregation unavailable: no usable signed articles."
+        )
+    lines = [
+        f"### Weighted news aggregation - {ticker} "
+        "(unweighted = published per-day mean)",
+        "",
+        "| date | n | unweighted | weighted | neutral_share | dispersion |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in rows[-10:]:
+        w = f"{r['weighted']:+.3f}" if r["weighted"] is not None else "n/a"
+        dp = f"{r['dispersion']:.3f}" if r["dispersion"] is not None else "n/a"
+        lines.append(
+            f"| {r['date']} | {r['n']} | {r['unweighted']:+.3f} | {w} | "
+            f"{r['neutral_share']:.3f} | {dp} |"
+        )
+    lines.append("")
+    lines.append(f"basis: {rows[-1]['basis']}")
+    return "\n".join(lines)
+
+
+def _render_weighted_window(out, ticker: str) -> str:
+    if not out or not out.get("rows"):
+        return (
+            f"### Weighted rolling sentiment - {ticker}\n"
+            "weighted rolling sentiment unavailable: no daily sentiment series."
+        )
+    lines = [
+        f"### Weighted rolling sentiment - {ticker} (window={out['window']}d, "
+        f"exponential={out['exponential']}, unweighted 7d SMA beside it)",
+        "",
+    ]
+    if not out.get("sufficient_history"):
+        lines.append(out["basis"])
+        return "\n".join(lines)
+    lines.append("| date | score | sma_7d | weighted | n |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for r in out["rows"][-10:]:
+        sc = f"{r['score']:+.3f}" if r["score"] is not None else "n/a"
+        sma = f"{r['sma_7d']:.3f}" if r["sma_7d"] is not None else "n/a"
+        wt = f"{r['weighted']:.3f}" if r["weighted"] is not None else "n/a"
+        lines.append(f"| {r['date']} | {sc} | {sma} | {wt} | {r['n']} |")
+    lines.append("")
+    lines.append(out["basis"])
+    return "\n".join(lines)
+
+
+def _sentiment_agg_rows(ticker: str, start: str, end: str) -> str:
+    """S4/S7 additive rows for get_news_sentiment_series (gated, optional)."""
+    want_agg = _sentiment_flag("enable_weighted_sentiment_agg")
+    want_win = _sentiment_flag("enable_weighted_sentiment_window")
+    if not (want_agg or want_win):
+        return ""
+    from tradingagents.strategies.sentiment import (
+        aggregate_weighted_sentiment,
+        weighted_rolling_sentiment,
+    )
+
+    parts = []
+    if want_agg:
+        articles = _av_news_articles(ticker, start, end)
+        rows = aggregate_weighted_sentiment(articles, ticker=ticker) if articles else None
+        parts.append(_render_weighted_agg(rows, ticker))
+    if want_win:
+        points = _news_sentiment_points(ticker, start, end)
+        out = weighted_rolling_sentiment(points) if points else None
+        parts.append(_render_weighted_window(out, ticker))
+    return "\n" + "\n".join(p for p in parts if p)
+
+
 @tool
 
 def get_sentiment_computed(
@@ -5941,7 +6165,11 @@ def get_sentiment_computed(
         result = _scores(ticker, cache_dir=cfg.get("data_cache_dir"), limit=30)
         if not result:
             return f"computed sentiment unavailable for {ticker}: no StockTwits data."
-        return _line(result)
+        line = _line(result)
+        if _sentiment_flag("enable_crowd_ratio_bands"):
+            with contextlib.suppress(Exception):  # an optional row must not break the tool
+                line += "\n" + _render_crowd_row(result)
+        return line
     except Exception as exc:  # noqa: BLE001
         return f"computed sentiment unavailable for {ticker}: {exc}"
 
@@ -5964,7 +6192,12 @@ def get_news_sentiment_series(
 
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=int(look_back_days) + 1)).strftime("%Y-%m-%d")
-        return route_to_vendor("get_news_sentiment", ticker, start, end)
+        base = route_to_vendor("get_news_sentiment", ticker, start, end)
+        try:
+            extra = _sentiment_agg_rows(ticker, start, end)
+        except Exception:  # noqa: BLE001 - optional rows must not break the base series
+            extra = ""
+        return base + extra if extra else base
     except Exception as exc:  # noqa: BLE001 - degrades, never crashes
         return f"news sentiment series unavailable for {ticker}: {exc}"
 

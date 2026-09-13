@@ -19,10 +19,15 @@ def create_news_analyst(llm, backup_llm=None, config=None):
 
         # Forced-tool evidence (map-reduce): gather deterministically once
         # when analyst_forced_tools is set; skipped on tool-loop re-entries.
-        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+        from tradingagents.agents.utils.evidence_gather import (
+            gather_for_analyst_node,
+            make_llm_planner,
+        )
 
+        # S11d: gated inside the gather by enable_evidence_symmetry; inert with
+        # the gate off. See market_analyst for the validation contract.
         evidence_block, tool_evidence = gather_for_analyst_node(
-            state, "news", tools, config
+            state, "news", tools, config, planner=make_llm_planner(llm)
         )
 
         system_message = (

@@ -1,5 +1,6 @@
 # TradingAgents/graph/setup.py
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -29,6 +30,42 @@ from tradingagents.agents.utils.independent_vote import (
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
+
+logger = logging.getLogger(__name__)
+
+
+def create_evidence_symmetry_node(config: dict | None = None):
+    """Pre-debate symmetry assertion (S11d, gate ``enable_evidence_symmetry``).
+
+    Labels, never blocks: it computes the S11a ``symmetry_report`` over the
+    run's gathered evidence (pure, zero vendor calls) and records it in the
+    debate state's ``tool_evidence`` block so the web panel and
+    ``repro_check --evidence`` can render it. It asserts the symmetry contract
+    - same whitelist (fired/planned tool sets), same arg keys, mirrored
+    discretionary counts - but a mismatch never changes a score or a verdict,
+    and any failure is swallowed so the debate always runs.
+    """
+
+    def evidence_symmetry_node(state):
+        try:
+            from tradingagents.agents.utils.evidence_gather import (
+                MODEL_POOL_KEY,
+                SYMMETRY_KEY,
+                TOOL_EVIDENCE_KEY,
+                symmetry_report,
+                symmetry_rows,
+            )
+
+            evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})
+            report = symmetry_report(evidence, evidence.get(MODEL_POOL_KEY) or {})
+            evidence[SYMMETRY_KEY] = symmetry_rows(report)
+            logger.info("evidence symmetry: %s", report.get("verdict"))
+            return {TOOL_EVIDENCE_KEY: evidence}
+        except Exception:  # noqa: BLE001 - labels, never blocks
+            return {}
+
+    return evidence_symmetry_node
+
 
 # Every target a shared conditional router can return. Each edge driven by the
 # router maps all of them, so a fall-through return (e.g. under prompt/i18n/
@@ -377,10 +414,14 @@ class GraphSetup:
         risk_debate_entry = (
             "SD Risk Aggressive" if self._structured_debate else "Aggressive Analyst"
         )
+        # S11d pre-debate symmetry node is only registered when the gate is on,
+        # so a gate-off graph is byte-identical to the pre-S11 chain.
+        symmetry_on = bool(self.config.get("enable_evidence_symmetry"))
+        post_analyst = "Evidence Symmetry" if symmetry_on else "Independent Researcher Stances"
 
         if self.analyst_concurrency > 1:
             workflow.add_edge(START, "Run Analysts")
-            workflow.add_edge("Run Analysts", "Independent Researcher Stances")
+            workflow.add_edge("Run Analysts", post_analyst)
             workflow.add_edge("Independent Researcher Stances", debate_entry)
         else:
             # Start with the first analyst
@@ -422,7 +463,7 @@ class GraphSetup:
                 else:
                     # Independent researcher stances sampled BEFORE the debate;
                     # then the fixed Bull/Bear debate chain runs as before.
-                    workflow.add_edge(current_clear, "Independent Researcher Stances")
+                    workflow.add_edge(current_clear, post_analyst)
                     workflow.add_edge("Independent Researcher Stances", debate_entry)
 
         if self._structured_debate:
@@ -496,6 +537,15 @@ class GraphSetup:
                     self.conditional_logic.should_continue_risk_analysis,
                     RISK_ANALYSIS_PATH_MAP,
                 )
+
+        # S11d: pre-debate symmetry assertion (labels, never blocks). Added
+        # only when the gate is on, so a gate-off graph is byte-identical to
+        # the pre-S11 chain.
+        if symmetry_on:
+            workflow.add_node(
+                "Evidence Symmetry", create_evidence_symmetry_node(self.config)
+            )
+            workflow.add_edge("Evidence Symmetry", "Independent Researcher Stances")
 
         workflow.add_edge("Portfolio Manager", END)
 

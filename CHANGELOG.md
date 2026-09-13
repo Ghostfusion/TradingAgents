@@ -432,6 +432,37 @@ fails. Tests: 3 new. No web impact.
 
 ### Added
 
+**Round-3 scoring & sentiment formulas land (2026-09-13; S1-S11, every gate default-off).** Ten additive,
+deterministic-first computations, each printing its basis and degrading to "unavailable" instead of fabricating a
+value: S1 the Altman Z'/Z''/Z''-EM variants plus the distress zones they label (book-equity X4 with the
+proxy named, funds and financials unavailable); S2 the Piotroski F-Score's paper basis (the accrual test in ratio
+form, LTD+current portion over *average* assets), its published 0-1/8-9 bands and a `deviations` list recording
+every substitution; S10 Mohanram's G-Score and Montier's C-Score (a **risk screen**) with industry medians from
+the resolved peer universe; S4 a weighted/unweighted news aggregation whose equal-weight default reproduces the
+unweighted mean exactly and which dedupes syndicated headlines; S5 the crowd bull/bear ratio + dispersion with
+display-only bands; S6 an MSCI-style weighted revision ratio (coverage-guarded, denominator deviation printed,
+estimate-change leg says why it is unavailable); S3 a 0-100 winsorised-z composite quality score with stated
+coverage and its own quality bands (never `SCORE_BANDS`); S8 score IC/decile/coverage/stability rows; S7 an
+exponentially weighted rolling sentiment window with a warm-up guard; S11 paired-role evidence symmetry (a
+measured symmetry row, deterministic default args, a mirrored discretionary budget, and a gated argument-plan
+call that falls back to the legacy loop with the reason).
+
+New modules `strategies/analyst_revisions.py`, `strategies/peer_universe.py` (ONE resolver for the screener scan
+universe, shared by S3 and S10) and `agents/utils/analyst_revision_tools.py`; new rows on the existing
+`get_quality_factors`, `get_composite_rank`, `get_news_sentiment_series` / `get_sentiment_computed` tools; new
+screener columns G / C / Qual / RevIdx behind `--growth-scores`, `--quality-score`, `--revision-index`.
+
+Also closed while landing: S11b's declared-default table was falling back to itself when a caller omitted it, so
+`classify_tool_pools` / `gather_evidence` moved a model-pool tool into the deterministic gather even with the gate
+off. Both now default to NO table (gate-on callers pass it), and the ungated split is byte-identical to before
+(the re-measurement is what caught it: news 23/4 ungated vs 24/3 gated). S9 (reduced BW-style market sentiment
+index) stays unscheduled per the plan's Appendix A - it is annual, one-year-lagged and five of its six proxies are
+unavailable, and no market-level consumer with a decision path exists.
+
+**Web impact**: additive tool-card lines only - `tool_evidence.json` gains the S11 `_symmetry` list (the existing
+evidence readers skip a list-valued key) and the tool rows above; no JSON key is removed, renamed or reshaped, and
+no CLI flag changes meaning. The screener's new columns are additive table columns.
+
 **The research→execution artifact now declares the executor's v1.1.0 envelope (2026-09-12; plan R1–R5).**
 `research_decision.json` was a loose blob the execution layer had to read as 1.0.0, so nothing on the far side
 could check provenance, expiry or the body hash. `write_research_decision` now emits

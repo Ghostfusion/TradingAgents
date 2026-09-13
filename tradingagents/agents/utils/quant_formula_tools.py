@@ -159,7 +159,12 @@ def get_quality_factors(
         fin = fetch_ticker(ticker, current_date or "") or {}
         gp = gross_profitability(fin) if fin else None
         noa = net_operating_assets(fin) if fin else None
-        if not gp and not noa:
+        _extra_gates = (
+            _flag("enable_altman_variants")
+            or _flag("enable_f_score_detail")
+            or _flag("enable_growth_scores")
+        )
+        if not gp and not noa and not _extra_gates:
             return (
                 f"quality factors {ticker}: unavailable (needs revenue/COGS/total "
                 "assets and a prior-year balance sheet)"
@@ -177,6 +182,67 @@ def get_quality_factors(
             "Interpretation: GP/A is a quality counterweight to cheapness; high "
             "NOA (bloated balance sheet) is a documented drag on forward returns."
         )
+        if _flag("enable_altman_variants"):
+            from tradingagents.dataflows.quantitative_scores import (
+                altman_variant,
+                altman_variant_for,
+                altman_zone,
+            )
+
+            sel = altman_variant_for(ticker=ticker, sector=fin.get("sector"), fin=fin)
+            if sel.get("variant") is None:
+                lines.append(f"  altman: unavailable - {sel['reason']} [{sel['basis']}]")
+            else:
+                av = altman_variant(fin, sel["variant"])
+                if av is None:
+                    lines.append(
+                        f"  altman: unavailable - variant {sel['variant']} needs an "
+                        f"input the statement chain lacks [{sel['reason']}]"
+                    )
+                else:
+                    zone = altman_zone(av["value"], sel["variant"])
+                    lines.append(
+                        f"  altman_{sel['variant']}={av['value']:.2f} zone={zone['zone']} "
+                        f"bands={zone['bands']}; {av['basis']}"
+                    )
+        if _flag("enable_f_score_detail"):
+            from tradingagents.dataflows.quantitative_scores import piotroski_f_score_detailed
+
+            det = piotroski_f_score_detailed(fin, sector=fin.get("sector"))
+            if det is None:
+                lines.append(
+                    "  f_score_detail: unavailable (fund/financial name, or no "
+                    "computable signal)"
+                )
+            else:
+                band = det["band"]["label"] if det["band"] else "unavailable"
+                lines.append(f"  f_score_detail={det['score']} band={band}; {det['basis']}")
+                for d in det["deviations"]:
+                    lines.append(f"    f_deviation: {d}")
+        if _flag("enable_growth_scores"):
+            from tradingagents.dataflows.quantitative_scores import (
+                growth_score,
+                overpriced_score,
+            )
+
+            g = growth_score(fin, None)
+            if g is None:
+                lines.append("  g_score: unavailable (no computable G signal)")
+            else:
+                band = g["band"]["label"] if g["band"] else "unavailable"
+                lines.append(f"  g_score={g['score']}/8 band={band}; {g['basis']}")
+                for d in g["deviations"]:
+                    lines.append(f"    g_deviation: {d}")
+            c = overpriced_score(fin)
+            if c is None:
+                lines.append("  c_score: unavailable (no computable C signal)")
+            else:
+                band = c["band"]["label"] if c["band"] else "unavailable"
+                lines.append(
+                    f"  c_score={c['score']}/6 band={band} (risk screen); {c['basis']}"
+                )
+                for d in c["deviations"]:
+                    lines.append(f"    c_deviation: {d}")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         return f"quality factors unavailable for {ticker}: {exc}"

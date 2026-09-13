@@ -30,6 +30,16 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **Round-3 scoring & sentiment formulas land (S1-S11, all gates default-off)** — ten additive
+  deterministic reads: the Altman Z'/Z''/Z''-EM variants with the distress zones they label, the Piotroski
+  F-Score's paper basis/bands/recorded deviations, Mohanram's G-Score + Montier's C-Score (industry medians from
+  the resolved peer universe), a weighted/unweighted news aggregation, the crowd bull/bear ratio + dispersion, an
+  MSCI-style coverage-guarded revision ratio (`get_analyst_revision_index`), a 0-100 composite quality score, score
+  IC/decile/coverage/stability rows, an exponentially weighted rolling sentiment window, and paired-role evidence
+  symmetry (`symmetry_report` + a mirrored discretionary budget + a gated plan call that falls back to the legacy
+  loop). New screener columns G/C/Qual/RevIdx (`--growth-scores`, `--quality-score`, `--revision-index`). Every
+  gate defaults off, every output prints its basis, and an unavailable input is printed as unavailable rather than
+  scored 0. The reduced BW-style index (S9) stays unscheduled. See CHANGELOG.
 - [2026-09-13] **Forced-tool short-circuit actually wired** — `make_short_circuit_tool_node` guarded on
   `callable(node)`, but a LangGraph `ToolNode` is a Runnable and not callable, so every production node was returned
   unwrapped: gathered tools could re-hit the vendor, no tool call was journaled, and model-pool results

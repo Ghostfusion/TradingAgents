@@ -21,10 +21,19 @@ def create_market_analyst(llm, backup_llm=None, config=None):
 
         # Forced-tool evidence (map-reduce): gather deterministically once
         # when analyst_forced_tools is set; skipped on tool-loop re-entries.
-        from tradingagents.agents.utils.evidence_gather import gather_for_analyst_node
+        from tradingagents.agents.utils.evidence_gather import (
+            gather_for_analyst_node,
+            make_llm_planner,
+        )
 
+        # S11d: the cheap plan call is gated inside the gather
+        # (enable_evidence_symmetry), so passing the planner is inert until that
+        # gate flips. The planner only ever proposes calls over the model-pool
+        # remainder, and the gather validates them against each tool's own args
+        # schema + the pool whitelist before firing (falling back to the legacy
+        # loop, with the reason, on any invalid plan).
         evidence_block, tool_evidence = gather_for_analyst_node(
-            state, "market", tools, config
+            state, "market", tools, config, planner=make_llm_planner(llm)
         )
 
         system_message = (

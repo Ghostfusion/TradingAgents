@@ -1,6 +1,8 @@
 # Scoring & Sentiment Formula Additions, Round 3 — Implementation Plan
 
-Status: **designed, NOT started (2026-09-13); no code changed by this round.**
+Status: **LANDED (2026-09-13) - S1-S11 implemented, each with its own tests
+(147 phase tests + 19 wiring tests) and its gate default-off; S9 stays
+unscheduled (Appendix A).**
 Implements the adopted list in
 [`docs/design_quant_formulas_research_round3.md`](design_quant_formulas_research_round3.md)
 (items **S1-S11**; **S11** is the orchestration/symmetry item from the
@@ -49,10 +51,11 @@ missing.
     tree's `verify_flags.json`; and `scripts/verify_sweep.py` condenses it into
     per-claim verdicts, read-only, exiting 1 on any CONFIRMED/SUSPECT — which is
     what blocks the flip. Only additive, declared lines are acceptable.
-    `run_card.json` records the commit and a `config_hash`, but that hash's key
-    list does **not** cover the round-3 gates yet — so naming the flipped gate in
-    the run output, and extending that key list, is part of the phase rather than
-    an afterthought.
+    `run_card.json`'s `config_hash` is taken over the **whole** `DEFAULT_CONFIG`,
+    so a gate flip already moves it. `scripts/repro_check.py::_config_hash()`
+    hashed a fixed 14-key LLM list that did **not** cover the round-3 gates; that
+    list now carries all ten, with a test proving the hash moves when a gate
+    flips. Naming the flipped gate in the run output remains the operator's step.
 
 ---
 
@@ -481,11 +484,13 @@ tests/` must be green per commit.
   joins one of the two pools automatically — and the rows added here (S1/S2/S10
   on the fundamentals tools, S6's `get_analyst_revision_index`, S4/S5/S7 on the
   sentiment tools, S3's `get_composite_rank` extension) are exactly the
-  multi-arg, model-fed kind that lands in the model pool. Measured today: **214**
-  `@tool` functions repo-wide, **198 bound** across the three analysts (market
-  115: 87 gather / 28 model; news 27: 23/4; fundamentals 56: 47/9 over the
-  company+ETF union) — i.e. **41 model-pool tools** catalog-wide and **33** for
-  the variants the audited QQQI run actually bound. Not a reason to slow down,
+  multi-arg, model-fed kind that lands in the model pool. Measured after this
+  landing: **215** `@tool` functions repo-wide, **199 bound** across the three
+  analysts (market 115: 87 gather / 28 model; news 27: 23/4; fundamentals 57:
+  48/9 over the company+ETF union) — i.e. **41 model-pool tools** catalog-wide,
+  unchanged: the new S6 tool takes only run-context args (ticker + date), so it
+  landed in the **gather** pool, and no round-3 row added a model-discretionary
+  argument. Not a reason to slow down,
   but a real interaction: a new tool must either take args the gather context
   supplies or be counted in the S11a symmetry row, and S8's coverage rows are the
   other half of the measurement (a score nothing fires is visible there).

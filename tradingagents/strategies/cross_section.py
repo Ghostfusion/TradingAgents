@@ -322,6 +322,38 @@ def no_trade_band(target_weights: dict, prev_weights: dict, delta: float = 0.02)
     return out
 
 
+def group_median(values_by_key, groups, min_n=5):
+    """Per-group median of ``values_by_key`` partitioned by ``groups``.
+
+    ``values_by_key`` maps a key to a value; ``groups`` maps the same key to its
+    group label (e.g. sector). Returns ``{group: {"median": float, "n": int} |
+    None}`` - a group with fewer than ``min_n`` finite members maps to ``None``
+    (never a median over a handful of names). Pure; no fabrication.
+    """
+    grouped: dict = {}
+    for key, val in (values_by_key or {}).items():
+        grp = (groups or {}).get(key)
+        if grp is None:
+            continue
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(f):
+            continue
+        grouped.setdefault(grp, []).append(f)
+    out: dict = {}
+    for grp in set((groups or {}).values()):
+        if grp is None:
+            continue
+        vals = grouped.get(grp, [])
+        if len(vals) < min_n:
+            out[grp] = None
+        else:
+            out[grp] = {"median": _quantile(vals, 0.5), "n": len(vals)}
+    return out
+
+
 __all__ = [
     "winsorize",
     "cross_sectional_z",
@@ -331,4 +363,5 @@ __all__ = [
     "residualize_returns",
     "neutralize_book",
     "no_trade_band",
+    "group_median",
 ]

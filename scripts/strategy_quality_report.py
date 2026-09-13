@@ -60,6 +60,62 @@ def _load_jsonl(path: str) -> list:
     return rows
 
 
+def _flag(name: str, default: bool = False) -> bool:
+    """Read a config gate; a config read must never break the report."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return bool((get_config() or {}).get(name, default))
+    except Exception:  # noqa: BLE001 - a config read must never break the report
+        return default
+
+
+def _score_eval_block(data_dir: str) -> dict:
+    """S8 rows: score IC / deciles / coverage / stability over the alpha ledger.
+
+    The panel is the emitted-decision alpha ledger (``alpha_ledger.jsonl``:
+    ticker + effective_date + rating); the score is the numeric stance
+    (``rating_to_number``). Prices are aligned to the snapshot dates through
+    the same private OHLCV chain ``scripts/alpha_health.py`` uses; a name that
+    fails to fetch simply drops out (never fabricated). Advisory: any failure
+    degrades to ``available=False`` with the reason, never raises.
+    """
+    rows = _load_jsonl(os.path.join(data_dir, "alpha_ledger.jsonl"))
+    if not rows:
+        return {
+            "available": False,
+            "reason": "no alpha_ledger.jsonl with emitted decisions",
+            "n": 0,
+        }
+    from tradingagents.strategies.alpha_health import rating_to_number
+
+    scores_by_date: dict = {}
+    for r in rows:
+        d = str(r.get("effective_date") or "")
+        t = str(r.get("ticker") or "").upper()
+        s = rating_to_number(r.get("rating"))
+        if d and t and s is not None:
+            scores_by_date.setdefault(d, {})[t] = s
+    if not scores_by_date:
+        return {"available": False, "reason": "no scored rows with a rating", "n": 0}
+    try:
+        from tradingagents.agents.utils.analysis_tools import _ohlcv
+    except Exception as exc:  # noqa: BLE001 - report stays advisory
+        return {"available": False, "reason": f"OHLCV chain unavailable: {exc}", "n": 0}
+    dates = sorted(scores_by_date)
+    prices: dict = {}
+    for t in sorted({t for d in dates for t in scores_by_date[d]}):
+        try:
+            oh = _ohlcv(t, days=320) or {}
+        except Exception:  # noqa: BLE001 - one missing name degrades, never fails
+            continue
+        by_date = dict(zip(oh.get("dates") or [], oh.get("closes") or [], strict=False))
+        prices[t] = [by_date.get(d) for d in dates]
+    from tradingagents.strategies.alpha_health import score_evaluation_rows
+
+    return score_evaluation_rows(scores_by_date, prices, holding=5)
+
+
 def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
     """Collect ledger metrics into a dict; never raises.
 
@@ -277,6 +333,12 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
                 }
         except Exception:  # noqa: BLE001 - drift monitor is advisory
             out["drift"] = None
+    # S8 score-evaluation rows (default off): IC / deciles / coverage /
+    # stability over the emitted-decision panel. Inputs to DSR/PBO, never a
+    # standalone verdict; only present when the gate is on so the legacy
+    # report output stays unchanged.
+    if _flag("enable_score_eval_rows"):
+        out["score_eval"] = _score_eval_block(data_dir)
     return out
 
 
@@ -340,6 +402,38 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         lines.append("\nNo realized pre-market rows yet — run pre-market reviews to populate.")
+    se = report.get("score_eval")
+    if se is not None:
+        lines.append("\n## Score evaluation rows (S8)")
+        if se.get("available") is False:
+            lines.append(f"- unavailable: {se.get('reason')} (n={se.get('n', 0)})")
+        else:
+            ic = se.get("ic") or {}
+            dec = se.get("deciles") or {}
+            cov = se.get("coverage") or {}
+            stab = se.get("stability") or {}
+            lines.append(
+                f"- rank IC: n={ic.get('n')} holding={se.get('holding')}d "
+                f"mean={ic.get('mean_rank_ic')} ic_ir={ic.get('ic_ir')}"
+                + ("" if ic.get("available") else f" (unavailable: {ic.get('reason')})")
+            )
+            lines.append(
+                f"- deciles: n={dec.get('n')} holding={se.get('holding')}d "
+                f"monotonicity={dec.get('monotonicity')} "
+                f"buckets_filled={dec.get('buckets_filled')}"
+                + ("" if dec.get("available") else f" (unavailable: {dec.get('reason')})")
+            )
+            lines.append(
+                f"- coverage: n={cov.get('n')} scored/universe="
+                f"{cov.get('scored')}/{cov.get('universe')} ratio={cov.get('ratio')}"
+                + ("" if cov.get("available") else f" (unavailable: {cov.get('reason')})")
+            )
+            lines.append(
+                f"- stability: n={stab.get('n')} mean_rank_autocorr="
+                f"{stab.get('mean_rank_autocorr')}"
+                + ("" if stab.get("available") else f" (unavailable: {stab.get('reason')})")
+            )
+            lines.append(f"- {se.get('basis')}")
     print("\n".join(lines))
     return 0
 

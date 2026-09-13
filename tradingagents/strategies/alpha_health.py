@@ -432,3 +432,270 @@ def alpha_health_report(
     }
 
 
+def _eval_unavailable(n: int, holding: int, reason: str) -> dict:
+    """One evaluation row that could not be measured: count + reason."""
+    return {"available": False, "n": int(n), "holding": int(holding), "reason": reason}
+
+
+def score_evaluation_rows(
+    scores_by_date: dict,
+    prices: dict,
+    holding: int = 5,
+    n_buckets: int = 10,
+    *,
+    min_names: int = 4,
+    min_obs: int = 5,
+) -> dict:
+    """Generic score-evaluation rows for any cross-sectional score.
+
+    ``scores_by_date`` is ``{date: {ticker: score}}``; ``prices`` is
+    ``{ticker: [close, ...]}`` whose index ``i`` is the ``i``-th date of
+    ``sorted(scores_by_date)`` (a name with no bar at a date carries None).
+    Pure and deterministic - no I/O, no network.
+
+    Emits four rows, each stating its ``n`` and the ``holding`` period:
+
+    * ``ic`` - mean cross-sectional rank IC + IC IR, computed by
+      ``sentiment_research.rolling_information_coefficient`` (no second IC
+      implementation);
+    * ``deciles`` - mean ``holding``-day forward return per rank bucket (rank
+      bucketing, the ``quintile_long_short`` semantics) + a monotonicity flag
+      (Spearman of bucket index vs bucket mean), withheld until every bucket
+      is populated;
+    * ``coverage`` - scored names / universe, per date and pooled;
+    * ``stability`` - mean rank autocorrelation of consecutive snapshots.
+
+    A row is emitted only above ``min_obs`` periods; below that it is
+    ``available=False`` with the observed count and the reason. These rows are
+    inputs to the DSR/PBO multiple-testing check - never a standalone verdict.
+    """
+    from tradingagents.strategies.sentiment_research import (
+        _bucket,
+        _cross_section,
+        _forward_returns,
+        rolling_information_coefficient,
+    )
+
+    holding = max(1, int(holding))
+    n_buckets = max(2, int(n_buckets))
+    dates = sorted(scores_by_date) if isinstance(scores_by_date, dict) else []
+    basis = (
+        "score-evaluation rows are inputs to the DSR/PBO multiple-testing "
+        "check, never a standalone verdict; each row states its n and the "
+        f"{holding}d holding period, and a row below {min_obs} periods is "
+        "unavailable"
+    )
+    meta = {
+        "holding": holding,
+        "n_buckets": n_buckets,
+        "n_dates": len(dates),
+        "min_names": min_names,
+        "min_obs": min_obs,
+        "basis": basis,
+    }
+    if not dates:
+        return {
+            **meta,
+            "universe_n": 0,
+            "ic": _eval_unavailable(0, holding, "no score snapshots"),
+            "deciles": _eval_unavailable(0, holding, "no score snapshots"),
+            "coverage": _eval_unavailable(0, holding, "no score snapshots"),
+            "stability": _eval_unavailable(0, holding, "no score snapshots"),
+        }
+
+    def _sc(d, t):
+        row = scores_by_date.get(d)
+        return _f(row.get(t)) if isinstance(row, dict) else None
+
+    panel = {
+        t: [_sc(d, t) for d in dates]
+        for t in sorted({t for d in dates for t in (scores_by_date.get(d) or {})})
+    }
+    px = (
+        {t: list(prices[t]) for t in prices if isinstance(prices.get(t), (list, tuple))}
+        if isinstance(prices, dict)
+        else {}
+    )
+    universe = sorted(set(panel) | set(px))
+
+    n_ret, fwd = _forward_returns(panel, px, holding)
+    n_periods = max(0, n_ret - holding)
+
+    def _usable(i: int) -> list:
+        sig = _cross_section(panel, i)
+        cs = _cross_section(fwd, i)
+        return [t for t in sig if t in cs and cs[t] is not None]
+
+    # --- IC: reuse the sentiment_research implementation ------------------
+    usables = {i: _usable(i) for i in range(n_periods)}
+    periods = sum(1 for names in usables.values() if len(names) >= min_names)
+    if periods < 2:
+        ic = _eval_unavailable(
+            periods, holding,
+            f"{periods} cross-sectional period(s) with >= {min_names} scored names",
+        )
+    elif periods < min_obs:
+        ic = _eval_unavailable(
+            periods, holding, f"{periods} cross-sectional periods < min_obs={min_obs}"
+        )
+    else:
+        try:
+            res = rolling_information_coefficient(
+                panel, px, holding=holding, min_assets=min_names
+            )
+        except (ZeroDivisionError, ValueError, KeyError):
+            res = None
+        metrics = (res or {}).get("metrics") or {}
+        if not metrics:
+            ic = _eval_unavailable(periods, holding, "rank IC degenerate on this panel")
+        else:
+            ic = {
+                "available": True,
+                "n": int(metrics.get("periods") or periods),
+                "holding": holding,
+                "mean_rank_ic": metrics.get("mean_rank_ic"),
+                "mean_pearson_ic": metrics.get("mean_pearson_ic"),
+                "ic_ir": metrics.get("ic_ir"),
+                "pct_positive": metrics.get("pct_positive"),
+                "basis": f"cross-sectional Spearman rank IC vs {holding}d forward return",
+            }
+
+    # --- deciles: rank-bucketed mean forward returns ----------------------
+    bucket_sum = [0.0] * n_buckets
+    bucket_cnt = [0] * n_buckets
+    obs = 0
+    bucket_periods = 0
+    for i in range(n_periods):
+        names = usables.get(i) or []
+        if len(names) < min_names:
+            continue
+        sig = _cross_section(panel, i)
+        cs = _cross_section(fwd, i)
+        xs = [sig[t] for t in names]
+        bucket_periods += 1
+        for t in names:
+            b = _bucket(sig[t], xs, n_buckets)
+            bucket_sum[b] += cs[t]
+            bucket_cnt[b] += 1
+            obs += 1
+    bucket_means = [
+        (bucket_sum[k] / bucket_cnt[k]) if bucket_cnt[k] else None
+        for k in range(n_buckets)
+    ]
+    filled = sum(1 for m in bucket_means if m is not None)
+    if filled == n_buckets:
+        mono = _pearson(
+            _rank_avg([float(k) for k in range(n_buckets)]),
+            _rank_avg([float(m) for m in bucket_means]),
+        )
+    else:
+        mono = None
+    monotone = bool(mono is not None and mono >= 1.0 - 1e-9)
+    if bucket_periods < min_obs or obs == 0:
+        deciles = _eval_unavailable(
+            obs, holding,
+            f"{bucket_periods} period(s) / {obs} observation(s) < min_obs={min_obs}",
+        )
+    else:
+        deciles = {
+            "available": True,
+            "n": obs,
+            "periods": bucket_periods,
+            "holding": holding,
+            "n_buckets": n_buckets,
+            "bucket_means": bucket_means,
+            "bucket_counts": list(bucket_cnt),
+            "buckets_filled": filled,
+            "monotonicity": mono,
+            "monotone": monotone,
+            "basis": (
+                f"rank-bucketed mean {holding}d forward return (bucket 1 = "
+                "lowest score); monotonicity withheld until every bucket is "
+                "populated"
+            ),
+        }
+
+    # --- coverage: scored names / universe --------------------------------
+    scored = 0
+    universe_cells = 0
+    cov_dates = 0
+    per_date = {}
+    for i, d in enumerate(dates):
+        present = tot = 0
+        for t in universe:
+            p = px.get(t)
+            if p is None or i >= len(p):
+                continue
+            if _f(p[i]) is None:
+                continue
+            tot += 1
+            if _sc(d, t) is not None:
+                present += 1
+        per_date[d] = {"scored": present, "universe": tot}
+        scored += present
+        universe_cells += tot
+        cov_dates += 1 if tot else 0
+    ratio = (scored / universe_cells) if universe_cells else None
+    if cov_dates < min_obs or universe_cells == 0:
+        coverage = _eval_unavailable(
+            universe_cells, holding,
+            f"{cov_dates} date(s) with a priced universe < min_obs={min_obs}",
+        )
+    else:
+        coverage = {
+            "available": True,
+            "n": universe_cells,
+            "periods": cov_dates,
+            "holding": holding,
+            "scored": scored,
+            "universe": universe_cells,
+            "ratio": ratio,
+            "per_date": per_date,
+            "basis": (
+                "scored names / universe (a name with a bar but no score "
+                "counts against coverage)"
+            ),
+        }
+
+    # --- stability: rank autocorrelation of consecutive snapshots ---------
+    pairs = 0
+    stab_sum = 0.0
+    per_pair = {}
+    for i in range(1, len(dates)):
+        a = _cross_section(panel, i - 1)
+        b = _cross_section(panel, i)
+        common = [t for t in a if t in b]
+        if len(common) < min_names:
+            continue
+        v = _pearson(
+            _rank_avg([a[t] for t in common]), _rank_avg([b[t] for t in common])
+        )
+        if v is None:
+            continue
+        stab_sum += v
+        per_pair[dates[i]] = v
+        pairs += 1
+    if pairs < min_obs:
+        stability = _eval_unavailable(
+            pairs, holding, f"{pairs} consecutive snapshot pair(s) < min_obs={min_obs}"
+        )
+    else:
+        stability = {
+            "available": True,
+            "n": pairs,
+            "holding": holding,
+            "mean_rank_autocorr": stab_sum / pairs,
+            "per_pair": per_pair,
+            "basis": "mean Spearman rank autocorrelation of consecutive score snapshots",
+        }
+
+    return {
+        **meta,
+        "universe_n": len(universe),
+        "ic": ic,
+        "deciles": deciles,
+        "coverage": coverage,
+        "stability": stability,
+    }
+
+

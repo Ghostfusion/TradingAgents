@@ -961,6 +961,22 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_sector_industry": False,
         "enable_sector_breadth": False,
         "enable_sector_eodhd_constituents": False,  # EODHD full-US universe for the breadth layer (sector_screener)
+        # Round-3 scoring & sentiment additions
+        # (docs/implementation_plan_quant_formula_additions_round3.md). Ten
+        # default-off gates; every item is additive, prints its basis, and
+        # degrades to "unavailable" when an input is missing, so a run's
+        # outputs cannot change silently (ground rule 5). Flip one at a time
+        # per ground rule 10 (dark launches are measured, not assumed).
+        "enable_altman_variants": False,  # S1: Z'/Z''/Z''-EM variants + distress zones
+        "enable_f_score_detail": False,  # S2: F-score paper basis, bands, applicability
+        "enable_growth_scores": False,  # S10: Mohanram G-Score + Montier C-Score
+        "enable_weighted_sentiment_agg": False,  # S4: weighted/unweighted news aggregation
+        "enable_crowd_ratio_bands": False,  # S5: crowd ratio + dispersion (display-only bands)
+        "enable_analyst_revision_index": False,  # S6: MSCI-style weighted revision ratio
+        "enable_quality_composite": False,  # S3: winsorised-z quality composite 0-100
+        "enable_score_eval_rows": False,  # S8: score IC / decile / coverage / stability rows
+        "enable_weighted_sentiment_window": False,  # S7: exponentially weighted rolling window
+        "enable_evidence_symmetry": False,  # S11: paired-role symmetry report + mirrored budget
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

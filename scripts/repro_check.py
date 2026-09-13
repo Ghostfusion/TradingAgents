@@ -51,6 +51,18 @@ def _config_hash() -> str:
             "max_debate_rounds",
             "max_risk_discuss_rounds",
             "openrouter_reasoning_effort",
+            # Round-3 gates (ground rule 10): a dark-launch flip must move the
+            # repro-check config hash, or two runs are not provably same-input.
+            "enable_altman_variants",
+            "enable_f_score_detail",
+            "enable_growth_scores",
+            "enable_weighted_sentiment_agg",
+            "enable_crowd_ratio_bands",
+            "enable_analyst_revision_index",
+            "enable_quality_composite",
+            "enable_score_eval_rows",
+            "enable_weighted_sentiment_window",
+            "enable_evidence_symmetry",
         )
         if k in DEFAULT_CONFIG
     }
@@ -129,6 +141,7 @@ def _print_evidence_diff(report_dirs) -> None:
         print("\nall tool statuses identical across runs (composition + status stable)")
 
     _figure_cross_check(report_dirs, evidence)
+    _print_symmetry(evidence)
 
 
 # Figure-matching is canonical in tradingagents.agents.utils.report_verifier
@@ -175,6 +188,59 @@ def _figure_cross_check(report_dirs: list, evidence: list) -> None:
             else:
                 print(f"  run{run_i + 1} {md.stem}: all decimal figures grounded in tool output")
     print("  (heuristic: ±0.5% tolerance; integers/pool-tool figures are not covered)")
+
+
+def _print_symmetry(evidence) -> None:
+    """S11a: render each run's symmetry report as additive columns.
+
+    Appended after the existing tool/status diff, which it does not touch. A
+    run that persisted the block (gate on) renders the stored report; a run
+    from before the gate existed renders a fresh report over its evidence, so
+    the columns are always available. Reads only - zero vendor calls.
+    """
+    from tradingagents.agents.utils.evidence_gather import (
+        MODEL_POOL_KEY,
+        stored_symmetry,
+        symmetry_report,
+    )
+
+    print("\n=== evidence symmetry (S11a) ===")
+    printed = False
+    for run_i, ev in enumerate(evidence):
+        if ev is None:
+            continue
+        report = stored_symmetry(ev) or symmetry_report(
+            ev, ev.get(MODEL_POOL_KEY) or {}
+        )
+        differs = report.get("differs_on") or []
+        line = f"run{run_i + 1}: {report.get('verdict')}"
+        if differs:
+            line += " differs on: " + ", ".join(str(d) for d in differs)
+        print(line)
+        print(
+            f"  {'pair':<22} {'leaves':>9} {'unavail':>9} {'planned':>9} "
+            f"{'discr':>7} {'arg_key_diff':<18} {'as_of':<24} verdict"
+        )
+        for row in report.get("pairs") or []:
+            leaves = row.get("leaves") or {}
+            unavail = row.get("unavailable") or {}
+            planned = row.get("planned") or {}
+            discr = row.get("discretionary") or {}
+            as_of = row.get("as_of") or {}
+            print(
+                f"  {str(row.get('pair')):<22} "
+                f"{leaves.get('a', 0)}/{leaves.get('b', 0):>7} "
+                f"{unavail.get('a', 0)}/{unavail.get('b', 0):>7} "
+                f"{len(planned.get('a') or [])}/{len(planned.get('b') or []):>7} "
+                f"{discr.get('a', 0)}/{discr.get('b', 0):>5} "
+                f"{','.join(str(k) for k in row.get('arg_key_diff') or []) or '-':<18} "
+                f"{'/'.join(str(d) for d in as_of.get('a') or []) or '-'}/"
+                f"{'/'.join(str(d) for d in as_of.get('b') or []) or '-'} "
+                f"{row.get('verdict')}"
+            )
+        printed = True
+    if not printed:
+        print("no evidence to report symmetry over (analyst_forced_tools off)")
 
 
 def main() -> int:

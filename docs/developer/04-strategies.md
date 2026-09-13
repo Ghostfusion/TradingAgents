@@ -36,7 +36,18 @@ involved. This is the "compute, don't narrate" core.
 - `decision_guardrail.py` — post-PM downgrade-only stabilizer + versioned score<->rating validator + confidence cap on degraded data quality (advisory, DSA research §3.1).
 - `market_tradability.py` — limit-up/down gates, suspension, volume
   participation caps, deal-price selector (Qlib exchange model, advisory).
-- `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile.
+- `normalized.py` — 5y median-margin EBIT + EV/EBIT + 5y PE percentile; round-3 S1/S2: `trap_verdict`
+  carries the Altman zone and the F-Score band as additive keys when the caller passes them.
+- `quantitative_scores.py` (round-3) — `altman_variant`/`altman_zone` (Z'/Z''/Z''-EM + the published zones,
+  book-equity X4 with the total-equity proxy named), `piotroski_f_score_detailed` (per-signal booleans, paper
+  bands, recorded deviations), `growth_metrics` + `growth_score` (G1-G8) + `overpriced_score` (C1-C6).
+  `growth_metrics` is the ONE definition of the seven G inputs, so the score and its peer medians cannot drift.
+- `peer_universe.py` (round-3) — `resolve_peer_universe` (one resolver for the screener scan universe: EODHD US
+  common stocks or a caller-supplied `tickers=`/`financials=` cross-section, bounded workers, per-name failures
+  counted) + `resolve_growth_medians` + `sector_medians_for`; metrics come from `statement_parsing.screen_ticker`.
+- `analyst_revisions.py` (round-3) — `revision_ratio` (MSCI `{3,2,1}`, coverage-guarded), `estimate_change_index`
+  (unavailable without a level history, reason printed), `winsor_z` (±3 clip reused from `cross_sectional_z`),
+  `revision_index` (assembles the legs with their basis; informs, never gates).
 - `value_dip.py` — Value Dip + Swing hybrid (`Strategies/Value_Dip_swing*.md`):  Bollinger %b, historical valuation Z, FCF yield, breakeven win rate /
   expectancy, 3-tranche scale-in plan (P1/P2/P3, weighted avg entry, composite
   stop, capital-at-risk, blended R:R), the hybrid allocation matrix
@@ -95,7 +106,12 @@ involved. This is the "compute, don't narrate" core.
 - `orderflow.py` — `fetch_flow`, `summarize`, divergence/alignment/exhaustion.
 - `sentiment.py` — `compute_social_scores`, `computed_sentiment_line`,
   `aggregate_daily_sentiment` (feed -> daily mean scores, post-16:00 ET
-  next-day bucket) + `daily_sentiment_sma` (calendar 7d SMA + innovation).
+  next-day bucket) + `daily_sentiment_sma` (calendar 7d SMA + innovation) +
+  round-3 `aggregate_weighted_sentiment` (weighted/unweighted pair, syndication
+  dedupe, `n`/neutral-share/dispersion, weighted withheld below `min_n`),
+  `crowd_ratio` + `sentiment_dispersion` (display-only 40/60 bands, no 50
+  fallback) and `weighted_rolling_sentiment` (exp-linspace weights,
+  `min_history` warm-up guard).
 - `sentiment_research.py` — news-sentiment factor analytics (lead/lag,
   multi-horizon Newey-West HAC regression, sector-neutral z /
   size-residualization, rolling IC + IC-IR, IC term structure + half-life,
@@ -106,8 +122,16 @@ involved. This is the "compute, don't narrate" core.
 - `mean_reversion.py` — demeaned AR(1)/OU half-life with an OLS t-test gate
   + `mean_reversion_verdict`.
 - `fixed_income.py` — preferred YTM / duration / DV01 / convexity.
+- `factors.py` — round-3 S3 `quality_composite` (0-100 tie-aware percentile of the winsorised-z mean over a
+  declared metric set with `QUALITY_DIRECTIONS`; coverage floor, per-metric droplist, `QUALITY_BANDS`) +
+  `quality_band`.
+- `alpha_health.py` — round-3 S8 `score_evaluation_rows` (mean rank IC + IC IR reusing
+  `sentiment_research.rolling_information_coefficient`, rank-bucketed forward returns + monotonicity, coverage,
+  rank-autocorrelation stability; unavailable below the observation floor; rows are inputs to DSR/PBO, never a
+  verdict).
 - `cross_section.py` — cookbook cross-sectional toolkit: `winsorize`,
   `cross_sectional_z`, `centered_rank` (2.RankPct-1), `quantile_split`,
+  `group_median` (round-3: per-group median with a `min_n` floor),
   `residualize_returns` (market beta residual), `neutralize_book`
   (dollar + beta + sector-neutral via a row-space projection, gross
   renormalized), `no_trade_band`.
@@ -146,7 +170,12 @@ involved. This is the "compute, don't narrate" core.
 ## 4.5 Config flags that gate them
 
 `enable_regime` / `enable_factors` / `enable_sentiment` / `enable_threshold_gate`
-default OFF; all `enable_*` overlays default ON except those four. Catalyst
+default OFF; all `enable_*` overlays default ON except those four. Round-3
+scoring/sentiment gates (all default OFF): `enable_altman_variants`,
+`enable_f_score_detail`, `enable_growth_scores`, `enable_weighted_sentiment_agg`,
+`enable_crowd_ratio_bands`, `enable_analyst_revision_index`,
+`enable_quality_composite`, `enable_score_eval_rows`,
+`enable_weighted_sentiment_window`, `enable_evidence_symmetry`. Catalyst
 keys: `catalyst_*`. Risk: `risk_*`. Sizing: `position_sizing`, `target_vol`,
 `risk_per_trade`, `atr_mult`, `kelly_fraction`.
 

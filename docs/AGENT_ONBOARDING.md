@@ -338,6 +338,25 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - Round-3 scoring/sentiment implementation (S1-S11; ten `enable_*` gates, all
+  default-off): `quantitative_scores.altman_variant`/`altman_zone` + `piotroski_f_score_detailed` +
+  `growth_score`(G1-G8)/`overpriced_score`(C1-C6), `strategies/peer_universe.py` (ONE resolver for the screener
+  scan universe - `tickers=`/`financials=` let the screener pass its own scanned cross-section - plus
+  `resolve_growth_medians`/`sector_medians_for`, all built on `statement_parsing.screen_ticker` so the columns and
+  the medians cannot drift), `strategies/analyst_revisions.py` (weighted coverage-guarded revision ratio;
+  estimate-change leg prints why it is unavailable), `factors.quality_composite` (0-100 winsorised-z percentile,
+  coverage floor, published quality bands - never `decision_guardrail.SCORE_BANDS`; `QUALITY_DIRECTIONS` is the one
+  direction table), `sentiment.aggregate_weighted_sentiment`/`crowd_ratio`/`sentiment_dispersion`/
+  `weighted_rolling_sentiment`, `alpha_health.score_evaluation_rows`, and S11 in `evidence_gather` (symmetry
+  report + declared-default args + mirrored discretionary budget + the gated plan call, wired into the three
+  analyst nodes so the planner is inert until the gate flips). New tools: `get_analyst_revision_index`
+  (fundamentals, gather pool); new rows on `get_quality_factors` / `get_composite_rank` /
+  `get_news_sentiment_series` / `get_sentiment_computed`; screener columns G/C/Qual/RevIdx. **Also fixed while
+  landing:** S11b's declared-default table was its own fallback, so an ungated `classify_tool_pools` /
+  `gather_evidence` call moved `get_macro_indicators` into the deterministic gather - both now default to no
+  table (gate-on callers pass `TOOL_ARG_DEFAULTS`) and the ungated split is byte-identical to HEAD. S9 stays
+  unscheduled (plan Appendix A). 147 phase tests + 19 wiring tests, every phase's primary mutation proven
+  failing first; design/plan docs marked landed. See CHANGELOG.
 - 2026-09-13 `(working tree)` - QQQI news-review loop: the forced-tool short-circuit was never active -
   `evidence_gather.make_short_circuit_tool_node` guarded on `callable(node)` and a LangGraph `ToolNode` is a
   Runnable (not callable), so every production node returned unwrapped: no short-circuit, no tool-call journal

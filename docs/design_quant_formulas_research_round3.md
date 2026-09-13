@@ -1,6 +1,8 @@
 # Scoring, Sentiment-Aggregation & Composite-Score Research, Round 3
 
-Status: **research only (2026-09-13), no code changed.** Round 3 of
+Status: **research (2026-09-13); implemented the same day - every adopted item
+(S1-S11) landed behind its own default-off gate, with S9 left unscheduled
+(Appendix A of the plan).** Round 3 of
 [`design_quant_formulas_research.md`](design_quant_formulas_research.md)
 (round 1, 2026-09-05) and
 [`design_quant_formulas_research_round2.md`](design_quant_formulas_research_round2.md)

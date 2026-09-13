@@ -210,6 +210,9 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.alpaca_tools import (
     get_market_snapshot_alpaca,
 )
+from tradingagents.agents.utils.analyst_revision_tools import (
+    get_analyst_revision_index,
+)
 from tradingagents.agents.utils.financial_trends import get_financial_trends
 from tradingagents.agents.utils.momentum_tools import (
     get_momentum_scan,
@@ -385,6 +388,7 @@ def fundamentals_company_tools() -> list:
                 get_dividends,
                 get_analyst_verdict,
                 get_earnings_surprise,
+                get_analyst_revision_index,
                 get_earnings_surprise_history,
                 get_institution_holdings,
                 get_earnings_quality,

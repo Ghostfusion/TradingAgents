@@ -298,6 +298,32 @@ Bayesian changepoint line inside `get_shift_detection`. The report verifier
 gains two text-only families with no flag (they only fire on the cited lines):
 `tone_claim_conflict` and `valuation_band_conflict`.
 
+**Round-3 scoring & sentiment additions**
+(`docs/design_quant_formulas_research_round3.md`,
+`docs/implementation_plan_quant_formula_additions_round3.md`, phases S1-S11) -
+ten flags, every one default **False**, every added line additive, and every
+unavailable input rendered "unavailable" rather than scored 0:
+`enable_altman_variants` (S1: `altman_variant` / `altman_zone` - the
+Z'/Z''/Z''-EM family plus the distress zones, X4 basis printed, funds and
+financials `unavailable`), `enable_f_score_detail` (S2:
+`piotroski_f_score_detailed` - per-signal booleans, the paper's 0-1/8-9 bands,
+and `deviations` recording every substitution), `enable_growth_scores` (S10:
+`growth_score` G1-G8 + `overpriced_score` C1-C6, industry medians from the
+resolved peer universe), `enable_weighted_sentiment_agg` (S4:
+`aggregate_weighted_sentiment` beside the byte-identical
+`aggregate_daily_sentiment`), `enable_crowd_ratio_bands` (S5: bull/bear ratio +
+dispersion, display-only bands), `enable_analyst_revision_index` (S6:
+`analyst_revisions.revision_ratio` and the `get_analyst_revision_index` tool),
+`enable_quality_composite` (S3: `factors.quality_composite` 0-100 with the
+quality bands - never `decision_guardrail.SCORE_BANDS`),
+`enable_score_eval_rows` (S8: `alpha_health.score_evaluation_rows`),
+`enable_weighted_sentiment_window` (S7: `weighted_rolling_sentiment`, the
+10-day exponential window plus the `min_history` warm-up guard), and
+`enable_evidence_symmetry` (S11: `evidence_gather.symmetry_report`, the
+mirrored discretionary budget, and the gated argument-plan call). The peer
+universe behind S3/S10 is the screener scan universe, resolved once by
+`strategies/peer_universe.py::resolve_peer_universe` (plan §1.1).
+
 ## 2. LLM providers
 
 `deep_think_llm` models the Research Manager + Portfolio Manager; `quick` the
@@ -660,8 +686,9 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_execution_schedule(notional, intervals, volatility?, temp_impact?, risk_aversion?, method=...)` | `strategies.execution_schedule` | market | Almgren-Chriss optimal trajectory + TWAP/VWAP/POV benchmarks (E[IS]/var(IS), per-interval trades) |
 | `get_spread_estimate(ticker, current_date?)` | `strategies.liquidity_risk.corwin_schultz` + `abdi_ranaldo` + `spread_estimate` | market | quote-free high-low spread FLOOR (median of both estimators) for names with no quoted spread; `None` when the two-day correction is negative |
 | `get_return_decomposition(ticker, current_date?)` | `strategies.market_session.decompose_returns` | market | overnight vs intraday log-return legs + intraday share of variance (which leg carried the move, never why) |
-| `get_quality_factors(ticker, current_date?)` | `dataflows.quantitative_scores.gross_profitability` + `net_operating_assets` | fundamentals | GP/A (Novy-Marx) + NOA (Hirshleifer); unavailable when COGS or the prior-year balance sheet is missing |
+| `get_quality_factors(ticker, current_date?)` | `dataflows.quantitative_scores.gross_profitability` + `net_operating_assets` (+ round-3 S1/S2/S10) | fundamentals | GP/A (Novy-Marx) + NOA (Hirshleifer); unavailable when COGS or the prior-year balance sheet is missing. Gated additive rows: the Altman Z'/Z''/Z''-EM variant + distress zone with the X4 basis (`enable_altman_variants`), the F-Score's paper band + recorded deviations (`enable_f_score_detail`), the G/C scores with each median leg's exclusion printed when no peer panel is supplied (`enable_growth_scores`) |
 | `get_valuation_band(ticker, point_value?, current_date?, alpha?)` | `strategies.conformal.rolling_band` | fundamentals | conformal band around a model value with the REALIZED coverage printed beside the nominal level; needs >= `conformal_min_pairs` model-vs-realized pairs |
+| `get_analyst_revision_index(ticker, current_date)` | `strategies.analyst_revisions.revision_index` | fundamentals | weighted, coverage-guarded analyst revision ratio (MSCI weights 3/2/1 over the periods supplied; denominator `up+down` printed as a deviation from analyst coverage; <2 actions -> unavailable; the estimate-change leg states why it is unavailable) - gated by `enable_analyst_revision_index` |
 | `get_disclosure_tone(ticker, current_date?)` | `strategies.text_factors.lm_tone` + `readability` + `divergence` | news | Loughran-McDonald tone counts + readability + filing-vs-news tone/complexity gaps; a zero-hit read is NO SIGNAL, not neutral |
 | `get_book_risk_budget(current_date?)` | `strategies.book_risk.min_cvar_weights` + `copula_scenarios` | risk debators | minimum-CVaR weights under the existing budget (advisory sizing only, never an order) |
 | `get_risk_overlay(portfolio_value, floor?, expected_vol?, target_vol?, multiplier?)` | `strategies.portfolio.cppi_exposure` + `size.volatility_target_scale` | market | CPPI floor-protected risky exposure + vol-targeting scale (advisory overlay) |
@@ -736,7 +763,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_hrp_alloc(ticker, returns_by_name)` | `strategies.hierarchical_risk_parity` | market | Hierarchical Risk Parity book weights (single-linkage HRP; robust under noisy covariance, no Σ inversion) + cluster order |
 | `get_momentum_12_1(ticker)` | `strategies.momentum.momentum_12_1` | market | canonical 12-1 momentum (skips the last month's short-term reversal; needs ~274 bars) |
 | `get_margin_of_safety(ticker, intrinsic)` | `strategies.normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic safety band (wide/modest/negative) |
-| `get_composite_rank(ticker, factors?)` | `strategies.factors.composite_score` | fundamentals | cross-sectional value+momentum composite percentile vs industry peers |
+| `get_composite_rank(ticker, factors?, current_date?)` | `strategies.factors.composite_score` (+ round-3 S3 under `enable_quality_composite`) | fundamentals | cross-sectional value+momentum composite percentile vs industry peers; gated additively the 0-100 composite quality score over the same peer set with its metric set, coverage, peer count and quality band |
 | `get_tail_risk(ticker, alpha?)` | `strategies.book_risk.cvar` / `simple_var` / `stress_loss` + **`cdar`** | market | historical VaR / CVaR tail budget + CDaR/DVaR drawdown-tail + -10% uniform stress loss |
 | `get_credit_spread_read(date)` | `strategies.credit_spread.credit_stress_level` | market | FRED ICE BofA HY/CCC/BB OAS + deterministic credit-cycle band (low/mod/high/severe) + de-risk scale |
 | `get_session_discipline(ticker, peak_pnl?, current_pnl?)` | `strategies.momentum.session_flags` + `psych_level` + `past_optimal_window` | market | intraday walk-away rules (giveback, max-daily-loss, past 10:00 ET optimal) + nearest psych levels |

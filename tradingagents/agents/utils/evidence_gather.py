@@ -98,7 +98,21 @@ def _truncate(text: str, window: int) -> str:
     return text
 
 
-def _args_for(fn, context: dict | None) -> dict:
+def _declared_defaults(fn, defaults=None) -> dict:
+    """The S11b declared enumerable defaults for one tool (name-keyed).
+
+    Defaults to NO table: the ungated path must synthesize exactly the args it
+    did before S11b. A gate-on caller passes ``TOOL_ARG_DEFAULTS`` explicitly
+    (``gather_for_analyst_node`` does) - defaulting to the full table here made
+    the gate depend on every caller remembering to pass ``{}``, the opposite of
+    ground rule 5.
+    """
+    table = {} if defaults is None else defaults
+    name = str(getattr(fn, "name", "") or "")
+    return dict(table.get(name) or {})
+
+
+def _args_for(fn, context: dict | None, defaults=None) -> dict:
     """Synthesize deterministic args for one tool from the run context bag.
 
     Only declared schema keys present in the context are passed; tools that
@@ -106,17 +120,34 @@ def _args_for(fn, context: dict | None) -> dict:
     per their own signature (a mismatch is a recorded ``error`` leaf, never
     a raise). Tools needing non-context args stay OUT of the curated forced
     sets (Phase 4); they remain the model's gap-fill domain.
+
+    S11b: a tool with a declared enumerable default (``TOOL_ARG_DEFAULTS``)
+    also receives that value for the covered required arg, so it can move into
+    the deterministic gather. A tool WITHOUT a declared default gets nothing
+    invented for it.
     """
     declared = getattr(fn, "args", None)
     ctx = dict(context or {})
+    defaults = _declared_defaults(fn, defaults)
     if isinstance(declared, dict) and declared:
-        return {k: ctx[k] for k in declared if k in ctx}
+        out = {k: ctx[k] for k in declared if k in ctx}
+        for key, value in defaults.items():
+            if key in declared and key not in out:
+                out[key] = value
+        return out
     # LangChain StructuredTool.args is a dict; plain callables may expose
     # ``__annotations__`` instead.
     annotations = getattr(fn, "__annotations__", None)
     if isinstance(annotations, dict) and annotations:
-        return {k: ctx[k] for k in annotations if k in ctx}
-    return ctx
+        out = {k: ctx[k] for k in annotations if k in ctx}
+        for key, value in defaults.items():
+            if key in annotations and key not in out:
+                out[key] = value
+        return out
+    out = dict(ctx)
+    for key, value in defaults.items():
+        out.setdefault(key, value)
+    return out
 
 
 def _classify(content: str) -> str:
@@ -137,6 +168,8 @@ def gather_evidence(
     timeout_s: float = 30,
     max_parallel: int = 1,
     summary_window: int = 12000,
+    arg_defaults=None,
+    args_by_name: dict | None = None,
 ) -> list[ToolEvidenceLeaf]:
     """Invoke every forced tool deterministically; always return leaves.
 
@@ -144,6 +177,11 @@ def gather_evidence(
     running after ``timeout_s`` is recorded as ``status=timeout`` while its
     daemon thread drains in the background. Never raises; a missing resolver
     entry becomes an ``error`` leaf.
+
+    ``args_by_name`` (S11d) supplies explicit per-tool args (an LLM plan's
+    ``{tool: {arg: value}}``), overriding ``context`` for those names;
+    otherwise args are synthesized from the context plus the S11b declared
+    defaults (``arg_defaults``).
     """
     if not forced_names or not tools_by_name:
         return []
@@ -157,9 +195,15 @@ def gather_evidence(
         for i in range(0, len(resolved), max(1, max_parallel))
     ]
 
+    def resolve_args(name: str, fn) -> dict:
+        explicit = (args_by_name or {}).get(name)
+        if explicit is not None:
+            return dict(explicit)
+        return _args_for(fn, context, arg_defaults)
+
     def run_one(name: str, fn) -> None:
         start = time.monotonic()
-        args = _args_for(fn, context)
+        args = resolve_args(name, fn)
         try:
             out = str(fn.invoke(dict(args or {})))
             status = _classify(out)
@@ -203,7 +247,7 @@ def gather_evidence(
                         continue
                     timed_out.add(name)
                     fn = tools_by_name[name]
-                    args = _args_for(fn, context)
+                    args = resolve_args(name, fn)
                     leaves[name] = _leaf(
                         name,
                         args,
@@ -272,6 +316,31 @@ CONTEXT_ARG_KEYS = frozenset(
     {"ticker", "symbol", "current_date", "curr_date", "start_date", "end_date", "look_back_days"}
 )
 
+# S11b: declared per-tool deterministic defaults for enumerable args. When a
+# model-pool tool's only non-context required args have a defensible declared
+# value, the tool moves into the deterministic gather (composition becomes
+# deterministic for free) and the reason is printed. A tool WITHOUT a
+# defensible default stays in the model pool - an arg is never invented to
+# force a tool in (plan section 2 S11b).
+TOOL_ARG_DEFAULTS: dict[str, dict] = {
+    "get_macro_indicators": {"indicator": "10y_treasury"},
+}
+
+TOOL_ARG_DEFAULT_REASONS: dict[str, str] = {
+    "get_macro_indicators": (
+        "declared enumerable default indicator='10y_treasury': the run's "
+        "macro-authority gate cites the 10Y first, and a single-valued enum "
+        "makes the forced leaf set deterministic"
+    ),
+}
+
+# Reserved key in the tool_evidence state dict carrying the persisted S11a
+# symmetry block. The value is a LIST of dicts (summary row first, then one
+# row per pair), never a nested dict: ``reporting._evidence_sources`` walks
+# every tool_evidence value as a leaf list, and a dict would raise there,
+# while a list of dicts lacking a ``tool`` key is skipped like a metadata row.
+SYMMETRY_KEY = "_symmetry"
+
 # Reserved key in the tool_evidence state dict carrying the per-analyst
 # model-pool name lists (persisted for the --evidence G/M split).
 MODEL_POOL_KEY = "_model_pool"
@@ -286,18 +355,26 @@ def classify_tool_pools(
     tools,
     context_keys=CONTEXT_ARG_KEYS,
     forced_model=(),
+    defaults=None,
+    on_move=None,
 ) -> tuple[list[str], list[str]]:
     """Classify bound tools into (gather_pool, model_pool).
 
-    The gather (auto) pool = every tool whose required args are all covered
-    by the deterministic context. The model pool = every tool that requires an
-    arg the context cannot supply (e.g. ``get_bsm_option_quote`` needs
-    spot/strike/t_years/vol; ``get_macro_indicators`` needs ``indicator``),
-    plus any name in ``forced_model`` (the analyst_tools_model_supplied
-    override). Classified from each tool's own schema, so a FUTURE tool that
-    needs a model input lands in the model pool automatically — no
-    maintained list to go stale.
+    The gather (auto) pool = every tool whose required args are all covered by
+    the deterministic context, plus (S11b) a required arg covered by a declared
+    enumerable default. The model pool = every tool that still requires an arg
+    the context cannot supply (e.g. ``get_bsm_option_quote`` needs
+    spot/strike/t_years/vol), plus any name in ``forced_model`` (the
+    analyst_tools_model_supplied override). Classified from each tool's own
+    schema, so a FUTURE tool that needs a model input lands in the model pool
+    automatically - no maintained list to go stale.
+
+    A tool that moves into the gather because of a declared default prints the
+    reason (``on_move(name, covered_args, reason)`` callback + a log line); a
+    tool with no defensible default stays in the model pool - an arg is never
+    invented to force a tool in.
     """
+    table = {} if defaults is None else defaults  # gate-on callers pass the table
     forced = set(forced_model or ())
     gather: list[str] = []
     model: list[str] = []
@@ -307,14 +384,27 @@ def classify_tool_pools(
             continue
         args = getattr(t, "args", None) or {}
         required = [k for k, meta in args.items() if "default" not in meta]
-        if name in forced or any(k not in context_keys for k in required):
+        covered = dict(table.get(name) or {})
+        missing = [k for k in required if k not in context_keys and k not in covered]
+        if name in forced or missing:
             model.append(name)
-        else:
-            gather.append(name)
+            continue
+        gather.append(name)
+        moved = [k for k in required if k not in context_keys and k in covered]
+        if moved:
+            reason = TOOL_ARG_DEFAULT_REASONS.get(name) or (
+                "declared enumerable defaults "
+                + ", ".join(f"{k}={covered[k]!r}" for k in moved)
+            )
+            logger.info(
+                "tool %r moved to the deterministic gather: %s", name, reason
+            )
+            if on_move is not None:
+                on_move(name, moved, reason)
     return gather, sorted(model)
 
 
-def _render_evidence(leaves, model_names, reference_line: str = "") -> str:
+def _render_evidence(leaves, model_names, reference_line: str = "", notes=None) -> str:
     """Evidence block + the model-pool hint (the analyst reduce sees both).
 
     ``reference_line`` (optional): the run's price basis (as-of date + close,
@@ -328,6 +418,11 @@ def _render_evidence(leaves, model_names, reference_line: str = "") -> str:
     block = format_evidence_block(leaves)
     if reference_line:
         block = f"{reference_line}\n\n{block}"
+    if notes:
+        # S11b: print WHY a tool left the model pool (composition basis).
+        block += "\n\n## Declared-default tools moved to the deterministic gather\n" + "\n".join(
+            f"- {note}" for note in notes
+        )
     if model_names:
         block += "\n\n" + MODEL_POOL_HEADER + "\n" + ", ".join(sorted(model_names))
     return block
@@ -351,6 +446,7 @@ def gather_for_analyst_node(
     analyst_key: str,
     tools: list,
     config: dict | None = None,
+    planner=None,
 ) -> tuple[str, dict]:
     """Gather forced evidence once per analyst run; return (block, evidence).
 
@@ -378,9 +474,18 @@ def gather_for_analyst_node(
         ), existing
 
     by_name = {t.name: t for t in tools}
+    # S11b is gated: with the gate off the declared-default table is empty, so
+    # the pool split (and every output) is byte-identical to HEAD. With the
+    # gate on, a tool whose required arg has a defensible declared default
+    # moves into the deterministic gather and its reason is printed into the
+    # evidence block.
+    arg_defaults = TOOL_ARG_DEFAULTS if _flag("enable_evidence_symmetry") else {}
+    move_notes: list = []
     gather_names, model_names = classify_tool_pools(
         by_name.values(),
         forced_model=(config or {}).get("analyst_tools_model_supplied") or [],
+        defaults=arg_defaults,
+        on_move=lambda name, covered, reason: move_notes.append(f"{name}: {reason}"),
     )
     model_set = set(model_names)
 
@@ -413,20 +518,63 @@ def gather_for_analyst_node(
         return "", updated
 
     context = _evidence_context(state)
-    leaves = gather_evidence(
-        by_name,
-        names,
-        context=context,
-        timeout_s=float(config.get("analyst_forced_tools_timeout_s") or 30),
-        max_parallel=int(config.get("analyst_forced_tools_max_parallel") or 1),
-        summary_window=int(config.get("analyst_forced_tools_summary_window") or 12000),
+    leaves: list[ToolEvidenceLeaf] = []
+    # S11d (gated): one cheap completion emits a typed plan over the model-pool
+    # remainder; code validates it against the remainder whitelist + each
+    # tool's own args schema and fires it through the same executor. An empty,
+    # invalid or out-of-whitelist plan falls back to today's loop and says so -
+    # it never raises and never thins the evidence.
+    if planner is not None and _flag("enable_evidence_symmetry"):
+        plan_reason = ""
+        try:
+            raw = planner(analyst_key, list(model_names), tools)
+        except Exception as exc:  # noqa: BLE001 - a planner must never abort the gather
+            plan_reason = f"planner raised {type(exc).__name__}: {exc}"
+        else:
+            plan_leaves, plan_reason = resolve_model_pool_plan(
+                raw, by_name, model_names
+            )
+            if not plan_reason:
+                leaves.extend(plan_leaves)
+                # Journal the accepted plan (one line per call) so repro_check
+                # can diff the plan the run actually fired.
+                try:
+                    from tradingagents.agents.utils.tool_call_log import log_tool_call
+
+                    for leaf in plan_leaves:
+                        log_tool_call(
+                            analyst_key,
+                            leaf.tool,
+                            "planned",
+                            args=leaf.args,
+                            state=state,
+                            in_model_pool=True,
+                        )
+                except Exception:  # noqa: BLE001 - advisory, never break the gather
+                    pass
+        if plan_reason:
+            logger.warning(
+                "evidence-symmetry plan for %r fell back to the legacy loop: %s",
+                analyst_key,
+                plan_reason,
+            )
+    leaves.extend(
+        gather_evidence(
+            by_name,
+            names,
+            context=context,
+            timeout_s=float(config.get("analyst_forced_tools_timeout_s") or 30),
+            max_parallel=int(config.get("analyst_forced_tools_max_parallel") or 1),
+            summary_window=int(config.get("analyst_forced_tools_summary_window") or 12000),
+            arg_defaults=arg_defaults,
+        )
     )
     updated = {**existing, analyst_key: [leaf.__dict__ for leaf in leaves]}
     pools = dict(existing.get(MODEL_POOL_KEY) or {})
     pools[analyst_key] = model_names
     updated[MODEL_POOL_KEY] = pools
     return _render_evidence(
-        leaves, model_names, reference_line=_reference_price_line(state)
+        leaves, model_names, reference_line=_reference_price_line(state), notes=move_notes
     ), updated
 
 
@@ -632,6 +780,19 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             return {"messages": out_msgs}
         from langchain_core.messages import ToolMessage
 
+        # S11c: the mirrored discretionary allowance for this role's pair. Only
+        # active under the gate and when a pair budget is declared; None keeps
+        # today's behaviour byte-identical.
+        budget = (
+            _pair_budget_for(analyst_key, _config())
+            if _flag("enable_evidence_symmetry")
+            else None
+        )
+        forced_names = {
+            str(_leaf_as_dict(leaf).get("tool") or "")
+            for leaf in (state.get(TOOL_EVIDENCE_KEY) or {}).get(analyst_key) or []
+        }
+        used = 0
         new_leaves: list[dict] = []
         for msg in real_msgs:
             if not isinstance(msg, ToolMessage):
@@ -646,6 +807,24 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             )
             if call is None:
                 continue
+            if budget is not None and name not in forced_names and used >= budget:
+                # A surplus call beyond the mirror is suppressed AND journaled
+                # with its args, so the asymmetry is visible rather than hidden.
+                try:
+                    from tradingagents.agents.utils.tool_call_log import log_tool_call
+
+                    log_tool_call(
+                        analyst_key,
+                        name,
+                        "suppressed",
+                        args=(call or {}).get("args"),
+                        state=state,
+                        in_model_pool=True,
+                    )
+                except Exception:  # noqa: BLE001 - advisory, never break the loop
+                    pass
+                continue
+            used += 1
             new_leaves.append(
                 make_evidence_leaf(name, content, args=(call or {}).get("args"), status="ok")
             )
@@ -754,3 +933,456 @@ def format_evidence_block(leaves) -> str:
     except Exception:  # noqa: BLE001 - advisory; never break the evidence block
         pass
     return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# S11 - symmetric evidence for paired roles (plan section 2 S11; gate
+# ``enable_evidence_symmetry``). S11 changes *how* evidence is gathered, never
+# how anything is scored: every function below only reads the leaves and model
+# pools the pipeline already journals, and none of them can raise.
+# ---------------------------------------------------------------------------
+
+
+def _config() -> dict:
+    """The run config dict, or ``{}`` - a config read must never break a run."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return dict(get_config() or {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    """Read a run config gate defensively (matches the repo's tool pattern)."""
+    return bool(_config().get(name, default))
+
+
+def _side_stats(leaves, model_names) -> dict:
+    """Per-side evidence stats: fired/planned tools, leaves, arg keys, as-of."""
+    fired: set = set()
+    arg_keys: set = set()
+    as_of: set = set()
+    n_ok = 0
+    n_unavailable = 0
+    count = 0
+    for leaf in leaves or []:
+        count += 1
+        d = _leaf_as_dict(leaf)
+        tool = str(d.get("tool") or "")
+        if tool:
+            fired.add(tool)
+        if str(d.get("status") or "ok") == "ok":
+            n_ok += 1
+        else:
+            n_unavailable += 1
+        args = d.get("args") or {}
+        arg_keys.update(str(k) for k in args)
+        for key in ("current_date", "curr_date", "trade_date", "as_of", "end_date", "start_date"):
+            value = args.get(key)
+            if value:
+                as_of.add(str(value))
+    model = sorted(str(n) for n in (model_names or []))
+    return {
+        "fired": sorted(fired),
+        "planned": sorted(fired | set(model)),
+        "leaves": count,
+        "ok": n_ok,
+        "unavailable": n_unavailable,
+        "arg_keys": arg_keys,
+        "as_of": sorted(as_of),
+        "discretionary": len(model),
+    }
+
+
+def _normalize_pairs(pairs, keys) -> list[dict]:
+    """Normalize pair specs to ``{"pair", "side_a", "side_b"}``.
+
+    ``pairs`` may be pairs of side keys, or dicts carrying ``side_a``/
+    ``side_b`` (and an optional ``pair`` label). The default is every unordered
+    pair of the side keys present, so a two-side fixture reports exactly one
+    row.
+    """
+    if not pairs:
+        import itertools
+
+        return [
+            {"pair": f"{a}/{b}", "side_a": a, "side_b": b}
+            for a, b in itertools.combinations(sorted(keys), 2)
+        ]
+    out: list[dict] = []
+    for spec in pairs:
+        if isinstance(spec, dict):
+            a = str(spec.get("side_a") or "")
+            b = str(spec.get("side_b") or "")
+            label = str(spec.get("pair") or f"{a}/{b}")
+        else:
+            a, b = (list(spec) + ["", ""])[:2]
+            a, b = str(a), str(b)
+            label = f"{a}/{b}"
+        out.append({"pair": label, "side_a": a, "side_b": b})
+    return out
+
+
+def _pair_row(pair: str, side_a: str, side_b: str, sa: dict, sb: dict) -> dict:
+    tool_diff = sorted(set(sa["planned"]) ^ set(sb["planned"]))
+    arg_diff = sorted(sa["arg_keys"] ^ sb["arg_keys"])
+    if sa["leaves"] == 0 or sb["leaves"] == 0:
+        # A side with no leaves has nothing to compare: unavailable, never
+        # SYMMETRIC (plan section 4 mutation "report SYMMETRIC when a side has
+        # no leaves").
+        verdict = "unavailable"
+        differs: list[str] = []
+    else:
+        differs = tool_diff
+        asymmetric = bool(tool_diff) or bool(arg_diff) or (
+            sa["discretionary"] != sb["discretionary"]
+        )
+        verdict = "ASYMMETRIC" if asymmetric else "SYMMETRIC"
+    return {
+        "pair": pair,
+        "side_a": side_a,
+        "side_b": side_b,
+        "planned": {"a": sa["planned"], "b": sb["planned"]},
+        "fired": {"a": sa["fired"], "b": sb["fired"]},
+        "leaves": {"a": sa["leaves"], "b": sb["leaves"]},
+        "unavailable": {"a": sa["unavailable"], "b": sb["unavailable"]},
+        "arg_key_diff": arg_diff,
+        "as_of": {"a": sa["as_of"], "b": sb["as_of"]},
+        "discretionary": {"a": sa["discretionary"], "b": sb["discretionary"]},
+        "verdict": verdict,
+        "differs_on": differs,
+    }
+
+
+def symmetry_report(evidence, model_pool=None, pairs=None) -> dict:
+    """S11a: per-pair symmetry verdict over the evidence the pipeline journals.
+
+    Implements the contract ``SYM(A,B) = (W_A = W_B) and (K_A = K_B) and
+    (|D_A| = |D_B|)``: the planned tool sets (fired leaves union the
+    ``_model_pool`` remainder), the arg keys, and the discretionary counts read
+    from ``_model_pool``. ``differs_on`` names the tools whose planned sets
+    differ. A pair with no leaves on either side renders ``unavailable`` -
+    never ``SYMMETRIC`` (a missing input is never a score of zero).
+
+    Pure and offline: it makes **zero** vendor calls (the tests assert this
+    with a call counter, not by inspection). ``evidence`` is the state's
+    ``tool_evidence`` dict; ``model_pool`` defaults to its ``_model_pool``
+    metadata.
+    """
+    ev = dict(evidence or {})
+    if model_pool is None:
+        pools = {
+            str(k): list(v or []) for k, v in (ev.get(MODEL_POOL_KEY) or {}).items()
+        }
+    elif isinstance(model_pool, dict):
+        pools = {str(k): list(v or []) for k, v in model_pool.items()}
+    else:
+        pools = {}
+    keys = {str(k) for k in ev if not str(k).startswith("_")}
+    keys |= set(pools)
+    rows = []
+    for spec in _normalize_pairs(pairs, keys):
+        a, b = spec["side_a"], spec["side_b"]
+        rows.append(
+            _pair_row(
+                spec["pair"],
+                a,
+                b,
+                _side_stats(ev.get(a), pools.get(a)),
+                _side_stats(ev.get(b), pools.get(b)),
+            )
+        )
+    if not rows or all(r["verdict"] == "unavailable" for r in rows):
+        verdict = "unavailable"
+    elif any(r["verdict"] == "ASYMMETRIC" for r in rows):
+        verdict = "ASYMMETRIC"
+    else:
+        verdict = "SYMMETRIC"
+    differs_on = sorted({name for r in rows for name in r["differs_on"]})
+    basis = (
+        f"{len(rows)} pair(s); planned = fired leaves union the _model_pool "
+        "remainder; compared planned tool sets, arg keys and discretionary "
+        "counts; no vendor calls made"
+    )
+    return {"pairs": rows, "verdict": verdict, "differs_on": differs_on, "basis": basis}
+
+
+def symmetry_rows(report) -> list[dict]:
+    """Persist-shape rows for the ``tool_evidence`` block (reporting-safe).
+
+    ``reporting._evidence_sources`` walks every ``tool_evidence`` value as a
+    leaf list, so the block must be a LIST of dicts (summary first, then one
+    row per pair), never a nested dict. Each dict lacks a ``tool`` key, so the
+    source-coverage walk skips it exactly like a metadata row.
+    """
+    report = report or {}
+    rows = [
+        {
+            "verdict": str(report.get("verdict") or "unavailable"),
+            "differs_on": list(report.get("differs_on") or []),
+            "n_pairs": len(report.get("pairs") or []),
+            "basis": str(report.get("basis") or ""),
+        }
+    ]
+    rows.extend(list(report.get("pairs") or []))
+    return rows
+
+
+def stored_symmetry(evidence) -> dict | None:
+    """Recover the ``symmetry_report`` dict from a persisted evidence block."""
+    raw = (evidence or {}).get(SYMMETRY_KEY)
+    if not raw:
+        return None
+    if isinstance(raw, dict):  # tolerate a caller that stored the dict directly
+        return raw
+    rows = list(raw)
+    summary = rows[0] if rows else {}
+    return {
+        "pairs": rows[1:],
+        "verdict": summary.get("verdict", "unavailable"),
+        "differs_on": list(summary.get("differs_on") or []),
+        "basis": summary.get("basis", ""),
+    }
+
+
+def _call_tool(call) -> str:
+    return str((call or {}).get("name") or (call or {}).get("tool") or "")
+
+
+def mirror_discretionary_budget(
+    calls_by_role,
+    *,
+    pairs=None,
+    budget=None,
+    forced=(),
+    state=None,
+    journal=True,
+) -> dict:
+    """S11c: mirror each paired role's discretionary call allowance.
+
+    Each pair gets the same allowance - the smaller of its two sides' call
+    counts, or an explicit ``budget`` - and any call beyond it is suppressed
+    AND journaled with its args (``event='suppressed'``) so the asymmetry is
+    visible rather than hidden. The mirror is per pair, never global, and a
+    call whose tool is a forced (S11b) leaf is never suppressed. Returns the
+    per-role kept/suppressed split; never raises.
+    """
+    forced_names = {str(f) for f in (forced or ())}
+    source = dict(calls_by_role or {})
+    roles = sorted(str(r) for r in source)
+    kept: dict[str, list] = {r: list(source.get(r) or []) for r in roles}
+    suppressed: dict[str, list] = {r: [] for r in roles}
+    allowances: dict[str, int] = {}
+    for spec in _normalize_pairs(pairs, roles):
+        a, b = spec["side_a"], spec["side_b"]
+        if a not in kept or b not in kept:
+            continue
+        allowance = min(len(kept[a]), len(kept[b])) if budget is None else int(budget)
+        allowances[spec["pair"]] = allowance
+        for role in (a, b):
+            keep: list = []
+            drop: list = []
+            for index, call in enumerate(kept[role]):
+                if index >= allowance and _call_tool(call) not in forced_names:
+                    drop.append(call)
+                else:
+                    keep.append(call)
+            kept[role] = keep
+            suppressed[role] = drop
+            if journal and drop:
+                from tradingagents.agents.utils.tool_call_log import log_tool_call
+
+                for call in drop:
+                    log_tool_call(
+                        role,
+                        _call_tool(call),
+                        "suppressed",
+                        args=(call or {}).get("args"),
+                        state=state,
+                        in_model_pool=True,
+                    )
+    return {
+        "pairs": _normalize_pairs(pairs, roles),
+        "allowances": allowances,
+        "kept": kept,
+        "suppressed": suppressed,
+    }
+
+
+def _pair_budget_for(role: str, config: dict | None) -> int | None:
+    """The mirrored discretionary allowance configured for ``role``'s pair."""
+    for spec in (config or {}).get("evidence_symmetry_pairs") or []:
+        if not isinstance(spec, dict):
+            continue
+        roles = [str(r) for r in (spec.get("roles") or [])]
+        if role in roles:
+            try:
+                return int(spec.get("budget"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def parse_evidence_plan(raw, whitelist, tools_by_name) -> tuple[dict | None, str]:
+    """S11d: parse + validate a model plan reply into ``{tool: {arg: value}}``.
+
+    Accepts a JSON object or its string form. Returns ``(plan, "")`` on a valid
+    plan and ``(None, reason)`` on an empty, unparseable, out-of-whitelist or
+    schema-violating one. Never raises - a bad plan falls back to today's loop
+    (plan section 2 S11d).
+    """
+    import re
+
+    allowed = {str(w) for w in (whitelist or ())}
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None, "empty plan"
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if not match:
+                return None, "plan is not JSON"
+            try:
+                raw = json.loads(match.group(0))
+            except ValueError:
+                return None, "plan is not JSON"
+    if not isinstance(raw, dict) or not raw:
+        return None, "empty plan"
+    plan: dict[str, dict] = {}
+    for tool, args in raw.items():
+        name = str(tool)
+        if name not in allowed:
+            return None, f"tool {name!r} is outside the whitelist"
+        if name not in tools_by_name:
+            return None, f"tool {name!r} is not bound to this analyst"
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            return None, f"args for {name!r} are not an object"
+        declared = getattr(tools_by_name[name], "args", None) or {}
+        if declared:
+            unknown = sorted(k for k in args if k not in declared)
+            if unknown:
+                return None, f"args for {name!r} outside its schema: {unknown}"
+            missing = sorted(
+                k for k, meta in declared.items() if "default" not in meta and k not in args
+            )
+            if missing:
+                return None, f"args for {name!r} missing required keys: {missing}"
+        plan[name] = {str(k): v for k, v in args.items()}
+    return plan, ""
+
+
+def plan_evidence_calls(
+    tools_by_name,
+    plan,
+    *,
+    timeout_s: float = 30,
+    max_parallel: int = 1,
+    summary_window: int = 12000,
+) -> list[ToolEvidenceLeaf]:
+    """S11d: fire a validated plan through the existing executor.
+
+    Bounded parallel, per-call timeout and error leaves come from
+    ``gather_evidence``; the plan's per-tool args are passed verbatim.
+    """
+    names = [n for n in plan if n in tools_by_name]
+    return gather_evidence(
+        tools_by_name,
+        names,
+        context=None,
+        timeout_s=timeout_s,
+        max_parallel=max_parallel,
+        summary_window=summary_window,
+        args_by_name={n: plan[n] for n in names},
+    )
+
+
+PLAN_PROMPT_HEADER = """You plan one analyst's TOOL CALLS before the report is written.
+
+The tools below are the analyst's model-discretionary remainder. Choose a
+minimal plan - only the calls whose arguments you can state concretely. Reply
+with ONE JSON object mapping each chosen tool name to its argument object, and
+nothing else. If you cannot supply a call's arguments, omit that tool (an
+empty object is a valid plan). Never invent a tool or an argument name.
+"""
+
+
+def build_plan_prompt(analyst_key: str, model_names, tools) -> str:
+    """S11d: the cheap-plan prompt over the model-pool remainder."""
+    by_name = {getattr(t, "name", ""): t for t in tools}
+    lines = [PLAN_PROMPT_HEADER, f"Analyst: {analyst_key}", "", "Tools:"]
+    for name in model_names:
+        fn = by_name.get(name)
+        schema = getattr(fn, "args", None) or {}
+        desc = (getattr(fn, "description", "") or "").strip().splitlines()
+        lines.append(f"- {name}: {desc[0] if desc else ''}".rstrip())
+        for arg, meta in schema.items():
+            required = "required" if "default" not in meta else "optional"
+            lines.append(f"    {arg} ({required})")
+    return "\n".join(lines)
+
+
+def make_llm_planner(llm):
+    """S11d: build the one-cheap-completion planner callable.
+
+    Returns ``planner(analyst_key, model_names, tools) -> raw plan text``; the
+    caller validates + fires it (``resolve_model_pool_plan``), so a malformed
+    completion falls back to today's loop rather than raising.
+    """
+
+    def planner(analyst_key, model_names, tools):
+        prompt = build_plan_prompt(analyst_key, list(model_names), tools)
+        response = llm.invoke(prompt)
+        return getattr(response, "content", response)
+
+    return planner
+
+
+def resolve_model_pool_plan(raw, tools_by_name, whitelist) -> tuple[list, str]:
+    """S11d: validate a plan and fire it; ``""`` on success, reason otherwise.
+
+    On any empty/invalid/out-of-whitelist plan it returns ``([], reason)`` so
+    the caller falls back to today's loop and states why - it never raises.
+    """
+    try:
+        plan, error = parse_evidence_plan(raw, whitelist, tools_by_name)
+        if plan is None:
+            return [], error
+        return plan_evidence_calls(tools_by_name, plan), ""
+    except Exception as exc:  # noqa: BLE001 - a plan must never abort the gather
+        return [], f"plan failed: {type(exc).__name__}: {exc}"
+
+
+__all__ = [
+    "ALL_LITERAL",
+    "CONTEXT_ARG_KEYS",
+    "EVIDENCE_SECTION_HEADER",
+    "MODEL_POOL_HEADER",
+    "MODEL_POOL_KEY",
+    "PLAN_PROMPT_HEADER",
+    "SYMMETRY_KEY",
+    "TOOL_ARG_DEFAULTS",
+    "TOOL_ARG_DEFAULT_REASONS",
+    "TOOL_EVIDENCE_KEY",
+    "ToolEvidenceLeaf",
+    "build_plan_prompt",
+    "classify_tool_pools",
+    "format_evidence_block",
+    "gather_evidence",
+    "gather_for_analyst_node",
+    "make_evidence_leaf",
+    "make_llm_planner",
+    "make_short_circuit_tool_node",
+    "mirror_discretionary_budget",
+    "parse_evidence_plan",
+    "parse_forced_spec",
+    "plan_evidence_calls",
+    "resolve_model_pool_plan",
+    "short_circuit_tool_calls",
+    "stored_symmetry",
+    "symmetry_report",
+    "symmetry_rows",
+]
