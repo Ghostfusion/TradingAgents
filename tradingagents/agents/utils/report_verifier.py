@@ -945,6 +945,317 @@ def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
     return []
 
 
+# ---------------------------------------------------------------------------
+# Basis-identity checks (NVDA 2026-09-12 review loop: D5/D7 + ratio bases)
+# ---------------------------------------------------------------------------
+# The NVDA 2026-09-12 fundamentals reports printed a net-debt line, a current
+# ratio and a ROA on bases that disagree with the other numbers the SAME
+# report quotes, and bound one fiscal-quarter label to the wrong ISO date.
+# These are basis/identity breaks inside ONE report (never renderer bugs), so
+# they are checked deterministically here and reported as advisory conflicts.
+
+# A dollar figure with an optional K/M/B/T suffix; a bare number is read as
+# raw dollars (so "62,469" -> 6.2e-5 B) which keeps unlike scales apart.
+_MONEY_SUFFIX_EXP = {"": 1e-9, "k": 1e-6, "m": 1e-3, "b": 1.0, "t": 1e3}
+
+_CASH_STI_RE = re.compile(
+    r"(?i)cash\s*(?:\+|and|&)\s*(?:st\b|short[-\s]?term)\s+investments?"
+    r"[^0-9$]{0,12}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+)
+# "total debt ... = $38.35B" (R1 spells the current + long-term legs first) or
+# the plain table row "Total Debt | $38.35B" (R2).
+_TOTAL_DEBT_EQ_RE = re.compile(
+    r"(?i)total\s+debt\b[^\n]{0,90}?=\s*\**\s*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+)
+_TOTAL_DEBT_RE = re.compile(
+    r"(?i)total\s+debt\b[^\n\d$]{0,14}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+)
+_NET_FIGURE_RE = re.compile(
+    r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*\-]*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+)
+
+
+def _money_billions(raw: str, suffix: str | None) -> float | None:
+    """A dollar figure -> billions, honouring a K/M/B/T suffix ('' = raw $)."""
+    try:
+        value = float(raw.replace(",", ""))
+    except (ValueError, AttributeError):
+        return None
+    scale = _MONEY_SUFFIX_EXP.get((suffix or "").lower())
+    if scale is None:
+        return None
+    return value * scale
+
+
+def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
+    """Cash+ST investments minus total debt must match the quoted net figure.
+
+    Pins the NVDA 2026-09-12 (R2) defect: the report quoted cash+ST
+    investments $62.47B and total debt $38.35B (=> ~$24.1B net CASH) while also
+    printing "net debt of $10.9B" — the quoted net line disagrees with the
+    balance-sheet legs by a full sign and ~145% of the larger leg.
+    """
+    if not report_text:
+        return []
+    cash_m = _CASH_STI_RE.search(report_text)
+    debt_m = _TOTAL_DEBT_EQ_RE.search(report_text) or _TOTAL_DEBT_RE.search(report_text)
+    net_matches = list(_NET_FIGURE_RE.finditer(report_text))
+    if not net_matches:
+        return []
+    debts = [m for m in net_matches if m.group(1).lower() == "debt"]
+    net_m = (debts or net_matches)[-1]
+    if not (cash_m and debt_m):
+        return []
+    cash = _money_billions(cash_m.group(1), cash_m.group(2))
+    debt = _money_billions(debt_m.group(1), debt_m.group(2))
+    quoted = _money_billions(net_m.group(2), net_m.group(3))
+    if cash is None or debt is None or quoted is None:
+        return []
+    is_debt = net_m.group(1).lower() == "debt"
+    if not is_debt:
+        quoted = -quoted
+    expected = debt - cash
+    if abs(quoted - expected) / max(abs(quoted), abs(expected), 1e-9) <= 0.05:
+        return []
+    implied_word = "net cash" if expected < 0 else "net debt"
+    return [
+        VerifierClaim(
+            claim=(
+                f"cash+ST investments ${cash:.2f}B - total debt ${debt:.2f}B = "
+                f"{implied_word} ${abs(expected):.2f}B, but report quotes "
+                f"{'net debt' if is_debt else 'net cash'} ${abs(quoted):.2f}B"
+            ),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The quoted net debt / net cash figure does not resolve from the "
+                "same report's cash+ST investments and total debt rows. Reconcile "
+                "the net line to those legs (rule pinned by the NVDA 2026-09-12 "
+                "review loop)."
+            ),
+        )
+    ]
+
+
+_CURRENT_RATIO_RE = re.compile(r"(?i)\b(?:current\s+ratio|CR)\b[^0-9\n]{0,12}?(\d+(?:\.\d+)?)")
+_CA_CL_PAIR_RE = re.compile(
+    r"(?i)current\s+assets\b[^0-9\n]{0,16}?current\s+liabilit(?:ies|y)\b"
+    r"[^0-9]{0,24}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    r"[^0-9]{0,12}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+)
+
+
+def _current_ratio_identity(report_text: str) -> list[VerifierClaim]:
+    """A quoted current ratio must match the report's own CA/CL pair.
+
+    Pins the NVDA 2026-09-12 (R1) defect: the report printed current assets /
+    current liabilities $197.41B / $43.02B (= 4.588) while the quoted provider
+    current ratio was 4.6808 — a 2% basis break inside one report.
+    """
+    if not report_text:
+        return []
+    cr_m = _CURRENT_RATIO_RE.search(report_text)
+    pair = _CA_CL_PAIR_RE.search(report_text)
+    if not (cr_m and pair):
+        return []
+    ca = _money_billions(pair.group(1), pair.group(2))
+    cl = _money_billions(pair.group(3), pair.group(4))
+    try:
+        quoted = float(cr_m.group(1))
+    except ValueError:
+        return []
+    if not (ca and cl and quoted):
+        return []
+    computed = ca / cl
+    if abs(computed - quoted) / max(abs(computed), 1e-9) <= 0.02:
+        return []
+    return [
+        VerifierClaim(
+            claim=(
+                f"current ratio quoted {quoted:.4f} vs current assets ${ca:.2f}B / "
+                f"current liabilities ${cl:.2f}B = {computed:.4f}"
+            ),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The quoted current ratio does not resolve from the current "
+                "assets / current liabilities pair the same report prints. "
+                "Reconcile to one balance-sheet basis (rule pinned by the NVDA "
+                "2026-09-12 review loop)."
+            ),
+        )
+    ]
+
+
+_ROA_RE = re.compile(r"(?i)\bROA\b[^\n0-9]{0,20}?(\d+(?:\.\d+)?)\s*%")
+# The DuPont decomposition inputs; accept the underscore tool form and the
+# spaced prose form ("net margin 0.637" / "net_margin 0.637").
+_ROA_NET_MARGIN_RE = re.compile(r"(?i)net[_\s]?margin\s*\**\s*[:=]?\s*([\d.]+)")
+_ROA_ASSET_TURNOVER_RE = re.compile(r"(?i)asset[_\s]?turnover\s*\**\s*[:=]?\s*([\d.]+)")
+
+
+def _roa_consistency(report_text: str) -> list[VerifierClaim]:
+    """A quoted ROA must agree with the report's net margin x asset turnover.
+
+    Pins the NVDA 2026-09-12 (R1) defect: ROA TTM 81.41% was a provider
+    passthrough while the same report's DuPont inputs (net margin 0.637 x
+    asset turnover 0.946 = 60.3%) never produced it.
+    """
+    if not report_text:
+        return []
+    roa_m = _ROA_RE.search(report_text)
+    margin_m = _ROA_NET_MARGIN_RE.search(report_text)
+    turnover_m = _ROA_ASSET_TURNOVER_RE.search(report_text)
+    if not (roa_m and margin_m and turnover_m):
+        return []
+    try:
+        roa = float(roa_m.group(1))
+        margin = float(margin_m.group(1))
+        turnover = float(turnover_m.group(1))
+    except ValueError:
+        return []
+    if roa <= 0 or margin <= 0 or turnover <= 0:
+        return []
+    margin_pct = margin * 100.0 if margin <= 1.0 else margin
+    implied = margin_pct * turnover
+    if abs(implied - roa) / max(abs(roa), 1e-9) <= 0.2:
+        return []
+    return [
+        VerifierClaim(
+            claim=(
+                f"ROA quoted {roa:.2f}% vs net margin {margin_pct:.2f}% x asset "
+                f"turnover {turnover:.3f} = {implied:.2f}%"
+            ),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The quoted ROA does not resolve from the net margin x asset "
+                "turnover pair the same report prints (a provider ROA on another "
+                "basis). Reconcile to one basis (rule pinned by the NVDA "
+                "2026-09-12 review loop)."
+            ),
+        )
+    ]
+
+
+# A markdown table header cell bound to one fiscal quarter, and one bound to
+# an ISO period-end date. Cross-table column index is how the two bind: R2's
+# balance-sheet date header aligns under its income / cash-flow quarter labels.
+_FQ_LABEL_RE = re.compile(r"^Q\s*([1-4])\s*FY\s*(\d{2,4})$", re.I)
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _table_cells(line: str) -> list[str]:
+    """Cells of a markdown table row, or [] when the line is not one."""
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return []
+    cells = [c.strip().strip("*").strip() for c in stripped.strip("|").split("|")]
+    return cells if len(cells) >= 2 else []
+
+
+def _parse_fq_label(label: str) -> tuple[int, int] | None:
+    """(quarter, fiscal_year) from a "Qn FYyy[yy]" cell label."""
+    m = _FQ_LABEL_RE.match(label)
+    if not m:
+        return None
+    fiscal_year = int(m.group(2))
+    if fiscal_year < 100:
+        fiscal_year += 2000
+    return int(m.group(1)), fiscal_year
+
+
+def _fq_quarter(date_str: str) -> tuple[int, int] | None:
+    """(quarter, fiscal_year) an ISO date-end sits in, for a Jan-end year."""
+    m = _ISO_DATE_RE.match(date_str)
+    if not m:
+        return None
+    year, month = int(m.group(1)), int(m.group(2))
+    quarter = ((month - 2) % 12) // 3 + 1
+    return quarter, year + 1 if month >= 2 else year
+
+
+def _quarter_label_consistency(report_text: str) -> list[VerifierClaim]:
+    """Fiscal-quarter column labels must not contradict the ISO dates.
+
+    Pins the NVDA 2026-09-12 (R2) defect: 2025-07-31 appeared as the "Q1 FY26"
+    column of the income/balance tables but as "Q2 FY26" in the cash-flow
+    table. Two cases fire, both from the report's own tables:
+    (a) one ISO date bound (by column index) to two different quarter labels;
+    (b) a quarter label that the Jan-end calendar does not assign to its bound
+        date. (b) only runs when some other column in the report IS consistent,
+        so the calendar is derived from the report, never assumed; a non-Jan
+        fiscal-year reporter therefore never triggers (b).
+    """
+    if not report_text:
+        return []
+    date_headers: list[list[str]] = []
+    label_headers: list[list[str]] = []
+    for line in report_text.splitlines():
+        cells = _table_cells(line)
+        if not cells:
+            continue
+        if sum(1 for c in cells if _ISO_DATE_RE.match(c)) >= 2:
+            date_headers.append(cells)
+        elif sum(1 for c in cells if _FQ_LABEL_RE.match(c)) >= 2:
+            label_headers.append(cells)
+    if not (date_headers and label_headers):
+        return []
+    bound: dict[str, list[str]] = {}
+    for header in date_headers:
+        for idx, cell in enumerate(header):
+            if not _ISO_DATE_RE.match(cell):
+                continue
+            labels = bound.setdefault(cell, [])
+            for label_header in label_headers:
+                if idx < len(label_header) and _FQ_LABEL_RE.match(label_header[idx]):
+                    norm = " ".join(label_header[idx].upper().split())
+                    if norm not in labels:
+                        labels.append(norm)
+    claims: list[VerifierClaim] = []
+    # (a) one ISO date carrying two different fiscal-quarter labels.
+    for date, labels in bound.items():
+        if len(labels) >= 2:
+            claims.append(
+                VerifierClaim(
+                    claim=f"date {date} labelled {labels[0]} and {labels[1]} in one report",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "Two different fiscal-quarter columns carry the same period-end "
+                        "date, so at least one is mislabelled (rule pinned by the NVDA "
+                        "2026-09-12 review loop)."
+                    ),
+                )
+            )
+    # (b) a label the Jan-end calendar does not assign to its bound date.
+    any_consistent = any(
+        _parse_fq_label(label) == _fq_quarter(date)
+        for date, labels in bound.items()
+        for label in labels
+    )
+    if any_consistent:
+        for date, labels in bound.items():
+            derived = _fq_quarter(date)
+            if derived is None:
+                continue
+            for label in labels:
+                parsed = _parse_fq_label(label)
+                if parsed and parsed != derived:
+                    quarter, fiscal_year = derived
+                    claims.append(
+                        VerifierClaim(
+                            claim=(f"date {date} bound to {label} but its fiscal quarter is "
+                                   f"Q{quarter} FY{fiscal_year}"),
+                            status="INTERNAL_CONFLICT",
+                            reason=(
+                                "The column header binds this ISO period-end date to a "
+                                "fiscal quarter the Jan-end fiscal calendar does not assign "
+                                "to it. Non-Jan fiscal-year reporters are out of scope for "
+                                "this check (rule pinned by the NVDA 2026-09-12 review "
+                                "loop)."
+                            ),
+                        )
+                    )
+    return claims
+
+
 _DRAWDOWN_RE = re.compile(
     r"(?i)[~\-]?\s*(\d+(?:\.\d+)?)\s*%\s*(?:below|off)\s+"
     r"(?:its\s+|the\s+)?(?:52[-\s]?week\s+)?(?:high|top)"
@@ -2065,12 +2376,20 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
 
 
 def _valuation_identity_checks(report_text: str) -> list[VerifierClaim]:
-    """Run all identity checks (DuPont, P/E basis, EV/net-cash, R-multiple)."""
+    """Run all identity checks (DuPont, P/E, EV/net-cash, R-multiple, ratios).
+
+    The basis-identity family (net debt, current ratio, ROA, quarter labels)
+    joins the MU-origin valuation identities; each is additive and advisory.
+    """
     return (
         _dupont_identity(report_text)
         + _pe_basis_conflict(report_text)
         + _ev_net_cash_conflict(report_text)
         + _r_multiple_identity(report_text)
+        + _net_debt_identity(report_text)
+        + _current_ratio_identity(report_text)
+        + _roa_consistency(report_text)
+        + _quarter_label_consistency(report_text)
     )
 
 

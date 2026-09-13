@@ -796,3 +796,50 @@ def test_claim_audit_reconciles_the_stop_against_the_contract():
     )
     assert "207.19" in note and "207.8845" in note and "reconcile" in note
     assert audit_decision_numbers("**Stop Loss**: 207.8\n", {"stop": 207.8845}) == ""
+
+
+def test_run_card_records_analyst_identity_conflicts(tmp_path):
+    """The deterministic identities ran only in the opt-in report_verify CLI, so
+    the 2026-09-12 NVDA trees carried no consistency record at all. They now run
+    at write time into the run card: this is the blocking-free record that makes
+    an internal contradiction (here a DuPont ROE whose own inputs multiply to a
+    different number) visible without an extra pass."""
+    from tradingagents.reporting import _run_card_analyst_consistency
+
+    analysts = tmp_path / "1_analysts"
+    analysts.mkdir()
+    (analysts / "fundamentals.md").write_text(
+        "net_margin 0.500 asset_turnover 1.000 equity_multiplier 1.000: ROE 90.0%\n",
+        encoding="utf-8",
+    )
+    (analysts / "market.md").write_text("RSI 49.94; close above the 200-day.\n", encoding="utf-8")
+
+    out = _run_card_analyst_consistency(tmp_path)
+    assert out is not None and set(out) == {"fundamentals"}   # the clean one is absent
+    assert out["fundamentals"][0]["status"] == "INTERNAL_CONFLICT"
+    assert "DuPont" in out["fundamentals"][0]["claim"]
+
+
+def test_run_card_consistency_is_null_when_no_analyst_report_exists(tmp_path):
+    from tradingagents.reporting import _run_card_analyst_consistency
+
+    assert _run_card_analyst_consistency(tmp_path) is None
+
+
+def test_run_card_carries_the_analyst_consistency_record(tmp_path, monkeypatch):
+    """Wiring: the identity record must reach a real run card, not only the
+    helper. NVDA 2026-09-12 - the checks existed but ran only in the opt-in
+    report_verify CLI, so neither tree carried any record at all."""
+    import tradingagents.reporting as R
+
+    monkeypatch.setattr(
+        R,
+        "_run_card_analyst_consistency",
+        lambda save_path: {"fundamentals": [{"status": "INTERNAL_CONFLICT", "claim": "x"}]},
+    )
+    write_report_tree(_state(), "TST", tmp_path)
+
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["analyst_consistency"] == {
+        "fundamentals": [{"status": "INTERNAL_CONFLICT", "claim": "x"}]
+    }

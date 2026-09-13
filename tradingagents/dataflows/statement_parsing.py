@@ -785,19 +785,129 @@ def _canonicalize(payload: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def fetch_ticker(ticker: str, curr_date: str) -> dict:
-    """Pull the canonical line items for one ticker via the vendor chain."""
+def _payload_period(payload: str) -> str | None:
+    """The newest period a statement/fundamentals payload describes, or None.
+
+    CSV shape (yfinance/tiingo): the header row's first non-empty cell is the
+    newest period (``,2026-07-31,2026-04-30,...``). Markdown shape (moomoo):
+    the first ``### <label>`` period header. This exists so a derived number
+    can STATE its basis - a figure whose period cannot be established is
+    reported as unlabelled rather than labelled wrongly (NVDA 2026-09-12: the
+    ratio block mixed an annual P/E with quarterly balance-sheet rows and said
+    nothing about either).
+    """
+    text = (payload or "").strip()
+    if not text:
+        return None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped:
+            continue
+        if "," in stripped:
+            cells = [c.strip() for c in stripped.split(",")]
+            if not cells[0] and len(cells) > 1 and cells[1]:
+                return cells[1][:10]
+            continue
+        break
+    match = re.search(r"^###\s+(.+)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def trailing_twelve_months(ticker: str, curr_date: str, periods: int = 4) -> dict:
+    """Sum the newest ``periods`` quarters of the FLOW line items (TTM).
+
+    One producer for a trailing-twelve-month total. Every key requires FULL
+    coverage - all ``periods`` columns present - before it is reported, because
+    a partial window would present three quarters as a year (NVDA 2026-09-12:
+    the ratio block's P/E used FY2026 ANNUAL net income, 43.90x, while the TTM
+    basis was 27.63x, and nothing said which). Keys without coverage are
+    ABSENT from the result, never zero-filled.
+
+    Only the quarterly CSV shape is summed: a vendor whose payload carries one
+    period per table (moomoo markdown, with its own YoY/QoQ columns) returns
+    ``source: None`` and the caller must degrade honestly rather than invent a
+    window.
+    """
+    flows = {
+        "revenue": "revenue",
+        "operating_income": "operating_income",
+        "net_income": "net_income",
+        "eps": "eps",
+        "operating_cashflow": "operating_cashflow",
+        "capex": "capex",
+        "dividends_paid": "dividends_paid",
+    }
+    out: dict = {"periods": [], "source": None, "complete": False}
+    merged: dict[str, dict] = {}
+    for method in ("get_income_statement", "get_cashflow"):
+        try:
+            payload = route_to_vendor(method, ticker, "quarterly", curr_date)
+        except Exception as exc:  # noqa: BLE001 - vendor chain already degrades
+            logger.warning("%s %s (quarterly, TTM): %s", ticker, method, exc)
+            continue
+        try:
+            rows = _parse_csv_statement_rows(payload)
+        except Exception as exc:  # noqa: BLE001 - a malformed payload is not fatal
+            logger.warning("%s %s (quarterly, TTM) unparsed: %s", ticker, method, exc)
+            rows = {}
+        if rows:
+            merged.update(rows)
+            if out["source"] is None:
+                out["source"] = f"{method} (quarterly)"
+    if not merged:
+        return out
+    for canonical, suffix in flows.items():
+        found = _match_row(merged, canonical)
+        if not found:
+            continue
+        series = found[1] if isinstance(found[1], dict) else {}
+        dated = sorted(
+            ((str(day)[:10], float(val)) for day, val in series.items() if val is not None),
+            reverse=True,
+        )
+        if len(dated) < periods:
+            continue
+        window = dated[:periods]
+        out[f"{suffix}_ttm"] = float(sum(val for _, val in window))
+        if suffix == "revenue":
+            out["periods"] = [day for day, _ in window]
+    # "complete" = a full ``periods``-quarter window was established AND at
+    # least one flow key was summed from it. Per-key coverage is enforced
+    # above, so this flag only says whether the window itself was usable.
+    out["complete"] = bool(out["periods"]) and any(k.endswith("_ttm") for k in out)
+    return out
+
+
+def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
+    """Pull the canonical line items for one ticker via the vendor chain.
+
+    ``with_provenance=True`` returns ``(canonical, provenance)`` where
+    provenance maps every recorded key to ``{source, basis, period}`` - the
+    merge below is last-writer-wins across up to four vendor payloads, so
+    without this a derived ratio cannot state which period or vendor it came
+    from (that silence is what let one NVDA report quote an annual P/E beside
+    quarterly balance-sheet rows, 2026-09-12).
+    """
     canonical = {}
+    provenance: dict[str, dict] = {}
+
+    def absorb(payload: str, source: str, basis: str) -> None:
+        got = _canonicalize(payload)
+        period = _payload_period(payload)
+        canonical.update(got)
+        for key in got:
+            provenance[key] = {"source": source, "basis": basis, "period": period}
+
     # Fundamentals carries market cap (yfinance info / alpha_vantage overview).
     try:
         fund = route_to_vendor("get_fundamentals", ticker, curr_date)
-        canonical.update(_canonicalize(fund))
+        absorb(fund, "get_fundamentals", "info")
     except Exception as exc:  # noqa: BLE001 - vendor chain already degrades
         logger.warning("%s fundamentals: %s", ticker, exc)
     for method in ("get_balance_sheet", "get_income_statement"):
         try:
             stmt = route_to_vendor(method, ticker, "annual", curr_date)
-            canonical.update(_canonicalize(stmt))
+            absorb(stmt, method, "annual")
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s %s: %s", ticker, method, exc)
     # Finnhub basic financials (free tier, key-gated): a single call fills the
@@ -813,6 +923,11 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
         for k in ("eps_yoy", "revenue_yoy", "roe", "market_cap"):
             if k not in canonical and bf_canon.get(k) is not None:
                 canonical[k] = bf_canon.get(k)
+                provenance[k] = {
+                    "source": "finnhub basic financials",
+                    "basis": "vendor TTM/annual",
+                    "period": _payload_period(bf),
+                }
     except Exception as exc:  # noqa: BLE001
         logger.debug("%s finnhub basic financials: %s", ticker, exc)
     # Guard: a cash figure larger than total assets means a wrong-row match.
@@ -820,6 +935,11 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
     ta_ = _latest(canonical.get("total_assets"))
     if ca_ is not None and ta_ is not None and ca_ > ta_:
         canonical["cash"] = None
+        provenance["cash"] = {
+            "source": "guard",
+            "basis": "nulled (cash exceeded total assets)",
+            "period": None,
+        }
     # Currency heuristic for ADRs: yfinance reports statements in the local
     # currency (e.g. JPY) with no marker in the CSV, while market cap arrives
     # in USD. A total-assets / market-cap ratio above 1000x only occurs when
@@ -836,6 +956,13 @@ def fetch_ticker(ticker: str, curr_date: str) -> dict:
         cl = _latest(canonical.get("current_liabilities"))
         if ca is not None and cl is not None:
             canonical["working_capital"] = ca - cl
+            provenance["working_capital"] = {
+                "source": "derived",
+                "basis": "current_assets - current_liabilities",
+                "period": (provenance.get("current_assets") or {}).get("period"),
+            }
+    if with_provenance:
+        return canonical, provenance
     return canonical
 
 

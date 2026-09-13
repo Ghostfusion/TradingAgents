@@ -292,6 +292,20 @@ def _period_fcf_value(rows: dict) -> float | None:
     return None
 
 
+def _num_text(value) -> str:
+    """Render one canonical input for the basis line: `n/a` when absent.
+
+    Never rounds: the reader is reconciling against another statement row, so
+    the exact value the ratio used is the useful one.
+    """
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):,.0f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _ttm_fcf_from_quarterly(payload: str) -> float | None:
     """Trailing-12M FCF (sum of the newest 4 quarters) from a QUARTERLY
     cashflow payload, else None (caller falls back to the annual anchor).
@@ -885,9 +899,20 @@ def get_balance_sheet_health(
             f"balance sheet health unavailable for {ticker}: need debt/equity and "
             "current ratio from the vendor chain."
         )
+    # Print the rows the ratios were built from. The NVDA 2026-09-12 review
+    # (D2) could not reconcile `current_ratio 4.6808` with the $197.41B/$43.02B
+    # the same report quoted, because the tool never said which pair it used:
+    # this tool reads the canonical MERGE, which can be a different period from
+    # the statement rows the analyst reads. Naming both inputs makes the tool's
+    # own number self-consistent and shows a reader the basis.
+    inputs = (
+        f" (inputs: current_assets={_num_text(ca_)} current_liabilities={_num_text(cl_)} "
+        f"total_debt={_num_text(td)} total_equity={_num_text(te)}; "
+        "basis: canonical merged rows, latest as-reported period per line item)"
+    )
     return (
         f"balance sheet health {ticker}: pass={out['pass']} d_e={_txt_round(out.get('d_e'))} "
-        f"current_ratio={_txt_round(out.get('current_ratio'))}; "
+        f"current_ratio={_txt_round(out.get('current_ratio'))}{inputs}; "
         + "; ".join(out.get("reasons") or [])
     )
 

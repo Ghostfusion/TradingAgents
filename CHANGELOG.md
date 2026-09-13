@@ -14,6 +14,81 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**Fundamentals number and label integrity (2026-09-12; NVDA report review).** An external reviewer re-derived
+the disputed figures from two NVDA trees (`reports/NVDA_20260912_160416` = R1, `reports/NVDA_20260912_005957`
+= R2) against live market data. Seven defects, all fixed at the source, each with a regression test.
+
+**(1) A P/E on annual earnings presented as a current multiple (R1: `P/E 43.90`).**
+`strategies/ratios.py::price_to_earnings` divided the current market cap by the **FY2026 ANNUAL** net income
+(120.07B → 43.90x) while the same run's TTM basis was 27.63x (Finnhub `epsTTM` 7.9108). The merge that fed it
+(`statement_parsing.fetch_ticker`) overwrote up to four vendor payloads per key without recording which period
+or vendor won. `fetch_ticker(..., with_provenance=True)` now returns `{key: {source, basis, period}}`,
+`statement_parsing.trailing_twelve_months()` is the single producer of a TTM window (full coverage required -
+a key with three quarters is reported absent, never as a year), `compute_ratios` prefers the TTM flows, and the
+rendered block leads with `- basis: flows TTM (4 quarters ending 2026-07-31); balance sheet 2026-07-31`. The
+dead `price` parameter is now the labelled `price / reported EPS` fallback.
+
+**(2) A current ratio that did not match the report's own inputs (R1: `4.6808` beside `$197.41B / $43.02B` =
+4.588).** `get_balance_sheet_health` divided the canonical merge's own pair without printing it, so a reader
+could not reconcile the tool's number with the statement rows the same report quoted (the run carried three
+different current ratios). It now prints all four rows it used plus the basis
+(`current_assets=… current_liabilities=… total_debt=… total_equity=…; basis: canonical merged rows`).
+
+**(3) An ROA that contradicted its own DuPont inputs (R1: `ROA TTM 81.41%` vs `0.637 x 0.946` = 60.3%).**
+The figure was a verbatim Finnhub passthrough printed beside computed ratios with no basis. Every metric line
+in `get_basic_financials_finnhub` now carries its basis and source derived from the vendor key suffix
+(`roaTTM (TTM, Finnhub): 81.41%`; an unrecognised key renders `(vendor, basis unknown)` and is never dropped),
+and when the payload's own TTM margin and asset turnover imply a materially different ROA an advisory
+`# NOTE:` line names both numbers and the implied value.
+
+**(4) A DuPont decomposition labelled "on the latest quarter" over a mixed basis (R1).**
+`get_dupont_read` took three bare floats and emitted no period, so the label was prose over a TTM margin and
+quarter-end turnover/leverage. `get_dupont_read(ticker, curr_date)` now derives all three legs from ONE
+payload and states the period it used; the raw-number form labels the legs caller-supplied and unverified
+unless `period=` is passed.
+
+**(5) One period labelled two ways in one report (R2: `2025-07-31` as `Q1 FY26` in the income/balance tables
+and `Q2 FY26` in the cash-flow table - the second is right).** Quarter names were LLM-authored because
+yfinance emits date-only columns. The new `get_financial_trends(ticker, curr_date)` prints the labelled
+quarter-series table (`| Item | <date (FYq)> | … | YoY | QoQ |`), deriving fiscal labels from the vendor's own
+annual period ends (and stating so when it cannot), and the prompt requires quoting its cells.
+
+**(6) An inventory "+47% YoY" that was a two-quarter move (R2; the true YoY was +111%).**
+Same tool: every delta is rendered as `+47.6% (Q4 FY26 -> Q2 FY27)`, naming both periods, so a six-month change
+cannot be read as a year; the prompt pin states the rule and the NVDA case.
+
+**(7) "net debt of $10.9B" that contradicted its own balance sheet (R2: cash+STI 62.47B - total debt 38.35B =
+24.12B net CASH).** The number is yfinance's own `Net Debt` row surfaced verbatim, and the guard written for
+exactly this case (`y_finance._net_debt_note`, INTU 2026-09-08) **had no test**; its note is absent from every
+logged NVDA payload although the call site is present at the run's recorded commit and the function returns
+the correction when run on the run's own payload. Mechanism NOT proven - the run card's `commit` field is
+itself unreliable after the 2026-09-12 rebuild - so the fix does not depend on the note surviving: four
+regression tests now cover the guard (including that the note is the last text in the delivered payload), and
+the arithmetic is enforced independently by the verifier check below.
+
+**Detection, not just repair.** The identity family in `agents/utils/report_verifier.py` gains
+`_net_debt_identity`, `_current_ratio_identity`, `_roa_consistency` and `_quarter_label_consistency`, and the
+family now runs at **write time**: `run_card.json` carries `analyst_consistency`
+(`{stem: [{status, claim}]}`), so a tree records its own contradictions instead of depending on the opt-in
+`report_verify` pass (neither NVDA tree had a `verify_flags.json`, so nothing checked them at all).
+Deliberately the identity family only, not the same-metric-at-two-values scan, which still false-positives on
+ordinary prose. Replayed over the two real trees the checks report exactly the reviewer's findings and nothing
+else: R2 gets the net-debt sign flip plus both quarter-label defects, R1 the current-ratio and ROA
+contradictions.
+
+Tests: 45 new (14 `test_financial_trends.py`, 9 `test_report_verify.py`, 7 `test_finnhub_basis.py`,
+4 `test_analysis_tools.py`, 3 `test_reporting.py`, 2 `test_strategies_ratios.py`,
+2 `test_statement_parsing.py`, 4 `test_yfinance_keyless_vendor.py`) and one updated where it pinned the
+replaced behaviour (the ratio block's no-fabrication sweep now iterates the ratio keys, since `basis` is
+metadata). **3958 passed, 5 skipped** on the full suite. Twelve mutations were run against the new gates and every one bit
+(including a registration probe: dropping a check from the verifier fan-out leaves its unit test green, so the
+fan-out is tested directly); each file was restored byte-identical and a no-op control stayed green.
+
+Web impact: none - the app reads tool names, CLI flags and JSON shapes, and these changes are additive labels
+plus one new tool and one new run-card key.
+
+### Fixed
+
 **Number and label integrity in the decision path (2026-09-12; NVDA report comparison).** Comparing the two
 NVDA trees for the same session (`reports/NVDA_20260912_005957` vs `NVDA_20260912_160416`) surfaced five
 defects where a report or artifact carried a number under a name that did not mean what a reader (or the

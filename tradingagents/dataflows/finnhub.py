@@ -234,6 +234,76 @@ def get_earnings_calendar_finnhub(
     return "\n".join(lines)
 
 
+# Finnhub encodes each metric's reporting basis in its key suffix
+# (``roaTTM``, ``netProfitMarginAnnual``, ``currentRatioQuarterly``). The
+# mapping is data-driven and total: a key whose suffix isn't recognised is
+# labelled basis-unknown rather than guessed at, so a vendor TTM value can no
+# longer read like a period-agnostic one (D3: the unlabelled ``roaTTM``
+# 81.41% sat next to a computed 58.06%).
+_BASIS_BY_SUFFIX = (
+    ("TTM", "TTM, Finnhub"),
+    ("Annual", "annual, Finnhub"),
+    ("Quarterly", "quarterly, Finnhub"),
+)
+_UNKNOWN_BASIS = "vendor, basis unknown"
+
+# Relative divergence above which the vendor's own ROA inputs win over the
+# emitted ``roaTTM`` row.
+_ROA_REL_TOLERANCE = 0.20
+
+
+def _metric_basis(key: str) -> str:
+    """Basis + source label for a Finnhub metric key (``_BASIS_BY_SUFFIX``)."""
+    for suffix, label in _BASIS_BY_SUFFIX:
+        if key.endswith(suffix):
+            return label
+    return _UNKNOWN_BASIS
+
+
+def _is_number(v) -> bool:
+    """True for a real int/float metric value (``bool`` excluded)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _roa_reconcile_note(metric: dict) -> str:
+    """Cross-check Finnhub's ``roaTTM`` against the payload's own inputs.
+
+    ROA = TTM net margin x TTM asset turnover. Finnhub ships both inputs
+    alongside ``roaTTM``, so when the vendor's own product disagrees with the
+    emitted ROA by more than ``_ROA_REL_TOLERANCE`` relative, return an
+    advisory ``# NOTE:`` correction naming both numbers and the implied value.
+    Mirrors ``y_finance._net_debt_note``: returns "" when an input is absent
+    or the figures agree, and never raises.
+    """
+    roa = metric.get("roaTTM")
+    margin = metric.get("netProfitMarginTTM")
+    if not _is_number(roa) or not _is_number(margin):
+        return ""
+    turnover = metric.get("assetTurnoverTTM")
+    if not _is_number(turnover):
+        turnover = metric.get("totalAssetTurnoverTTM")
+    if not _is_number(turnover):
+        # No turnover row: derive it from revenue / total assets when shipped.
+        revenue = metric.get("revenueTTM")
+        if not _is_number(revenue):
+            revenue = metric.get("totalRevenueTTM")
+        assets = metric.get("totalAssetsTTM")
+        if not _is_number(assets):
+            assets = metric.get("totalAssets")
+        if not _is_number(revenue) or not _is_number(assets) or assets == 0:
+            return ""
+        turnover = revenue / assets
+    implied = margin * turnover
+    if roa == 0 or abs(implied - roa) <= _ROA_REL_TOLERANCE * abs(roa):
+        return ""
+    return (
+        f"\n# NOTE: vendor 'ROA TTM' ({roa:.2f}) disagrees with its own TTM "
+        f"inputs: TTM net margin ({margin:.2f}) x TTM asset turnover "
+        f"({turnover:.4f}) implies {implied:.2f}. Quote the implied figure, "
+        f"not the vendor ROA row."
+    )
+
+
 def get_basic_financials_finnhub(symbol: str, curr_date: str | None = None) -> str:
     """Finnhub basic financials metrics (free tier) -> canonical line items.
 
@@ -242,7 +312,9 @@ def get_basic_financials_finnhub(symbol: str, curr_date: str | None = None) -> s
     and levels, margins, payout, current ratio, 52w high). Returns a compact
     ``Key: value`` block the screener's text parser can canonicalize into
     eps_yoy / revenue_yoy / roe / market_cap; raises ``NoMarketDataError``
-    when Finnhub reports nothing.
+    when Finnhub reports nothing. Each metric line carries its own basis and
+    source (``roaTTM (TTM, Finnhub): ...``) so a vendor value is never
+    mistaken for a computed, period-agnostic one.
     """
     finnhub_client = _client()
     data = finnhub_client.company_basic_financials(symbol, "all") or {}
@@ -254,14 +326,16 @@ def get_basic_financials_finnhub(symbol: str, curr_date: str | None = None) -> s
         "Sector: " + (data.get("sector") or ""),
     ]
     for k, v in metric.items():
-        # keep the numbers textual for the canonical parser (it reads 'a: 1.2')
+        # keep the numbers textual for the canonical parser (it reads the
+        # value after the last ':'; its row matcher matches the key substring,
+        # so the added basis label does not break eps_yoy/revenue_yoy/roe/mcap)
         # Finnhub reports market cap in millions - scale to raw USD so the
         # screener's market-cap floor ($) compares correctly.
         if k == "marketCapitalization" and isinstance(v, (int, float)):
             v = float(v) * 1_000_000.0
         if isinstance(v, (int, float)):
-            out.append(f"{k}: {v}")
-    return "\n".join(out)
+            out.append(f"{k} ({_metric_basis(k)}): {v}")
+    return "\n".join(out) + _roa_reconcile_note(metric)
 
 
 # Finnhub returns malformed/foreign-listing peer ids for some US names

@@ -883,6 +883,54 @@ def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
     return block
 
 
+def _run_card_analyst_consistency(save_path) -> dict | None:
+    """Deterministic identity checks over this run's analyst reports (advisory).
+
+    ``scripts/report_verify.py`` applies identities and claim-grounding in an
+    LLM pass, but that pass is opt-in: none of the 2026-09-12 NVDA trees carried
+    a ``verify_flags.json``, so an internal contradiction (a DuPont ROE whose own
+    inputs multiply to a different number, a current ratio that does not match
+    the report's stated assets/liabilities, a quoted net debt that contradicts
+    the same table's cash and debt rows, a period labelled two ways) protected
+    nobody. The identity family is pure regex, costs nothing and does not cry
+    wolf, so the run card records it for every run.
+
+    Deliberately the IDENTITY family only (``_valuation_identity_checks``), not
+    the whole ``_text_metrics`` fan-out: the same-metric-at-two-values scan still
+    produces false positives on ordinary prose ("beta 1.00" against an ERP 5.00),
+    and a record nobody trusts is worse than none. Advisory: never blocks a
+    write, never edits a report, and its own failure is recorded, not raised.
+
+    Returns ``{stem: [{status, claim}]}`` for reports with findings, or None
+    when there is nothing to report (or no analyst report to check).
+    """
+    analyst_dir = Path(save_path) / "1_analysts"
+    if not analyst_dir.exists():
+        return None
+    try:
+        from tradingagents.agents.utils.report_verifier import _valuation_identity_checks
+    except Exception as exc:  # noqa: BLE001 - advisory; must never break the card
+        return {"unavailable": f"{type(exc).__name__}: {exc}"}
+    out: dict = {}
+    for path in sorted(analyst_dir.glob("*.md")):
+        try:
+            claims = _valuation_identity_checks(
+                path.read_text(encoding="utf-8", errors="replace")
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad report must not lose the rest
+            out[path.stem] = [{"status": "CHECK_FAILED", "claim": str(exc)}]
+            continue
+        flagged = [
+            {"status": str(getattr(c, "status", "")), "claim": str(getattr(c, "claim", ""))}
+            for c in claims
+            if str(getattr(c, "status", ""))
+            in ("INTERNAL_CONFLICT", "UNSUPPORTED", "CONTRADICTED")
+        ]
+        if flagged:
+            out[path.stem] = flagged
+    return out or None
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None,
     *, emit_run_artifacts: bool = True,
@@ -1329,6 +1377,10 @@ def write_report_tree(
                 "risk_halt": bool(final_state.get("risk_halt")),
             },
             "debate": debate_card,
+            # Deterministic identity checks over the analyst reports, run at
+            # write time so a tree carries its own consistency record instead of
+            # depending on the opt-in report_verify pass. Advisory; additive key.
+            "analyst_consistency": _run_card_analyst_consistency(save_path),
             "sections": [],
         }
         if emit_run_artifacts:

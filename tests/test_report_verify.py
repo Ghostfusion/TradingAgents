@@ -1082,6 +1082,99 @@ def test_ev_net_cash_clean_when_consistent():
     assert rv._ev_net_cash_conflict(text) == []
 
 
+# --- NVDA 2026-09-12 review loop: basis identities (D5/D7 + ratio bases) ----
+
+
+def test_net_debt_identity_flags_r2_sign_flip():
+    # Verbatim R2 rows: cash+ST investments $62.47B, total debt $38.35B
+    # (=> ~$24.1B net CASH) yet the report prints "net debt of $10.9B".
+    text = (
+        "| Item | 2026-07-31 |\n"
+        "| Cash + ST Investments | $62.47B |\n"
+        "| Total Debt | **$38.35B** |\n"
+        "| Net Debt | $10.92B | net cash | net cash |\n"
+        "\n**Total debt jumped from $12.35B to $38.35B** (+$26B in one quarter), "
+        "flipping the company to **net debt of $10.9B**.\n"
+    )
+    cs = rv._net_debt_identity(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "62.47" in cs[0].claim and "38.35" in cs[0].claim
+
+
+def test_net_debt_identity_clean_when_net_cash_agrees():
+    text = (
+        "Cash + ST Investments $62.47B; Total Debt $38.35B; net cash of $24.12B."
+    )
+    assert rv._net_debt_identity(text) == []
+
+
+def test_current_ratio_identity_flags_r1_cr_vs_pair():
+    # Verbatim R1: CA/CL $197.41B / $43.02B (= 4.588) against quoted CR 4.6808.
+    text = (
+        "Current Assets/Current Liabilities = $197.41B / $43.02B. "
+        "get_balance_sheet_health: **pass** (D/E 0.0702 < 1.0; "
+        "current ratio 4.6808 > 1.5)."
+    )
+    cs = rv._current_ratio_identity(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "4.6808" in cs[0].claim and "4.588" in cs[0].claim
+
+
+def test_current_ratio_identity_clean_when_consistent():
+    text = "Current Assets/Current Liabilities = $197.41B / $43.02B; current ratio 4.59."
+    assert rv._current_ratio_identity(text) == []
+
+
+def test_roa_consistency_flags_r1_provider_passthrough():
+    # Verbatim R1: ROA TTM 81.41% vs net margin 0.637 x asset turnover 0.946.
+    text = (
+        "TTM (Finnhub basic financials): gross margin 74.67%, net margin 63.66%, "
+        "ROA TTM 81.41%. DuPont on the latest quarter (net margin 0.637, "
+        "asset turnover 0.946, equity multiplier 1.399): **ROE 84.3%, margin-led**."
+    )
+    cs = rv._roa_consistency(text)
+    assert len(cs) == 1
+    assert cs[0].status == "INTERNAL_CONFLICT"
+    assert "81.41" in cs[0].claim and "60.2" in cs[0].claim
+
+
+def test_roa_consistency_clean_when_product_matches():
+    text = "ROA 65.0% with net margin 0.65 and asset turnover 1.00."
+    assert rv._roa_consistency(text) == []
+
+
+def test_quarter_label_consistency_flags_r2_same_date_two_quarters():
+    # Verbatim R2 headers: 2025-07-31 is the 4th column, labelled Q1 FY26 by the
+    # income table but Q2 FY26 by the cash-flow table (FY26 ends 2026-01).
+    text = (
+        "| Metric | Q2 FY27 | Q1 FY27 | Q4 FY26 | Q1 FY26 |\n"
+        "|---|---|---|---|---|\n"
+        "| Revenue | $96.22B | $81.62B | $68.13B | $46.74B |\n"
+        "| Item | 2026-07-31 | 2026-04-30 | 2026-01-31 | 2025-07-31 |\n"
+        "| Metric | Q2 FY27 | Q1 FY27 | Q4 FY26 | Q2 FY26 |\n"
+    )
+    cs = rv._quarter_label_consistency(text)
+    assert any(
+        c.status == "INTERNAL_CONFLICT" and "2025-07-31" in c.claim
+        and "Q1 FY26" in c.claim and "Q2 FY26" in c.claim
+        for c in cs
+    )
+
+
+def test_quarter_label_consistency_clean_when_labels_agree():
+    text = (
+        "| Metric | Q2 FY27 | Q1 FY27 |\n"
+        "|---|---|---|\n"
+        "| Item | 2026-07-31 | 2026-04-30 |\n"
+        "| Revenue | $96.22B | $81.62B |\n"
+    )
+    assert rv._quarter_label_consistency(text) == []
+    # No date/label binding supplied by the report -> nothing to check.
+    assert rv._quarter_label_consistency("Report has no tables at all.") == []
+
+
 def test_internal_conflicts_altman_z_pair():
     text = "Altman Z 24.2 (body)\n| Altman Z | 25.70 |"
     cs = rv._internal_conflicts(text)
@@ -1519,3 +1612,39 @@ def test_the_cli_counts_an_envelope_flag_in_its_exit_code(tmp_path, monkeypatch,
     assert rvc.main() == 1
     printed = capsys.readouterr().out
     assert "envelope      FLAG" in printed and "invalid_opportunity_score" in printed
+
+
+def test_the_identity_fan_out_registers_the_basis_checks():
+    """The four basis identities must be REGISTERED, not merely defined.
+
+    Each has its own unit test above, so dropping one from
+    ``_valuation_identity_checks`` (the fan-out the run card and the CLI both
+    call) would leave every unit test green while the check stopped running -
+    the exact failure mode that let these defects ship unnoticed.
+    """
+    net_debt = (
+        "Cash + ST Investments: $62.47B\n"
+        "Total Debt: $38.35B\n"
+        "Net Debt: $10.92B\n"
+    )
+    assert any("net cash" in c.claim.lower() for c in rv._valuation_identity_checks(net_debt))
+
+    labels = (
+        "| Metric | Q2 FY27 | Q1 FY27 | Q4 FY26 | Q1 FY26 |\n"
+        "|---|---|---|---|---|\n"
+        "| Revenue | $96.22B | $81.62B | $68.13B | $46.74B |\n"
+        "| Item | 2026-07-31 | 2026-04-30 | 2026-01-31 | 2025-07-31 |\n"
+        "| Metric | Q2 FY27 | Q1 FY27 | Q4 FY26 | Q2 FY26 |\n"
+    )
+    assert any(
+        "2025-07-31" in c.claim for c in rv._valuation_identity_checks(labels)
+    )
+
+    ratio = (
+        "Current Assets/Current Liabilities = $197.41B / $43.02B\n"
+        "current ratio 4.6808\n"
+    )
+    assert any("4.6808" in c.claim for c in rv._valuation_identity_checks(ratio))
+
+    roa = "ROA TTM 81.41% vs net_margin 0.637 asset_turnover 0.946\n"
+    assert any("81.41" in c.claim for c in rv._valuation_identity_checks(roa))

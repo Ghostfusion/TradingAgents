@@ -2709,15 +2709,60 @@ def get_dupont_read(
     equity_multiplier: Annotated[float | None, "total assets / equity"] = None,
     tax_burden: Annotated[float | None, "5-factor: net income / pretax"] = None,
     interest_burden: Annotated[float | None, "5-factor: pretax income / EBIT"] = None,
+    ticker: Annotated[
+        str | None, "ticker: derive all three legs from ONE payload (preferred)"
+    ] = None,
+    curr_date: Annotated[str | None, "as-of date for the derived legs"] = None,
+    period: Annotated[
+        str | None,
+        "the interval the legs you pass describe (e.g. 'TTM', 'FY2027 Q2'); "
+        "state it or the decomposition is labelled caller-supplied/unverified",
+    ] = None,
 ) -> str:
     """DuPont ROE decomposition (3- or 5-factor): explains WHERE ROE comes
     from — margin vs turnover vs leverage. Use before any 'high ROE means
     quality' / 'ROE rising' claim; a leverage-led ROE is lower quality than a
     margin-led one. Advisory.
+
+    Pass ``ticker`` (with ``curr_date``) to have all three legs derived from one
+    payload, so the decomposition is period-consistent by construction; that is
+    the preferred call. When you supply the legs yourself they are taken as
+    given and the output says so — NVDA 2026-09-12 shipped
+    ``DuPont on the latest quarter (net margin 0.637 ...)`` whose margin was the
+    TTM figure, i.e. a label over a mixed basis nothing could check.
     """
     try:
         from tradingagents.strategies.dupont import dupont_3, dupont_5
 
+        if ticker and all(v is None for v in (net_margin, asset_turnover, equity_multiplier)):
+            from tradingagents.dataflows.statement_parsing import (
+                _latest,
+                fetch_ticker,
+                trailing_twelve_months,
+            )
+
+            if not curr_date:
+                from datetime import datetime as _dt
+
+                curr_date = _dt.now().strftime("%Y-%m-%d")
+            fin, provenance = fetch_ticker(ticker, curr_date, with_provenance=True)
+            ttm = trailing_twelve_months(ticker, curr_date)
+            ni = ttm.get("net_income_ttm")
+            rev = ttm.get("revenue_ttm")
+            ta = _latest((fin or {}).get("total_assets"))
+            te = _latest((fin or {}).get("total_equity"))
+            if None in (ni, rev, ta, te) or not (rev and ta and te):
+                return (
+                    f"dupont read: n/a for {ticker} (need TTM net income and revenue "
+                    "plus total assets and equity from one payload)."
+                )
+            net_margin, asset_turnover = ni / rev, rev / ta
+            equity_multiplier = ta / te
+            period = (
+                "TTM flows (4 quarters ending "
+                f"{(ttm.get('periods') or ['?'])[0]}), balance sheet "
+                f"{(provenance.get('total_assets') or {}).get('period') or 'period unstated'}"
+            )
         if tax_burden is not None or interest_burden is not None:
             r = dupont_5(net_margin, tax_burden, interest_burden, asset_turnover, equity_multiplier)
         else:
@@ -2727,11 +2772,17 @@ def get_dupont_read(
     if r["roe"] is None:
         return "dupont read: n/a (incomplete inputs)"
     f = r["factors"]
+    basis = (
+        f"derived from one payload: {period}"
+        if period
+        else "caller-supplied legs (period unstated - pass period= to label them)"
+    )
     return (
         f"dupont ROE {r['roe']:.1%} ({r['note']}, driver {r['driver']}): "
         f"net_margin={f.get('net_margin')} "
         f"asset_turnover={f.get('asset_turnover')} "
-        f"equity_multiplier={f.get('equity_multiplier')}"
+        f"equity_multiplier={f.get('equity_multiplier')} "
+        f"[basis: {basis}]"
     )
 
 
@@ -3981,21 +4032,45 @@ def get_ratios(
         A ``key: value`` block of the computable ratios.
     """
     try:
-        from tradingagents.strategies.ratios import compute_ratios, render_ratios
+        from tradingagents.strategies.ratios import (
+            RENDER_ORDER,
+            compute_ratios,
+            render_ratios,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"ratios unavailable for {ticker}: {exc}"
     try:
-        from tradingagents.dataflows.statement_parsing import fetch_ticker
+        from tradingagents.dataflows.statement_parsing import (
+            fetch_ticker,
+            trailing_twelve_months,
+        )
 
         if not current_date:
             from datetime import datetime as _dt
 
             current_date = _dt.now().strftime("%Y-%m-%d")
-        fin = fetch_ticker(ticker, current_date) or {}
+        fin, provenance = fetch_ticker(ticker, current_date, with_provenance=True)
+        fin = dict(fin or {})
+        # Flows on a trailing-twelve-month window, so a current market cap is
+        # not divided by a stale annual earnings figure (NVDA 2026-09-12: the
+        # unlabelled annual basis gave 43.90x where the TTM basis was 27.63x).
+        ttm = trailing_twelve_months(ticker, current_date)
+        fin.update(
+            {k: v for k, v in ttm.items() if k.endswith("_ttm") and v is not None}
+        )
+        periods = ttm.get("periods") or []
+        basis = {
+            "flows": "TTM" if any(k.endswith("_ttm") for k in fin) else "as reported",
+            "flows_period": f"4 quarters ending {periods[0]}" if periods else None,
+            # The balance-sheet family is the latest as-reported column; name it
+            # so a reader can see that it is a DIFFERENT period from the flows.
+            "balance": (provenance.get("total_assets") or {}).get("period")
+            or (provenance.get("total_equity") or {}).get("period"),
+        }
     except Exception as exc:  # noqa: BLE001
         return f"ratios unavailable for {ticker}: {exc}"
-    ratios = compute_ratios(fin)
-    if not any(v is not None for v in ratios.values()):
+    ratios = compute_ratios(fin, basis=basis)
+    if not any(ratios.get(k) is not None for k, _label, _kind in RENDER_ORDER):
         return (
             f"ratios unavailable for {ticker}: no usable statement line items; "
             "do not fabricate valuation ratios."

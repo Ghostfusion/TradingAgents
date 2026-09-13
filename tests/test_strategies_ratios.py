@@ -61,7 +61,48 @@ def test_full_ratio_block():
 
 def test_missing_inputs_render_none_never_fabricate():
     r = compute_ratios({})  # no data
-    assert all(v is None for v in r.values())
+    # Every RATIO is None; ``basis`` is metadata (the periods the block would
+    # have come from), not a value, so it is excluded from the no-fabrication
+    # sweep - the point of the test is that no number is invented.
+    assert all(r[k] is None for k, _label, _kind in RENDER_ORDER)
+
+
+def test_the_block_states_the_basis_it_was_built_from():
+    """NVDA 2026-09-12 (D1): a P/E on annual earnings sat unlabelled in the same
+    block as quarterly balance-sheet ratios, and the report quoted it as a
+    current multiple. The basis is now part of the output."""
+    ttm = compute_ratios(
+        _fin(net_income_ttm=40e6, revenue_ttm=1000e6),
+        basis={"flows": "TTM", "flows_period": "4 quarters ending 2026-07-31",
+               "balance": "2026-07-31"},
+    )
+    text = render_ratios(ttm)
+    assert "- basis: flows TTM (4 quarters ending 2026-07-31); balance sheet 2026-07-31" in text
+    # the TTM earnings figure wins: 1000/40 = 25x, not 1000/80 = 12.5x
+    assert ttm["price_to_earnings"] == pytest.approx(25.0)
+    assert ttm["price_to_sales"] == pytest.approx(1.0)
+
+    reported = render_ratios(compute_ratios(_fin()))
+    assert "- basis: flows as reported" in reported
+    assert reported.index("- basis:") == 0  # it leads the block, not buried
+
+    # No basis supplied and no TTM keys -> inferred, still labelled.
+    assert compute_ratios(_fin())["basis"]["label"] == "flows as reported"
+
+
+def test_the_price_parameter_is_the_labelled_pe_fallback():
+    """The documented ``price`` sanity check was dead code (never referenced in
+    the body). It is now the fallback when no earnings figure exists, and the
+    rendered line says so - a price/EPS multiple is not the market-cap one."""
+    fin = _fin(net_income=None, eps=4.0)
+    r = compute_ratios(fin, price=100.0)
+    assert r["price_to_earnings"] == pytest.approx(25.0)
+    assert r["basis"]["p_e_fallback"] is True
+    assert "- P/E: 25.00 (basis: price / reported EPS)" in render_ratios(r)
+    # With earnings present the market-cap basis is used and not annotated.
+    r2 = compute_ratios(_fin(), price=100.0)
+    assert r2["basis"]["p_e_fallback"] is False
+    assert "P/E: 12.50" in render_ratios(r2)
 
 
 def test_capex_none_does_not_raise():

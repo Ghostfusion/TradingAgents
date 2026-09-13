@@ -235,3 +235,79 @@ def test_sane_revenue_yoy_percent_scaled_without_pair():
     # A sane vendor value in the plausible band (0.4 = 40% growth, no pair)
     # passes through unchanged.
     assert sp.sane_revenue_yoy({"revenue_yoy": 0.4}) == pytest.approx(0.4)
+
+
+@pytest.mark.unit
+def test_fetch_ticker_provenance_records_source_basis_and_period(monkeypatch):
+    """NVDA 2026-09-12 (D1): the merge overwrote up to four vendor payloads per
+    key with no record of which period or vendor won, so a derived ratio could
+    not state its basis. ``with_provenance=True`` returns that record; the
+    default call keeps returning the plain dict so existing callers are
+    unaffected."""
+    annual_income = (
+        "# Income Statement data for TST (annual)\n"
+        "# Data retrieved on: 2026-09-12 00:00:00\n\n"
+        ",2026-01-31,2025-01-31\n"
+        "Total Revenue,215940000000.0,130500000000.0\n"
+        "Net Income,120070000000.0,72880000000.0\n"
+    )
+    balance = (
+        "# Balance Sheet data for TST (annual)\n"
+        "# Data retrieved on: 2026-09-12 00:00:00\n\n"
+        ",2026-01-31,2025-01-31\n"
+        "Total Assets,206800000000.0,140740000000.0\n"
+        "Stockholders Equity,157290000000.0,100130000000.0\n"
+    )
+
+    def _fake(method, *args, **kwargs):
+        if method == "get_income_statement":
+            return annual_income
+        if method == "get_balance_sheet":
+            return balance
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+
+    fin, prov = sp.fetch_ticker("TST", "2026-09-12", with_provenance=True)
+    assert prov["net_income"] == {
+        "source": "get_income_statement",
+        "basis": "annual",
+        "period": "2026-01-31",
+    }
+    assert prov["total_assets"]["period"] == "2026-01-31"
+    assert fin["net_income"] == pytest.approx(120070000000.0)
+
+    # Default call: the plain dict, unchanged for every existing caller.
+    plain = sp.fetch_ticker("TST", "2026-09-12")
+    assert isinstance(plain, dict) and plain["net_income"] == pytest.approx(120070000000.0)
+
+
+@pytest.mark.unit
+def test_trailing_twelve_months_sums_only_a_full_window(monkeypatch):
+    """A partial window must be ABSENT, never presented as a year (D1)."""
+    quarterly = (
+        "# Income Statement data for TST (quarterly)\n"
+        "# Data retrieved on: 2026-09-12 00:00:00\n\n"
+        ",2026-07-31,2026-04-30,2026-01-31\n"
+        "Total Revenue,96221000000.0,81615000000.0,68127000000.0\n"
+        "Net Income,59688000000.0,58320000000.0,42960000000.0\n"
+    )
+
+    def _fake(method, *args, **kwargs):
+        return quarterly if method == "get_income_statement" else "DATA_UNAVAILABLE: no cashflow"
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+
+    ttm = sp.trailing_twelve_months("TST", "2026-09-12")
+    assert ttm["periods"] == []
+    assert "net_income_ttm" not in ttm      # three quarters is not a year
+    assert ttm["complete"] is False
+
+    four = quarterly.replace(",2026-01-31\n", ",2026-01-31,2025-10-31\n").replace(
+        "68127000000.0\n", "68127000000.0,57006000000.0\n"
+    ).replace("42960000000.0\n", "42960000000.0,31910000000.0\n")
+    monkeypatch.setattr(sp, "route_to_vendor", lambda method, *a, **k: four)
+    full = sp.trailing_twelve_months("TST", "2026-09-12")
+    assert full["periods"][0] == "2026-07-31"
+    assert full["net_income_ttm"] == pytest.approx(192878000000.0)
+    assert full["complete"] is True

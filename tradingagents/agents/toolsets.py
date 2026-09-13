@@ -210,6 +210,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.alpaca_tools import (
     get_market_snapshot_alpaca,
 )
+from tradingagents.agents.utils.financial_trends import get_financial_trends
 from tradingagents.agents.utils.momentum_tools import (
     get_momentum_scan,
 )
@@ -376,6 +377,7 @@ def fundamentals_company_tools() -> list:
                 get_balance_sheet,
                 get_cashflow,
                 get_income_statement,
+                get_financial_trends,
                 get_analyst_ratings,
                 get_smart_money,
                 get_revenue_breakdown,

@@ -1357,7 +1357,7 @@ def _eq_canonical():
 
 
 def test_earnings_quality_reports_accruals(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda ticker, date: _eq_canonical())
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda ticker, date, **kw: _eq_canonical())
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "earnings quality AAPL" in out
     assert "consensus_concern: HIGH" in out  # cc 0.45 warning + accrual 0.055 elevated
@@ -1411,7 +1411,7 @@ def test_earnings_quality_capex_negative_fcf_red_flag(monkeypatch):
 
 
 def test_earnings_quality_no_data_degrades(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda ticker, date: {})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda ticker, date, **kw: {})
     out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
 
@@ -1514,7 +1514,7 @@ def test_trade_expectancy_missing_inputs_degrades():
 
 
 def test_fcf_yield_computes(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {"market_cap": 1e11})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {"market_cap": 1e11})
     monkeypatch.setattr(
         V,
         "route_to_vendor",
@@ -1532,7 +1532,7 @@ def test_fcf_yield_computes(monkeypatch):
 
 
 def test_fcf_yield_missing_data_degrades(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {})
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
     out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
@@ -1560,7 +1560,7 @@ def test_fcf_yield_uses_trailing_ttm_not_annual(monkeypatch):
     -$2.5B case). Quarter sum = -18.171+0.332+0.43+14.937 = -2.472B."""
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"market_cap": 2721e9},
+        lambda t, d, **kw: {"market_cap": 2721e9},
     )
     monthly = lambda *a, **k: _qf_markdown([-18.171, 0.332, 0.43, 14.937])  # noqa: E731
     monkeypatch.setattr(V, "route_to_vendor", monthly)
@@ -1576,7 +1576,7 @@ def test_fcf_yield_positive_ttm_still_renders(monkeypatch):
     """A positive trailing-12M FCF is used as-is; positive TTM => floor check."""
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"market_cap": 100e9},
+        lambda t, d, **kw: {"market_cap": 100e9},
     )
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: _qf_markdown([10, 8, 9, 7]))
     out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
@@ -1589,7 +1589,7 @@ def test_fcf_yield_falls_back_to_annual_basis(monkeypatch):
     floor falls back to the latest annual FCF and says so."""
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"market_cap": 100e9},
+        lambda t, d, **kw: {"market_cap": 100e9},
     )
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: _vdip_fundamentals_markdown())
     out = V.get_fcf_yield.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
@@ -1635,7 +1635,7 @@ def test_valuation_z_score_too_few_periods_degrades(monkeypatch):
 
 def test_value_dip_setup_reports_matrix(monkeypatch):
     monkeypatch.setattr(V, "_ohlcv", lambda ticker: _vdip_ohlcv())
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {"market_cap": 1e11})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {"market_cap": 1e11})
     monkeypatch.setattr(
         V,
         "route_to_vendor",
@@ -1651,7 +1651,7 @@ def test_value_dip_setup_reports_matrix(monkeypatch):
 
 
 def test_value_dip_setup_no_data_degrades(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {})
     out = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
 
@@ -1665,7 +1665,7 @@ def test_value_dip_setup_no_data_degrades(monkeypatch):
 def test_balance_sheet_health_computes(monkeypatch):
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {
+        lambda t, d, **kw: {
             "total_debt": 400e6,
             "total_equity": 1e9,
             "current_assets": 800e6,
@@ -1678,8 +1678,30 @@ def test_balance_sheet_health_computes(monkeypatch):
     assert "d_e=0.40" in out
 
 
+def test_balance_sheet_health_names_the_rows_it_divided(monkeypatch):
+    """D2 (NVDA 2026-09-12): the report showed `current ratio 4.6808` beside a
+    $197.41B/$43.02B pair it never used, and nothing could reconcile the two
+    because the tool did not print its own inputs. The basis line now names
+    all four canonical rows, so the tool's number is self-consistent."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d, **kw: {
+            "total_debt": 11_040_000_000,
+            "total_equity": 157_290_000_000,
+            "current_assets": 234_000_000_000,
+            "current_liabilities": 50_000_000_000,
+        },
+    )
+    out = V.get_balance_sheet_health.invoke({"ticker": "NVDA", "current_date": "2026-09-12"})
+    assert "current_ratio=4.68" in out
+    assert "current_assets=234,000,000,000" in out
+    assert "current_liabilities=50,000,000,000" in out
+    assert "total_debt=11,040,000,000" in out and "total_equity=157,290,000,000" in out
+    assert "basis: canonical merged rows" in out
+
+
 def test_balance_sheet_health_degrades(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {})
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {})
     out = V.get_balance_sheet_health.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "unavailable" in out.lower()
 
@@ -1782,7 +1804,7 @@ def test_decline_driver_suppresses_degenerate_eps_yoy(monkeypatch):
         "eps": {"current": 0.75, "prior": 0.0},
         "eps_yoy": -22.8,  # vendor artifact: -2280%
     }
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin)
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
     monkeypatch.setattr(
         V,
@@ -1811,7 +1833,7 @@ def test_decline_driver_reports_verdict(monkeypatch):
         "current_assets": 800e6,
         "current_liabilities": 300e6,
     }
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin)
     monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
     monkeypatch.setattr(
         V,
@@ -1873,7 +1895,14 @@ def test_get_ratios_returns_computed_block(monkeypatch):
         "current_assets": 300e6, "current_liabilities": 150e6, "inventory": 60e6,
         "dividends_paid": 20e6,
     }
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d, **kw: (fin, {}) if kw.get("with_provenance") else fin,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.trailing_twelve_months",
+        lambda t, d, periods=4: {"periods": [], "source": None, "complete": False},
+    )
     out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "Ratios (computed)" in out
     assert "EV/EBITDA: 7.67" in out
@@ -1883,10 +1912,78 @@ def test_get_ratios_returns_computed_block(monkeypatch):
 
 
 def test_get_ratios_degrades_when_no_data(monkeypatch):
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {})
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d, **kw: ({}, {}) if kw.get("with_provenance") else {},
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.trailing_twelve_months",
+        lambda t, d, periods=4: {"periods": [], "source": None, "complete": False},
+    )
     out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "unavailable" in out.lower()
     assert "fabricate" in out.lower()
+
+
+def test_get_ratios_uses_the_ttm_basis_and_names_it(monkeypatch):
+    """D1 (NVDA 2026-09-12): the block divided a current market cap by the
+    FY-ANNUAL net income and printed `P/E 43.90` with no period, while the TTM
+    basis was 27.63. The TTM flow now wins and the basis leads the block."""
+    annual = {
+        "market_cap": 1000e6, "total_assets": 800e6, "total_equity": 500e6,
+        "net_income": 80e6, "revenue": 900e6,
+    }
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d, **kw: (
+            (annual, {"total_assets": {"period": "2026-07-31", "basis": "annual"}})
+            if kw.get("with_provenance") else annual
+        ),
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.trailing_twelve_months",
+        lambda t, d, periods=4: {
+            "periods": ["2026-07-31", "2026-04-30", "2026-01-31", "2025-10-31"],
+            "source": "get_income_statement (quarterly)", "complete": True,
+            "net_income_ttm": 40e6, "revenue_ttm": 1000e6,
+        },
+    )
+    out = T.get_ratios.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
+    assert "- basis: flows TTM (4 quarters ending 2026-07-31); balance sheet 2026-07-31" in out
+    assert "P/E: 25.00" in out      # 1000 / 40 TTM, not 1000 / 80 annual
+    assert "P/S: 1.00" in out
+
+
+def test_dupont_read_derives_one_payload_and_labels_its_basis(monkeypatch):
+    """D4 (NVDA 2026-09-12): the tool took three bare floats and emitted no
+    period, so `DuPont on the latest quarter` labelled a TTM margin. Passing a
+    ticker derives all three legs from ONE payload, period-consistent."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker",
+        lambda t, d, **kw: (
+            ({"total_assets": 800e6, "total_equity": 500e6},
+             {"total_assets": {"period": "2026-07-31", "basis": "annual"}})
+            if kw.get("with_provenance") else {"total_assets": 800e6, "total_equity": 500e6}
+        ),
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.trailing_twelve_months",
+        lambda t, d, periods=4: {
+            "periods": ["2026-07-31"], "complete": True,
+            "net_income_ttm": 80e6, "revenue_ttm": 900e6,
+        },
+    )
+    out = T.get_dupont_read.invoke({"ticker": "AAPL", "curr_date": "2026-08-24"})
+    assert "16.0%" in out                      # 8.89% margin x 1.125 x 1.6
+    assert "derived from one payload" in out and "2026-07-31" in out
+
+
+def test_dupont_read_labels_caller_supplied_legs_as_unverified():
+    out = T.get_dupont_read.invoke(
+        {"net_margin": 0.637, "asset_turnover": 0.946, "equity_multiplier": 1.399}
+    )
+    assert "84.3%" in out
+    assert "caller-supplied legs" in out and "period unstated" in out
 
 
 # --------------------------------------------------------------------------
@@ -1907,7 +2004,7 @@ def test_get_liquidity_risk_computes(monkeypatch):
     )
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+        lambda t, d, **kw: {"shares": {"current": 100e6, "prior": 100e6}},
     )
     out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "liquidity risk AAPL" in out
@@ -1923,7 +2020,7 @@ def test_get_liquidity_risk_missing_data_degrades(monkeypatch):
         "tradingagents.dataflows.float_shares.fetch_float_shares", lambda t: None
     )
     monkeypatch.setattr(
-        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {}
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {}
     )
     out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "liquidity risk AAPL" in out
@@ -1938,7 +2035,7 @@ def test_get_ownership_concentration_computes(monkeypatch):
     )
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+        lambda t, d, **kw: {"shares": {"current": 100e6, "prior": 100e6}},
     )
     monkeypatch.setattr(
         "tradingagents.dataflows.interface.route_to_vendor",
@@ -1958,7 +2055,7 @@ def test_get_ownership_concentration_no_holder_data(monkeypatch):
     )
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
-        lambda t, d: {"shares": {"current": 100e6, "prior": 100e6}},
+        lambda t, d, **kw: {"shares": {"current": 100e6, "prior": 100e6}},
     )
     monkeypatch.setattr(
         "tradingagents.dataflows.interface.route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE"
@@ -2042,7 +2139,7 @@ def test_get_value_floors_computes(monkeypatch):
         "total_assets": {"current": 5e9, "prior": 4.5e9},
         "beta": {"current": 1.1, "prior": 1.0},
     }
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin)
     monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
     out = VDT.get_value_floors.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "value floors AAPL" in out
@@ -2210,7 +2307,7 @@ def test_get_value_floors_no_tax_does_not_crash(monkeypatch):
         "total_assets": {"current": 5e9, "prior": 4.5e9},
         "beta": {"current": 1.1, "prior": 1.0},
     }
-    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin)
+    monkeypatch.setattr("tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin)
     monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
     out = VDT.get_value_floors.invoke({"ticker": "X", "current_date": "2026-08-19"})
     assert "value floors X" in out  # no crash

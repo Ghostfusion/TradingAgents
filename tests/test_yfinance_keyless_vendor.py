@@ -132,5 +132,89 @@ class TestFundamentalsFormattingGuards(unittest.TestCase):
         self.assertIn("Dividend Yield: 0.73%", out)
 
 
+_NVDA_QUARTERLY_BALANCE_CSV = (
+    # Verbatim rows from the 2026-09-12 NVDA run's yfinance quarterly balance
+    # sheet: a net-cash company reported with a positive vendor "Net Debt".
+    ",2026-07-31,2026-04-30,2026-01-31,2025-10-31,2025-07-31\n"
+    "Net Debt,10923000000.0,,,,\n"
+    "Total Debt,38351000000.0,12348000000.0,11040000000.0,10481000000.0,10598000000.0\n"
+    "Cash Cash Equivalents And Short Term Investments,62469000000.0,80572000000.0,"
+    "62556000000.0,60608000000.0,53991000000.0\n"
+)
+
+
+class TestNetDebtSignNote(unittest.TestCase):
+    """D7 (NVDA 2026-09-12): the delivered balance-sheet payload carried the
+    vendor's own ``Net Debt`` row (10,923,000,000) even though that payload's
+    cash + ST investments (62,469,000,000) exceed total debt (38,351,000,000).
+    The correction note existed for exactly this case and had no test."""
+
+    def test_fires_on_the_real_nvda_quarterly_payload(self):
+        note = y_finance._net_debt_note(_NVDA_QUARTERLY_BALANCE_CSV, "NVDA")
+        self.assertIn("NET CASH", note)
+        self.assertIn("10,923,000,000.00", note)
+        self.assertIn("62,469,000,000.00", note)
+        self.assertIn("38,351,000,000.00", note)
+        self.assertIn("do not quote the vendor Net Debt row", note)
+
+    def test_silent_when_the_company_is_genuinely_net_debt(self):
+        payload = (
+            ",2026-07-31,2026-04-30\n"
+            "Net Debt,3000000000.0,\n"
+            "Total Debt,8000000000.0,7000000000.0\n"
+            "Cash Cash Equivalents And Short Term Investments,5000000000.0,4000000000.0\n"
+        )
+        self.assertEqual(y_finance._net_debt_note(payload, "TST"), "")
+
+    def test_silent_when_any_row_is_absent(self):
+        rows = _NVDA_QUARTERLY_BALANCE_CSV.splitlines()
+        for dropped in (
+            "Net Debt",
+            "Total Debt",
+            "Cash Cash Equivalents And Short Term Investments",
+        ):
+            with self.subTest(dropped=dropped):
+                kept = [ln for ln in rows if not ln.startswith(f"{dropped},")]
+                self.assertEqual(y_finance._net_debt_note("\n".join(kept) + "\n", "NVDA"), "")
+
+    def test_note_survives_the_payload_get_balance_sheet_returns(self):
+        """Delivery-path regression: the note must be IN the string the analyst
+        receives, not merely computable from it."""
+        frame = pd.DataFrame(
+            {
+                pd.Timestamp("2026-07-31"): [10923000000.0, 38351000000.0, 62469000000.0],
+                pd.Timestamp("2026-04-30"): [None, 12348000000.0, 80572000000.0],
+                pd.Timestamp("2026-01-31"): [None, 11040000000.0, 62556000000.0],
+            },
+            index=[
+                "Net Debt",
+                "Total Debt",
+                "Cash Cash Equivalents And Short Term Investments",
+            ],
+        )
+
+        class _BalanceSheetTicker:
+            @property
+            def quarterly_balance_sheet(self):
+                return frame
+
+        with (
+            mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s),
+            mock.patch.object(y_finance, "yf") as mock_yf,
+        ):
+            mock_yf.Ticker.return_value = _BalanceSheetTicker()
+            out = y_finance.get_balance_sheet("NVDA", "quarterly", "2026-09-12")
+
+        self.assertIn("Net Debt,10923000000.0", out)
+        self.assertIn("NET CASH", out)
+        self.assertIn("62,469,000,000.00", out)
+        self.assertTrue(
+            out.rstrip().endswith(
+                "do not quote the vendor Net Debt row as a positive debt position."
+            ),
+            out[-400:],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
