@@ -30,6 +30,14 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **Forced-tool short-circuit actually wired** — `make_short_circuit_tool_node` guarded on
+  `callable(node)`, but a LangGraph `ToolNode` is a Runnable and not callable, so every production node was returned
+  unwrapped: gathered tools could re-hit the vendor, no tool call was journaled, and model-pool results
+  (`get_macro_indicators`, `get_prediction_markets`) never became evidence leaves — which made the verifier flag the
+  QQQI news report's five real 10Y/RRP/Polymarket lines as unsupported. Runnables now get a `RunnableLambda` that
+  forwards the graph config and still answers `tools_by_name` (the tool-binding contract the wiring tests assert);
+  an unwrappable node is logged instead of silently skipped. Also fixed `get_catalyst_scale` printing the modal
+  probability as `8650%`. See CHANGELOG.
 - [2026-09-13] **Options horizons** — every yfinance-chain tool parsed an expiry as a 6-digit contract stamp
   while yfinance returns ISO dates, so all of them silently priced a 68-day chain at 30 days: the model-free
   implied variance was doubled (0.1034 vs 0.0458), the gamma call wall read 55.0 instead of 56.0, and an expected

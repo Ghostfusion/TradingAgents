@@ -30,6 +30,8 @@ import threading
 import time
 from dataclasses import dataclass
 
+from langchain_core.runnables import RunnableLambda
+
 # State key accumulating the evidence leaves (design doc ``analyst_tool_evidence_key``).
 TOOL_EVIDENCE_KEY = "tool_evidence"
 
@@ -435,6 +437,33 @@ def _leaf_as_dict(leaf) -> dict:
     return dict(leaf or {})
 
 
+class _ShortCircuitToolNode(RunnableLambda):
+    """Runnable tool-node wrapper that keeps the wrapped node's attributes.
+
+    The wrapper has to be a Runnable - LangGraph's ``add_node`` rejects a plain
+    proxy object ("Expected a Runnable, callable or dict") - and it has to keep
+    the node's public surface answering: the tool-binding contract tests read
+    ``tools_by_name`` off ``graph.tool_nodes`` (one producer per number), so a
+    bare ``RunnableLambda`` blinds them. Unknown attributes delegate to the
+    wrapped node; private names do not, so LangChain's own internals never leak
+    into the ToolNode.
+    """
+
+    def __init__(self, tool_node, analyst_key: str) -> None:
+        self._wrapped = tool_node
+        invoke = tool_node.invoke
+        super().__init__(
+            lambda state, config=None: short_circuit_tool_calls(
+                lambda st: invoke(st, config), analyst_key, state
+            )
+        )
+
+    def __getattr__(self, item):
+        if item.startswith("_"):
+            raise AttributeError(item)
+        return getattr(self._wrapped, item)
+
+
 def make_short_circuit_tool_node(tool_node, analyst_key: str):
     """Wrap an analyst ToolNode so already-gathered tools never re-run.
 
@@ -450,16 +479,42 @@ def make_short_circuit_tool_node(tool_node, analyst_key: str):
     configured, since ``ALL`` covers the whole registry) is delegated to the
     underlying node. Off-path when no evidence exists (legacy default) → the
     node behaves exactly as before.
+
+    LangGraph's ``ToolNode`` is a Runnable, NOT a plain function:
+    ``callable(ToolNode(tools))`` is False. An earlier ``callable`` guard here
+    therefore returned every PRODUCTION node UNWRAPPED while the unit tests -
+    which pass plain-function doubles - stayed green: the short-circuit, the
+    per-analyst tool-call journal and the model-pool evidence leaves were all
+    dead in real runs (QQQI 2026-09-13: the news analyst's real
+    ``get_macro_indicators`` / ``get_prediction_markets`` calls left no leaf, so
+    the verifier's macro-authority gate flagged the report's 10Y / RRP /
+    Polymarket lines as UNSUPPORTED). A Runnable node gets a RunnableLambda so
+    LangGraph injects the node config its ``invoke`` requires - a bare
+    ``invoke(state)`` raises "Missing required config key" outside the graph.
+
+    A node that is neither callable nor a Runnable is left untouched, but the
+    disable is now LOUD: silently returning it is what hid the unwrapped-node
+    defect for months.
     """
-    if not callable(tool_node):
-        # Not a real ToolNode (e.g. a non-callable test double): no way to
-        # short-circuit, so leave it untouched.
-        return tool_node
+    invoke = getattr(tool_node, "invoke", None)
+    if callable(tool_node):
 
-    def wrapper(state):
-        return short_circuit_tool_calls(tool_node, analyst_key, state)
+        def wrapper(state):
+            return short_circuit_tool_calls(tool_node, analyst_key, state)
 
-    return wrapper
+        return wrapper
+
+    if callable(invoke):
+        return _ShortCircuitToolNode(tool_node, analyst_key)
+
+    logger.warning(
+        "short-circuit disabled for the %s analyst: tool node %r is neither "
+        "callable nor a Runnable - gathered tools will re-run and model-pool "
+        "tool results will not be journaled as evidence",
+        analyst_key,
+        type(tool_node).__name__,
+    )
+    return tool_node
 
 
 def short_circuit_tool_calls(tool_node, analyst_key: str, state: dict) -> dict:
@@ -585,10 +640,15 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             content = str(getattr(msg, "content", "") or "")
             if not name or not content.strip():
                 continue
-            if any(
-                str((c or {}).get("name") or "") == name for c in remaining
-            ):
-                new_leaves.append(make_evidence_leaf(name, content, status="ok"))
+            call = next(
+                (c for c in remaining if str((c or {}).get("name") or "") == name),
+                None,
+            )
+            if call is None:
+                continue
+            new_leaves.append(
+                make_evidence_leaf(name, content, args=(call or {}).get("args"), status="ok")
+            )
         if not new_leaves:
             return {"messages": out_msgs}
         evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})

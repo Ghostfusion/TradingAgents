@@ -162,6 +162,24 @@ def test_snapshot_unassessed_when_all_macro_feeds_absent():
     assert any("unevaluable" in r or "unmeasured" in r for r in snap["reasons"])
 
 
+def test_snapshot_fed_reason_states_the_modal_probability_once():
+    """The feed gives the modal probability as a PERCENT number (86.5). The
+    reason line must format it with "%", not run it through ``:.0%`` - that
+    doubled the scale and the QQQI 2026-09-13 leaf read "modal 8650%"."""
+    data = {
+        "earnings_calendar": [],
+        "move_history": [],
+        "economic_calendar": [],
+        "fed_watch": [
+            {"meeting_date": "2026-09-15", "target_range": "3.75-4.00%", "probability": 86.5},
+            {"meeting_date": "2026-09-15", "target_range": "3.50-3.75%", "probability": 13.5},
+        ],
+    }
+    snap = build_catalyst_snapshot(data, "2026-09-13", {"catalyst_window_days": 14})
+    fed_reasons = [r for r in snap["reasons"] if r.startswith("FOMC")]
+    assert fed_reasons == ["FOMC 2d out (modal 86.5%) -> x0.60"]
+
+
 def test_snapshot_macro_verdict():
     data = {
         "earnings_calendar": [],

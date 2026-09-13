@@ -49,6 +49,15 @@ Applied in code: `TRADINGAGENTS_ANALYST_FORCED_TOOLS=ALL` (local `.env`),
 `evidence_gather.make_short_circuit_tool_node` (re-request → short-circuit),
 wired from `tradingagents/graph/trading_graph.py::_create_tool_nodes`.
 
+**Fixed 2026-09-13 (QQQI news review).** The wrapper guarded on `callable(tool_node)`, but a LangGraph `ToolNode`
+is a Runnable and NOT callable - so it returned every production node UNWRAPPED and the short-circuit (operating-philosophy item 2), the
+per-analyst tool-call journal and the model-pool evidence leaves were all dead in real runs (0 of 38 archived runs
+has a model-pool leaf; the verifier's macro-authority gate flagged the QQQI news report's five real 10Y / RRP /
+Polymarket lines as UNSUPPORTED). A Runnable node now gets a `RunnableLambda` subclass that forwards the
+graph-injected config and delegates unknown attributes to the node (so `tools_by_name` still answers); a node that is
+neither callable nor a Runnable is left alone but logged. Model-pool leaves also carry the call args so
+`repro_check --evidence` diffs them.
+
 Gather-args extension (2026-09-07): the deterministic arg bag now carries the
 date-window keys too — `symbol`, `start_date`, `end_date`,
 `look_back_days` (rolling 30 calendar days on the trade date) — so data tools

@@ -459,6 +459,104 @@ def test_short_circuit_passes_through_model_pool_calls():
 # --------------------------------------------------------------------------
 
 
+def test_real_toolnode_is_wrapped_and_records_model_pool_leaves(monkeypatch):
+    """QQQI 2026-09-13 news review loop: the production tool node is a
+    LangGraph ``ToolNode`` - a Runnable, and NOT callable. The old
+    ``callable(...)`` guard returned it UNWRAPPED, so in every real run the
+    gathered tools could re-run, no tool call was journaled, and model-pool
+    results (``get_macro_indicators`` / ``get_prediction_markets``) never
+    became evidence leaves - which is why the verifier's macro-authority gate
+    flagged the report's real 10Y / RRP / Polymarket lines as UNSUPPORTED (5
+    claims on the QQQI news report), and why none of the 38 archived runs
+    carries a single model-pool leaf. Driven through a graph because a nested
+    ``ToolNode.invoke`` needs the config LangGraph injects."""
+    from langchain_core.messages import AIMessage
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.prebuilt import ToolNode
+
+    from tradingagents.agents.utils import tool_call_log as TCL
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    hits: list = []
+
+    @tool
+    def gathered_tool(x: int = 0) -> str:
+        """Gathered tool: must never reach the vendor again."""
+        hits.append(("gathered", x))
+        return "vendor payload"
+
+    @tool
+    def pool_tool(x: int = 0) -> str:
+        """Model-pool tool: executes for real and must leave a leaf."""
+        hits.append(("pool", x))
+        return f"pool payload {x}"
+
+    real = ToolNode([gathered_tool, pool_tool])
+    wrapped = make_short_circuit_tool_node(real, "news")
+    assert wrapped is not real, "a real ToolNode must be wrapped, never returned as-is"
+
+    recorded: list = []
+    monkeypatch.setattr(TCL, "log_tool_call", lambda *a, **k: recorded.append((a[1], a[2])))
+
+    def analyst(state):
+        if len(state["messages"]) == 1:
+            return _ai_tool_calls(
+                {"name": "gathered_tool", "args": {"x": 1}, "id": "c1"},
+                {"name": "pool_tool", "args": {"x": 7}, "id": "c7"},
+            )
+        return {"messages": [AIMessage(content="report")], "news_report": "r"}
+
+    graph = StateGraph(AgentState)
+    graph.add_node("analyst", analyst)
+    graph.add_node("tools_news", wrapped)
+    graph.add_edge(START, "analyst")
+    graph.add_conditional_edges(
+        "analyst",
+        lambda s: "tools_news" if getattr(s["messages"][-1], "tool_calls", None) else END,
+        {"tools_news": "tools_news", END: END},
+    )
+    graph.add_edge("tools_news", "analyst")
+    final = graph.compile().invoke(
+        {
+            "messages": [AIMessage(content="go")],
+            "trade_date": "2026-09-13",
+            "company_of_interest": "QQQI",
+            TOOL_EVIDENCE_KEY: {
+                "news": [
+                    {
+                        "tool": "gathered_tool",
+                        "status": "ok",
+                        "args": {},
+                        "args_hash": "h",
+                        "content": "gathered",
+                    }
+                ],
+                MODEL_POOL_KEY: {"news": ["pool_tool"]},
+            },
+        }
+    )
+
+    # Only the model-pool call reached the vendor.
+    assert hits == [("pool", 7)]
+    # Both calls are journaled with their pool classification.
+    assert recorded == [("gathered_tool", "short_circuit"), ("pool_tool", "executed")]
+    # The executed result is persisted as an evidence leaf, with its args.
+    leaves = final[TOOL_EVIDENCE_KEY]["news"]
+    pool_leaf = next(leaf for leaf in leaves if leaf["tool"] == "pool_tool")
+    assert pool_leaf["status"] == "ok"
+    assert pool_leaf["args"] == {"x": 7}
+    assert "pool payload 7" in pool_leaf["content"]
+
+
+def test_unwrappable_tool_node_is_left_alone_with_a_warning(caplog):
+    """A node that is neither callable nor a Runnable is returned untouched,
+    but the disable is logged - the silent return is what hid the unwrapped
+    ToolNode for months."""
+    marker = object()
+    assert make_short_circuit_tool_node(marker, "news") is marker
+    assert "short-circuit disabled for the news analyst" in caplog.text
+
+
 def test_tool_call_log_records_short_and_executed(monkeypatch):
     """Regression (QCOM 2026-09-07): nothing persisted which model-pool tools
     the LLM actually called. The short-circuit wrapper must log every model

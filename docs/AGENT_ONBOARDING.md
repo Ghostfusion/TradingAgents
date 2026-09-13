@@ -338,6 +338,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - QQQI news-review loop: the forced-tool short-circuit was never active -
+  `evidence_gather.make_short_circuit_tool_node` guarded on `callable(node)` and a LangGraph `ToolNode` is a
+  Runnable (not callable), so every production node returned unwrapped: no short-circuit, no tool-call journal
+  and no model-pool evidence leaves (0 of 38 archived runs has one, though the QQQI news analyst really called
+  `get_macro_indicators`/`get_prediction_markets`/`get_news_relevance_read` and the report quotes their outputs).
+  The macro-authority gate therefore flagged five correct 10Y/RRP/Polymarket lines. Runnable nodes now get a
+  `RunnableLambda` subclass that forwards the graph config and delegates unknown attributes (so `tools_by_name` keeps
+  answering for the tool-binding contract tests); unwrappable nodes log a warning instead of returning silently.
+  Model-pool leaves carry their call args. Also: `get_catalyst_scale` printed the modal probability as `8650%`
+  (already a percent number, formatted again with `:.0%`) - now `86.5%`. See CHANGELOG.
 - 2026-09-13 `(working tree)` - QQQI market-review options loop: `strategies/options_math.py::expiry_days`
   reads the vendor's expiry label (ISO date / 6-digit contract stamp / 8-digit basic ISO; None when
   unreadable) and the five yfinance-chain readers (`_options_chain_rows_lambda`, `get_options_iv_read`,

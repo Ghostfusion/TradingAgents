@@ -305,7 +305,7 @@ def build_catalyst_snapshot(data: dict, trade_date: str, cfg: dict | None = None
         if verdict == "no-imminent-catalyst":
             verdict = "fed-catalyst"
         reasons.append(
-            f"FOMC {fed['days_until']}d out (modal {fed['modal_prob']:.0%}) -> x{fed_scale:.2f}"
+            f"FOMC {fed['days_until']}d out (modal {fed['modal_prob']:.1f}%) -> x{fed_scale:.2f}"
         )
 
     # OpenD-decoupled macro backdrop: only apply when no forward event calendar

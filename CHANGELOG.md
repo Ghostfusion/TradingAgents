@@ -14,6 +14,44 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**The forced-tool short-circuit never wrapped the real tool node: no journal, no model-pool leaves
+(2026-09-13; the QQQI news review).** `evidence_gather.make_short_circuit_tool_node` guarded on
+`callable(tool_node)` and returned the node untouched when that was False. LangGraph's `ToolNode` is a Runnable and
+NOT callable, so **every production node** came back unwrapped while the unit tests - which pass plain-function
+doubles - stayed green. In every run since the feature landed:
+
+- the short-circuit never fired (a re-requested gathered tool could re-hit the vendor);
+- `tool_call_log` recorded no calls (there is no `QQQI_tool_calls.jsonl` for the QQQI run);
+- `_journal_executed` appended no model-pool leaf - **0 of the 38 archived runs** carries one, although the QQQI news
+  analyst demonstrably called `get_macro_indicators` (`10y_treasury` / `fed_funds_rate` / `reverse_repo` / `vix` /
+  `cpi`), `get_prediction_markets` (`Fed rate cut`, `recession 2026`) and `get_news_relevance_read`, and the report
+  quotes their real outputs verbatim (DGS10 4.95 / 4.68, RRP 5.255B, CPI 334.131, Polymarket 94%).
+
+Cost of the defect: the deterministic macro-authority gate (`report_verifier._macro_authority_gate`) holds every
+"10Y / RRP / Polymarket" line to a matching tool leaf, so the QQQI news report's **five** correct,
+tool-grounded lines were flagged UNSUPPORTED - the exact false-positive class the recorder was written to kill (the
+JPM/GS 2026-09-08 macro block). Adding just those two leaves takes the same report to zero flags.
+
+Fix: a callable node keeps the plain-function wrapper; a Runnable node now gets a `RunnableLambda` that forwards the
+config LangGraph injects (a bare `ToolNode.invoke(state)` raises "Missing required config key" outside a graph), and
+that wrapper is a `RunnableLambda` SUBCLASS delegating unknown attributes to the ToolNode - LangGraph rejects a plain
+proxy object, and the tool-binding contract (one producer per number: four test files read
+`graph.tool_nodes[key].tools_by_name`) must keep answering. A node that is neither callable nor a Runnable is still
+returned untouched, but that disable is now logged loudly - the silent return is what hid this. Model-pool leaves
+also carry the call args (they were empty), so `repro_check --evidence` can diff them.
+
+Verified against the live wiring: the run's own news tool node, driven in a graph with a
+`get_macro_indicators(indicator="cpi")` call, executes against FRED, journals `executed / in_model_pool=True` and
+appends the leaf with its args.
+
+**`get_catalyst_scale` printed the modal probability 100x too large (2026-09-13).** The fed-watch feed's probability
+is already a percent number (86.5) and the reason line formatted it with `:.0%`, so the QQQI leaf read
+"modal 8650%". It renders "modal 86.5%" now; the sibling `modal_prob=86.5000` field was always right.
+
+Tests: a real `ToolNode` regression (wrapped, both the short-circuit and executed paths, leaf carries its args), a
+loud-disable test, and a catalyst reason assertion that fails on the doubled scale. Web impact: none (no JSON shape,
+CLI flag or tool name changed; the web app's Value-tools screen calls the tools directly, outside this node).
+
 **Options horizons read from the wrong label: doubled variance + a moved gamma wall (2026-09-13; the QQQI
 market review).** Every yfinance-chain reader parsed an expiry as a 6-digit contract stamp
 (`strptime(expiry, "%y%m%d")`), but `Ticker.options` returns ISO dates (`"2026-11-20"`), so the parse failed
