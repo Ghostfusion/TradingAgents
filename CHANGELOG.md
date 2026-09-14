@@ -14,6 +14,33 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**`get_composite_rank` ranked against the characters of a string, not against peers (2026-09-13;
+found while dark-launching the round-3 gates).** `get_company_peers_finnhub` returns TEXT
+(`"Peers: NVDA, AVGO, AMD, ..."`) because it is routed through the vendor layer, and the tool did
+`peers = [ticker] + list(peer_list)[:8]` - so its peer set was the first eight CHARACTERS of that sentence:
+`['P','e','e','r','s',':',' ','N']`. Consequences, measured live on MU 2026-09-11: it ranked the name against
+the letters `e/P/r/s` (`peers_ranked: P, e, r, s`, composite 60.00%), and it fetched statements for the
+"symbol" `N` (Tiingo 400s in the run log). New `finnhub.peer_symbols()` parses the rendered string (or accepts
+already-split iterables, which is what the tests pass), and the tool excludes its own ticker. Measured after the
+fix: `peers_ranked: ADI, AMD, AVGO, INTC, MRVL, NVDA, QCOM, TXN`, composite 77.78%, and the S3 quality row it
+now feeds renders `quality composite MU: 86/100 (elite); metrics used: accruals, f, gp_a, m, noa, o, z;
+coverage 7/7; peers scored 8 of 9` (before the fix that row could only answer `peer set below the floor
+(5 < 8 names)` - it burned 9s to do it). A test pins the production shape: a rendered-peer-string monkeypatch
+must produce real symbols and must never fetch a single-character ticker.
+**Web impact**: the `get_composite_rank` tool card's `peers_ranked` list and `score` change (real peers instead
+of characters) - an additive-honesty fix to an existing surface, not a shape change.
+
+**The ten round-3 gates could not be flipped from `.env` (2026-09-13; found while dark-launching them).**
+`_apply_env_overrides` only reads names present in `_ENV_OVERRIDES`, and the ten round-3 gates were not in it -
+so `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS=true` was silently ignored, the rule-10 launch procedure had no operator
+path, and the `.env.example` block shipped for this round documented ten environment variables that did nothing.
+All ten are now mapped (with a test asserting the mapping covers every round-3 gate, that a mapped value flips its
+key, and that a typo raises rather than being swallowed). Verified live: `.env` -> `DEFAULT_CONFIG`, one gate at a
+time. The round-3 gate-default tests were also environment-coupled - they read the in-process `DEFAULT_CONFIG`,
+which is built from the operator's `.env`, so the very dark launch they exist to support failed them; the shipped-
+default check now runs in a clean interpreter with no `.env` and no `TRADINGAGENTS_*`, and the mapping test clears
+the ambient gate variables first.
+
 **The forced-tool short-circuit never wrapped the real tool node: no journal, no model-pool leaves
 (2026-09-13; the QQQI news review).** `evidence_gather.make_short_circuit_tool_node` guarded on
 `callable(tool_node)` and returned the node untouched when that was False. LangGraph's `ToolNode` is a Runnable and

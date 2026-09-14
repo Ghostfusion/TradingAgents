@@ -391,6 +391,27 @@ def get_company_peers_finnhub(ticker: str) -> str:
     return "Peers: " + ", ".join(canon)
 
 
+def peer_symbols(rendered) -> list[str]:
+    """Canonical peer tickers out of `get_company_peers_finnhub`'s value.
+
+    The vendor route returns TEXT (``"Peers: NVDA, AVGO, ..."``), so a caller
+    that needs the cross-section must parse it: iterating the string directly
+    yields its CHARACTERS. That is exactly what `get_composite_rank` did - its
+    peer set was ``['P', 'e', 'e', 'r', 's', ':', ' ', 'N']``, it ranked MU
+    against the letters ``e/P/r/s`` and fetched statements for the symbol ``N``
+    (Tiingo 400s). Accepts the rendered string or an already-split iterable
+    (the shape the tests and any future list-returning source use).
+    """
+    if rendered is None:
+        return []
+    if not isinstance(rendered, str):
+        return [str(p).strip().upper() for p in rendered if str(p).strip()]
+    text = rendered.strip()
+    if text.lower().startswith("peers"):
+        text = text.split(":", 1)[1] if ":" in text else text[len("peers") :]
+    return [tok.strip().upper() for tok in text.replace("\n", ",").split(",") if tok.strip()]
+
+
 _INSIDER_WINDOW_MONTHS = 12
 
 

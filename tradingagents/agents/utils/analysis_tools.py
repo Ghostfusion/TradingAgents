@@ -4030,10 +4030,17 @@ def get_composite_rank(
     # Peer universe: the ticker plus its company peers, when available.
     peers = [ticker]
     try:
-        from tradingagents.dataflows.finnhub import get_company_peers_finnhub
+        from tradingagents.dataflows.finnhub import get_company_peers_finnhub, peer_symbols
 
-        peer_list = get_company_peers_finnhub(ticker) or []
-        peers = [ticker] + list(peer_list)[:8]
+        # The vendor returns a rendered "Peers: A, B, ..." string; parse it into
+        # symbols (iterating the string gave the peer set the characters
+        # ['P','e','e','r','s', ...] and fetched statements for the symbol "N").
+        peer_list = [
+            p
+            for p in peer_symbols(get_company_peers_finnhub(ticker))
+            if p and p != str(ticker).strip().upper()
+        ]
+        peers = [ticker] + peer_list[:8]
     except Exception:  # noqa: BLE001
         peers = [ticker]
     factors_by_ticker = {}

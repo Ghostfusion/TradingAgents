@@ -42,7 +42,9 @@ missing.
    gathered also emits a machine-readable symmetry row, and S11's plan call must
    **fall back to today's loop** when the plan is empty, invalid, or outside the
    tool whitelist.
-10. **Dark launches are measured, not assumed.** A gate stays `False` in
+10. **Dark launches are measured, not assumed.** Every gate is env-mappable
+    (`_ENV_OVERRIDES` carries all ten, so `TRADINGAGENTS_ENABLE_*` flips it;
+    an unmapped name would be silently ignored). A gate stays `False` in
     `default_config.py` until its phase is proven: flip **one** gate at a time,
     in a labelled run, and diff that run against a gate-off run on the same
     basket. Three **pre-existing** scripts do the work: `scripts/repro_check.py

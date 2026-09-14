@@ -65,12 +65,42 @@ def _panel_fins(n: int = 10) -> dict:
     return out
 
 
-def test_every_round3_gate_exists_and_defaults_off() -> None:
+def test_every_round3_gate_exists() -> None:
     from tradingagents.default_config import DEFAULT_CONFIG
 
-    missing = [k for k in ROUND3_GATES if k not in DEFAULT_CONFIG]
-    assert missing == []
-    assert [k for k in ROUND3_GATES if DEFAULT_CONFIG[k] is not False] == []
+    assert [k for k in ROUND3_GATES if k not in DEFAULT_CONFIG] == []
+
+
+def test_shipped_gate_defaults_are_off() -> None:
+    """The SHIPPED default is off.
+
+    Deliberately NOT asserted on the in-process DEFAULT_CONFIG: that dict is
+    built from the operator's .env, so a dark launch - the whole point of these
+    gates - would fail the test. A clean interpreter whose cwd has no .env sees
+    only the code's literal defaults.
+    """
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    repo = str(Path(__file__).resolve().parents[1])
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TRADINGAGENTS_")}
+    env["PYTHONPATH"] = repo
+    code = (
+        "from tradingagents.default_config import DEFAULT_CONFIG as D;"
+        f"print([g for g in {ROUND3_GATES!r} if D[g]])"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tempfile.gettempdir(),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=True,
+    )
+    assert out.stdout.strip() == "[]", out.stdout + out.stderr
 
 
 def test_revision_tool_is_bound_to_the_fundamentals_analyst() -> None:
@@ -326,3 +356,57 @@ def test_quality_tool_compresses_the_median_exclusions_when_no_panel_is_supplied
     assert "industry median unavailable" not in out
     assert "g_score=" in out and "/8" not in out
     assert "c_score=" in out and "/6" not in out
+
+
+def test_round3_gates_are_env_mappable(monkeypatch) -> None:
+    """A gate an operator cannot flip from .env is not a dark-launch gate.
+
+    `_apply_env_overrides` only reads names in `_ENV_OVERRIDES`, so an unmapped
+    `TRADINGAGENTS_ENABLE_*` is silently ignored (and the .env.example block for
+    this round would document ten variables that do nothing).
+    """
+    from tradingagents import default_config as dc
+
+    mapped = set(dc._ENV_OVERRIDES.values())
+    unmapped = sorted(set(ROUND3_GATES) - mapped)
+    assert unmapped == []
+    # Base config: DEFAULT_CONFIG's own types (the validator checks every mapped
+    # target), with the ten gates forced off so the env var is what flips them.
+    env_of = {key: env for env, key in dc._ENV_OVERRIDES.items()}
+    # The operator's own dark launch lives in os.environ (a .env is loaded at
+    # package import), so clear the ten names before asserting on two of them.
+    for gate in ROUND3_GATES:
+        monkeypatch.delenv(env_of[gate], raising=False)
+    base = dict(dc.DEFAULT_CONFIG)
+    base.update(dict.fromkeys(ROUND3_GATES, False))
+    monkeypatch.setenv("TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS", "true")
+    monkeypatch.setenv("TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY", "false")
+    cfg = dc._apply_env_overrides(base)
+    assert cfg["enable_altman_variants"] is True
+    assert cfg["enable_evidence_symmetry"] is False
+    assert [g for g in ROUND3_GATES if cfg[g]] == ["enable_altman_variants"]
+
+
+def test_composite_rank_parses_the_rendered_peer_string(monkeypatch) -> None:
+    """The vendor returns TEXT; iterating it made the peer set the characters of
+    "Peers: NVDA, ..." (peers e/P/r/s, and a statement fetch for the symbol "N")."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    seen: list = []
+
+    def _ohlcv(t):
+        seen.append(str(t))
+        return {"closes": [100.0 + 0.5 * i for i in range(300)]}
+
+    monkeypatch.setattr(at, "_ohlcv", _ohlcv)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.finnhub.get_company_peers_finnhub",
+        lambda t: "Peers: NVDA, AVGO, AMD, INTC, TXN, MRVL, QCOM, ADI, MPWR, ALAB",
+    )
+    out = at.get_composite_rank.invoke({"ticker": "MU"})
+    assert "peers_ranked:" in out
+    ranked = out.split("peers_ranked:")[1]
+    assert "NVDA" in ranked and "AVGO" in ranked
+    assert "e" not in ranked.replace("peers_ranked:", "").split(",")[0].strip().lower()
+    assert "N" not in seen and "e" not in seen
+    assert "NVDA" in seen and "MU" in seen

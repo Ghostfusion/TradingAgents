@@ -268,6 +268,21 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION": "enable_return_decomposition",
     "TRADINGAGENTS_ENABLE_TEXT_FACTORS": "enable_text_factors",
     "TRADINGAGENTS_ENABLE_BOCPD": "enable_bocpd",
+    # Round-3 scoring & sentiment gates (all default OFF). These MUST be mapped
+    # here: _apply_env_overrides only reads names in this dict, so an unmapped
+    # TRADINGAGENTS_ENABLE_* is silently ignored - which is also why the
+    # .env.example block for this round would otherwise have documented ten
+    # environment variables that did nothing.
+    "TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS": "enable_altman_variants",
+    "TRADINGAGENTS_ENABLE_F_SCORE_DETAIL": "enable_f_score_detail",
+    "TRADINGAGENTS_ENABLE_GROWTH_SCORES": "enable_growth_scores",
+    "TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_AGG": "enable_weighted_sentiment_agg",
+    "TRADINGAGENTS_ENABLE_CROWD_RATIO_BANDS": "enable_crowd_ratio_bands",
+    "TRADINGAGENTS_ENABLE_ANALYST_REVISION_INDEX": "enable_analyst_revision_index",
+    "TRADINGAGENTS_ENABLE_QUALITY_COMPOSITE": "enable_quality_composite",
+    "TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS": "enable_score_eval_rows",
+    "TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_WINDOW": "enable_weighted_sentiment_window",
+    "TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY": "enable_evidence_symmetry",
     # Gate-registry keys (docs/gate_registry.md). Every gate and every limit a
     # gate reads must be reachable from .env, so an operator can widen/tighten
     # or disable a gate without editing code or the config dict. The registry
