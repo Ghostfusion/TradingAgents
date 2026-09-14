@@ -338,6 +338,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - Drafting-monologue guard: a free-text deliverable can arrive as the model's
+  private planning/self-correction monologue (MU 2026-09-13 research run: 5.6 KB of "why does my decimal become
+  asterisks" ahead of the real plan in `2_research/manager.md`, and therefore inside the Trader / Portfolio Manager
+  prompts that read `investment_plan`). `agents/utils/structured.py` now detects it
+  (`_looks_like_drafting_monologue`; thresholds measured against every report file on disk - only the leaked
+  monologue matches), keeps the monologue's own final draft when there is one (`_salvage_final_draft`, free - it
+  recovered the real plan from the same response), else re-asks once on the backup model, else emits the explicit
+  unavailable notice; wired into all three free-text chokepoints - `invoke_structured_or_freetext`
+  (RM/trader/PM), `retry_chain_if_stub` (analyst reports) and `retry_llm_if_truncated` (bull/bear researchers
+  + the three risk debators) - each writing a `monologue/<agent>` journal note. Tests:
+  `tests/test_structured_monologue.py` (16).
 - 2026-09-13 `(working tree)` - Round-3 scoring/sentiment implementation (S1-S11; ten `enable_*` gates, all
   default-off): `quantitative_scores.altman_variant`/`altman_zone` + `piotroski_f_score_detailed` +
   `growth_score`(G1-G8)/`overpriced_score`(C1-C6), `strategies/peer_universe.py` (ONE resolver for the screener

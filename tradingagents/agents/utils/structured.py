@@ -222,6 +222,188 @@ def _stub_completion_prompt(original: Any) -> str:
     )
 
 
+# --- drafting-monologue guard ---------------------------------------------
+# A model asked for a deliverable can answer with its *private* drafting
+# monologue instead: it plans the answer, argues with itself about markdown,
+# re-drafts, and only then writes the report. None of the guards above sees it
+# (not a stub, not a truncation, not a repetition loop), so it shipped
+# verbatim - the Research Manager's ``2_research/manager.md`` on MU 2026-09-13
+# opened with 5.6 KB of "why does my decimal become asterisks" self-talk
+# before the actual plan, and every downstream reader (the Trader / Portfolio
+# Manager prompts, the report tree, the memory log) received that text as the
+# investment plan.
+#
+# Detector evidence: over the 599 markdown files under ``reports/`` on
+# 2026-09-13, the composition vocabulary below matches ONLY that leaked
+# monologue (31 hits) and the narrow self-correction set never exceeds 1 hit in
+# a clean report - a finished report never discusses its own backticks or
+# asterisks, and never tells itself to try again. The thresholds therefore fire
+# on the observed failure and on nothing else this repo has written.
+_MONOLOGUE_COMPOSITION_RE = _re.compile(
+    r"backtick|asterisk|code tick|markdown bold|markdown emphasis|html entity",
+    _re.IGNORECASE,
+)
+_MONOLOGUE_SELF_CORE = (
+    r"\bI keep\b|\bI'?m typing\b|\bWhy am I\b|\bargh\b|\btypo\b"
+    r"|Potential final|[Nn]ote to self|\bwait\s*[\u2014-]\s*no"
+    r"|no\s*[\u2014-]\s*wait|Let's draft|Let's write|Let's produce"
+)
+# The narrow set is pure drafting/self-correction talk; the wider set adds the
+# first-person planning verbs a real report *may* use ("let me walk through"),
+# so it is only decisive together with composition talk. Two narrow hits is
+# already decisive: no clean report on disk carries more than one.
+_MONOLOGUE_NARROW_RE = _re.compile(_MONOLOGUE_SELF_CORE, _re.IGNORECASE)
+_MONOLOGUE_SELF_RE = _re.compile(
+    _MONOLOGUE_SELF_CORE + r"|\blet me\b|\blet's\b", _re.IGNORECASE
+)
+# A salvaged final draft must be substantial; below this the tail is another
+# planning scrap rather than a report.
+_MONOLOGUE_TAIL_MIN_CHARS = 200
+
+
+def _looks_like_drafting_monologue(text: str) -> bool:
+    """Is this response the model drafting/arguing with itself, not a report?
+
+    Deliberately NOT length-gated: the observed monologue was 5.6 KB, and a
+    short one is caught by ``_looks_stub``/``_looks_report_stub`` instead. The
+    three clauses follow the evidence note above the regexes - composition talk
+    on its own, a little composition talk plus drafting talk, or drafting talk
+    on its own (two hits; a clean report carries at most one).
+    """
+    t = text or ""
+    composition = len(_MONOLOGUE_COMPOSITION_RE.findall(t))
+    self_talk = len(_MONOLOGUE_SELF_RE.findall(t))
+    return (
+        composition >= 3
+        or (composition >= 1 and self_talk >= 2)
+        or len(_MONOLOGUE_NARROW_RE.findall(t)) >= 2
+    )
+
+
+def _salvage_final_draft(text: str) -> str | None:
+    """Return a monologue's final draft, or None when there is none to keep.
+
+    A monologue drafts, re-drafts and finally writes the deliverable, so the
+    last repetition of its own opening line usually begins the real answer
+    (MU 2026-09-13: chars 5629-8602 of an 8602-char response). Salvaging is
+    free and keeps the model's own wording, so it is tried BEFORE any paid
+    retry. The tail must be substantial and must not itself be a monologue.
+    """
+    t = text or ""
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if not lines or len(lines[0]) < 8:
+        return None
+    opening = _re.compile(
+        r"^[ \t]*" + _re.escape(lines[0]) + r"[ \t]*$", _re.MULTILINE
+    )
+    starts = [m.start() for m in opening.finditer(t)]
+    if len(starts) < 2:
+        return None
+    tail = t[starts[-1]:].strip()
+    if len(tail) < _MONOLOGUE_TAIL_MIN_CHARS or _looks_like_drafting_monologue(tail):
+        return None
+    return tail
+
+
+def _monologue_completion_prompt(original: Any) -> str:
+    """Ask for the finished report only, after a drafting-monologue response."""
+    text = original if isinstance(original, str) else str(original)
+    return (
+        "Your previous response was a private drafting monologue, not the "
+        "requested report: it planned the answer, discussed markdown "
+        "formatting, and re-drafted the same opening. Write ONLY the finished "
+        "report now - no planning, no note-to-self, no commentary on "
+        "formatting, no restating of these instructions, and never the same "
+        "section twice. Cite only computed values given below; state "
+        "'unavailable' where none exist.\n\n"
+        "INSTRUCTIONS + EVIDENCE:\n" + text[:8000]
+    )
+
+
+def _journal_monologue(agent_name: str, text: str, *, salvaged: bool,
+                       repair: str | None) -> None:
+    """Record a drafting-monologue deliverable (advisory; never raises)."""
+    try:
+        from tradingagents.agents.utils.llm_failure_journal import journal_llm_note
+
+        journal_llm_note(
+            f"monologue/{agent_name or 'agent'}",
+            "free-text deliverable was a drafting monologue",
+            chars=len(text or ""),
+            salvaged=salvaged,
+            repair=repair,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory only
+        logger.debug("monologue journal write skipped: %s", exc)
+
+
+def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
+                        agent_name: str, fallback_llm: Any | None = None,
+                        backup_llm: Any | None = None) -> str:
+    """Never ship a drafting monologue as the deliverable.
+
+    Order: (1) salvage the final draft out of the same response - free, keeps
+    the model's own wording; (2) ONE retry on a different model - the backup
+    first, because it did not write the monologue and the truncation path
+    already treats it as the repair model, then the fallback tier; (3) an
+    explicit unavailable notice. The monologue itself is never returned. A
+    clean response costs one regex scan and nothing else.
+    """
+    text = response_text or ""
+    if not _looks_like_drafting_monologue(text):
+        return text
+    salvaged = _salvage_final_draft(text)
+    if salvaged is not None:
+        logger.warning(
+            "%s: free-text deliverable was a drafting monologue (%d chars); "
+            "kept its final draft (%d chars)",
+            agent_name, len(text), len(salvaged),
+        )
+        _journal_monologue(agent_name, text, salvaged=True, repair="final draft")
+        return salvaged
+    retry_llm = None
+    for candidate in (backup_llm, fallback_llm):
+        if candidate is not None and candidate is not plain_llm:
+            retry_llm = candidate
+            break
+    if retry_llm is not None:
+        nxt = ""
+        try:
+            logger.info(
+                "%s: drafting monologue with no final draft; retrying on %r",
+                agent_name, _model_name(retry_llm) or retry_llm,
+            )
+            resp = retry_llm.invoke(_monologue_completion_prompt(prompt))
+            nxt = content_to_text(getattr(resp, "content", resp))
+        except Exception as exc:  # noqa: BLE001 - a failed retry degrades
+            logger.warning("%s: monologue retry failed: %s", agent_name, exc)
+        model = _model_name(retry_llm) or None
+        if nxt.strip() and not _looks_like_drafting_monologue(nxt):
+            _journal_monologue(agent_name, text, salvaged=False, repair=f"retry:{model}")
+            return nxt
+        salvaged = _salvage_final_draft(nxt)
+        if salvaged is not None:
+            logger.warning(
+                "%s: monologue retry was a monologue too; kept its final draft "
+                "(%d chars)", agent_name, len(salvaged),
+            )
+            _journal_monologue(agent_name, text, salvaged=False,
+                               repair=f"retry-draft:{model}")
+            return salvaged
+    logger.warning(
+        "%s: free-text deliverable was a drafting monologue with no final "
+        "draft recoverable; emitting an explicit unavailable decision",
+        agent_name,
+    )
+    _journal_monologue(agent_name, text, salvaged=False, repair=None)
+    return (
+        "**Decision**: unavailable - the model returned a drafting monologue "
+        "instead of the decision, and no final draft could be recovered. The "
+        "prior research and risk debate stand; re-run to regenerate the final "
+        "decision."
+    )
+
+
 def _model_name(llm: Any) -> str:
     """Best-effort model name for logs; '' when unreadable."""
     for attr in ("model_name", "model", "model_id", "name"):
@@ -384,8 +566,21 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
     text = response_text or ""
     retry_chain = backup_chain if (backup_chain is not None and backup_chain is not chain) else None
     for _ in range(_MAX_TRUNCATION_RETRIES):
-        if not _looks_report_stub(text):
+        monologue = _looks_like_drafting_monologue(text)
+        if not _looks_report_stub(text) and not monologue:
             return text
+        # A monologue usually carries the finished report as its last
+        # draft; keep that instead of paying for another call.
+        salvaged = _salvage_final_draft(text) if monologue else None
+        if salvaged is not None:
+            logger.warning(
+                "%s: report was a drafting monologue (%d chars); kept its "
+                "final draft (%d chars)",
+                agent_name, len(text), len(salvaged),
+            )
+            _journal_monologue(agent_name, text, salvaged=True, repair="final draft")
+            text = salvaged
+            continue
         if retry_chain is None:
             break
         try:
@@ -399,14 +594,19 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
             break
         if not text or not text.strip():
             break
-    if _looks_report_stub(text):
+    if _looks_report_stub(text) or _looks_like_drafting_monologue(text):
+        monologue = _looks_like_drafting_monologue(text)
         logger.warning(
-            "%s: analyst returned a status-turn stub; emitting unavailable report",
+            "%s: analyst returned %s; emitting unavailable report",
             agent_name,
+            "a drafting monologue" if monologue else "a status-turn stub",
         )
+        if monologue:
+            _journal_monologue(agent_name, text, salvaged=False, repair=None)
         return (
-            "**Report unavailable** — the analyst returned a degenerate status "
-            f"stub ({(text[:80]).strip() or 'empty'}). The prior tool evidence "
+            "**Report unavailable** — the analyst returned "
+            f"{'a drafting monologue' if monologue else 'a degenerate status stub'} "
+            f"({(text[:80]).strip() or 'empty'}). The prior tool evidence "
             "stands; re-run to regenerate the full report."
         )
     return text
@@ -519,16 +719,22 @@ def retry_chain_if_truncated(chain: Any, messages: Any, response_text: str,
 
 
 def retry_llm_if_truncated(llm: Any, prompt: Any, response_text: str,
-                           backup_llm: Any | None = None) -> str:
+                           backup_llm: Any | None = None,
+                           agent_name: str = "") -> str:
     """Re-invoke a plain LLM when its response was cut at the output cap.
 
     The researchers / risk debators call ``llm.invoke(prompt)`` directly and
     wrap the content in a speaker tag. This retries the raw content with a
     continuation prompt and merges, so the debate argument is not truncated.
     ``backup_llm`` (optional) reroutes the continuation onto the backup model
-    (see ``_retry_if_truncated``).
+    (see ``_retry_if_truncated``). A drafting monologue is not an argument
+    either, so the decision agents' monologue guard runs first (see
+    ``_retry_if_monologue``) - a researcher / debator turn can never land its
+    private self-talk in the bull/bear/risk history.
     """
-    return _retry_if_truncated(llm, prompt, response_text, backup_llm=backup_llm)
+    text = _retry_if_monologue(llm, prompt, response_text,
+                               agent_name or "debate turn", backup_llm=backup_llm)
+    return _retry_if_truncated(llm, prompt, text, backup_llm=backup_llm)
 
 
 def _terminal_turn_max_tokens() -> int | None:
@@ -849,6 +1055,13 @@ def invoke_structured_or_freetext(
 
     response = plain_llm.invoke(prompt)
     response_text = content_to_text(getattr(response, "content", response))
+    # A drafting monologue is not a deliverable: salvage its final draft or
+    # re-ask, never ship the self-talk. Runs before the completeness/stub
+    # guards so those never pay to continue or repair a monologue.
+    response_text = _retry_if_monologue(
+        plain_llm, prompt, response_text, agent_name,
+        fallback_llm=fallback_llm, backup_llm=backup_llm,
+    )
     # Enforce completeness: cut-at-cap -> continuation merge.
     response_text = _retry_if_truncated(plain_llm, prompt, response_text, backup_llm=backup_llm)
     # Harden: a bare header/stub is not a usable decision. Regenerate once;

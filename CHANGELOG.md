@@ -14,6 +14,27 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**A drafting monologue shipped as the Research Manager's investment plan (2026-09-13; found reviewing
+`reports/MU_20260913_220057`).** The RM's structured call missed (`structured output returned no parsed result`), the
+free-text fallback returned the model's *private* drafting monologue - 5.6 KB of "why does my decimal become
+asterisks" self-correction that re-drafted the same header twice - and `2_research/manager.md` opened with that
+monologue ahead of the real plan. It reached every consumer, because the same text is the state's
+`investment_plan`: the Trader and Portfolio Manager prompts, the report tree and the memory log all read it as the
+plan. None of the existing guards could see it: it is not a stub (5.6 KB of prose), not a truncation
+(`_looks_truncated` needs a mid-sentence ending) and not a repetition loop. New in `agents/utils/structured.py`:
+`_looks_like_drafting_monologue` flags it, `_salvage_final_draft` keeps the monologue's own final draft when there is
+one (free - it recovered the real plan from that same response, so the run's plan was never lost),
+`_retry_if_monologue` otherwise re-asks once on the backup model (never the model that just monologued) and finally
+emits the explicit "**Decision**: unavailable" notice. Wired into all three free-text chokepoints -
+`invoke_structured_or_freetext` (RM / trader / PM), `retry_chain_if_stub` (analyst reports) and
+`retry_llm_if_truncated` (bull/bear researchers and the three risk debators) - each writing a
+`monologue/<agent>` journal note so the event is diagnosable. The detector thresholds are measured, not guessed:
+across the 599 markdown files under `reports/` (2026-09-13) the composition vocabulary matches ONLY that leaked
+monologue (31 hits) and the narrow self-correction set never exceeds 1 hit in a clean report.
+**Web impact**: none - the guard runs inside the engine before the report tree is written; the app's
+`2_research/manager.md` / `tool_evidence.json` readers see the same shapes, except that a monologue run now yields
+the real plan (or an explicit unavailable notice) instead of self-talk.
+
 **`scripts/repro_check.py` could not be run as documented (2026-09-13; found while reproducing a report run for
 the rule-10 launch).** `py -3.12 scripts/repro_check.py --symbol tsm --runs 3 --workers 1` - its own docstring's
 `Usage:` line, and the script the round-3 plan's rule 10 and `docs/AGENT_ONBOARDING.md` both point at for the

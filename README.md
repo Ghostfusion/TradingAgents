@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **A drafting monologue can no longer ship as a manager plan** - the Research Manager's
+  free-text fallback returned the model's own self-correction monologue ("why does my decimal become asterisks") and
+  it landed verbatim at the top of `2_research/manager.md`, where the Trader and Portfolio Manager read it as the
+  investment plan. A new guard detects that text, keeps the monologue's own final draft when it has one (no extra
+  call), otherwise re-asks once on the backup model, and never ships the monologue. See CHANGELOG.
 - [2026-09-13] **Round-3 scoring & sentiment formulas land (S1-S11, all gates default-off)** — ten additive
   deterministic reads: the Altman Z'/Z''/Z''-EM variants with the distress zones they label, the Piotroski
   F-Score's paper basis/bands/recorded deviations, Mohanram's G-Score + Montier's C-Score (industry medians from

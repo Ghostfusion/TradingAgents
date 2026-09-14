@@ -56,7 +56,9 @@ Use this information to deliver a compelling bull argument, refute the bear's co
 
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content = retry_llm_if_truncated(llm, prompt, response.content, backup_llm=backup_llm)
+        content = retry_llm_if_truncated(llm, prompt, response.content,
+                                         backup_llm=backup_llm,
+                                         agent_name="Bull Researcher")
         if not (content or "").strip():
             # A degenerate empty response would render as a bare "Bull
             # Analyst:" marker and starve the debate. Retry once with a

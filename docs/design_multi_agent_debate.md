@@ -138,6 +138,15 @@ factsheet injected into the decision agents), the run-level OHLCV cache,
 
 ---
 
+**Deliverable contract (2026-09-13).** The RM's plan reaches every downstream reader as text - the Trader and
+Portfolio Manager prompts (state `investment_plan`), `2_research/manager.md` and the memory log - so the
+free-text fallback must never ship a model's *private* drafting monologue as the plan.
+`agents/utils/structured.py` enforces that at every free-text chokepoint (the decision agents, the analyst
+reports and the bull/bear/risk debate turns): a monologue is detected, its own final draft is kept when it has
+one, and otherwise the agent re-asks once on the backup model and finally emits the explicit "Decision:
+unavailable" notice. Observed live: the MU 2026-09-13 run's `manager.md` opened with 5.6 KB of "why does my
+decimal become asterisks" self-talk ahead of the real plan.
+
 ## 2. Design principles
 
 1. **Debate is hypothesis search, not persuasion.** Each turn must add

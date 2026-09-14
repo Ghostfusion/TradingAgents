@@ -58,7 +58,9 @@ Use this information to deliver a compelling bear argument, refute the bull's cl
 
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
-        content = retry_llm_if_truncated(llm, prompt, response.content, backup_llm=backup_llm)
+        content = retry_llm_if_truncated(llm, prompt, response.content,
+                                         backup_llm=backup_llm,
+                                         agent_name="Bear Researcher")
         if not (content or "").strip():
             try:
                 retry = llm.invoke(

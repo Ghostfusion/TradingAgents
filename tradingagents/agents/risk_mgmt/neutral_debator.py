@@ -56,7 +56,9 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
         from tradingagents.agents.utils.structured import retry_llm_if_truncated
 
         content, _transcript = run_tool_loop(llm, prompt, RISK_DEBATOR_TOOLS, max_rounds=2, backup_llm=backup_llm)  # bound runtime: 2 tool rounds per debate turn
-        content = retry_llm_if_truncated(llm, prompt, content, backup_llm=backup_llm)
+        content = retry_llm_if_truncated(llm, prompt, content,
+                                            backup_llm=backup_llm,
+                                            agent_name="Neutral Analyst")
         argument = f"Neutral Analyst: {content}"
 
         new_risk_debate_state = {
