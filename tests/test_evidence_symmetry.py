@@ -344,7 +344,9 @@ def test_plan_args_must_match_the_tool_schema():
     assert plan is None and "schema" in reason
 
 
-def test_gate_off_leaves_the_gather_unchanged():
+def test_gate_off_leaves_the_gather_unchanged(monkeypatch):
+    # Explicit OFF: the operator's .env may have the gate on (dark launch).
+    monkeypatch.setattr(eg, "_flag", lambda name, default=False: False)
     calls = {"planner": 0}
 
     def planner(*args, **kwargs):
@@ -360,7 +362,9 @@ def test_gate_off_leaves_the_gather_unchanged():
     assert [leaf["tool"] for leaf in evidence["market"]] == ["get_financials"]
 
 
-def test_gate_off_does_not_move_declared_default_tool():
+def test_gate_off_does_not_move_declared_default_tool(monkeypatch):
+    # Explicit OFF: the operator's .env may have the gate on (dark launch).
+    monkeypatch.setattr(eg, "_flag", lambda name, default=False: False)
     cfg = {"analyst_forced_tools": ["get_macro_indicators"]}
     state = {"company_of_interest": "TSM", "trade_date": "2026-09-07"}
     _, evidence = gather_for_analyst_node(state, "market", [get_macro_indicators], cfg)
@@ -498,12 +502,15 @@ def test_repro_config_hash_tracks_round3_gates():
 
     rc._CONFIG_HASH_CACHE.clear()
     before = rc._config_hash()
+    # Flip relative to whatever the operator's config holds, so the test does not
+    # depend on the ambient .env gate state.
+    original = DEFAULT_CONFIG["enable_evidence_symmetry"]
     try:
-        DEFAULT_CONFIG["enable_evidence_symmetry"] = True
+        DEFAULT_CONFIG["enable_evidence_symmetry"] = not original
         rc._CONFIG_HASH_CACHE.clear()
         after = rc._config_hash()
     finally:
-        DEFAULT_CONFIG["enable_evidence_symmetry"] = False
+        DEFAULT_CONFIG["enable_evidence_symmetry"] = original
         rc._CONFIG_HASH_CACHE.clear()
     assert before != after
 
