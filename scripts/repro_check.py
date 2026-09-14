@@ -19,10 +19,13 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
-from batch import analyze
-from tradingagents.agents.utils.evidence_gather import MODEL_POOL_KEY
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from batch import analyze  # noqa: E402
+from tradingagents.agents.utils.evidence_gather import MODEL_POOL_KEY  # noqa: E402
 
 _CONFIG_HASH_CACHE: dict = {}
 

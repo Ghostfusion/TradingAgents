@@ -14,6 +14,19 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**`scripts/repro_check.py` could not be run as documented (2026-09-13; found while reproducing a report run for
+the rule-10 launch).** `py -3.12 scripts/repro_check.py --symbol tsm --runs 3 --workers 1` - its own docstring's
+`Usage:` line, and the script the round-3 plan's rule 10 and `docs/AGENT_ONBOARDING.md` both point at for the
+gate-flip evidence - died immediately with `ModuleNotFoundError: No module named 'batch'`. The script runs with
+`scripts/` as `sys.path[0]` while `batch.py` lives at the repo root, so `from batch import analyze` only resolved
+when something else had already put the root on the path (e.g. `py -3.12 -m scripts.repro_check`, or
+`PYTHONPATH=.`). It now takes the same
+`sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` bootstrap 19 other scripts in `scripts/` already
+use. Why it matters: rule 10's gate-flip evidence (the off-run/on-run tree diff) is produced by this script, so
+the documented launch command failing at import is the difference between a measured flip and a claimed one -
+and it was one reason the earlier report-level attempts produced no tree at all.
+**Web impact**: none - `trading_web` does not invoke anything under `scripts/`.
+
 **`get_composite_rank` ranked against the characters of a string, not against peers (2026-09-13;
 found while dark-launching the round-3 gates).** `get_company_peers_finnhub` returns TEXT
 (`"Peers: NVDA, AVGO, AMD, ..."`) because it is routed through the vendor layer, and the tool did
