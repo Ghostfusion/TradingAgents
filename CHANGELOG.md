@@ -14,6 +14,22 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**A launcher's `TRADINGAGENTS_*` environment was silently replaced by `.env` (2026-09-13; found while trying to flip a
+gate per run).** `tradingagents/__init__.py` reloaded the whole `.env` with `override=True` to force the three
+output-token cap keys (commit `0a0ba1c`) and then restored the caller's values for those three keys only - so every
+other key the file declares (~190) was rewritten in `os.environ` at import. Reproduced: exporting
+`TRADINGAGENTS_ENABLE_GROWTH_SCORES=false` (or `TRADINGAGENTS_TEMPERATURE=0.99`) left both `os.environ` and
+`DEFAULT_CONFIG` holding `.env`'s value, although that block's own comment promised "all other caller exports are
+untouched". Why it matters: (a) the round-3 gates were documented as env-flippable, but the only working operator
+path was editing `.env`, so a rule-10 flip could not be scoped to one run or one process; (b) any launcher, script or
+CI job that exports engine settings had them ignored whenever `.env` also declared them. The force-set is now scoped:
+the three cap keys are read out of the files with `dotenv_values` and applied directly (unchanged intent - a low
+launcher cap must not starve report turns), every other caller export survives, and a gate can be flipped per run
+(`TRADINGAGENTS_ENABLE_X=true py -3.12 batch.py ...`) as well as through `.env`. Tests:
+`tests/test_env_overrides.py` (+3; two of them fail against the old block).
+**Web impact**: the app spawns the engine with the repo's `.env` in place, so its behaviour is unchanged; a launcher
+that exports `TRADINGAGENTS_*` (or a future per-job override) now takes effect instead of being overridden.
+
 **A drafting monologue shipped as the Research Manager's investment plan (2026-09-13; found reviewing
 `reports/MU_20260913_220057`).** The RM's structured call missed (`structured output returned no parsed result`), the
 free-text fallback returned the model's *private* drafting monologue - 5.6 KB of "why does my decimal become

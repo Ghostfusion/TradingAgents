@@ -130,6 +130,11 @@ def test_news_tool_appends_weighted_rows_only_when_gated(monkeypatch):
         lambda *a, **k: "## base series",
     )
     tool = at.get_news_sentiment_series
+    # Explicit OFF for both rows this tool renders: the gates may be enabled in
+    # the operator's .env (dark launch).
+    config_module.set_config(
+        {"enable_weighted_sentiment_agg": False, "enable_weighted_sentiment_window": False}
+    )
     assert tool.invoke({"ticker": "AAPL"}) == "## base series"
     config_module.set_config({"enable_weighted_sentiment_agg": True})
     on = tool.invoke({"ticker": "AAPL"})

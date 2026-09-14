@@ -287,3 +287,71 @@ def test_forced_tools_validation_ranges():
     # timeout/summary_window allow zero = "off"; concurrency does not.
     assert not any("analyst_forced_tools_timeout_s" in v for v in violations)
     assert not any("analyst_forced_tools_summary_window" in v for v in violations)
+
+
+# --- .env vs the caller's environment (package-import precedence) -----------
+
+def _run_in_fresh_interpreter(code: str, **env_extra: str) -> str:
+    """Run ``code`` in a clean interpreter rooted at the repo.
+
+    The precedence below is a side effect of importing the package (it reads
+    ``.env`` from the cwd), so it can only be observed in a process whose
+    environment and working directory the test controls.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TRADINGAGENTS_")}
+    env["PYTHONPATH"] = str(repo)
+    env.update(env_extra)
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
+def test_launcher_export_survives_package_import():
+    """A TRADINGAGENTS_* value the caller exported must beat .env's value.
+
+    Regression (2026-09-13): the package reloaded the whole .env with
+    ``override=True`` to force the three output-cap keys, which also rewrote
+    ``os.environ`` for every other key the file declares - so a launcher's (or
+    a dark launch's) exported provider / temperature / gate was silently
+    replaced by the file's value. Only the three cap keys may be forced.
+    """
+    out = _run_in_fresh_interpreter(
+        "import os\n"
+        "from tradingagents.default_config import DEFAULT_CONFIG as D\n"
+        "print(os.environ['TRADINGAGENTS_TEMPERATURE'], D['temperature'])",
+        TRADINGAGENTS_TEMPERATURE="0.77",
+    )
+    assert out == "0.77 0.77"
+
+
+def test_launcher_can_flip_a_gate_for_one_process():
+    """The round-3 gates are flippable per process, not only by editing .env."""
+    out = _run_in_fresh_interpreter(
+        "from tradingagents.default_config import DEFAULT_CONFIG as D\n"
+        "print(D['enable_altman_variants'])",
+        TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS="false",
+    )
+    assert out == "False"
+
+
+def test_dotenv_output_caps_still_beat_a_low_launcher_cap():
+    """The one deliberate exception: a low launcher cap must not starve turns."""
+    out = _run_in_fresh_interpreter(
+        "from tradingagents.default_config import DEFAULT_CONFIG as D\n"
+        "print(D['max_output_tokens_deep'])",
+        TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP="1",
+    )
+    assert int(out) > 1

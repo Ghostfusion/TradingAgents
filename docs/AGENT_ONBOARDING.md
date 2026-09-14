@@ -338,6 +338,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - Launcher env vs `.env`: importing `tradingagents` reloaded the whole `.env` with
+  `override=True` to force the three output-cap keys and restored only those, so every other declared key (~190)
+  overwrote the caller's `os.environ` - an exported `TRADINGAGENTS_ENABLE_*` / provider / temperature was silently
+  ignored, and the only way to flip a round-3 gate was editing `.env`. The force-set is now scoped
+  (`dotenv_values` + `os.environ.update` for the three cap keys only), so both paths work:
+  `TRADINGAGENTS_ENABLE_GROWTH_SCORES=true py -3.12 batch.py ...` and `.env`. Tests: `tests/test_env_overrides.py`
+  (+3: the exported temperature survives the import, a gate flips for one process, a low launcher cap is still raised).
 - 2026-09-13 `(working tree)` - Drafting-monologue guard: a free-text deliverable can arrive as the model's
   private planning/self-correction monologue (MU 2026-09-13 research run: 5.6 KB of "why does my decimal become
   asterisks" ahead of the real plan in `2_research/manager.md`, and therefore inside the Trader / Portfolio Manager

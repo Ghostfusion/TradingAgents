@@ -102,6 +102,8 @@ def test_crowd_row_gated_on_the_tool(monkeypatch):
         },
     )
     tool = at.get_sentiment_computed
+    # Explicit OFF: the gate may be enabled in the operator's .env (dark launch).
+    config_module.set_config({"enable_crowd_ratio_bands": False})
     assert "crowd ratio" not in tool.invoke({"ticker": "AAPL"})
     config_module.set_config({"enable_crowd_ratio_bands": True})
     on = tool.invoke({"ticker": "AAPL"})

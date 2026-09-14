@@ -58,6 +58,36 @@ missing.
     hashed a fixed 14-key LLM list that did **not** cover the round-3 gates; that
     list now carries all ten, with a test proving the hash moves when a gate
     flips. Naming the flipped gate in the run output remains the operator's step.
+    The override is read from the process environment - which until 2026-09-13 was not enough: importing the package
+    reloaded the whole `.env` with `override=True` to force the three output-token cap keys, rewriting `os.environ`
+    for every other key the file declares. An exported gate was therefore silently replaced by the file's value and
+    the ONLY way to flip one was editing `.env`. That reload is now scoped to the three cap keys, so a gate can be
+    flipped per run (`TRADINGAGENTS_ENABLE_X=true py -3.12 batch.py --symbols MU ...`) as well as through `.env`, and
+    either way the flip moves `run_card.json`'s `config_hash`.
+
+    **Measured flips (2026-09-13; the deployed gather path plus each gate's own tool row, live vendors, MU on
+    2026-09-11):**
+    - **S1** +2 lines, **S2** +7 lines (`get_quality_factors` / `get_earnings_quality`): the variant + zone + basis
+      line, the F detail with its withheld band and the paper's large-cap weak-signal flag. Additive, declared, no
+      extra vendor calls. **S8** changes nothing in a run (its consumer is the quality-report script). **S6** flips
+      its tool from the DISABLED sentinel to a real read that degrades honestly (coverage guard), 1 call.
+    - **S3** adds the quality row but `get_composite_rank` **timed out at the 30 s forced-tool budget** in a full
+      run (status `timeout`, thread still draining) - the row was silently absent, so the operator left the gate off.
+      Options: raise the per-tool timeout, shrink the peer panel, or accept and declare it.
+    - **S10** +9 lines on `get_quality_factors`, no extra calls: the C-Score reads (`3/6 band=middle (risk screen)`,
+      with `c5` named as a proxy), while the G-Score can only print `1 of 1 computed signal(s) (7 excluded, not
+      scored 0) band=unavailable` - the peer medians come from the screener's own cross-section, not from the tool, so
+      7 of 8 legs are excluded by design. Honest, but thin in the report path; the medians need a fetch there before
+      the G row carries a band.
+    - **S4** rendered `weighted news aggregation unavailable: no usable signed articles.` on the live feed: the
+      configured `news_sentiment` chain serves day aggregates, not signed per-article scores, so the row is an honest
+      no-op until a score-bearing source is in the chain.
+    - **S7** +12 lines (the weighted table, its basis line and `n_history=32 scored days (min_history=30)`), ~2 vendor
+      calls. **S5** +1 row (`ratio=78.9 band=crowded-bullish net_share=+0.579 dispersion=0.706 agreement=0.500`,
+      display-only and source-labelled), 0 extra calls; the parallel `velocity` sigma moved between runs, but the
+      OFF-vs-OFF control moved it by the same amount with `score` and `n` stable - feed drift, not the gate.
+    - **S11** is unmeasured: it is the only gate that can suppress evidence, so it needs its own gate-off/gate-on
+      asymmetry diff (`repro_check --evidence` symmetry columns) before it flips.
 
 ---
 

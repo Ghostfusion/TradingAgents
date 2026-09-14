@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **A launcher's `TRADINGAGENTS_*` exports were silently replaced by `.env`** - the package reloaded
+  the whole `.env` with `override=True` (to force the three output-token caps) and restored only those three keys, so
+  every other key the file declares overwrote the caller's environment at import: an exported gate, provider or
+  temperature was ignored, and a rule-10 gate flip could not be scoped to a single run. The cap force-set is now
+  scoped to the cap keys, so `TRADINGAGENTS_ENABLE_X=true py -3.12 batch.py ...` works. See CHANGELOG.
 - [2026-09-13] **A drafting monologue can no longer ship as a manager plan** - the Research Manager's
   free-text fallback returned the model's own self-correction monologue ("why does my decimal become asterisks") and
   it landed verbatim at the top of `2_research/manager.md`, where the Trader and Portfolio Manager read it as the
