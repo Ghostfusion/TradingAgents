@@ -780,11 +780,12 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             return {"messages": out_msgs}
         from langchain_core.messages import ToolMessage
 
-        # S11c: the mirrored discretionary allowance for this role's pair. Only
-        # active under the gate and when a pair budget is declared; None keeps
-        # today's behaviour byte-identical.
-        budget = (
-            _pair_budget_for(analyst_key, _config())
+        # S11c: the mirrored discretionary allowance for this role's pair. Active
+        # only under the gate AND with a declared pair (``evidence_symmetry_pairs``);
+        # no pair -> None -> today's behaviour byte-identical. The split itself is
+        # the shared mirror rule, so the pair API and this live path cannot drift.
+        allowance = (
+            _pair_allowance_for(analyst_key, state, _config())
             if _flag("enable_evidence_symmetry")
             else None
         )
@@ -792,8 +793,7 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             str(_leaf_as_dict(leaf).get("tool") or "")
             for leaf in (state.get(TOOL_EVIDENCE_KEY) or {}).get(analyst_key) or []
         }
-        used = 0
-        new_leaves: list[dict] = []
+        candidates: list[dict] = []
         for msg in real_msgs:
             if not isinstance(msg, ToolMessage):
                 continue
@@ -807,27 +807,21 @@ def _journal_executed(state: dict, analyst_key: str, remaining: list, real_msgs:
             )
             if call is None:
                 continue
-            if budget is not None and name not in forced_names and used >= budget:
-                # A surplus call beyond the mirror is suppressed AND journaled
-                # with its args, so the asymmetry is visible rather than hidden.
-                try:
-                    from tradingagents.agents.utils.tool_call_log import log_tool_call
-
-                    log_tool_call(
-                        analyst_key,
-                        name,
-                        "suppressed",
-                        args=(call or {}).get("args"),
-                        state=state,
-                        in_model_pool=True,
-                    )
-                except Exception:  # noqa: BLE001 - advisory, never break the loop
-                    pass
-                continue
-            used += 1
-            new_leaves.append(
-                make_evidence_leaf(name, content, args=(call or {}).get("args"), status="ok")
+            candidates.append(
+                {"name": name, "args": (call or {}).get("args"), "content": content}
             )
+        kept_calls, suppressed_calls = _split_discretionary(
+            candidates, allowance, forced_names
+        )
+        # A surplus call beyond the mirror is suppressed AND journaled with its
+        # args, so the asymmetry is visible rather than hidden.
+        _journal_suppressed(analyst_key, suppressed_calls, state=state)
+        new_leaves: list[dict] = [
+            make_evidence_leaf(
+                item["name"], item["content"], args=item["args"], status="ok"
+            )
+            for item in kept_calls
+        ]
         if not new_leaves:
             return {"messages": out_msgs}
         evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})
@@ -1149,6 +1143,52 @@ def _call_tool(call) -> str:
     return str((call or {}).get("name") or (call or {}).get("tool") or "")
 
 
+def _split_discretionary(calls, allowance, forced_names) -> tuple[list, list]:
+    """S11c's single split rule: keep the first ``allowance`` NON-forced calls.
+
+    ``allowance is None`` means "no mirror": every call is kept, so a gate-off
+    run - or a gate-on run with no declared pair - is byte-identical. A forced
+    (S11b) leaf is never dropped AND never consumes the allowance (it is not a
+    discretionary call). Shared by ``mirror_discretionary_budget`` (pair level)
+    and the live ``_journal_executed`` path so the two cannot drift.
+    """
+    if allowance is None:
+        return list(calls), []
+    keep: list = []
+    drop: list = []
+    used = 0
+    for call in calls:
+        if _call_tool(call) in forced_names:
+            keep.append(call)
+            continue
+        if used >= allowance:
+            drop.append(call)
+            continue
+        used += 1
+        keep.append(call)
+    return keep, drop
+
+
+def _journal_suppressed(role, dropped, state=None) -> None:
+    """S11c: journal each suppressed call WITH its args (advisory, never raises)."""
+    if not dropped:
+        return
+    try:
+        from tradingagents.agents.utils.tool_call_log import log_tool_call
+
+        for call in dropped:
+            log_tool_call(
+                role,
+                _call_tool(call),
+                "suppressed",
+                args=(call or {}).get("args"),
+                state=state,
+                in_model_pool=True,
+            )
+    except Exception:  # noqa: BLE001 - advisory, never break the loop
+        pass
+
+
 def mirror_discretionary_budget(
     calls_by_role,
     *,
@@ -1175,32 +1215,16 @@ def mirror_discretionary_budget(
     allowances: dict[str, int] = {}
     for spec in _normalize_pairs(pairs, roles):
         a, b = spec["side_a"], spec["side_b"]
-        if a not in kept or b not in kept:
+        if a not in kept or b not in kept or a == b:
             continue
         allowance = min(len(kept[a]), len(kept[b])) if budget is None else int(budget)
         allowances[spec["pair"]] = allowance
         for role in (a, b):
-            keep: list = []
-            drop: list = []
-            for index, call in enumerate(kept[role]):
-                if index >= allowance and _call_tool(call) not in forced_names:
-                    drop.append(call)
-                else:
-                    keep.append(call)
+            keep, drop = _split_discretionary(kept[role], allowance, forced_names)
             kept[role] = keep
             suppressed[role] = drop
-            if journal and drop:
-                from tradingagents.agents.utils.tool_call_log import log_tool_call
-
-                for call in drop:
-                    log_tool_call(
-                        role,
-                        _call_tool(call),
-                        "suppressed",
-                        args=(call or {}).get("args"),
-                        state=state,
-                        in_model_pool=True,
-                    )
+            if journal:
+                _journal_suppressed(role, drop, state=state)
     return {
         "pairs": _normalize_pairs(pairs, roles),
         "allowances": allowances,
@@ -1209,18 +1233,63 @@ def mirror_discretionary_budget(
     }
 
 
-def _pair_budget_for(role: str, config: dict | None) -> int | None:
-    """The mirrored discretionary allowance configured for ``role``'s pair."""
+def _pair_spec_for(role: str, config: dict | None) -> dict | None:
+    """The declared pair spec containing ``role`` (``evidence_symmetry_pairs``)."""
     for spec in (config or {}).get("evidence_symmetry_pairs") or []:
         if not isinstance(spec, dict):
             continue
-        roles = [str(r) for r in (spec.get("roles") or [])]
-        if role in roles:
-            try:
-                return int(spec.get("budget"))
-            except (TypeError, ValueError):
-                return None
+        if role in [str(r) for r in (spec.get("roles") or [])]:
+            return spec
     return None
+
+
+def _pair_budget_for(role: str, config: dict | None) -> int | None:
+    """The mirrored discretionary allowance DECLARED for ``role``'s pair."""
+    spec = _pair_spec_for(role, config)
+    if spec is None:
+        return None
+    try:
+        return int(spec.get("budget"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _observed_discretionary(state: dict, role: str) -> int | None:
+    """Discretionary (model-pool) leaves ``role`` gathered, or None if not run.
+
+    None - not 0 - for a role with no evidence key yet: counting "has not run"
+    as zero would let a partner that produced no count at all cap a first mover
+    to nothing.
+    """
+    evidence = state.get(TOOL_EVIDENCE_KEY) or {}
+    if role not in evidence:
+        return None
+    pool = set((evidence.get(MODEL_POOL_KEY) or {}).get(role) or [])
+    return sum(
+        1
+        for leaf in evidence.get(role) or []
+        if str(_leaf_as_dict(leaf).get("tool") or "") in pool
+    )
+
+
+def _pair_allowance_for(role: str, state: dict, config: dict | None) -> int | None:
+    """S11c: ``role``'s allowance - declared budget, else the pair's observed min.
+
+    The plan's rule is "the same allowance = the smaller of its two sides' call
+    counts, or an explicit budget". The explicit budget comes from the pair
+    spec; without one the mirror binds to the smallest discretionary count an
+    already-run partner recorded, and stays uncapped (None) while no partner
+    count exists.
+    """
+    spec = _pair_spec_for(role, config)
+    if spec is None:
+        return None
+    declared = _pair_budget_for(role, config)
+    if declared is not None:
+        return declared
+    others = [str(r) for r in (spec.get("roles") or []) if str(r) != role]
+    counts = [c for c in (_observed_discretionary(state, r) for r in others) if c is not None]
+    return min(counts) if counts else None
 
 
 def parse_evidence_plan(raw, whitelist, tools_by_name) -> tuple[dict | None, str]:

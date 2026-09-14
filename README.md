@@ -30,6 +30,11 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-13] **S11c's mirrored evidence budget is reachable** - the paired-role discretionary mirror was
+  implemented but read an undeclared, env-unreachable key, so it could never activate. `evidence_symmetry_pairs`
+  (JSON `{roles, budget}` specs, `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS`) now drives it: a surplus discretionary call
+  is dropped from the evidence and journaled with its args, a forced leaf is never suppressed, and with no pair
+  declared a gate-on run stays byte-identical. See CHANGELOG.
 - [2026-09-13] **A launcher's `TRADINGAGENTS_*` exports were silently replaced by `.env`** - the package reloaded
   the whole `.env` with `override=True` (to force the three output-token caps) and restored only those three keys, so
   every other key the file declares overwrote the caller's environment at import: an exported gate, provider or

@@ -506,3 +506,150 @@ def test_repro_config_hash_tracks_round3_gates():
         DEFAULT_CONFIG["enable_evidence_symmetry"] = False
         rc._CONFIG_HASH_CACHE.clear()
     assert before != after
+
+
+# ---------------------------------------------------------------------------
+# S11c wiring: the live tool-loop path (
+#   _journal_executed) uses the same split rule as the pair API, under the gate
+#   and only for a DECLARED pair.
+# ---------------------------------------------------------------------------
+
+
+def _pool_state(analyst: str, forced: list, partner: str | None = None, partner_pool=()):
+    evidence = {MODEL_POOL_KEY: {analyst: []}, analyst: forced}
+    if partner is not None:
+        evidence[partner] = [_leaf(name, {}) for name in partner_pool]
+        evidence[MODEL_POOL_KEY][partner] = list(partner_pool)
+    return {TOOL_EVIDENCE_KEY: evidence}
+
+
+def _tool_messages(names):
+    from langchain_core.messages import ToolMessage
+
+    return [
+        ToolMessage(content=f"result-{name}", name=name, tool_call_id=f"c{index}")
+        for index, name in enumerate(names)
+    ]
+
+
+def test_journal_executed_suppresses_surplus_discretionary_calls(monkeypatch):
+    """A declared pair budget caps the LIVE path: surplus calls are dropped
+
+    from the evidence and journaled with their args (S11c).
+    """
+    events = []
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.tool_call_log.log_tool_call",
+        lambda analyst, tool, event, args=None, state=None, in_model_pool=None: events.append(
+            (analyst, tool, event, args)
+        ),
+    )
+    monkeypatch.setattr(eg, "_flag", lambda name, default=False: True)
+    monkeypatch.setattr(
+        eg, "_config", lambda: {"evidence_symmetry_pairs": [{"roles": ["fundamentals", "news"], "budget": 1}]}
+    )
+    state = _pool_state("fundamentals", [_leaf("get_financials", {})])
+    remaining = [
+        {"name": "get_bsm_quote", "args": {"spot": 1.0}},
+        {"name": "get_probe_a", "args": {"q": 2}},
+        {"name": "get_probe_b", "args": {"q": 3}},
+    ]
+    out = eg._journal_executed(
+        state, "fundamentals", remaining,
+        _tool_messages(["get_bsm_quote", "get_probe_a", "get_probe_b"]),
+    )
+    tools = [leaf["tool"] for leaf in out["tool_evidence"]["fundamentals"]]
+    assert tools == ["get_financials", "get_bsm_quote"]
+    assert [(e[0], e[1], e[2]) for e in events] == [
+        ("fundamentals", "get_probe_a", "suppressed"),
+        ("fundamentals", "get_probe_b", "suppressed"),
+    ]
+    assert events[0][3] == {"q": 2}
+
+
+def test_journal_executed_is_unchanged_without_a_declared_pair(monkeypatch):
+    """Gate on but no pair declared: byte-identical to today (the mirror is inert)."""
+    events = []
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.tool_call_log.log_tool_call",
+        lambda *a, **k: events.append(a),
+    )
+    monkeypatch.setattr(eg, "_flag", lambda name, default=False: True)
+    monkeypatch.setattr(eg, "_config", lambda: {"evidence_symmetry_pairs": []})
+    state = _pool_state("fundamentals", [_leaf("get_financials", {})])
+    remaining = [
+        {"name": "t1", "args": {}},
+        {"name": "t2", "args": {}},
+        {"name": "t3", "args": {}},
+    ]
+    out = eg._journal_executed(
+        state, "fundamentals", remaining, _tool_messages(["t1", "t2", "t3"])
+    )
+    tools = [leaf["tool"] for leaf in out["tool_evidence"]["fundamentals"]]
+    assert tools == ["get_financials", "t1", "t2", "t3"]
+    assert events == []
+
+
+def test_journal_executed_is_unchanged_with_the_gate_off(monkeypatch):
+    """Declared pair but gate off: the mirror never runs."""
+    events = []
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.tool_call_log.log_tool_call",
+        lambda *a, **k: events.append(a),
+    )
+    monkeypatch.setattr(eg, "_flag", lambda name, default=False: False)
+    monkeypatch.setattr(
+        eg, "_config", lambda: {"evidence_symmetry_pairs": [{"roles": ["fundamentals", "news"], "budget": 0}]}
+    )
+    state = _pool_state("fundamentals", [])
+    remaining = [{"name": "t1", "args": {}}, {"name": "t2", "args": {}}]
+    out = eg._journal_executed(
+        state, "fundamentals", remaining, _tool_messages(["t1", "t2"])
+    )
+    assert [leaf["tool"] for leaf in out["tool_evidence"]["fundamentals"]] == ["t1", "t2"]
+    assert events == []
+
+
+def test_split_counts_only_discretionary_calls():
+    """A forced leaf neither consumes the allowance nor is ever dropped."""
+    calls = [{"name": "forced"}, {"name": "a"}, {"name": "b"}]
+    keep, drop = eg._split_discretionary(calls, 1, {"forced"})
+    assert [c["name"] for c in keep] == ["forced", "a"]
+    assert [c["name"] for c in drop] == ["b"]
+    assert eg._split_discretionary(calls, None, {"forced"}) == (calls, [])
+
+
+def test_pair_allowance_mirrors_an_already_run_partner():
+    """No declared budget: the allowance is the pair's smallest OBSERVED count."""
+    pairs = {"evidence_symmetry_pairs": [{"roles": ["news", "fundamentals"]}]}
+    state = _pool_state(
+        "fundamentals", [], partner="news", partner_pool=("t1", "t2")
+    )
+    assert eg._pair_allowance_for("fundamentals", state, pairs) == 2
+    # A partner that has not run cannot cap a first mover to zero.
+    assert eg._pair_allowance_for("news", _pool_state("news", []), pairs) is None
+    # A declared budget always wins over the observed count.
+    declared = {"evidence_symmetry_pairs": [{"roles": ["news", "fundamentals"], "budget": 1}]}
+    assert eg._pair_allowance_for("fundamentals", state, declared) == 1
+    # No pair at all -> no mirror.
+    assert eg._pair_allowance_for("fundamentals", state, {}) is None
+
+
+def test_symmetry_pair_env_accepts_a_json_list():
+    from tradingagents.default_config import _coerce
+
+    raw = '[{"roles": ["news", "fundamentals"], "budget": 2}]'
+    assert _coerce(raw, []) == [{"roles": ["news", "fundamentals"], "budget": 2}]
+    with pytest.raises(ValueError):
+        _coerce('[not json', [])
+    # The comma form still works for plain string lists.
+    assert _coerce("news,fundamentals", []) == ["news", "fundamentals"]
+
+
+def test_pair_spec_key_is_declared_and_env_mappable():
+    from tradingagents import default_config as dc
+
+    assert dc.DEFAULT_CONFIG["evidence_symmetry_pairs"] == []
+    assert dc._ENV_OVERRIDES["TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS"] == (
+        "evidence_symmetry_pairs"
+    )

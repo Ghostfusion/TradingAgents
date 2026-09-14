@@ -338,6 +338,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-13 `(working tree)` - S11c wiring: the mirrored discretionary budget was implemented in
+  `evidence_gather._journal_executed` but its allowance came from `evidence_symmetry_pairs`, a key that was
+  **undeclared and env-unreachable**, so the mirror could never activate (nothing was ever suppressed; the
+  standalone `mirror_discretionary_budget` API had no caller). The key is now in `default_config.py` (`[]` = inert)
+  and reaches `.env` as `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS` - a JSON list of `{roles, budget}` specs, accepted by
+  any list-valued override (malformed JSON raises at startup). One split rule (`_split_discretionary`) and one
+  suppression-journal helper are shared by the pair API and the live path; a forced (S11b) leaf is never suppressed
+  and no longer consumes the allowance. Measured: budget 1 suppresses the surplus with its args in the tool-call log;
+  a pair without a budget mirrors the smallest count an already-run partner recorded; no pair declared = byte-
+  identical to gate off; the deterministic gather is untouched. Caveat: the mirror drops the evidence **leaf** after
+  the call executed, so keep budgets at or above a pair's natural counts (the transcript still holds the result).
+  Tests: `tests/test_evidence_symmetry.py` (+7).
 - 2026-09-13 `(working tree)` - Launcher env vs `.env`: importing `tradingagents` reloaded the whole `.env` with
   `override=True` to force the three output-cap keys and restored only those, so every other declared key (~190)
   overwrote the caller's `os.environ` - an exported `TRADINGAGENTS_ENABLE_*` / provider / temperature was silently

@@ -86,8 +86,25 @@ missing.
       calls. **S5** +1 row (`ratio=78.9 band=crowded-bullish net_share=+0.579 dispersion=0.706 agreement=0.500`,
       display-only and source-labelled), 0 extra calls; the parallel `velocity` sigma moved between runs, but the
       OFF-vs-OFF control moved it by the same amount with `score` and `n` stable - feed drift, not the gate.
-    - **S11** is unmeasured: it is the only gate that can suppress evidence, so it needs its own gate-off/gate-on
-      asymmetry diff (`repro_check --evidence` symmetry columns) before it flips.
+    - **S11** measured (MU, live vendors, env-flip per process): **S11b** moves `get_macro_indicators`
+      (`indicator=10y_treasury`) out of the news model pool into the gather - 23 -> 24 leaves, pool 4 -> 3, +1 vendor
+      call, ~+6 s, and nothing else changed in either direction; **S11a** over the completed run's evidence renders
+      `ASYMMETRIC` (6 analyst pairs, 190 differing tool names, 7 persisted rows, **zero vendor calls**, 0.0 ms) - the
+      per-side numbers are the usable part, the verdict reads ASYMMETRIC by construction because analysts bind
+      different toolsets; **S11d**'s live plan call returned `{}` (`empty plan` -> fallback with the reason, 0 calls
+      fired) for all three analyst pools (2.4 s / 1.2 s / 17.1 s), and validation rejects out-of-whitelist, malformed
+      and out-of-schema plans with a named reason; the fundamentals gather is byte-identical with the gate on
+      (48 leaves, same pool, same block), and the news differences under the gate are feed drift (an OFF-vs-OFF
+      control moved the same `get_catalyst_scale` FOMC probability and `get_global_news` URLs).
+    - **S11c is wired** (it previously had no reachable operator path): `evidence_symmetry_pairs` /
+      `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS` declares the pairs, the live `_journal_executed` path applies the
+      shared split rule, and a declared `budget` (or the smallest discretionary count an already-run partner
+      recorded) suppresses the surplus **and journals it with its args**. Measured on the real path: budget 1 ->
+      surplus suppressed; derived -> mirrors the partner's observed 2; no pair declared -> byte-identical to today.
+      Caveat measured: the mirror drops the evidence **leaf** after the call already executed, so the transcript
+      still holds that result - keep budgets at or above a pair's natural counts, or the verifier will flag claims
+      based on a result the evidence file no longer carries. The S11a row keeps reporting the **planned** set, so the
+      pair verdict does not move when the mirror acts.
 
 ---
 
@@ -411,6 +428,13 @@ single-valued enum.
 *Behaviour.* Each paired role gets the same discretionary call allowance; a
 surplus call beyond the mirror is suppressed **and journaled with its args**, so
 the asymmetry is visible rather than hidden. The mirror is per pair, not global.
+The allowance is read from the declared pair specs (`evidence_symmetry_pairs` /
+`TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS`, a JSON list of `{roles, budget}`): a
+declared `budget` is used verbatim, otherwise the mirror binds to the smallest
+discretionary count an **already-run** partner recorded. With no declared pair
+the mirror is inert, so a gate-on run is byte-identical to a gate-off one, and
+the split rule itself is shared (`_split_discretionary`) with the pair-level API
+so the two call sites cannot drift.
 
 *Acceptance.* Three discretionary calls on side A against one on side B produce
 journal entries for the two unmatched A calls plus an `ASYMMETRIC` symmetry row;

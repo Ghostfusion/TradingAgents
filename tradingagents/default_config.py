@@ -283,6 +283,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS": "enable_score_eval_rows",
     "TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_WINDOW": "enable_weighted_sentiment_window",
     "TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY": "enable_evidence_symmetry",
+    # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
+    # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
+    # Empty = the mirror is inert (nothing is ever suppressed).
+    "TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS": "evidence_symmetry_pairs",
     # Gate-registry keys (docs/gate_registry.md). Every gate and every limit a
     # gate reads must be reachable from .env, so an operator can widen/tighten
     # or disable a gate without editing code or the config dict. The registry
@@ -330,6 +334,20 @@ def _coerce(value: str, reference):
     if isinstance(reference, float):
         return float(value)
     if isinstance(reference, list):
+        # A JSON list is accepted verbatim so a list of OBJECTS is expressible from
+        # .env (TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS carries pair specs); the
+        # comma-separated form below cannot group a pair.
+        text = value.strip()
+        if text.startswith("["):
+            import json
+
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"expected a JSON list, got {value!r}") from exc
+            if not isinstance(parsed, list):
+                raise ValueError(f"expected a JSON list, got {value!r}")
+            return parsed
         # Comma-separated list, e.g. "SPY,QQQ,AAPL" -> ["SPY", "QQQ", "AAPL"].
         items = [item.strip() for item in value.split(",") if item.strip()]
         # Coerce each element to the existing default's element type so a
@@ -992,6 +1010,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_score_eval_rows": False,  # S8: score IC / decile / coverage / stability rows
         "enable_weighted_sentiment_window": False,  # S7: exponentially weighted rolling window
         "enable_evidence_symmetry": False,  # S11: paired-role symmetry report + mirrored budget
+        # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
+        # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
+        # to mirror the smallest observed count of the pair instead. Empty (default)
+        # = inert: nothing is suppressed and a gate-on run stays byte-identical.
+        "evidence_symmetry_pairs": [],
         "vendor_cache_enabled": True,
         "vendor_cache_ttl_seconds": 21600,  # 6 hours
         # Categories excluded from the cache because their content is genuinely

@@ -320,7 +320,9 @@ quality bands - never `decision_guardrail.SCORE_BANDS`),
 `enable_weighted_sentiment_window` (S7: `weighted_rolling_sentiment`, the
 10-day exponential window plus the `min_history` warm-up guard), and
 `enable_evidence_symmetry` (S11: `evidence_gather.symmetry_report`, the
-mirrored discretionary budget, and the gated argument-plan call). The peer
+mirrored discretionary budget - driven by the declared pair specs in
+`evidence_symmetry_pairs` / `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS`, inert while
+that list is empty - and the gated argument-plan call). The peer
 universe behind S3/S10 is the screener scan universe, resolved once by
 `strategies/peer_universe.py::resolve_peer_universe` (plan §1.1).
 

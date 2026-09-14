@@ -14,6 +14,25 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**S11c's mirrored discretionary budget had no operator path (2026-09-13; found measuring the S11 gate).** The
+behaviour was implemented in `evidence_gather._journal_executed` but read its allowance from
+`config["evidence_symmetry_pairs"]` - a key that was **not declared in `default_config.py` and not env-mappable** -
+so the mirror could never activate: nothing was suppressed, and the plan's "S11c" row described a behaviour no run
+could reach (the standalone `mirror_discretionary_budget` API was tested but had no caller). Now: the key is declared
+(`[]` = inert) and reaches `.env` via `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS`, a JSON list of `{roles, budget}`
+specs (any list-valued key accepts a JSON list; malformed JSON raises at startup); the live path and the pair API
+share one split rule (`_split_discretionary`) and one suppression-journal helper, so they cannot drift; a pair may
+declare an explicit `budget` or leave it out to mirror the smallest discretionary count an already-run partner
+recorded; and a forced (S11b) leaf is never suppressed (and no longer consumes the allowance). Measured on the real
+path with real journaling: budget 1 -> the surplus calls are dropped from the evidence and written to the tool-call
+log as `suppressed` with their args; derived allowance -> mirrors the partner's observed count; gate on with no pair
+declared -> byte-identical to a gate-off run; the deterministic gather is unaffected (fundamentals 48 leaves, same
+pool, same block with the gate on and a pair declared). Caveat measured: the mirror drops the evidence **leaf** after
+the call already executed, so the transcript still carries that result - keep budgets at or above a pair's natural
+counts, or the report verifier will flag claims based on a result the evidence file no longer holds.
+**Web impact**: none - no JSON shape or CLI flag changes; a suppressed call simply appears as a `suppressed` row in
+the per-symbol tool-call log instead of an evidence leaf.
+
 **A launcher's `TRADINGAGENTS_*` environment was silently replaced by `.env` (2026-09-13; found while trying to flip a
 gate per run).** `tradingagents/__init__.py` reloaded the whole `.env` with `override=True` to force the three
 output-token cap keys (commit `0a0ba1c`) and then restored the caller's values for those three keys only - so every
