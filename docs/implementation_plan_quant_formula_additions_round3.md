@@ -105,6 +105,24 @@ missing.
       still holds that result - keep budgets at or above a pair's natural counts, or the verifier will flag claims
       based on a result the evidence file no longer carries. The S11a row keeps reporting the **planned** set, so the
       pair verdict does not move when the mirror acts.
+    - **Report-level diff (2026-09-14, MU 2026-09-11, `--depth shallow`, same commit, live vendors):** A = the
+      operator's `.env` (gate off), B = the same plus `enable_evidence_symmetry=true` and
+      `evidence_symmetry_pairs=[{"roles": ["news", "fundamentals"], "budget": 2}]`. Wall time 1768s vs 1773s,
+      rating **Underweight** in both, `run_card` verdict PASS in both, `config_hash` moved
+      `6f2576603653fda1 -> 179246b6edcf7d86`. Attributable in B: `_symmetry` present (summary + 6 pair rows, all
+      `ASYMMETRIC` - different analysts, different toolsets by construction); the 10Y `get_macro_indicators` leaf
+      moved out of the news model pool into the gather and was **used and verified** in the news report
+      ("10Y (DGS10) at 4.95 on 2026-09-10" -> GROUNDED via `get_macro_indicators`); and the mirror **suppressed 3**
+      news discretionary calls at 00:46:20 (`get_beat_miss_sizing` `{catalyst: 0.6, side: beat}`,
+      `get_news_relevance_read` x2), each journaled with args, with 0 suppressed in A. The `report_verify --stem
+      news` pass then attached 3 "No leaf evidence - <tool> does not appear in the evidence leaves" notes to exactly
+      those claims (0 such notes in A); they stayed GROUNDED on the deterministic numeric anchor, and neither tree
+      produced UNSUPPORTED/CONTRADICTED (A: 36 GROUNDED / 1 MISQUOTED / 1 INTERNAL_CONFLICT on 38 claims; B: 56
+      GROUNDED / 3 INTERNAL_CONFLICT on 59 claims). Caveat for reading this: the two reports differ structurally
+      beyond the gate (different sections and claim counts), so LLM sampling variance dominates the text - only the
+      suppressed rows, the dropped leaves, the symmetry block and the macro leaf are attributable. Conclusion: the
+      **gate alone** is additive; the **mirror** is a deliberate, declared evidence *removal* - keep budgets at or
+      above a pair's natural discretionary counts, or leave the pair list empty.
 
 ---
 
