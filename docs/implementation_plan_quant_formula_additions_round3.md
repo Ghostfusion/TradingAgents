@@ -439,6 +439,22 @@ in.
 printed; a tool without one stays; the forced leaf set is byte-identical for a
 single-valued enum.
 
+*Extension (2026-09-14, from the SKHY review).* The declared default only reaches
+an analyst that **binds tools** — the sentiment analyst pre-fetches a fixed
+source set and has no `ToolNode`, so `gather_for_analyst_node` never runs for it
+and it could state a macro level with nothing behind it: SKHY 2026-09-14 wrote
+"US 10-year above 5%" while the news stem in the same tree held the FRED DGS10
+leaf, and the verifier flagged the line UNSUPPORTED (the SKHY 2026-09-09 class).
+Under the same gate the sentiment node now makes the one deterministic call
+(`get_macro_indicators(indicator=10y_treasury, look_back_days=30)`), journals the
+result as a `get_macro_indicators` leaf under `tool_evidence.sentiment` in the
+same shape as a gatherer leaf (`no_data` on a placeholder, `error` never
+fatal), adds it to the prompt, and pins the rule that a headline disagreeing
+with the leaf must be reported as disagreeing. Gate off — or a vendor failure —
+leaves the stem byte-identical to the pre-extension one. Tests:
+`tests/test_structured_agents.py::test_journals_macro_leaf_only_when_the_gate_is_on`
++ `tests/test_report_verify.py::test_sentiment_prompt_pins_macro_to_the_leaf`.
+
 **S11c - Mirrored discretionary budget (no LLM change).**
 
 *Target.* the analyst tool-loop / `_journal_executed` path.

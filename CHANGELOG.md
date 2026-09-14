@@ -14,6 +14,36 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**The report verifier's deterministic scan cried wolf: half of its same-metric conflicts were capture artifacts (2026-09-14; found running it over the
+MU/SNDK/DELL/SKHY batch).** Adjudicating a 4-tree run (727 claims: 639 GROUNDED, 78 INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0 CONTRADICTED) showed the
+CONFLICT rows were dominated by the extractor, not the reports: `'diluted eps'` "conflicting" at `rice (919.97; **$24.67; +1368.5; | $28` (the raw string carried a
+6-char slice of surrounding prose), `'scenario dcf bear' 71.38; 171.38` and `94.96; 194.96` (the label regex consumed the value's leading digit), `'market cap'
+**1` (a fragment of `$1,166,000,000,000` — the figure regex stopped at the first comma, so `$28,243,000,000` read as 28), `'stochastic' … rsi **0.0` (`stoch`
+matched `stochrsi`), `'rsi' … : 5.8` (a VIF row reusing the label), `'rvol' … ≥ 1.3` (a threshold read as a value), `'insider net' 12; 12m` (a 12-month window
+read as 12 million), `'diluted eps' 6.34; 5.24; 1.70` (three quarters, each labelled as such), and `metric_errors: valuation_identity: could not convert string
+to float: '1.5286.'` (a `[\d.]+` capture swallowing a sentence-ending period, which silently killed the whole DuPont check). Two identity families were binding
+*across producers*: the R-multiple check crossed one tool's `entry` with another's `stop` (the quoted targets are verbatim tool output — `get_swing_set` scales
+2R/3R off the structure stop, `get_swing_exits` off the chandelier, `get_tranche_plan` off an averaged entry at 1.8R/3.0R), and the valuation-band check demanded
+realized coverage from a band that has none by design (get_expected_move's option-implied ±1σ band; the conformal `get_valuation_band` prints its own coverage).
+Now: comma-grouped figures (plus a `T` unit), unit-boundary and R-suffix-aware capture, label-prefix / VIF / threshold / growth-percent / 12-month-window /
+period-qualifier guards, table-cell and slash-list pair binding (`| Net Income / Diluted EPS | $28,243,000,000 / $24.67 |` binds 24.67), per-tool scoping for
+`t1`/`t2`, a conformal-context gate on the band check, a line-local (spot-price-anchored, multiplier-aware) R-multiple binding, and hardened float captures.
+Measured over all 45 archived trees (185 analyst reports): same-metric conflict rows 409 -> 186, metric errors > 0 -> 0, and 0 R-multiple/band claims on the four
+2026-09-14 trees (12 before). Every pinned verifier test still passes (10 new cases pin the classes above); the advisory contract is unchanged — the verifier
+still never edits a report.
+**Web impact**: none structurally — `verify_flags.json` simply carries fewer INTERNAL_CONFLICT claims and no `metric_errors` entries; no key or CLI flag changed.
+
+**The sentiment stem could cite a macro level with no evidence behind it (2026-09-14; SKHY review).** The news analyst gets a deterministic 10-year FRED leaf from
+`gather_for_analyst_node` (S11b's declared default under `enable_evidence_symmetry`), but the sentiment analyst binds no tools and pre-fetches a fixed source set,
+so it had only recalled macro levels out of headlines: the SKHY 2026-09-14 stem wrote "US 10-year above 5%" with no macro leaf anywhere in its evidence and the
+verifier flagged the line UNSUPPORTED (the class pinned by the SKHY 2026-09-09 review loop). Under the same gate the node now fetches
+`get_macro_indicators(indicator=10y_treasury, look_back_days=30)` once, journals it as a `get_macro_indicators` leaf under `tool_evidence.sentiment` (same leaf
+shape/args_hash as a gatherer leaf, `no_data` when the vendor returns a placeholder), adds it to the prompt as the only quotable macro level, and pins the rule:
+a headline that disagrees with the leaf must be reported as disagreeing rather than repeated as fact. Gate off (or a fetch failure) leaves the stem byte-identical
+to before.
+**Web impact**: additive only — with the gate on, `tool_evidence.json` gains one `get_macro_indicators` leaf under the `sentiment` key (array append), and the
+rendered `sentiment.md` may quote the 10-year level with its date. No key, flag or CLI change.
+
 **S11c's mirrored discretionary budget had no operator path (2026-09-13; found measuring the S11 gate).** The
 behaviour was implemented in `evidence_gather._journal_executed` but read its allowance from
 `config["evidence_symmetry_pairs"]` - a key that was **not declared in `default_config.py` and not env-mappable** -

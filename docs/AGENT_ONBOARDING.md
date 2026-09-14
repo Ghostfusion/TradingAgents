@@ -338,6 +338,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-14 `(working tree)` - Verifier capture/binding hardening (adjudicating the MU/SNDK/DELL/SKHY batch: 727 claims, 639 GROUNDED, 78
+  INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0 CONTRADICTED). The deterministic same-metric scan was inflating its own list: `_DOLLAR_RE` stopped at the
+  first comma (`$28,243,000,000` -> 28, `$1,166,000,000,000` -> 1), the `scenario dcf bear/base/bull` labels consumed the value's leading digit, the displayed
+  raw string carried a 6-char slice of prose ("rice (919.97"), `stoch` matched `stochrsi`, a VIF row's score read as the RSI level, `>= 1.3` read as a second
+  RVOL, `12m` read as 12 million, and a `[\d.]+` capture swallowed a sentence period, which made `_dupont_identity` raise (`float('1.5286.')`) and silently
+  drop the DuPont check. Two binding errors: `_r_multiple_identity` crossed one tool's entry with another's stop (targets are verbatim tool output - swing_set
+  2R/3R off the structure stop, swing_exits off the chandelier, tranche_plan off an averaged entry at 1.8R/3.0R), and `_valuation_band_conflict` demanded
+  realized coverage from `get_expected_move`'s option-implied band (no calibration pairs; the conformal tool prints its own coverage). Fixed: comma+`T`
+  figures, unit-boundary/R-suffix capture, prefix/VIF/threshold/growth-%/12m/period-qualifier guards, table-cell + slash-list pair binding by label ordinal,
+  per-tool scoping for `t1`/`t2`, a conformal-context gate, line-local R-multiple binding (spot-price anchored, multiplier-aware), `(\d+(?:\.\d+)?)` captures.
+  All 45 archived trees: conflict rows 409 -> 186, metric errors 0; four new trees: R-multiple/band claims 12 -> 0. Verifier tests 170 -> 180.
+- 2026-09-14 `(working tree)` - Sentiment macro leaf (S11b for the sentiment stem, gate `enable_evidence_symmetry`): SKHY 2026-09-14 stated "US 10-year above
+  5%" with no macro leaf in its own evidence (this node binds no tools, so `gather_for_analyst_node` never runs for it) and the verifier flagged it. The node
+  now fetches `get_macro_indicators("10y_treasury", end_date, 30)` once under the gate, journals it as a leaf under `tool_evidence.sentiment`, adds it to the
+  prompt as the only quotable macro level, and requires a disagreeing headline to be reported as disagreeing. Gate off = byte-identical stem. Tests:
+  `tests/test_structured_agents.py` (+1 node, 2 pinned gate-off), `tests/test_report_verify.py` (+1 prompt).
 - 2026-09-13 `(working tree)` - S11c wiring: the mirrored discretionary budget was implemented in
   `evidence_gather._journal_executed` but its allowance came from `evidence_symmetry_pairs`, a key that was
   **undeclared and env-unreachable**, so the mirror could never activate (nothing was ever suppressed; the

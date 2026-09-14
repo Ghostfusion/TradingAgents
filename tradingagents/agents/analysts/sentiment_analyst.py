@@ -33,6 +33,7 @@ from tradingagents.agents.schemas import SentimentReport, render_sentiment_repor
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_macro_indicators,
     get_news,
     get_output_budget,
 )
@@ -125,6 +126,22 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             computed_sentiment_line(computed) if computed is not None else ""
         )
 
+        # S11b for THIS stem (gate: enable_evidence_symmetry). The news analyst
+        # synthesizes the deterministic 10-year FRED leaf inside
+        # gather_for_analyst_node, but this node binds no tools and pre-fetches
+        # a fixed source set, so it had only recalled macro levels from
+        # headlines: the SKHY 2026-09-14 run wrote "US 10-year above 5%" with no
+        # macro leaf anywhere in its evidence and the report verifier flagged
+        # the line as UNSUPPORTED (the class pinned by the SKHY 2026-09-09
+        # review loop). Additive and default-off; a fetch failure leaves the
+        # stem exactly as it was.
+        macro_block = ""
+        if cfg is not None and cfg.get("enable_evidence_symmetry"):
+            try:
+                macro_block = get_macro_indicators.func("10y_treasury", end_date, 30)
+            except Exception:  # noqa: BLE001 - additive evidence, never fatal
+                macro_block = ""
+
         system_message = _build_system_message(
             ticker=ticker,
             start_date=start_date,
@@ -133,6 +150,7 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
             computed_line=computed_line,
+            macro_block=macro_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -224,6 +242,20 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
                     summary_window=_window,
                 )
             )
+        if macro_block:
+            sentiment_leaves.append(
+                make_evidence_leaf(
+                    "get_macro_indicators",
+                    macro_block,
+                    args={
+                        "indicator": "10y_treasury",
+                        "curr_date": end_date,
+                        "look_back_days": 30,
+                    },
+                    status=_prefetch_status(macro_block),
+                    summary_window=_window,
+                )
+            )
         evidence = dict(state.get(TOOL_EVIDENCE_KEY) or {})
         evidence["sentiment"] = sentiment_leaves
 
@@ -264,8 +296,28 @@ def _build_system_message(
     stocktwits_block: str,
     reddit_block: str,
     computed_line: str = "",
+    macro_block: str = "",
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
+    macro_section = (
+        "\n### Macro rate level — FRED via get_macro_indicators, deterministic leaf\n"
+        "The only macro level you may state. Headlines in the feeds below may quote "
+        "a different figure (often a round number, or yesterday's print): when they "
+        "disagree with this leaf, quote the leaf, date it, and say the headline "
+        "figure differs.\n\n<start_of_macro>\n"
+        f"{macro_block}\n<end_of_macro>\n"
+        if macro_block
+        else ""
+    )
+    macro_pin = (
+        "- **MACRO MUSTS (10-year).** Any macro rate level you mention (10-year "
+        "Treasury / DGS10, Fed funds) must be quoted from the macro leaf above "
+        "with its date. Recalled levels — from headlines, posts, or memory — must "
+        "not appear as figures: if the feeds talk about a level you cannot find in "
+        "the leaf, describe it qualitatively.\n"
+        if macro_block
+        else ""
+    )
     computed_block = (
         "### Deterministic computed sentiment (pre-computed by the pipeline; "
         "numbers the LLM must not contradict)\n\n"
@@ -299,7 +351,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 <start_of_reddit>
 {reddit_block}
 <end_of_reddit>
-
+{macro_section}
 ## How to analyze this data (best practices)
 
 1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
@@ -316,7 +368,9 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+8. **Ground every macro figure in the leaf.**
+{macro_pin}
+9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 

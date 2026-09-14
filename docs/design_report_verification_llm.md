@@ -126,3 +126,49 @@ because the news LLM did not call those model-pool tools) + 37 anchored-small
 (<=0.5% figure noise) + 15 other-derived. NO open code defect: journaling
 mechanics proven hermetic (short-circuit wraps every analyst node); the
 missing scenario-DCF leaf on ROST is a fabricated call, correctly flagged.
+
+## Batch findings (2026-09-14 live, MU/SNDK/DELL/SKHY — 16 stems)
+
+727 claims: **639 GROUNDED, 78 INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0
+CONTRADICTED**. Adjudicating the conflicts (not accepting them) found the
+deterministic scan was the noisy party, so this round hardened the *capture*
+rather than the reports (reports are records; the producers were checked too —
+see below).
+
+**Capture defects proven on real text** (`agents/utils/report_verifier.py`):
+thousands separators were not read, so `$28,243,000,000` became `28` and
+`$1,166,000,000,000` became `1`; the `scenario dcf bear/base/bull` label regexes
+consumed the value's leading digit (`bear 171.38` -> `71.38`, then the same
+number looked like two conflicting scenarios); the printed raw value carried a
+6-char slice of surrounding prose (`rice (919.97`); `stoch` matched `stochrsi`;
+a VIF table row's multicollinearity score was read as the RSI level; `>= 1.3` was
+read as a second RVOL print; `12m` (a window) was read as 12 million; three
+period-labelled quarters were compared as one metric; `_r_multiple_identity`
+crossed one tool's `entry` with another tool's `stop`; `_valuation_band_conflict`
+demanded realized coverage from `get_expected_move`'s option-implied band (no
+calibration pairs exist; the conformal tool prints its own); and a `[\d.]+`
+capture swallowed a sentence period, which made `_dupont_identity` raise
+(`could not convert string to float: '1.5286.'`) and silently lose the whole
+identity family.
+
+**Producer checks (independent, per family).** The 2R/3R/T1/T2 numbers are
+verbatim tool output and internally consistent: `get_swing_set` derives
+`T1 = close + 2*(close - structure_stop)`, `get_swing_exits` measures off the
+chandelier stop, `get_tranche_plan` off a size-weighted averaged entry at
+1.8R/3.0R — three frameworks, three pairs, no arithmetic in the prompt. The
+SNDK ROA "identity break" (50.80% vs net margin x turnover = 69.27%) mixed a
+single-quarter net margin (77.0%, derived in prose) with a TTM turnover; on the
+TTM leg set the identity holds (0.5646 x 0.8996 = 50.79% ≈ get_ratios' 50.80%).
+Both were verifier-side, not producer-side.
+
+**Residual, accepted (advisory noise we can name but not yet remove).** Metrics
+that are legitimately multi-source or multi-period still flag: `roe` at 93.18%
+(get_ratios) vs 15.76% (get_analyst_verdict), `ev/ebit` at 17.62 vs 106.87,
+`atr` at two windows, `vrp` printed from model-free and ATM-IV bases, and a
+handful of historical R-multiple lines where a report mixes two frameworks in
+one line. These are true statements about the text; whether they are defects is
+a reader's call, which is exactly what "advisory" means here.
+
+**Conclusion.** Corpus-wide over the 45 archived trees: same-metric conflict rows
+409 -> 186, `metric_errors` > 0 -> 0, and 0 R-multiple/band claims on the four
+new trees (12 before). 10 new pinned cases in `tests/test_report_verify.py`.

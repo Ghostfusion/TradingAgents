@@ -511,7 +511,9 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # ATR/bands/surprise) use a tighter 0.5% so a real target mismatch (T1
     # 265.03 vs 265.97, a 0.35% diff masked by the 1% bucket, or macdh -1.36
     # vs -1.15) still flags.
-    "ema20":(re.compile(r"\bema\s*20\b(?=[^0-9|]{0,20}?\d)", re.I), 0.005),
+    # The qualifier is part of the label ("EMA20 trail 481.74"): leaving it in
+    # the label-to-value gap would make the value look like prose.
+    "ema20": (re.compile(r"\bema\s*20\b(?:\s*(?:trail|line|band|value))?", re.I), 0.005),
         "atr":(re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),0.005),
     # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
     # real conflict, so level-type metrics use a 0.1% bucket. Their values come
@@ -530,7 +532,10 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "macd histogram": (re.compile(r"macd\s*h|macdh|histogram", re.I), 0.005),
     "rvol": (re.compile(r"\brvol\b|relative\s*volume", re.I), 0.005),
     "williams_r": (re.compile(r"williams", re.I), 0.005),
-    "stochastic": (re.compile(r"stoch", re.I), 0.005),
+    # "stoch" alone also matched "stochrsi" (a different oscillator) and read
+    # its 0.0 as a %K conflict against the real stochK 12.42 (MU market.md
+    # 2026-09-14). Only the %K spellings are the same metric.
+    "stochastic": (re.compile(r"\bstoch(?:k|astic)\b(?:\s*%?\s*k)?", re.I), 0.005),
     "rsi": (re.compile(r"\brsi\b|relative\s*strength\s*index", re.I), 0.005),
     "aws growth": (re.compile(r"aws.{0,10}(?:growth|yoy)|yoy.{0,10}aws", re.I), 0.005),
     "hy oas": (re.compile(r"hy[-\s]?oas|high\s*yield.{0,20}oas", re.I), 0.005),
@@ -551,9 +556,18 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Only the "bear" label is pair-safe — "bear" is the FIRST leg of the slash list,
     # so "bear": $N  is the same dollar in both the body and the summary row.
 
-    "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|\d))", re.I),0.001),
-    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|\d|$)", re.I), 0.001),
-    "scenario dcf bull": (re.compile(r"scenario[\s-]*dcf.{0,40}?bull\b|bull\s*(?:\||:|=|/|\$|\d|$)", re.I), 0.001),
+    # The trailing "\d" used to be consumed by the label match itself, so the
+    # value lost its leading digit: "bear 171.38" was read as "71.38" and the
+    # same number then looked like two conflicting scenarios (MU fundamentals.md
+    # 2026-09-14: 71.38/171.38, 94.96/194.96, 27.07/227.07). A lookahead keeps
+    # the digit in the value.
+    "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|(?=\d)))", re.I),0.001),
+    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|(?=\d)|$)", re.I), 0.001),
+    # The bare "bull" alternative needs a scenario neighbour: a REGIME row
+    # ("| Regime | BULL 0.7255, vol NORMAL ... |") also carries the word, and
+    # its state score was read as a second scenario-DCF bull (MU/SNDK/DELL
+    # fundamentals.md 2026-09-14).
+    "scenario dcf bull": (re.compile(r"scenario[\s-]*dcf.{0,40}?bull\b|(?:bear|base)[^\n]{0,40}?bull\s*(?:\||:|=|/|\$|(?=\d)|$)", re.I), 0.001),
     "beta": (re.compile(r"\bbeta\b", re.I), 0.05),
     "cash conversion": (re.compile(r"cash\s*conversion|cash_conversion|ocf\s*/\s*ni", re.I), 0.02),
     # WDC 2026-09-10 fundamentals review loop: current ratio 10.87
@@ -562,13 +576,97 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "current ratio": (re.compile(r"current\s*ratio|\bcurrentRatio\b|\bCR\b", re.I), 0.20),
 }
 
-# A dollar figure in the report, with optional K/M/B suffix, e.g. "80.76",
-# "$80.60", "79.78B", "5.7B". Used to extract the numeric value attached to a
-# metric. Returns (value, unit_multiplier) or None. A digit carrying an
-# R-multiple suffix ("3R", "2xR") is NOT a figure: reading the "3" of
-# "3R targets ..." as a price is what let a wrong 3R go uncompared
-# (MU 2026-09-09 review loop).
-_DOLLAR_RE = re.compile(r"(?<![\w])\$?\s*(\d+(?:\.\d+)?)\s*([KMBkmb])?(?![xX]?R\b)")
+# A figure in the report, with optional K/M/B/T suffix, e.g. "80.76",
+# "$80.60", "79.78B", "5.7B", "1,166,000,000". Used to extract the numeric
+# value attached to a metric. Three hard-won details (MU/SNDK/DELL/SKHY
+# 2026-09-14 verifier run, 78 INTERNAL_CONFLICT rows of which the majority
+# were capture artifacts):
+#   * THOUSANDS SEPARATORS count as one figure. Without them "$28,243,000,000"
+#     was read as "28" (the digits before the first comma), which is how
+#     'diluted eps' came to "conflict" at 24.67 vs 28 and 'market cap' at
+#     "**1" — a fragment of "$1,166,000,000,000".
+#   * A digit carrying an R-multiple suffix ("3R", "2xR") is NOT a figure:
+#     reading the "3" of "3R targets ..." as a price is what let a wrong 3R go
+#     uncompared (MU 2026-09-09 review loop). A unit suffix must end its token,
+#     so "1.25Tonnes" is not 1.25T.
+#   * The boundary check belongs on the UNIT, not on the number: requiring a
+#     non-letter after the figure made "10.52pp" backtrack into "10" (the
+#     SNDK/SKHY VRP prints).
+_DOLLAR_RE = re.compile(
+    r"(?<![\w,.])\$?\s*(\d[\d,]*(?:\.\d+)?)(?:\s*([KMBkmbt])(?![A-Za-z]))?(?![xX]?R\b)"
+)
+
+# Unit suffix -> multiplier. T joined the set because the reports write
+# "$1.25T" beside "$1,250,373,926,912" and the two must land in ONE cluster.
+_DOLLAR_UNITS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
+
+# Formatting plus a bounded vocabulary of LINK words may sit between a metric
+# label and its OWN figure. Anything else is prose or another metric's label, so
+# the figure after it belongs to that other thing: "...$24.67 diluted EPS; price
+# 919.97 is a forming bar" must not read the price as the EPS ("price" is not a
+# link word), while "DCF fair value is $80.76", "DCF value at 79.60" and
+# "Current ratio vendor 1.329" must still read their values ("is", "at",
+# "vendor" are).
+_FILLER_CHARS = r"[\s*_`:=~$|()\[\]{},/+\-\u2013\u2014]*"
+_VALUE_LINK_WORDS = (
+    r"(?:is|are|was|were|be|at|of|to|for|near|about|around|approx|approximately|"
+    r"reached|printed|quoted|quotes|reads|read|sits|stood|estimated|"
+    r"vendor|vendors|provider|finnhub|fmp|consensus|screener|company|reported|"
+    r"per|from|as|tool|leaf|source|basis)"
+)
+_LABEL_TO_VALUE_FILLER_RE = re.compile(
+    rf"^{_FILLER_CHARS}(?:{_VALUE_LINK_WORDS}{_FILLER_CHARS}){{0,2}}$", re.I
+)
+
+# A figure introduced by a comparison is a THRESHOLD, not the metric's value:
+# "rvol 0.6390 ... (>= 1.3 = high)" must not read 1.3 as a second RVOL print.
+_THRESHOLD_BEFORE_RE = re.compile(r"[<>\u2264\u2265]\s*$")
+
+# A VIF (multicollinearity) row reuses the indicator label for a variance
+# inflation factor — "| VIF | rsi 5.8 HIGH, mom 5.8 HIGH |" — and that number
+# is not the oscillator's level (MU market.md 2026-09-14, rows 7 and 83).
+_VIF_MARKER_RE = re.compile(r"\bvif\b", re.I)
+
+# Metrics whose value is a LEVEL (a price, a per-share figure, a dollar
+# amount) rather than a rate: a percentage printed after the label is that
+# metric's GROWTH or yield, not its value ("Diluted EPS +1368.5% YoY",
+# "market cap +2.1% w/w").
+_LEVEL_METRICS = frozenset({
+    "diluted eps", "eps ttm", "eps actual", "eps estimate", "book value",
+    "dcf fair value", "scenario dcf bear", "scenario dcf base",
+    "scenario dcf bull", "market cap", "insider net", "200-day sma", "ema20",
+})
+
+# A label whose SAME spelling is reused by a neighbouring quantity on the same
+# line, keyed to the context that gives it away: "put/call **1.49**" is the OI
+# ratio while "call/put volume **0.97** (put/call **1.03**)" is the volume
+# ratio, and "the 10-02 chain reads put/call 1.29" is ANOTHER expiry's ratio —
+# none of them is a dual print of the first (MU market.md L30, DELL market.md
+# L21, 2026-09-14).
+_LABEL_CONTEXT_REJECT: dict[str, re.Pattern] = {
+    "pcr oi": re.compile(r"(?i)\b(?:volume|chain)\b"),
+}
+
+# A period-qualified level metric is scoped to that period, not a second
+# quoting of the same number: "Prior quarter (2026-04-30): ... Diluted EPS
+# $5.24. Year-ago quarter (2025-07-31): ... Diluted EPS $1.70" are three
+# quarters, and comparing them flagged DELL fundamentals.md 2026-09-14.
+_PERIOD_QUALIFIER_RE = re.compile(
+    r"(?i)\b(?:prior|previous|year[\s-]?ago|quarter|q[1-4]\b|fy\s*\d|ttm|yoy|qoq)\b"
+)
+
+
+def _segment_before(line: str, pos: int) -> str:
+    """The clause the label opens, since the last sentence/segment boundary.
+
+    A period qualifier scopes the values in ITS clause: "Prior quarter ...:
+    Revenue $43,842M, Diluted EPS $5.24." qualifies that EPS, while the trailing
+    "(leaf, FY26 Q4)" of an earlier clause must not reach across the ";" to
+    disqualify the next one.
+    """
+    seg = line[:pos]
+    cut = max(seg.rfind(". "), seg.rfind("; "), seg.rfind(";"), seg.rfind("|"))
+    return seg[cut + 1:]
 
 # ---------------------------------------------------------------------------
 # Macro-authority gate (deterministic; SKHY 2026-09-09 review loop)
@@ -653,7 +751,92 @@ def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) ->
     return out
 
 
-def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, float]]:
+def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
+    """The label's own leg when its table cell holds no figure of its own.
+
+    A two-cell row such as ``| Net Income / Diluted EPS | $28,243,000,000 /
+    $24.67 |`` lists the labels in one cell and their values, in the same
+    order, in the next. Reading the first figure of the value cell would bind
+    the net income to the EPS, so the label's ordinal inside its own cell (the
+    number of "/" separators before it) selects the matching leg.
+    """
+    if "|" not in line:
+        return None
+    cells = line.split("|")
+    pos = 0
+    for idx, cell in enumerate(cells):
+        if pos <= m.start() and m.end() <= pos + len(cell):
+            prefix = cell[:m.start() - pos]
+            if _DOLLAR_RE.search(cell):
+                return None  # the label cell has its own figure: normal path
+            if idx + 1 >= len(cells):
+                return None
+            legs = [x.group(0) for x in _DOLLAR_RE.finditer(cells[idx + 1])]
+            if len(legs) < 2:
+                return None
+            ordinal = min(prefix.count("/"), len(legs) - 1)
+            raw = legs[ordinal]
+            try:
+                value = float(raw.replace(",", ""))
+            except ValueError:
+                return None
+            return raw, value
+        pos += len(cell) + 1
+    return None
+
+
+# A label run joined by slashes ("bear/base/bull") binds, in order, to the
+# value run that follows it ("$87.75 / $115.51 / $240.53"): the DELL
+# 2026-09-14 fundamental body quoted the same scenario set twice, and reading
+# the first figure of the value list for every label made all three look like
+# conflicts with themselves.
+_SLASH_LABEL_TAIL_RE = re.compile(r"([A-Za-z%][\w%]*)\s*/\s*$")
+_SLASH_HEAD_RE = re.compile(r"\s*/\s*")
+
+
+def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
+    """The label's own leg when labels and values are both slash-separated."""
+    before = line[:m.start()]
+    ordinal = 0
+    pos = len(before)
+    while True:
+        mm = _SLASH_LABEL_TAIL_RE.search(before[:pos])
+        if mm is None:
+            break
+        pos = mm.start(1)
+        ordinal += 1
+    after = line[m.end():]
+    if "|" in line:
+        # A table row: the figures that follow belong to the cell AFTER the
+        # label's own ("| RSI / MACD / ATR(14) | 60.16 / ... |" — the 14 of
+        # ATR(14) is not the RSI leg).
+        rest_of_line = line[m.end():]
+        bar = rest_of_line.find("|")
+        if bar >= 0:
+            after = rest_of_line[bar:]
+    if ordinal == 0 and not _SLASH_HEAD_RE.match(after):
+        return None
+    legs: list[tuple[str, float]] = []
+    rest = after
+    for idx in range(ordinal + 1):
+        mm = _DOLLAR_RE.search(rest)
+        if mm is None:
+            return None
+        num_s, unit = mm.group(1), (mm.group(2) or "")
+        try:
+            value = float(num_s.replace(",", "")) * _DOLLAR_UNITS.get(unit.upper(), 1.0)
+        except ValueError:
+            return None
+        legs.append((num_s + unit, value))
+        rest = rest[mm.end():]
+        if idx < ordinal and not _SLASH_HEAD_RE.match(rest):
+            return None
+    return legs[ordinal]
+
+
+def _extract_metric_values(
+    text: str, regex: re.Pattern, label: str = ""
+) -> list[tuple[str, float]]:
     """All ``(raw_value_str, numeric_value)`` occurrences for one metric label.
 
     Considers EVERY match of the label on a line (not just the first) so a
@@ -665,21 +848,69 @@ def _extract_metric_values(text: str, regex: re.Pattern) -> list[tuple[str, floa
     (79.78B -> 7.978e10) so 79.78B and 5.7B compare at one scale.
     """
     out: list[tuple[str, float]] = []
+    level_metric = label in _LEVEL_METRICS
+    reject_before = _LABEL_CONTEXT_REJECT.get(label)
     for line in text.splitlines():
         for m in regex.finditer(line):
+            # The label must be a whole token: "stoch" inside "stochrsi" is a
+            # different indicator (MU market.md L18) and "beta" inside "betas"
+            # is a different noun.
+            if (
+                line[m.end():m.end() + 1].isalpha()
+                and line[m.end() - 1].isalnum()
+            ):
+                continue
+            if reject_before is not None and reject_before.search(
+                line[max(0, m.start() - 32):m.start()]
+            ):
+                continue
+            # A label cell with no figure of its own hands its value over from
+            # the NEXT table cell, where a "/"-separated list keeps the label
+            # order: "| Net Income / Diluted EPS | $28,243,000,000 / $24.67 |"
+            # gives the EPS 24.67, not the net income.
+            cell_pair = _table_cell_pair_value(line, m)
+            if cell_pair is not None:
+                out.append(cell_pair)
+                continue
+            slash_pair = _slash_pair_value(line, m)
+            if slash_pair is not None:
+                out.append(slash_pair)
+                continue
             # Skip a label immediately followed by a parenthetical multiplier
             # like "T1(2R)" — 2R is a reward multiple, not the metric's value.
             tail = line[m.end():m.end() + _METRIC_WINDOW]
             stripped = re.sub(r"^\([^)]*\)", "", tail.strip())
-            for mnum in _DOLLAR_RE.finditer(stripped):
-                num_s, unit = mnum.group(1), (mnum.group(2) or "")
-                try:
-                    num = float(num_s)
-                except ValueError:
-                    continue
-                mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(unit.upper(), 1.0)
-                out.append((stripped[max(0, mnum.start() - 6):mnum.end()].strip(), num * mult))
-                break
+            mnum = _DOLLAR_RE.search(stripped)
+            if mnum is None:
+                continue
+            gap = stripped[:mnum.start()]
+            if not _LABEL_TO_VALUE_FILLER_RE.match(gap):
+                continue
+            if _THRESHOLD_BEFORE_RE.search(gap):
+                continue
+            if _VIF_MARKER_RE.search(
+                line[max(0, m.start() - 24):m.start()]
+                + gap
+                + stripped[mnum.end():mnum.end() + 24]
+            ):
+                continue
+            if level_metric and stripped[mnum.end():mnum.end() + 1] == "%":
+                continue
+            num_s, unit = mnum.group(1), (mnum.group(2) or "")
+            # "12m" is a twelve-month window, not twelve million: reports write
+            # integer magnitudes in upper case ("122M", "5.9B") and only scale a
+            # fraction the other way ("1.2m").
+            if unit and unit.islower() and "." not in num_s:
+                continue
+            if level_metric and _PERIOD_QUALIFIER_RE.search(
+                _segment_before(line, m.start())[-80:] + gap
+            ):
+                continue
+            try:
+                num = float(num_s.replace(",", ""))
+            except ValueError:
+                continue
+            out.append((num_s + unit, num * _DOLLAR_UNITS.get(unit.upper(), 1.0)))
     return out
 
 
@@ -781,22 +1012,28 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
         # R-multiple legs (t1/t2) read the value bound to their own label; the
         # label regex stays as the fallback for its other spellings.
         reader = _METRIC_VALUE_READERS.get(label)
-        vals = reader(report_text) if reader else []
-        if not vals:
-            vals = _extract_metric_values(report_text, regex)
-        # Group near-equal values; flag when >1 distinct cluster.
-        distinct: list[tuple[float, str]] = []
-        for raw, v in vals:
-            bucket = next(
-                (b for b in distinct if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= tol),
-                None,
-            )
-            if bucket is None:
-                distinct.append((v, raw))
+        if reader is not None and label in _MULTI_PRODUCER_METRICS:
+            groups = _tool_scoped_values(report_text, label)
         else:
-                # keep the first raw string for the group
-                pass
-        if len(distinct) >= 2:
+            groups = [reader(report_text)] if reader is not None else []
+        if not any(groups):
+            groups = [_extract_metric_values(report_text, regex, label)]
+        for vals in groups:
+            # Group near-equal values; flag when >1 distinct cluster.
+            distinct: list[tuple[float, str]] = []
+            for raw, v in vals:
+                bucket = next(
+                    (
+                        b
+                        for b in distinct
+                        if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= tol
+                    ),
+                    None,
+                )
+                if bucket is None:
+                    distinct.append((v, raw))
+            if len(distinct) < 2:
+                continue
             shown = "; ".join(f"{raw}" for _, raw in distinct)
             conflicts.append(
                 VerifierClaim(
@@ -827,10 +1064,13 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
 _PE_RE = re.compile(r"\bP\s*/\s*E\b\s*:?\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
 _PRICE_RE = re.compile(r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d{2})|at\s+\$(\d[\d,]*\.\d{2})")
 _TTM_EPS_RE = re.compile(r"(?i)\beps\b[^0-9]{0,40}ttm[^0-9]{0,40}\$\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
-_ROE_RE = re.compile(r"\bROE\b\s*\**\s*~?\s*([\d.]+)\s*%")
-_NET_MARGIN_RE = re.compile(r"net_margin\s*\**\s*([\d.]+)")
-_AT_RE = re.compile(r"asset_turnover\s*\**\s*([\d.]+)")
-_EM_RE = re.compile(r"equity_multiplier\s*\**\s*([\d.]+)")
+# A "[\d.]+" capture swallows a sentence-ending period, and float() then
+# raises: "equity_multiplier 1.5286. Margin-led" made the whole DuPont check
+# record a metric error instead of a verdict (MU fundamentals.md 2026-09-14).
+_ROE_RE = re.compile(r"\bROE\b\s*\**\s*~?\s*(\d+(?:\.\d+)?)\s*%")
+_NET_MARGIN_RE = re.compile(r"net_margin\s*\**\s*(\d+(?:\.\d+)?)")
+_AT_RE = re.compile(r"asset_turnover\s*\**\s*(\d+(?:\.\d+)?)")
+_EM_RE = re.compile(r"equity_multiplier\s*\**\s*(\d+(?:\.\d+)?)")
 _EV_RE = re.compile(r"\bEV\b(?!\s*/)[::]?\s*\**\s*\$?\s*\**\s*(\d[\d,]*)")
 _MCAP_RE = re.compile(r"(?i)market\s*cap[^0-9]{0,45}\$?\s*\**\s*(\d[\d,]*)")
 _NET_CASH_RE = re.compile(r"(?i)net\s*cash[^0-9]{0,20}\$?\s*([\d.]+)\s*B")
@@ -1089,8 +1329,8 @@ def _current_ratio_identity(report_text: str) -> list[VerifierClaim]:
 _ROA_RE = re.compile(r"(?i)\bROA\b[^\n0-9]{0,20}?(\d+(?:\.\d+)?)\s*%")
 # The DuPont decomposition inputs; accept the underscore tool form and the
 # spaced prose form ("net margin 0.637" / "net_margin 0.637").
-_ROA_NET_MARGIN_RE = re.compile(r"(?i)net[_\s]?margin\s*\**\s*[:=]?\s*([\d.]+)")
-_ROA_ASSET_TURNOVER_RE = re.compile(r"(?i)asset[_\s]?turnover\s*\**\s*[:=]?\s*([\d.]+)")
+_ROA_NET_MARGIN_RE = re.compile(r"(?i)net[_\s]?margin\s*\**\s*[:=]?\s*(\d+(?:\.\d+)?)")
+_ROA_ASSET_TURNOVER_RE = re.compile(r"(?i)asset[_\s]?turnover\s*\**\s*[:=]?\s*(\d+(?:\.\d+)?)")
 
 
 def _roa_consistency(report_text: str) -> list[VerifierClaim]:
@@ -1455,6 +1695,13 @@ _BAND_NOMINAL_RE = re.compile(r"nominal\s+(\d+(?:\.\d+)?)\s*%")
 _BAND_REALIZED_RE = re.compile(r"realized\s+(\d+(?:\.\d+)?)\s*%")
 _BAND_POINT_RE = re.compile(r"point value\s+([\d.,]+)\s+is\s+(INSIDE|OUTSIDE)")
 _BAND_COVERAGE_SLACK = 0.25
+# Only a CONFORMAL band carries a coverage promise. An option-implied
+# expected-move band ("band [814.32, 1024.45] (±11.4%)") is a different object
+# with no calibration pairs at all, and demanding coverage for it flagged MU
+# market.md twice on the 2026-09-14 batch.
+_CONFORMAL_BAND_RE = re.compile(
+    r"(?i)\b(?:valuation|conformal)\s+band\b|\bnominal\s+\d+(?:\.\d+)?\s*%"
+)
 
 
 def _tone_claim_conflict(report_text: str) -> list[VerifierClaim]:
@@ -1523,6 +1770,8 @@ def _valuation_band_conflict(report_text: str) -> list[VerifierClaim]:
     out: list[VerifierClaim] = []
     for line in report_text.splitlines():
         if "band" not in line.lower():
+            continue
+        if not _CONFORMAL_BAND_RE.search(line):
             continue
         pair = _BAND_PAIR_RE.search(line)
         if not pair:
@@ -2376,7 +2625,9 @@ def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
 # entry 1027.77 / stop 862.81 / 2R 1357.6891 / 3R 1522.6486 — the quoted
 # 3R is a 0.06% offset typo (1521.68 vs 1522.65). Catch it deterministically.
 _ENTRY_RE = re.compile(r"(?i)\bentry\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)")
-_STOP_RE = re.compile(r"(?i)\b(?:struct(?:ure)?\s*)?stop\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)")
+_STOP_RE = re.compile(
+    r"(?i)\b(?:struct(?:ure)?[\s_]*)?stop\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)"
+)
 # "2R" / "3R" / "T1(2R)" / "T2(3R)" label followed by its value(s). A swing
 # line often quotes a pair "2R/3R targets 1357.69 / 1521.68" — group 2 is the
 # label-specific value (the one after "/" for the 3R in a "A / B" pair).
@@ -2385,6 +2636,42 @@ _RMULT_RE = re.compile(
 )
 
 _RMULT_TOL = 0.002  # 0.2% — a real typo (0.06%) is far under; framework drift is not.
+
+# An entry stated as an average (a tranche plan's size-weighted entry), and a
+# risk stated per share. A line carrying both owns its own basis, so the
+# label's implied 2R/3R multiple no longer governs (get_tranche_plan: 1.8R /
+# 3.0R off avg 871.92 with risk/share 104.84 — MU market.md 2026-09-14).
+_ENTRY_AVG_RE = re.compile(
+    r"(?i)\b(?:avg|average)(?:\s+entry)?\s*[:=]?\s*\$?\s*(\d[\d,]*\.\d+)"
+)
+_RISK_PER_SHARE_RE = re.compile(
+    r"(?i)\brisk(?:\s*/\s*share)?\s*[:=]?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d+)"
+)
+# A stated reward multiple beside its own target. The decimal point is what
+# separates a written multiple ("T1 1857.88 (1.8R)") from the label itself
+# ("2R/3R targets"), which is not a claim about the basis.
+_RMULT_STATED_RE = re.compile(r"(?i)\b(\d\.\d+)\s*R\b")
+
+# The same R-label is quoted by DIFFERENT producers in one market report
+# (get_swing_set off the structure stop, get_swing_exits off the chandelier,
+# get_tranche_plan off an averaged entry). Two of those are two numbers by
+# design, so the pair reader compares only values quoted against the SAME tool
+# scope — the tool named on their own line. A report that names no tool keeps
+# the plain report-wide comparison.
+_MULTI_PRODUCER_METRICS = frozenset({"t1", "t2"})
+_TOOL_SCOPE_RE = re.compile(r"`?((?:get|compute|read|fetch)_[a-z0-9_]+)`?")
+
+
+def _tool_scoped_values(text: str, label: str) -> list[list[tuple[str, float]]]:
+    """Metric values grouped by the tool named on their line."""
+    groups: dict[str, list[tuple[str, float]]] = {}
+    for line in text.splitlines():
+        vals = _METRIC_VALUE_READERS[label](line)
+        if not vals:
+            continue
+        found = _TOOL_SCOPE_RE.search(line)
+        groups.setdefault(found.group(1) if found else "", []).extend(vals)
+    return list(groups.values())
 
 
 def _rmult_value(m: re.Match) -> float | None:
@@ -2413,32 +2700,55 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    en = _ENTRY_RE.search(report_text)
-    if not en:
-        return []
-    entry = float(en.group(1).replace(",", ""))
-    global_stop: float | None = None
-    gs = _STOP_RE.search(report_text)
-    if gs:
-        global_stop = float(gs.group(1).replace(",", ""))
     out: list[VerifierClaim] = []
+    spot = _primary_price(report_text)
     for line in report_text.splitlines():
         rs = list(_RMULT_RE.finditer(line))
         if not rs:
             continue
+        # Bind the pair on THIS line only. The report-wide first "entry ..."
+        # belongs to whichever tool quoted it first, and crossing it with
+        # another tool's stop invented five flags per symbol on the 2026-09-14
+        # batch while every quoted target was verbatim tool output.
         ls = _STOP_RE.search(line)
-        if ls:
-            line_stop = float(ls.group(1).replace(",", ""))
-        elif global_stop is not None:
-            line_stop = global_stop
+        if not ls:
+            continue
+        line_stop = float(ls.group(1).replace(",", ""))
+        em = _ENTRY_RE.search(line) or _ENTRY_AVG_RE.search(line)
+        if em is not None:
+            entry = float(em.group(1).replace(",", ""))
+        elif spot is not None:
+            entry = spot
         else:
             continue
         risk = entry - line_stop
         if risk <= 0:
             continue
+        # A plan line states its own risk basis and its own multipliers:
+        # get_tranche_plan scales T1/T2 off a size-weighted average entry at
+        # 1.8R / 3.0R, not off the label's implied 2R/3R.
+        stated = _RISK_PER_SHARE_RE.search(line)
+        own_basis = (
+            _ENTRY_AVG_RE.search(line) is not None
+            or _RMULT_STATED_RE.search(line) is not None
+            or (
+                stated is not None
+                and abs(float(stated.group(1).replace(",", "")) - risk) / risk <= 0.01
+            )
+        )
+        stated_mults = [float(x) for x in _RMULT_STATED_RE.findall(line)]
         for m in rs:
             quoted = _rmult_value(m)
             mult = 2 if m.group(1).upper() in ("2R", "T1") else 3
+            if own_basis:
+                implied = (quoted - entry) / risk
+                if 1.0 <= implied <= 4.0 and abs(implied * 10 - round(implied * 10)) / implied <= 0.01:
+                    continue
+            if any(
+                target > 0 and abs(quoted - target) / target <= _RMULT_TOL
+                for target in (entry + k * risk for k in stated_mults)
+            ):
+                continue
             expected = entry + mult * risk
             if expected <= 0:
                 continue

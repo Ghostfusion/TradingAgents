@@ -636,7 +636,11 @@ class TestSentimentAnalystAgent:
         from types import SimpleNamespace
 
         from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
+        from tradingagents.dataflows.config import set_config
 
+        # The exact leaf set is the gate-OFF baseline: an ambient
+        # enable_evidence_symmetry (operator .env) adds the macro leaf.
+        set_config({"enable_evidence_symmetry": False})
         monkeypatch.setattr(
             sentiment_mod, "get_news",
             SimpleNamespace(func=lambda t, s, e: "## QCOM News\nheadline #1"),
@@ -671,13 +675,84 @@ class TestSentimentAnalystAgent:
         assert leaves[1]["args"]["limit"] == 30
         assert len(leaves[1]["args_hash"]) == 12
 
+    def test_journals_macro_leaf_only_when_the_gate_is_on(self, monkeypatch):
+        """S11b for the sentiment stem (gate enable_evidence_symmetry).
+
+        SKHY 2026-09-14 cited "US 10-year above 5%" with no macro leaf in this
+        stem (the news analyst gets one from the gather; this node binds no
+        tools), and the verifier flagged it as UNSUPPORTED. On, the node fetches
+        the deterministic 10-year leaf and pins the prompt to it; off, the stem
+        is exactly what it was.
+        """
+        from types import SimpleNamespace
+
+        from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
+        from tradingagents.dataflows.config import set_config
+
+        monkeypatch.setattr(
+            sentiment_mod, "get_news", SimpleNamespace(func=lambda t, s, e: "news")
+        )
+        monkeypatch.setattr(
+            sentiment_mod,
+            "fetch_stocktwits_messages",
+            lambda t, limit=30, start_date=None, end_date=None: "st",
+        )
+        monkeypatch.setattr(
+            sentiment_mod,
+            "fetch_reddit_posts",
+            lambda t, start_date=None, end_date=None: "reddit",
+        )
+        calls: list = []
+        monkeypatch.setattr(
+            sentiment_mod,
+            "get_macro_indicators",
+            SimpleNamespace(
+                func=lambda ind, d, lb: (
+                    calls.append((ind, d, lb)),
+                    "**Latest:** 4.95 (2026-09-10)",
+                )[1]
+            ),
+        )
+
+        set_config({"enable_evidence_symmetry": False})
+        captured: dict = {}
+        out = create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+        assert [leaf["tool"] for leaf in out[TOOL_EVIDENCE_KEY]["sentiment"]] == [
+            "news_headlines",
+            "stocktwits_messages",
+            "reddit_posts",
+            "sentiment_computed",
+        ]
+        assert calls == []
+
+        set_config({"enable_evidence_symmetry": True})
+        captured = {}
+        out = create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+        leaves = out[TOOL_EVIDENCE_KEY]["sentiment"]
+        assert leaves[-1]["tool"] == "get_macro_indicators"
+        assert leaves[-1]["args"] == {
+            "indicator": "10y_treasury",
+            "curr_date": "2026-01-15",
+            "look_back_days": 30,
+        }
+        assert leaves[-1]["status"] == "ok"
+        # The 10-year leaf is what the prompt is pinned to.
+        assert calls == [("10y_treasury", "2026-01-15", 30)]
+        assert "MACRO MUSTS" in str(captured["prompt"])
+
     def test_journal_respects_summary_window_truncation(self, monkeypatch):
         from types import SimpleNamespace
 
         from tradingagents.agents.utils.evidence_gather import TOOL_EVIDENCE_KEY
         from tradingagents.dataflows.config import set_config
 
-        set_config({"analyst_forced_tools_summary_window": 12})
+        set_config(
+            {"analyst_forced_tools_summary_window": 12, "enable_evidence_symmetry": False}
+        )
         long = "X" * 500
         monkeypatch.setattr(sentiment_mod, "get_news", SimpleNamespace(func=lambda t, s, e: long))
         monkeypatch.setattr(

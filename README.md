@@ -30,6 +30,19 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-14] **The report verifier stopped flagging its own extraction artifacts** - adjudicating a 4-symbol batch (727 claims: 639 GROUNDED, 78
+  INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0 CONTRADICTED) showed the CONFLICT rows were mostly the scan misreading figures: comma-grouped
+  `$28,243,000,000` read as `28`, a label eating its value's leading digit (`bear 171.38` -> `71.38`), prose sliced into the reported value
+  (`rice (919.97`), `stoch` matching `stochrsi`, a VIF row's score read as the RSI level, `>= 1.3` read as a second RVOL, `12m` read as 12 million,
+  three labelled quarters read as one metric, and a `[\d.]+` capture swallowing a period (which silently disabled the DuPont identity check). The
+  R-multiple check also crossed one tool's entry with another's stop, and the band check demanded conformal coverage from the option-implied
+  expected-move band. Capture and binding are fixed (table/slash pair binding, per-tool scoping for T1/T2, conformal-only bands, line-local
+  R-multiple pairs, hardened floats): conflict rows over all 45 archived trees 409 -> 186, metric errors 0, and **0** R-multiple/band claims on the
+  four new trees (12 before). See [`CHANGELOG.md`](CHANGELOG.md); the advisory contract is unchanged - reports are never rewritten.
+- [2026-09-14] **The sentiment analyst can no longer cite a macro level it cannot show.** The news stem gets a deterministic 10-year FRED leaf
+  (`get_macro_indicators`, S11b under `enable_evidence_symmetry`); the sentiment stem binds no tools, so SKHY 2026-09-14 stated "US 10-year above 5%"
+  with no leaf at all and the verifier flagged it. Under the same gate the sentiment node now fetches that leaf once, journals it under
+  `tool_evidence.sentiment`, puts it in the prompt, and forbids recalled macro figures (a headline that disagrees must be reported as disagreeing).
 - [2026-09-13] **S11c's mirrored evidence budget is reachable** - the paired-role discretionary mirror was
   implemented but read an undeclared, env-unreachable key, so it could never activate. `evidence_symmetry_pairs`
   (JSON `{roles, budget}` specs, `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS`) now drives it: a surplus discretionary call

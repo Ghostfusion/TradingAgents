@@ -235,6 +235,35 @@ def test_sentiment_prompt_binds_verdict_to_computed_score():
     assert "### Deterministic computed sentiment" not in plain
 
 
+def test_sentiment_prompt_pins_macro_to_the_leaf():
+    """SKHY 2026-09-14: the sentiment stem stated "US 10-year above 5%" while no
+    macro leaf existed anywhere in its evidence (the news stem had one), so the
+    verifier flagged the line as UNSUPPORTED. With the gated leaf present the
+    prompt carries it and forbids recalled levels; without it the prompt is
+    byte-identical to the pre-fix one."""
+    from tradingagents.agents.analysts.sentiment_analyst import _build_system_message
+
+    blocks = {
+        "ticker": "SKHY",
+        "start_date": "2026-09-07",
+        "end_date": "2026-09-14",
+        "news_block": "",
+        "stocktwits_block": "",
+        "reddit_block": "",
+    }
+    with_leaf = _build_system_message(
+        **blocks, macro_block="**Latest:** 4.95 (2026-09-10) | Change +0.23"
+    )
+    assert "MACRO MUSTS" in with_leaf
+    assert "4.95" in with_leaf
+    assert "must be quoted from the macro leaf above" in with_leaf
+
+    without = _build_system_message(**blocks)
+    assert "MACRO MUSTS" not in without
+    assert "Macro rate level" not in without
+    assert without == _build_system_message(**blocks, macro_block="")
+
+
 def test_internal_conflict_same_metric_two_values():
     text = (
         "DCF fair value is $80.76.\n"
@@ -292,6 +321,81 @@ def test_cost_models_import_reachable():
     from tradingagents.agents.utils import report_verifier as R2
 
     assert hasattr(R2, "internal_conflicts") or hasattr(R2, "_internal_conflicts")
+
+
+def test_internal_conflict_reads_comma_grouped_figures():
+    # "$28,243,000,000" was read as "28" (the digits before the first comma),
+    # so the EPS looked like a dual value against the net income.
+    t = "| Net Income / Diluted EPS | $28,243,000,000 / $24.67 |\nDiluted EPS 24.67.\n"
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_label_eats_no_leading_digit():
+    # "bear 171.38" used to be read as 71.38, making one number look like two
+    # conflicting scenarios (MU fundamentals.md 2026-09-14).
+    t = (
+        "- get_scenario_dcf: bear 171.38 / base 194.96 / bull 227.07\n"
+        "| Scenario DCF | bear 171.38 / base 194.96 / bull 227.07 |\n"
+    )
+    labels = {c.claim.split("'")[1] for c in rv._internal_conflicts(t)}
+    assert not {"scenario dcf bear", "scenario dcf base", "scenario dcf bull"} & labels
+
+
+def test_internal_conflict_stochrsi_is_not_stochk():
+    # The label "stoch" also matched "stochrsi", whose 0.0 then read as a
+    # conflicting %K (MU market.md 2026-09-14).
+    t = "- stochK **12.42** — oversold. `get_mean_reversion_tech`: stochrsi **0.0**\n"
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_skips_thresholds_and_vif_rows():
+    # ">= 1.3" is a threshold, and a VIF row reuses the indicator label for a
+    # multicollinearity score (MU market.md L7/L83, 2026-09-14).
+    t = "- rvol =0.6390 (mean-reversion). | VIF | rsi 5.8 HIGH, mom 5.8 HIGH |\n"
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_level_metric_ignores_growth_percent():
+    # "Diluted EPS +1368.5% YoY" is a growth rate, not a second EPS value.
+    t = "Diluted EPS +1368.5% YoY.\nDiluted EPS $24.67.\n"
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_twelve_month_window_is_not_twelve_million():
+    # "Insider net 12m" is a window label; only a fraction scales in lower case.
+    t = "| Insider net 12m | +1,504,467 shares |\nInsider net 1,504,467 shares.\n"
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_scopes_multi_producer_r_targets():
+    # Two swing frameworks quote their own T1/T2 by design (get_swing_set off
+    # the structure stop, get_tranche_plan off an averaged entry).
+    t = (
+        "`get_swing_set`: T1(2R) 1042.0785, T2(3R) 1103.1328\n"
+        "`get_tranche_plan`: T1 1060.63 / T2 1186.44\n"
+    )
+    labels = {c.claim.split("'")[1] for c in rv._internal_conflicts(t)}
+    assert "t1" not in labels and "t2" not in labels
+
+
+def test_expected_move_band_is_not_a_conformal_band():
+    # get_expected_move's option-implied band has no calibration pairs, so it
+    # owes no realized coverage (MU market.md 2026-09-14).
+    assert rv._valuation_band_conflict(
+        "- Last close 919.38; band [814.32, 1024.45] (±11.4%)\n"
+    ) == []
+
+
+def test_r_multiple_identity_binds_the_lines_own_pair():
+    # The structure stop + the report's own spot resolve the swing targets, and
+    # the tranche line states its own averaged entry and risk basis.
+    text = (
+        "price 919.97 ... structure_stop 858.9157 ... "
+        "T1(2R) 1042.0785, T2(3R) 1103.1328\n"
+        "`get_tranche_plan`: P1 919.97 / P2 876.29 / P3 832.60, stop 767.08, "
+        "avg 871.92, risk/share 104.84, T1 1060.63 / T2 1186.44\n"
+    )
+    assert rv._r_multiple_identity(text) == []
 
 
 def test_internal_conflict_atr_two_windows():
