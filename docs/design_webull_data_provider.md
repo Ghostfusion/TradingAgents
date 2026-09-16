@@ -172,6 +172,56 @@ the catalyst overlay), and - once entitled - NOII auction imbalance and Footprin
 one endpoint that *proves* the entitlement boundary is `footprints` with its explicit
 `403 MARKET_DATA_NOT_SUBSCRIBED`.
 
+## Backup plan: the verified-working endpoints behind the chains in force today
+
+The chains below are the **effective** ones - `DEFAULT_CONFIG` merged with `.env`, read through the
+app's own loader (`dataflows.config.get_config()`), not the documented defaults. "Repo method" is
+the name in `dataflows/interface.py::CATEGORIES`, i.e. exactly what a `webull` entry in
+`VENDOR_METHODS` has to implement for that chain to dispatch to it. Nothing here is wired yet.
+
+### Stocks market data
+
+| Webull endpoint (verified working) | Repo method -> category | Chain in force today | Where Webull would sit |
+|---|---|---|---|
+| `POST /market-data/stocks/bars/list` - US_STOCK + US_ETF, <=20 symbols/call, count <=1200, D/W/M/Y forward-adjusted, M1-M240 unadjusted, `trading_sessions` PRE/RTH/ATH/OVN, `real_time_required` sets the window | `get_stock_data` -> `core_stock_apis` | `eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata` | **last** (a 7th fallback), or second behind `eodhd` when moomoo's connection budget is the binding constraint (`MAX_PARALLEL_WORKERS=4` exists for moomoo) |
+| `GET /market-data/stocks/snapshots/list` - `price/open/high/low/volume/change/ask/bid/ask_size/bid_size/bps/lot_size` | no dedicated method today (the quote paths read the provider's latest bar inside `_ohlcv`, plus the intraday vendor reads) | same chain | feeds the OHLCV refresh / `market_data_validator`; needs no chain entry until a quote method exists |
+| `GET /market-data/stocks/ticks/list` | - | - | not consumed: intraday ticks belong to the execution side, not research |
+| `GET /market-data/screeners/gainers-losers/list`, `top-actives/list`, `week52-high-low/list`, `high-dividend-ranks/list` (200 rows each) | `screen_equities` (equity_screener), `get_market_movers` (market_movers) | `yfinance` / `yfinance` | **co-equal or first**: both categories rest on one free vendor today, and these feeds are the same product |
+| `GET /market-data/screeners/market-sectors/list` (+ `/get` detail) | same two methods (sector + movers context) | `yfinance` | co-equal |
+| `GET /trading/instruments/stocks/profiles/list` - 1000 rows with `exchange_code`, `shortable`, `marginable`, `lot_size`, `sub_category` (`ETF`), `pagination_key` | `get_exchange_symbols` -> `exchange_symbols` | `eodhd` | **a second universe source**; also the cheapest ETF classification (`sub_category: ETF`) for the ETF engine and symbol validation |
+
+### Fundamentals
+
+| Webull endpoint (verified working) | Repo method -> category | Chain in force today | Notes |
+|---|---|---|---|
+| `GET /market-data/fundamentals/company-profiles/get` | `get_fundamentals` -> `fundamental_data` | `moomoo,yfinance,tiingo,alpha_vantage` | profile fields (ceo, employees, establish_date, address); also input for `classify_security` |
+| `GET /market-data/fundamentals/indicators/get` | `get_fundamentals` / `get_basic_financials` -> `fundamental_data` | same | a `values` map (cap_surplus_ps, debt_to_assets, diluted_eps_incl_extra, ...); the provider must state its date - the map carries `currency` but no period tag of its own |
+| `GET /market-data/fundamentals/analysis/ratings/get` + `analysis/target-prices/get` | `get_analyst_ratings` -> `analyst_ratings` | `moomoo,finnhub,yfinance` | buy/hold/sell counts and mean/high/low, each with `effective_start_date` (a basis the reports can quote) |
+| `GET /market-data/fundamentals/earnings-calendars/list` + `dividend-calendars/list` | `get_earnings_calendar` -> `earnings_calendar`; the dividend side -> `get_corporate_actions` -> `corporate_actions` | `moomoo,finnhub,yfinance` / `eodhd,moomoo` | dated rows |
+| `GET /market-data/fundamentals/financial-alerts/get` | catalyst overlay inputs (`enable_events`, `catalyst_window_days`) | `moomoo` (earnings_catalyst) | next report date + `eps_est` vs `eps_ly` + `rev_est` vs `rev_ly` - precisely the overlay's inputs |
+| `GET /market-data/fundamentals/forecast-eps/get` | forward-EPS reads (`fundamental_data`, `earnings_surprise`) | `moomoo` | 5 rows |
+| `GET /market-data/fundamentals/filings/list` | `get_sec_filings` -> `sec_filings` | `sec_edgar` | keep `sec_edgar` first (free, richer); Webull is the fallback |
+| `GET /market-data/fundamentals/capital-flows/get` | `get_capital_flow` -> `capital_flow` | **`moomoo` only** | the only alternative source in the project today - the highest-value single entry in this table |
+| `GET /market-data/fundamentals/fund-brief/get` + `fund-performances/get` (`US_ETF`, e.g. IEI) | ETF-engine inputs (`enable_etf_engine`) | the engine fetches its own | aum/custodian/objective/launch_date + 1m-3m-6m-1y-3y-5y returns |
+| ~~`income-statements/get`, `balance-sheets/get`, `cash-flows/get`~~ | `get_income_statement`, `get_balance_sheet`, `get_cashflow` -> `fundamental_data` | `moomoo,yfinance,tiingo,alpha_vantage` | **excluded from the backup set**: verified empty in the sandbox for every symbol/type/count variant. These are the rows the repo would benefit from most, so they are the first thing a production key must re-test (open question 1) |
+
+### How it would be placed (still no code)
+
+- **Append last** - `...,webull` on `core_stock_apis` and `fundamental_data`: zero behavioural change
+  while it is only a fallback, and the first thing to A/B.
+- **Co-equal or first** where Webull is the only alternative (`capital_flow`) or where the category
+  rests on a single free vendor for the same product (`equity_screener`, `market_movers`,
+  `exchange_symbols`).
+- **A/B without touching chains**: `batch.py --vendor webull`. A preset must cover every category
+  key - `tests/test_batch_vendor_preset.py` enforces that - so the preset is the honest way to
+  compare a whole run side by side.
+- **Per-tool placement** exists too (`tool_vendors`), e.g. pin only `get_analyst_ratings` to Webull
+  without moving the category.
+- Counted from the sweep: of the two families, **3** stocks-market-data endpoints, **6**
+  screener/sector feeds and **12** fundamentals endpoints are verified working and have a place
+  above; the three statement endpoints are the only exclusion, and ticks + the instrument master are
+  additive rather than replacements.
+
 ## Constraints and blockers
 
 1. **US-only.** `US_STOCK`/`US_ETF` categories, US options/futures/crypto/event contracts.
@@ -226,12 +276,15 @@ tradingagents/dataflows/webull.py          the category functions the router dis
   `NO_DATA_AVAILABLE`; `WebullRateLimitError` -> fall through; `NoMarketDataError` (non-US
   symbol, no rows) -> `NO_DATA_AVAILABLE`.
 
-`webull.py` (each returns the repo's canonical text/JSON shape for its category)
-
-- `webull_available()`, `get_stock_data_webull(symbol, start, end)`, `get_snapshot_webull`,
-  `get_fundamentals_webull`, `get_income_statement_webull(freq)`, `get_balance_sheet_webull`,
-  `get_cashflow_webull`, `get_analyst_ratings_webull`, `get_earnings_calendar_webull`,
-  `get_capital_flow_webull`, `get_market_movers_webull`.
+`webull.py` - one function per **method name** in `CATEGORIES`, named `<method>_webull` (the repo
+convention: `get_stock_data_moomoo`, `get_fundamentals_moomoo`, ...), registered as
+`VENDOR_METHODS["webull"]`. The backup table fixes the set: `get_stock_data`, `get_fundamentals`,
+`get_basic_financials`, `get_analyst_ratings`, `get_earnings_calendar`, `get_corporate_actions`,
+`get_capital_flow`, `get_sec_filings`, `screen_equities`, `get_market_movers`,
+`get_exchange_symbols` - plus `webull_available()` for the router's provider check. The three
+statement methods (`get_income_statement`, `get_balance_sheet`, `get_cashflow`) stay unimplemented
+until a production key fills the statement gap (open question 1), so a chain can never quietly
+prefer a source that returns nothing for them.
 
 ### Mapping rules that matter here
 
@@ -292,7 +345,9 @@ piece this repo's basis work pointed at, and it is the cheapest way to get a pro
 states its period instead of merging four payloads last-writer-wins. Keep EODHD for OHLCV
 breadth, keep moomoo for the non-US universe, skip the news endpoint (it is an LLM summary, not
 a feed), skip the Display Solution families (wrong product for non-display analytics), and treat
-streaming and NOII/Footprint as separate, later decisions.
+streaming and NOII/Footprint as separate, later decisions. Start from the backup table: the *append-last* entries first (bars
+behind `eodhd`, fundamentals behind `moomoo`), then the three where Webull is the only alternative
+or a second source (`capital_flow`, `equity_screener`/`market_movers`, `exchange_symbols`).
 
 The two things that can still kill it: entitlement economics (open question 5) and the 15-day
 idle token invalidation (constraint 3) - the first is a purchase decision, the second is a
