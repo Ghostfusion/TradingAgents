@@ -29,7 +29,13 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 ANALYSTS = REPO / "tradingagents" / "agents" / "analysts"
 
-MARKET_CEILING = 40_000
+# 40_000 -> 40_300 (2026-09-16, deliberate): four tool-guidance lines gained the two
+# argument contracts that produced wrong numbers in the reports - every `*_pct`
+# argument is a FRACTION (0.01 = 1%) and the exit tools MEASURE their price/ATR when
+# given a ticker (NVDA 2026-09-15 read a 1% proposal as 100% and passed an invented
+# atr=7.0). The wording was trimmed to the minimum that carries both facts; the
+# slack is now 69 chars, so the next growth must trim something or raise this again.
+MARKET_CEILING = 40_300
 MARKET_BULLET_LIMIT = 95
 LONGEST_BULLET_LIMIT = 523
 BULLET_RE = re.compile(r"^\s*-\s*[a-z_]+\s*\(")

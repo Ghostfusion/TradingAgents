@@ -54,6 +54,18 @@ _NO_MARKUP_INSTRUCTION = (
     "as text is not executed, and your answer is read by a human."
 )
 
+# Appended to every system directive as well: the two argument traps that
+# produced wrong numbers in the reports. Every ``*_pct`` argument is a fraction
+# (the gate read a 1% proposal as 100% and REJECTed it, NVDA 2026-09-15), and a
+# market level the model supplies itself is an invented number that the tool
+# then prints as if it were computed (the same run passed atr=7.0).
+_LEVEL_BASIS_INSTRUCTION = (
+    " Every argument named *_pct, and every size or drawdown, is a FRACTION of "
+    "capital: 0.01 means 1%, not 1. Never pass a price, ATR or other market "
+    "level you did not receive from a tool - pass ticker=<symbol> wherever a "
+    "tool can measure it instead."
+)
+
 # Risk toolset for the 3 risk debators (aggressive/conservative/neutral).
 # All wrap deterministic strategies over the run-level OHLCV cache or config;
 # the LLM grounds every risk number it cites in one of these.
@@ -304,7 +316,7 @@ def run_tool_loop(
         "available tools before asserting a VaR/CVaR, stop, position-size, "
         "liquidity, tail, credit or tranche figure. Never invent a computed "
         "value; if a tool returns 'unavailable', say so explicitly."
-    )) + _NO_MARKUP_INSTRUCTION
+    )) + _NO_MARKUP_INSTRUCTION + _LEVEL_BASIS_INSTRUCTION
     messages = [SystemMessage(content=sys), HumanMessage(content=prompt_text)]
     executor = ToolExecutor(tools)
     try:

@@ -553,7 +553,87 @@ def test_exit_check_returns_stop_target_action():
 
 def test_exit_check_requires_positive_atr():
     out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 0.0})
-    assert "atr must be > 0" in out
+    assert "no usable ATR" in out
+    # no levels at all (and no ticker to measure them) is an explicit refusal
+    out = T.get_exit_check.invoke({"entry": 100.0})
+    assert "no usable ATR" in out and "ticker" in out
+
+
+def test_exit_check_measures_levels_when_given_a_ticker(monkeypatch):
+    """The ATR must come from the run's own series, not from the caller.
+
+    NVDA 2026-09-15: the trader's verification pass passed ``atr=7.0`` - a value
+    no tool in that conversation had produced - and the exit arithmetic printed
+    it as a computed check.
+    """
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    measured = T._measured_levels("NVDA")
+    out = T.get_exit_check.invoke({"entry": 100.0, "ticker": "NVDA", "atr": 7.0})
+    assert "measured from NVDA" in out
+    assert "caller atr=7.00 ignored" in out
+    assert f"target={100.0 + 4.0 * measured['atr']:.2f}" in out
+    assert "target=128.00" not in out  # 100 + 4*7.0: the invented ATR
+
+
+def test_exit_check_labels_caller_supplied_levels():
+    """Without a ticker the levels are named as caller-supplied, so a report
+    cannot present an invented ATR as a measurement."""
+    out = T.get_exit_check.invoke({"entry": 100.0, "close": 95.0, "atr": 3.0})
+    assert "CALLER-SUPPLIED" in out and "not measured" in out
+    assert "ticker" in out
+
+
+def test_exit_plan_measures_levels_when_given_a_ticker(monkeypatch):
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: _vdip_ohlcv())
+    out = T.get_exit_plan.invoke(
+        {"entry": 100.0, "ticker": "NVDA", "atr": 7.0, "stop": 97.0}
+    )
+    assert "exit_plan" in out and "measured from NVDA" in out
+    assert "caller atr=7.00 ignored" in out
+
+
+def test_risk_gate_refuses_a_size_written_as_a_percent():
+    """``size_pct=1.0`` for a 1% proposal was read as 100% and REJECTed
+    (NVDA 2026-09-15) - a verdict the desk never issued, which the report then
+    cited. The gate must refuse the input instead of answering on it."""
+    for value in (1.0, 1.5, 40):
+        out = T.get_risk_gate.invoke({"size_pct": value})
+        assert "unavailable" in out and "FRACTION" in out, out
+        assert "REJECT" not in out, out
+    assert "0.01 for a 1% position" in T.get_risk_gate.invoke({"size_pct": 1.0})
+    # the fraction form still gates: below the cap it passes, above it rejects
+    assert "PASS" in T.get_risk_gate.invoke({"size_pct": 0.01})
+
+
+def test_risk_gate_refuses_percent_rate_arguments():
+    out = T.get_risk_gate.invoke({"size_pct": 0.01, "cvar_pct": 5})
+    assert "unavailable" in out and "cvar_pct" in out
+    # a legitimate 1.0 boundary on a rate argument is not a size and stays valid
+    assert "unavailable" not in T.get_risk_gate.invoke({"size_pct": 0.01, "sector_pct": 1.0})
+
+
+def test_sizing_tools_refuse_percent_arguments():
+    out = T.get_position_sizing.invoke({"confidence": 0.5, "stop_dist_pct": 8.371})
+    assert "unavailable" in out and "stop_dist_pct" in out
+    out = T.get_position_sizing.invoke(
+        {"confidence": 0.5, "stop_dist_pct": 0.08371, "risk_per_trade": 1.5}
+    )
+    assert "unavailable" in out and "risk_per_trade" in out
+    out = T.get_composite_sizing.invoke({"confidence": 0.5, "stop_dist_pct": 5.0})
+    assert "unavailable" in out and "FRACTION" in out
+    # the fraction form still sizes
+    ok = T.get_position_sizing.invoke(
+        {"confidence": 0.5, "stop_dist_pct": 0.08371, "risk_per_trade": 0.015}
+    )
+    assert "position size:" in ok
+
+
+def test_fixed_risk_size_names_the_unit_error():
+    out = T.get_fixed_risk_size.invoke(
+        {"equity": 100000, "risk_frac": 1.5, "entry": 100.0, "stop_loss": 95.0}
+    )
+    assert "FRACTION" in out and "risk_frac" in out
+    assert "must be positive" not in out
 
 
 def test_exit_plan_breakeven_and_giveback():

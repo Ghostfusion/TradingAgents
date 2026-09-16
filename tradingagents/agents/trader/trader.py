@@ -138,7 +138,11 @@ def create_trader(llm, backup_llm=None):
                 "mis-sized, say so with the computed numbers. Output a compact "
                 "corrected trade spec: entry=... stop=... size_pct=... rr=... "
                 "+ reasons citing the tool outputs. If a tool is 'unavailable' "
-                "or no proposal levels exist, output 'verification unavailable'."
+                "or no proposal levels exist, output 'verification unavailable'.\n\n"
+                f"Pass ticker={company_name} to the exit tools so the current price "
+                "and ATR are MEASURED from the run's own series, and never pass a "
+                "price or ATR you did not receive from a tool. Every sizing "
+                "argument is a fraction of capital: 0.01 means 1%."
             )
             verification, _t = run_tool_loop(
                 llm,

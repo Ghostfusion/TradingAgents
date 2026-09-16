@@ -55,6 +55,127 @@ def _load_ohlcv_df(ticker: str) -> object:
     return load_ohlcv(ticker, datetime.now().strftime("%Y-%m-%d"))
 
 
+def _fraction_errors(specs) -> str:
+    """Contract errors for fraction arguments that arrived as percent numbers.
+
+    Every sizing/risk argument in this module is a FRACTION (``0.01`` = 1%),
+    while its name ends in ``_pct`` — so a caller who reads the name passes the
+    percent number, and the tool then computes a verdict on an input nobody
+    proposed. Measured 2026-09-15 (NVDA): the trader's verification pass passed
+    ``size_pct=1.0`` for a **1%** proposal and ``get_risk_gate`` answered
+    ``size 100.0% > cap 30.0%`` — a REJECT the desk never issued, which the
+    report then cited; the same trap silently capped ``risk_per_trade``
+    (1.5 = 150%) and collapsed ``stop_dist_pct`` (8.371 vs 0.08371). Fail
+    closed, never coerce: a value that cannot be the fraction it claims is
+    refused with the corrected form, and no verdict is produced from it.
+
+    ``specs`` maps an argument name to ``(value, example, strictly_below_one)``:
+
+    - ``strictly_below_one=True`` for a POSITION SIZE / risk budget, where
+      exactly ``1.0`` is the ambiguous value (a 100% position, above every cap
+      and never a real proposal — but also the shape of "1%" written as a
+      percent number). Refused from ``1.0`` up.
+    - ``False`` for rate-like arguments (drawdown, CVaR, book or sector
+      exposure, a cap), where ``1.0`` is a legitimate boundary value and only
+      ``> 1.0`` is impossible.
+
+    Returns ``""`` when every value is in range, else the messages joined with
+    ``" | "``.
+    """
+    errors = []
+    for name, (value, example, strictly_below_one) in specs.items():
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            errors.append(f"{name} must be a number as a fraction of capital ({example})")
+            continue
+        limit_exceeded = number > 1.0 or (strictly_below_one and number == 1.0)
+        if limit_exceeded or number < 0.0:
+            errors.append(
+                f"{name} must be a FRACTION of capital, not a percent number: got "
+                f"{number:g}, and 1.0 would mean 100% (pass {example})"
+            )
+    return " | ".join(errors)
+
+
+def _measured_levels(ticker: str) -> dict:
+    """The run's own last close and 14-day ATR for a ticker.
+
+    Returns ``{"close", "atr", "basis", "note"}`` — ``close``/``atr`` are None
+    when the series cannot be measured, ``basis`` is the provenance phrase the
+    caller prints, ``note`` is the shared scale/staleness advisory.
+
+    The exit-arithmetic tools take their levels as arguments, so without this a
+    model supplies its own ATR and a "computed" check prints a number no vendor
+    ever returned (NVDA 2026-09-15: the verification pass passed ``atr=7.0``,
+    which no tool in that conversation had produced). Measured values therefore
+    WIN over caller-supplied ones, and the caller reports which basis it used.
+    """
+    try:
+        from tradingagents.strategies.size import atr as _atr
+    except Exception as exc:  # noqa: BLE001
+        return {"close": None, "atr": None, "basis": f"measurement unavailable ({exc})", "note": ""}
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    if len(closes) < 15:
+        return {
+            "close": None,
+            "atr": None,
+            "basis": f"measurement unavailable ({ticker.upper()}: {len(closes)} bars)",
+            "note": "",
+        }
+    try:
+        measured_atr = float(_atr(data.get("highs") or [], data.get("lows") or [], closes, window=14))
+    except Exception as exc:  # noqa: BLE001
+        return {"close": None, "atr": None, "basis": f"measurement unavailable ({exc})", "note": ""}
+    return {
+        "close": float(closes[-1]),
+        "atr": measured_atr,
+        "basis": f"measured from {ticker.upper()} daily bars (last close, 14d ATR)",
+        "note": _scale_note(ticker, closes),
+    }
+
+
+def _resolve_exit_levels(ticker, close, atr) -> dict:
+    """The levels an exit-arithmetic tool should use, with their provenance.
+
+    Returns ``{"close", "atr", "basis", "note"}``. With a ticker, the run's own
+    series WINS over whatever the caller passed, and the ignored caller values
+    are named in ``basis``; without one, ``basis`` says the levels are
+    caller-supplied so a report can never present an invented number as a
+    measurement.
+    """
+    if ticker:
+        measured = _measured_levels(ticker)
+        if measured["close"] is not None:
+            ignored = []
+            if atr is not None and abs(float(atr) - measured["atr"]) > 1e-9:
+                ignored.append(f"caller atr={float(atr):.2f} ignored")
+            if close is not None and abs(float(close) - measured["close"]) > 1e-9:
+                ignored.append(f"caller close={float(close):.2f} ignored")
+            return {
+                "close": measured["close"],
+                "atr": measured["atr"],
+                "basis": measured["basis"] + (f"; {'; '.join(ignored)}" if ignored else ""),
+                "note": measured["note"],
+            }
+        basis = f"{measured['basis']} - using the caller-supplied levels"
+    else:
+        supplied = []
+        if close is not None:
+            supplied.append(f"close={float(close):.2f}")
+        if atr is not None:
+            supplied.append(f"atr={float(atr):.2f}")
+        basis = (
+            "levels CALLER-SUPPLIED ("
+            + (", ".join(supplied) if supplied else "none")
+            + ") - not measured; pass ticker=<symbol> to measure the ATR"
+        )
+    return {"close": close, "atr": atr, "basis": basis, "note": ""}
+
+
 def _scale_note(ticker: str, closes: list) -> str:
     """Price-scale/staleness advisory vs the run's verified close.
 
@@ -607,6 +728,13 @@ def get_position_sizing(
         from tradingagents.strategies.size import kelly_fraction, risk_of_ruin
     except Exception as exc:  # noqa: BLE001
         return f"position sizing unavailable: {exc}"
+    err = _fraction_errors({
+        "stop_dist_pct": (stop_dist_pct, "0.05 for a 5% stop", True),
+        "risk_per_trade": (risk_per_trade, "0.01 for a 1% risk budget", True),
+        "max_position_pct": (max_position_pct, "0.30 for a 30% cap", False),
+    })
+    if err:
+        return f"position sizing unavailable: {err}"
     if stop_dist_pct is None or stop_dist_pct <= 0:
         return "position sizing unavailable: stop_dist_pct must be > 0 (e.g. 0.05 for a 5% stop)."
     kelly = kelly_fraction(confidence, odds)
@@ -652,6 +780,14 @@ def get_composite_sizing(
     proposing a concrete size; the composed risk gate stays the authority.
     """
     from tradingagents.strategies.size import composite_position_size
+
+    err = _fraction_errors({
+        "stop_dist_pct": (stop_dist_pct, "0.05 for a 5% stop", True),
+        "risk_per_trade": (risk_per_trade, "0.01 for a 1% risk budget", True),
+        "max_position_pct": (max_position_pct, "0.30 for a 30% cap", False),
+    })
+    if err:
+        return f"composite sizing unavailable: {err}"
 
     r = composite_position_size(
         confidence=confidence, odds=odds, stop_dist_pct=stop_dist_pct,
@@ -745,6 +881,21 @@ def get_risk_gate(
         from tradingagents.strategies.risk_governor import build_risk_snapshot, govern
     except Exception as exc:  # noqa: BLE001
         return f"risk gate unavailable: {exc}"
+    # A percent number in a fraction argument silently changes the verdict (a
+    # 1% proposal read as 100% REJECTs), so refuse it before the governor runs.
+    err = _fraction_errors({
+        "size_pct": (size_pct, "0.01 for a 1% position", True),
+        "cvar_pct": (cvar_pct, "0.02 for a 2% tail budget", False),
+        "drawdown_pct": (drawdown_pct, "0.20 for a 20% drawdown", False),
+        "book_total_pct": (book_total_pct, "0.40 for a 40% book", False),
+        "daily_loss_pct": (daily_loss_pct, "0.02 for a 2% loss", False),
+        "hwm_drawdown_pct": (hwm_drawdown_pct, "0.20 for a 20% drawdown", False),
+        "capital_at_risk_pct": (capital_at_risk_pct, "0.05 for a 5% worst case", False),
+        "risk_cap_pct": (risk_cap_pct, "0.015 for a 1.5% budget", False),
+        "sector_pct": (sector_pct, "0.20 for a 20% sector exposure", False),
+    })
+    if err:
+        return f"risk gate unavailable: {err}"
     # ``drawdown_pct`` is a STATE input, not a proposal, and this tool cannot
     # read the run's measured book drawdown - so a caller-supplied value never
     # decides the verdict here. It used to: NVDA 2026-09-12 the model passed
@@ -1822,20 +1973,49 @@ def get_form4_insider(
 @tool
 def get_exit_check(
     entry: Annotated[float, "entry price of the position"],
-    close: Annotated[float, "current price"],
-    atr: Annotated[float, "current ATR (use get_swing_set / get_volatility_contraction)"],
+    close: Annotated[
+        float | None,
+        "current price; omit when ticker is passed (measured from the run's series)",
+    ] = None,
+    atr: Annotated[
+        float | None,
+        "ATR a tool returned (get_swing_set / get_volatility_contraction); omit when ticker "
+        "is passed. A measured ATR wins and a conflicting caller one is reported as ignored",
+    ] = None,
     target_mult: Annotated[float, "ATR multiple for the profit target, default 4.0"] = 4.0,
     breakeven_cushion: Annotated[
         float, "ATRs above entry for stop-to-breakeven, default 1.0"
     ] = 1.0,
+    ticker: Annotated[
+        str | None,
+        "ticker to MEASURE the current price and 14d ATR from the run's own daily series "
+        "(preferred: a caller-supplied ATR is not verifiable)",
+    ] = None,
 ) -> str:
-    "Deterministic exit state for a held long position: stop-to-breakeven, ATR target, holding action."
+    """Deterministic exit state for a held long position: stop-to-breakeven, ATR target, holding action.
+
+    Pass ``ticker`` and both the current price and the ATR are MEASURED from the
+    run's own daily series (a conflicting caller value is reported as ignored).
+    Called without a ticker the output states that its levels are
+    caller-supplied, because an ATR no tool produced is an invented number
+    rather than a computed check (NVDA 2026-09-15: the trader's verification
+    pass passed ``atr=7.0``, a value no tool in that conversation had returned).
+    Everything is advisory: the arithmetic is exact, the inputs decide whether
+    it means anything.
+    """
     try:
         from tradingagents.strategies.exits import exit_check
     except Exception as exc:  # noqa: BLE001
         return f"exit check unavailable: {exc}"
-    if atr is None or atr <= 0:
-        return "exit check unavailable: atr must be > 0."
+    levels = _resolve_exit_levels(ticker, close, atr)
+    close, atr = levels["close"], levels["atr"]
+    if atr is None or float(atr) <= 0:
+        return (
+            "exit check unavailable: no usable ATR - pass ticker=<symbol> to measure it, "
+            "or an atr=<value> a tool returned."
+        )
+    if close is None:
+        return "exit check unavailable: no current price - pass ticker=<symbol> or close=<price>."
     r = exit_check(
         float(entry),
         float(close),
@@ -1846,8 +2026,8 @@ def get_exit_check(
     return (
         f"exit: breakeven_stop={r['breakeven_stop']:.2f} target={r['target']:.2f} "
         f"stop_hit={r['stop_hit']} target_hit={r['target_hit']} "
-        f"action={r['holding_action']}"
-    )
+        f"action={r['holding_action']} ({levels['basis']})"
+    ) + levels["note"]
 
 
 @tool
@@ -3608,19 +3788,32 @@ def get_trailing_exit(
 @tool
 def get_exit_plan(
     entry: Annotated[float, "entry price"],
-    atr: Annotated[float, "ATR at exit decision"],
-    current: Annotated[float, "current price"],
+    atr: Annotated[
+        float | None,
+        "ATR a tool returned; omit when ticker is passed. A measured ATR wins and a "
+        "conflicting caller one is reported as ignored",
+    ] = None,
+    current: Annotated[
+        float | None, "current price; omit when ticker is passed (measured)"
+    ] = None,
     peak: Annotated[float, "highest price since entry, default = current"] = 0.0,
     stop: Annotated[float | None, "entry stop price, for the R-based BE rule"] = None,
     giveback_pct: Annotated[float, "margin give-back fraction, default 0.30"] = 0.30,
+    ticker: Annotated[
+        str | None,
+        "ticker to MEASURE the current price and 14d ATR from the run's own daily series "
+        "(preferred: a caller-supplied ATR is not verifiable)",
+    ] = None,
 ) -> str:
     """Trade-management exit arithm (B3 + Lean L4).
 
     Combines the breakeven rule (move to BE only after confirmation - 1R or a
     higher low, never too early) and the margin-giveback stop (a runner that
     has surrendered a set fraction of its best peak gain is exited) into one
-    deterministic read the Trader/manager cites. Pass entry/atr/current/peak
-    and optionally the entry stop price for the R-based BE trigger.
+    deterministic read the Trader/manager cites. Pass ``ticker`` and the current
+    price and ATR are measured from the run's series (a conflicting caller value
+    is reported as ignored); without a ticker the output states that the levels
+    are caller-supplied, so an invented ATR is never read as a measurement.
     """
     try:
         from tradingagents.strategies.exits import (
@@ -3629,7 +3822,17 @@ def get_exit_plan(
         )
     except Exception as exc:  # noqa: BLE001
         return f"exit plan unavailable: {exc}"
-    peak = float(peak) if peak else float(current)
+    levels = _resolve_exit_levels(ticker, current, atr)
+    if levels["atr"] is None or float(levels["atr"]) <= 0:
+        return (
+            "exit plan unavailable: no usable ATR - pass ticker=<symbol> to measure it, "
+            "or an atr=<value> a tool returned."
+        )
+    if levels["close"] is None:
+        return "exit plan unavailable: no current price - pass ticker=<symbol> or current=<price>."
+    current = float(levels["close"])
+    atr = float(levels["atr"])
+    peak = float(peak) if peak else current
     be = breakeven_after_confirmation(
         entry_price=float(entry),
         stop_price=float(stop) if stop is not None else None,
@@ -3643,8 +3846,9 @@ def get_exit_plan(
     return (
         f"exit_plan: breakeven_stop={be_s} (trigger={be.get('trigger')}) "
         f"giveback_{gb_v} stop_px={gb.get('stop_px')} "
-        f"remaining_gain_pct={gb.get('remaining_gain_pct')} (giveback {float(giveback_pct):.0%})"
-    )
+        f"remaining_gain_pct={gb.get('remaining_gain_pct')} (giveback {float(giveback_pct):.0%}) "
+        f"({levels['basis']})"
+    ) + levels["note"]
 
 
 @tool
@@ -5173,6 +5377,13 @@ def get_composed_risk_gate(
         from tradingagents.strategies.risk_governor import govern
     except Exception as exc:  # noqa: BLE001
         return f"composed risk gate unavailable for {ticker}: {exc}"
+    err = _fraction_errors({
+        "size_pct": (size_pct, "0.01 for a 1% position", True),
+        "capital_at_risk_pct": (capital_at_risk_pct, "0.05 for a 5% worst case", False),
+        "risk_cap_pct": (risk_cap_pct, "0.015 for a 1.5% budget", False),
+    })
+    if err:
+        return f"composed risk gate unavailable for {ticker}: {err}"
     try:
         w = dict(weights or {})
         if not w:
@@ -7138,8 +7349,11 @@ def get_fixed_risk_size(
         st = float(stop_loss)
     except (TypeError, ValueError):
         return "fixed risk size unavailable: non-numeric inputs"
-    if e <= 0 or not (0.0 <= rf <= 1.0) or ent <= 0 or st <= 0:
-        return "fixed risk size unavailable: equity/risk/price must be positive"
+    err = _fraction_errors({"risk_frac": (rf, "0.01 for a 1% risk budget", True)})
+    if err:
+        return f"fixed risk size unavailable: {err}"
+    if e <= 0 or ent <= 0 or st <= 0:
+        return "fixed risk size unavailable: equity and prices must be positive"
     budget = riskable_money(e, rf, commission_rate)
     qty = risk_money(ent, st, e, rf, commission_rate=commission_rate, hard_limit=hard_limit)
     n = max(1, int(units))

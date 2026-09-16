@@ -353,6 +353,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-16 `(working tree)` - Two argument contracts inside the trader's tool loop, found by running its verify prompt
+  against the live provider after the markup fix: (1) **the unit trap** - every sizing/risk argument is a FRACTION of
+  capital while its name ends in `_pct`, so `get_risk_gate(size_pct=1.0)` for a 1% proposal answered
+  `size 100.0% > cap 30.0% -> REJECT` (a REJECT the desk never issued, cited by the report), and the same trap pinned
+  `risk_per_trade=1.5` to the cap and collapsed `stop_dist_pct=8.371` to a 0.12% size. New
+  `analysis_tools._fraction_errors` refuses a percent number with the corrected form (fail closed, never coerce) and
+  issues no verdict from it - size-like args from `1.0` up (the ambiguous value), rate-like args only above `1.0`;
+  wired into `get_position_sizing`/`get_composite_sizing`/`get_risk_gate`/`get_composed_risk_gate`/`get_fixed_risk_size`.
+  (2) **the invented level** - `get_exit_check`/`get_exit_plan` took close+ATR from the caller and the pass supplied
+  `atr=7.0`, which no tool had returned, so a measured-value path now exists (`_measured_levels`: the run's own last
+  close + 14d ATR), a measured value wins over a conflicting caller one, and without a ticker the output labels its
+  levels `CALLER-SUPPLIED ... not measured`. Prompts state both contracts (loop system directive for the trader + risk
+  debators; the trader's verify prompt names `ticker`; the market analyst's tool lines state the fraction convention)
+  and `docs/api_reference.md` carries the new signatures. No report-tree correction needed - the only surviving REJECT
+  claims in the 11 repaired trees are CVaR-budget rejects computed on a correct fraction. See CHANGELOG.
+  Tests: `test_analysis_tools.py` +7; full suite 4257 passed / 5 skipped.
 - 2026-09-16 `(working tree)` - The Trader's "Computed verification" block was, in 11 of 22 archived trees, the provider's raw
   tool-call markup instead of a computed spec: `risk_tool_loop.run_tool_loop` read `result.tool_calls` only, so a relay answering a
   tool-bound turn with its native markup in `content` and an EMPTY `tool_calls` list left `pending == []`, the `while` never ran, and
