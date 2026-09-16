@@ -905,6 +905,18 @@ score to a fabricated one. The rules live in one module,
 `tradingagents/execution_contract.py`, shared by the emitter and the report
 verifier (`verify_flags.json` gains an `envelope` block; legacy 1.0.0 trees are
 exempt). Contract note and acceptance tests: `docs/execution_v1_emitter_plan.md`.
+**The verification payload is machine-readable as well as readable.** Alongside `claims` and `overall`
+(now `PASS | FLAG | NUMERIC_ONLY | UNKNOWN`), each stem carries `basis`: the typed triples the deterministic
+layer extracted, as `{metric, value, basis, source}`. `basis` is the period token the report prints beside
+the value (`ttm:ttm`, `date:2026-06-30`, `period:annualized`) or, when the report states none, the metric's
+unit class (`level`, `percent`, `multiple`, `ratio`) — a bare `ratio` is deliberately unbounded, because a
+ratio above 1 is ordinary here (P/E 135.94). `source` is `evidence` when the value resolves to a tool leaf
+within the metric's tolerance, else `report`. `NUMERIC_ONLY` means the LLM half could not produce a verdict
+but the figures were extracted, checked and found consistent; `UNKNOWN` is reserved for "nothing ran".
+The registry is what makes two runs of one ticker comparable without diffing prose — the same
+`(AMZN, 2026-09-14)` calls resolved FY-annual flows at 22:5xZ and TTM quarters at 19:08Z, which no sentence
+records.
+
 
 Every number in these blocks states the period it was built from. `get_ratios`
 leads with `- basis: flows TTM (4 quarters ending …); balance sheet …` (the

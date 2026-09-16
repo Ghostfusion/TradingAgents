@@ -88,7 +88,9 @@ host-executed server-side tools** exist and remove the blocker:
 - CLI: extend the existing `--evidence`-style flag or add `--verify`; run once
   per report dir, not in the gather loop.
 - No changes to agent prompts (the verifier is orthogonal, post-hoc).
-- Only actionable output: per-claim verdicts + a report-level PASS/FLAG.
+- Output: per-claim verdicts, a report-level `PASS | FLAG | NUMERIC_ONLY | UNKNOWN`, and the typed
+  `basis` registry (`{metric, value, basis, source}` per stem) that makes two runs of one ticker
+  comparable without diffing prose (2026-09-16).- Only actionable output: per-claim verdicts + a report-level PASS/FLAG.
 
 ## Not in scope (decisions already made)
 
@@ -263,7 +265,10 @@ are advisory-noise or capture gaps with a known reproducer.
   (ticker, date) resolved FY2025-annual flows at 22:5xZ where the 19:08Z run had
   TTM quarters, moving ROE 22.09 -> 18.90, P/E 30.12 -> 35.41, EV/EBIT 32.79 ->
   -30551.06. `statement_parsing.fetch_ticker` merges up to four payloads
-  last-writer-wins; the chosen provenance belongs in `run_card.json`.
+   REPORT SIDE NOW RECORDED: `verify_flags.json` carries the per-stem `basis` registry, so which period
+  each quoted figure claims is machine-readable (2026-09-16). Still open: the chosen vendor payload/basis
+  on the EVIDENCE side is not journaled, so a run that anchors to whichever vendor won the merge still
+  looks internally consistent.last-writer-wins; the chosen provenance belongs in `run_card.json`.
 - **Provider safety rejections**: "Upstream error from Alibaba: Output data may
   contain inappropriate content" leaves stems UNKNOWN on dense fundamentals text
   (3rd occurrence 2026-09-14). A `TRADINGAGENTS_VERIFY_MODEL` outside Alibaba, or

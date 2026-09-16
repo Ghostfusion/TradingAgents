@@ -1249,7 +1249,30 @@ def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypat
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("provider down")),
     )
     payload = rv.verify_report_dir(report_dir, llm_override=_Boom(), max_calls=1)
+    # The provider is down, so the PROSE is unverified - but the deterministic
+    # layer read the report's figures, so the honest label is NUMERIC_ONLY, not
+    # UNKNOWN (which now means "nothing ran at all"). The degrade contract is
+    # unchanged where it matters: never raise, and never upgrade the LLM verdict.
+    assert payload["verification"]["fundamentals"]["overall"] == "NUMERIC_ONLY"
+
+
+def test_verify_report_dir_unknown_when_there_is_no_figure_to_check(tmp_path, monkeypatch):
+    """A stem with no extractable figure stays UNKNOWN under a dead provider."""
+    report_dir = _mk_report_dir(tmp_path, reports={"fundamentals": "Prose with no figures at all.\n"})
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.structured.invoke_structured_or_freetext",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+    payload = rv.verify_report_dir(report_dir, llm_override=_NoopLLM(), max_calls=1)
     assert payload["verification"]["fundamentals"]["overall"] == "UNKNOWN"
+    assert payload["verification"]["fundamentals"]["basis"] == []
+
+
+class _NoopLLM:
+    def invoke(self, prompt):  # noqa: ANN001
+        class _R:
+            content = ""
+        return _R()
 
 
 # ---------------------------------------------------------------------------
@@ -2146,3 +2169,104 @@ def test_report_as_of_reads_the_run_directory_name():
     assert rv._report_as_of("reports/NVDA_20260912_160416") == "2026-09-12"
     assert rv._report_as_of("reports/NVDA_20261312_160416") is None  # month 13
     assert rv._report_as_of("reports/scratch") is None
+
+
+# ---------------------------------------------------------------------------
+# Typed basis registry + verdict provenance (2026-09-16)
+# ---------------------------------------------------------------------------
+# The checks here are regexes over prose; the registry is that same extraction
+# emitted as data, so two runs of one ticker are comparable mechanically. The
+# drift that motivated it leaves no prose trace to diff: the same
+# (AMZN, 2026-09-14) call returned FY-annual flows at 22:5xZ and TTM quarters at
+# 19:08Z (EV/EBIT 32.79 -> -30551.06), and one metric is quoted at two values
+# across runs (LULU 5.50/4.40, MSFT rvol 0.30/0.4220, LRCX EPS 1.81/5.76).
+
+
+def test_basis_of_prefers_the_stated_period():
+    # The report's OWN period token is the only basis a comparison may rely on.
+    assert rv._basis_of("EV/EBIT 32.79 (TTM)", "ev/ebit", "32.79") == "ttm:ttm"
+
+
+def test_basis_of_falls_back_to_the_unit_class():
+    assert rv._basis_of("Diluted EPS $24.67", "diluted eps", "24.67") == "level"
+    assert rv._basis_of("ROE 22.09%", "roe", "22.09") == "percent"
+    assert rv._basis_of("chandelier 3.0x below the high", "chandelier", "3.0") == "multiple"
+    # A bare ratio carries no bound: it may exceed 1 (P/E 135.94 is ordinary).
+    assert rv._basis_of("P/E 135.94", "p/e", "135.94") == "ratio"
+
+
+def test_basis_registry_emits_deduped_typed_triples_with_provenance():
+    reg = rv._basis_registry(
+        "Diluted EPS $24.67 (leaf).\nDiluted EPS 24.67 again.\n", {24.67}
+    )
+    assert [(b.metric, b.value, b.basis, b.source) for b in reg] == [
+        ("diluted eps", 24.67, "level", "evidence")
+    ]
+
+
+def test_basis_registry_marks_a_value_no_leaf_carries():
+    reg = rv._basis_registry("Diluted EPS $24.67", set())
+    assert [(b.value, b.source) for b in reg] == [(24.67, "report")]
+
+
+def test_basis_registry_separates_two_stated_periods():
+    """Two labelled quarters are two bases, not one metric at two values."""
+    reg = rv._basis_registry(
+        "Diluted EPS 2.78 (2026-03-31)\nDiluted EPS 5.75 (2026-06-30)\n", set()
+    )
+    bases = sorted(b.basis for b in reg)
+    assert len(bases) == 2 and all(b.startswith("date:2026-") for b in bases), bases
+
+
+def test_stem_overall_names_numeric_only_when_the_llm_half_failed():
+    """UNKNOWN must mean "nothing ran" - not "the figures were checked clean"."""
+    claims = [
+        rv.VerifierClaim(
+            claim="P/E 12.5 = price 50.00 / EPS 4.00", status="GROUNDED", reason="evidence"
+        )
+    ]
+    anchored = rv.ReportVerification(report="market", claims=[], overall="UNKNOWN")
+    # The signal is what was CHECKED, not what was found: a clean extraction is
+    # still evidence that the figures were examined (this is the batch case -
+    # market on two symbols had no conflict and no LLM verdict).
+    assert rv._stem_overall(anchored, claims, deterministic_triples=2) == "NUMERIC_ONLY"
+    assert rv._stem_overall(anchored, claims) == "UNKNOWN"
+    assert rv._stem_overall(anchored, []) == "UNKNOWN"
+
+
+def test_stem_overall_flags_on_a_deterministic_claim():
+    claims = [
+        rv.VerifierClaim(
+            claim="current ratio 10.87 vs 1.329", status="INTERNAL_CONFLICT", reason="x"
+        )
+    ]
+    anchored = rv.ReportVerification(report="fundamentals", claims=[], overall="UNKNOWN")
+    assert rv._stem_overall(anchored, claims) == "FLAG"
+
+
+def test_stem_overall_passes_the_llm_verdict_through():
+    anchored = rv.ReportVerification(report="news", claims=[], overall="PASS")
+    assert rv._stem_overall(anchored, []) == "PASS"
+
+
+def test_verify_report_dir_carries_the_basis_registry(tmp_path):
+    """The payload's machine-readable half: typed triples per stem."""
+    d = _mk_report_dir(
+        tmp_path,
+        evidence={
+            "market": [
+                {
+                    "tool": "get_ratios",
+                    "status": "ok",
+                    "content": "EV/EBIT 32.79 diluted EPS 24.67",
+                }
+            ]
+        },
+        reports={"market": "EV/EBIT 32.79 (TTM)\nDiluted EPS $24.67\n"},
+    )
+    payload = rv.verify_report_dir(d, llm_override=_mk_llm("not json at all"))
+    entry = payload["verification"]["market"]
+    assert entry["overall"] == "NUMERIC_ONLY", entry
+    triples = {(b["metric"], b["value"], b["basis"], b["source"]) for b in entry["basis"]}
+    assert ("diluted eps", 24.67, "level", "evidence") in triples, triples
+    assert ("ev/ebit", 32.79, "ttm:ttm", "evidence") in triples, triples

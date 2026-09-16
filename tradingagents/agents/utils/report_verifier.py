@@ -16,9 +16,11 @@ a CONTRADICTED claim whose figure matches evidence is downgraded to
 UNSUPPORTED. The tolerance is shared with ``repro_check._matches`` (<=0.5%).
 
 Advisory by contract: never edits reports, never blocks delivery. A
-provider failure degrades to "verifier unavailable" (the caller reports
-UNKNOWN and returns 0), exactly like ``llm_failure_journal`` degrades the
-structured-invoke path — one failed call must never kill a run.
+provider failure degrades to "verifier unavailable" (the caller returns 0 and
+the stem reports the deterministic half it could still produce: ``NUMERIC_ONLY``
+when the figures were checked, ``UNKNOWN`` when there was nothing to check),
+exactly like ``llm_failure_journal`` degrades the structured-invoke path — one
+failed call must never kill a run.
 """
 
 from __future__ import annotations
@@ -134,16 +136,48 @@ class VerifierClaim(BaseModel):
     )
 
 
+class BasisAssertion(BaseModel):
+    """A typed ``(metric, value, basis)`` triple the deterministic layer resolved.
+
+    The checks in this module are regexes over prose; this is the same
+    extraction emitted as data, per run, so two runs of one ticker can be
+    compared mechanically. The drift that motivated it leaves no prose trace to
+    diff: the same ``(AMZN, 2026-09-14)`` call returned FY-annual flows at
+    22:5xZ and TTM quarters at 19:08Z (EV/EBIT 32.79 -> -30551.06), and the
+    same metric is quoted at 5.50 vs 4.40 (LULU), 0.30 vs 0.4220 (MSFT rvol),
+    1.81 vs 5.76 (LRCX diluted EPS) across runs.
+
+    ``basis`` is the period token the report itself prints beside the value
+    (``_period_tag``), else the metric's unit class - never a guess: a number
+    with no stated period is recorded as ``level``/``ratio``/``percent``/
+    ``multiple``, which is exactly the distinction a comparison must respect.
+    """
+
+    metric: str
+    value: float
+    basis: str
+    source: Literal["evidence", "report"] = Field(
+        ...,
+        description=(
+            "evidence = the value resolves to a tool leaf within the metric's "
+            "tolerance; report = it appears only in the prose."
+        ),
+    )
+
+
 class ReportVerification(BaseModel):
     """Verdicts for one analyst report."""
 
     report: str = Field(..., description="Analyst key, e.g. 'fundamentals'.")
     claims: list[VerifierClaim] = Field(default_factory=list)
-    overall: Literal["PASS", "FLAG", "UNKNOWN"] = Field(
+    overall: Literal["PASS", "FLAG", "UNKNOWN", "NUMERIC_ONLY"] = Field(
         ...,
         description=(
             "PASS = every claim grounded; FLAG = any UNSUPPORTED/CONTRADICTED/"
-            "MISQUOTED/INTERNAL_CONFLICT; UNKNOWN = verifier could not run."
+            "MISQUOTED/INTERNAL_CONFLICT; NUMERIC_ONLY = the LLM half could "
+            "not run (or was unparsed) but the deterministic families DID run "
+            "and found nothing - the prose is unverified, the figures are not; "
+            "UNKNOWN = nothing ran at all."
         ),
     )
 
@@ -526,6 +560,38 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
         else "PASS"
     )
     return ReportVerification(report=verification.report, claims=anchored, overall=overall)
+
+
+def _stem_overall(
+    anchored: ReportVerification,
+    claims: list[VerifierClaim],
+    *,
+    deterministic_triples: int = 0,
+) -> Literal["PASS", "FLAG", "UNKNOWN", "NUMERIC_ONLY"]:
+    """The stem's verdict, keeping the deterministic half visible.
+
+    ``UNKNOWN`` must mean "nothing ran". When the LLM verdict could not be
+    produced or parsed but the deterministic layer DID examine the report's
+    figures - ``deterministic_triples`` is the size of the typed registry it
+    extracted - the honest label is ``NUMERIC_ONLY``: the prose is unverified,
+    the figures are not. Measured 2026-09-16 on a 4-symbol batch: market came
+    back UNKNOWN on two symbols whose figures HAD been extracted and found
+    consistent, and a consumer could not tell that from a verifier that never
+    started. A stem with no extractable figure stays UNKNOWN: there the
+    numeric layer really has nothing to say.
+
+    The LLM's own verdict is never upgraded here: ``_anchor_claims`` already
+    refuses to turn UNKNOWN into a verdict, and this only names the provenance
+    of the checks that did run.
+    """
+    if any(
+        c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT")
+        for c in claims
+    ):
+        return "FLAG"
+    if anchored.overall == "UNKNOWN":
+        return "NUMERIC_ONLY" if deterministic_triples else "UNKNOWN"
+    return anchored.overall
 
 
 # ---------------------------------------------------------------------------
@@ -3865,6 +3931,73 @@ def _text_metrics(
     return claims, errors
 
 
+def _basis_of(line: str, metric: str, raw: str) -> str:
+    """The basis this printed value carries: a stated period, else its unit class.
+
+    A period token the report prints on the same line (``_period_tag``) is the
+    only basis a comparison may rely on - it is what the report itself claims.
+    Without one the value is recorded as its unit class, which is the weaker
+    claim a reader can still compare against another run ON THE SAME CLASS.
+
+    Deliberately not a fraction/percent dichotomy: a ratio above 1 is ordinary
+    here (P/E 135.94, EV/EBIT 32.79), so ``ratio`` carries no bound and a
+    ``fraction_0_1``-style vocabulary would mislabel the common case.
+    """
+    tag = _period_tag(line) if line else None
+    if tag:
+        return tag
+    if metric in _LEVEL_METRICS:
+        return "level"
+    unit = _unit_after(line, raw) if line else ""
+    if unit == "%":
+        return "percent"
+    if unit in {"x", "\u00d7"}:
+        return "multiple"
+    return "ratio"
+
+
+def _basis_registry(report_text: str, evidence_dec: set) -> list[BasisAssertion]:
+    """The typed ``(metric, value, basis)`` triples this report asserts.
+
+    Deterministic and additive: the same metric table the conflict checks use,
+    the period token on the value's own line, and whether the number resolves
+    to a tool leaf within the metric's tolerance. Emitted per run so two runs
+    of one ticker are comparable mechanically - prose cannot be diffed for a
+    basis change, because the sentences are new every time (AMZN ev/ebit 32.79
+    vs -30551.06 on 2026-09-14; LULU 5.50 vs 4.40; MSFT rvol 0.30 vs 0.4220).
+    """
+    out: list[BasisAssertion] = []
+    seen: set[tuple[str, float, str]] = set()
+    for metric, (regex, _tol) in sorted(_INTERNAL_CONFLICT_METRICS.items()):
+        try:
+            rows = _extract_metric_values(report_text, regex, metric, with_lines=True)
+        except Exception as exc:  # noqa: BLE001 - advisory: never break the payload
+            logger.warning("report_verifier: basis registry skipped %s (%s)", metric, exc)
+            continue
+        for row in rows:
+            if len(row) < 3:
+                continue
+            raw, value, line = row[0], row[1], row[2]
+            try:
+                flt = float(value)
+            except (TypeError, ValueError):
+                continue
+            basis = _basis_of(str(line), metric, str(raw))
+            key = (metric, round(flt, 6), basis)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                BasisAssertion(
+                    metric=metric,
+                    value=flt,
+                    basis=basis,
+                    source="evidence" if _matches(flt, evidence_dec) else "report",
+                )
+            )
+    return out
+
+
 def verify_report_dir(
     report_dir: str | Path,
     *,
@@ -3961,6 +4094,9 @@ def verify_report_dir(
                 "overall": "UNKNOWN",
                 "claims": [],
                 "reason": "max_calls budget exhausted",
+                # Uniform payload shape: a consumer never has to guess whether
+                # the key exists before iterating it.
+                "basis": [],
             }
             continue
         if _unusable_note(report_text):
@@ -3984,6 +4120,7 @@ def verify_report_dir(
                     ).model_dump()
                 ],
                 "reason": "unusable-generation note",
+                "basis": [],  # nothing to extract: no analyst prose in this stem
             }
             stem_succeeded += 1
             continue
@@ -3999,21 +4136,23 @@ def verify_report_dir(
         except Exception as exc:  # noqa: BLE001 — advisory: never raise mid-run
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
-        anchored = _anchor_claims(verification, _evidence_decimals(evidence, stem))
-        all_claims, metric_errors = _text_metrics(report_text, as_of=as_of)
+        evidence_dec = _evidence_decimals(evidence, stem)
+        anchored = _anchor_claims(verification, evidence_dec)
+        text_claims, metric_errors = _text_metrics(report_text, as_of=as_of)
         all_claims = [
             *anchored.claims,
             *_macro_authority_gate(report_text, evidence, stem),
-            *all_claims,
+            *text_claims,
         ]
-        overall = (
-            "FLAG"
-            if any(c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT") for c in all_claims)
-            else anchored.overall
-        )
+        basis = _basis_registry(report_text, evidence_dec)
         entry: dict = {
-            "overall": overall,
+            "overall": _stem_overall(
+                anchored, all_claims, deterministic_triples=len(basis)
+            ),
             "claims": [c.model_dump() for c in all_claims],
+            # The typed (metric, value, basis) triples this report asserts, so
+            # two runs of one ticker are comparable without diffing prose.
+            "basis": [b.model_dump() for b in basis],
         }
         if metric_errors:
             # A metric that cannot parse the report is recorded, never silent:

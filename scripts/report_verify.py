@@ -11,7 +11,9 @@ Usage:
     py -3.12 scripts/report_verify.py --report-dir <dir> --max-calls 8
     py -3.12 scripts/report_verify.py --report-dir <dir> --model <x> --provider openrouter
 
-Exit code: 0 = every report PASS or UNKNOWN (unavailable); 1 = any FLAG.
+Exit code: 0 = every report PASS, NUMERIC_ONLY or UNKNOWN (unavailable);
+1 = any FLAG. NUMERIC_ONLY means the LLM half could not run but the
+deterministic checks did, so the figures are anchored and the prose is not.
 Advisory: never edits reports; the verdict JSON is written to
 verify_flags.json in the report tree.
 
