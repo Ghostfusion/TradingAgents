@@ -273,7 +273,7 @@ def _watchlist_markdown(results: list) -> str:
 
     heads = [
         "Rank", "Ticker", "Name",
-        "EY", "EV/EBIT", "EV", "F", "M", "Z", "NetNet", "GP/A", "NOA",
+        "EY", "EV/EBIT", "EV", "TobinQ", "F", "M", "Z", "NetNet", "GP/A", "NOA",
         "Pills", "Pull", "RR",
         "L1Px", "VWAP1m", "1mVol",
         "NEV/EBIT", "PE5Y",
@@ -303,6 +303,7 @@ def _watchlist_markdown(results: list) -> str:
             str(i), r["ticker"], cell(r.get("name")),
             cell(r.get("earnings_yield"), "{:.2%}"),
             cell(r.get("ev_ebit")), cell(r.get("ev")),
+            cell(r.get("tobins_q"), "{:.3f}"),
             cell(r.get("f_score")), cell(r.get("beneish_m")), cell(r.get("altman_z")),
             flag(r.get("net_net")),
             cell(r.get("gp_a"), "{:.3f}"), cell(r.get("noa"), "{:.3f}"),

@@ -381,6 +381,7 @@ def test_currency_gate_blocks_mixed_ev():
         "currency": "JPY",
         "market_cap": 3.68e10,
         "total_assets": 3.0e14,
+        "total_liabilities": 2.6e14,
         "cash": 6.8e13,
         "total_debt": 6.2e12,
         "operating_income": 5.0e11,
@@ -390,6 +391,9 @@ def test_currency_gate_blocks_mixed_ev():
     assert row["ev_ebit"] is None
     assert row["earnings_yield"] is None
     assert row["altman_z"] is None
+    # Q mixes a USD market cap with JPY book liabilities, so it takes the same
+    # gate as the EV family rather than printing a 0.10x "cheap" multiple.
+    assert row["tobins_q"] is None
     assert row["net_net"] is False
 
 

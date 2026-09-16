@@ -1292,6 +1292,7 @@ def screen_value_line(key: str, v, ev_ebit) -> str:
     label = {
         "earnings_yield": "EY",
         "ev_ebit": "EV/EBIT",
+        "tobins_q": "Tobin's Q",
         "f_score": "Piotroski F",
         "beneish_m": "Beneish M",
         "altman_z": "Altman Z",
@@ -1308,20 +1309,22 @@ def screen_value_line(key: str, v, ev_ebit) -> str:
         )
     if key == "earnings_yield" and ev_ebit is not None and abs(ev_ebit) > 1000:
         return f"  {label}: {v:.2%} (ARTIFACT: same near-zero EBIT denominator)"
-    if key in ("beneish_m", "altman_z", "f_score", "ev_ebit"):
+    if key in ("beneish_m", "altman_z", "f_score", "ev_ebit", "tobins_q"):
         return f"  {label}: {v:.2f}"
     if key in ("roe", "eps_yoy", "revenue_yoy", "earnings_yield"):
         return f"  {label}: {v:.2%}"
     return f"  {label}: {v}"
 
 # Canonical keys the value screens read (operating_income is the EBIT leg of
-# EY/EV-EBIT; net_income/total_equity the ROE leg; the rest drive EV, Altman and
-# the net-net test). Used to state the basis of the screen inputs.
+# EY/EV-EBIT; net_income/total_equity the ROE leg; total_liabilities is the
+# liabilities leg of Tobin's Q and a Net-Net/Altman input; the rest drive EV,
+# Altman and the net-net test). Used to state the basis of the screen inputs.
 _SCREEN_BASIS_KEYS = (
     "operating_income",
     "net_income",
     "total_equity",
     "total_assets",
+    "total_liabilities",
     "market_cap",
     "total_debt",
     "cash",
@@ -1385,10 +1388,11 @@ def get_analyst_verdict(
 
     Runs the same canonical financial pipeline as the value watchlist and
     returns the computed screens: Earnings Yield, EV/EBIT (Acquirer's
-    Multiple), Piotroski F-Score, Beneish M-Score, Altman Z-Score, Net-Net,
-    the collapsed trap-risk verdict (LOW/MEDIUM/HIGH + evidence), ROE, and
-    EPS/Revenue YoY growth. Call this before any 'cheap / quality / value /
-    accounting risk / trap' claim - it is the computed number, not a guess.
+    Multiple), Tobin's Q (market value of the assets over their book value),
+    Piotroski F-Score, Beneish M-Score, Altman Z-Score, Net-Net, the collapsed
+    trap-risk verdict (LOW/MEDIUM/HIGH + evidence), ROE, and EPS/Revenue YoY
+    growth. Call this before any 'cheap / quality / value / accounting risk /
+    trap' claim - it is the computed number, not a guess.
 
     Args:
         ticker: single ticker symbol.
@@ -1417,6 +1421,7 @@ def get_analyst_verdict(
     for key, _label in (
         ("earnings_yield", "EY"),
         ("ev_ebit", "EV/EBIT"),
+        ("tobins_q", "Tobin's Q"),
         ("f_score", "Piotroski F"),
         ("beneish_m", "Beneish M"),
         ("altman_z", "Altman Z"),

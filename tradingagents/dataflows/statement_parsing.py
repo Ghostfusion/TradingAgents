@@ -31,6 +31,7 @@ from tradingagents.dataflows.quantitative_scores import (
     gross_profitability,
     net_operating_assets,
     piotroski_f_score,
+    tobins_q,
 )
 
 logger = logging.getLogger("statement_parsing")
@@ -1127,6 +1128,11 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     # only - no score, ranking or filter reads them.
     gp_a_row = gross_profitability(fin)
     noa_row = net_operating_assets(fin)
+    # Tobin's Q prices the equity leg off the market and the rest off the
+    # balance sheet, so it mixes currencies exactly like the EV family does:
+    # a JPY statement under a USD market cap produces a meaningless Q (the
+    # JPPHY EV defect), hence the same USD gate.
+    q_row = tobins_q(fin) if usd else None
     mc = _latest(fin.get("market_cap"))
     ca = _latest(fin.get("current_assets"))
     tl = _latest(fin.get("total_liabilities"))
@@ -1159,6 +1165,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "ev_ebit": round(am, 2) if am is not None else None,
         "earnings_yield": round(ey, 4) if ey is not None else None,
         "ev": round(ev, 2) if ev is not None else None,
+        "tobins_q": round(q_row["value"], 3) if q_row else None,
         "f_score": f_score,
         "beneish_m": round(m_score, 3) if m_score is not None else None,
         "altman_z": round(z_score, 3) if z_score is not None else None,
@@ -1168,6 +1175,7 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "noa": round(noa_row["value"], 4) if noa_row else None,
         "gp_a_classification": gp_a_row["classification"] if gp_a_row else None,
         "noa_classification": noa_row["classification"] if noa_row else None,
+        "tobins_q_classification": q_row["classification"] if q_row else None,
         "roe": round(roe, 4) if roe is not None else None,
         "eps_yoy": sane_eps_yoy(fin),
         "revenue_yoy": sane_revenue_yoy(fin),

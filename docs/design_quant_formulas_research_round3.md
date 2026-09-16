@@ -56,7 +56,7 @@ round-2 exclusion rule:
 
 | Surface | Where |
 | --- | --- |
-| Altman Z (original, 5 ratios), Beneish M, Piotroski F, EV, earnings yield, Acquirer's multiple, Novy-Marx GP/A, Hirshleifer NOA | `dataflows/quantitative_scores.py` |
+| Altman Z (original, 5 ratios), Beneish M, Piotroski F, EV, earnings yield, Acquirer's multiple, Tobin's Q, Novy-Marx GP/A, Hirshleifer NOA | `dataflows/quantitative_scores.py` |
 | Consumed as **informational rows only** — "no score, ranking or filter reads them" | `dataflows/statement_parsing.py` (quality-rows block) |
 | Ohlson O, Zmijewski X, Sloan accruals ratio, 5y median-margin normalized EBIT, PE percentile, `trap_verdict`, margin of safety (both denominator conventions) | `strategies/normalized.py` |
 | Quality composite [0,1] from ROE+margin; `quant_signal`, `baseline_rating` | `strategies/quant_baseline.py` |

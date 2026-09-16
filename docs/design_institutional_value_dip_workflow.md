@@ -170,7 +170,7 @@ hard gates and layered controls**:
 | 1 | Liquid-universe screen first | `eodhd-us` default; ILLIQ/FltTurn columns; `--min-avg-vol`/`--min-mcap` gates | ✅ mostly covered |
 | 2 | Triage: why is it cheap (accounting quality) | `decline_driver_check` structural ⇒ reject; accruals/Beneish/Piotroski/Altman rows; `balance_sheet_health` | ✅ strong |
 | 3 | Qualitative overlay (moat/management) | Not automated (no moat/management signal); analyst LLMs can reason from tools but no hard gate | ⚠️ partial — see S4 |
-| 4 | Valuation + margin of safety 20–50% | DCF (`get_dcf_valuation`), value floors (Graham/NCAV/EPV), `value_floor` row (MoS≥20% **or** FCFY≥6%) | ✅ |
+| 4 | Valuation + margin of safety 20–50% | DCF (`get_dcf_valuation`), value floors (Graham/NCAV/EPV), Tobin's Q + the EV/EBIT and GP/A screens, `value_floor` row (MoS≥20% **or** FCFY≥6%) | ✅ |
 | 5 | Catalyst-first / re-rating evidence | `--revision`, `--inst-accum`, growth gates, `get_earnings_surprise`; but **not required** for value-dip | ⚠️ see S5 |
 | 6 | Regime switch (MR vs trend) | `regime` label + `vol_pct` computed; `trend` row opt-in (`require_trend`); no entry-gate by regime | ❌ see S1 |
 | 7 | Confirmation entry, not first oversold | VDU ladder (volume dry-up → divergence/higher-low → trigger candle RVOL≥1.3); technical_entry row RSI+%b | ✅ |

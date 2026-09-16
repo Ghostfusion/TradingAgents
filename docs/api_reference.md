@@ -740,7 +740,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_volatility_contraction(ticker)` | `swing.vcp_setup` | market | VCP base depths + contraction + near-breakout |
 | `get_orderflow_read(ticker)` | `orderflow.summarize` (+ guarded fetch) | market | inst/retail net, distribution, divergence, alignment |
 | `get_financial_trends(ticker, curr_date, items?, periods?)` | `agents/utils/financial_trends.py` | fundamentals | labelled quarter-series table: `\| Item \| <date (FYq)> \| … \| YoY \| QoQ \|`, fiscal labels derived from the vendor's own annual period ends, every delta naming the two periods it compared (`+105.9% (Q2 FY26 -> Q2 FY27)`), `n/a`/`unavailable` with a reason rather than a guess - the producer the 2026-09-12 NVDA review found missing when a `+47%` two-quarter move was reported as YoY |
-| `get_analyst_verdict(ticker, date)` | `screener screen_ticker` + `normalized.trap_verdict` | fundamentals | EY, EV/EBIT, F/M/Z, Net-Net, trap risk, ROE, YoY |
+| `get_analyst_verdict(ticker, date)` | `screener screen_ticker` + `normalized.trap_verdict` | fundamentals | EY, EV/EBIT, Tobin's Q, F/M/Z, Net-Net, trap risk, ROE, YoY |
 | `get_earnings_surprise(ticker, date)` | `events.surprise_score` + `catalyst.last_earnings_surprise` | fundamentals | surprise % + side |
 | `get_portfolio_weights(scores, sector_map, ...)` | `portfolio.value_ratio_weights + adjust_for_caps` | fundamentals | cap-respecting value weights |
 | `get_basic_financials(ticker)` | `finnhub.get_basic_financials_finnhub` | fundamentals | EPS/revenue YoY, ROE/ROA, margins, payout (free tier) |

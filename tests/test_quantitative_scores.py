@@ -9,6 +9,7 @@ from tradingagents.dataflows.quantitative_scores import (
     earnings_yield,
     enterprise_value,
     piotroski_f_score,
+    tobins_q,
 )
 
 
@@ -146,3 +147,30 @@ def test_value(fin):
     assert ev is not None and ev > 0
     assert ey is not None and ey > 0
     assert am is not None and am > 0
+
+
+def test_tobins_q_prices_the_liabilities_leg_at_book(fin):
+    """Q = (market cap + TOTAL LIABILITIES) / total assets = (3000 + 900) / 2000.
+
+    The equity-only reading (market cap / book equity = 3000 / 1100) is P/B,
+    not Q - the liabilities leg is what makes it a firm-level multiple.
+    """
+    row = tobins_q(fin)
+    assert row["value"] == pytest.approx(1.95)
+    assert row["value"] != pytest.approx(3000.0 / 1100.0)
+    assert "Tobin's Q" in row["basis"]
+    assert "total_liabilities" in row["classification"]
+
+
+def test_tobins_q_missing_liabilities_is_none_not_the_equity_only_ratio():
+    """Silently dropping the liabilities leg would print a cheap-looking 0.5
+    for a firm whose debt is simply unreported; None instead."""
+    assert tobins_q({"market_cap": 1000.0, "total_assets": 2000.0}) is None
+
+
+def test_tobins_q_rejects_a_nonpositive_cap_or_asset_base():
+    base = {"market_cap": 1000.0, "total_liabilities": 500.0, "total_assets": 2000.0}
+    assert tobins_q(base)["value"] == pytest.approx(0.75)
+    assert tobins_q({**base, "total_assets": 0.0}) is None
+    assert tobins_q({**base, "market_cap": 0.0}) is None
+    assert tobins_q({**base, "total_assets": None}) is None

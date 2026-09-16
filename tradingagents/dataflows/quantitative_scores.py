@@ -10,6 +10,9 @@ is built on:
 - EV = MarketCap + TotalDebt - Cash
 - EarningsYield = EBIT / EV
 - Acquirer'sMultiple = EV / EBIT
+- Tobin's Q = (MarketCap + TotalLiabilities) / TotalAssets
+- GP/A: Novy-Marx gross profitability
+- NOA: Hirshleifer et al. net operating assets
 
 Input contract
 --------------
@@ -261,6 +264,36 @@ def acquirers_multiple(fin):
     if ev is None or ebit is None:
         return None
     return _ratio(ev, ebit)
+
+
+def tobins_q(fin):
+    """Tobin's Q = (market cap + total liabilities) / total assets.
+
+    The market value of the firm's assets over their book value, which stands
+    in for replacement cost: the canonical has no market price for the debt and
+    no appraisal of the asset base, so the two legs are stated rather than
+    implied - equity is priced by the market, liabilities and assets are book.
+
+    A missing ``total_liabilities`` returns ``None`` instead of the equity-only
+    ratio: dropping the liabilities leg silently inflates Q (the P/B reading),
+    and a substitute is not available. A non-positive market cap or total assets
+    is likewise ``None`` (never a negative or infinite multiple).
+
+    Returns ``{"value", "basis", "classification"}``.
+    """
+    mc = _num(fin.get("market_cap"))
+    tl = _num(fin.get("total_liabilities"))
+    ta = _num(fin.get("total_assets"))
+    if mc is None or tl is None or ta is None or mc <= 0 or ta <= 0:
+        return None
+    return {
+        "value": (mc + tl) / ta,
+        "basis": "Tobin's Q = (market_cap + total_liabilities) / total_assets; "
+        "equity at market, liabilities and assets at book (the replacement-cost "
+        "proxy); latest period",
+        "classification": "equity leg: market_cap; liabilities leg: "
+        "total_liabilities; assets: total_assets",
+    }
 
 
 def gross_profitability(fin):

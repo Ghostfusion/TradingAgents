@@ -464,6 +464,22 @@ def test_analyst_verdict_import_and_runs():
     assert hasattr(T2, "get_analyst_verdict")
 
 
+def test_analyst_verdict_reports_tobins_q(monkeypatch):
+    """A screen row carrying Tobin's Q must reach the verdict text: the number
+    is only useful if the tool prints it (the seam the unused `forward_peg`
+    argument showed is easy to leave unconnected)."""
+    from tradingagents.dataflows import statement_parsing as sp
+
+    monkeypatch.setattr(
+        sp, "fetch_ticker", lambda ticker, date, **kw: ({"market_cap": 3000.0}, {})
+    )
+    monkeypatch.setattr(
+        sp, "screen_ticker", lambda ticker, fin: {"ev_ebit": 12.5, "tobins_q": 1.95}
+    )
+    out = T.get_analyst_verdict.invoke({"ticker": "TEST", "current_date": "2026-09-16"})
+    assert "Tobin's Q: 1.95" in out
+
+
 def test_earnings_surprise_reports_side():
     fake = {
         "earnings_calendar": [

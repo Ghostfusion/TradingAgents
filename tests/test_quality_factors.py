@@ -87,6 +87,17 @@ def test_screen_ticker_exposes_quality_columns():
     assert row["noa_classification"] is not None
 
 
+def test_screen_ticker_exposes_tobins_q():
+    fin = {
+        "market_cap": 3000.0,
+        "total_liabilities": 900.0,
+        "total_assets": 2000.0,
+    }
+    row = vs.screen_ticker("TEST", fin)
+    assert row["tobins_q"] == pytest.approx(1.95, abs=1e-4)
+    assert row["tobins_q_classification"] is not None
+
+
 def test_composite_score_unchanged_by_quality_columns():
     """The informational GP/A + NOA columns must not move the composite rank."""
     base_results = [
