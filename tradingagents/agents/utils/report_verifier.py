@@ -32,6 +32,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from tradingagents.agents.utils.evidence_gather import RENDERED_BLOCK_KEY
+
 logger = logging.getLogger(__name__)
 
 # Analyst report stems this pass covers (1_analysts/ in each report tree).
@@ -160,7 +162,35 @@ def _evidence_decimals(evidence: dict, analyst_key: str) -> set:
         if not isinstance(leaf, dict):
             continue
         out |= _float_tokens(str(leaf.get("content") or ""))
+    # The reference-price line is evidence too (see _reference_price_line): the
+    # anchor layer must treat its figure as present, or it downgrades every
+    # claim quoting it.
+    out |= _float_tokens(_reference_price_line(evidence, analyst_key))
     return out
+
+
+_REFERENCE_LINE_RE = re.compile(r"(?m)^\*\*Reference price:.*$")
+
+
+def _reference_price_line(evidence: dict, analyst_key: str) -> str:
+    """The run's reference-price line as the analyst received it ("" if none).
+
+    It is not a tool leaf - ``evidence_gather._render_evidence`` PREPENDS it to
+    every stem's evidence block - so without this the verifier read every
+    "reference price X (..., FORMING intraday bar)" claim as fabrication: TSM
+    2026-09-15 news.md (413.23, "no leaf prints it") and AMZN 2026-09-15
+    news.md, which named its own source as "prompt".
+    """
+    blocks = evidence.get(RENDERED_BLOCK_KEY)
+    if not isinstance(blocks, list):
+        return ""
+    for entry in blocks:
+        if not isinstance(entry, dict) or entry.get("analyst") != analyst_key:
+            continue
+        match = _REFERENCE_LINE_RE.search(str(entry.get("block") or ""))
+        if match:
+            return match.group(0).strip()
+    return ""
 
 
 def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = None) -> str:
@@ -175,6 +205,9 @@ def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = N
     """
     leaves = evidence.get(analyst_key) or []
     lines: list[str] = []
+    reference = _reference_price_line(evidence, analyst_key)
+    if reference:
+        lines.append(f"- reference_price [ok]: {reference}")
     if isinstance(leaves, list):
         for leaf in leaves:
             if not isinstance(leaf, dict):
@@ -370,6 +403,17 @@ _MISQUOTE_CUES = re.compile(
     r"entity|subject)|really (the|belongs)|the report (mixes|flips|confus)",
     re.I,
 )
+# A claim that ASSERTS a series is unavailable is supported by that series'
+# absence: "the effective fed funds rate / RRP series returned no fresh
+# evidence this run, so both are unavailable" was flagged UNSUPPORTED for
+# having no EFFR/RRP leaf - but the prompt REQUIRES saying "unavailable"
+# instead of quoting a recalled value, so the absence IS the support (AMKR
+# 2026-09-14 news.md, same shape on AMZN).
+_UNAVAILABLE_CUES = re.compile(
+    r"unavailable|no fresh evidence|not surfaced|no data|no leaf|could not be"
+    r"|did not surface|absent from the",
+    re.I,
+)
 
 
 def _parse_verdict(text: str, report_name: str) -> ReportVerification:
@@ -423,6 +467,17 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
     anchored: list[VerifierClaim] = []
     for c in verification.claims:
         decs = _float_tokens(c.claim)
+        if c.status == "UNSUPPORTED" and _UNAVAILABLE_CUES.search(c.claim or ""):
+            # The claim says a series is absent - the missing leaf is the
+            # support, not a gap in it.
+            anchored.append(
+                VerifierClaim(
+                    claim=c.claim,
+                    status="GROUNDED",
+                    reason=(c.reason or "") + " [anchored: the claim asserts the series is unavailable, which the absent leaf corroborates]",
+                )
+            )
+            continue
         if c.status == "UNSUPPORTED" and decs and all(_matches(d, evidence_dec) for d in decs):
             if _MISQUOTE_CUES.search(c.reason or ""):
                 # The figures exist but the LLM said the claim misuses them
@@ -481,6 +536,173 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
 # GS/TJX 2026-09-08 batch: DCF fair value 80.76 vs 80.71, EPS 5.81 vs 4.79,
 # market cap 141.8B vs 145.3B, ROE 53.92 vs 59.77 — all "matched some leaf"
 # individually, so the per-claim anchor could not see the conflict).
+def _cluster_value_tokens(raw: list[str], rel: float = 0.001) -> set[str]:
+    """Distinct values behind printed tokens, merging reprints within ``rel``.
+
+    One number printed at two precisions is ONE number: LRCX 2026-09-14
+    market.md carries the chandelier stop as 306.033 (body) and 306.0336
+    (summary), a 0.0002% drift that an exact-string set read as two
+    conflicting stops.
+    """
+    clusters: list[float] = []
+    out: set[str] = set()
+    for tok in sorted(raw, key=lambda t: float(t) if _is_number(t) else 0.0):
+        try:
+            value = float(tok)
+        except ValueError:
+            out.add(tok)
+            continue
+        if clusters and abs(value - clusters[-1]) / max(abs(clusters[-1]), 1e-9) <= rel:
+            continue
+        clusters.append(value)
+        out.add(tok)
+    return out
+
+
+def _is_number(token: str) -> bool:
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
+
+
+def _value_in(raw: str, line: str) -> bool:
+    """Is this figure in the line as a figure (not a substring of another)?
+
+    Plain ``raw in line`` matches '22.1' inside '122.15', which let a
+    disclosure about one block satisfy the check for a value from another.
+    """
+    if not raw:
+        return False
+    return re.search(rf"(?<![\d.]){re.escape(raw)}(?![\d])", line) is not None
+
+
+# A line that names the difference between two quoted values. The verifier
+# exempts a same-metric pair only when such a line also carries one of the
+# flagged values - i.e. the report flagged the conflict itself.
+# The bare word "conflict" is NOT a marker: a report that says its two
+# current-ratio values conflict (WDC 2026-09-10, 10.87 vs 1.329) has flagged a
+# real discrepancy, not explained one away. Only a stated BASIS difference
+# exempts - that is a legitimate pair, not an error.
+_DISCLOSURE_MARKERS = re.compile(
+    r"(?i)\bdiffers?\b|\bdifferent\b[^.\n]{0,24}\bbasis\b"
+    r"|\bdo\s+not\s+(?:mix|combine)\b|\bnot\s+be\s+combined\b"
+    r"|\bquote\s+(?:both|each)\b|\blabel\s+(?:each|them|separately)\b"
+    r"|\blabel basis\b|\bbasis differs\b|\bseparate(?:ly)?\s+basis\b"
+    r"|\btreat\s+as\s+a\s+range\b|\bunit[- ]mixed\b|\bcross-?currency\b"
+    r"|\bnot conflicting\b|\bdifferent\b[^.\n]{0,20}\bframeworks?\b"
+    r"|simple\s+mean\s+of\s+TR|\bswing\s+(?:tool|model)s?\b|\bheadline\s+ATR\b"
+    r"|\bverified\s+snapshot\b"
+    # "separate ATR basis" (JCI), "conflicting bases" (JCI ROE row),
+    # "as printed" / "history" (AMKR's FY series beside the latest quarter)
+    r"|\bseparate\b[^.\n]{0,20}\bbasis\b|conflicting\s+bases|\bas\s+printed\b|\bhistory\b"
+    # A report that STATES the disagreement has done its job (the analyst
+    # prompt requires quoting both producers and flagging it): SKHY 2026-09-14
+    # "This conflicts with get_ratios ROE 35.57%". Generalised count too -
+    # SKHY/VST print three bases, not two.
+    r"|\bconflicts?\s+with\b|\b(?:two|three|four|five|six)\b[^.\n]{0,20}\bbases?\b"
+    # A report that names the CAUSE and says which value is right has
+    # reconciled: MSFT 2026-09-15 fundamentals.md writes "Same metric, two
+    # values (conflict): current ratio 3.74 ... vs 1.23 ... The 3.74 is the
+    # non-current-row artifact; 1.23 is the correct current-row basis" - the
+    # vendor tool passed the wrong balance-sheet rows.
+    r"|\bmislabell?ed\b|\bnon[- ]current\b|\bwrong\s+row\b"
+)
+
+def _marker_beside_a_value(para: str, flagged: set[str]) -> bool:
+    """Is a disclosure marker printed in the same unit as a flagged value?
+
+    Paragraph scope alone is too coarse: a summary TABLE is one paragraph, so a
+    marker on its current-ratio row exempted the ROE quartet in the same table
+    (MSFT 2026-09-15 fundamentals.md, where the report names the cause for the
+    ratio and, two rows later, says "quote all four; no reconciliation
+    offered" for ROE). A character window is too fine the other way - a prose
+    reconciliation clause names the values first and the basis at the end of a
+    long sentence. The unit is the sentence (or the table row), which is where
+    a reader sees the disclosure sitting next to the figures it explains.
+    """
+    if "|" not in para:
+        # Prose: the reconciliation clause and the figures it covers are one
+        # statement, however long the sentence runs.
+        return bool(_DISCLOSURE_MARKERS.search(para))
+    # A TABLE is one paragraph but many statements: the marker must share the
+    # ROW with the value it explains. Cells are not units - the summary row
+    # "| ROE | 31.57% / 34.88% / ... | five bases - quote all |" puts the label,
+    # the values and the disclosure in three different cells (SIMO 2026-09-14
+    # fundamentals.md).
+    for row in para.splitlines():
+        if _DISCLOSURE_MARKERS.search(row) and any(_value_in(f, row) for f in flagged):
+            return True
+    return False
+
+
+# A metric's value can sit inside ANOTHER metric's list: SMCI 2026-09-14
+# market.md quotes `get_vif_read`'s "rsi 5.4 HIGH>5" - a VIF SCORE, not an RSI
+# reading - beside the real RSI 50.71, and the rsi pair reader saw two RSI
+# values. A value whose every occurrence sits in the foreign context is not a
+# reading of this metric.
+_METRIC_CONTEXT_REJECT: dict[str, re.Pattern] = {
+    # `\bvif\b` alone cannot match inside `get_vif_read` (the underscore is a
+    # word char) - the same trap `_VIF_MARKER_RE` documents.
+    "rsi": re.compile(r"(?i)\bvif\b|\bvif[\s_]*read\b|get_vif_read"),
+}
+
+
+def _value_context_rejected(label: str, raw: str, line: str) -> bool:
+    """Is every occurrence of this value sitting in another metric's context?"""
+    rx = _METRIC_CONTEXT_REJECT.get(label)
+    if rx is None or not line or not raw:
+        return False
+    occurrences = list(re.finditer(re.escape(raw.strip()), line))
+    if not occurrences:
+        return False
+    return all(
+        # 80 chars, not 40: the tool name starts the clause -
+        # "`get_vif_read` on [rsi, mom, std, vol, range] returns **rsi 5.4 ..."
+        # is 50-odd chars before the score.
+        rx.search(line[max(0, m.start() - 80): m.start()]) for m in occurrences
+    )
+
+
+def _disclosed_pair(report_text: str, regex: re.Pattern, flagged: set[str]) -> bool:
+    """Did the report flag this difference itself?
+
+    Scoped to the PARAGRAPH (a blank-line block), not the line: the
+    disclosure is usually a sentence right beside the figures ("Do not mix
+    their targets or stops", HPE market.md; "Label basis: ...", AMAT
+    market.md), and a line-only scope missed those. A stated range
+    ("0.1187–0.12") or a bracketed alternate ("19.97 (21.12)") is disclosure
+    too - the report presents the two readings as one value with a spread.
+    """
+    for para in re.split(r"\n\s*\n", report_text):
+        if not (regex.search(para) and any(_value_in(f, para) for f in flagged)):
+            continue
+        if _marker_beside_a_value(para, flagged):
+            return True
+        pair = sorted(flagged)
+        for i, a in enumerate(pair):
+            for b in pair[i + 1:]:
+                dash = rf"(?<![\d.]){re.escape(a)}[\s]*[\u2013-][\s]*{re.escape(b)}(?![\d])"
+                paren = rf"(?<![\d.]){re.escape(a)}\s*\(\s*{re.escape(b)}\s*\)"
+                if re.search(dash, para) or re.search(paren, para):
+                    return True
+    return False
+
+
+# Metrics whose producers print DIFFERENT UNITS for the same name. Two unit
+# classes are two constructs; only same-unit values are claims about each other.
+_UNIT_SCOPED_METRICS = frozenset({"vrp"})
+
+
+def _unit_after(line: str, raw: str) -> str:
+    """The unit token printed immediately after a value, "" when none."""
+    if not line or not raw:
+        return ""
+    m = re.search(re.escape(raw.strip()) + r"\s*(%|pp\b|\u00d7|x\b)?", line, re.I)
+    return (m.group(1) or "").lower() if m else ""
+
+
 _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Default tolerance 1%: vendor-consensus rounding (80.76 vs 80.75) is ONE
     # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
@@ -622,10 +844,67 @@ _LABEL_TO_VALUE_FILLER_RE = re.compile(
 # "rvol 0.6390 ... (>= 1.3 = high)" must not read 1.3 as a second RVOL print.
 _THRESHOLD_BEFORE_RE = re.compile(r"[<>\u2264\u2265]\s*$")
 
+# A figure that is really part of a DATE must not read as the metric's value:
+# "(09-21)" gave vrp a third cluster of 9.0 and "2026-06-30" gave ROE one of
+# 6.0 (AMZN market.md / SMCI fundamentals.md 2026-09-14), each splitting one
+# real value into a phantom conflict.
+_DATE_TAIL_BEFORE_RE = re.compile(r"\d{2,4}-\d{0,2}$")
+_DATE_HEAD_AFTER_RE = re.compile(r"^-\d{2}(?!\d)")
+
+
+def _date_fragment_around(gap: str, after: str) -> bool:
+    """Is the value about to be read a fragment of a YYYY-MM-DD / MM-DD token?"""
+    return bool(_DATE_TAIL_BEFORE_RE.search(gap) or _DATE_HEAD_AFTER_RE.match(after))
+
+
+def _is_date_fragment_in(raw: str, line: str) -> bool:
+    """Is this figure a component of a date token elsewhere in the line?
+
+    The table-cell / slash-pair readers return before the gap-based guard can
+    run, so "| P/E / P/B / ROE | 10.82 / 1.67 / 15.40% (TTM 2026-06-30) |"
+    handed ROE a second value of 6.0 read out of the date (SMCI
+    fundamentals.md 2026-09-14) and split one ROE into a phantom conflict.
+    """
+    if not raw or not raw.isdigit():
+        return False
+    return bool(
+        re.search(rf"\d{{2,4}}-{re.escape(raw)}(?!\d)", line)
+        or re.search(rf"(?<!\d){re.escape(raw)}-\d{{2}}(?!\d)", line)
+    )
+
+# Metrics a report routinely quotes for a PEER in the same breath as the
+# subject: "AMKR ... PEG 0.59 ... vs NVMI forward P/E 32.93, PEG 1.88". The
+# comparand's figure is not a second reading of the subject's (AMKR
+# 2026-09-14 news.md), so for these the line is cut at the comparison marker
+# before values are read.
+_COMPARISON_METRICS = frozenset({"forward peg", "market cap", "ttm p/e", "ev/ebit"})
+_COMPARAND_SPLIT_RE = re.compile(
+    r"(?i)\bvs\.?\b|\bversus\b|\bcompared\s+(?:to|with)\b|\bpeers?\b"
+)
+_MAG_SUFFIX_RE = re.compile(r"([BMKT])$")
+
+
+def _same_with_dropped_unit(a_val: float, a_raw: str, b_val: float, b_raw: str) -> bool:
+    """Same reading once a dropped magnitude suffix is restored.
+
+    "market cap $87.8B" beside "market cap 87.8" is one figure captured twice,
+    once without its unit - not two market caps (JCI 2026-09-14 sentiment.md).
+    Only a suffixed/bare PAIR qualifies, so a genuine "$87.8M vs $87.8B" mix
+    (both suffixed, different units) still flags.
+    """
+    sa = _MAG_SUFFIX_RE.search(a_raw or "")
+    sb = _MAG_SUFFIX_RE.search(b_raw or "")
+    if bool(sa) == bool(sb):
+        return False
+    bare, suffixed = (a_val, b_val) if not sa else (b_val, a_val)
+    unit = _DOLLAR_UNITS.get((sb or sa).group(1).upper(), 1.0)
+    return abs(bare * unit - suffixed) / max(abs(suffixed), 1e-9) <= 0.01
+
+
 # A VIF (multicollinearity) row reuses the indicator label for a variance
 # inflation factor — "| VIF | rsi 5.8 HIGH, mom 5.8 HIGH |" — and that number
 # is not the oscillator's level (MU market.md 2026-09-14, rows 7 and 83).
-_VIF_MARKER_RE = re.compile(r"\bvif\b", re.I)
+_VIF_MARKER_RE = re.compile(r"\bvif\b|\bvif[\s_]*(?:read|factor)?\b|get_vif_read", re.I)
 
 # Metrics whose value is a LEVEL (a price, a per-share figure, a dollar
 # amount) rather than a rate: a percentage printed after the label is that
@@ -680,24 +959,42 @@ def _segment_before(line: str, pos: int) -> str:
 # when the report-term's evidence has no leaf from the pinned tool group
 # (and no leaf content carries the term).
 #
-# Requirement: (phrases) -> (tools that satisfy the line). Any line
-# containing a listed phrase must have at least one leaf whose tool is in
-# the set, or a leaf whose content contains a listed phrase. Otherwise the
-# line is UNSUPPORTED — deterministic, independent of the LLM pass.
-_MACRO_AUTHORITY_PHRASES_TOOLS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
-    (("polymarket", "prediction market"), ("get_prediction_markets",)),
+# Requirement: (phrases) -> (tools that satisfy the line) -> (extra leaf terms
+# that also satisfy it). Any line containing a listed phrase must have at least
+# one leaf whose tool is in the set, or a leaf whose content contains a listed
+# phrase (or one of the group's carriers). Otherwise the line is UNSUPPORTED -
+# deterministic, independent of the LLM pass.
+_MACRO_AUTHORITY_PHRASES_TOOLS: tuple[
+    tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...
+] = (
+    (("polymarket", "prediction market"), ("get_prediction_markets",), ()),
     (
         ("no rate cuts", "no fed rate cuts", "cut probability", "hike probability",
-         "fomc", "fed watch"),
+         "fed watch"),
         ("get_prediction_markets", "get_fed_watch"),
+        (),
     ),
-    # TGA balance ≠ RRP: a get_tga_balance leaf must not satisfy an RRP
+    # The MEETING is not a market-implied figure: a dated Fed-decision line is
+    # anchored by the central bank itself, which the analyst's own news leaves
+    # name. IEI 2026-09-15 sentiment.md's "FOMC decision on 2026-09-16" was
+    # flagged while that analyst's news_headlines leaf holds UBS's "expects the
+    # Federal Reserve to raise its policy rate by 25 basis points on September
+    # 16" and Apollo's "expects the Federal Open Market Committee to raise
+    # interest rates at its mid-September meeting". A PROBABILITY/strike-price
+    # claim stays in the strict group above - those still need the pinned tool.
+    (
+        ("fomc",),
+        ("get_prediction_markets", "get_fed_watch"),
+        ("federal open market committee", "federal reserve", "fed decision",
+         "fed meeting"),
+    ),
+    # TGA balance != RRP: a get_tga_balance leaf must not satisfy an RRP
     # claim (SKHY 2026-09-09: "RRP at 0.432B" passed the old mapping because
     # TGA was called). RRP/reverse-repo need get_macro_indicators or a leaf
     # whose content actually carries the term.
-    (("rrp", "reverse repo"), ("get_macro_indicators",)),
-    (("10y", "10-year"), ("get_macro_indicators", "get_treasury_curve")),
-    (("wti", "oil price", "crude"), ("get_macro_indicators", "get_economic_calendar")),
+    (("rrp", "reverse repo"), ("get_macro_indicators",), ()),
+    (("10y", "10-year"), ("get_macro_indicators", "get_treasury_curve"), ()),
+    (("wti", "oil price", "crude"), ("get_macro_indicators", "get_economic_calendar"), ()),
 )
 
 
@@ -728,13 +1025,16 @@ def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) ->
     out: list[VerifierClaim] = []
     for line in report_text.splitlines():
         low = line.strip().lower()
-        for phrases, tools in _MACRO_AUTHORITY_PHRASES_TOOLS:
+        for phrases, tools, carriers in _MACRO_AUTHORITY_PHRASES_TOOLS:
             present = [p for p in phrases if p in low]
             if not present:
                 continue
             # Satisfied when a pinned tool leaf exists, OR a leaf content
-            # itself carries a listed phrase (e.g. a fetched article).
-            satisfied = bool(leaf_tools & set(tools)) or any(p in leaf_text_low for p in present)
+            # itself carries a listed phrase (e.g. a fetched article) or one of
+            # the group's carrier terms.
+            satisfied = bool(leaf_tools & set(tools)) or any(
+                p in leaf_text_low for p in (*present, *carriers)
+            )
             if not satisfied:
                 out.append(
                     VerifierClaim(
@@ -771,7 +1071,13 @@ def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
                 return None  # the label cell has its own figure: normal path
             if idx + 1 >= len(cells):
                 return None
-            legs = [x.group(0) for x in _DOLLAR_RE.finditer(cells[idx + 1])]
+            legs = [
+                x.group(0) for x in _DOLLAR_RE.finditer(cells[idx + 1])
+                # a date inside the value cell is not a leg: keeping "09" out
+                # of "30.84% (09-21) / +4.59pp" makes the VRP ordinal select
+                # 4.59 instead of the IV (AMZN market.md 2026-09-14)
+                if not _is_date_fragment_in(x.group(0), line)
+            ]
             if len(legs) < 2:
                 return None
             ordinal = min(prefix.count("/"), len(legs) - 1)
@@ -798,13 +1104,23 @@ def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     """The label's own leg when labels and values are both slash-separated."""
     before = line[:m.start()]
     ordinal = 0
-    pos = len(before)
-    while True:
-        mm = _SLASH_LABEL_TAIL_RE.search(before[:pos])
-        if mm is None:
-            break
-        pos = mm.start(1)
-        ordinal += 1
+    cell_start = before.rfind("|") if "|" in line else -1
+    if cell_start >= 0:
+        # In a table row the label cell IS the slash list, so the ordinal is
+        # simply how many labels precede this one in that cell. The tail
+        # regex below needed the preceding label to look like a label and
+        # silently returned ordinal 0 for "| Tranche stop / T1 / T2 |",
+        # handing T1 the stop's value (SKHY 2026-09-14 market.md: 145.51 read
+        # as a T1 target alongside the real 203.34).
+        ordinal = before.count("/", cell_start)
+    else:
+        pos = len(before)
+        while True:
+            mm = _SLASH_LABEL_TAIL_RE.search(before[:pos])
+            if mm is None:
+                break
+            pos = mm.start(1)
+            ordinal += 1
     after = line[m.end():]
     if "|" in line:
         # A table row: the figures that follow belong to the cell AFTER the
@@ -835,8 +1151,8 @@ def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
 
 
 def _extract_metric_values(
-    text: str, regex: re.Pattern, label: str = ""
-) -> list[tuple[str, float]]:
+    text: str, regex: re.Pattern, label: str = "", *, with_lines: bool = False
+) -> list:
     """All ``(raw_value_str, numeric_value)`` occurrences for one metric label.
 
     Considers EVERY match of the label on a line (not just the first) so a
@@ -848,9 +1164,14 @@ def _extract_metric_values(
     (79.78B -> 7.978e10) so 79.78B and 5.7B compare at one scale.
     """
     out: list[tuple[str, float]] = []
+    # Line provenance, only needed by the same-metric conflict scan: a value
+    # whose line discloses its own period is not an undisclosed conflict.
+    lines_out: list[str] = []
     level_metric = label in _LEVEL_METRICS
     reject_before = _LABEL_CONTEXT_REJECT.get(label)
     for line in text.splitlines():
+        if label in _COMPARISON_METRICS:
+            line = _COMPARAND_SPLIT_RE.split(line)[0]
         for m in regex.finditer(line):
             # The label must be a whole token: "stoch" inside "stochrsi" is a
             # different indicator (MU market.md L18) and "beta" inside "betas"
@@ -869,12 +1190,16 @@ def _extract_metric_values(
             # order: "| Net Income / Diluted EPS | $28,243,000,000 / $24.67 |"
             # gives the EPS 24.67, not the net income.
             cell_pair = _table_cell_pair_value(line, m)
-            if cell_pair is not None:
+            if cell_pair is not None and not _is_date_fragment_in(cell_pair[0], line):
                 out.append(cell_pair)
+                lines_out.append(line)
                 continue
             slash_pair = _slash_pair_value(line, m)
             if slash_pair is not None:
+                if _is_date_fragment_in(slash_pair[0], line):
+                    continue
                 out.append(slash_pair)
+                lines_out.append(line)
                 continue
             # Skip a label immediately followed by a parenthetical multiplier
             # like "T1(2R)" — 2R is a reward multiple, not the metric's value.
@@ -887,6 +1212,8 @@ def _extract_metric_values(
             if not _LABEL_TO_VALUE_FILLER_RE.match(gap):
                 continue
             if _THRESHOLD_BEFORE_RE.search(gap):
+                continue
+            if _date_fragment_around(gap, stripped[mnum.end():]):
                 continue
             if _VIF_MARKER_RE.search(
                 line[max(0, m.start() - 24):m.start()]
@@ -911,6 +1238,12 @@ def _extract_metric_values(
             except ValueError:
                 continue
             out.append((num_s + unit, num * _DOLLAR_UNITS.get(unit.upper(), 1.0)))
+            lines_out.append(line)
+    if with_lines:
+        # ``lines_out`` runs parallel to ``out``: every append above records
+        # its source line, so the pairing is positional for both the two-value
+        # returns (cell/slash pairs count as ONE entry in each list).
+        return [(*pair, source) for pair, source in zip(out, lines_out)]
     return out
 
 
@@ -996,6 +1329,40 @@ def _fed_cuts_contradiction(report_text: str) -> list[VerifierClaim]:
     return []
 
 
+# A period/basis tag ON THE SAME LINE as a metric value. Two values for one
+# metric are a CONFLICT only when the report left the difference undisclosed:
+# a report that labels one cluster "Q2 FY26" and the other "Q1 FY26" has made
+# a period statement (AMZN 2026-09-14: diluted EPS 5.75 (2026-06-30)") and
+# 2.78 (2026-03-31"), which the blanket scan read as a conflict).
+_PERIOD_TAG_RES: tuple[tuple[re.Pattern, str], ...] = (
+    # "FY2026 Q1" (the vendor header spelling) and "Q1 FY26" are the same
+    # statement; both must read as their own period, or two labelled quarters
+    # look like one metric at two values (AMZN 2026-09-14 diluted EPS).
+    (re.compile(r"\bFY\s*\d{2,4}\s*[- ]?Q[1-4]\b", re.I), "fq"),
+    (re.compile(r"\bQ[1-4]\s*FY\s*\d{2,4}\b", re.I), "q"),
+    (re.compile(r"\bFY\s*\d{2,4}\b|\b\d{4}\s*/\s*FY\b", re.I), "fy"),
+    (re.compile(r"\b20\d{2}-\d{2}-\d{2}\b"), "date"),
+    (re.compile(r"\bTTM\b|\btrailing\s+twelve\b", re.I), "ttm"),
+    # A stated reporting PERIOD is a basis statement in prose form: AMZN
+    # 2026-09-15 fundamentals.md quotes get_ratios' D/E 0.37 "(balance-sheet
+    # data dated 2025-12-31)" against get_basic_financials' "quarterly total
+    # debt/equity 0.2816". Two lines tagged with two different periods are two
+    # measurements, not one metric at two values.
+    (re.compile(r"\bquarter(?:ly|s)\b", re.I), "period"),
+    (re.compile(r"\bannual(?:ized)?\b|\bfiscal\s+year\b", re.I), "period"),
+    (re.compile(r"\bFQ[1-4]\b", re.I), "fq"),
+)
+
+
+def _period_tag(line: str) -> str | None:
+    """The period/basis token this line discloses for its figures, if any."""
+    for regex, kind in _PERIOD_TAG_RES:
+        m = regex.search(line)
+        if m:
+            return f"{kind}:{re.sub(r'\s+', '', m.group(0)).lower()}"
+    return None
+
+
 def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
     """Find the same-asserted-metric-at-different-values within ONE report.
 
@@ -1013,28 +1380,92 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
         # label regex stays as the fallback for its other spellings.
         reader = _METRIC_VALUE_READERS.get(label)
         if reader is not None and label in _MULTI_PRODUCER_METRICS:
-            groups = _tool_scoped_values(report_text, label)
+            groups = [[(raw, v, None) for raw, v in g]
+                      for g in _tool_scoped_values(report_text, label)]
+        elif reader is not None:
+            groups = [[(raw, v, None) for raw, v in reader(report_text)]]
         else:
-            groups = [reader(report_text)] if reader is not None else []
+            groups = []
         if not any(groups):
-            groups = [_extract_metric_values(report_text, regex, label)]
+            groups = [_extract_metric_values(report_text, regex, label, with_lines=True)]
         for vals in groups:
+            if not vals:
+                continue
             # Group near-equal values; flag when >1 distinct cluster.
-            distinct: list[tuple[float, str]] = []
-            for raw, v in vals:
+            distinct: list[list] = []  # [value, first_raw, {period tags}]
+            for raw, v, line in vals:
+                if _value_context_rejected(label, raw, line or ""):
+                    continue
                 bucket = next(
                     (
                         b
                         for b in distinct
                         if abs(b[0] - v) / max(abs(b[0]), abs(v), 1e-9) <= tol
+                        or _same_with_dropped_unit(b[0], b[1], v, raw)
                     ),
                     None,
                 )
                 if bucket is None:
-                    distinct.append((v, raw))
+                    bucket = [v, raw, set(), line or ""]
+                    distinct.append(bucket)
+                if line:
+                    bucket[3] = line
+                    tag = _period_tag(line)
+                    if tag:
+                        bucket[2].add(tag)
             if len(distinct) < 2:
                 continue
-            shown = "; ".join(f"{raw}" for _, raw in distinct)
+            # A DISCLOSED basis difference is not a conflict. When every
+            # cluster carries its own period tag and no two clusters share a
+            # tag, the report has said which period each value belongs to
+            # (AMZN 2026-09-14: diluted EPS 2.78 for 2026-03-31 beside 5.75 for
+            # 2026-06-30 - two quarters, both labelled, not one metric). An
+            # unlabelled cluster, or two clusters on the SAME stated period, is
+            # still a conflict (the same run's ROE 30.56 / 22.09 / 18.89 and
+            # EV/EBIT 35.02 vs 32.79 stayed unflagged and undated in the prose).
+            tags = [b[2] for b in distinct]
+            if all(tags) and all(
+                tags[i].isdisjoint(tags[j])
+                for i in range(len(tags))
+                for j in range(i + 1, len(tags))
+            ):
+                continue
+            # A DISCLOSED difference is not a defect either. The analyst
+            # prompt REQUIRES quoting both values with their producers and
+            # flagging the conflict; a report that does so has done its job,
+            # and flagging it punishes compliance (every 2026-09-14 tree did
+            # exactly this for the two ATR bases, and the TSM/AMAT/WDC pairs
+            # are labelled "Conflict:" / "do not mix" next to the values).
+            # Naming the producers ALONE is not enough - that is the
+            # attribution-without-reconciliation case a fact-check still
+            # counts as a defect (AMZN 2026-09-14 ROE 30.56/22.09/18.89).
+            flagged = {b[1].strip() for b in distinct if b[1]}
+            if flagged and _disclosed_pair(report_text, regex, flagged):
+                continue
+            # A quoted UNIT is a quoted basis: `get_options_iv_read` prints VRP
+            # as a percentage-point spread while `get_variance_premium` prints
+            # it as a variance ratio (AMZN 2026-09-15 market.md: +2.10pp vs
+            # +0.0490, each beside its own tool). Two unit classes are two
+            # constructs, not one metric at two values.
+            if label in _UNIT_SCOPED_METRICS and len(
+                {_unit_after(b[3], b[1]) for b in distinct}
+            ) > 1:
+                continue
+            # Different frameworks quote their own T1/T2 by design
+            # (get_swing_set off the structure stop, get_swing_exits off the
+            # chandelier, get_tranche_plan off an averaged entry), and HPE
+            # 2026-09-14 market.md says so outright. Only values quoted in the
+            # SAME paragraph are claims about one another; a transcription
+            # slip inside one framework still pairs up and flags.
+            if label in _MULTI_PRODUCER_METRICS:
+                paras = [p for p in re.split(r"\n\s*\n", report_text) if regex.search(p)]
+                paired = any(
+                    sum(1 for b in distinct if _value_in(b[1].strip(), p)) >= 2
+                    for p in paras
+                )
+                if not paired:
+                    continue
+            shown = "; ".join(f"{b[1]}" for b in distinct)
             conflicts.append(
                 VerifierClaim(
                     claim=f"'{label}' cited at conflicting values: {shown}",
@@ -1098,9 +1529,17 @@ def _dupont_identity(report_text: str) -> list[VerifierClaim]:
     for line in report_text.splitlines():
         if not (_NET_MARGIN_RE.search(line) or _AT_RE.search(line) or _EM_RE.search(line)):
             continue
-        for m in _ROE_RE.finditer(line):
+        # Only the ROE ATTACHED to the decomposition is an identity to check:
+        # a line may name the other bases it disagrees with (SKHY 2026-09-14
+        # fundamentals.md: "ROE 134.2% (leverage-led ...) - net_margin 0.8562,
+        # asset_turnover 1.0742, equity_multiplier 1.4595 ... This conflicts
+        # with get_ratios ROE 35.57%"), and reading the disclosed comparison
+        # value as a second identity failure inverts the intent.
+        for m in list(_ROE_RE.finditer(line))[:1]:
             roe = float(m.group(1))
             if roe <= 0:
+                continue
+            if _DISCLOSURE_MARKERS.search(line):
                 continue
             if abs(product_pct - roe) / max(abs(roe), 1e-9) > 0.2:
                 return [
@@ -1201,18 +1640,22 @@ _MONEY_SUFFIX_EXP = {"": 1e-9, "k": 1e-6, "m": 1e-3, "b": 1.0, "t": 1e3}
 
 _CASH_STI_RE = re.compile(
     r"(?i)cash\s*(?:\+|and|&)\s*(?:st\b|short[-\s]?term)\s+investments?"
-    r"[^0-9$]{0,12}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    # The gap must not bridge into another noun phrase: NFLX 2026-09-15
+    # fundamentals.md writes "a -25.7% QoQ drop in cash + ST investments and a
+    # 4,714,403,000 buyback quarter", and a 12-char gap handed the BUYBACK to
+    # the cash leg (the same class as the stripped-unit captures).
+    r"[\s|:*=]{0,4}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 # "total debt ... = $38.35B" (R1 spells the current + long-term legs first) or
 # the plain table row "Total Debt | $38.35B" (R2).
 _TOTAL_DEBT_EQ_RE = re.compile(
-    r"(?i)total\s+debt\b[^\n]{0,90}?=\s*\**\s*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    r"(?i)total\s+debt\b[^\n]{0,90}?=\s*\**\s*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 _TOTAL_DEBT_RE = re.compile(
-    r"(?i)total\s+debt\b[^\n\d$]{0,14}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    r"(?i)total\s+debt\b[^\n\d$]{0,14}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 _NET_FIGURE_RE = re.compile(
-    r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*\-]*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*\-]*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 
 
@@ -1240,16 +1683,30 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
         return []
     cash_m = _CASH_STI_RE.search(report_text)
     debt_m = _TOTAL_DEBT_EQ_RE.search(report_text) or _TOTAL_DEBT_RE.search(report_text)
-    net_matches = list(_NET_FIGURE_RE.finditer(report_text))
+    # A slash-list label cell pairs its values by ORDINAL: the row
+    # "| Total Debt / Net Debt | 14,309,306,000 / 5,210,074,000 |" (NFLX
+    # 2026-09-15 fundamentals.md) otherwise hands the TOTAL DEBT to the net
+    # leg, and the check then read a correct report as a $9.59B contradiction.
+    net_matches = []
+    for m in _NET_FIGURE_RE.finditer(report_text):
+        line_start = report_text.rfind("\n", 0, m.start()) + 1
+        line_end = report_text.find("\n", m.end())
+        line = report_text[line_start: line_end if line_end != -1 else len(report_text)]
+        pair = _table_cell_pair_value(line, m)
+        net_matches.append((m, pair[0] if pair else m.group(2), pair[1] if pair else None))
     if not net_matches:
         return []
-    debts = [m for m in net_matches if m.group(1).lower() == "debt"]
-    net_m = (debts or net_matches)[-1]
+    debts = [x for x in net_matches if x[0].group(1).lower() == "debt"]
+    net_m, net_raw, net_value = (debts or net_matches)[-1]
     if not (cash_m and debt_m):
         return []
     cash = _money_billions(cash_m.group(1), cash_m.group(2))
     debt = _money_billions(debt_m.group(1), debt_m.group(2))
-    quoted = _money_billions(net_m.group(2), net_m.group(3))
+    quoted = (
+        net_value
+        if net_value is not None
+        else _money_billions(net_raw, net_m.group(3))
+    )
     if cash is None or debt is None or quoted is None:
         return []
     is_debt = net_m.group(1).lower() == "debt"
@@ -1280,8 +1737,8 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
 _CURRENT_RATIO_RE = re.compile(r"(?i)\b(?:current\s+ratio|CR)\b[^0-9\n]{0,12}?(\d+(?:\.\d+)?)")
 _CA_CL_PAIR_RE = re.compile(
     r"(?i)current\s+assets\b[^0-9\n]{0,16}?current\s+liabilit(?:ies|y)\b"
-    r"[^0-9]{0,24}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
-    r"[^0-9]{0,12}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)"
+    r"[^0-9]{0,24}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
+    r"[^0-9]{0,12}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 
 
@@ -1342,10 +1799,29 @@ def _roa_consistency(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    roa_m = _ROA_RE.search(report_text)
-    margin_m = _ROA_NET_MARGIN_RE.search(report_text)
-    turnover_m = _ROA_ASSET_TURNOVER_RE.search(report_text)
-    if not (roa_m and margin_m and turnover_m):
+    # Compare only within ONE paragraph: the identity is the report's own claim
+    # only where it prints the ROA and its decomposition together. TSM
+    # 2026-09-15 fundamentals.md quotes get_fundamentals' ROA 19.00% several
+    # bullets away from get_dupont_read's net_margin 0.4992 x asset_turnover
+    # 0.5598, and VST 2026-09-15 splits the two the same way - the old
+    # whole-report search crossed producers and read a report that discloses
+    # every basis it uses as a contradiction (AMZN 2026-09-15: "the ROE, ROA,
+    # current-ratio, and FCF readings vary by basis").
+    block = ""
+    for block in re.split(r"\n\s*\n", report_text):
+        roa_m = _ROA_RE.search(block)
+        margin_m = _ROA_NET_MARGIN_RE.search(block)
+        turnover_m = _ROA_ASSET_TURNOVER_RE.search(block)
+        if roa_m and margin_m and turnover_m:
+            break
+    else:
+        return []
+
+    # A stated basis difference is exempt everywhere else in this module and
+    # is exempt here too: AMAT/VST 2026-09-14 carry a dated reconciliation
+    # clause naming each ROA basis ("three ROA bases (2.27% ratios / 5.89%
+    # fundamentals / 5.34% DuPont-implied)").
+    if _DISCLOSURE_MARKERS.search(block):
         return []
     try:
         roa = float(roa_m.group(1))
@@ -1358,6 +1834,18 @@ def _roa_consistency(report_text: str) -> list[VerifierClaim]:
     margin_pct = margin * 100.0 if margin <= 1.0 else margin
     implied = margin_pct * turnover
     if abs(implied - roa) / max(abs(roa), 1e-9) <= 0.2:
+        return []
+    # The product must be one of the report's own ROA readings for the
+    # comparison to be about anything: AMZN 2026-09-15 prints three provider
+    # ROAs (6.59 / 15.21 / 11.10) and the DuPont product IS get_ratios' 11.10,
+    # so the report is showing bases, not contradicting itself. A single
+    # quoted ROA the report's own decomposition does not produce is the defect
+    # R1 pinned (NVDA 2026-09-12: ROA 81.41% vs margin 0.637 x turnover 0.946
+    # = 60.3%).
+    quoted_roa = [float(v) for v in _ROA_RE.findall(report_text)]
+    if len(quoted_roa) > 1 and any(
+        q > 0 and abs(implied - q) / q <= 0.05 for q in quoted_roa
+    ):
         return []
     return [
         VerifierClaim(
@@ -1586,10 +2074,10 @@ _DIST_CADENCE_RE = re.compile(r"(?i)\b(monthly|quarterly)\b")
 
 
 _FCF_AMT = re.compile(
-    r"(?i)\bfcf\b[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)"
+    r"(?i)\bfcf\b[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)(?![A-Za-z])"
 )
 _FCF_AMT_FE = re.compile(
-    r"(?i)free\s+cash\s+flow[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)"
+    r"(?i)free\s+cash\s+flow[^0-9$]{0,12}\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([KMBkmb]?)(?![A-Za-z])"
 )
 
 
@@ -2096,6 +2584,12 @@ _TEMA_VAL = re.compile(
     r"10\s*-?\s*EMA\s*(?:=|:|is|at)?\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I
 )
 _TRAIL_VAL = re.compile(r"EMA\s*-?\s?trail[^0-9]{0,12}?([0-9]+\.?[0-9]*)", re.I)
+# A dated series is one value CHANGING, not two competing readings: IEI
+# 2026-09-15 market.md quotes "10 EMA 116.1043 -> **115.0450**" (moomoo, 08-17
+# to 09-15) beside the verified "10 EMA 115.20". Neither leg of a series is a
+# competing canonical value, so the dual-value check must not read one.
+_EMA_SERIES_AFTER_RE = re.compile(r"^\s*(?:\u2192|->|=>|to)\s*\**\s*[\d.]")
+_EMA_SERIES_BEFORE_RE = re.compile(r"[\d.]+\s*(?:\u2192|->|=>)\s*\**\s*$")
 
 
 def _ema_identity(report_text: str) -> list[VerifierClaim]:
@@ -2107,7 +2601,13 @@ def _ema_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _TEMA_VAL.finditer(report_text)}
+    vals: set[str] = set()
+    for m in _TEMA_VAL.finditer(report_text):
+        if _EMA_SERIES_AFTER_RE.match(report_text[m.end(1): m.end(1) + 16]):
+            continue
+        if _EMA_SERIES_BEFORE_RE.search(report_text[max(0, m.start(1) - 16): m.start(1)]):
+            continue
+        vals.add(m.group(1))
     if len(vals) <= 1:
         return []
     return [VerifierClaim(
@@ -2130,7 +2630,17 @@ def _ema_trail_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _TRAIL_VAL.finditer(report_text)}
+    vals: set[str] = set()
+    for m in _TRAIL_VAL.finditer(report_text):
+        # "| Chandelier / 20-EMA trail | 414.0586 (exit) / 422.0031 |": the
+        # label is the SECOND leg of a slash list whose values pair by
+        # position, so the cell value before the slash belongs to the
+        # chandelier - reading it as a second EMA trail invented a stop
+        # conflict on a row that labels both tools (TSM 2026-09-15 market.md).
+        if re.search(r"(?i)chandelier\s*(?:stop)?\s*/", report_text[max(0, m.start() - 40): m.start()]):
+            continue
+        vals.add(m.group(1))
+    vals = _cluster_value_tokens(sorted(vals))
     if len(vals) <= 1:
         return []
     return [VerifierClaim(
@@ -2145,13 +2655,45 @@ def _ema_trail_identity(report_text: str) -> list[VerifierClaim]:
 
 
 _SMA200_PCT = re.compile(r"200\s*-?\s*SMA[^\n]{0,60}?([+]?\d+(?:\.\d+)?)%", re.I)
+# ...but a percent inside that window belongs to the 200-SMA only when no
+# other metric introduces it. IEI 2026-09-15 market.md states its distance
+# once ("1.6% under the 200-SMA") and the reader still reported two: the 4.9%
+# of "no short thesis at 200-SMA support with 4.8-4.9% 5-7y yields" (a YIELD)
+# and the Bollinger "%b -6.22%" two clauses later.
+_FOREIGN_PCT_LABEL_RE = re.compile(
+    r"(?i)\b(?:rsi|stoch\w*|mfi|kst|atr|adx|yields?|coupon|vwap|skew|hist|"
+    r"macd|ema|sma|boll(?:inger)?|vol(?:ume)?|iv|odds|probability)\b"
+)
+# A value that is the SECOND leg of a range ("4.8-4.9%") is not a distance.
+_RANGE_DASH_RE = re.compile(r"\d\s*[-\u2013\u2014~]\s*$")
+_SMA_LABEL_STRIP_RE = re.compile(r"(?i)\b200\s*-?\s*(?:day\s*)?sma\b")
+
+
+def _sma200_pct_is_foreign(line: str, m: re.Match) -> bool:
+    """True when the % in this match is some other metric's, not the SMA's."""
+    window = _SMA_LABEL_STRIP_RE.sub(" ", line[max(0, m.start(1) - 22): m.start(1)])
+    return bool(_FOREIGN_PCT_LABEL_RE.search(window) or _RANGE_DASH_RE.search(window))
+
+
 _GARCH_COND = re.compile(r"garch[^\n]{0,40}?\bcond(?:itional)?[^0-9]{0,8}(\d+(?:\.\d+)?)%", re.I)
 _CHANDELIER_EQ = re.compile(r"chandelier[^=\n]*=\s*(\d+(?:\.\d+)?)", re.I)
 _CHANDELIER_SPACE = re.compile(r"chandelier\s+(\d+(?:\.\d+)?)(?!\s*[x×XATR])", re.I)
 
 
 _PRIMARY_PRICE = re.compile(
-    r"(?i)(?:at|close|price|spot)[\s:$]{0,3}\$?\s*([0-9]+\.[0-9]{2})"
+    # The spot price, never the SESSION IT BEGAN FROM: TSM 2026-09-15 market.md
+    # opens with "Verified OHLCV ... C 413.23" and the very next sentence quotes
+    # "Prev close 418.01", which the fallback entry picked - inventing a 2R/3R
+    # mismatch against the swing-set stop (AMZN 2026-09-15: "Prior close
+    # 253.54").
+    # The leading \b is load-bearing: without it the alternation matched the
+    # "at" INSIDE an ordinary word, so IEI 2026-09-15 market.md's own caveat
+    # sentence - '... do not reconcile as a true print."* Treat 114.33 as
+    # unverified.' - handed back the DISOWNED live print as the report's spot
+    # price. The swing-set row's 2R/3R targets were then re-derived off the day
+    # low plus ATR (114.33 + 2*0.2939 = 114.92 vs the quoted 115.2778) and two
+    # targets that are verbatim tool output were flagged. "Treat" is not "at".
+    r"(?i)(?<!prev\s)(?<!previous\s)(?<!prior\s)\b(?:at|close|price|spot)[\s:$]{0,3}\$?\s*([0-9]+\.[0-9]{2})"
 )
 
 
@@ -2171,6 +2713,51 @@ def _primary_price(report_text: str) -> float | None:
 
 
 _SMA_ABOVE_RE = re.compile(r"([+]?-?\d+(?:\.\d+)?)%\s*(?:above|below)\s+the\s+200\s*-?\s*SMA\b[^\n:!]{0,16}?([0-9]+\.?[0-9]*)", re.I)
+
+
+_SMA_LABEL_RE = re.compile(r"\b(?:10|20|50|200)\s*-?\s*(?:day\s*)?SMA\b", re.I)
+_PCT_TOKEN_RE = re.compile(r"[+-]?\d+(?:\.\d+)?%")
+
+
+def _sma200_percent_values(report_text: str) -> list[str]:
+    """The % figures the report ties to the 200-SMA, table rows included.
+
+    A table row lists its labels in one cell and their values, in the same
+    order, elsewhere in the row - MSFT 2026-09-15 market.md writes
+    ``| 50-SMA / 200-SMA | 457.68 / 429.95 | Stacked, rising; +8.9% / +15.9% above |``,
+    where +8.9% is the 50-SMA's distance. Reading it as a second 200-SMA
+    distance invented a conflict on a row that labels both; the label's
+    ordinal in its slash list selects the matching value.
+    """
+    out: list[str] = []
+    for line in report_text.splitlines():
+        for m in _SMA200_PCT.finditer(line):
+            if _sma200_pct_is_foreign(line, m):
+                continue
+            if "|" not in line:
+                out.append(m.group(1))
+                continue
+            pos = 0
+            for idx, cell in enumerate(line.split("|")):
+                if pos <= m.start() < pos + len(cell):
+                    labels = list(_SMA_LABEL_RE.finditer(cell))
+                    value_cell = next(
+                        (c for c in line.split("|")[idx + 1:]
+                         if len(_PCT_TOKEN_RE.findall(c)) >= 2),
+                        None,
+                    )
+                    if len(labels) > 1 and value_cell is not None:
+                        ordinal = sum(
+                            1 for lm in labels if lm.start() <= m.start() - pos
+                        )
+                        pcts = _PCT_TOKEN_RE.findall(value_cell)
+                        if 1 <= ordinal <= len(pcts):
+                            out.append(pcts[ordinal - 1].rstrip("%"))
+                    else:
+                        out.append(m.group(1))
+                    break
+                pos += len(cell) + 1
+    return out
 
 
 def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
@@ -2194,8 +2781,8 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
             return None
 
     # 1) pairwise conflicts between distinct stated percents
-    vals = sorted({v for m in _SMA200_PCT.finditer(report_text)
-                   if (v := _pct(m.group(1))) is not None})
+    vals = sorted({v for raw in _sma200_percent_values(report_text)
+                   if (v := _pct(raw)) is not None})
     if len(vals) > 1:
         out.append(VerifierClaim(
             claim="200-SMA distance cited at different values: "
@@ -2249,7 +2836,6 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
                             ),
                         ))
     return out
-    return out
 
 
 def _garch_cond_identity(report_text: str) -> list[VerifierClaim]:
@@ -2260,7 +2846,7 @@ def _garch_cond_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _GARCH_COND.finditer(report_text)}
+    vals = _cluster_value_tokens([m.group(1) for m in _GARCH_COND.finditer(report_text)])
     if len(vals) <= 1:
         return []
     return [VerifierClaim(
@@ -2285,8 +2871,9 @@ def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _CHANDELIER_EQ.finditer(report_text)}
-    vals |= {m.group(1) for m in _CHANDELIER_SPACE.finditer(report_text)}
+    raw = [m.group(1) for m in _CHANDELIER_EQ.finditer(report_text)]
+    raw += [m.group(1) for m in _CHANDELIER_SPACE.finditer(report_text)]
+    vals = _cluster_value_tokens(raw)
     if len(vals) <= 1:
         return []
     return [VerifierClaim(
@@ -2303,7 +2890,7 @@ def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
 
 
 _SUM_LINE = re.compile(
-    r"([0-9][0-9,]*\.?[0-9]*(?:\s*\+\s*[0-9][0-9,]*\.?[0-9]*){2,})\s*=\s*\$?\s*(\d+(?:\.\d+)?)"
+    r"([0-9][0-9,]*\.?[0-9]*(?:\s*\+\s*[0-9][0-9,]*\.?[0-9]*){2,})\s*=\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"
 )
 
 
@@ -2326,7 +2913,14 @@ def _sum_identity(report_text: str) -> list[VerifierClaim]:
         s = sum(addends)
         if abs(s) < 1e-9:
             continue
-        if abs(s - total) / abs(s) > 0.005:
+        # The addends and the total may be quoted on different SCALES: WDC
+        # 2026-09-14 fundamentals.md writes the four buyback quarters as
+        # millions and the total in dollars ("672+752+615+553 =
+        # $2,592,000,000") - the arithmetic is right, the units are implicit.
+        if abs(s - total) / abs(s) > 0.005 and not any(
+            abs(s * scale - total) / abs(s * scale) <= 0.005
+            for scale in (1e3, 1e6, 1e9, 1e12)
+        ):
             expr = "+".join(str(x) for x in addends)
             return [VerifierClaim(
                 claim=f"quoted sum {expr} = {total:g} (as written) sums to {s:g}",
@@ -2342,7 +2936,15 @@ def _sum_identity(report_text: str) -> list[VerifierClaim]:
     return []
 
 
-_PRICE_TARGET = re.compile(r"\bmean\s+(?:PT\s*)?\$?([\d.]+)", re.I)
+_PT_CONTEXT_REJECT = re.compile(r"(?i)\bvs\b|z-?score|\bstd\b|deviation|\bn\s*=\s*\d|\.\.\.")
+
+_PRICE_TARGET = re.compile(
+    # A price target is never a percentage: without the lookahead, "call IV mean
+    # 151.3%, put IV mean 184.7%" read as two conflicting mean PTs (JCI
+    # 2026-09-14 market.md), and the same shape hit AMZN (102.8/91.3).
+    r"\bmean\s+(?:PT\s*)?\$?(\d[\d,]*(?:\.\d+)?)(?![\d.])(?!\s*%)",
+    re.I,
+)
 
 
 def _price_target_identity(report_text: str) -> list[VerifierClaim]:
@@ -2356,7 +2958,14 @@ def _price_target_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    vals = {m.group(1) for m in _PRICE_TARGET.finditer(report_text)}
+    vals = set()
+    for line in report_text.splitlines():
+        for m in _PRICE_TARGET.finditer(line):
+            # "current 1.2770 vs mean 1.9691, std 0.5373" is a z-score series'
+            # mean, not a consensus target (TSM 2026-09-14 fundamentals.md).
+            if _PT_CONTEXT_REJECT.search(line[max(0, m.start() - 30): m.start()]):
+                continue
+            vals.add(m.group(1))
     if len(vals) <= 1:
         return []
     return [VerifierClaim(
@@ -2376,6 +2985,58 @@ _MONEY_ELLIPSIS = re.compile(r"\$\s*\d[\d,]*\.?\d*\s*[BMK]?\s*\.\.\.")
 _SELF_CORRECTION = re.compile(
     r"(?:\bcorrected?\s*:|\bcorrection\s*[\u2014-]|\b\.\.\.\s*(?:corrected?|correction))"
 )
+# A generation that gave up and re-emitted itself, or that says so out loud.
+# HPE 2026-09-14 fundamentals.md shipped a whole report that degenerated:
+# "Wait correction needed below", "This is degenerating", a 10x repeated
+# "Inventory series:" line, then "I am stuck repeating myself due an internal
+# glitch. Please disregard this draft attempt entirely. I will restart
+# cleanly below" followed by a second, space-stripped copy of the report -
+# and the deterministic pass flagged none of it (only bogus figure conflicts
+# read out of the mangled digits).
+_DEGENERATION_MARKERS = re.compile(
+    r"(?:\brestarts?\s+cleanly|\brestarting\s+cleanly|\bdisregard\s+(?:this|the)\s+draft"
+    r"|\binternal\s+glitch|\bstuck\s+repeating|\bthis\s+is\s+degenerating"
+    r"|\bwait,?\s+correction\s+needed)",
+    re.I,
+)
+_FINAL_PROPOSAL = re.compile(r"\bFINAL\s+TRANSACTION\s+PROPOSAL\b", re.I)
+# The verdict token on a proposal line, to tell a repeated conclusion from a
+# restarted one: two HOLD lines is a style habit, HOLD then SELL is a restart.
+_FINAL_VERDICT = re.compile(
+    r"FINAL\s+TRANSACTION\s+PROPOSAL\s*:?\s*\**\s*([A-Za-z]+)", re.I
+)
+# Leaked tool-call markup: an unexecuted call transcript written as the report
+# (wdc 2026-09-14 market_report.md is 25 lines of <invoke name=...> and nothing
+# else - the model emitted XML tool syntax, no tool ran, and the raw text was
+# saved as the analyst's market read).
+_TOOL_CALL_MARKUP = re.compile(
+    r"</?\s*(?:｜\s*)?(?:DSML)?(?:｜\s*)?\]?\s*(?:tool_calls?|invoke|parameter|function_calls?)\b[^>]{0,80}>",
+    re.I,
+)
+# A run of non-whitespace this long is text that lost its spaces: the restart
+# copy above had 300+ character tokens ("terminalshare64WACC121beta144...").
+_GLUED_RUN = re.compile(r"\S{200,}")
+_REPETITION_MIN = 4
+_REPETITION_MIN_CHARS = 16
+
+
+def _repetition_loops(report_text: str) -> list[str]:
+    """Lines repeated verbatim at least ``_REPETITION_MIN`` times.
+
+    Table rules and short cells are excluded: a markdown separator repeated
+    four times is a table, not a stuck decoder. Returns one sample per loop.
+    """
+    counts: dict[str, int] = {}
+    for ln in report_text.splitlines():
+        s = ln.strip()
+        if len(s) < _REPETITION_MIN_CHARS or set(s) <= set("-|: _"):
+            continue
+        counts[s] = counts.get(s, 0) + 1
+    return sorted(
+        (s for s, n in counts.items() if n >= _REPETITION_MIN),
+        key=lambda s: -counts[s],
+    )
+
 
 
 def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
@@ -2397,21 +3058,106 @@ def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
             markers.append(m.group(0))
         if _MONEY_ELLIPSIS.search(ln):
             markers.append("money-ellipsis")
-    if not markers:
-        return []
-    return [VerifierClaim(
-        claim="self-correction artifacts present in report text: "
-              + ", ".join(sorted(set(markers))),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report contains inline self-correction markers (e.g. "
-            "'9.87 ... corrected: 4.8', '278.346 ... correction - 154.3360', "
-            "'Total debt $8.22B... verbatim'); these are the model retyping a "
-            "figure mid-generation and leaking the repair into the artifact. "
-            "Emit only the final corrected value; never include the wrong "
-            "value with a caveat (HPE 2026-09-10)."
-        ),
-    )]
+    out: list[VerifierClaim] = []
+    if markers:
+        out.append(VerifierClaim(
+            claim="self-correction artifacts present in report text: "
+                  + ", ".join(sorted(set(markers))),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report contains inline self-correction markers (e.g. "
+                "'9.87 ... corrected: 4.8', '278.346 ... correction - 154.3360', "
+                "'Total debt $8.22B... verbatim'); these are the model retyping a "
+                "figure mid-generation and leaking the repair into the artifact. "
+                "Emit only the final corrected value; never include the wrong "
+                "value with a caveat (HPE 2026-09-10)."
+            ),
+        ))
+
+    # A generation that restarted, looped, or lost its spacing is not a
+    # readable report and must not pass as one (HPE 2026-09-14 fundamentals).
+    degeneration = sorted({m.group(0).strip() for m in _DEGENERATION_MARKERS.finditer(report_text)})
+    if degeneration:
+        out.append(VerifierClaim(
+            claim="generation-degeneration markers present: "
+                  + ", ".join(f"'{d}'" for d in degeneration),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The text announces that it is restarting/discarding itself "
+                "('I am stuck repeating myself ... I will restart cleanly', "
+                "'This is degenerating', 'Wait correction needed'). Everything "
+                "after such a marker is a SECOND, unreviewed copy of the "
+                "report - treat neither copy as analysis (HPE 2026-09-14 "
+                "fundamentals.md). Regenerate the report."
+            ),
+        ))
+    loops = _repetition_loops(report_text)
+    if loops:
+        out.append(VerifierClaim(
+            claim="repetition loop in report text: "
+                  + "; ".join(f"{ln[:60]!r}" for ln in loops[:3]),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "A line repeated four or more times is decoder repetition, not "
+                "prose - the report stopped making progress (HPE 2026-09-14 "
+                "fundamentals.md repeated one 'Inventory series:' line ten "
+                "times). Regenerate the report."
+            ),
+        ))
+    glued = _GLUED_RUN.search(report_text)
+    if glued:
+        out.append(VerifierClaim(
+            claim=f"degenerate run ({len(glued.group(0))} chars with no whitespace) in report text",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "A 200+ character run with no whitespace is either text that lost "
+                "its spacing - labels and figures glued together, decimals gone, "
+                "so neither the numbers nor any conflict read out of them can be "
+                "trusted ('DCFFairValue194EV440527404343', HPE 2026-09-14 "
+                "fundamentals.md) - or a stuck decoder repeating one unit "
+                "('Stop_loss_loss_loss_...', MSFT 2026-09-03 "
+                "final_trade_decision.md). Either way the passage is unreadable."
+            ),
+        ))
+    verdicts = {m.group(1).strip().upper() for m in _FINAL_VERDICT.finditer(report_text)}
+    if len(verdicts) > 1:
+        out.append(VerifierClaim(
+            claim="conflicting 'FINAL TRANSACTION PROPOSAL' verdicts in one report: "
+                  + ", ".join(sorted(verdicts)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "A report concludes once. Two DIFFERENT verdicts means a restart "
+                "left both bodies in the artifact, and the downstream reader "
+                "cannot tell which one was meant. (Two identical proposal lines "
+                "are a style habit, not flagged here.)"
+            ),
+        ))
+    markup = [m.group(0) for m in _TOOL_CALL_MARKUP.finditer(report_text)]
+    if markup:
+        # A whole file of call markup is the worst case: no report at all.
+        prose_lines = sum(
+            1
+            for ln in report_text.splitlines()
+            if ln.strip() and not _TOOL_CALL_MARKUP.search(ln)
+        )
+        what = (
+            "the whole artifact is a call transcript with no report text"
+            if prose_lines <= 2
+            else "a call transcript leaked into the report"
+        )
+        out.append(VerifierClaim(
+            claim=f"unexecuted tool-call markup in report text ({len(markup)} tags): "
+                  + ", ".join(sorted({m[:40] for m in markup})[:3]),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                f"{what}: the model emitted XML tool syntax instead of prose and "
+                "the raw text was saved as the analyst's report, so the calls it "
+                "describes never ran and no evidence backs the section (wdc "
+                "2026-09-14 market_report.md is 25 lines of <invoke name=...> and "
+                "nothing else). Regenerate the report."
+            ),
+        ))
+    return out
 
 
 _BOLL_PAIR = re.compile(
@@ -2538,7 +3284,17 @@ def _expected_band_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    if not _BAND_ZERO.search(report_text):
+    m = _BAND_ZERO.search(report_text)
+    if not m:
+        return []
+    # A line that DISCLAIMS the zero band is not quoting one: SIMO 2026-09-14
+    # market.md wrote "no earnings-implied move / dollar band is available -
+    # dollar band unavailable, not +-$0.00", and the literal in the disclaimer
+    # was read as the fabrication this check exists to catch.
+    ls = report_text.rfind("\n", 0, m.start()) + 1
+    le = report_text.find("\n", m.end())
+    line = report_text[ls: le if le != -1 else len(report_text)]
+    if re.search(r"(?i)unavailable|no[_ ]data|not\s*[\u00b1+-]", line):
         return []
     return [VerifierClaim(
                 claim="expected-move dollar band quoted as +/-$0.00 (impossible for a positive move)",
@@ -2628,6 +3384,22 @@ _ENTRY_RE = re.compile(r"(?i)\bentry\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)")
 _STOP_RE = re.compile(
     r"(?i)\b(?:struct(?:ure)?[\s_]*)?stop\b[^0-9]{0,12}\$?\s*\**\s*(\d[\d,]*\.\d+)"
 )
+# "stop: swing_low **134.9000**, structure_stop **129.9781**" fits the 12-char
+# gap exactly, so the reader took the swing LOW as the stop and reported the
+# report's own correct 2R target as wrong (VST 2026-09-14 market.md: T1(2R)
+# 162.2338 resolves from 140.73 / 129.9781). A number introduced by another
+# metric's label is not the stop.
+_STOP_GAP_REJECT = re.compile(
+    r"(?i)swing[\s_]*(?:low|high)|\bentry\b|\bavg\b|\btarget\b|\bbase\b"
+)
+# ... and the value may be followed by a parenthetical naming another metric.
+_STOP_TAIL_REJECT = re.compile(
+    r"^\s*\(\s*[^)]{0,24}?(?:sma|ema|vwma|atr|wall|mid|band|sma50|sma200)[^)]{0,12}\)",
+    re.I,
+)
+# A line quoting a scale-in ladder: its targets come off the plan's averaged
+# entry, so the report-wide spot price is not their basis.
+_TRANCHE_LINE_RE = re.compile(r"(?i)\btranche\b|\bP1\b[^\n]{0,40}\bP3\b")
 # "2R" / "3R" / "T1(2R)" / "T2(3R)" label followed by its value(s). A swing
 # line often quotes a pair "2R/3R targets 1357.69 / 1521.68" — group 2 is the
 # label-specific value (the one after "/" for the 3R in a "A / B" pair).
@@ -2642,7 +3414,12 @@ _RMULT_TOL = 0.002  # 0.2% — a real typo (0.06%) is far under; framework drift
 # label's implied 2R/3R multiple no longer governs (get_tranche_plan: 1.8R /
 # 3.0R off avg 871.92 with risk/share 104.84 — MU market.md 2026-09-14).
 _ENTRY_AVG_RE = re.compile(
-    r"(?i)\b(?:avg|average)(?:\s+entry)?\s*[:=]?\s*\$?\s*(\d[\d,]*\.\d+)"
+    # ``[\s_]+entry``: get_tranche_plan's own stdout spells it ``avg_entry=``
+    # (with an underscore), which the space-only form missed — so a report
+    # quoting the tool verbatim fell back to the report-wide spot price and
+    # flagged the tool's own correct 1.8R/3.0R targets (AMZN market.md
+    # 2026-09-14, T1 271.97 / T2 288.46).
+    r"(?i)\b(?:avg|average)(?:[\s_]+entry)?\s*[:=]?\s*\**\s*\$?\s*(\d[\d,]*\.\d+)"
 )
 _RISK_PER_SHARE_RE = re.compile(
     r"(?i)\brisk(?:\s*/\s*share)?\s*[:=]?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d+)"
@@ -2651,6 +3428,12 @@ _RISK_PER_SHARE_RE = re.compile(
 # separates a written multiple ("T1 1857.88 (1.8R)") from the label itself
 # ("2R/3R targets"), which is not a claim about the basis.
 _RMULT_STATED_RE = re.compile(r"(?i)\b(\d\.\d+)\s*R\b")
+# The same statement in its other printed form: "targets T1(2R) 444.2039,
+# T2(3R) 459.6909" (TSM 2026-09-15 market.md). Those targets come off the
+# swing-set's own swing-low/ATR basis, not off any quoted entry, so the
+# report-wide spot fallback must not be used to re-derive them. Parenthesized
+# ONLY: a bare "2R/3R targets" phrase names the labels, not a basis.
+_RMULT_STATED_LABEL_RE = re.compile(r"(?i)\(\s*\d+(?:\.\d+)?\s*R\s*\)")
 
 # The same R-label is quoted by DIFFERENT producers in one market report
 # (get_swing_set off the structure stop, get_swing_exits off the chandelier,
@@ -2660,17 +3443,47 @@ _RMULT_STATED_RE = re.compile(r"(?i)\b(\d\.\d+)\s*R\b")
 # the plain report-wide comparison.
 _MULTI_PRODUCER_METRICS = frozenset({"t1", "t2"})
 _TOOL_SCOPE_RE = re.compile(r"`?((?:get|compute|read|fetch)_[a-z0-9_]+)`?")
+# A summary row names its producer in a LABEL, not in a tool call: "| Swing set
+# | stop 114.0361, T1 115.2778, T2 115.6917 |" sits beside "| Tranche plan |
+# ... T1 115.40 ... |". Those rows quote two frameworks' own targets by
+# design, and with no tool name on the line both landed in one scope key, so
+# the tranche plan's T1 flagged the swing set's (IEI 2026-09-15 market.md).
+# Framework labels only - a generic "structure stop" is a basis, not a
+# producer, and two MU-style target sets read as one under it.
+_METHOD_SCOPE_RE = re.compile(
+    r"(?i)\b(swing\s*-?\s*set|tranche\s*plan|chandelier|ema\s*-?\s?(?:20|trail))\b"
+)
 
 
 def _tool_scoped_values(text: str, label: str) -> list[list[tuple[str, float]]]:
-    """Metric values grouped by the tool named on their line."""
+    """Metric values grouped by the producer named nearest them.
+
+    Scoping is per SEGMENT, not per line: a line naming two producers
+    ("`get_tranche_plan`: ... T1=115.40 ... `get_swing_set` ... T1 **115.2778**",
+    IEI 2026-09-15 market.md) binds each value to the producer named closest
+    before it. A line naming none falls back to its framework label, and
+    failing that to the report-wide "" scope.
+    """
     groups: dict[str, list[tuple[str, float]]] = {}
+    reader = _METRIC_VALUE_READERS[label]
     for line in text.splitlines():
-        vals = _METRIC_VALUE_READERS[label](line)
-        if not vals:
-            continue
-        found = _TOOL_SCOPE_RE.search(line)
-        groups.setdefault(found.group(1) if found else "", []).extend(vals)
+        marks = list(_TOOL_SCOPE_RE.finditer(line))
+        method = _METHOD_SCOPE_RE.search(line)
+        fallback = f"method:{method.group(1).lower()}" if method else ""
+        bounds = [m.start() for m in marks] + [len(line)]
+        # Whatever precedes the first producer name belongs to no tool ON THIS
+        # LINE: it keeps the framework-label (or report-wide) scope.
+        segments = [("", line[: bounds[0]])]
+        segments += [
+            (mark.group(1), line[bounds[i]: bounds[i + 1]])
+            for i, mark in enumerate(marks)
+        ]
+        for tool, segment in segments:
+            if not segment:
+                continue
+            vals = reader(segment)
+            if vals:
+                groups.setdefault(tool or fallback, []).extend(vals)
     return list(groups.values())
 
 
@@ -2710,16 +3523,40 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
         # belongs to whichever tool quoted it first, and crossing it with
         # another tool's stop invented five flags per symbol on the 2026-09-14
         # batch while every quoted target was verbatim tool output.
-        ls = _STOP_RE.search(line)
-        if not ls:
+        line_stop = None
+        for cand in _STOP_RE.finditer(line):
+            if _STOP_GAP_REJECT.search(cand.group(0)[: cand.start(1) - cand.start(0)]):
+                continue
+            # The candidate value may itself be another metric wearing a
+            # parenthetical: "puts 386.51 (structure stop) and 381.68
+            # (200-SMA) in play" (WDC 2026-09-15 market.md) bound the 200-SMA
+            # as the stop and flagged a correct 2R target.
+            if _STOP_TAIL_REJECT.match(line[cand.end(1): cand.end(1) + 24]):
+                continue
+            line_stop = float(cand.group(1).replace(",", ""))
+            break
+        if line_stop is None:
             continue
-        line_stop = float(ls.group(1).replace(",", ""))
         em = _ENTRY_RE.search(line) or _ENTRY_AVG_RE.search(line)
         if em is not None:
             entry = float(em.group(1).replace(",", ""))
-        elif spot is not None:
+        elif (
+            spot is not None
+            and not _RMULT_STATED_RE.search(line)
+            and not _RMULT_STATED_LABEL_RE.search(line)
+            # A summary row quoting a tranche plan's targets names no entry of
+            # its own: those targets are measured off the plan's averaged
+            # entry, so the quote is not their basis (TSM 2026-09-14
+            # market.md, "| Tranche plan | stop 382.56; T1 450.62; R:R 2.40 |").
+            and not _TRANCHE_LINE_RE.search(line)
+        ):
             entry = spot
         else:
+            # The line states its own multiplier ("T1 55.27 (1.8R)") but not
+            # the entry it is measured from - the tranche plan's averaged
+            # entry, not the quote. Falling back to the report-wide spot price
+            # asserted a risk the line never claimed and flagged the tool's own
+            # output (AMKR 2026-09-14 market.md).
             continue
         risk = entry - line_stop
         if risk <= 0:
@@ -2731,6 +3568,7 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
         own_basis = (
             _ENTRY_AVG_RE.search(line) is not None
             or _RMULT_STATED_RE.search(line) is not None
+            or _RMULT_STATED_LABEL_RE.search(line) is not None
             or (
                 stated is not None
                 and abs(float(stated.group(1).replace(",", "")) - risk) / risk <= 0.01
@@ -2742,7 +3580,21 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
             mult = 2 if m.group(1).upper() in ("2R", "T1") else 3
             if own_basis:
                 implied = (quoted - entry) / risk
-                if 1.0 <= implied <= 4.0 and abs(implied * 10 - round(implied * 10)) / implied <= 0.01:
+                # Consistent with the multiple the LINE states (1.8R / 3.0R
+                # round-trips as 1.798 / 2.999 from the tool's own rounded
+                # inputs - a 1.1% drift, which the old "clean decimal" test
+                # rejected and so flagged the tool's verbatim output on JCI
+                # and AMKR 2026-09-14).
+                if stated_mults and any(
+                    abs(implied - m) / m <= 0.05 for m in stated_mults
+                ):
+                    continue
+                # A plan line that states avg entry + risk/share but drops the
+                # tool's "(1.8R)" parenthetical still implies a clean multiple:
+                # 149.07 from 133.90 / 8.43 is 1.798 = 1.8R with the tool's own
+                # rounding (JCI 2026-09-14 market.md). 3% of a tenth still
+                # rejects a real mis-binding (2.5R quoted for a 2R pair).
+                if 1.0 <= implied <= 4.0 and abs(implied * 10 - round(implied * 10)) / implied <= 0.03:
                     continue
             if any(
                 target > 0 and abs(quoted - target) / target <= _RMULT_TOL
@@ -2769,10 +3621,10 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
 
 
 _DAYS_OUT_RE = re.compile(
-    r"(?P<date>\d{4}-\d{2}-\d{2})[^\n]{0,160}?"
     r"(?P<count>\d{1,4})\s*days?\s*(?P<dir>out|away|ago|until|from now|later|hence)",
     re.IGNORECASE,
 )
+_ANY_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Only countdown/elapsed phrasings whose direction is unambiguous. A bare
 # "in N days" is NOT one: "worst in 30 days" is a lookback window, and reading
 # it as a countdown flagged TSM 2026-09-09 news.md (30 days vs the -3 it would
@@ -2824,24 +3676,49 @@ def _days_countdown_identity(
     claims: list[VerifierClaim] = []
     seen: set[tuple[str, int, bool]] = set()
     for m in _DAYS_OUT_RE.finditer(report_text):
-        try:
-            target = datetime.strptime(m.group("date"), "%Y-%m-%d").date()  # noqa: DTZ007
-        except ValueError:
-            continue
         stated = int(m.group("count"))
         direction = m.group("dir").lower()
         future = direction not in _PAST_DIRECTIONS
-        expected = (target - anchor).days if future else (anchor - target).days
-        if abs(stated - expected) <= 1:
+        # The date may sit on EITHER side of the count, and the line may carry
+        # several dates (the next print and the last one). Bind the count to
+        # the date that fits it: reading only a trailing date made AMZN
+        # 2026-09-14 news.md look like it claimed "45 days away" for the
+        # 2026-07-30 print, when the 45 belonged to the 2026-10-29 one.
+        ls = report_text.rfind("\n", 0, m.start()) + 1
+        le = report_text.find("\n", m.end())
+        line = report_text[ls: le if le != -1 else len(report_text)]
+        best: tuple[str, int, int] | None = None
+        for dm in _ANY_ISO_DATE_RE.finditer(line):
+            ds = dm.group(0)
+            try:
+                target = datetime.strptime(ds, "%Y-%m-%d").date()  # noqa: DTZ007
+            except ValueError:
+                continue
+            expected = (target - anchor).days if future else (anchor - target).days
+            # A count's direction rules out one side of the anchor: a past date
+            # cannot be "45 days away" and a future date cannot be "45 days
+            # ago". The only dates AMZN 2026-09-14 news.md printed next to its
+            # forward count were the PRIOR print's (2026-07-30, and the
+            # 2026-10-29 next print was not on the line), so the check read a
+            # correct forward count as a wrong one. Wrong-side dates carry no
+            # information - skip them, and only flag when no date fits.
+            if expected < 0:
+                continue
+            if abs(stated - expected) <= 1:
+                best = None
+                break
+            if best is None or abs(stated - expected) < best[1]:
+                best = (ds, abs(stated - expected), expected)
+        if best is None:
             continue
-        key = (m.group("date"), stated, future)
+        key = (best[0], stated, future)
         if key in seen:
             continue
         seen.add(key)
         claims.append(VerifierClaim(
             claim=(
                 f"day count does not follow from its own dates: '{stated} days "
-                f"{direction}' for {m.group('date')} is {expected} days from "
+                f"{direction}' for {best[0]} is {best[2]} days from "
                 f"{as_of}"
             ),
             status="INTERNAL_CONFLICT",
@@ -2883,6 +3760,17 @@ def _valuation_identity_checks(
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+
+
+# The second line every replaced-stem note carries ("# TICKER - Stem: SECTION
+# UNUSABLE (generation degenerated)"); the verifier reports those stems as such
+# rather than judging the note's own sentences as report claims.
+_UNUSABLE_SENTINEL = "SECTION UNUSABLE"
+
+
+def _unusable_note(report_text: str) -> bool:
+    """Is this stem the replacement note for a degenerated generation?"""
+    return bool(report_text) and _UNUSABLE_SENTINEL in report_text[:400]
 
 
 def verify_evidence_call(
@@ -3072,6 +3960,30 @@ def verify_report_dir(
                 "claims": [],
                 "reason": "max_calls budget exhausted",
             }
+            continue
+        if _unusable_note(report_text):
+            # A stem that was REPLACED by a "SECTION UNUSABLE" note is not a
+            # report to judge: its sentences describe the lost generation, so
+            # every one of them reads as an unsupported claim (HPE 2026-09-14
+            # fundamentals, NVDA 2026-09-15 market) and the provider call is
+            # spent on prose that no analyst wrote. Report the state instead.
+            outcomes[stem] = {
+                "overall": "FLAG",
+                "claims": [
+                    VerifierClaim(
+                        claim="stem replaced by an unusable-generation note",
+                        status="INTERNAL_CONFLICT",
+                        reason=(
+                            "The generation degenerated and the stem was replaced by a "
+                            "note describing what it contained (see the file). "
+                            "Regenerate this stem; the deterministic evidence for it "
+                            "is intact in tool_evidence.json."
+                        ),
+                    ).model_dump()
+                ],
+                "reason": "unusable-generation note",
+            }
+            stem_succeeded += 1
             continue
         try:
             verification = verify_evidence_call(

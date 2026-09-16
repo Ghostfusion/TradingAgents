@@ -501,11 +501,27 @@ def _evidence_sources(final_state: dict) -> tuple[list[str], list[str]]:
     ok: set[str] = set()
     failed: set[str] = set()
     for leaves in (final_state.get("tool_evidence") or {}).values():
-        for leaf in leaves or []:
-            name = str((leaf or {}).get("tool") or "").strip()
+        # The mapping holds the per-analyst leaf lists AND the gatherer's
+        # run-level records, and only the former are leaves: `_model_pool` is a
+        # dict of tool-NAME lists, so iterating it yields strings and the walk
+        # died on `(leaf or {}).get(...)` with AttributeError. That exception
+        # was swallowed by `write_report_tree`'s `suppress(Exception)`, so
+        # `research_decision.json` - the only input contract of the
+        # TradingExecution signal daemon - was never written for ANY run whose
+        # state carried tool evidence. Match on SHAPE, never on the four
+        # analyst names: the key set follows the selected analysts, and a
+        # name list would silently drop a real analyst's evidence from
+        # `data_quality` (`_rendered_block` / `_symmetry` are lists of dicts
+        # that carry no `tool` and are skipped by the guard below).
+        if not isinstance(leaves, list):
+            continue
+        for leaf in leaves:
+            if not isinstance(leaf, dict):
+                continue
+            name = str(leaf.get("tool") or "").strip()
             if not name:
                 continue
-            status = str((leaf or {}).get("status") or "").strip().lower()
+            status = str(leaf.get("status") or "").strip().lower()
             if status == "ok":
                 ok.add(name)
             elif status in _TOOL_FAILED_STATUSES:
@@ -1017,11 +1033,20 @@ def write_report_tree(
             if text:
                 research_dir.mkdir(exist_ok=True)
                 cleaned = _collapse_repeated_tables(text)
-                (research_dir / fname).write_text(
-                    _finalize_section(_readable_section(cleaned, role=name.split()[0])),
-                    encoding="utf-8",
+                # The role token must be the SPEAKER the debate state writes,
+                # not the display name: bull_researcher.py/bear_researcher.py
+                # label every turn ``Bull Analyst:``/``Bear Analyst:``, so
+                # ``name.split()[0]`` ("Bull") matched nothing, the
+                # occurrence count stayed 0, no ``### Round N`` heading was
+                # ever promoted, and a two-round bull.md/bear.md rendered as
+                # one unbroken wall (IEI 2026-09-15). 4_risk has always passed
+                # its speaker ("Aggressive Analyst") and has always read
+                # separated; the research section now uses the same format.
+                readable = _finalize_section(
+                    _readable_section(cleaned, role=name.split()[0] + " Analyst")
                 )
-                research_parts.append((name, _finalize_section(_readable_section(cleaned, role=name.split()[0]))))
+                (research_dir / fname).write_text(readable, encoding="utf-8")
+                research_parts.append((name, readable))
         if debate.get("judge_decision"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "manager.md").write_text(

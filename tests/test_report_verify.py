@@ -398,6 +398,24 @@ def test_r_multiple_identity_binds_the_lines_own_pair():
     assert rv._r_multiple_identity(text) == []
 
 
+def test_r_multiple_identity_reads_avg_entry_underscore_spelling():
+    """get_tranche_plan's stdout spells the entry `avg_entry=` (underscore).
+
+    The space-only reader missed that spelling, fell back to the report-wide
+    spot price, and flagged the tool's own correct 1.8R/3.0R targets as two
+    INTERNAL_CONFLICTs on a report that quoted it verbatim (AMZN market.md
+    2026-09-14: T1 271.97 / T2 288.46 off avg_entry 247.24 with risk/share
+    13.74). Both frameworks must stay clean.
+    """
+    text = (
+        "- Verified close 253.54 (FORMING bar)\n"
+        "- `get_tranche_plan`: P1=253.54, P2=247.81, P3=242.09, "
+        "stop=233.50, avg_entry=247.24, risk/share=13.74, shares=109, "
+        "T1=271.97 (1.8R), T2=288.46 (3.0R)\n"
+    )
+    assert rv._r_multiple_identity(text) == []
+
+
 def test_internal_conflict_atr_two_windows():
     """ATR 6.47 (snapshot) vs ATR 5.7079 (swing) in one report must flag —
     the AMZN 2026-09-09 'ATR compressing' class that slipped before."""
@@ -520,6 +538,36 @@ def test_internal_conflict_ev_ebit_dual_values():
     t = "EV/EBIT **65.2** (analyst verdict)  ...  EV/EBIT 66.65 (get_ratios)"
     out = rv._internal_conflicts(t)
     assert any("'ev/ebit'" in c.claim for c in out)
+
+
+def test_internal_conflict_ignores_period_labelled_pairs():
+    # AMZN 2026-09-14 fundamentals: diluted EPS 2.78 (2026-03-31, FY2026 Q1) and
+    # 5.75 (2026-06-30, FY2026 Q2) are two LABELLED quarters, not one metric at
+    # two values - the blanket scan called that pair a conflict.
+    t = (
+        "Income statement: the latest populated diluted EPS **2.78** for "
+        "2026-03-31 (FY2026 Q1)\n"
+        "The 2026-06-30 (FY2026 Q2) column reports diluted EPS of **5.75**\n"
+    )
+    assert not any("'diluted eps'" in c.claim for c in rv._internal_conflicts(t))
+
+
+def test_internal_conflict_flags_undisclosed_roe_and_ev_ebit():
+    # Same AMZN 2026-09-14 report: ROE at 30.56% (feed) / 22.09% (ratios) /
+    # 18.89% (verdict) and EV/EBIT at 35.02 (verdict) vs 32.79 (ratios). Only the
+    # ratios cluster names a basis, so these are undisclosed differences and
+    # must still flag (the period-labelled exemption above must not swallow
+    # them).
+    text = (
+        "Verdict headline: DuPont ROE 22.1% margin-led\n"
+        "The deterministic analyst verdict reports EY: 2.86%, EV/EBIT: 35.02, "
+        "Altman Z: 5.87, ROE: 18.89%\n"
+        "Computed ratios use flows TTM: EV/EBIT 32.79, ROE 22.09%\n"
+        "The same feed reports ROE of 30.56%\n"
+    )
+    claims = [c.claim for c in rv._internal_conflicts(text)]
+    assert any("'roe'" in c for c in claims)
+    assert any("'ev/ebit'" in c for c in claims)
 
 
 def test_dividend_yield_sanity_flags_stale_vendor_field():
@@ -991,6 +1039,47 @@ def test_money_ellipsis_flagged_as_artifact():
 def test_self_correction_artifacts_clean():
     assert rv._self_correction_artifacts("10Y 4.8 (09-08); USD/JPY 154.33") == []
     assert rv._self_correction_artifacts("correction factor 0.99 applied daily") == []
+
+
+def test_self_correction_artifacts_detects_degeneration():
+    """HPE 2026-09-14 fundamentals.md shipped a report that gave up on itself:
+    'Wait correction needed', 'This is degenerating', a repeated line, then a
+    'I will restart cleanly' second copy in space-stripped text."""
+    t = (
+        "Inventory series:** ``635200`. **\n"
+        "Inventory series:** ``635200`. **\n"
+        "Inventory series:** ``635200`. **\n"
+        "Inventory series:** ``635200`. **\n"
+        "I am stuck repeating myself due an internal glitch. Please disregard "
+        "this draft attempt entirely. I will restart cleanly below.\n"
+        + ("DCFFairValue194EV440527404343terminalshare64WACC121beta144" * 8)
+    )
+    claims = rv._self_correction_artifacts(t)
+    texts = " | ".join(c.claim for c in claims)
+    assert all(c.status == "INTERNAL_CONFLICT" for c in claims)
+    assert "generation-degeneration markers" in texts
+    assert "repetition loop" in texts
+    assert "degenerate run" in texts
+
+
+def test_self_correction_artifacts_detects_leaked_tool_markup():
+    """wdc 2026-09-14 market_report.md is an unexecuted call transcript."""
+    all_markup = (
+        "<tool_calls>\n"
+        '<invoke name="get_indicators">\n'
+        '<parameter name="ticker">WDC</parameter>\n'
+        "</invoke>\n"
+    )
+    claims = rv._self_correction_artifacts(all_markup)
+    assert len(claims) == 1
+    assert "tool-call markup" in claims[0].claim
+    assert "no report text" in claims[0].reason
+    # the DSML-wrapped spelling counts too (the wdc run wrote exactly this)
+    dsml = "</\uff5cDSML\uff5c invoke>"
+    assert any(
+        "tool-call markup" in c.claim
+        for c in rv._self_correction_artifacts(dsml)
+    )
 
 
 def test_ema20_does_not_cross_table_pipe():
@@ -1628,19 +1717,33 @@ def test_verify_report_dir_carries_the_debate_block(tmp_path):
 
 
 def _sealed_decision(**overrides):
-    """A conformant 1.1.0 artifact; overrides are applied before sealing."""
-    from datetime import date
+    """A conformant 1.1.0 artifact; overrides are applied before sealing.
+
+    The artifact is built from TODAY's effective date with ``produced_at``
+    pinned to that session's start. A fixture with a hard-coded historical date
+    is not stable: ``expires_at`` is derived from ``effective``, so once the real
+    clock moved past it the artifact was first self-inconsistent
+    (``invalid_timestamp``: expires_at before the wall-clock produced_at) and
+    then ``expired`` — which is how all four envelope tests went red on
+    2026-09-15 with no product change. Pinning produced_at inside the fixture's
+    own window keeps them ordered for every clock.
+    """
+    from datetime import date, datetime, time, timezone
 
     from tradingagents import execution_contract as ec
 
+    run_date = date.today()
     doc = {
         "schema_version": ec.SCHEMA_VERSION,
         "ticker": "NVDA",
-        "effective_date": "2026-09-12",
+        "effective_date": run_date.isoformat(),
     }
     doc.update(
         ec.envelope_fields(
-            {}, run_id="NVDA_20260912_005957", effective=date(2026, 9, 12)
+            {},
+            run_id=f"NVDA_{run_date.strftime('%Y%m%d')}_005957",
+            effective=run_date,
+            now=datetime.combine(run_date, time.min, tzinfo=timezone.utc),
         )
     )
     doc.update(overrides)
@@ -1862,6 +1965,169 @@ def test_days_countdown_identity_reads_elapsed_counts():
     assert rv._days_countdown_identity("2026-08-26 print, 17 days ago", "2026-09-12") == []
     claims = rv._days_countdown_identity("2026-08-26 print, 83 days ago", "2026-09-12")
     assert len(claims) == 1 and "17 days" in claims[0].claim
+
+
+def test_days_countdown_identity_ignores_wrong_side_dates():
+    """A count's direction rules out one side of the anchor.
+
+    AMZN 2026-09-14 news.md quoted the prior print's date (2026-07-30) on the
+    same line as a forward count for the NEXT print (2026-10-29, not on the
+    line); the past date carried no information and the check read a correct
+    "45 days away" as a wrong one.
+    """
+    prior = (
+        "get_earnings_catalyst (2026/Q2, pub 2026-07-30): implied move 8.2% - "
+        "historically a major single-day event, but it is 45 days away."
+    )
+    assert rv._days_countdown_identity(prior, "2026-09-14") == []
+    # The mirror case: a future date cannot be an elapsed count either.
+    assert rv._days_countdown_identity(
+        "the 2026-11-17 print is 45 days ago", "2026-09-14"
+    ) == []
+    # A same-side date that does not fit still flags (the check is not off).
+    claims = rv._days_countdown_identity(
+        "the 2026-11-17 print is 83 days away", "2026-09-14"
+    )
+    assert len(claims) == 1 and "64 days" in claims[0].claim
+
+
+def test_primary_price_ignores_the_prior_session_close():
+    """The spot price, not the close the session began from.
+
+    TSM 2026-09-15 market.md opens with "Verified OHLCV ... C 413.23" and the
+    next sentence quotes "Prev close 418.01"; the fallback entry took the
+    latter and invented a 2R/3R mismatch against the swing-set stop.
+    """
+    line = "Massive.com snapshot: Last 414, Prev close 418.01, -4.01 (-0.96%)"
+    assert rv._primary_price(line) is None
+    assert rv._primary_price("Prior close 253.54 then Price 249.14") == 249.14
+
+
+def test_primary_price_ignores_a_word_ending_in_at():
+    """The report's spot price, not a number an ordinary word happens to precede.
+
+    IEI 2026-09-15 market.md caveats its Alpaca live print with '... do not
+    reconcile as a true print."* Treat 114.33 as unverified.' The alternation
+    matched the "at" INSIDE "Treat", so the report-wide fallback entry was the
+    price the report had just disowned - and the swing-set summary row's 2R/3R
+    targets were then re-derived off the day low plus ATR (114.33 + 2*0.2939 =
+    114.92 vs the quoted 115.2778), flagging two targets that are verbatim
+    get_swing_set output.
+    """
+    text = (
+        '"...do not reconcile as a true print."* Treat 114.33 as unverified. '
+        "**Trend.** Close 114.45 sits below the 10 EMA.\n"
+        "| Swing set | stop 114.0361, T1 115.2778, T2 115.6917, risk 0.36% | "
+        "Structure stop basis |\n"
+    )
+    assert rv._primary_price(text) == 114.45
+    assert rv._r_multiple_identity(text) == []
+
+
+def test_reference_price_line_is_evidence_for_every_stem():
+    """The run's reference-price line is prepended to each analyst's block, so
+    a report citing it is grounded (TSM/AMZN 2026-09-15 news.md were flagged
+    for quoting a price that no leaf carries)."""
+
+    ref = "**Reference price: 413.23** (2026-09-15, FORMING intraday bar - provisional)"
+    ev = {
+        "news": [{"tool": "get_news", "status": "ok", "content": "px 416.60"}],
+        rv.RENDERED_BLOCK_KEY: [
+            {"analyst": "news", "block": ref + "\n\n## Tool Evidence"}
+        ],
+    }
+    assert rv._reference_price_line(ev, "news") == ref
+    assert rv._reference_price_line(ev, "market") == ""
+    assert any(abs(d - 413.23) < 1e-9 for d in rv._evidence_decimals(ev, "news"))
+
+
+def test_r_multiple_ignores_a_line_that_labels_its_own_multiple():
+    """"targets T1(2R) 444.2039, T2(3R) 459.6909" off the swing set's own
+    swing-low/ATR basis: with no entry on the line the report-wide spot is not
+    their basis (TSM 2026-09-15 market.md)."""
+    t = (
+        "Price 413.23. `get_swing_set` structure stop 397.7429, risk 3.75% of "
+        "close; targets T1(2R) 444.2039, T2(3R) 459.6909."
+    )
+    assert rv._r_multiple_identity(t) == []
+
+
+def test_stop_candidate_rejects_a_parenthesised_metric_tail():
+    """"puts 386.51 (structure stop) and 381.68 (200-SMA) in play" must not
+    bind the SMA as the stop (WDC 2026-09-15 market.md flagged a correct 2R)."""
+    t = (
+        "Price 413.53. A close under 410.85 with volume puts 386.51 (structure "
+        "stop) and 381.68 (200-SMA) in play toward T1 467.57."
+    )
+    assert rv._r_multiple_identity(t) == []
+
+
+def test_vrp_unit_scoped_pair_is_not_a_conflict():
+    """A percentage-point VRP and a variance-ratio VRP are two constructs
+    (AMZN 2026-09-15 market.md: +2.10pp beside +0.0490)."""
+    t = "Options: VRP +2.10pp (iv_read); vrp +0.0490 (variance_premium, IV 34.77% vs realized 26.82%)"
+    assert rv._internal_conflicts(t) == []
+    same = "VRP +2.10pp (iv_read) vs VRP +4.90pp (variance_premium)"
+    assert rv._internal_conflicts(same)
+
+
+def test_sum_identity_reads_a_unit_scaled_total():
+    """Addends in millions with a total in dollars are one statement, not a
+    slip (WDC 2026-09-15: 672+752+615+553 = $2,592,000,000)."""
+    assert rv._sum_identity("Buybacks: 672+752+615+553 = $2,592,000,000") == []
+    assert rv._sum_identity("OCF = 2.165+2.958+3.160+2.198 = $10.62B")
+
+
+def test_chandelier_reprints_at_two_precisions_are_one_stop():
+    """306.033 and 306.0336 are one stop printed twice (LRCX 2026-09-14)."""
+    assert rv._chandelier_identity("chandelier 306.033 ... chandelier 306.0336") == []
+    assert rv._chandelier_identity("chandelier 54.11 ... chandelier 58.2")
+
+
+def test_dupont_identity_reads_only_the_decompositions_own_roe():
+    """A line that names the bases it disagrees with is not a second failure
+    (SKHY 2026-09-14: ROE 134.2% from the inputs, "This conflicts with
+    get_ratios ROE 35.57%")."""
+    t = (
+        "get_dupont_read: ROE 134.2% - net_margin 0.8562, asset_turnover "
+        "1.0742, equity_multiplier 1.4595. This conflicts with get_ratios "
+        "ROE 35.57%."
+    )
+    assert rv._dupont_identity(t) == []
+
+
+def test_roa_identity_needs_one_paragraph_and_one_basis():
+    """The ROA and its decomposition must be the report's own claim, printed
+    together: TSM/AMZN 2026-09-15 print them under different producers."""
+    split = (
+        "- get_fundamentals reports ROA 19.00% and Profit Margin 49.92%.\n"
+        "\n"
+        "- get_dupont_read: net_margin 0.4992, asset_turnover 0.5598.\n"
+    )
+    assert rv._roa_consistency(split) == []
+    single = "ROA TTM 81.41% beside net margin 0.637 x asset turnover 0.946."
+    assert rv._roa_consistency(single)
+
+
+def test_internal_conflict_reads_a_stated_period_as_a_basis():
+    """"D/E 0.37 (balance sheet 2025-12-31)" against "quarterly total
+    debt/equity 0.2816" is a period difference, stated (AMZN 2026-09-15)."""
+    t = (
+        "- get_ratios reports D/E 0.37, balance-sheet data dated 2025-12-31.\n"
+        "\n"
+        "- get_basic_financials reports quarterly total debt/equity of 0.2816.\n"
+    )
+    assert rv._internal_conflicts(t) == []
+    same = "get_ratios D/E 0.37 quarterly; get_basic_financials D/E 0.2816 quarterly"
+    assert rv._internal_conflicts(same)
+
+
+def test_unusable_note_stems_are_reported_not_judged():
+    """A replaced-stem note is not a report: its own sentences describe the
+    lost generation, so judging them produced one UNSUPPORTED flag per sentence
+    (HPE 2026-09-14 fundamentals, NVDA 2026-09-15 market)."""
+    assert rv._unusable_note("# NVDA - Market Analyst: SECTION UNUSABLE (generation degenerated)\n\n> ...")
+    assert not rv._unusable_note("## NVDA - Market\n\n**Verdict:** ...")
 
 
 def test_report_as_of_reads_the_run_directory_name():

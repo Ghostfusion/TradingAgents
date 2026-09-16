@@ -48,6 +48,45 @@ def test_readable_section_single_intro_no_round_heading():
     assert "Bull: a single prose block only." in out
 
 
+def test_multi_round_bull_and_bear_files_separate_their_rounds(tmp_path):
+    """The research section must read like the risk section.
+
+    The debate state labels every turn "Bull Analyst:"/"Bear Analyst:"
+    (bull_researcher.py / bear_researcher.py), but the writer passed
+    ``name.split()[0]`` - "Bull" - so the round promotion matched nothing and
+    a two-round bull.md/bear.md rendered as one unbroken wall with no marker
+    between rounds (IEI 2026-09-15). 4_risk separates its rounds; the research
+    files must too.
+    """
+    state = {
+        "investment_debate_state": {
+            "history": "",
+            "bull_history": (
+                "Bull Analyst: round one bull argument\ncontinues here\n"
+                "Bull Analyst: round two bull argument\nand continues\n"
+            ),
+            "bear_history": (
+                "Bear Analyst: round one bear argument\ncontinues here\n"
+                "Bear Analyst: round two bear argument\nand continues\n"
+            ),
+            "judge_decision": "## Research Manager\n\nplan prose\n",
+            "current_response": "",
+            "count": 4,
+        }
+    }
+    write_report_tree(state, "TST", tmp_path)
+    for fname in ("bull.md", "bear.md"):
+        text = (tmp_path / "2_research" / fname).read_text(encoding="utf-8")
+        assert "### Round 1" in text and "### Round 2" in text
+        # each round's own prose stays under its own heading, in order
+        assert (
+            text.index("### Round 1")
+            < text.index("round one")
+            < text.index("### Round 2")
+            < text.index("round two")
+        )
+
+
 def test_readable_section_is_idempotent():
     sample = (
         "Aggressive Analyst: round one prose line\n"
