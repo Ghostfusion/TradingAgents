@@ -25,6 +25,11 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from tradingagents.agents.utils.tool_call_markup import (
+    MARKUP_UNAVAILABLE,
+    has_tool_call_markup,
+    strip_tool_call_markup,
+)
 from tradingagents.llm_clients.base_client import content_to_text
 
 logger = logging.getLogger(__name__)
@@ -261,6 +266,184 @@ _MONOLOGUE_SELF_RE = _re.compile(
 _MONOLOGUE_TAIL_MIN_CHARS = 200
 
 
+# --- degenerate phrase-cascade guard --------------------------------------
+# A model can degenerate into a cascade of the same word block instead of
+# writing a report, and the artifact ships as the analyst's deliverable:
+#
+#   MSFT 2026-09-16 news.md      "speaking broadly overall generally" x20
+#   NVDA 2026-09-15 sentiment.md "world without end" x24
+#   VTV  2026-09-16 market.md    "aforementioned" x7 (+ the self-correction set)
+#   AMZN 2026-09-16 fundamental  "106 corrected" x8
+#
+# The line-based loop guard (``_repetition_loop_cut``) cannot see it — the
+# cascade is INSIDE one line — and the drafting-monologue vocabulary does not
+# fire on it (MSFT news carried exactly one narrow hit, "note to self"), so
+# every downstream reader received the cascade as truth.
+#
+# Detector evidence (2026-09-16): over the 493 markdown files under
+# ``reports/``, the longest run of an immediately repeated 3/4/5-word block is
+# 2 in every non-degenerate file and 5 or more in every degenerate one — the
+# gap between the populations is empty, so the threshold sits at 4 and fires on
+# nothing this repo has otherwise written.
+_DEGENERATE_LOOP_PERIODS = (3, 4, 5)
+_DEGENERATE_LOOP_MIN_REPS = 4
+_DEGENERATE_LOOP_WORD_RE = _re.compile(r"[A-Za-z0-9']+")
+# The line-level shape of the same class (thresholds shared with the verifier's
+# ``_repetition_loops``): a repeated line must be long enough to be prose.
+# Detector evidence (2026-09-16): over the 502 agent stems under ``reports/``,
+# the maximum repeat of one non-trivial line is 2 in every clean stem and 12+
+# in the two degenerate ones - so 4 sits in an empty gap. (Assembled
+# ``complete_report.md`` files do reach 4 legitimately, by quoting the same
+# analyst line in two sections; they are not a guard input.)
+_DEGENERATE_LINE_MIN_REPS = 4
+_DEGENERATE_LINE_MIN_CHARS = 16
+
+
+def _loop_repeat_run(text: str) -> int:
+    """Longest run of an immediately repeated 3/4/5-word block (1 = none)."""
+    words = [w.lower() for w in _DEGENERATE_LOOP_WORD_RE.findall(text or "")]
+    n = len(words)
+    best = 1
+    for period in _DEGENERATE_LOOP_PERIODS:
+        i = 0
+        while i + 2 * period <= n:
+            block = tuple(words[i:i + period])
+            reps = 1
+            j = i + period
+            while j + period <= n and tuple(words[j:j + period]) == block:
+                reps += 1
+                j += period
+            if reps > best:
+                best = reps
+            i += 1
+    return best
+
+
+def _looks_like_degenerate_loop(text: str) -> bool:
+    """Is this deliverable a repeating word cascade or a repeated line?
+
+    Two shapes, one class: the word cascade above (inside one line) and a
+    non-trivial LINE repeated four or more times - MSFT 2026-09-16 (the 17:49
+    re-run) sentiment.md repeated "FRED DGS10 leaf latest reading is exactly
+    what matters here ..." fifteen times, and VTV fundamentals.md repeated
+    "The substantive read stands regardless of formatting trouble:" twelve
+    times. Both are decoder loops that stopped making progress, and both
+    passed every other guard (`_repetition_loop_cut` only trims inside the
+    truncation path). Thresholds mirror the verifier's `_repetition_loops`,
+    which has flagged exactly these two artifacts and no clean file.
+    """
+    if _loop_repeat_run(text) >= _DEGENERATE_LOOP_MIN_REPS:
+        return True
+    return _line_repeat_run(text) >= _DEGENERATE_LINE_MIN_REPS
+
+
+def _line_repeat_run(text: str) -> int:
+    """Most occurrences of one non-trivial line (1 = none repeated)."""
+    counts: dict[str, int] = {}
+    best = 1
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        # Markdown rules and short cells repeat by design (a table separator).
+        if len(s) < _DEGENERATE_LINE_MIN_CHARS or set(s) <= set("-|: _*"):
+            continue
+        counts[s] = counts.get(s, 0) + 1
+        if counts[s] > best:
+            best = counts[s]
+    return best
+
+
+# A generation that gave up and said so, or narrated its own degeneration.
+# This is a DIFFERENT failure from the repeated-block cascade above: VTV
+# 2026-09-16 news.md spelled every figure out in words and walked a synonym
+# dump ("premature concluding presently firmly confidently...") with no
+# repeated block at all, ending "(Report truncated here deliberately rather
+# than continuing further because continuing risks reproducing known
+# degeneration patterns ...)". The vocabulary is the verifier's tuned set
+# plus the forms observed in this batch's artifacts.
+#
+# Detector evidence (2026-09-16): over the same 493 markdown files under
+# ``reports/``, this set matches exactly 5 files - all of them this batch's
+# degenerate artifacts (VTV news/market + their complete_report copies, MSFT
+# news + its copy) - and no clean file.
+_DEGENERATION_SELF_HALT_RE = _re.compile(
+    r"(?:\brestart(?:ing|s)?\s+cleanly|\bdisregard\s+(?:this|the)\s+draft"
+    r"|\binternal\s+glitch|\bstuck\s+repeating|\bthis\s+is\s+degenerating"
+    r"|\bwait,?\s+correction\s+needed|\bterminating\s+generation"
+    r"|\bnote\s+to\s+self\b|\breproducing\s+known\s+degeneration"
+    r"|\btruncated\s+here\s+deliberately|\bloop\s+error\b)",
+    _re.IGNORECASE,
+)
+
+
+def _looks_like_generation_self_halt(text: str) -> bool:
+    """Did the generation narrate its own failure instead of writing?"""
+    return bool(_DEGENERATION_SELF_HALT_RE.search(text or ""))
+
+
+# How each non-deliverable is named back to the reader (one vocabulary, so the
+# log line, the journal entry and the unavailable notice agree).
+_DEGENERATE_LABELS = {
+    "monologue": "a drafting monologue",
+    "loop": "a repeating word cascade",
+    "self_halt": "a self-narrated generation failure",
+}
+
+
+def _degenerate_body_kind(text: str) -> str | None:
+    """Classify a non-deliverable body, or None when it is a real report.
+
+    One classifier for the three guard sites (the analyst chain report, the
+    cap-forced terminal turn, the free-text decision path), so they cannot
+    disagree about what counts as a deliverable. ``monologue`` is the one
+    salvageable kind - its own last draft is usually the report.
+    """
+    if _looks_like_drafting_monologue(text):
+        return "monologue"
+    if _looks_like_degenerate_loop(text):
+        return "loop"
+    if _looks_like_generation_self_halt(text):
+        return "self_halt"
+    return None
+
+
+# --- leaked tool-call markup guard ----------------------------------------
+# A relay can answer a tool-bound turn with the provider's tool-call markup
+# inside ``content`` (measured 2026-09-15; see ``tool_call_markup``).
+# ``risk_tool_loop._final_prose`` guards the risk/trader path, but the analyst
+# reports never passed through it, so VTV 2026-09-16 sentiment.md shipped two
+# raw tags (``</invoke>``, ``</parameter>``) and the verifier had to flag the
+# transcript. One strip at the analyst report choke point
+# (``retry_chain_if_stub``, the last call in every analyst node) keeps the
+# artifact prose-only; a report that was ONLY markup is handed back untouched,
+# so the stub/unavailable path replaces it rather than shipping a blank file.
+def _sanitize_report_markup(text: str, agent_name: str) -> str:
+    """Strip leaked tool-call markup from a report; never silently.
+
+    A report that was ONLY markup strips to empty, so the stub guard downstream
+    replaces it with an explicit unavailable notice instead of shipping a
+    transcript with no findings.
+    """
+    if not text or not has_tool_call_markup(text):
+        return text
+    stripped = strip_tool_call_markup(text)
+    logger.warning(
+        "%s: leaked tool-call markup stripped from the report (%d -> %d chars)",
+        agent_name, len(text), len(stripped),
+    )
+    try:
+        from tradingagents.agents.utils.llm_failure_journal import journal_llm_note
+
+        journal_llm_note(
+            f"markup/{agent_name or 'agent'}",
+            "leaked tool-call markup stripped from a report",
+            chars=len(text),
+            stripped_chars=len(stripped),
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory only
+        logger.debug("markup journal write skipped: %s", exc)
+    return stripped
+
+
 def _looks_like_drafting_monologue(text: str) -> bool:
     """Is this response the model drafting/arguing with itself, not a report?
 
@@ -337,6 +520,21 @@ def _journal_monologue(agent_name: str, text: str, *, salvaged: bool,
         logger.debug("monologue journal write skipped: %s", exc)
 
 
+def _journal_degenerate_body(agent_name: str, text: str, kind: str) -> None:
+    """Record a loop / cascade / self-halt deliverable (advisory; never raises)."""
+    try:
+        from tradingagents.agents.utils.llm_failure_journal import journal_llm_note
+
+        journal_llm_note(
+            f"{kind}/{agent_name or 'agent'}",
+            f"deliverable was {_DEGENERATE_LABELS.get(kind, kind)}",
+            chars=len(text or ""),
+            max_repeat=_loop_repeat_run(text),
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory only
+        logger.debug("degenerate-body journal write skipped: %s", exc)
+
+
 def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
                         agent_name: str, fallback_llm: Any | None = None,
                         backup_llm: Any | None = None) -> str:
@@ -350,9 +548,12 @@ def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
     clean response costs one regex scan and nothing else.
     """
     text = response_text or ""
-    if not _looks_like_drafting_monologue(text):
+    kind = _degenerate_body_kind(text)
+    if kind is None:
         return text
-    salvaged = _salvage_final_draft(text)
+    # Only a monologue carries a salvageable final draft; a cascade or a
+    # self-halted generation has no report tail to keep.
+    salvaged = _salvage_final_draft(text) if kind == "monologue" else None
     if salvaged is not None:
         logger.warning(
             "%s: free-text deliverable was a drafting monologue (%d chars); "
@@ -378,10 +579,11 @@ def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
         except Exception as exc:  # noqa: BLE001 - a failed retry degrades
             logger.warning("%s: monologue retry failed: %s", agent_name, exc)
         model = _model_name(retry_llm) or None
-        if nxt.strip() and not _looks_like_drafting_monologue(nxt):
+        nxt_kind = _degenerate_body_kind(nxt)
+        if nxt.strip() and nxt_kind is None:
             _journal_monologue(agent_name, text, salvaged=False, repair=f"retry:{model}")
             return nxt
-        salvaged = _salvage_final_draft(nxt)
+        salvaged = _salvage_final_draft(nxt) if nxt_kind == "monologue" else None
         if salvaged is not None:
             logger.warning(
                 "%s: monologue retry was a monologue too; kept its final draft "
@@ -390,14 +592,17 @@ def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
             _journal_monologue(agent_name, text, salvaged=False,
                                repair=f"retry-draft:{model}")
             return salvaged
+    what = _DEGENERATE_LABELS.get(kind, "a degenerate body")
     logger.warning(
-        "%s: free-text deliverable was a drafting monologue with no final "
+        "%s: free-text deliverable was %s with no final "
         "draft recoverable; emitting an explicit unavailable decision",
         agent_name,
+        what,
     )
     _journal_monologue(agent_name, text, salvaged=False, repair=None)
     return (
-        "**Decision**: unavailable - the model returned a drafting monologue "
+        "**Decision**: unavailable - the model returned "
+        f"{what} "
         "instead of the decision, and no final draft could be recovered. The "
         "prior research and risk debate stand; re-run to regenerate the final "
         "decision."
@@ -525,6 +730,26 @@ _EMPTY_CAP_PROMPT = (
 )
 
 
+# Directive for the cap-forced terminal turn when the body was not a report
+# but was not empty either - a repeating word cascade (MSFT 2026-09-16
+# news.md: "speaking broadly overall generally" x20) or a generation that
+# narrated its own failure (VTV 2026-09-16 news.md: numbers spelled out in
+# words, "report truncated here deliberately ... reproducing known
+# degeneration patterns"). Neither took the empty path, so both shipped as the
+# analyst's report; name the failure and ask for the report again.
+_DEGENERATE_BODY_PROMPT = (
+    "Your previous response degenerated instead of producing a report: it "
+    "repeated the same phrase, or narrated its own failure, or spelled "
+    "numbers out in words. Write the COMPLETE analysis report now: verdict, "
+    "signal-by-signal evidence with exact computed numbers, risks, and a "
+    "clear stance. Cite only values you actually retrieved; state "
+    "'unavailable' where none exist. Write digits, never number words. Never "
+    "repeat a phrase or section, never describe your own writing process, and "
+    "never announce that you are stopping. Do not announce further tool "
+    "calls - deliver the report."
+)
+
+
 def _looks_report_stub(text: str) -> bool:
     """Is an analyst report a degenerate stub (no report substance)?
 
@@ -565,13 +790,17 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
     """
     text = response_text or ""
     retry_chain = backup_chain if (backup_chain is not None and backup_chain is not chain) else None
+    markup_only = False
     for _ in range(_MAX_TRUNCATION_RETRIES):
-        monologue = _looks_like_drafting_monologue(text)
-        if not _looks_report_stub(text) and not monologue:
+        had_markup = has_tool_call_markup(text)
+        text = _sanitize_report_markup(text, agent_name)
+        markup_only = had_markup and not text.strip()
+        kind = _degenerate_body_kind(text)
+        if not _looks_report_stub(text) and kind is None:
             return text
         # A monologue usually carries the finished report as its last
         # draft; keep that instead of paying for another call.
-        salvaged = _salvage_final_draft(text) if monologue else None
+        salvaged = _salvage_final_draft(text) if kind == "monologue" else None
         if salvaged is not None:
             logger.warning(
                 "%s: report was a drafting monologue (%d chars); kept its "
@@ -594,19 +823,35 @@ def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_nam
             break
         if not text or not text.strip():
             break
-    if _looks_report_stub(text) or _looks_like_drafting_monologue(text):
-        monologue = _looks_like_drafting_monologue(text)
+    # The loop can exit on a retry's text (or via ``break``) without the
+    # top-of-iteration strip; sanitize once more before the final verdict.
+    had_markup = has_tool_call_markup(text)
+    text = _sanitize_report_markup(text, agent_name)
+    markup_only = markup_only or (had_markup and not text.strip())
+    if markup_only and not text.strip():
+        # The report WAS the transcript (VTV 2026-09-16 sentiment.md): say so
+        # with the shared wording rather than a stub-style notice.
+        return MARKUP_UNAVAILABLE
+    kind = _degenerate_body_kind(text)
+    if _looks_report_stub(text) or kind is not None:
+        what = _DEGENERATE_LABELS.get(kind, "a status-turn stub")
         logger.warning(
             "%s: analyst returned %s; emitting unavailable report",
             agent_name,
-            "a drafting monologue" if monologue else "a status-turn stub",
+            what,
         )
-        if monologue:
+        if kind == "monologue":
             _journal_monologue(agent_name, text, salvaged=False, repair=None)
+        elif kind is not None:
+            _journal_degenerate_body(agent_name, text, kind)
+        snippet = (
+            f"{_loop_repeat_run(text)}x the same word block" if kind == "loop"
+            else (text[:80]).strip() or "empty"
+        )
         return (
             "**Report unavailable** — the analyst returned "
-            f"{'a drafting monologue' if monologue else 'a degenerate status stub'} "
-            f"({(text[:80]).strip() or 'empty'}). The prior tool evidence "
+            f"{what} "
+            f"({snippet}). The prior tool evidence "
             "stands; re-run to regenerate the full report."
         )
     return text
@@ -800,8 +1045,10 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
     tools, not a token burn. Without a plain chain the bound chain is used
     (unchanged legacy behavior) and the repair loop below is the only net.
 
-    An EMPTY terminal turn is repaired on a different chain with a doubled
-    output budget before degrading to the unavailable notice. Rationale:
+    An EMPTY terminal turn - or one that degenerated into a repeating word
+    cascade - is repaired on a different chain with a doubled output budget
+    before degrading to the unavailable notice (a cascade gets a
+    cascade-specific directive; both are non-deliverables). Rationale:
     reasoning tokens share ``max_tokens``, so the model can spend the whole
     budget on hidden reasoning and emit no text; re-asking the same question
     with the same cap on the same chain reproduces the same burn. At most two
@@ -831,11 +1078,32 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         cleaned_msgs = _deorphan_tool_calls(cleaned_msgs)
         term_chain = plain_chain if plain_chain is not None else chain
         final = term_chain.invoke(cleaned_msgs)
-        text = content_to_text(getattr(final, "content", final))
-        if text.strip():
+        raw = content_to_text(getattr(final, "content", final))
+        text = _sanitize_report_markup(raw, agent_name)
+        # The whole turn was tool-call markup: a transcript, not a report. The
+        # caller gets the shared "unavailable" wording (the risk loop's own
+        # contract for this case) instead of the empty-turn notice, which would
+        # claim the turn was empty.
+        if raw.strip() and not text.strip():
+            logger.warning(
+                "cap-forced terminal turn was tool-call markup only%s; "
+                "emitting the unavailable notice",
+                f" ({agent_name})" if agent_name else "",
+            )
+            return MARKUP_UNAVAILABLE
+        kind = _degenerate_body_kind(text)
+        if text.strip() and kind is None:
             return _retry_if_truncated(term_chain, cleaned_msgs, text,
                                        backup_llm=backup_plain_chain or backup_chain)
-        # Cap-forced terminal turn came back empty: no usable report text.
+        # Cap-forced terminal turn came back empty, or as a body that is not a
+        # report (a word cascade, a self-halted generation): repair it.
+        if kind is not None:
+            logger.warning(
+                "cap-forced terminal turn degenerated into %s%s; repairing",
+                _DEGENERATE_LABELS.get(kind, kind),
+                f" ({agent_name})" if agent_name else "",
+            )
+            _journal_degenerate_body(agent_name, text, kind)
         # Repair on a different chain with a RAISED output budget (see
         # ``_terminal_turn_max_tokens``); only then emit the explicit
         # unavailable notice - never a silent "" that downstream would render
@@ -843,7 +1111,8 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         # market 2026-09-07).
         from langchain_core.messages import HumanMessage
 
-        repair_msgs = [*cleaned_msgs, HumanMessage(content=_EMPTY_CAP_PROMPT)]
+        repair_msgs = [*cleaned_msgs, HumanMessage(
+            content=_DEGENERATE_BODY_PROMPT if kind is not None else _EMPTY_CAP_PROMPT)]
         raised_cap = _terminal_turn_max_tokens()
         candidates: list[tuple[str, Any]] = []
         for label, bound_chain, plain in (
@@ -863,8 +1132,8 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
         for label, repair_chain in candidates:
             kwargs = {"max_tokens": raised_cap} if raised_cap else {}
             logger.info(
-                "cap-forced terminal turn returned empty%s; repairing on %s "
-                "(max_tokens=%s)",
+                "cap-forced terminal turn produced no usable report%s; "
+                "repairing on %s (max_tokens=%s)",
                 f" ({agent_name})" if agent_name else "", label,
                 raised_cap or "default",
             )
@@ -875,7 +1144,8 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
                 outcomes.append(f"{label}: raised {type(exc).__name__}: {exc}")
                 first = False
                 continue
-            nxt = content_to_text(getattr(resp, "content", resp))
+            nxt = _sanitize_report_markup(
+                content_to_text(getattr(resp, "content", resp)), agent_name)
             if first:
                 meta = getattr(resp, "response_metadata", None) or {}
                 usage = getattr(resp, "usage_metadata", None) or {}
@@ -887,16 +1157,16 @@ def finalize_messages(chain: Any, messages: Any, result: Any,
                     ).get("reasoning"),
                 }
                 first = False
-            if nxt.strip():
+            if nxt.strip() and _degenerate_body_kind(nxt) is None:
                 outcomes.append(f"{label}: {len(nxt)} chars")
                 _journal_terminal_turn(agent_name, final, first_meta, outcomes,
                                        repaired=True, raised_cap=raised_cap)
                 return _retry_if_truncated(repair_chain, repair_msgs, nxt,
                                            backup_llm=backup_plain_chain or backup_chain)
-            outcomes.append(f"{label}: empty")
+            outcomes.append(f"{label}: cascade" if nxt.strip() else f"{label}: empty")
         logger.warning(
-            "cap-forced final report turn returned empty after %d repair "
-            "attempt(s); emitting unavailable notice",
+            "cap-forced final report turn produced no usable report after %d "
+            "repair attempt(s); emitting unavailable notice",
             len(candidates),
         )
         _journal_terminal_turn(agent_name, final, first_meta, outcomes,

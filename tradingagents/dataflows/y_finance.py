@@ -371,6 +371,12 @@ def get_fundamentals(
             ("Name", info.get("longName")),
             ("Sector", info.get("sector")),
             ("Industry", info.get("industry")),
+            # The listing venue belongs to the identity block. Without it a
+            # report stating a true venue ("iShares 3-7 Year Treasury Bond
+            # ETF, exchange NGM") reads as fabrication, because no leaf carries
+            # an exchange for the symbol - it was flagged UNSUPPORTED on both
+            # the IEI 2026-09-16 trees.
+            ("Exchange", info.get("exchange")),
             ("Market Cap", info.get("marketCap")),
             ("PE Ratio (TTM)", info.get("trailingPE")),
             ("Forward PE", info.get("forwardPE")),
@@ -461,6 +467,20 @@ def get_fundamentals(
         raise
 
 
+# The vendor CSV prints ABSOLUTE integers (``19639000000.0``) with no units
+# line, so a reader has no scale to anchor on: MSFT 2026-09-16 fundamentals.md
+# quoted four cash-flow rows as "196390 x10^6" and "900070 x10^6" - a 10x
+# mis-scale on FCF, capex, operating cash flow, deferred tax and total revenue,
+# with no leaf anywhere stating an ``x10^6`` header. ``financial_trends`` already
+# states its scale ("# Values are raw vendor figures (unscaled)."); the three
+# statement payloads now say the same, and name what the digits mean, so the
+# scale can never be inferred from the size of the number alone.
+_STATEMENT_UNITS_NOTE = (
+    "# Values are raw vendor figures (unscaled): absolute units, so "
+    "19639000000.0 = $19.639bn (NOT 196,390 x10^6).\n"
+)
+
+
 def _net_debt_note(csv_string: str, ticker: str) -> str:
     """Cross-check a yfinance balance-sheet CSV's ``Net Debt`` row against its
     own ``Total Debt`` and ``Cash (incl. STI)`` rows, and return a correction
@@ -532,7 +552,8 @@ def get_balance_sheet(
 
         # Add header information
         header = f"# Balance Sheet data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _STATEMENT_UNITS_NOTE + "\n"
 
         return header + csv_string + _net_debt_note(csv_string, ticker)
 
@@ -567,7 +588,8 @@ def get_cashflow(
 
         # Add header information
         header = f"# Cash Flow data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _STATEMENT_UNITS_NOTE + "\n"
 
         return header + csv_string
 
@@ -602,7 +624,8 @@ def get_income_statement(
 
         # Add header information
         header = f"# Income Statement data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += _STATEMENT_UNITS_NOTE + "\n"
 
         return header + csv_string
 

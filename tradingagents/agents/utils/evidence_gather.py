@@ -425,7 +425,39 @@ def classify_tool_pools(
     return gather, sorted(model)
 
 
-def _render_evidence(leaves, model_names, reference_line: str = "", notes=None) -> str:
+def _instrument_identity_line(state: dict) -> str:
+    """The run's resolved identity as the analysts receive it ("" when none).
+
+    ``build_instrument_context`` puts "Resolved identity: Company: X; Exchange:
+    Y" into every analyst's system message, so a report that names the venue is
+    quoting the PROMPT, not a tool leaf - and the verifier (evidence-only by
+    design) had no way to see it: IEI 2026-09-16 and VTV 2026-09-16 both had
+    "exchange NGM" / "on PCX" flagged as fabrication while the fact was handed
+    to the analyst at run start. Prepending it beside the reference price is
+    the same precedent (that line is likewise not a tool leaf).
+    """
+    import re as _re
+
+    try:
+        from tradingagents.agents.utils.agent_utils import (
+            get_instrument_context_from_state,
+        )
+
+        context = get_instrument_context_from_state(state) or ""
+    except Exception:  # noqa: BLE001 - advisory context, never a blocker
+        return ""
+    m = _re.search(r"Resolved identity:\s*([^.]*)\.", context)
+    if not m:
+        return ""
+    return (
+        "**Instrument identity (resolved at run start):** "
+        + m.group(1).strip()
+    )
+
+
+def _render_evidence(
+    leaves, model_names, reference_line: str = "", notes=None, identity_line: str = ""
+) -> str:
     """Evidence block + the model-pool hint (the analyst reduce sees both).
 
     ``reference_line`` (optional): the run's price basis (as-of date + close,
@@ -437,6 +469,8 @@ def _render_evidence(leaves, model_names, reference_line: str = "", notes=None) 
     flagged the same bar provisional).
     """
     block = format_evidence_block(leaves)
+    if identity_line:
+        block = f"{identity_line}\n\n{block}"
     if reference_line:
         block = f"{reference_line}\n\n{block}"
     if notes:
@@ -535,7 +569,10 @@ def gather_for_analyst_node(
         # (a resumed checkpoint). Re-render once and adopt that text as the
         # frozen block, so this entry and every later one agree byte-for-byte.
         block = _render_evidence(
-            existing[analyst_key], pool, reference_line=_reference_price_line(state)
+            existing[analyst_key],
+            pool,
+            reference_line=_reference_price_line(state),
+            identity_line=_instrument_identity_line(state),
         )
         return block, _with_frozen_block(existing, analyst_key, block)
 
@@ -640,7 +677,11 @@ def gather_for_analyst_node(
     pools[analyst_key] = model_names
     updated[MODEL_POOL_KEY] = pools
     block = _render_evidence(
-        leaves, model_names, reference_line=_reference_price_line(state), notes=move_notes
+        leaves,
+        model_names,
+        reference_line=_reference_price_line(state),
+        notes=move_notes,
+        identity_line=_instrument_identity_line(state),
     )
     # Freeze the text we are about to send: every later entry of this analyst
     # must re-serve it unchanged (RENDERED_BLOCK_KEY).

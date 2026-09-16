@@ -140,7 +140,22 @@ def test_finalize_messages_merges_truncated_terminal_turn():
 
     from tradingagents.agents.utils.structured import finalize_messages
 
-    truncated = "A long market analysis " * 10 + "the trend is"
+    # A realistic long report cut mid-sentence. (A padded repetition like
+    # "A long market analysis " * 10 is itself a degenerate body, and the
+    # cascade guard now answers it with an unavailable notice instead of
+    # continuing it - the fixture must not be degenerate to test the
+    # truncation-merge contract.)
+    truncated = (
+        "# NVDA - Market Analysis 2026-09-16\n\n"
+        "**Verdict:** HOLD. Price 183.20 sits +2.4% above the 200-SMA 178.90 "
+        "with RSI 55.4 and ATR 6.47; the stack is intact and volume is 1.32x "
+        "the 20-day average. Structure stop 171.30 with T1 191.55, so the plan "
+        "trails the stop rather than adding into the extension. Order flow "
+        "shows inst net +1.85M against retail net +10.07M, distribution 0.55, "
+        "and the regime read is BULL with vol NORMAL and F_regime 1.0. The "
+        "open question is whether the tape holds the 50-SMA 176.42 while the "
+        "trend is"
+    )
     msgs = _msgs(MAX_TOOL_ROUNDS - 1, tail="tools")
 
     # Terminal turn not truncated -> one call.

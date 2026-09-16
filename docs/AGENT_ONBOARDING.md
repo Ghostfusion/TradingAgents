@@ -100,6 +100,21 @@ a fresh agent must follow them without being reminded:
    flag, an env key or a report format changes, find the doc that states the old behaviour and fix
    it in the same commit. The rule spans all three repos: this one, `TradingExecution`, and
    `trading_web` (which lives in the `TradingNew` repo root, so its commits go there).
+10. **A confirmed defect is fixed on sight, without asking (owner standing order, 2026-09-16)** -
+   when the verifier, a test, a log or a review surfaces a defect, the default is to **fix it in
+   the same task**: no "want me to fix this?", no parking it for approval, no documenting it and
+   moving on while the fix is reachable. Concretely: fix the SOURCE (not the test, not a symptom
+   suppression), add the regression test that fails before the fix, run the affected suite, then
+   land it per rule 9. A found defect is a work item, not a question.
+   - **Ask first only** when the fix would be *destructive to user data* (deleting report trees,
+     vendor/daemon state, force-pushing, rotating keys) or when it would silently rewrite a
+     decision contract the owner set (a mandate, a threshold, a rating/veto semantic). Those are
+     the only two categories; everything else is fix-and-report.
+   - **Report-text defects count.** A wrong figure, a transposed count, a leaked self-correction
+     marker or tool-call markup in a generated report is a defect: correct the artifact and fix the
+     producer (prompt/tool/sanitizer) that let it through, so the next run cannot repeat it.
+   - **Never** re-adjudicate a defect the owner already ruled on, and never re-open a
+     documented-but-deferred item as though it were new.
 
 ---
 

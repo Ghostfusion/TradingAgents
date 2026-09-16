@@ -18,6 +18,8 @@ from tradingagents.agents.utils.evidence_gather import (
     MODEL_POOL_KEY,
     RENDERED_BLOCK_KEY,
     TOOL_EVIDENCE_KEY,
+    _instrument_identity_line,
+    _render_evidence,
     format_evidence_block,
     gather_evidence,
     gather_for_analyst_node,
@@ -615,6 +617,35 @@ def test_tool_call_log_dir_resolution(monkeypatch):
         == Path("D:/logs/tc")
     # No cache dir and no override -> None (no write)
     assert _log._log_dir({}) is None
+
+
+def test_render_evidence_prepends_the_resolved_identity():
+    """The resolved identity (name/sector/venue) reaches every analyst in its
+    system message, so the evidence block states it too - otherwise a report
+    naming its listing venue is unverifiable and reads as fabrication (IEI
+    2026-09-16 "exchange NGM", VTV 2026-09-16 "on PCX")."""
+    state = {
+        "company_of_interest": "IEI",
+        "asset_type": "stock",
+        "instrument_context": (
+            "The instrument to analyze is `IEI`. Resolved identity: "
+            "Company: iShares 3-7 Year Treasury Bond Fund; Exchange: NGM. "
+            "Do not substitute a different company."
+        ),
+    }
+    line = _instrument_identity_line(state)
+    assert line.startswith("**Instrument identity (resolved at run start):**")
+    assert "Exchange: NGM" in line
+
+    block = _render_evidence(
+        [], set(), reference_line="**Reference price: 114.22**", identity_line=line
+    )
+    # The reference price keeps its long-standing lead; the identity follows.
+    assert block.startswith("**Reference price: 114.22**")
+    assert line in block
+
+    # A ticker-only context (no resolution) contributes no line.
+    assert _instrument_identity_line({"company_of_interest": "IEI"}) == ""
 
 
 def test_evidence_block_carries_the_run_price_basis():

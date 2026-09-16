@@ -54,6 +54,16 @@ _STRING_FLAG_RE = re.compile(r"""\bstring\s*=\s*["'](true|false)["']""", re.I)
 _NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
+# What a caller receives when a model answered with markup and nothing else:
+# the calls were never prose and no deliverable exists. One definition - the
+# risk loop (which parses the calls into real ones), the report guards (which
+# strip them) and the trader's append check all mean this by "unavailable".
+MARKUP_UNAVAILABLE = (
+    "unavailable: the model returned tool-call markup instead of prose - "
+    "nothing was produced for this section"
+)
+
+
 def has_tool_call_markup(content: object) -> bool:
     """True when the text carries a tool-call markup tag."""
     return bool(TOOL_CALL_MARKUP_RE.search(content_to_text(content)))

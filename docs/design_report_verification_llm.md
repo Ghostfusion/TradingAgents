@@ -243,7 +243,89 @@ claims, envelope OK, exit 0. Suite 4246 passed / 5 skipped - one new pinned
 case in `tests/test_report_verify.py` (the word boundary) and one in
 `tests/test_report_readable.py` (the round separators).
 
+## Verification round (2026-09-16 live, AMZN/MSFT/IEI/VTV — 16 stems)
+
+388 claims: **365 GROUNDED, 11 UNSUPPORTED, 7 INTERNAL_CONFLICT, 5 MISQUOTED**
+(AMZN 183/4/2/0, MSFT 64/2/0/5, IEI 69/3/3/0, VTV 49/2/2/0). Adjudicating every
+non-GROUNDED claim against `tool_evidence.json` split them **12 real defects /
+11 verifier false positives**, and the false positives turned out to be five
+distinct verifier bugs - fixed the same task (working-agreement rule 10).
+
+**Real, report-side.** Two stems were *degenerate artifacts*, not reports: MSFT
+news.md (one line of "speaking broadly overall generally" x20, then
+`[SYSTEM NOTE TO SELF] ... [HARD STOP]`) and VTV news.md (every figure spelled
+out in words, ending "(Report truncated here deliberately ... reproducing known
+degeneration patterns"). Both were non-empty, so every producer guard passed
+them - the cascade lives inside one line and carried exactly one monologue
+vocabulary hit. Also real: MSFT fundamentals quoted five cash-flow/income rows
+10x too large with an invented `x10^6` scale (no leaf prints such a header);
+MSFT sentiment transposed the labeled split ("37.5% bearish" is the *bullish*
+3/8); AMZN news spliced the 7d-SMA peak onto daily-score readings; AMZN
+sentiment called mixed news "distinctly negative" (its own Divergence #2 says
+the opposite); IEI fundamentals named a listing venue with no leaf behind it;
+VTV market carried self-correction/loop notes; VTV sentiment invented "two of
+three social channels" (there are two) and a ">90/100 splits" rule no leaf
+states.
+
+**Verifier false positives, all five fixed here.** (1) `_sma200_pct_identity`
+compared stated distances as exact floats and printed them at one decimal, so
+AMZN's +2.44% and 2.4% became "+2.4% / +2.4%" - a conflict the report does not
+contain. (2-3) The 0-10 sentiment score is a *prompt contract*
+(`5 + 5*computed_score` +/-0.5, `sentiment_analyst.py`; bounds documented in
+`agents/schemas.py`), which the LLM verifier applied inconsistently: AMZN 9.5/10
+and IEI ~0/10 were flagged while MSFT 3.75 and VTV 9.25/9.00 were accepted -
+contradicting this doc's own 2026-09-15 acceptance. Now anchored in
+`_anchor_claims`. (4) The label-keyed `eps estimate` conflict paired AMZN's
+1.83 (reported 2026-07-30) with 2.03 (Zacks, upcoming): an estimate is only
+comparable within one earnings date, so the generic metric is gone and the
+date-scoped `_eps_estimate_duals` owns it. (5) `pcr oi "91; 2.91"`,
+`rsi "23; 23.15"` and `GARCH "04; 3.04"` were all mis-parses of one corruption:
+IEI market.md masked 146 digits (`rsi=23._15`, `pct_b=_0219`, `GARCH cond
+**_._**04%`).
+
+**Producer/verifier drift this round closed.** The scale line on the statement
+payloads (the 10x misreads), the `Exchange` field on `get_fundamentals`, and the
+**resolved instrument identity** prepended to every evidence block - the venue
+claims were quoting the analyst's *system message*, which the verifier cannot
+see; the identity now rides beside the reference price, exactly the precedent
+that line set on 2026-09-15. Digit placeholders (an underscore variant in IEI,
+a dot/ellipsis variant in VTV: `+0..85`, `≈9..25/10`) are reported as
+`digit_obfuscation` and no longer yield quotable values.
+
+**Model-side, for the record.** This batch's provider/model
+(`openrouter/deepseek/deepseek-v4.1-flash`) degenerated repeatedly - cascades,
+placeholder-masked digits, markup-only responses (40+ strips in the two re-runs)
+and cap-forced empty turns (9 journal entries). The guards now convert all of
+those into either a repaired report or an explicit unavailable notice, and the
+regenerated trees (IEI/MSFT/VTV, 12 stems) came out clean on every class.
+
 ## Open items (state 2026-09-16)
+
+**New from the 2026-09-16 four-symbol round (both are verifier noise on
+correct reports; each has a reproducer).**
+
+- **A DISCLOSED vendor pair still flags.** MSFT 2026-09-16 (17:49) fundamentals
+  states `current ratio 3.7419` (vendor block) beside `1.23` (balance-sheet
+  derived) with the sentence "**Both current ratios are reported; the 3.74
+  figure is not the balance-sheet-date ratio**", and `debt/equity 0.1285` vs
+  `0.11`; IEI 2026-09-16 (17:52) fundamentals states `Beta is 0.03 vs QQQ ...
+  The same block reports beta 0.15310799`. Both pairs are explicitly
+  reconciled and both were flagged INTERNAL_CONFLICT. `_disclosed_pair`'s cues
+  do not cover these forms ("Both X are reported", "the N figure is not the Y
+  basis", "the same block reports N"); widening them risks muting a real
+  undisclosed conflict, so each survivor needs its own reproducer first.
+- **A meta-statement about the analyst's own call is ungroundable.** MSFT
+  2026-09-16 (17:49) news.md: "note inputs were analyst-supplied fractions so
+  treat directionally advisory only" - a provenance caveat on the analyst's own
+  `get_taylor_read` call, flagged UNSUPPORTED because the digest carries the
+  tool's OUTPUT, never the arguments the analyst passed. Either the digest
+  gains the stem's own call arguments, or the instructions state that a
+  self-provenance caveat is not a claim about the world.
+- **Verifier per-run variance.** Re-verifying the same patched tree flags a
+  different tail of meta/qualitative claims each time (the MSFT fundamentals
+  stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
+  content). The deterministic half is stable; the LLM half is not, which is why
+  every non-GROUNDED claim is adjudicated rather than counted.
 
 Confirmed-but-unfixed, per working-agreement rule 8. None blocks delivery; all
 are advisory-noise or capture gaps with a known reproducer.

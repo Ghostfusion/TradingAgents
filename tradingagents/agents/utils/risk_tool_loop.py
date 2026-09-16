@@ -40,6 +40,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from tradingagents.agents.utils.tool_call_markup import (
+    MARKUP_UNAVAILABLE,
     has_tool_call_markup,
     parse_text_tool_calls,
     strip_tool_call_markup,
@@ -47,13 +48,10 @@ from tradingagents.agents.utils.tool_call_markup import (
 from tradingagents.graph.conditional_logic import MAX_TOOL_ROUNDS
 from tradingagents.llm_clients.base_client import content_to_text
 
-# Returned instead of markup-only prose: the caller must never write a claim of
-# a deterministic check it could not obtain. Starts with "unavailable" so the
+# A markup-only answer is returned as MARKUP_UNAVAILABLE (imported above from
+# ``tool_call_markup``): the caller must never write a claim of a deterministic
+# check it could not obtain, and the wording starts with "unavailable" so the
 # trader's append guard rejects it (see ``trader.create_trader``).
-MARKUP_UNAVAILABLE = (
-    "unavailable: the model returned tool-call markup instead of prose - no "
-    "computed verification was produced"
-)
 
 # Appended to every system directive: the provider-native markup interface is
 # not one this loop can rely on, so name the interface to use instead.

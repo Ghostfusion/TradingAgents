@@ -9,6 +9,7 @@ The LLM call itself is mocked; the numeric tolerance is shared with
 from __future__ import annotations
 
 import json
+import re
 
 from tradingagents.agents.utils import report_verifier as R
 
@@ -452,7 +453,10 @@ def test_internal_conflict_eps_actual_dual_values():
     t = "EPS actual **7.04** vs estimate **5.012**  ...  EPS actual **7.00** vs est **5.03**"
     out = rv._internal_conflicts(t)
     assert any("'eps actual'" in c.claim for c in out)
-    assert any("'eps estimate'" in c.claim for c in out)
+    # The ESTIMATE leg is not compared by this pass: an estimate is only
+    # comparable within one earnings date (AMZN 2026-09-16 news.md paired
+    # 1.83 for the reported 2026-07-30 print with 2.03 for an upcoming one).
+    assert not any("'eps estimate'" in c.claim for c in out)
 
 
 def test_internal_conflict_eps_single_value_clean():
@@ -460,18 +464,89 @@ def test_internal_conflict_eps_single_value_clean():
     assert rv._internal_conflicts(t) == []
 
 
-def test_internal_conflict_eps_estimate_clean_lines_dual_values():
-    # Two conflicting EPS ESTIMATEs on otherwise clean lines. The old metric
-    # required the literal words "eps actual" ahead of the estimate, so these
-    # lines were never compared (and it only re-ran the "eps actual" trigger).
-    t = "EPS estimate 4.72 for the quarter.\nThe forward calendar lists EPS estimate 4.16."
-    hit = [c for c in rv._internal_conflicts(t) if "'eps estimate'" in c.claim]
-    assert hit and hit[0].status == "INTERNAL_CONFLICT"
-    assert "4.72" in hit[0].claim and "4.16" in hit[0].claim
-    # Same estimate twice is one cluster -> no false positive.
-    assert rv._internal_conflicts(
-        "EPS estimate 4.72 for the quarter.\nConsensus EPS estimate 4.72 confirmed."
-    ) == []
+def test_sma200_values_that_print_identically_are_not_a_conflict():
+    """AMZN 2026-09-16 market.md states the 200-SMA distance as +2.44% in one
+    line and 2.4% in another - both render "+2.4%", and the claim read
+    "+2.4% / +2.4%". One stated distance, not a conflict."""
+    t = (
+        "price sits **above** the 200-SMA **240.11** (+2.44%)\n"
+        "the 200-SMA **240.1117** (2.4% below)"
+    )
+    assert rv._sma200_pct_identity(t) == []
+    # Two genuinely different distances still flag.
+    differing = "200-SMA +2.4% ... vs the 200-SMA +15.9% above"
+    assert rv._sma200_pct_identity(differing)
+
+
+def test_digit_masked_numbers_are_reported_and_never_read_as_values():
+    """IEI 2026-09-16 market.md masked digits (146 tokens: ``rsi=23._15`` for
+    the leaf's 23.15, ``pct_b=_0219``, ``GARCH cond **_._**04%``). The
+    extractors read the surviving fragments as second values and produced
+    three invented conflicts; the corruption itself is the defect."""
+    masked = "dip technical rsi=23._15 pct_b=_0219 stochK=_46 GARCH cond **_._**04%"
+    claims = rv._digit_obfuscation(masked)
+    assert len(claims) == 1 and claims[0].status == "INTERNAL_CONFLICT"
+    assert "digit-masked numbers" in claims[0].claim
+
+    # A masked line yields no value at all - not "23" out of "23._15".
+    rsi_re = re.compile(r"\brsi\b", re.I)
+    assert rv._extract_metric_values(masked, rsi_re, "rsi") == []
+    assert rv._extract_metric_values("dip technical rsi=23.15 pct_b=0.0219", rsi_re, "rsi")
+
+    # A date RANGE is not a masked number (JCI/IEI news stems use "..").
+    assert rv._digit_obfuscation("0 messages for 2026-09-07..2026-09-14") == []
+    assert rv._digit_obfuscation("close_50_sma 116.30, rsi 23.15") == []
+
+    # The dot/ellipsis placeholder variant (VTV 2026-09-16 sentiment.md).
+    vtv = "labels +0..85 on n=30 maps to \u22489..25/10, AUM $16..39T, run on -026-09-15"
+    assert rv._digit_obfuscation(vtv)
+
+
+def test_the_sentiment_rescale_anchor_is_checked_deterministically():
+    """The 0-10 headline score is the prompt's own rescale of computed_score
+    (5 + 5*score, +/-0.5). The LLM verifier applied that inconsistently on
+    2026-09-16 - AMZN's 9.5/10 and IEI's ~0/10 were flagged while MSFT's and
+    VTV's were accepted - so the band is anchored in code."""
+    def _v(*claims):
+        return rv.ReportVerification(
+            report="sentiment",
+            overall="FLAG",
+            claims=[rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf") for c in claims],
+        )
+
+    amzn = rv._anchor_claims(_v("Overall Sentiment: Bullish (Score: 9.5/10)"), set(), 10.0)
+    assert amzn.claims[0].status == "GROUNDED"
+    assert "0-10 rescale" in amzn.claims[0].reason
+
+    iei = rv._anchor_claims(_v("overall score \u2248 0 / Bearish"), set(), 0.0)
+    assert iei.claims[0].status == "GROUNDED"
+
+    # Outside the band it stays UNSUPPORTED, and with no anchor the rule is off.
+    off = rv._anchor_claims(_v("Overall Sentiment (Score: 7.5/10)"), set(), 10.0)
+    assert off.claims[0].status == "UNSUPPORTED"
+    no_anchor = rv._anchor_claims(_v("Overall Sentiment (Score: 9.5/10)"), set())
+    assert no_anchor.claims[0].status == "UNSUPPORTED"
+
+
+def test_eps_estimates_for_different_dates_are_not_a_conflict():
+    """AMZN 2026-09-16 news.md: 1.83 for the already-reported 2026-07-30
+    print beside 2.03 (Zacks, upcoming) and 1.95 (calendar, 2026-10-29).
+    Three estimates, two dates, each stated with its own period - the
+    label-keyed pass paired 1.83 with 2.03 and invented a conflict. Only two
+    estimates anchored to the SAME date are one (``_eps_estimate_duals``)."""
+    t = (
+        "Last reported print 2026-07-30: estimate=1.83, reported=5.75.\n"
+        "Zacks cites upcoming earnings of $2.03 per share; get_earnings_calendar "
+        "shows the 2026-10-29 estimate=1.95.\n"
+        "| Conflicting next-EPS estimate | $2.03 (Zacks) vs 1.95 (calendar) |"
+    )
+    assert rv._internal_conflicts(t) == []
+    # The same date with two values is still a conflict.
+    same_date = (
+        "2026-10-28 (est EPS 4.72) in the table; forward calendar lists "
+        "2026-10-28 est 4.16."
+    )
+    assert rv._eps_estimate_duals(same_date)
 
 
 def test_internal_conflict_close_200_sma_dual_values():
@@ -2074,6 +2149,28 @@ def test_reference_price_line_is_evidence_for_every_stem():
     assert rv._reference_price_line(ev, "news") == ref
     assert rv._reference_price_line(ev, "market") == ""
     assert any(abs(d - 413.23) < 1e-9 for d in rv._evidence_decimals(ev, "news"))
+
+
+def test_instrument_identity_line_is_evidence_for_every_stem():
+    """The resolved-identity line ("Resolved identity: Company: X; Exchange: Y")
+    reaches every analyst in its system message, so a report naming its venue is
+    quoting the prompt - IEI 2026-09-16 and VTV 2026-09-16 both had a true
+    venue flagged as fabrication. It is prepended beside the reference price
+    and is evidence in the digest."""
+    ident = (
+        "**Instrument identity (resolved at run start):** "
+        "Company: iShares 3-7 Year Treasury Bond ETF; Exchange: NGM"
+    )
+    ev = {
+        "fundamentals": [{"tool": "get_fundamentals", "status": "ok", "content": "Name: x"}],
+        rv.RENDERED_BLOCK_KEY: [
+            {"analyst": "fundamentals", "block": ident + "\n\n## Tool Evidence"}
+        ],
+    }
+    assert rv._instrument_identity_line(ev, "fundamentals") == ident
+    assert rv._instrument_identity_line(ev, "news") == ""
+    digest = rv._evidence_digest(ev, "fundamentals")
+    assert "instrument_identity [ok]" in digest and "Exchange: NGM" in digest
 
 
 def test_r_multiple_ignores_a_line_that_labels_its_own_multiple():

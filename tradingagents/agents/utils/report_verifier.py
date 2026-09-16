@@ -201,10 +201,60 @@ def _evidence_decimals(evidence: dict, analyst_key: str) -> set:
     # anchor layer must treat its figure as present, or it downgrades every
     # claim quoting it.
     out |= _float_tokens(_reference_price_line(evidence, analyst_key))
+    out |= _float_tokens(_instrument_identity_line(evidence, analyst_key))
     return out
 
 
 _REFERENCE_LINE_RE = re.compile(r"(?m)^\*\*Reference price:.*$")
+# The resolved instrument identity is the SECOND prompt-level fact prepended to
+# every analyst's evidence block (see evidence_gather._instrument_identity_line):
+# "Resolved identity: Company: X; Exchange: Y". A report naming its venue is
+# quoting the prompt, so the line is evidence too - without it, IEI 2026-09-16
+# and VTV 2026-09-16 both had a true venue flagged as fabrication.
+_IDENTITY_LINE_RE = re.compile(r"(?m)^\*\*Instrument identity.*$")
+
+# The 0-10 headline sentiment score is a PROMPT contract, not a leaf value: the
+# sentiment analyst must map ``computed_score`` in [-1, 1] to
+# ``5 + 5 * computed_score`` and stay within +/-0.5 (sentiment_analyst's system
+# prompt; the 0-10 bounds are documented in agents/schemas.py::SentimentReport).
+# On 2026-09-16 the LLM verifier applied that rule inconsistently - AMZN's
+# 9.5/10 (anchor 10.0) and IEI's ~0/10 (anchor 0.0) were flagged UNSUPPORTED,
+# while MSFT's 3.75 and VTV's 9.25/9.00 were accepted as the rescaled form - so
+# the band is now checked deterministically, before the LLM verdict is trusted.
+_SENTIMENT_SCORE_RE = re.compile(r"computed_score\s*=\s*([+-]?\d+(?:\.\d+)?)")
+_SENTIMENT_BAND = 0.5
+_SENTIMENT_SCORE_CLAIM_RE = re.compile(r"(?i)score|sentiment|/\s?10\b")
+# The score a claim STATES: the number bound to its own score word / equals
+# sign, so a date or a message count elsewhere in the line cannot disqualify it.
+_SENTIMENT_CLAIM_NUM_RE = re.compile(
+    r"(?:score[^\d\n]{0,12}|[=\u2248]\s*)([+-]?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def _sentiment_claim_numbers(claim: str) -> list[float]:
+    """The 0-10 score figures a claim states (empty when it states none)."""
+    out: list[float] = []
+    for m in _SENTIMENT_CLAIM_NUM_RE.finditer(claim or ""):
+        try:
+            out.append(float(m.group(1)))
+        except ValueError:  # pragma: no cover - regex guarantees a float
+            continue
+    return out
+
+
+def _sentiment_anchor(evidence: dict, analyst_key: str) -> float | None:
+    """The prompt-mandated 0-10 anchor for this stem, from computed_score."""
+    for leaf in evidence.get(analyst_key) or []:
+        if not isinstance(leaf, dict):
+            continue
+        m = _SENTIMENT_SCORE_RE.search(str(leaf.get("content") or ""))
+        if m:
+            try:
+                return 5.0 + 5.0 * float(m.group(1))
+            except ValueError:  # pragma: no cover - regex guarantees a float
+                continue
+    return None
 
 
 def _reference_price_line(evidence: dict, analyst_key: str) -> str:
@@ -228,6 +278,25 @@ def _reference_price_line(evidence: dict, analyst_key: str) -> str:
     return ""
 
 
+def _instrument_identity_line(evidence: dict, analyst_key: str) -> str:
+    """The resolved-identity line as the analyst received it ("" if none).
+
+    Same shape as ``_reference_price_line``: a prompt-level fact prepended to
+    the evidence block, not a tool leaf, so a venue/name claim in the report is
+    grounded only if the verifier can see it.
+    """
+    blocks = evidence.get(RENDERED_BLOCK_KEY)
+    if not isinstance(blocks, list):
+        return ""
+    for entry in blocks:
+        if not isinstance(entry, dict) or entry.get("analyst") != analyst_key:
+            continue
+        match = _IDENTITY_LINE_RE.search(str(entry.get("block") or ""))
+        if match:
+            return match.group(0).strip()
+    return ""
+
+
 def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = None) -> str:
     """Compact per-stem rendering of one analyst's evidence leaves.
 
@@ -240,6 +309,9 @@ def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = N
     """
     leaves = evidence.get(analyst_key) or []
     lines: list[str] = []
+    identity = _instrument_identity_line(evidence, analyst_key)
+    if identity:
+        lines.append(f"- instrument_identity [ok]: {identity}")
     reference = _reference_price_line(evidence, analyst_key)
     if reference:
         lines.append(f"- reference_price [ok]: {reference}")
@@ -390,11 +462,21 @@ claim:
 Rules:
 - Base every verdict on the evidence block ONLY. Do not use outside
   knowledge to rescue or condemn a claim.
+- Two lines in the block are prompt-level facts rather than tool leaves and
+  are equally valid evidence: `instrument_identity` (the ticker's resolved
+  company/fund name, sector and listing venue) and `reference_price` (the
+  run's price basis, with the intraday FORMING flag). A report naming its
+  venue or its price basis is quoting what it was given, not fabricating.
 - A number must match an evidence number (same value, sign matters).
   If the report says a figure the evidence lacks, that claim is
   UNSUPPORTED even if the rest sounds plausible.
 - Qualitative framing ("strong momentum", "compelling") is not a fact;
   do not flag it.
+- A sentiment SCORE on the 0-10 scale is not a leaf value: the sentiment
+  analyst is required to map ``computed_score`` in [-1, 1] to
+  ``5 + 5 * computed_score`` and stay within +/-0.5 of that anchor. A headline
+  score inside the band is GROUNDED against the leaf that supplies
+  ``computed_score`` - never UNSUPPORTED for lack of a 0-10 leaf.
 - Cite the supporting/refuting evidence in `reason` via the tool name and
   value (e.g. "get_analyst_verdict [ok]: EY ..."). When no leaf supports
   it, say "no leaf evidence".
@@ -485,7 +567,11 @@ def _parse_verdict(text: str, report_name: str) -> ReportVerification:
 # ---------------------------------------------------------------------------
 
 
-def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> ReportVerification:
+def _anchor_claims(
+    verification: ReportVerification,
+    evidence_dec: set,
+    sentiment_anchor: float | None = None,
+) -> ReportVerification:
     """Reconcile claim verdicts with the deterministic figure check.
 
     The LLM's number-matching is unreliable (verbatim-vs-tolerance); the
@@ -510,6 +596,27 @@ def _anchor_claims(verification: ReportVerification, evidence_dec: set) -> Repor
                     claim=c.claim,
                     status="GROUNDED",
                     reason=(c.reason or "") + " [anchored: the claim asserts the series is unavailable, which the absent leaf corroborates]",
+                )
+            )
+            continue
+        score_nums = _sentiment_claim_numbers(c.claim or "") or list(decs)
+        if (
+            c.status == "UNSUPPORTED"
+            and sentiment_anchor is not None
+            and score_nums
+            and _SENTIMENT_SCORE_CLAIM_RE.search(c.claim or "")
+            and all(abs(d - sentiment_anchor) <= _SENTIMENT_BAND for d in score_nums)
+        ):
+            # The 0-10 headline score is the prompt's own rescale of
+            # computed_score, so no leaf prints it (AMZN 9.5/10 against an
+            # anchor of 10.0; IEI ~0/10 against 0.0).
+            anchored.append(
+                VerifierClaim(
+                    claim=c.claim,
+                    status="GROUNDED",
+                    reason=c.reason
+                    + " [anchored: the prompt's mandated 0-10 rescale of "
+                    f"computed_score is {sentiment_anchor:.1f} +/-{_SENTIMENT_BAND}]",
                 )
             )
             continue
@@ -782,12 +889,16 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
 
 
         "eps actual":(re.compile(r"\beps\s+actual\b", re.I), 0.005),
-        # Keyed on the ESTIMATE token, not on the literal "eps actual" that was
-        # required to precede it: that requirement meant two conflicting EPS
-        # estimates on otherwise clean lines were never compared, and it merely
-        # re-ran the separate "eps actual" trigger. Matches "EPS estimate/est"
-        # and an "EPS ... estimate/est" pairing on one line.
-        "eps estimate": (re.compile(r"\beps\b[^\n]{0,40}?\best(?:imate)?\b", re.I), 0.002),
+        # NO generic "eps estimate" entry: an EPS estimate is only comparable
+        # within ONE earnings date, and this pass keys on the label alone. AMZN
+        # 2026-09-16 news.md quotes 1.83 for the already-reported 2026-07-30
+        # print beside 2.03 (Zacks, upcoming) and 1.95 (calendar,
+        # 2026-10-29) - three estimates for two dates, each stated with its
+        # own period - and the label-keyed pass paired 1.83 with 2.03 as a
+        # conflict. The date-scoped ``_eps_estimate_duals`` is the check that
+        # owns this metric: it flags two DIFFERENT estimates anchored to the
+        # SAME date (MSFT 2026-09-10: 4.72 in the table vs 4.16 in the forward
+        # calendar, both 2026-10-28) and stays silent across dates.
     "earnings power value": (re.compile(r"earnings\s*power\s*value|epv", re.I), 0.01),
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
@@ -1158,6 +1269,37 @@ def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     return None
 
 
+# Digits replaced by a placeholder glyph instead of being written. Two
+# variants reached the 2026-09-16 batch:
+#   IEI market.md (146 tokens) - an underscore: "rsi=23._15" for the leaf's
+#   rsi=23.15, "pct_b=_0219" for 0.0219, "GARCH cond **_._**04%" for 3.04%.
+#   VTV sentiment.md (20 tokens) - dots/ellipsis: "+0..85", "≈9..25/10",
+#   "-026-09-15" for 2026-09-15, "AUM $16..39T".
+# The lookbehind keeps tool names out ("close_50_sma" is not masked), and a
+# ".." between digits is only a placeholder when no ISO date sits beside it -
+# "2026-09-07..2026-09-14" is a news RANGE (JCI/IEI news stems).
+_DIGIT_MASKED_NUMBER_RE = re.compile(
+    r"(?:\._\d|_\.\d|(?<![\w])_\d[\d.,]*(?![\w])"
+    r"|[=\u2248+\-\u2212]\s*[\.\u2026]{1,3}\d"
+    r"|\d[\.\u2026]{2,3}\d)"
+)
+_ISO_DATE_RANGE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _masked_numbers(text: str) -> list[str]:
+    """Digit-placeholder tokens, excluding ISO date ranges."""
+    out: list[str] = []
+    src = text or ""
+    for m in _DIGIT_MASKED_NUMBER_RE.finditer(src):
+        token = m.group(0)
+        if ".." in token and _ISO_DATE_RANGE_RE.search(
+            src[max(0, m.start() - 30): m.end() + 30]
+        ):
+            continue
+        out.append(token)
+    return out
+
+
 # A label run joined by slashes ("bear/base/bull") binds, in order, to the
 # value run that follows it ("$87.75 / $115.51 / $240.53"): the DELL
 # 2026-09-14 fundamental body quoted the same scenario set twice, and reading
@@ -1237,6 +1379,12 @@ def _extract_metric_values(
     level_metric = label in _LEVEL_METRICS
     reject_before = _LABEL_CONTEXT_REJECT.get(label)
     for line in text.splitlines():
+        if _masked_numbers(line):
+            # A line whose digits are masked yields no quotable value: reading
+            # the surviving fragment ("23" from "rsi=23._15", "91" from
+            # "_._91") invented the IEI 2026-09-16 pcr/rsi/GARCH conflicts.
+            # The corruption itself is reported by ``_digit_obfuscation``.
+            continue
         if label in _COMPARISON_METRICS:
             line = _COMPARAND_SPLIT_RE.split(line)[0]
         for m in regex.finditer(line):
@@ -2847,8 +2995,12 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
         except (TypeError, ValueError):
             return None
 
-    # 1) pairwise conflicts between distinct stated percents
-    vals = sorted({v for raw in _sma200_percent_values(report_text)
+    # 1) pairwise conflicts between distinct stated percents. Two raw values
+    #    that PRINT identically are not two distances: AMZN 2026-09-16
+    #    market.md states 2.35 and 2.44, both of which render "+2.4%" - the
+    #    claim read "+2.4% / +2.4%" and invented a conflict the report does
+    #    not contain. Compare at the precision the claim prints.
+    vals = sorted({round(v, 1) for raw in _sma200_percent_values(report_text)
                    if (v := _pct(raw)) is not None})
     if len(vals) > 1:
         out.append(VerifierClaim(
@@ -3105,6 +3257,38 @@ def _repetition_loops(report_text: str) -> list[str]:
         key=lambda s: -counts[s],
     )
 
+
+
+def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
+    """Numbers whose digits were replaced by underscores - unreadable text.
+
+    IEI 2026-09-16 market.md carried 146 of them ("rsi=23._15" for the leaf's
+    rsi=23.15, "pct_b=_0219", "GARCH cond **_._**04%" for 3.04%, "boll _56 ub
+    _00 lb _12"). The value extractors then read the surviving fragments as
+    if they were second values - that one corruption produced all three
+    INTERNAL_CONFLICT rows the stem carried (pcr oi "91; 2.91" from
+    "_._91", rsi "23; 23.15" from "23._15", GARCH "04; 3.04" from
+    "_.04%"). The digits are unrecoverable from the text alone, so the
+    figures cannot be checked at all: that is the defect, and it is reported
+    as one claim instead of as three invented conflicts.
+    """
+    if not report_text:
+        return []
+    hits = _masked_numbers(report_text)
+    if not hits:
+        return []
+    sample = ", ".join(sorted({h.strip() for h in hits})[:5])
+    return [VerifierClaim(
+        claim=f"digit-masked numbers in report text ({len(hits)}): {sample}",
+        status="INTERNAL_CONFLICT",
+        reason=(
+            "Digits were replaced by underscores, so the figures cannot be "
+            "read - and any value extracted from the fragment is invented "
+            "(IEI 2026-09-16 market.md: 'rsi=23._15' for the leaf's 23.15, "
+            "'GARCH cond **_._**04%' for 3.04%). Emit real digits; a masked "
+            "number is neither quotable nor checkable."
+        ),
+    )]
 
 
 def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
@@ -3904,6 +4088,7 @@ def _text_metrics(
         ("sector_rank_identity", _sector_rank_identity),
         ("self_correction_artifacts", _self_correction_artifacts),
         ("price_target_identity", _price_target_identity),
+        ("digit_obfuscation", _digit_obfuscation),
         ("sma200_pct_identity", _sma200_pct_identity),
         ("garch_cond_identity", _garch_cond_identity),
         ("chandelier_identity", _chandelier_identity),
@@ -4137,7 +4322,9 @@ def verify_report_dir(
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         evidence_dec = _evidence_decimals(evidence, stem)
-        anchored = _anchor_claims(verification, evidence_dec)
+        anchored = _anchor_claims(
+            verification, evidence_dec, _sentiment_anchor(evidence, stem)
+        )
         text_claims, metric_errors = _text_metrics(report_text, as_of=as_of)
         all_claims = [
             *anchored.claims,
