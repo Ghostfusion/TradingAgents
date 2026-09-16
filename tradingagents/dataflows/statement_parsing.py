@@ -813,6 +813,63 @@ def _payload_period(payload: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+#: Payload period kinds that CONTRADICT the basis a vendor was asked for. Only
+#: explicit, machine-readable labels count: a bare ISO date states no kind, so
+#: it never flags. Diffing every period on every payload would instead flag
+#: intraday market movement as loudly as a mislabelled statement.
+_CONTRADICTING_KINDS = {
+    "annual": ("quarterly", "ttm"),
+    "quarterly": ("annual", "ttm"),
+}
+_QUARTER_RE = re.compile(r"\bq[1-4]\b")
+
+
+def _period_kind(period: str | None) -> str:
+    """``annual`` / ``quarterly`` / ``ttm`` / ``unstated`` for a period token.
+
+    Recognizes the labels the chains actually emit - moomoo's ``2025/FY`` /
+    ``2026/Q2`` markdown headings and ``### Income Statement (FY 2025)``
+    style headers, alpha_vantage TTM columns - and refuses to guess for
+    yfinance's bare date headers, which state no kind at all.
+    """
+    token = (period or "").strip().lower()
+    if not token:
+        return "unstated"
+    if "ttm" in token or "trailing" in token:
+        return "ttm"
+    if "fy" in token or "annual" in token:
+        return "annual"
+    if _QUARTER_RE.search(token) or "quarter" in token:
+        return "quarterly"
+    return "unstated"
+
+
+def _basis_conflict(basis: str, kind: str) -> bool:
+    """True when a payload's observed kind contradicts the requested basis."""
+    return kind in _CONTRADICTING_KINDS.get(basis, ())
+
+
+def _basis_entry(source: str, basis: str, payload: str | None) -> dict:
+    """Provenance record for one absorbed payload.
+
+    ``basis`` is what the merge ASKED the vendor for, ``period`` is what the
+    payload says, ``observed_kind`` classifies that period and
+    ``basis_conflict`` is the pair that proves a mismatch. Until this existed
+    both statement pulls were stamped a flat ``annual`` whatever came back -
+    how the AMZN 2026-09-14 report merged FY-annual rows with TTM quarters
+    (EV/EBIT 32.79 -> -30551.06) with nothing recording the disagreement.
+    """
+    period = _payload_period(payload) if payload else None
+    kind = _period_kind(period)
+    return {
+        "source": source,
+        "basis": basis,
+        "period": period,
+        "observed_kind": kind,
+        "basis_conflict": _basis_conflict(basis, kind),
+    }
+
+
 def trailing_twelve_months(ticker: str, curr_date: str, periods: int = 4) -> dict:
     """Sum the newest ``periods`` quarters of the FLOW line items (TTM).
 
@@ -882,21 +939,34 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
     """Pull the canonical line items for one ticker via the vendor chain.
 
     ``with_provenance=True`` returns ``(canonical, provenance)`` where
-    provenance maps every recorded key to ``{source, basis, period}`` - the
-    merge below is last-writer-wins across up to four vendor payloads, so
-    without this a derived ratio cannot state which period or vendor it came
-    from (that silence is what let one NVDA report quote an annual P/E beside
-    quarterly balance-sheet rows, 2026-09-12).
+    provenance maps every recorded key to ``{source, basis, period,
+    observed_kind, basis_conflict}`` - the merge below is last-writer-wins
+    across up to four vendor payloads, so without this a derived ratio cannot
+    state which period or vendor it came from (that silence is what let one
+    NVDA report quote an annual P/E beside quarterly balance-sheet rows,
+    2026-09-12).
+
+    ``basis`` is what the merge requested and ``observed_kind`` what the
+    payload's own newest period states; ``basis_conflict`` is True when those
+    two disagree (an annual request answered with a quarterly or TTM payload),
+    which is the AMZN 2026-09-14 signature. A payload whose period states no
+    kind (a bare date header) is never flagged as a conflict.
     """
     canonical = {}
     provenance: dict[str, dict] = {}
 
     def absorb(payload: str, source: str, basis: str) -> None:
         got = _canonicalize(payload)
-        period = _payload_period(payload)
+        entry = _basis_entry(source, basis, payload)
+        if entry["basis_conflict"]:
+            logger.warning(
+                "%s %s: newest period %r (%s) contradicts the requested %s basis; "
+                "recording basis_conflict on %d key(s)",
+                ticker, source, entry["period"], entry["observed_kind"], basis, len(got),
+            )
         canonical.update(got)
         for key in got:
-            provenance[key] = {"source": source, "basis": basis, "period": period}
+            provenance[key] = dict(entry)
 
     # Fundamentals carries market cap (yfinance info / alpha_vantage overview).
     try:
@@ -923,11 +993,9 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
         for k in ("eps_yoy", "revenue_yoy", "roe", "market_cap"):
             if k not in canonical and bf_canon.get(k) is not None:
                 canonical[k] = bf_canon.get(k)
-                provenance[k] = {
-                    "source": "finnhub basic financials",
-                    "basis": "vendor TTM/annual",
-                    "period": _payload_period(bf),
-                }
+                # Finnhub's own payload period, classified the same way as the
+                # statement pulls so one reader handles every entry.
+                provenance[k] = _basis_entry("finnhub basic financials", "vendor TTM/annual", bf)
     except Exception as exc:  # noqa: BLE001
         logger.debug("%s finnhub basic financials: %s", ticker, exc)
     # Guard: a cash figure larger than total assets means a wrong-row match.
@@ -939,6 +1007,8 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
             "source": "guard",
             "basis": "nulled (cash exceeded total assets)",
             "period": None,
+            "observed_kind": "unstated",
+            "basis_conflict": False,
         }
     # Currency heuristic for ADRs: yfinance reports statements in the local
     # currency (e.g. JPY) with no marker in the CSV, while market cap arrives
@@ -960,6 +1030,14 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
                 "source": "derived",
                 "basis": "current_assets - current_liabilities",
                 "period": (provenance.get("current_assets") or {}).get("period"),
+                # Inherited from the operands: the derivation adds no basis of
+                # its own, so it inherits theirs (including any conflict).
+                "observed_kind": (provenance.get("current_assets") or {}).get(
+                    "observed_kind", "unstated"
+                ),
+                "basis_conflict": bool(
+                    (provenance.get("current_assets") or {}).get("basis_conflict")
+                ),
             }
     if with_provenance:
         return canonical, provenance

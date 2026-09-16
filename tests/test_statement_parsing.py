@@ -273,6 +273,11 @@ def test_fetch_ticker_provenance_records_source_basis_and_period(monkeypatch):
         "source": "get_income_statement",
         "basis": "annual",
         "period": "2026-01-31",
+        # The payload is a yfinance-style CSV whose header is a bare date, so
+        # the kind is unstated rather than assumed - and no conflict is claimed
+        # on the strength of a column layout.
+        "observed_kind": "unstated",
+        "basis_conflict": False,
     }
     assert prov["total_assets"]["period"] == "2026-01-31"
     assert fin["net_income"] == pytest.approx(120070000000.0)
@@ -280,6 +285,96 @@ def test_fetch_ticker_provenance_records_source_basis_and_period(monkeypatch):
     # Default call: the plain dict, unchanged for every existing caller.
     plain = sp.fetch_ticker("TST", "2026-09-12")
     assert isinstance(plain, dict) and plain["net_income"] == pytest.approx(120070000000.0)
+
+
+@pytest.mark.unit
+def test_fetch_ticker_flags_a_quarterly_payload_under_an_annual_request(monkeypatch):
+    """AMZN 2026-09-14: the merge asked the statement vendors for ``annual``
+    and stamped a flat ``annual`` on whatever came back, so FY-annual rows were
+    combined with TTM quarters (EV/EBIT 32.79 -> -30551.06) and nothing
+    recorded the disagreement. The payload's own period now decides
+    ``observed_kind``, and a contradiction sets ``basis_conflict``."""
+    quarterly_income = (
+        "### Income Statement (2026/Q2)\n"
+        "| Item | Q2 |\n| --- | --- |\n"
+        "| Total Revenue | 96,221,000,000 |\n"
+        "| Net Income | 59,688,000,000 |\n"
+    )
+    annual_balance = (
+        "### Balance Sheet (FY 2025)\n"
+        "| Item | FY2025 |\n| --- | --- |\n"
+        "| Total Assets | 206,800,000,000 |\n"
+        "| Stockholders Equity | 157,290,000,000 |\n"
+    )
+
+    def _fake(method, *args, **kwargs):
+        if method == "get_income_statement":
+            return quarterly_income
+        if method == "get_balance_sheet":
+            return annual_balance
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+
+    _fin, prov = sp.fetch_ticker("TST", "2026-09-14", with_provenance=True)
+    income = {k: v for k, v in prov.items() if v["source"] == "get_income_statement"}
+    balance = {k: v for k, v in prov.items() if v["source"] == "get_balance_sheet"}
+    assert income and balance  # both payloads were parsed, not empty dicts
+    assert {v["observed_kind"] for v in income.values()} == {"quarterly"}
+    assert all(v["basis_conflict"] for v in income.values())
+    assert all(v["period"] == "Income Statement (2026/Q2)" for v in income.values())
+    assert {v["observed_kind"] for v in balance.values()} == {"annual"}
+    assert not any(v["basis_conflict"] for v in balance.values())
+
+
+@pytest.mark.unit
+def test_fetch_ticker_keeps_the_basis_label_when_the_merge_cannot_see_a_kind(monkeypatch):
+    """A bare date header states no kind: an annual request against it is NOT a
+    conflict, so the merge never cries wolf over a vendor's column layout.
+    Only an explicit quarterly/TTM label is evidence."""
+    csv_payload = (
+        "# Income Statement data for TST (annual)\n\n"
+        ",2026-01-31,2025-01-31\n"
+        "Total Revenue,215940000000.0,130500000000.0\n"
+    )
+    monkeypatch.setattr(sp, "route_to_vendor", lambda *a, **kw: csv_payload)
+
+    _fin, prov = sp.fetch_ticker("TST", "2026-09-12", with_provenance=True)
+    assert prov["revenue"]["observed_kind"] == "unstated"
+    assert prov["revenue"]["basis_conflict"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("token", "kind"),
+    [
+        ("2025/FY", "annual"),
+        ("Income Statement (FY 2025)", "annual"),
+        ("FY2026 annual", "annual"),
+        ("2026/Q2", "quarterly"),
+        ("2026-Q3", "quarterly"),
+        ("Quarter ended 2026-07-31", "quarterly"),
+        ("TTM 2026-07-31", "ttm"),
+        ("trailing twelve months", "ttm"),
+        ("2026-01-31", "unstated"),
+        ("", "unstated"),
+        (None, "unstated"),
+    ],
+)
+def test_period_kind_classifies_vendor_labels(token, kind):
+    assert sp._period_kind(token) == kind
+
+
+@pytest.mark.unit
+def test_basis_conflict_only_fires_on_a_contradicting_kind():
+    assert sp._basis_conflict("annual", "quarterly") is True
+    assert sp._basis_conflict("annual", "ttm") is True
+    assert sp._basis_conflict("quarterly", "annual") is True
+    assert sp._basis_conflict("quarterly", "ttm") is True
+    assert sp._basis_conflict("annual", "annual") is False
+    assert sp._basis_conflict("annual", "unstated") is False
+    # The fundamentals pull asks for no basis, so it can never conflict.
+    assert sp._basis_conflict("info", "quarterly") is False
 
 
 @pytest.mark.unit

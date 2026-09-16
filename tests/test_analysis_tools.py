@@ -2939,6 +2939,49 @@ def test_prompt_injection_names_the_missing_text():
     assert flagged.startswith("prompt-injection FLAGGED"), flagged
 
 
+def test_screen_basis_line_calls_out_a_basis_conflict():
+    """A payload whose period kind contradicts the basis it was requested with
+    must not print as a clean basis (AMZN 2026-09-14: FY-annual rows merged
+    with TTM quarters, EV/EBIT 32.79 -> -30551.06)."""
+    line = T._screen_basis_line(
+        {
+            "net_income": {
+                "source": "get_income_statement",
+                "basis": "annual",
+                "period": "Income Statement (2026/Q2)",
+                "observed_kind": "quarterly",
+                "basis_conflict": True,
+            },
+            "total_assets": {
+                "source": "get_balance_sheet",
+                "basis": "annual",
+                "period": "2025/FY",
+                "observed_kind": "annual",
+                "basis_conflict": False,
+            },
+        }
+    )
+    assert "BASIS CONFLICT" in line
+    assert "net_income" in line.split("BASIS CONFLICT")[1]
+    assert "total_assets" in line
+
+
+def test_screen_basis_line_has_no_conflict_marker_when_bases_agree():
+    line = T._screen_basis_line(
+        {
+            "total_assets": {
+                "source": "get_balance_sheet",
+                "basis": "annual",
+                "period": "2026-01-31",
+                "observed_kind": "unstated",
+                "basis_conflict": False,
+            }
+        }
+    )
+    assert "BASIS CONFLICT" not in line
+    assert "total_assets" in line and "2026-01-31" in line
+
+
 def test_trade_outcome_entry_is_required_not_blamed_on_the_closes(monkeypatch):
     """entry=0.0 (what the app sends) divided by zero and reported "no valid
     closes" against a perfectly healthy close series - the price was missing,

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import re
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -1339,6 +1340,10 @@ def _screen_basis_line(provenance: dict) -> str:
     (same for its EV/EBIT 35.02 vs the ratios block's 32.79). A screen that
     cannot name its own period forces the reader to guess which of three bases
     produced it, so the basis is printed with the numbers.
+
+    A key whose payload period kind contradicts the basis it was requested
+    with (``basis_conflict`` from the vendor merge) is called out separately,
+    so a mislabelled payload cannot print as a clean basis.
     """
     groups: dict[tuple[str, str], list[str]] = {}
     for key in _SCREEN_BASIS_KEYS:
@@ -1355,7 +1360,20 @@ def _screen_basis_line(provenance: dict) -> str:
         f"{'/'.join(sorted(keys))} {period} ({source})"
         for (period, source), keys in sorted(groups.items())
     ]
-    return "  basis: " + "; ".join(parts)
+    line = "  basis: " + "; ".join(parts)
+    conflicted = sorted(
+        key
+        for key in _SCREEN_BASIS_KEYS
+        if (provenance.get(key) or {}).get("basis_conflict")
+    )
+    if conflicted:
+        line += (
+            "  |  BASIS CONFLICT: "
+            + "/".join(conflicted)
+            + " came from a payload whose newest period kind contradicts the basis "
+            "it was requested with — re-check the period before quoting"
+        )
+    return line
 
 
 @tool
@@ -4468,9 +4486,7 @@ def get_ratios(
 
 def _fred_latest_pct(payload: str) -> float | None:
     """Parse the latest value (%) from a FRED macro markdown payload."""
-    import re as _re
-
-    m = _re.search(r"Latest:\*{2}\s*([0-9.]+)", payload or "")
+    m = re.search(r"Latest:\*{2}\s*([0-9.]+)", payload or "")
     return float(m.group(1)) if m else None
 
 
@@ -7618,17 +7634,15 @@ def get_fixed_income_risk(
     except Exception as exc:
         return f"fixed income risk unavailable: {exc}"
     try:
-        import re as _re
-
         from tradingagents.dataflows.interface import route_to_vendor
 
         fund = route_to_vendor("get_fundamentals", ticker, "") or ""
         div = None
         price = None
-        m = _re.search(r"dividend[_ ]?rate[^:]*:[^\d]*([0-9.]+)", fund, _re.I)
+        m = re.search(r"dividend[_ ]?rate[^:]*:[^\d]*([0-9.]+)", fund, re.I)
         if m:
             div = float(m.group(1))
-        m2 = _re.search(r"(?:current|last)[_ ]?price[^:]*:[^\d]*([0-9.]+)", fund, _re.I)
+        m2 = re.search(r"(?:current|last)[_ ]?price[^:]*:[^\d]*([0-9.]+)", fund, re.I)
         if m2:
             price = float(m2.group(1))
         if div is None or price is None or price <= 0:

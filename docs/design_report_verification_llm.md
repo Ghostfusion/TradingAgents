@@ -265,10 +265,15 @@ are advisory-noise or capture gaps with a known reproducer.
   (ticker, date) resolved FY2025-annual flows at 22:5xZ where the 19:08Z run had
   TTM quarters, moving ROE 22.09 -> 18.90, P/E 30.12 -> 35.41, EV/EBIT 32.79 ->
   -30551.06. `statement_parsing.fetch_ticker` merges up to four payloads
-   REPORT SIDE NOW RECORDED: `verify_flags.json` carries the per-stem `basis` registry, so which period
-  each quoted figure claims is machine-readable (2026-09-16). Still open: the chosen vendor payload/basis
-  on the EVIDENCE side is not journaled, so a run that anchors to whichever vendor won the merge still
-  looks internally consistent.last-writer-wins; the chosen provenance belongs in `run_card.json`.
+  last-writer-wins. **Report side now recorded (2026-09-16):** `verify_flags.json`
+  carries the per-stem `basis` registry, so which period each quoted figure claims is
+  machine-readable. **Evidence side now recorded (2026-09-16):** the merge labels every
+  absorbed payload from the payload itself - `{source, basis, period, observed_kind,
+  basis_conflict}` - and the verdict tool's basis line names any key whose payload kind
+  contradicts the basis it was requested with. **Still open:** neither record is written
+  to `run_card.json`, so a run that anchors to whichever vendor won the merge is
+  inspectable by re-running the tool and reading its basis line, not from the archived run
+  artifact.
 - **Provider safety rejections**: "Upstream error from Alibaba: Output data may
   contain inappropriate content" leaves stems UNKNOWN on dense fundamentals text
   (3rd occurrence 2026-09-14). A `TRADINGAGENTS_VERIFY_MODEL` outside Alibaba, or
