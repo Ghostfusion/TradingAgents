@@ -57,7 +57,56 @@ Two documentation inconsistencies to code against deliberately (the SDK sidestep
    signature and token pages all state the secret is used only client-side for signing. Follow
    the prose/signature page; never transmit the secret.
 2. `x-version`: the signature page says it accepts `v2`, the reference schemas say `v2|v3`
+   (default `v3`). Every example uses `v2`; use `v2` and pin it in one constant.2. `x-version`: the signature page says it accepts `v2`, the reference schemas say `v2|v3`
    (default `v3`). Every example uses `v2`; use `v2` and pin it in one constant.
+
+The measurement below resolved a third apparent contradiction (the `/openapi` prefix) in
+favour of "both exist, per environment".
+
+## Empirical probe (2026-09-16, no credentials available)
+
+Measured before writing P0, on this workstation (signer implemented from the signature page and
+self-tested against the vendor's own published vector, which it reproduces exactly:
+`kvlS6opdZDhEBo5jq40nHYXaLvM=`).
+
+**What the probe proves.**
+
+| Probe | Result | Reading |
+|---|---|---|
+| `POST {sandbox}/market-data/stocks/bars/list` unsigned | `401 {"error_code":"MISSING_APP_KEY","message":"Header x-app-key is missing."}` | route exists; auth is enforced first |
+| `POST {sandbox}/market-data/nonsense/xyz` unsigned | `404 {"error_msg":"404 Route Not Found"}` | unknown routes are 404, so a 401 means the route is real |
+| `POST {sandbox}/auth/tokens/create` unsigned | `401 MISSING_APP_KEY` | the token route exists at the **unprefixed** path |
+| `POST {sandbox}/openapi/auth/tokens/create` unsigned | `404` | the `/openapi` prefix does **not** apply to the auth route |
+| any path under `{sandbox}/openapi/market-data/...` unsigned (including nonsense) | `401 MISSING_APP_KEY` | that prefix is an auth-first gateway - a 401 there says nothing about the specific route |
+| `POST {prod}/market-data/stocks/bars/list` unsigned | `404` | production does **not** serve the unprefixed market-data path |
+| `POST {prod}/openapi/market-data/stocks/bars/list` unsigned | `401 MISSING_APP_KEY` | production's market-data gateway lives under `/openapi` |
+| signed with a syntactically valid but unknown key (both hosts) | `401 {"error_code":"UNAUTHORIZED","message":"Invalid credentials. Please verify your credentials and ensure you are connecting to the correct environment"}` | the signature scheme is parsed; only the key is rejected |
+
+**Two corrections to what the documentation alone implied.**
+
+1. **The path prefix is per-environment, not an inconsistency.** Reference pages use
+   `/market-data/...` (their `servers` block is the sandbox host) and the Data API example uses
+   `/openapi/market-data/...`: both are real. The sandbox serves the unprefixed paths, production
+   serves the prefixed ones. Hand-rolled code must switch the prefix with the host; the SDK
+   already does.
+2. **Auth precedes entitlement, so this probe cannot answer the subscription question.** The
+   go/no-go still requires one valid sandbox key. The probe script that answers it is written and
+   self-tested (it creates a token, then reads bars/snapshot/income/ratings/capital-flow/news/
+   instruments and prints an explicit entitlement verdict); it lives outside the repo as a
+   throwaway until P1 promotes it.
+
+**Error envelopes the provider must parse (two shapes).** `401` and `417` carry
+`{"error_code": ..., "message": ...}` (`MISSING_APP_KEY`, `UNAUTHORIZED`, `INVALID_PARAMETER`);
+an unrouted path carries `{"error_msg": "404 Route Not Found"}`. Map the first to typed
+`WebullAuthError`/`WebullPermissionError`, the second to `NoMarketDataError` rather than crashing on
+`KeyError`.
+
+**Token facts confirmed from the endpoint spec** (`/auth/tokens/create`): the response is
+`{token (32-hex), expires_at (unix ms), status (PENDING|NORMAL|INVALID|EXPIRED)}`. The docs make two
+statements about the 15-day figure - the token page says a token becomes `INVALID` after 15
+consecutive days without API calls, the endpoint page says tokens are time-sensitive with a default
+15-day expiry. Treat both as real until a live token says otherwise: check status before a run and
+persist the token under `data_cache_dir/`.
 
 ## Fit against this repo's `data_vendors` categories
 
@@ -185,7 +234,10 @@ live in `.env` (mirrored in `.env.example`), and every failure degrades to the n
    overview says non-display OpenAPI usage requires Nasdaq Basic/Totalview, while the sandbox is
    documented as 15-minute delayed "by default" - these two statements only reconcile if the
    sandbox is usable unentitled. **This is the go/no-go for the whole integration** and it costs
-   one P0 smoke call to answer.
+   one P0 smoke call to answer - the probe for it is written and self-tested (creates a token,
+   then reads bars/snapshot/income/ratings/capital-flow/news/instruments and prints an
+   entitlement verdict); it only needs `WEBULL_APP_KEY`/`WEBULL_APP_SECRET` from an
+   auto-approved sandbox application.
 2. Are statements available for ETFs, or only the `Fund*` family? (Affects `IEI`-style names.)
 3. Is `Filings` metadata-only, and does it add anything over `sec_edgar`? (Probably not - default: skip.)
 4. Is the event-contract universe broad enough to be a `prediction_markets` source, or is it
