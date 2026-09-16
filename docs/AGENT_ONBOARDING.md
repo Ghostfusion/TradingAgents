@@ -89,6 +89,17 @@ a fresh agent must follow them without being reminded:
    on. Document confirmed-but-unfixed defects in the design doc's reopen
    checklist (docs/design_report_verification_llm.md) rather than silently
    dropping them.
+9. **Land every change, and never leave a doc stale (owner standing order, 2026-09-16)** -
+   a task is not finished until its changes are **committed and pushed**
+   (`git push origin main`, explicit `git add` paths) and every doc it touched or invalidated is
+   corrected **in the same pass**: `README.md`, `CHANGELOG.md` (with the web-impact line whenever the
+   web contract moves), `docs/AGENT_ONBOARDING.md`, `docs/api_reference.md`, `.env.example`
+   (mirrors every code-read key), the plan/design doc that owns the behaviour, and the verifier
+   design doc's reopen checklist. NEVER park a finished change uncommitted while asking whether to
+   commit it, and NEVER leave a doc describing behaviour the code no longer has - when a check, a
+   flag, an env key or a report format changes, find the doc that states the old behaviour and fix
+   it in the same commit. The rule spans all three repos: this one, `TradingExecution`, and
+   `trading_web` (which lives in the `TradingNew` repo root, so its commits go there).
 
 ---
 
