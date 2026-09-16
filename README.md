@@ -30,6 +30,31 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-15] **The post-PM decision guardrail is on, and the executor's only input contract is actually
+  written** — `strategies/decision_guardrail.py` (still default-off in code) is enabled in the shipped `.env`: a
+  Buy/Overweight is capped at Hold when a structured risk-debate row is HIGH/CRITICAL, confidence is capped on
+  non-fresh data, and a flipped judge caps it further; downgrade-only by construction, no provider calls.
+  Measured across all 21 trees before enabling, the cap would have changed **0 ratings** — the same HIGH rows
+  already make the deterministic gate block new risk. Same session: `research_decision.json` is live in
+  production (schema 1.1.0, validates against the executor's published contract), and
+  `write_research_decision`'s silently-swallowed `AttributeError` (`_model_pool` is a dict, not a leaf list)
+  meant that contract had never been emitted at all. See CHANGELOG.
+- [2026-09-15] **Bull/bear transcripts separate their rounds, and five verifier false positives closed** —
+  verifying the newest tree (IEI, a first run for that symbol) flagged `market` and `sentiment`; adjudicating all
+  13 claims against `tool_evidence.json` found **one real report defect** (a `get_capital_flow` count of "7 of the
+  last 8 weeks" where the tool's own weekly table shows 6 of 8) and **two analyst-recall defects** (a hedge-fund
+  "basis-trade unwind" mechanism no leaf carries — the headline snippet stops mid-sentence — and a "~4-5 year
+  duration" figure the same tree's fundamentals section had correctly refused for lack of a leaf). The rest were
+  the verifier misreading its own text: `_PRIMARY_PRICE` matched the "at" inside an ordinary word (the market
+  section's own caveat "Treat 114.33 as unverified" became the report's spot price, which then re-derived the
+  swing-set row's 2R/3R off the day low plus ATR and flagged two verbatim `get_swing_set` targets), `t1`/`t2`
+  bound to the first tool named on a line and to nothing at all on a tool-less summary row (two frameworks framed
+  each other), a percent two clauses away counted as a 200-SMA distance, a dated series ("10 EMA 116.1043 ->
+  115.0450") read as two competing values, and a line naming the **FOMC meeting** was held to `get_fed_watch`
+  though that analyst's own news leaf carried it. Separately, `2_research/bull.md`/`bear.md` never gained the risk
+  section's `### Round N` separators — the writer passed `role="Bull"` while the debate state labels every turn
+  `"Bull Analyst:"`, so a two-round transcript rendered as one wall; both sections now render identically.
+  Post-fix re-run: all four sections PASS, 0 non-GROUNDED claims. See CHANGELOG.
 - [2026-09-14] **The report verifier stopped flagging its own extraction artifacts** - adjudicating a 4-symbol batch (727 claims: 639 GROUNDED, 78
   INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0 CONTRADICTED) showed the CONFLICT rows were mostly the scan misreading figures: comma-grouped
   `$28,243,000,000` read as `28`, a label eating its value's leading digit (`bear 171.38` -> `71.38`), prose sliced into the reported value
@@ -68,6 +93,19 @@
   loop). New screener columns G/C/Qual/RevIdx (`--growth-scores`, `--quality-score`, `--revision-index`). Every
   gate defaults off, every output prints its basis, and an unavailable input is printed as unavailable rather than
   scored 0. The reduced BW-style index (S9) stays unscheduled. See CHANGELOG.
+- [2026-09-14] **OpenRouter prompt caching actually hits, and large-prompt
+  request shaping** — the analyst system message (which carries the
+  forced-evidence block) was rebuilt on every tool round from state that had
+  since grown, so the prompt prefix moved at token 0 and an implicit prefix
+  cache (OpenRouter/DeepSeek) was dead for the whole tool loop. It is now
+  frozen at the first render (`_rendered_block`), and the OpenRouter client
+  gained opt-in `TRADINGAGENTS_OPENROUTER_STREAMING`,
+  `TRADINGAGENTS_OPENROUTER_SESSION_ID=auto` (sticky routing — never
+  `provider.order`, which disables it) and the `provider` sort/latency/
+  throughput/require_parameters/allow_fallbacks keys. The footer shows
+  `(cache N)` and the failure journal records typed provider errors
+  (`error_type=timeout` for the 504 class). Measured live on one prompt:
+  `cache_read` 0 → 5888 of 6043 input tokens on the second turn. See CHANGELOG.
 - [2026-09-13] **Forced-tool short-circuit actually wired** — `make_short_circuit_tool_node` guarded on
   `callable(node)`, but a LangGraph `ToolNode` is a Runnable and not callable, so every production node was returned
   unwrapped: gathered tools could re-hit the vendor, no tool call was journaled, and model-pool results
@@ -198,7 +236,7 @@
   no code, the no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-04] **yfinance study P1 + P5 implemented** - typed absence
   reasons now travel through the read envelope (`VendorAbsence` +
-  `VendorResult.absence` + OHLCV/run_card/web `absence` field; string
+  `VendorResult.absence` + OHLCV/web `absence` field and the run card's `data_absence`; string
   callers untouched) and yfinance is deliberately pinned `~=1.4` with
   vendor-quirk notes (`tradingagents/dataflows/README.md`). P2/P3/P4 of the
   study stay design-only. 181 tests green. See CHANGELOG.
@@ -1307,7 +1345,7 @@ Every run writes a per-section tree (`1_analysts/`, `2_research/`, `3_trading/`,
     ###### <details>
 ```
 
-The agent's raw files (`1_analysts/market.md`, `2_research/bull.md`, …) stay byte-identical — only the consolidated view is re-nested. `complete_report.md` also opens with an auto-generated **Table of Contents** (GitHub-anchor links to every team and role).
+The per-section files (`1_analysts/market.md`, `2_research/bull.md`, …) keep their own heading levels — only the consolidated view is demoted by three — but they are **not** byte-identical to the model's raw output: the debate/trader/risk sections go through the readable pass (paragraph spacing, and `### Round N` separators when a debate ran several rounds), and any section can carry a truncation marker. `complete_report.md` also opens with an auto-generated **Table of Contents** (GitHub-anchor links to every team and role).
 
 To re-render the consolidated report for an existing folder (e.g. after a formatter change) without re-running the analysis — preserving the `Risk Gate (computed)` block when present:
 ```bash

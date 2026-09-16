@@ -112,6 +112,13 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
 | `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
 | `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
+| `TRADINGAGENTS_OPENROUTER_STREAMING` | `openrouter_streaming` | stream OpenRouter responses; default `false`. A large prompt spends a long time in prefill with nothing on the wire, and OpenRouter only commits HTTP 200 + headers once a provider accepts the request (later failures arrive in-stream, not as a bare 504). langchain aggregates the chunks, so `invoke()`/tool loops are unchanged |
+| `TRADINGAGENTS_OPENROUTER_SESSION_ID` | `openrouter_session_id` | sticky-routing key sent as the request-body `session_id`: `auto` = one generated id per client (per symbol run), a literal string (≤256 chars) pins a named session, empty (default) = off. Keeps each turn on the provider holding the warmed prefix cache; OpenRouter's sticky routing is disabled by `provider.order`, so this repo never sends one |
+| `TRADINGAGENTS_OPENROUTER_PROVIDER_SORT` | `openrouter_provider_sort` | `provider.sort`: `price` \| `throughput` \| `latency`; empty (default) keeps OpenRouter's price-based load balancing. Sorting disables that balancing, so the same model can route to pricier hosts |
+| `TRADINGAGENTS_OPENROUTER_PREFERRED_MAX_LATENCY` | `openrouter_preferred_max_latency` | `provider.preferred_max_latency` in seconds; empty/0 = not sent |
+| `TRADINGAGENTS_OPENROUTER_PREFERRED_MIN_THROUGHPUT` | `openrouter_preferred_min_throughput` | `provider.preferred_min_throughput` in tokens/sec; empty/0 = not sent |
+| `TRADINGAGENTS_OPENROUTER_REQUIRE_PARAMETERS` | `openrouter_require_parameters` | `true` = only hosts that honor every parameter in the request (tools, `max_tokens`) |
+| `TRADINGAGENTS_OPENROUTER_ALLOW_FALLBACKS` | `openrouter_allow_fallbacks` | default `true` (OpenRouter's own default, so nothing is sent); `false` = fail instead of falling back when the preferred host is unavailable |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 8000; the fallback for both tiers |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
 | `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
@@ -899,7 +906,8 @@ the legs caller-supplied unless `period=` is given), and each Finnhub metric is
 tagged with its basis (`roaTTM (TTM, Finnhub)`) with an advisory note when the
 payload's own margin x turnover contradicts its ROA. `write_report_tree` also runs
 the deterministic identity checks at write time and records them in
-`run_card.json` as `analyst_consistency` (`{stem: [{status, claim}]}`) - the
+`run_card.json` as `analyst_consistency` (`{stem: [{status, claim}]}`) - `report_verifier._valuation_identity_checks`, i.e.
+the valuation quartet (DuPont, P/E basis, EV/net-cash, R-multiple) plus the
 net-debt sign, current-ratio, ROA, fiscal-quarter-label and date-count
 identities (the last recomputes a stated `N days out` from its own ISO date and
 the run date read off the report directory, and stays silent without an anchor),
@@ -931,7 +939,7 @@ so a tree carries its own consistency record instead of depending on the opt-in
 - batch.py: `--symbols` (required) `--date` `--workers` (1-4 default=capped,
   via `batch.effective_workers`; `TRADINGAGENTS_MAX_WORKERS` raises the cap)
   `--depth` (shallow|medium|deep) `--analysts` (market|social|news|fundamentals)
-  `--vendor` (default|moomoo|yfinance|eodhd) `--verify` (advisory LLM
+  `--vendor` (default|moomoo|yfinance|eodhd|tiingo) `--verify` (advisory LLM
   report-verification pass post-run -> `verify_flags.json` in each report tree).
 - pipeline.py: `--universe` (tickers|top-losers|heat-proxy|top-movers-massive)
   `--file` `--top` `--limit` `--market` `--movers-count` `--min-mcap`

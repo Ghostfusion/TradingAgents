@@ -1,6 +1,6 @@
 """Post-verifier adjudication workbench (item 3 of the AMZN 2026-09-09 loop).
 
-``scripts/report_verify.py --verify`` writes per-tree verify_flags.json with
+``scripts/report_verify.py --report-dir <tree>`` writes per-tree verify_flags.json with
 hundreds of per-claim verdicts; scrolling them buries the real defects. This
 script condenses one run into the confirmation list a human actually needs:
 

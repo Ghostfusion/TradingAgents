@@ -76,8 +76,12 @@ a fresh agent must follow them without being reminded:
    report-verifier run finishes (batch `--verify`, `scripts/report_verify.py`,
    or the web Verify checkbox), the assistant MUST follow up on the flagged
    results before moving on: (a) inspect each `verify_flags.json` /
-   per-stem flags, (b) adjudicate every UNSUPPORTED / CONTRADICTED claim
-   against the actual `tool_evidence.json` leaves — separating real defects
+   per-stem flags, (b) adjudicate every non-GROUNDED claim - UNSUPPORTED,
+   CONTRADICTED, MISQUOTED and INTERNAL_CONFLICT (`scripts/verify_sweep.py`
+   classes CONTRADICTED/MISQUOTED/INTERNAL_CONFLICT as CONFIRMED and
+   UNSUPPORTED as SUSPECT, and a MISQUOTED or INTERNAL_CONFLICT row is a real
+   capture-or-citation defect, not noise) against the actual
+   `tool_evidence.json` leaves — separating real defects
    (analyst-side citation errors, tool-side bugs, evidence-coverage gaps) from
    verifier noise — and (c) FIX every confirmed defect (code, prompt, evidence
    persistence) with a regression test, then commit + push. The verifier is a
@@ -338,6 +342,20 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-15/16 `(working tree)` - IEI verification round + debate round separators + a docs pass. Verifying `reports/IEI_20260915_210623`
+  (the first IEI run) returned FLAG on market/sentiment; adjudicating all 13 non-GROUNDED claims found one real report defect
+  (`get_capital_flow` counted as "negative in 7 of the last 8 weeks" where its own weekly table shows 6 of 8) and two analyst-recall
+  defects (a hedge-fund "basis-trade unwind" mechanism no leaf carries; a "~4-5 year duration" figure that the same tree's fundamentals
+  section had correctly refused), plus five verifier false-positive classes, all fixed: `_PRIMARY_PRICE` had no leading `\b` (the market
+  section's own caveat "Treat 114.33 as unverified" became the report's spot price, and two verbatim `get_swing_set` targets were flagged),
+  `t1`/`t2` scoping was per line by the first tool named on it (now per SEGMENT, with a framework-label fallback for tool-less summary
+  rows), a foreign metric's percent counted as a 200-SMA distance, a dated series read as two competing 10-EMAs, and the bare `fomc` macro
+  trigger now accepts a leaf naming the central bank. Separately `2_research/bull.md`/`bear.md` never gained the risk section's
+  `### Round N` separators - the writer passed `role="Bull"` while the debate state labels every turn `"Bull Analyst:"`. Then a docs pass
+  against the code: the verifier design doc's reopen checklist refreshed (the 2026-09-08 "no open code defect" conclusion marked
+  falsified, the closed `vrp` and `t1`/`t2`-SKHY classes moved to "closed", the survivors re-measured), `.env.example` backfilled to every
+  code-referenced key (209 -> 248 names), README/api_reference/onboarding corrections, and the web repo's stale pointers fixed.
+  See CHANGELOG. Tests: `test_report_verify.py` 180, `test_report_readable.py` +1; full suite 4246 passed / 5 skipped.
 - 2026-09-14 `(working tree)` - Verifier capture/binding hardening (adjudicating the MU/SNDK/DELL/SKHY batch: 727 claims, 639 GROUNDED, 78
   INTERNAL_CONFLICT, 6 UNSUPPORTED, 4 MISQUOTED, 0 CONTRADICTED). The deterministic same-metric scan was inflating its own list: `_DOLLAR_RE` stopped at the
   first comma (`$28,243,000,000` -> 28, `$1,166,000,000,000` -> 1), the `scenario dcf bear/base/bull` labels consumed the value's leading digit, the displayed
@@ -413,6 +431,25 @@ has changed before); never assume an endpoint works — the SDK's
   answering for the tool-binding contract tests); unwrappable nodes log a warning instead of returning silently.
   Model-pool leaves carry their call args. Also: `get_catalyst_scale` printed the modal probability as `8650%`
   (already a percent number, formatted again with `:.0%`) - now `86.5%`. See CHANGELOG.
+- 2026-09-14 `(working tree)` - OpenRouter prompt caching + request shaping
+  (plan: `docs/implementation_plan_openrouter_large_prompt_ttft.md`). The
+  analyst system message is `messages[0]` and carries the forced-evidence
+  block, but it was re-rendered on every tool-loop re-entry from state that had
+  grown since (the tool node journals a leaf per LLM-called tool) and without
+  the first render's S11b notes — so the prefix moved at token 0 and the
+  implicit prefix cache never hit. `gather_for_analyst_node` now freezes the
+  first render under the reserved `_rendered_block` key (list-of-rows; skipped
+  by `_evidence_sources` and by `repro_check`'s `_`-prefix rule) and re-serves
+  it byte-for-byte. Opt-in OpenRouter knobs: `OPENROUTER_STREAMING`,
+  `OPENROUTER_SESSION_ID` (`auto` = per-client sticky id, ≤256 chars),
+  `OPENROUTER_PROVIDER_SORT` / `_PREFERRED_MAX_LATENCY` /
+  `_PREFERRED_MIN_THROUGHPUT` / `_REQUIRE_PARAMETERS` / `_ALLOW_FALLBACKS`;
+  never `provider.order` (disables sticky routing). Footer prints `(cache N)`;
+  the failure journal records `error_type`/`error_code`/`status_code` and the
+  token+cache counters; `llm_cost.estimate_cost` prices cached input at the
+  0.1x DeepSeek cache-read rate. Measured live: same client, same prompt,
+  `cache_read` 0 -> 5888/6043 on turn 2. Tests: +8 client, +2 evidence.
+  See CHANGELOG.
 - 2026-09-13 `(working tree)` - QQQI market-review options loop: `strategies/options_math.py::expiry_days`
   reads the vendor's expiry label (ISO date / 6-digit contract stamp / 8-digit basic ISO; None when
   unreadable) and the five yfinance-chain readers (`_options_chain_rows_lambda`, `get_options_iv_read`,
