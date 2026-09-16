@@ -356,6 +356,118 @@ def test_run_tool_loop_cap_always_terminates():
 
 
 @pytest.mark.unit
+def test_round_fingerprint_is_order_insensitive():
+    from tradingagents.agents.utils.risk_tool_loop import _round_fingerprint
+
+    a = _round_fingerprint(
+        [
+            {"name": "get_risk_gate", "args": {"ticker": "NVDA", "size_pct": 0.1}},
+            {"name": "get_position_sizing", "args": {"ticker": "NVDA"}},
+        ]
+    )
+    # Same calls, keys and calls reordered: ONE round, so a cosmetic re-ask
+    # still counts as a repeat.
+    b = _round_fingerprint(
+        [
+            {"name": "get_position_sizing", "args": {"ticker": "NVDA"}},
+            {"name": "get_risk_gate", "args": {"size_pct": 0.1, "ticker": "NVDA"}},
+        ]
+    )
+    assert a == b
+    # A different argument is a different round: the guard must not trip here.
+    c = _round_fingerprint(
+        [{"name": "get_risk_gate", "args": {"ticker": "NVDA", "size_pct": 0.2}}]
+    )
+    assert c != _round_fingerprint(
+        [{"name": "get_risk_gate", "args": {"ticker": "NVDA", "size_pct": 0.1}}]
+    )
+
+
+class _RepeatChain:
+    """Asks for the same (or a rotating) set of calls, forever, with new prose."""
+
+    def __init__(self, rounds):
+        self.rounds = list(rounds)
+        self.turns = 0
+
+    def invoke(self, messages):
+        self.turns += 1
+        pending = self.rounds[(self.turns - 1) % len(self.rounds)]
+        return _FakeResp(content=f"still checking (turn {self.turns})", tool_calls=pending)
+
+
+def _repeat_llm(rounds, **kw):
+    class _L:
+        def bind_tools(self, tools):
+            return _RepeatChain(rounds)
+
+    return _L(), kw
+
+
+@pytest.mark.unit
+def test_run_tool_loop_stops_a_repeated_round_without_executing_it():
+    """A round whose results the model already holds is not paid for again.
+
+    Prose similarity cannot see this loop - the model writes new text every
+    turn while asking for the same evidence - and every extra round is a
+    provider call inside a node that already runs 14-26 min deep.
+    """
+    from tradingagents.agents.utils.risk_tool_loop import (
+        _CYCLE_REPEAT_LIMIT,
+        RISK_DEBATOR_TOOLS,
+        run_tool_loop,
+    )
+
+    same = [{"name": "get_risk_gate", "args": {"size_pct": 0.1}, "id": "x"}]
+    llm, _ = _repeat_llm([same])
+    text, transcript = run_tool_loop(llm, "p", RISK_DEBATOR_TOOLS, max_rounds=10)
+
+    executed = [t for t in transcript if t.startswith("get_risk_gate(")]
+    assert len(executed) == _CYCLE_REPEAT_LIMIT - 1, transcript
+    assert any(t.startswith("[cycle]") for t in transcript), transcript
+    assert isinstance(text, str) and text.strip()
+
+
+@pytest.mark.unit
+def test_run_tool_loop_stops_a_two_call_cycle():
+    """A -> B -> A -> B is a loop even when no two consecutive rounds match."""
+    from tradingagents.agents.utils.risk_tool_loop import (
+        RISK_DEBATOR_TOOLS,
+        run_tool_loop,
+    )
+
+    a = [{"name": "get_risk_gate", "args": {"size_pct": 0.1}, "id": "a"}]
+    b = [{"name": "get_risk_gate", "args": {"ticker": "NVDA"}, "id": "b"}]
+    llm, _ = _repeat_llm([a, b])
+    text, transcript = run_tool_loop(llm, "p", RISK_DEBATOR_TOOLS, max_rounds=12)
+
+    executed = [t for t in transcript if t.startswith("get_risk_gate(")]
+    assert len(executed) == 4, transcript
+    assert any(t.startswith("[cycle]") for t in transcript), transcript
+    assert isinstance(text, str)
+
+
+@pytest.mark.unit
+def test_run_tool_loop_does_not_trip_on_distinct_rounds():
+    """The guard must not cut a loop that is genuinely making progress."""
+    from tradingagents.agents.utils.risk_tool_loop import (
+        RISK_DEBATOR_TOOLS,
+        run_tool_loop,
+    )
+
+    rounds = [
+        [{"name": "get_risk_gate", "args": {"size_pct": size}, "id": f"s{size}"}]
+        for size in (0.1, 0.2, 0.3)
+    ]
+    llm, _ = _repeat_llm(rounds)
+    text, transcript = run_tool_loop(llm, "p", RISK_DEBATOR_TOOLS, max_rounds=3)
+
+    executed = [t for t in transcript if t.startswith("get_risk_gate(")]
+    assert len(executed) == 3, transcript
+    assert not any(t.startswith("[cycle]") for t in transcript), transcript
+
+
+@pytest.mark.unit
 def test_run_tool_loop_falls_back_when_bind_fails():
     from tradingagents.agents.utils.risk_tool_loop import (
         RISK_DEBATOR_TOOLS,

@@ -22,10 +22,19 @@ prose, so the caller appended it under a heading that claims deterministic
 verification - with no tool run at all. ``_turn_calls`` now parses the markup
 into real calls (see ``tool_call_markup``) so that round executes, and
 ``_final_prose`` guarantees markup never reaches a caller as prose.
+
+A model can also re-ask what it already has. The loop counts rounds by their
+tool-call fingerprint (name + canonical args, order-insensitive) and stops a
+repeat at ``_CYCLE_REPEAT_LIMIT``: that round is NOT executed, the dangling
+calls are stripped by the same terminal turn the round cap already uses, and
+the transcript records the trip with a ``[cycle]`` line. A repeated round is
+the visible signature of a loop re-reading the same evidence while burning
+rounds; prose similarity cannot see it, because the text is new every time.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -65,6 +74,12 @@ _LEVEL_BASIS_INSTRUCTION = (
     "level you did not receive from a tool - pass ticker=<symbol> wherever a "
     "tool can measure it instead."
 )
+
+# A round whose tool calls repeat this many times has nothing new to learn: the
+# model is re-asking for evidence it already holds and every extra round is a
+# paid provider call. Three is the guardrail baseline - two repeats are allowed,
+# so a legitimate re-read of a moving value is not cut short.
+_CYCLE_REPEAT_LIMIT = 3
 
 # Risk toolset for the 3 risk debators (aggressive/conservative/neutral).
 # All wrap deterministic strategies over the run-level OHLCV cache or config;
@@ -281,6 +296,26 @@ def _final_prose(llm, messages, text, *, backup_llm=None) -> str:
     return MARKUP_UNAVAILABLE
 
 
+def _round_fingerprint(pending) -> str:
+    """One round's identity: its tool calls as order-insensitive (name, args).
+
+    Args are canonicalised with sorted keys, so a re-ask that only reorders
+    them is the same round; sorting the calls means parallel calls in a
+    different order are the same round too. A formatting failure falls back to
+    ``str(args)`` rather than dropping that round from the guard entirely.
+    """
+    parts: list[str] = []
+    for tc in pending:
+        name = str((tc or {}).get("name") or "")
+        args = (tc or {}).get("args") or {}
+        try:
+            canon = json.dumps(args, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            canon = str(args)
+        parts.append(f"{name}{canon}")
+    return "|".join(sorted(parts))
+
+
 def run_tool_loop(
     llm,
     prompt_text: str,
@@ -330,10 +365,24 @@ def run_tool_loop(
             llm, fallback_prompt, content_to_text(getattr(result, "content", result))
         ), []
     transcript: list[str] = []
+    round_counts: dict[str, int] = {}
 
     result = chain.invoke(messages)
     result, pending = _turn_calls(result)
     while pending and len(transcript) < rounds:
+        fingerprint = _round_fingerprint(pending)
+        if round_counts.get(fingerprint, 0) + 1 >= _CYCLE_REPEAT_LIMIT:
+            # Stop BEFORE executing: every result this round asks for is
+            # already in the conversation, so the terminal turn below can
+            # answer from them. Left unexecuted on purpose - re-running the
+            # same tools would only re-print the same numbers and pay for it.
+            first = (pending[0] or {}).get("args") or {}
+            transcript.append(
+                f"[cycle] the same tool call(s) came back "
+                f"{_CYCLE_REPEAT_LIMIT}x ({_fmt_args(first)}); terminal turn forced"
+            )
+            break
+        round_counts[fingerprint] = round_counts.get(fingerprint, 0) + 1
         messages.append(result)
         for tc in pending:
             name = (tc or {}).get("name") or ""
