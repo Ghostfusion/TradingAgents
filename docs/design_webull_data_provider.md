@@ -302,16 +302,17 @@ design detail that must not be allowed to break a batch.
 
 Harvested from the 184 reference pages in Webull's `llms.txt` index and probed against the sandbox
 with a real token. "not called (mutating)" = deliberately not invoked (order/account/watchlist
-mutations).
+mutations). The `/auth/tokens/create` and `/auth/tokens/check` rows carry their measured results
+rather than the sweep's skip classification.
 
 ### Auth & tokens
 
 | Method | Path | What it is | Sandbox result |
 |---|---|---|---|
-| POST | `/auth/client-tokens/create` | createClientToken | `SKIPPED` — None |
+| POST | `/auth/client-tokens/create` | createClientToken | not called (mutating) |
 | POST | `/auth/client-tokens/refresh` | refreshClientToken | `404` — not in sandbox |
-| POST | `/auth/tokens/check` | checkToken | `400` — Bad Request: Required request body is missing: public … |
-| POST | `/auth/tokens/create` | createToken | `SKIPPED` — None |
+| POST | `/auth/tokens/check` | checkToken | `400` — needs a request body (token/phone) |
+| POST | `/auth/tokens/create` | createToken | not called (mutating) |
 
 ### Stocks market data
 
@@ -325,7 +326,7 @@ mutations).
 | GET | `/market-data/stocks/noii-snapshots/list` | getNoiiSnapshot | `400` — 400: Parameters not valid |
 | GET | `/market-data/stocks/snapshots/list` | snapshot | `200` — list[1] |
 | POST | `/market-data/stocks/snapshots/list` | snapshotUsingGET | `404` — not in sandbox |
-| GET | `/market-data/stocks/ticks/list` | tickUsingGET | `200` — result[2] |
+| GET | `/market-data/stocks/ticks/list` | tick | `200` — result[2] |
 
 ### Fundamentals
 
@@ -333,25 +334,25 @@ mutations).
 |---|---|---|---|
 | GET | `/market-data/fundamentals/analysis/ratings/get` | listAnalystRatingUsingGET | `200` — buy,category,effective_start_date,hold,number |
 | GET | `/market-data/fundamentals/analysis/target-prices/get` | listAnalystTargetPriceUsingGET | `200` — category,currency,effective_start_date,high,low |
-| GET | `/market-data/fundamentals/balance-sheets/get` | financialBalancesheet | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/balance-sheets/get` | financialBalancesheet | `200` — route live, no data in sandbox |
 | GET | `/market-data/fundamentals/capital-flows/get` | capitalFlow | `200` — list[5] |
-| GET | `/market-data/fundamentals/cash-flows/get` | financialCashflow | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/cash-flows/get` | financialCashflow | `200` — route live, no data in sandbox |
 | GET | `/market-data/fundamentals/company-profiles/get` | listCompanyProfileUsingGET | `200` — address,category,ceo,company_name,employees |
 | GET | `/market-data/fundamentals/dividend-calendars/list` | dividendCalendar | `200` — list[2] |
 | GET | `/market-data/fundamentals/earnings-calendars/list` | earningsCalendar | `200` — list[2] |
 | GET | `/market-data/fundamentals/filings/list` | filings | `200` — category,filings,symbol |
 | GET | `/market-data/fundamentals/financial-alerts/get` | financialAlert | `200` — currency,end_date,eps_est,eps_ly,fiscal_period |
 | GET | `/market-data/fundamentals/forecast-eps/get` | forecastEps | `200` — list[5] |
-| GET | `/market-data/fundamentals/fund-allocations/get` | fundAllocation | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-allocations/get` | fundAllocation | `200` — route live, no data in sandbox |
 | GET | `/market-data/fundamentals/fund-brief/get` | fundBrief | `200` — issuer |
-| GET | `/market-data/fundamentals/fund-dividends/get` | fundDividends | `200` — no data in sandbox |
-| GET | `/market-data/fundamentals/fund-files/get` | fundFiles | `200` — no data in sandbox |
-| GET | `/market-data/fundamentals/fund-holdings/get` | fundHoldings | `200` — no data in sandbox |
-| GET | `/market-data/fundamentals/fund-net-values/get` | fundNetValue | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-dividends/get` | fundDividends | `200` — route live, no data in sandbox |
+| GET | `/market-data/fundamentals/fund-files/get` | fundFiles | `200` — route live, no data in sandbox |
+| GET | `/market-data/fundamentals/fund-holdings/get` | fundHoldings | `200` — route live, no data in sandbox |
+| GET | `/market-data/fundamentals/fund-net-values/get` | fundNetValue | `200` — route live, no data in sandbox |
 | GET | `/market-data/fundamentals/fund-performances/get` | fundPerformance | `200` —  |
-| GET | `/market-data/fundamentals/fund-ratings/get` | fundRating | `200` — no data in sandbox |
-| GET | `/market-data/fundamentals/fund-splits/get` | fundSplits | `200` — no data in sandbox |
-| GET | `/market-data/fundamentals/income-statements/get` | financialIncome | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-ratings/get` | fundRating | `200` — route live, no data in sandbox |
+| GET | `/market-data/fundamentals/fund-splits/get` | fundSplits | `200` — route live, no data in sandbox |
+| GET | `/market-data/fundamentals/income-statements/get` | financialIncome | `200` — route live, no data in sandbox |
 | GET | `/market-data/fundamentals/indicators/get` | financialIndicators | `200` — currency,values |
 | GET | `/market-data/fundamentals/industry-comparisons/get` | industryComparison | `200` —  |
 | POST | `/market-data/fundamentals/logos/list` | batchLogoUsingPOST | `404` — not in sandbox |
@@ -360,7 +361,7 @@ mutations).
 
 | Method | Path | What it is | Sandbox result |
 |---|---|---|---|
-| GET | `/market-data/screeners/gainers-losers/list` | getGainersLosers | `200` — list[200] |
+| GET | `/market-data/screeners/gainers-losers/list` | topGainersUsingGETNew | `200` — list[200] |
 | GET | `/market-data/screeners/high-dividend-ranks/list` | getHighDividend | `200` — list[200] |
 | GET | `/market-data/screeners/market-sectors/get` | getMarketSectorsDetail | `200` — advanced,change_ratio,declined,flat,id |
 | GET | `/market-data/screeners/market-sectors/list` | getMarketSectors | `200` — data[20] |
@@ -377,7 +378,7 @@ mutations).
 | GET | `/market-data/watchlists/instruments/list` | getWatchlistInstruments | `417` — WATCHLIST_NOT_FOUND: The watchlist does not exist or d… |
 | POST | `/market-data/watchlists/instruments/remove` | removeWatchlistInstruments | `417` — ILLEGAL_PARAMETER: instruments is empty. |
 | POST | `/market-data/watchlists/instruments/update` | updateWatchlistInstruments | `417` — ILLEGAL_PARAMETER: instruments is empty. |
-| GET | `/market-data/watchlists/list` | getWatchlist | `200` — no data in sandbox |
+| GET | `/market-data/watchlists/list` | getWatchlist | `200` — route live, no data in sandbox |
 | POST | `/market-data/watchlists/update` | updateWatchlist | `417` — WATCHLIST_NOT_FOUND: The watchlist does not exist or d… |
 
 ### Futures
@@ -432,8 +433,8 @@ mutations).
 |---|---|---|---|
 | GET | `/trading/instruments/crypto/profiles/list` | cryptoInstrumentList | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
 | GET | `/trading/instruments/event-contracts/categories/list` | eventCategoriesList | `200` — list[9] |
-| GET | `/trading/instruments/event-contracts/events/list` | eventEventsList | `200` — no data in sandbox |
-| GET | `/trading/instruments/event-contracts/markets/list` | eventMarketList | `200` — no data in sandbox |
+| GET | `/trading/instruments/event-contracts/events/list` | eventEventsList | `200` — route live, no data in sandbox |
+| GET | `/trading/instruments/event-contracts/markets/list` | eventMarketList | `200` — route live, no data in sandbox |
 | GET | `/trading/instruments/event-contracts/series/list` | eventSeriesList | `200` — data[500] |
 | GET | `/trading/instruments/futures/contracts/list` | futuresInstrumentList | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
 | GET | `/trading/instruments/futures/product-classes/list` | futuresProductsClass | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
@@ -448,14 +449,14 @@ mutations).
 | GET | `/trading/activities/cash-activities/list` | tradeCashActivityByType | `403` — ACCOUNT_ACCESS_DENIED |
 | GET | `/trading/assets/balances/get` | accountBalance | `403` — ACCOUNT_ACCESS_DENIED |
 | GET | `/trading/assets/positions/list` | accountPosition | `403` — ACCOUNT_ACCESS_DENIED |
-| POST | `/trading/orders/batch-place` | Order Batch Place | `SKIPPED` — None |
-| POST | `/trading/orders/cancel` | Common Order Cancel | `SKIPPED` — None |
+| POST | `/trading/orders/batch-place` | Order Batch Place | not called (mutating) |
+| POST | `/trading/orders/cancel` | Common Order Cancel | not called (mutating) |
 | GET | `/trading/orders/get` | orderDetail | `403` — ACCOUNT_ACCESS_DENIED |
 | GET | `/trading/orders/historical-orders/list` | orderHistory | `403` — ACCOUNT_ACCESS_DENIED |
 | GET | `/trading/orders/open-orders/list` | orderOpen | `403` — ACCOUNT_ACCESS_DENIED |
-| POST | `/trading/orders/place` | Common Order Place | `SKIPPED` — None |
-| POST | `/trading/orders/preview` | Common Order Preview | `SKIPPED` — None |
-| POST | `/trading/orders/replace` | Common Order Replace | `SKIPPED` — None |
+| POST | `/trading/orders/place` | Common Order Place | not called (mutating) |
+| POST | `/trading/orders/preview` | Common Order Preview | not called (mutating) |
+| POST | `/trading/orders/replace` | Common Order Replace | not called (mutating) |
 
 ### Broker / Display Solution
 
@@ -463,61 +464,61 @@ mutations).
 |---|---|---|---|
 | GET | `/broker/accounts/applications/get` | getAccountApplicationDetail | `404` — not in sandbox |
 | POST | `/broker/accounts/close` | closeAccount | `404` — not in sandbox |
-| POST | `/broker/accounts/create` | createAccountApply | `SKIPPED` — None |
+| POST | `/broker/accounts/create` | createAccountApply | not called (mutating) |
 | GET | `/broker/accounts/get` | getAccountDetail | `404` — not in sandbox |
 | GET | `/broker/accounts/list` | listAccounts | `404` — not in sandbox |
-| POST | `/broker/accounts/update` | updateAccountApply | `SKIPPED` — None |
+| POST | `/broker/accounts/update` | updateAccountApply | not called (mutating) |
 | GET | `/broker/activities/cash-activities/list` | brokerCashActivityByType | `404` — not in sandbox |
-| GET | `/broker/agreements/get` | brokerGetAgreementDetails | `SKIPPED` — None |
-| GET | `/broker/agreements/list` | brokerListAgreementsByType | `SKIPPED` — None |
+| GET | `/broker/agreements/get` | brokerGetAgreementDetails | not called (mutating) |
+| GET | `/broker/agreements/list` | brokerListAgreementsByType | not called (mutating) |
 | GET | `/broker/assets/balances/get` | accountBalance | `404` — not in sandbox |
 | GET | `/broker/assets/positions/list` | accountPosition | `404` — not in sandbox |
 | GET | `/broker/assets/summaries/get` | summary | `404` — not in sandbox |
-| POST | `/broker/credits/create` | brokerFundingCreditCreate | `SKIPPED` — None |
-| GET | `/broker/credits/get` | brokerFundingCreditQuery | `SKIPPED` — None |
-| GET | `/broker/documents/download` | documentDownload | `SKIPPED` — None |
-| POST | `/broker/documents/upload` | documentUpload | `SKIPPED` — None |
-| POST | `/broker/fees/create` | brokerFundingFeeCreate | `SKIPPED` — None |
-| GET | `/broker/fees/get` | brokerFundingFeeQuery | `SKIPPED` — None |
+| POST | `/broker/credits/create` | brokerFundingCreditCreate | not called (mutating) |
+| GET | `/broker/credits/get` | brokerFundingCreditQuery | not called (mutating) |
+| GET | `/broker/documents/download` | documentDownload | not called (mutating) |
+| POST | `/broker/documents/upload` | documentUpload | not called (mutating) |
+| POST | `/broker/fees/create` | brokerFundingFeeCreate | not called (mutating) |
+| GET | `/broker/fees/get` | brokerFundingFeeQuery | not called (mutating) |
 | GET | `/broker/forms/get` | getFormContent | `404` — not in sandbox |
 | GET | `/broker/forms/list` | getFormList | `404` — not in sandbox |
 | GET | `/broker/forms/versions/list` | getFormVersionList | `404` — not in sandbox |
-| POST | `/broker/funding/ach-relationships/create` | createAchRelationship | `SKIPPED` — None |
-| POST | `/broker/funding/ach-relationships/delete` | deleteAchRelationship | `SKIPPED` — None |
-| GET | `/broker/funding/ach-relationships/list` | listAchRelationships | `SKIPPED` — None |
-| POST | `/broker/funding/bank-relationships/create` | createBankRelationship | `SKIPPED` — None |
-| POST | `/broker/funding/bank-relationships/delete` | deleteBankRelationship | `SKIPPED` — None |
-| GET | `/broker/funding/bank-relationships/list` | listLinkedBankAccounts | `SKIPPED` — None |
-| POST | `/broker/funding/instant-funding/create` | brokerFundingInstantCreate | `SKIPPED` — None |
-| GET | `/broker/funding/instant-funding/get` | brokerFundingInstantQuery | `SKIPPED` — None |
-| POST | `/broker/funding/transfers/cancel` | cancelTransfer | `SKIPPED` — None |
-| POST | `/broker/funding/transfers/create` | createTransfer | `SKIPPED` — None |
-| GET | `/broker/funding/transfers/get` | transferDetail | `SKIPPED` — None |
-| GET | `/broker/funding/transfers/list` | transferList | `SKIPPED` — None |
+| POST | `/broker/funding/ach-relationships/create` | createAchRelationship | not called (mutating) |
+| POST | `/broker/funding/ach-relationships/delete` | deleteAchRelationship | not called (mutating) |
+| GET | `/broker/funding/ach-relationships/list` | listAchRelationships | not called (mutating) |
+| POST | `/broker/funding/bank-relationships/create` | createBankRelationship | not called (mutating) |
+| POST | `/broker/funding/bank-relationships/delete` | deleteBankRelationship | not called (mutating) |
+| GET | `/broker/funding/bank-relationships/list` | listLinkedBankAccounts | not called (mutating) |
+| POST | `/broker/funding/instant-funding/create` | brokerFundingInstantCreate | not called (mutating) |
+| GET | `/broker/funding/instant-funding/get` | brokerFundingInstantQuery | not called (mutating) |
+| POST | `/broker/funding/transfers/cancel` | cancelTransfer | not called (mutating) |
+| POST | `/broker/funding/transfers/create` | createTransfer | not called (mutating) |
+| GET | `/broker/funding/transfers/get` | transferDetail | not called (mutating) |
+| GET | `/broker/funding/transfers/list` | transferList | not called (mutating) |
 | GET | `/broker/instruments/event-contracts/categories/list` | brokerEventCategoriesList | `404` — not in sandbox |
 | GET | `/broker/instruments/event-contracts/events/list` | brokerEventEventsList | `404` — not in sandbox |
 | GET | `/broker/instruments/event-contracts/markets/list` | brokerEventMarketList | `404` — not in sandbox |
 | GET | `/broker/instruments/event-contracts/series/list` | brokerEventSeriesList | `404` — not in sandbox |
 | GET | `/broker/instruments/stocks/corporate-actions/get` | brokerCorporateActionsDetail | `404` — not in sandbox |
 | GET | `/broker/instruments/stocks/profiles/list` | listStockInstruments | `404` — not in sandbox |
-| POST | `/broker/journals/cash-journals/create` | brokerJournalCashCreate | `SKIPPED` — None |
+| POST | `/broker/journals/cash-journals/create` | brokerJournalCashCreate | not called (mutating) |
 | GET | `/broker/journals/cash-journals/get` | brokerJournalCashQuery | `404` — not in sandbox |
 | GET | `/broker/master-data/enums/list` | listEnums | `404` — not in sandbox |
 | GET | `/broker/master-data/trading-calendars/list` | listTradeCalendar | `404` — not in sandbox |
-| POST | `/broker/orders/cancel` | Common Order Cancel | `SKIPPED` — None |
+| POST | `/broker/orders/cancel` | Common Order Cancel | not called (mutating) |
 | GET | `/broker/orders/get` | orderDetail | `404` — not in sandbox |
 | GET | `/broker/orders/historical-orders/list` | orderHistory | `404` — not in sandbox |
 | GET | `/broker/orders/open-orders/list` | orderOpen | `404` — not in sandbox |
-| POST | `/broker/orders/place` | Common Order Place | `SKIPPED` — None |
-| POST | `/broker/orders/preview` | Common Order Preview | `SKIPPED` — None |
-| POST | `/broker/orders/replace` | Common Order Replace | `SKIPPED` — None |
+| POST | `/broker/orders/place` | Common Order Place | not called (mutating) |
+| POST | `/broker/orders/preview` | Common Order Preview | not called (mutating) |
+| POST | `/broker/orders/replace` | Common Order Replace | not called (mutating) |
 
 ### Connect API (OAuth)
 
 | Method | Path | What it is | Sandbox result |
 |---|---|---|---|
 | GET | `/oauth2/auth-codes/get` | getAuthorizationCode | `404` — not in sandbox |
-| POST | `/oauth2/tokens/create` | CreateAndRefreshToken | `SKIPPED` — None |
+| POST | `/oauth2/tokens/create` | CreateAndRefreshToken | not called (mutating) |
 
 ### Other
 
@@ -531,5 +532,5 @@ mutations).
 | GET | `/market-data/instruments/stocks/corporate-actions/list` | corpActionUsingGET | `404` — not in sandbox |
 | GET | `/market-data/instruments/stocks/corporate-actions/list-by-market` | corpMarketUsingGET | `404` — not in sandbox |
 | POST | `/market-data/instruments/stocks/profiles/list` | listUsingGET | `404` — not in sandbox |
-| POST | `/market-data/streaming/subscribe` | subscribeUsingPOST | `SKIPPED` — None |
-| POST | `/market-data/streaming/unsubscribe` | unsubscribeUsingPOST | `SKIPPED` — None |
+| POST | `/market-data/streaming/subscribe` | subscribeUsingPOST | not called (mutating) |
+| POST | `/market-data/streaming/unsubscribe` | unsubscribeUsingPOST | not called (mutating) |
