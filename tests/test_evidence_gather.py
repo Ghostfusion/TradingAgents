@@ -16,6 +16,7 @@ from langchain_core.tools import tool
 from tradingagents.agents.utils.evidence_gather import (
     MODEL_POOL_HEADER,
     MODEL_POOL_KEY,
+    RENDERED_BLOCK_KEY,
     TOOL_EVIDENCE_KEY,
     format_evidence_block,
     gather_evidence,
@@ -645,3 +646,64 @@ def test_evidence_block_carries_the_run_price_basis():
         config={"analyst_forced_tools": ["get_financials"]},
     )
     assert "Reference price" not in block2
+
+
+def test_reentry_serves_first_rendered_block_byte_identical():
+    """W4: a tool-loop re-entry must re-serve the SAME block, byte-for-byte.
+
+    The analyst node runs once per tool round and partials this block into its
+    SYSTEM message, i.e. ``messages[0]``. A re-render (or a render that now
+    includes leaves appended by the LLM's own tool calls) rewrites a message the
+    provider already cached, so an implicit prefix cache is invalidated from
+    token 0 and every tool round becomes a cold prefill of the run's largest
+    prompt. The appended-leaf case below is the production one: the tool node
+    journals every tool the model calls itself (``_journal_executed``).
+    """
+    cfg = {"analyst_forced_tools": ["get_financials"]}
+    state = {
+        "company_of_interest": "TSM",
+        "trade_date": "2026-09-07",
+        "messages": [],
+        TOOL_EVIDENCE_KEY: {},
+    }
+    first_block, evidence = gather_for_analyst_node(state, "market", [get_financials], cfg)
+    assert "fin:TSM" in first_block
+    assert RENDERED_BLOCK_KEY in evidence
+
+    # The model called a tool of its own; the loop journals a leaf and re-enters.
+    advanced = {**state, TOOL_EVIDENCE_KEY: evidence}
+    advanced[TOOL_EVIDENCE_KEY]["market"] = [
+        *advanced[TOOL_EVIDENCE_KEY]["market"],
+        {"tool": "model_pool_tool", "status": "ok", "content": "x", "args_hash": "h"},
+    ]
+    reentry_block, reentry_evidence = gather_for_analyst_node(
+        advanced, "market", [get_financials], cfg
+    )
+
+    assert reentry_block == first_block  # the prefix does not move
+    assert "model_pool_tool" not in reentry_block  # the transcript carries it
+    # The leaf is still recorded, so the verifier/reports see everything.
+    assert [leaf["tool"] for leaf in reentry_evidence["market"]] == [
+        "get_financials",
+        "model_pool_tool",
+    ]
+
+
+def test_reserved_block_rows_are_invisible_to_evidence_walkers():
+    """The frozen render is metadata: never a tool, never a leaf list.
+
+    ``reporting._evidence_sources`` walks every ``tool_evidence`` value as a
+    leaf list and ``repro_check --evidence`` skips ``_``-prefixed keys — the
+    same contract SYMMETRY_KEY/MODEL_POOL_KEY rely on. A dict value (or a row
+    carrying a ``tool``) would corrupt the used/empty tool sets.
+    """
+    from tradingagents.reporting import _evidence_sources
+
+    assert RENDERED_BLOCK_KEY.startswith("_")
+    evidence = {
+        "market": [{"tool": "get_financials", "status": "ok"}],
+        RENDERED_BLOCK_KEY: [{"analyst": "market", "block": "## Tool Evidence"}],
+    }
+    used, empty = _evidence_sources({"tool_evidence": evidence})
+    assert used == ["get_financials"]
+    assert empty == []

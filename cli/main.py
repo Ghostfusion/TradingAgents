@@ -544,6 +544,12 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
             tokens_str = f"Tokens: {format_tokens(stats['tokens_in'])}\u2191 {format_tokens(stats['tokens_out'])}\u2193"
         else:
             tokens_str = "Tokens: --"
+        # Prompt-cache reads are the observable proof that prefix caching works
+        # (and that the prompt prefix stayed byte-stable between turns); show
+        # them only once the provider has actually reported a cache hit.
+        cached = int(stats.get("tokens_cached") or 0)
+        if cached > 0:
+            tokens_str += f" (cache {format_tokens(cached)})"
         stats_parts.append(tokens_str)
 
     stats_parts.append(f"Reports: {reports_completed}/{reports_total}")

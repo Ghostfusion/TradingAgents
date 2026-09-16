@@ -208,6 +208,17 @@ _ENV_OVERRIDES = {
     # body via extra_body. Empty = no restriction.
     "TRADINGAGENTS_OPENROUTER_REASONING_EFFORT": "openrouter_reasoning_effort",
     "TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS": "openrouter_ignore_providers",
+    # OpenRouter request shaping (docs/implementation_plan_openrouter_large_prompt_ttft.md):
+    # streaming keeps the connection alive through a long prefill; session_id is
+    # the sticky-routing key that reuses the warmed prefix cache; the provider_*
+    # keys extend the same provider object as the ignore list above.
+    "TRADINGAGENTS_OPENROUTER_STREAMING": "openrouter_streaming",
+    "TRADINGAGENTS_OPENROUTER_SESSION_ID": "openrouter_session_id",
+    "TRADINGAGENTS_OPENROUTER_PROVIDER_SORT": "openrouter_provider_sort",
+    "TRADINGAGENTS_OPENROUTER_PREFERRED_MAX_LATENCY": "openrouter_preferred_max_latency",
+    "TRADINGAGENTS_OPENROUTER_PREFERRED_MIN_THROUGHPUT": "openrouter_preferred_min_throughput",
+    "TRADINGAGENTS_OPENROUTER_REQUIRE_PARAMETERS": "openrouter_require_parameters",
+    "TRADINGAGENTS_OPENROUTER_ALLOW_FALLBACKS": "openrouter_allow_fallbacks",
     # Per-role max output tokens (cap; most-information-but-not-overflow).
     # quick/global is applied to analysts + debaters + trader; deep to RM/PM.
     "TRADINGAGENTS_MAX_OUTPUT_TOKENS": "max_output_tokens",
@@ -484,6 +495,33 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # cap -> the report turn returns empty / JSON never parses). Empty =
         # use the provider's default effort (no bound).
         "openrouter_reasoning_effort": "",
+        # Stream OpenRouter responses. A large prompt spends a long time in
+        # prefill with nothing on the wire; OpenRouter only commits HTTP 200 +
+        # headers once the provider accepts the request, and reports anything
+        # that goes wrong after that as an in-stream event rather than a bare
+        # 504. langchain then aggregates the chunks, so invoke()/tool loops are
+        # unchanged. Off by default; see the plan doc for the A/B.
+        "openrouter_streaming": False,
+        # Sticky-routing key for prompt caching (sent as the request-body
+        # ``session_id``). Empty = a per-client id is generated, which is the
+        # granularity OpenRouter asks for (thread / task / run). Set it to pin a
+        # named session across processes. Max 256 chars.
+        "openrouter_session_id": "",
+        # Routing preferences, merged into the same provider object as
+        # ``openrouter_ignore_providers``:
+        #   sort                  "throughput" | "latency" | "price" ("" = default)
+        #   preferred_max_latency seconds, or None
+        #   preferred_min_throughput tokens/sec, or None
+        #   require_parameters    only hosts that honor every request parameter
+        #   allow_fallbacks       True (default) keeps recovery when the pinned
+        #                         host dies; only a False is sent explicitly.
+        # No ``order`` key on purpose: a manual order disables OpenRouter's
+        # sticky routing and would cancel the session_id cache benefit.
+        "openrouter_provider_sort": "",
+        "openrouter_preferred_max_latency": None,
+        "openrouter_preferred_min_throughput": None,
+        "openrouter_require_parameters": False,
+        "openrouter_allow_fallbacks": True,
         # Per-role max output tokens (hard ceiling via max_tokens when the
         # provider accepts it). Basis: measured max outputs in this repo
         # (analysts ~5k, RM 1.9k, trader .7k, PM 1.4k) + ~20% headroom, well

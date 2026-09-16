@@ -39,14 +39,69 @@ def rate_for(model: str) -> tuple[float, float] | None:
     return None
 
 
-def estimate_cost(model: str, input_tokens: int | None, output_tokens: int | None) -> float | None:
-    """Estimated USD for one call/run; None when model or token counts unknown."""
+# Cache-read multiplier on the input rate, per model prefix (OpenRouter's
+# documented per-provider cache pricing). A cache READ is billed at this share
+# of the normal input price; cache WRITES are billed at the normal input price
+# for the providers used here (DeepSeek writes = 1.0x, Anthropic = 1.25x).
+# Unlisted model -> None, and the caller prices cached tokens at the FULL input
+# rate: an over-estimate is the honest failure mode for a cost figure.
+_CACHE_READ_MULTIPLIER: dict[str, float] = {
+    "deepseek": 0.10,
+    "claude": 0.10,
+    "gemini": 0.25,
+    "grok": 0.25,
+    "qwen": 0.10,
+    "moonshot": 0.25,
+}
+
+
+def cache_read_multiplier(model: str) -> float | None:
+    """Cache-READ price share of the input rate; None when unlisted."""
+    m = str(model or "").lower()
+    if not m:
+        return None
+    for prefix, mult in sorted(_CACHE_READ_MULTIPLIER.items(), key=lambda kv: -len(kv[0])):
+        if m.startswith(prefix):
+            return mult
+    return None
+
+
+def estimate_cost(
+    model: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    cached_input_tokens: int | None = None,
+) -> float | None:
+    """Estimated USD for one call/run; None when model or token counts unknown.
+
+    ``cached_input_tokens`` (part of ``input_tokens``, not additive) are priced
+    at the provider's documented cache-read share — 0.1x input for DeepSeek, the
+    model this repo runs. Unknown model -> cached tokens priced at the full input
+    rate (deliberately conservative).
+    """
     if not model or input_tokens is None or output_tokens is None:
         return None
     rate = rate_for(model)
     if rate is None:
         return None
-    return (input_tokens / 1_000_000.0) * rate[0] + (output_tokens / 1_000_000.0) * rate[1]
+    cached = max(0, min(int(cached_input_tokens or 0), int(input_tokens)))
+    multiplier = cache_read_multiplier(model)
+    if multiplier is None:
+        # Unknown cache pricing for this model: bill the whole input at the
+        # input rate rather than inventing a discount (over-estimate).
+        cached, multiplier = 0, 0.0
+    fresh = int(input_tokens) - cached
+    return (
+        (fresh / 1_000_000.0) * rate[0]
+        + (cached / 1_000_000.0) * rate[0] * multiplier
+        + (output_tokens / 1_000_000.0) * rate[1]
+    )
 
 
-__all__ = ["rate_for", "estimate_cost", "_RATE_TABLE"]
+__all__ = [
+    "rate_for",
+    "cache_read_multiplier",
+    "estimate_cost",
+    "_RATE_TABLE",
+    "_CACHE_READ_MULTIPLIER",
+]

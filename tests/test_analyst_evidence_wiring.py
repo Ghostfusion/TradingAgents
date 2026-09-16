@@ -194,6 +194,25 @@ def test_fundamentals_prompt_states_gain_substance_and_normalized_provenance():
     assert "cross-basis" in sys_text
 
 
+def test_fundamentals_prompt_states_same_metric_and_share_count_rules():
+    """Regression (AMZN 2026-09-14 fundamentals review): the report quoted ROE
+    as 30.56% (feed) / 22.09% (ratios) / 18.89% (verdict) and EV/EBIT as 35.02
+    (verdict) vs 32.79 (ratios) side by side with no reconciliation, and quoted
+    a market cap and EPS whose implied share counts differ by ~1% (10.79B vs
+    10.88B) without saying so. The rendered prompt must require both: quote
+    every block's value with its own basis, and state the implied share counts
+    when they disagree."""
+    captured: list = []
+    fundamentals_mod.create_fundamentals_analyst(
+        _FakeLLM(["f"], captured), config=None
+    )(_base_state())
+    sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
+    assert "SAME METRIC IN TWO BLOCKS" in sys_text
+    assert "basis unstated" in sys_text
+    assert "IMPLIED SHARE COUNT" in sys_text
+    assert "10.79B vs 10.88B" in sys_text
+
+
 def test_fundamentals_prompt_states_reference_price_basis():
     """The rendered fundamentals prompt must require the price basis (as-of +
     settled vs FORMING) on price-derived lines: GOOG 2026-09-11 compared a

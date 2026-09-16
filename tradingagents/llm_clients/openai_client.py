@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -181,6 +182,29 @@ def _supports_reasoning_effort(model: str) -> bool:
     return bool(_OPENAI_REASONING_MODEL.match(model.lower().strip()))
 
 
+# Magic value for ``openrouter_session_id``: generate a per-client sticky key.
+# An explicit string is used verbatim; empty disables the key (default).
+AUTO_SESSION_ID = "auto"
+
+
+def _optional_positive_float(value, *, key: str) -> float | None:
+    """Parse an optional positive float config value.
+
+    None/""/non-positive mean "unset" (the OpenRouter preference is simply not
+    sent). A non-empty value that is not a number raises: a typo in an unattended
+    .env run should fail at startup, not quietly drop the routing preference.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be a number, got {value!r}") from exc
+    return parsed if parsed > 0 else None
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """Declarative config for one OpenAI-compatible provider.
@@ -344,14 +368,30 @@ class OpenAIClient(BaseLLMClient):
         # this default.
         llm_kwargs.setdefault("request_timeout", 300)
 
-        # OpenRouter provider routing: block slow/unreliable providers via
-        # provider.ignore in the request body (sent as extra_body so it nests
-        # correctly). The list is configurable through
-        # TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS in .env.
-        ignore = self._openrouter_ignore()
-        if ignore:
+        # OpenRouter request shaping. Everything custom rides ONE extra_body
+        # dict: provider{...} selects/sorts hosts, session_id pins the sticky
+        # route that holds the warmed prefix cache, and streaming (a top-level
+        # field, not extra_body) keeps the connection from sitting silent
+        # through a long prefill.
+        # Rationale, measurements and the rollout order:
+        # docs/implementation_plan_openrouter_large_prompt_ttft.md
+        provider_prefs = self._openrouter_provider_prefs()
+        if provider_prefs:
             llm_kwargs.setdefault("extra_body", {})
-            llm_kwargs["extra_body"]["provider"] = {"ignore": ignore}
+            llm_kwargs["extra_body"]["provider"] = provider_prefs
+
+        if self.provider == "openrouter":
+            session_id = self._openrouter_session_id()
+            if session_id:
+                llm_kwargs.setdefault("extra_body", {})
+                llm_kwargs["extra_body"]["session_id"] = session_id
+            if self._openrouter_streaming():
+                # langchain-core routes invoke() through the streaming API when
+                # the instance attribute is True (it aggregates chunks into the
+                # usual ChatResult), so tool loops and structured output keep
+                # working. NOT sent for the json_mode structured path: langchain
+                # pops `stream` whenever a response_format is present.
+                llm_kwargs["streaming"] = True
 
         # OpenRouter reasoning-effort bound (TRADINGAGENTS_OPENROUTER_REASONING_
         # EFFORT): sent as ``reasoning: {"effort": ...}`` in the request body so
@@ -376,13 +416,16 @@ class OpenAIClient(BaseLLMClient):
         TRADINGAGENTS_OPENROUTER_REASONING_EFFORT). '' = provider default
         (no bound).
         """
+        return str(self._config().get("openrouter_reasoning_effort") or "").strip()
+
+    def _config(self) -> dict:
+        """The live config dict, or {} when it cannot be read (advisory knobs)."""
         try:
             from tradingagents.dataflows.config import get_config
 
-            cfg = get_config() or {}
-        except Exception:  # noqa: BLE001 - advisory; degrade to no bound
-            cfg = {}
-        return str(cfg.get("openrouter_reasoning_effort") or "").strip()
+            return get_config() or {}
+        except Exception:  # noqa: BLE001 - every caller treats this as "unset"
+            return {}
 
     def _openrouter_ignore(self):
         """Provider slugs to skip for OpenRouter, from config/env, or None.
@@ -393,16 +436,105 @@ class OpenAIClient(BaseLLMClient):
         """
         if self.provider != "openrouter":
             return None
-        try:
-            from tradingagents.dataflows.config import get_config
-
-            cfg = get_config() or {}
-        except Exception:  # noqa: BLE001
-            cfg = {}
-        ignore = cfg.get("openrouter_ignore_providers") or []
+        ignore = self._config().get("openrouter_ignore_providers") or []
         if isinstance(ignore, str):
             ignore = [s.strip() for s in ignore.split(",") if s.strip()]
         return [s for s in ignore if s] or None
+
+    def _openrouter_provider_prefs(self) -> dict:
+        """The OpenRouter ``provider`` object for this request, or {} for none.
+
+        Merges the slow-host blocklist with the routing preferences
+        (``sort`` / latency / throughput floors / ``require_parameters`` /
+        ``allow_fallbacks``). Defaults reproduce OpenRouter's own behavior and
+        emit nothing, so an unconfigured request body is unchanged.
+
+        Deliberately never emits ``order``: OpenRouter documents that a manual
+        provider order DISABLES sticky routing, which is the mechanism the
+        ``session_id`` below relies on to keep serving a request from the host
+        holding its warmed prefix cache.
+        """
+        if self.provider != "openrouter":
+            return {}
+        cfg = self._config()
+        prefs: dict = {}
+        ignore = self._openrouter_ignore()
+        if ignore:
+            prefs["ignore"] = ignore
+
+        sort = str(cfg.get("openrouter_provider_sort") or "").strip().lower()
+        if sort:
+            allowed = ("price", "throughput", "latency")
+            if sort not in allowed:
+                raise ValueError(
+                    f"openrouter_provider_sort must be one of {allowed} "
+                    f"(or empty for OpenRouter's default), got {sort!r}"
+                )
+            prefs["sort"] = sort
+
+        latency = _optional_positive_float(
+            cfg.get("openrouter_preferred_max_latency"),
+            key="openrouter_preferred_max_latency",
+        )
+        if latency is not None:
+            prefs["preferred_max_latency"] = latency
+        throughput = _optional_positive_float(
+            cfg.get("openrouter_preferred_min_throughput"),
+            key="openrouter_preferred_min_throughput",
+        )
+        if throughput is not None:
+            prefs["preferred_min_throughput"] = throughput
+
+        if cfg.get("openrouter_require_parameters"):
+            prefs["require_parameters"] = True
+        # Only deviate from the documented default (fallbacks allowed): sending
+        # the default would change every request body for no behavior change.
+        if cfg.get("openrouter_allow_fallbacks") is False:
+            prefs["allow_fallbacks"] = False
+        return prefs
+
+    def _openrouter_streaming(self) -> bool:
+        """Whether to stream OpenRouter responses (``openrouter_streaming``)."""
+        if self.provider != "openrouter":
+            return False
+        return bool(self._config().get("openrouter_streaming"))
+
+    def _openrouter_session_id(self) -> str | None:
+        """Sticky-routing key (``session_id``) for this client, or None.
+
+        OpenRouter derives a conversation key from the opening messages by
+        default and only starts sticking AFTER it observes a cache hit; an
+        explicit ``session_id`` pins the route from the first successful
+        request, so the next turn of the same unit of work lands on the host
+        holding its warmed prefix cache (DeepSeek cache reads bill at 0.1x
+        input). The configured value wins; ``"auto"`` generates a per-client id
+        (the client is constructed per run, which is exactly the granularity
+        OpenRouter asks for — thread / task / workflow run); empty disables the
+        key, leaving routing untouched. Body field and ``x-session-id`` header
+        are equivalent; the body wins, and the API caps the value at 256 chars.
+        """
+        if self.provider != "openrouter":
+            return None
+        configured = str(self._config().get("openrouter_session_id") or "").strip()
+        if not configured:
+            # Off by default: sending the key pins every request of the run to
+            # one provider, which trades OpenRouter's price/health routing for
+            # warm-cache hits. Opt in with "auto" (or a named session).
+            return None
+        if configured.lower() != AUTO_SESSION_ID:
+            if len(configured) > 256:
+                raise ValueError(
+                    "openrouter_session_id must be at most 256 characters "
+                    f"(got {len(configured)})"
+                )
+            return configured
+        cached = getattr(self, "_auto_session_id", None)
+        if cached:
+            return cached
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", self.model or "model")[:120].strip("-")
+        session = f"ta-{slug}-{uuid.uuid4().hex[:16]}"[:256]
+        self._auto_session_id = session
+        return session
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""

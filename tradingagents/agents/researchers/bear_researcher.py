@@ -29,7 +29,7 @@ def create_bear_researcher(llm, backup_llm=None):
             else "Asset fundamentals report (may be unavailable for crypto)"
         )
 
-        prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
+        prompt = f"""You are a fiercely skeptical, risk-averse Bear Analyst building the definitive short case against investing in {target_label}. Your mandate is not simply to caution, but to dismantle the bull thesis by exposing structural flaws, overhyped narrative traps, and unpriced downside risks. Treat management guidance and optimistic consensus models with rigorous suspicion.
 
 Key points to focus on:
 

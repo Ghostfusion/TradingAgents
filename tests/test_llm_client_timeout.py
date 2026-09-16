@@ -93,6 +93,170 @@ class TestAnthropicTimeout:
 
 
 @pytest.mark.unit
+class TestOpenRouterRequestShape:
+    """W1/W2/W3 (docs/implementation_plan_openrouter_large_prompt_ttft.md):
+    streaming, the provider routing object, and the sticky session id.
+
+    All three ride ``extra_body`` (or the top-level ``streaming`` field) on the
+    OpenRouter client only. Defaults must leave the request body untouched, so
+    an unconfigured run is byte-identical to before.
+    """
+
+    @staticmethod
+    def _capture(monkeypatch):
+        # Every construction is recorded: these tests build two clients and
+        # compare their payloads, so the last call must not overwrite the first
+        # into the same dict (setdefault would make two identical clients look
+        # like one).
+        captured: dict = {"calls": []}
+
+        def _fake(**kwargs):
+            captured["calls"].append(kwargs)
+            captured["kwargs"] = kwargs
+            return object()
+
+        monkeypatch.setattr(omod, "NormalizedChatOpenAI", _fake)
+        monkeypatch.setitem(
+            omod.OPENAI_COMPATIBLE_PROVIDERS, "openrouter",
+            omod.ProviderSpec(chat_class=_fake),
+        )
+        monkeypatch.setitem(
+            omod.OPENAI_COMPATIBLE_PROVIDERS, "openai",
+            omod.ProviderSpec(chat_class=_fake, use_responses_api=True),
+        )
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        return captured
+
+    @staticmethod
+    def _config(**overrides):
+        from tradingagents.dataflows import config as cfg_mod
+
+        base = {
+            "openrouter_streaming": False,
+            "openrouter_session_id": "",
+            "openrouter_provider_sort": "",
+            "openrouter_preferred_max_latency": None,
+            "openrouter_preferred_min_throughput": None,
+            "openrouter_require_parameters": False,
+            "openrouter_allow_fallbacks": True,
+            "openrouter_ignore_providers": [],
+            "openrouter_reasoning_effort": "",
+        }
+        base.update(overrides)
+        return cfg_mod, base
+
+    def test_defaults_leave_the_body_untouched(self, monkeypatch):
+        cfg_mod, cfg = self._config()
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(
+            model="deepseek/deepseek-v4.1-flash", provider="openrouter", api_key="x"
+        ).get_llm()
+        assert "streaming" not in captured["kwargs"]
+        assert "extra_body" not in captured["kwargs"]  # no provider{} at all
+
+    def test_streaming_and_auto_session_id_are_sent_when_configured(self, monkeypatch):
+        cfg_mod, cfg = self._config(openrouter_streaming=True, openrouter_session_id="auto")
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(
+            model="deepseek/deepseek-v4.1-flash", provider="openrouter", api_key="x"
+        ).get_llm()
+        assert captured["kwargs"]["streaming"] is True
+        session = captured["kwargs"]["extra_body"]["session_id"]
+        assert session.startswith("ta-deepseek-deepseek-v4.1-flash-")
+        assert len(session) <= 256
+        # Deprecated on OpenRouter (usage is always returned): never sent.
+        assert "stream_options" not in captured["kwargs"]
+
+    def test_session_id_is_stable_per_client_and_distinct_across_clients(
+        self, monkeypatch
+    ):
+        cfg_mod, cfg = self._config(openrouter_streaming=True, openrouter_session_id="auto")
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        client = omod.OpenAIClient(
+            model="deepseek/deepseek-v4.1-flash", provider="openrouter", api_key="x"
+        )
+        client.get_llm()
+        first = captured["calls"][-1]["extra_body"]["session_id"]
+        client.get_llm()  # same client -> same session (sticky route)
+        assert captured["calls"][-1]["extra_body"]["session_id"] == first
+        other = omod.OpenAIClient(
+            model="deepseek/deepseek-v4.1-flash", provider="openrouter", api_key="x"
+        )
+        other.get_llm()
+        assert captured["calls"][-1]["extra_body"]["session_id"] != first
+
+    def test_configured_session_id_wins_and_is_length_checked(self, monkeypatch):
+        cfg_mod, cfg = self._config(openrouter_session_id="sess-agent-run-1")
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+        assert captured["kwargs"]["extra_body"]["session_id"] == "sess-agent-run-1"
+
+        cfg_mod.set_config({**cfg, "openrouter_session_id": "x" * 257})
+        with pytest.raises(ValueError, match="256"):
+            omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+
+    def test_provider_routing_object_merges_ignore_and_preferences(self, monkeypatch):
+        cfg_mod, cfg = self._config(
+            openrouter_ignore_providers=["io-net", "venice"],
+            openrouter_provider_sort="throughput",
+            openrouter_preferred_max_latency="2.5",
+            openrouter_preferred_min_throughput=40,
+            openrouter_require_parameters=True,
+        )
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+        provider = captured["kwargs"]["extra_body"]["provider"]
+        assert provider["ignore"] == ["io-net", "venice"]
+        assert provider["sort"] == "throughput"
+        assert provider["preferred_max_latency"] == 2.5
+        assert provider["preferred_min_throughput"] == 40.0
+        assert provider["require_parameters"] is True
+        # Never provider.order: it disables OpenRouter's sticky routing.
+        assert "order" not in provider
+
+    def test_allow_fallbacks_only_sent_when_disabled(self, monkeypatch):
+        cfg_mod, cfg = self._config(
+            openrouter_ignore_providers=["io-net"], openrouter_allow_fallbacks=False
+        )
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+        assert captured["kwargs"]["extra_body"]["provider"]["allow_fallbacks"] is False
+
+    def test_bad_sort_and_bad_latency_fail_loudly(self, monkeypatch):
+        captured = self._capture(monkeypatch)
+        cfg_mod, cfg = self._config(openrouter_provider_sort="cheapest")
+        cfg_mod.set_config(cfg)
+        with pytest.raises(ValueError, match="openrouter_provider_sort"):
+            omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+
+        cfg_mod.set_config({**cfg, "openrouter_provider_sort": "", "openrouter_preferred_max_latency": "soon"})
+        with pytest.raises(ValueError, match="openrouter_preferred_max_latency"):
+            omod.OpenAIClient(model="m", provider="openrouter", api_key="x").get_llm()
+
+    def test_native_provider_gets_none_of_it(self, monkeypatch):
+        cfg_mod, cfg = self._config(
+            openrouter_streaming=True,
+            openrouter_session_id="sess",
+            openrouter_provider_sort="throughput",
+            openrouter_ignore_providers=["io-net"],
+        )
+        captured = self._capture(monkeypatch)
+        cfg_mod.set_config(cfg)
+        omod.OpenAIClient(model="gpt-5.5", provider="openai", api_key="x").get_llm()
+        kwargs = captured["kwargs"]
+        assert "streaming" not in kwargs
+        assert kwargs.get("extra_body", {}).get("session_id") is None
+        assert kwargs.get("extra_body", {}).get("provider") is None
+
+
+@pytest.mark.unit
 class TestOpenRouterReasoningEffort:
     """B2 — bound the hidden-reasoning burn on OpenRouter reasoning models.
 

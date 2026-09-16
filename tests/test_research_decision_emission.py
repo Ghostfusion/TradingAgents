@@ -128,3 +128,36 @@ def test_missing_pm_defaults_unknown_data_quality(tmp_path):
     doc = _read(tmp_path)
     assert doc["data_quality"] == "unknown"  # daemon fails closed on this
     assert doc["rating"] is None
+
+
+def test_emitter_survives_the_gatherers_run_level_evidence_keys(tmp_path):
+    """`_model_pool` is a mapping of tool-name lists, not a leaf list.
+
+    Regression (2026-09-15): the source walk read every ``tool_evidence``
+    value as a leaf list, so ``_model_pool``'s name strings raised
+    ``AttributeError: 'str' object has no attribute 'get'``, and
+    ``write_report_tree`` suppresses exactly that exception - so no run that
+    gathered evidence ever wrote ``research_decision.json``, the executor
+    daemon's only input contract. The walk now matches on shape: a value that
+    is not a list of dicts is not a leaf list: the reserved keys are skipped
+    wholesale, and a row without a ``tool`` key is still skipped row-wise.
+    """
+    fs = _final_state(
+        tool_evidence={
+            "market": [{"tool": "get_indicators", "status": "ok"}],
+            "news": [{"tool": "get_news", "status": "error"}],
+            "_model_pool": {
+                "market": ["get_indicators", "get_swing_set"],
+                "news": ["get_news"],
+            },
+            "_rendered_block": [{"analyst": "market", "block": "..."}],
+            "_symmetry": [{"basis": "2 pair(s)", "differs_on": []}],
+        }
+    )
+    # The PM's own declaration wins, so clear it and let the evidence decide.
+    fs["pm_decision"]["data_quality"] = None
+    write_research_decision(fs, "avgo", tmp_path)  # must not raise
+    doc = _read(tmp_path)
+    assert doc["disclosure"]["sources_used"] == ["get_indicators"]
+    assert doc["disclosure"]["sources_empty"] == ["get_news"]
+    assert doc["data_quality"] == "partial"

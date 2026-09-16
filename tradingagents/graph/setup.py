@@ -171,6 +171,14 @@ def make_parallel_analyst_node(plan, subgraphs, concurrency: int):
                     continue
                 if key == TOOL_EVIDENCE_KEY:
                     evidence = dict(out.get(key) or {})
+                    # Per-analyst keys merge; the underscore-prefixed metadata
+                    # keys (_model_pool, _symmetry, _rendered_block) are
+                    # whole-value: last subgraph wins. That is deliberate for
+                    # _rendered_block — it is the loop-LOCAL frozen evidence
+                    # block that keeps one analyst's prompt prefix byte-stable
+                    # (it is only ever read inside that analyst's own tool
+                    # loop, never after this merge), so a merged, partially
+                    # overwritten copy never reaches a prompt.
                     evidence.update(value or {})
                     out[key] = evidence
                 elif key not in state or value is not state[key]:

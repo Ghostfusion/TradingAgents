@@ -336,14 +336,35 @@ TOOL_ARG_DEFAULT_REASONS: dict[str, str] = {
 
 # Reserved key in the tool_evidence state dict carrying the persisted S11a
 # symmetry block. The value is a LIST of dicts (summary row first, then one
-# row per pair), never a nested dict: ``reporting._evidence_sources`` walks
-# every tool_evidence value as a leaf list, and a dict would raise there,
-# while a list of dicts lacking a ``tool`` key is skipped like a metadata row.
+# row per pair); a row without a ``tool`` key is skipped by
+# ``reporting._evidence_sources`` like any metadata row.
 SYMMETRY_KEY = "_symmetry"
 
 # Reserved key in the tool_evidence state dict carrying the per-analyst
-# model-pool name lists (persisted for the --evidence G/M split).
+# model-pool name lists (persisted for the --evidence G/M split). A MAPPING,
+# not a leaf list — and it must stay one, because ``repro_check --evidence``
+# reads it as analyst -> names. ``reporting._evidence_sources`` skips any value
+# that is not a list of leaf dicts, so this key is passed over wholesale; it
+# used to raise there instead (attribute error on a name string), which was
+# swallowed by the report writer and cost every run its
+# ``research_decision.json`` (2026-09-15).
 MODEL_POOL_KEY = "_model_pool"
+
+# Reserved key in the tool_evidence state dict carrying each analyst's
+# FIRST-rendered evidence block, so a tool-loop re-entry re-serves exactly the
+# bytes that were already sent. The render is not idempotent — the first render
+# appends the S11b "moved to the deterministic gather" notes
+# (``_render_evidence(..., notes=...)``) and a re-entry omits them — and
+# LLM-called tools append leaves (``_journal_executed``), so a re-render grows
+# too. Either one rewrites ``messages[0]`` of an already-sent prompt, which
+# invalidates an implicit prefix cache (OpenRouter/DeepSeek) from token 0 and
+# turns every tool round into a cold prefill of the run's largest prompt
+# (measured 2026-09-14; docs/implementation_plan_openrouter_large_prompt_ttft.md §W4).
+#
+# A LIST of rows (dicts without a ``tool`` key, skipped by the source walk),
+# and ``repro_check --evidence`` skips keys starting with ``_`` — the same
+# contract SYMMETRY_KEY relies on.
+RENDERED_BLOCK_KEY = "_rendered_block"
 
 MODEL_POOL_HEADER = (
     "## Model-supplied tools (not pre-gathered — call them with your own "
@@ -428,6 +449,38 @@ def _render_evidence(leaves, model_names, reference_line: str = "", notes=None) 
     return block
 
 
+def _rendered_block_rows(evidence: dict) -> list[dict]:
+    """The persisted first-render blocks as rows (list-of-rows, never a dict)."""
+    rows = (evidence or {}).get(RENDERED_BLOCK_KEY) or []
+    return [dict(row) for row in rows if isinstance(row, dict)]
+
+
+def _frozen_block(evidence: dict, analyst_key: str) -> str | None:
+    """The analyst's frozen first-render block, or None when it was never kept."""
+    for row in _rendered_block_rows(evidence):
+        if str(row.get("analyst") or "") == analyst_key:
+            block = row.get("block")
+            return block if isinstance(block, str) else None
+    return None
+
+
+def _with_frozen_block(evidence: dict, analyst_key: str, block: str) -> dict:
+    """Copy of ``evidence`` carrying ``block`` as the analyst's frozen render.
+
+    Sorted by analyst key so the stored rows are order-stable across runs (the
+    dict is persisted to tool_evidence.json and diffed by repro_check).
+    """
+    rows = [
+        row
+        for row in _rendered_block_rows(evidence)
+        if str(row.get("analyst") or "") != analyst_key
+    ]
+    rows.append({"analyst": analyst_key, "block": block})
+    out = {**evidence}
+    out[RENDERED_BLOCK_KEY] = sorted(rows, key=lambda row: str(row.get("analyst") or ""))
+    return out
+
+
 def _reference_price_line(state: dict) -> str:
     """The run's price basis for the evidence block ("" when unknown)."""
     try:
@@ -469,9 +522,22 @@ def gather_for_analyst_node(
 
     pool = (existing.get(MODEL_POOL_KEY) or {}).get(analyst_key) or []
     if analyst_key in existing:
-        return _render_evidence(
+        # Re-entry (the analyst node runs once per tool round): re-serve the
+        # FIRST render verbatim so the system message - i.e. messages[0] - is
+        # byte-identical to the previous request. The leaves gathered since are
+        # still in the transcript as the tool messages the node appended, and
+        # they stay in ``tool_evidence`` for the verifier; only the prompt
+        # prefix must not move. See RENDERED_BLOCK_KEY.
+        frozen = _frozen_block(existing, analyst_key)
+        if frozen is not None:
+            return frozen, existing
+        # No frozen block: a state written before RENDERED_BLOCK_KEY existed
+        # (a resumed checkpoint). Re-render once and adopt that text as the
+        # frozen block, so this entry and every later one agree byte-for-byte.
+        block = _render_evidence(
             existing[analyst_key], pool, reference_line=_reference_price_line(state)
-        ), existing
+        )
+        return block, _with_frozen_block(existing, analyst_key, block)
 
     by_name = {t.name: t for t in tools}
     # S11b is gated: with the gate off the declared-default table is empty, so
@@ -573,9 +639,12 @@ def gather_for_analyst_node(
     pools = dict(existing.get(MODEL_POOL_KEY) or {})
     pools[analyst_key] = model_names
     updated[MODEL_POOL_KEY] = pools
-    return _render_evidence(
+    block = _render_evidence(
         leaves, model_names, reference_line=_reference_price_line(state), notes=move_notes
-    ), updated
+    )
+    # Freeze the text we are about to send: every later entry of this analyst
+    # must re-serve it unchanged (RENDERED_BLOCK_KEY).
+    return block, _with_frozen_block(updated, analyst_key, block)
 
 
 def _leaf_as_dict(leaf) -> dict:
@@ -1432,6 +1501,7 @@ __all__ = [
     "MODEL_POOL_HEADER",
     "MODEL_POOL_KEY",
     "PLAN_PROMPT_HEADER",
+    "RENDERED_BLOCK_KEY",
     "SYMMETRY_KEY",
     "TOOL_ARG_DEFAULTS",
     "TOOL_ARG_DEFAULT_REASONS",

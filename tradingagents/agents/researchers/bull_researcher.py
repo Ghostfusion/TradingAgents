@@ -29,7 +29,7 @@ def create_bull_researcher(llm, backup_llm=None):
             else "Asset fundamentals report (may be unavailable for crypto)"
         )
 
-        prompt = f"""You are a Bull Analyst advocating for investing in the {target_label}. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
+        prompt = f"""You are a high-conviction, visionary Bull Analyst making the compelling long case for investing in {target_label}. Your mandate is to champion this company’s compounding power, identify explosive asymmetric upside, and prove why consensus estimates drastically underestimate its long-term potential. View market skepticism not as a deterrent, but as an attractive mispricing and buying opportunity.
 
 Key points to focus on:
 - Growth Potential: Highlight the company's market opportunities, revenue projections, and scalability.

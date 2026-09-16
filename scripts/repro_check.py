@@ -53,7 +53,18 @@ def _config_hash() -> str:
             "debate_max_rounds",
             "max_debate_rounds",
             "max_risk_discuss_rounds",
+            # Every key that changes the OpenRouter REQUEST BODY belongs here:
+            # two runs that differ in routing/streaming/sticky-session are not
+            # provably same-input even with identical prompts.
             "openrouter_reasoning_effort",
+            "openrouter_streaming",
+            "openrouter_session_id",
+            "openrouter_provider_sort",
+            "openrouter_preferred_max_latency",
+            "openrouter_preferred_min_throughput",
+            "openrouter_require_parameters",
+            "openrouter_allow_fallbacks",
+            "openrouter_ignore_providers",
             # Round-3 gates (ground rule 10): a dark-launch flip must move the
             # repro-check config hash, or two runs are not provably same-input.
             "enable_altman_variants",

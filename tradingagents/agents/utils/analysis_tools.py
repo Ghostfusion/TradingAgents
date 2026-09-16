@@ -1162,6 +1162,51 @@ def screen_value_line(key: str, v, ev_ebit) -> str:
         return f"  {label}: {v:.2%}"
     return f"  {label}: {v}"
 
+# Canonical keys the value screens read (operating_income is the EBIT leg of
+# EY/EV-EBIT; net_income/total_equity the ROE leg; the rest drive EV, Altman and
+# the net-net test). Used to state the basis of the screen inputs.
+_SCREEN_BASIS_KEYS = (
+    "operating_income",
+    "net_income",
+    "total_equity",
+    "total_assets",
+    "market_cap",
+    "total_debt",
+    "cash",
+    "revenue",
+)
+
+
+def _screen_basis_line(provenance: dict) -> str:
+    """One line naming the period/source behind the value-screen inputs.
+
+    ``get_ratios`` and ``get_dupont_read`` have printed a basis since the NVDA
+    2026-09-12 defect (an annual P/E quoted beside quarterly balance-sheet
+    rows); this verdict did not, and that silence is exactly what let the AMZN
+    2026-09-14 report quote a verdict ROE of 18.89% beside a ratios ROE of
+    22.09% and a feed ROE of 30.56% with no basis on the verdict line at all
+    (same for its EV/EBIT 35.02 vs the ratios block's 32.79). A screen that
+    cannot name its own period forces the reader to guess which of three bases
+    produced it, so the basis is printed with the numbers.
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for key in _SCREEN_BASIS_KEYS:
+        entry = provenance.get(key) or {}
+        period = str(entry.get("period") or entry.get("basis") or "period unstated")
+        # The payload header carries the vendor's own label (and its currency
+        # parenthetical); collapse the whitespace so the line stays one line.
+        period = re.sub(r"\s+", " ", period).strip()[:60]
+        source = str(entry.get("source") or "unknown source")
+        groups.setdefault((period, source), []).append(key)
+    if not groups:
+        return "  basis: period unstated (no provenance from the vendor chain)"
+    parts = [
+        f"{'/'.join(sorted(keys))} {period} ({source})"
+        for (period, source), keys in sorted(groups.items())
+    ]
+    return "  basis: " + "; ".join(parts)
+
+
 @tool
 def get_analyst_verdict(
     ticker: Annotated[str, "ticker symbol"],
@@ -1188,14 +1233,18 @@ def get_analyst_verdict(
         from tradingagents.dataflows.statement_parsing import _latest, fetch_ticker, screen_ticker
     except Exception as exc:  # noqa: BLE001
         return f"analyst verdict unavailable for {ticker}: {exc}"
-    fin = fetch_ticker(ticker, current_date)
+    provenance: dict = {}
+    try:
+        fin, provenance = fetch_ticker(ticker, current_date, with_provenance=True)
+    except Exception:  # noqa: BLE001 - provenance is advisory, the screen is not
+        fin, provenance = fetch_ticker(ticker, current_date), {}
     if not fin:
         return (
             f"analyst verdict unavailable for {ticker}: no statements from "
             "the vendor chain; do not fabricate value screens."
         )
     row = screen_ticker(ticker, fin)
-    lines = [f"analyst verdict {ticker}:"]
+    lines = [f"analyst verdict {ticker}:", _screen_basis_line(provenance)]
     for key, _label in (
         ("earnings_yield", "EY"),
         ("ev_ebit", "EV/EBIT"),

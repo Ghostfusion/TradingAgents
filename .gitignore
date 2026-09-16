@@ -226,6 +226,10 @@ screener/
 action_reports/
 preferred_income/
 
+# Pipeline runtime logs (per-run LLM failure journal + per-symbol tool-call log)
+FailureLog/
+ToolCallLog/
+
 # Personal portfolio exports (Fidelity etc.) — contains positions/weights
 positions/
 profolio/

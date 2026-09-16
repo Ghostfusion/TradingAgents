@@ -225,8 +225,11 @@ def get_tranche_plan(
         f"avg_entry(size-weighted)={plan['avg_entry']:.2f} "
         f"risk/share={plan['risk_per_share']:.2f} shares={plan['total_shares']} "
         f"(w={plan['weights']} n={plan['shares']}) "
-        f"capital_at_risk=${plan['capital_at_risk']:,.0f} vs max ${plan['max_dollar_risk']:,.0f} "
+        f"capital_at_risk=${plan['capital_at_risk']:,.0f} "
+        f"(=sum n_i*(P_i-stop), not shares*risk/share) "
+        f"vs max ${plan['max_dollar_risk']:,.0f} "
         f"risk_ok={plan['risk_ok']} "
+        f"(account ${account:,.0f} x {risk_pct:.2%} risk) "
         f"T1={tg['t1']:.2f} (1.8R) T2={tg['t2']:.2f} (3.0R) "
         f"blended_rr={tg['blended_rr']:.2f} breakeven_win_rate={plan['breakeven_win_rate']:.1%}"
     )

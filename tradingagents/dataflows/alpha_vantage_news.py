@@ -49,11 +49,12 @@ def get_news_sentiment_alpha_vantage(ticker: str, start_date: str, end_date: str
         inn = f"{r['innovation']:+.2f}" if r["innovation"] is not None else "n/a"
         lines.append(f"| {r['date']} | {sc} | {sma} | {inn} | {r['n']} |")
     latest = series[-1]
-    tail = [
-        "",
-        f"- latest score {latest['score'] if latest['score'] is not None else 'n/a'}, "
-        f"7d SMA {latest['sma_7d'] if latest['sma_7d'] is not None else 'n/a'}",
-    ]
+    # .4f at the source: a computed score's repr leaks 17 digits into the
+    # prompt, and the analysts copy tool numbers verbatim by rule (the same
+    # leak reached AMZN news.md prose via the EODHD sibling, 2026-09-14).
+    score = f"{latest['score']:.4f}" if latest["score"] is not None else "n/a"
+    sma = f"{latest['sma_7d']:.4f}" if latest["sma_7d"] is not None else "n/a"
+    tail = ["", f"- latest score {score}, 7d SMA {sma}"]
     if latest.get("innovation") is not None:
         tail.append(f"- latest sentiment innovation {latest['innovation']:+.2f}")
     return "\n".join(lines + tail)

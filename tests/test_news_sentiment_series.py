@@ -33,6 +33,32 @@ def test_eodhd_sentiment_renders_table(monkeypatch):
     assert "latest" in out and "sma_7d" in out
 
 
+def test_sentiment_summary_line_formats_the_score(monkeypatch):
+    """The summary line must not leak a raw float repr.
+
+    A computed score's repr carried 17 digits (0.23340000000000005) into the
+    prompt; the analysts copy tool numbers verbatim by rule, so it reached
+    report prose (AMZN news.md 2026-09-14). Scores whose repr is long are
+    exactly the ones a 2dp table row cannot carry, so the summary formats.
+    """
+    import re
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.eodhd._sentiment_points_eodhd",
+        lambda *a: [
+            {"date": "2026-09-13", "score": 0.1, "n": 3},
+            # a computed mean, i.e. the shape that leaked: repr() is 17 digits
+            {"date": "2026-09-14", "score": 0.1 + 0.2, "n": 4},
+        ],
+    )
+    out = get_news_sentiment_eodhd("AAPL", "2026-09-10", "2026-09-14")
+    assert not re.search(r"\d\.\d{12,}", out), out
+    line = [ln for ln in out.splitlines() if ln.startswith("- latest score")][0]
+    assert re.fullmatch(
+        r"- latest score [+-]?\d+\.\d{4}, 7d SMA ([+-]?\d+\.\d{4}|n/a)", line
+    ), line
+
+
 def test_eodhd_sentiment_no_data(monkeypatch):
     monkeypatch.setattr(
         "tradingagents.dataflows.eodhd._sentiment_points_eodhd",

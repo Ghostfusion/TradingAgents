@@ -66,6 +66,83 @@ def _completion_payload(completion) -> dict | None:
     return {"repr": str(completion)}
 
 
+def _error_dict_shape(value) -> dict:
+    """Normalize an OpenRouter error body (or the SDK's exception body)."""
+    if not isinstance(value, dict):
+        return {}
+    error = value.get("error")
+    if isinstance(error, dict):
+        return error
+    # Some shapes carry the fields one level up.
+    return value if ("code" in value or "metadata" in value) else {}
+
+
+def _provider_error_fields(exc: BaseException) -> dict:
+    """Typed provider-error fields, so a timeout is distinguishable in the journal.
+
+    OpenRouter answers with ``{"error": {"code": N, "message": ..., "metadata":
+    {"error_type": ...}}}``. Depending on where the failure surfaces, that
+    payload reaches us as ``exc.body``, as an ``APIStatusError.status_code``, or
+    — observed live on 2026-09-14 (``structured/Trader``) — stringified into the
+    exception message as a Python dict literal. The typed ``error_type`` is the
+    field worth recording: ``timeout`` (HTTP 504) means *the provider did not
+    respond within the allowed time*, which is a prefill/TTFT condition, not a
+    bad request and not a rate limit — a distinction the message string alone
+    does not reliably make.
+    """
+    import ast
+
+    error = _error_dict_shape(getattr(exc, "body", None))
+    if not error:
+        raw = str(exc).strip()
+        if raw.startswith("{") and raw.endswith("}"):
+            try:
+                parsed = ast.literal_eval(raw)
+            except (SyntaxError, ValueError):
+                parsed = None
+            error = _error_dict_shape(parsed)
+    metadata = error.get("metadata") if isinstance(error.get("metadata"), dict) else {}
+    fields = {
+        "error_code": error.get("code"),
+        "error_type": metadata.get("error_type"),
+        "provider_code": metadata.get("provider_code"),
+        "status_code": getattr(exc, "status_code", None),
+    }
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def _usage_fields(usage) -> dict:
+    """Cache/token fields from a provider usage payload (object or dict)."""
+    if usage is None:
+        return {}
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = (
+            dump()
+            if callable(dump)
+            else {
+                key: getattr(usage, key, None)
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+            }
+        )
+    details = usage.get("prompt_tokens_details") or {}
+    if not isinstance(details, dict):
+        details = getattr(details, "model_dump", lambda: {})() or {}
+    completion_details = usage.get("completion_tokens_details") or {}
+    if not isinstance(completion_details, dict):
+        completion_details = getattr(completion_details, "model_dump", lambda: {})() or {}
+    fields = {
+        "input_tokens": usage.get("prompt_tokens"),
+        "output_tokens": usage.get("completion_tokens"),
+        "reasoning_tokens": completion_details.get("reasoning_tokens"),
+        # The cache counters: a timeout whose prompt was served from the prefix
+        # cache (cached_tokens > 0) is a different defect from a cold prefill.
+        "cache_read_tokens": details.get("cached_tokens"),
+        "cache_write_tokens": details.get("cache_write_tokens"),
+    }
+    return {k: v for k, v in fields.items() if v is not None}
+
+
 def _write_payload(journal_dir: Path, payload: dict) -> None:
     """Write one journal entry (advisory; never raises)."""
     name = (
@@ -131,15 +208,30 @@ def journal_llm_failure(stage: str, exc: BaseException) -> None:
         logger.debug("llm_failure_journal: cannot create %s: %s", journal_dir, exc)
         return
     completion = _completion_payload(getattr(exc, "completion", None))
+    usage = getattr(getattr(exc, "completion", None), "usage", None)
+    if usage is None:
+        usage = getattr(exc, "usage", None)
+    # Provider context: which backend produced the failure, and the sticky
+    # routing key when one was pinned explicitly (an auto-generated per-client
+    # id is not recorded here — it is not knowable from the config).
+    provider = str((cfg or {}).get("llm_provider") or "") or None
+    session_id = str((cfg or {}).get("openrouter_session_id") or "").strip() or None
     payload = {
         "ts": time.time(),
         "stage": stage,
         "exception": type(exc).__name__,
         "message": str(exc)[:2000],
-        "usage": getattr(getattr(exc, "completion", None), "usage", None),
+        "provider": provider,
+        "session_id": session_id,
+        "usage": usage,
         "model": getattr(getattr(exc, "completion", None), "model", None),
         "completion": completion,
         "body": getattr(exc, "body", None),
+        # Typed provider error (error_type=timeout for the 504 class) — the
+        # field that separates a provider timeout from a parse/bad-request
+        # failure without reading the message text.
+        **_provider_error_fields(exc),
+        **_usage_fields(usage),
     }
     _write_payload(journal_dir, payload)
 
