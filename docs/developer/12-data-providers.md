@@ -153,6 +153,16 @@ that resilience.
 | Benzinga | `BENZINGA_API_KEY` | free tier (added in this fork; no real key registered yet) |
 | GDELT | none (keyless) | network-flaky; opt-in only |
 
+## Considered, not integrated
+
+| Provider | State | Why |
+| --- | --- | --- |
+| **Webull OpenAPI** | design only ([`docs/design_webull_data_provider.md`](../design_webull_data_provider.md), 2026-09-16) | US-only (`US_STOCK`/`US_ETF`); real-time needs a separately-purchased Nasdaq Basic/Totalview **non-display** subscription (app/QT subscriptions do not count, one device at a time); production tokens go `INVALID` after 15 idle days. Strongest fit is `fundamental_data` (basis-tagged statements) and `capital_flow`. Its news endpoint is an LLM summary stream, not a headline feed. |
+
+Nothing here is wired: no key, no chain entry, no preset.
+
+---
+
 ## Coverage notes
 
 - **US-centric non-routed** sources (Yahoo, FRED, Finnhub, Massive, SEC)

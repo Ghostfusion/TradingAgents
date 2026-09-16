@@ -1025,6 +1025,10 @@ so a tree carries its own consistency record instead of depending on the opt-in
   mapped to concrete deterministic `strategies/*` enhancements, phased
   (highest ROI first) with quick-wins verdict.
 - `docs/design_nautilus_trader_enhancements.md` - research-to-design: deep study of NautilusTrader (execution/evaluation rigor) mapped to a backtest harness, consistent risk sizing, statistics and config validation - implemented (see CHANGELOG).
+- `docs/design_webull_data_provider.md` - provider study (2026-09-16, design only): Webull
+  OpenAPI mapped onto `data_vendors` - a US-only bars + fundamentals vendor whose
+  statements are natively basis-tagged (`fiscal_year`/`fiscal_period`/`end_date`/
+  `publish_date`), the entitlement and 2FA-token constraints, and a phased plan.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product

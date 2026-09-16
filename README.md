@@ -187,6 +187,16 @@
   breakeven, long-leg intrinsic/extrinsic split, delta bands, 30-45d theta
   window, earnings + ex-div assignment risk. Advisory, None-safe (n/a, never
   fabricated), no execution. 151 suite green. See CHANGELOG.
+- [2026-09-16] **Webull OpenAPI provider study** - a direct-source study of
+  Webull's Market Data API (HTTP + MQTT streaming) mapped onto `data_vendors`: the
+  one provider whose income/cashflow/balance rows arrive natively basis-tagged
+  (`fiscal_year`/`fiscal_period`/`end_date`/`publish_date`), i.e. the upstream half
+  of the 2026-09-14 basis-drift finding; 300 req/min, 20 symbols per bars call, and a
+  Python SDK, against three constraints that decide it (US-only symbols, a paid
+  Nasdaq non-display entitlement for real-time with a one-device rule, and a
+  production token that expires after 15 idle days). Phased P0-P3 with the sandbox
+  go/no-go test spelled out (`docs/design_webull_data_provider.md`). Design only -
+  no code, no chain change, the no-execution/advisory mandates stand. See CHANGELOG.
 - [2026-09-05] **Sector-rotation research actions 1+3+2** - RRG quadrant
   (`rs_level x rs_momentum` → Leading/Weakening/Improving/Lagging, the
   separate-signal discipline firms use) + rotation cadence note in
