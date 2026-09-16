@@ -374,6 +374,125 @@ def test_run_tool_loop_falls_back_when_bind_fails():
     assert transcript == []
 
 
+# --- tool calls a provider wrote as TEXT (markup) -------------------------
+
+_PIPE = "\uff5c"
+
+
+def _dsml_edge(wrap):
+    return (_PIPE * wrap) + "DSML" + (_PIPE * wrap)
+
+
+def _tag(edge, word, attrs=""):
+    return "<" + edge + " " + word + attrs + ">"
+
+
+def _end_tag(edge, word):
+    return "</" + edge + " " + word + ">"
+
+
+def _markup(calls, wrap=1):
+    """A provider's native tool-call markup, as the reports received it.
+
+    Two spellings reached the report trees (NFLX and NVDA, 2026-09-15): a
+    single-wrapped ``|DSML|`` and a double-wrapped one - and in both the block
+    word had lost the ``tool_`` prefix the provider's token carries. Built from
+    the wrappers below so the test does not encode one spelling only.
+    """
+    edge = _dsml_edge(wrap)
+    parts = [_tag(edge, "calls")]
+    for name, args in calls:
+        parts.append(_tag(edge, "invoke", ' name="' + name + '"'))
+        for key, value in args.items():
+            flag = "true" if isinstance(value, str) else "false"
+            parts.append(_tag(edge, "parameter", ' name="' + key + '" string="' + flag + '"'))
+            parts.append(str(value))
+            parts.append(_end_tag(edge, "parameter"))
+        parts.append(_end_tag(edge, "invoke"))
+    parts.append(_end_tag(edge, "calls"))
+    return "".join(parts)
+
+
+@pytest.mark.unit
+def test_markup_parser_recovers_calls_and_argument_types():
+    from tradingagents.agents.utils.tool_call_markup import parse_text_tool_calls
+
+    calls = parse_text_tool_calls(
+        _markup([("get_risk_gate", {"ticker": "NVDA", "size_pct": 1.5})], wrap=2)
+    )
+    assert [c["name"] for c in calls] == ["get_risk_gate"]
+    # The markup's own string flag decides the type: a tool whose schema wants a
+    # float rejects the text "1.5", so the parser must not hand raw text over.
+    assert calls[0]["args"] == {"ticker": "NVDA", "size_pct": 1.5}
+    assert isinstance(calls[0]["args"]["size_pct"], float)
+    single = parse_text_tool_calls(_markup([("get_risk_gate", {"size_pct": 3})], wrap=1))
+    assert single[0]["args"] == {"size_pct": 3}
+    assert parse_text_tool_calls("the gate REJECTed 3.0%") == []
+
+
+@pytest.mark.unit
+def test_run_tool_loop_executes_calls_written_as_text():
+    """A relay that returns the calls as markup must still run them.
+
+    Measured 2026-09-15 (openrouter + deepseek/deepseek-v4.1-flash): the
+    trader's verification turn came back as markup with an EMPTY tool_calls
+    list, so no deterministic tool ran and the markup was appended to
+    trader.md under the "Computed verification (deterministic tools):" heading.
+    """
+    from tradingagents.agents.utils.risk_tool_loop import (
+        RISK_DEBATOR_TOOLS,
+        run_tool_loop,
+    )
+    from tradingagents.agents.utils.tool_call_markup import has_tool_call_markup
+
+    class _MarkupChain:
+        def __init__(self):
+            self.turns = 0
+
+        def invoke(self, messages):
+            self.turns += 1
+            if self.turns == 1:
+                return _FakeResp(
+                    content=_markup([("get_risk_gate", {"ticker": "NVDA", "size_pct": 25})])
+                )
+            tool_msgs = [m for m in messages if getattr(m, "type", "") == "tool"]
+            return _FakeResp(content="gate verdict: " + (tool_msgs[-1].content[:40] if tool_msgs else "none"))
+
+    class _MarkupLLM:
+        def bind_tools(self, tools):
+            return _MarkupChain()
+
+    text, transcript = run_tool_loop(_MarkupLLM(), "proposed 25%", RISK_DEBATOR_TOOLS)
+    assert transcript, "the markup block's call must be dispatched"
+    assert transcript[0].startswith("get_risk_gate("), transcript[0]
+    assert "unknown tool" not in transcript[0], transcript[0]
+    assert "gate verdict" in text
+    assert not has_tool_call_markup(text)
+
+
+@pytest.mark.unit
+def test_run_tool_loop_never_returns_tool_call_markup():
+    """A model that only answers with markup must never leak it to a caller."""
+    from tradingagents.agents.utils.risk_tool_loop import (
+        RISK_DEBATOR_TOOLS,
+        run_tool_loop,
+    )
+    from tradingagents.agents.utils.tool_call_markup import has_tool_call_markup
+
+    markup = _markup([("get_risk_gate", {"ticker": "NVDA", "size_pct": 1})])
+
+    class _AlwaysMarkup:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            return _FakeResp(content=markup)
+
+    text, transcript = run_tool_loop(_AlwaysMarkup(), "p", RISK_DEBATOR_TOOLS, max_rounds=2)
+    assert not has_tool_call_markup(text)
+    assert text.startswith("unavailable"), text
+
+
 @pytest.mark.unit
 def test_debator_node_runs_with_plain_llm():
     """A debator whose provider cannot bind tools still produces an argument

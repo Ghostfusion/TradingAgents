@@ -1080,6 +1080,18 @@ def test_self_correction_artifacts_detects_leaked_tool_markup():
         "tool-call markup" in c.claim
         for c in rv._self_correction_artifacts(dsml)
     )
+    # ...including the spelling whose block word lost its "tool_" prefix, and
+    # both wrapper widths: NFLX and NVDA on 2026-09-15 wrote " calls"/" invoke"
+    # (single and double wrapped) as the trader's "Computed verification".
+    for edge in ("\uff5cDSML\uff5c", "\uff5c\uff5cDSML\uff5c\uff5c"):
+        field_spelling = (
+            "<" + edge + " calls>"
+            + "<" + edge + ' invoke name="get_risk_gate">'
+        )
+        assert any(
+            "tool-call markup" in c.claim
+            for c in rv._self_correction_artifacts(field_spelling)
+        ), edge
 
 
 def test_ema20_does_not_cross_table_pipe():

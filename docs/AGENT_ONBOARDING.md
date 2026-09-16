@@ -353,6 +353,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-16 `(working tree)` - The Trader's "Computed verification" block was, in 11 of 22 archived trees, the provider's raw
+  tool-call markup instead of a computed spec: `risk_tool_loop.run_tool_loop` read `result.tool_calls` only, so a relay answering a
+  tool-bound turn with its native markup in `content` and an EMPTY `tool_calls` list left `pending == []`, the `while` never ran, and
+  the markup came back as the model's "final prose" - appended by the trader under a heading claiming deterministic verification while
+  **no tool had run**. Same provider/model as a clean NVDA run three hours earlier (`openrouter` + `deepseek/deepseek-v4.1-flash`), i.e.
+  intermittent emission; upstream it is the documented provider/parser mismatch. Fixed in three layers over one new vocabulary module
+  (`agents/utils/tool_call_markup.py`: `parse_text_tool_calls` / `has_tool_call_markup` / `strip_tool_call_markup`): the loop dispatches
+  markup turns through the same `ToolExecutor` (and rewrites the turn as a well-formed function call so strict backends accept the
+  ToolMessages), `_final_prose` guarantees markup never returns as prose, `trader._verification_is_stub` refuses to append a markup reply,
+  and `report_verifier._TOOL_CALL_MARKUP` is now the shared regex (it could not match the `tool_`-less spelling the reports carried). All
+  11 leaking trees repaired in place (1700 lines removed from `trader.md` + the embedded copies; backup in `%TEMP%`). See CHANGELOG.
+  Tests: `test_risk_agent_wiring.py` +3, `test_structured_agents.py` +1, `test_report_verify.py` detector spelling; full suite 4250
+  passed / 5 skipped, web 149, executor 1102.
 - 2026-09-15/16 `(working tree)` - IEI verification round + debate round separators + a docs pass. Verifying `reports/IEI_20260915_210623`
   (the first IEI run) returned FLAG on market/sentiment; adjudicating all 13 non-GROUNDED claims found one real report defect
   (`get_capital_flow` counted as "negative in 7 of the last 8 weeks" where its own weekly table shows 6 of 8) and two analyst-recall

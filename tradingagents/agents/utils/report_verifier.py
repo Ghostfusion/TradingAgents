@@ -33,6 +33,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from tradingagents.agents.utils.evidence_gather import RENDERED_BLOCK_KEY
+from tradingagents.agents.utils.tool_call_markup import TOOL_CALL_MARKUP_RE
 
 logger = logging.getLogger(__name__)
 
@@ -3006,13 +3007,14 @@ _FINAL_VERDICT = re.compile(
     r"FINAL\s+TRANSACTION\s+PROPOSAL\s*:?\s*\**\s*([A-Za-z]+)", re.I
 )
 # Leaked tool-call markup: an unexecuted call transcript written as the report
-# (wdc 2026-09-14 market_report.md is 25 lines of <invoke name=...> and nothing
+# (wdc 2026-09-14 market_report.md is 25 lines of invoke-tag markup and nothing
 # else - the model emitted XML tool syntax, no tool ran, and the raw text was
-# saved as the analyst's market read).
-_TOOL_CALL_MARKUP = re.compile(
-    r"</?\s*(?:｜\s*)?(?:DSML)?(?:｜\s*)?\]?\s*(?:tool_calls?|invoke|parameter|function_calls?)\b[^>]{0,80}>",
-    re.I,
-)
+# saved as the analyst's market read; NFLX and NVDA 2026-09-15 wrote the same
+# block under the trader's "Computed verification" heading). The vocabulary is
+# shared with the tool loop that now PARSES and executes it
+# (``tool_call_markup.TOOL_CALL_MARKUP_RE``), so the producer and this detector
+# cannot drift - including the spelling that lost its ``tool_`` prefix.
+_TOOL_CALL_MARKUP = TOOL_CALL_MARKUP_RE
 # A run of non-whitespace this long is text that lost its spaces: the restart
 # copy above had 300+ character tokens ("terminalshare64WACC121beta144...").
 _GLUED_RUN = re.compile(r"\S{200,}")

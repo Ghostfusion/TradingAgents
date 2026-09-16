@@ -823,6 +823,28 @@ class TestTraderVerificationBlock:
         assert "let me verify" not in plan.lower()
         assert calls.call_count == 2, "a stub verification must be re-asked once"
 
+    def test_markup_reply_is_not_appended_as_computed(self, monkeypatch):
+        """A tool-call markup block is a CALL, not a verification: appending it
+        under the heading would claim a deterministic check that never ran
+        (NFLX 2026-09-15 15:22 and NVDA 2026-09-15 22:32 wrote exactly such a
+        block into 3_trading/trader.md)."""
+        from tradingagents.agents.trader.trader import create_trader
+
+        edge = "\uff5cDSML\uff5c"
+        markup = (
+            "<" + edge + " calls>"
+            + "<" + edge + ' invoke name="get_risk_gate">'
+            + "<" + edge + ' parameter name="ticker" string="true">GOOG</' + edge + " parameter>"
+            + "<" + edge + ' parameter name="size_pct" string="false">1.0</' + edge + " parameter>"
+            + "</" + edge + " invoke>"
+        )
+        calls, rtl = self._patch_loop([markup])
+        monkeypatch.setattr(rtl, "run_tool_loop", calls)
+        out = create_trader(self._llm())(dict(self._STATE))
+        plan = out["trader_investment_plan"]
+        assert "Computed verification" not in plan
+        assert calls.call_count == 2, "markup is a stub: re-ask once, then drop the block"
+
     def test_real_spec_verification_is_appended(self, monkeypatch):
         from tradingagents.agents.trader.trader import create_trader
 

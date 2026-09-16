@@ -13,15 +13,46 @@ node, so risk_debate_state, the routers and the reports are untouched.
 Advisory-only: every executed tool returns exact numbers or an explicit
 "unavailable" string; a tool failure degrades to an "unavailable" ToolMessage
 and the loop continues - it never raises and never fabricates.
+
+A relay can answer a tool-bound turn with the provider's own tool-call markup
+inside ``content`` and an EMPTY ``tool_calls`` list (OpenRouter +
+deepseek/deepseek-v4.1-flash, 2026-09-15: the trader's verification turn). The
+loop used to read that as "no tool calls" and hand the markup back as the final
+prose, so the caller appended it under a heading that claims deterministic
+verification - with no tool run at all. ``_turn_calls`` now parses the markup
+into real calls (see ``tool_call_markup``) so that round executes, and
+``_final_prose`` guarantees markup never reaches a caller as prose.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from tradingagents.agents.utils.tool_call_markup import (
+    has_tool_call_markup,
+    parse_text_tool_calls,
+    strip_tool_call_markup,
+)
 from tradingagents.graph.conditional_logic import MAX_TOOL_ROUNDS
+from tradingagents.llm_clients.base_client import content_to_text
+
+# Returned instead of markup-only prose: the caller must never write a claim of
+# a deterministic check it could not obtain. Starts with "unavailable" so the
+# trader's append guard rejects it (see ``trader.create_trader``).
+MARKUP_UNAVAILABLE = (
+    "unavailable: the model returned tool-call markup instead of prose - no "
+    "computed verification was produced"
+)
+
+# Appended to every system directive: the provider-native markup interface is
+# not one this loop can rely on, so name the interface to use instead.
+_NO_MARKUP_INSTRUCTION = (
+    " Call the tools through the function-calling interface only. Never write "
+    "tool-call markup (or a tool call as text) into your answer: a call written "
+    "as text is not executed, and your answer is read by a human."
+)
 
 # Risk toolset for the 3 risk debators (aggressive/conservative/neutral).
 # All wrap deterministic strategies over the run-level OHLCV cache or config;
@@ -175,6 +206,69 @@ def _first_line(text) -> str:
     return line[:220]
 
 
+def _turn_calls(result) -> tuple[Any, list[dict]]:
+    """The turn's tool calls: structured, or parsed out of its text markup.
+
+    Returns the (possibly rewritten) turn plus its calls, in the shape the
+    dispatch loop reads. When only text markup carries the calls, the turn is
+    replaced by a well-formed function-call message: a strict backend rejects a
+    ToolMessage that follows an assistant turn without a matching tool_call, and
+    dropping the markup also stops the model re-reading its own markup in the
+    history as a format to imitate.
+    """
+    calls = [
+        tc for tc in (getattr(result, "tool_calls", None) or [])
+        if isinstance(tc, dict) and tc.get("name")
+    ]
+    if calls:
+        return result, calls
+    parsed = parse_text_tool_calls(getattr(result, "content", result))
+    if not parsed:
+        return result, []
+    return AIMessage(content="", tool_calls=parsed), parsed
+
+
+def _final_prose(llm, messages, text, *, backup_llm=None) -> str:
+    """Never hand tool-call markup to a caller as prose.
+
+    Text that reached here was neither executed as a call nor an answer. Ask
+    once more for the prose, WITHOUT tools, because the model already holds
+    every tool result it asked for; if it answers with markup again, strip the
+    markup and keep whatever prose was left, and only then say explicitly that
+    no verification could be produced. Measured failure this guards (NFLX
+    2026-09-15 15:22, NVDA 2026-09-15 22:32): the raw block was written into
+    ``3_trading/trader.md`` under the "**Computed verification (deterministic
+    tools):**" heading while no tool had run.
+    """
+    if not has_tool_call_markup(text):
+        return text
+    for chain in (llm, backup_llm):
+        if chain is None:
+            continue
+        try:
+            response = chain.invoke(
+                [
+                    *messages,
+                    HumanMessage(
+                        content=(
+                            "Answer in prose now, using the tool results already "
+                            "in this conversation. Do not write tool-call markup."
+                        )
+                    ),
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade, never raise mid-loop
+            logger.warning("prose retry after tool-call markup failed: %s", exc)
+            continue
+        out = content_to_text(getattr(response, "content", response))
+        if out.strip() and not has_tool_call_markup(out):
+            return out
+    stripped = strip_tool_call_markup(text)
+    if stripped and any(ch.isdigit() for ch in stripped):
+        return stripped
+    return MARKUP_UNAVAILABLE
+
+
 def run_tool_loop(
     llm,
     prompt_text: str,
@@ -205,12 +299,12 @@ def run_tool_loop(
     """
     _build_lists()
     rounds = int(max_rounds or MAX_TOOL_ROUNDS)
-    sys = system_text or (
+    sys = (system_text or (
         "You are a risk analyst. Ground every number you cite: call the "
         "available tools before asserting a VaR/CVaR, stop, position-size, "
         "liquidity, tail, credit or tranche figure. Never invent a computed "
         "value; if a tool returns 'unavailable', say so explicitly."
-    )
+    )) + _NO_MARKUP_INSTRUCTION
     messages = [SystemMessage(content=sys), HumanMessage(content=prompt_text)]
     executor = ToolExecutor(tools)
     try:
@@ -218,13 +312,15 @@ def run_tool_loop(
     except Exception:  # noqa: BLE001 - a provider without tool binding degrades
         # to a plain invocation (the analysts already assume tool support, but
         # a weak/legacy provider here must never break the decision chain).
+        fallback_prompt = [HumanMessage(content=prompt_text)]
         result = llm.invoke(prompt_text)
-        text = result.content if hasattr(result, "content") else str(result)
-        return str(text or ""), []
+        return _final_prose(
+            llm, fallback_prompt, content_to_text(getattr(result, "content", result))
+        ), []
     transcript: list[str] = []
 
     result = chain.invoke(messages)
-    pending = result.tool_calls if isinstance(result.tool_calls, list) else []
+    result, pending = _turn_calls(result)
     while pending and len(transcript) < rounds:
         messages.append(result)
         for tc in pending:
@@ -240,7 +336,7 @@ def run_tool_loop(
                 )
             )
         result = chain.invoke(messages)
-        pending = result.tool_calls if isinstance(result.tool_calls, list) else []
+        result, pending = _turn_calls(result)
 
     if pending:
         # Cap hit: force the terminal prose turn (dangling tool_calls
@@ -263,5 +359,9 @@ def run_tool_loop(
             backup_plain_chain=(backup_llm if backup_llm is not llm else None),
         )
     else:
-        text = result.content if hasattr(result, "content") else str(result)
+        text = content_to_text(getattr(result, "content", result))
+    # A markup turn can also be what the cap-forced terminal turn produced; the
+    # guard runs on both exits, because the caller must never write a claim of a
+    # deterministic check that produced no prose.
+    text = _final_prose(llm, messages, text, backup_llm=backup_llm)
     return str(text or ""), transcript

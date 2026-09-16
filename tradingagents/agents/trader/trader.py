@@ -40,8 +40,18 @@ def _verification_is_stub(text: object) -> bool:
     announcement carrying no ``field=value`` assignment (naming a field in prose
     — "the stop validity" — is not a spec).
     """
+    from tradingagents.agents.utils.tool_call_markup import has_tool_call_markup
+
     t = str(text or "").strip()
     if not t:
+        return True
+    if has_tool_call_markup(t):
+        # A tool-call markup block is not a verification, however many digits
+        # its arguments carry: it is a CALL, not a result, and the heading above
+        # it claims a deterministic check ran (NFLX 2026-09-15 15:22, NVDA
+        # 2026-09-15 22:32 wrote exactly such a block into the report). The tool
+        # loop now executes markup turns and never returns them, so this is the
+        # backstop for a caller that still hands one over.
         return True
     if not any(ch.isdigit() for ch in t):
         return True

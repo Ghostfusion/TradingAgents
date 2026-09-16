@@ -820,6 +820,17 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
   invocation when the provider cannot bind tools.
 - The **Trader** runs a 12-tool verification pass after its structured
   proposal (sizing / exit / tranche / expectancy / plan-card tools).
+- **Calls a provider writes as TEXT are executed, not echoed.** A relay can
+  answer a tool-bound turn with its own tool-call markup in `content` and an
+  empty `tool_calls` list; `run_tool_loop` parses that markup
+  (`agents/utils/tool_call_markup.py::parse_text_tool_calls` — both wrapper
+  widths, and the spelling that lost its `tool_` prefix) and dispatches the
+  calls through the same `ToolExecutor`, then re-asks for prose without tools.
+  Markup never reaches a caller as prose: the loop returns the residual prose or
+  an explicit `unavailable:` notice, and `trader._verification_is_stub` refuses
+  to append a markup reply under the "Computed verification" heading.
+  `report_verifier` uses the same vocabulary to flag an already-leaked block in
+  a finished report.
 - The **Research Manager** and **Bull/Bear researchers** receive the computed
   decision context (regime gate, plan card, risk snapshot, factsheet).
 - `get_risk_gate` exposes the trade-level governor surface: `book_total_pct`,
