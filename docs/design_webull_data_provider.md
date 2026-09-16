@@ -63,101 +63,141 @@ Two documentation inconsistencies to code against deliberately (the SDK sidestep
 The measurement below resolved a third apparent contradiction (the `/openapi` prefix) in
 favour of "both exist, per environment".
 
-## Empirical probe (2026-09-16, no credentials available)
+## Verified against the live API (2026-09-16)
 
-Measured before writing P0, on this workstation (signer implemented from the signature page and
-self-tested against the vendor's own published vector, which it reproduces exactly:
-`kvlS6opdZDhEBo5jq40nHYXaLvM=`).
+Everything below was measured with a real **sandbox** App Key in `TradingAgents/.env`
+(`TRADINGAGENTS_WEBULL_APP_KEY` / `_SECRET`, gitignored), a signer reproducing the vendor's own
+published vector (`kvlS6opdZDhEBo5jq40nHYXaLvM=`), and a token from `POST /auth/tokens/create`
+(`status=NORMAL`, no 2FA in the sandbox). The full sweep covered all **167 operations** harvested
+from the 184 reference pages (Appendix A).
 
-**What the probe proves.**
+### The headline
 
-| Probe | Result | Reading |
+**A large part of the API works with no subscription and no purchase of any kind.** In the
+sandbox, with a plain app key: bars, snapshots, ticks, five screener/ranking feeds, an instrument
+master of 1000 rows, and most of the fundamentals family (profiles, ratios, ratings, price
+targets, filings, capital flows, forecast EPS, earnings/dividend calendars, financial alerts, fund
+brief and fund performance) all return real payloads. The paid entitlement is **not** required for
+those.
+
+### Path and environment matrix (do not guess these)
+
+| Family | Sandbox (`api.sandbox.webull.com`) | Production (`api.webull.com`) |
 |---|---|---|
-| `POST {sandbox}/market-data/stocks/bars/list` unsigned | `401 {"error_code":"MISSING_APP_KEY","message":"Header x-app-key is missing."}` | route exists; auth is enforced first |
-| `POST {sandbox}/market-data/nonsense/xyz` unsigned | `404 {"error_msg":"404 Route Not Found"}` | unknown routes are 404, so a 401 means the route is real |
-| `POST {sandbox}/auth/tokens/create` unsigned | `401 MISSING_APP_KEY` | the token route exists at the **unprefixed** path |
-| `POST {sandbox}/openapi/auth/tokens/create` unsigned | `404` | the `/openapi` prefix does **not** apply to the auth route |
-| any path under `{sandbox}/openapi/market-data/...` unsigned (including nonsense) | `401 MISSING_APP_KEY` | that prefix is an auth-first gateway - a 401 there says nothing about the specific route |
-| `POST {prod}/market-data/stocks/bars/list` unsigned | `404` | production does **not** serve the unprefixed market-data path |
-| `POST {prod}/openapi/market-data/stocks/bars/list` unsigned | `401 MISSING_APP_KEY` | production's market-data gateway lives under `/openapi` |
-| signed with a syntactically valid but unknown key (both hosts) | `401 {"error_code":"UNAUTHORIZED","message":"Invalid credentials. Please verify your credentials and ensure you are connecting to the correct environment"}` | the signature scheme is parsed; only the key is rejected |
+| Auth/token `/auth/tokens/create` | unprefixed works | unprefixed route; **an unknown key returns `401 UNAUTHORIZED` "…correct environment"** |
+| Market data `/market-data/...` | **unprefixed works** | **`/openapi/market-data/...`** (unprefixed `404`s) |
+| `/openapi/*` gateway | auth-first: a nonsense path still returns `401 MISSING_APP_KEY`, so a 401 there proves nothing about the route | same |
 
-**Two corrections to what the documentation alone implied.**
+The sandbox key in `.env` is **sandbox-only**: against production the same key returns
+`401 UNAUTHORIZED`. Questions that need production (financial statements first among them) cannot
+be answered with it.
 
-1. **The path prefix is per-environment, not an inconsistency.** Reference pages use
-   `/market-data/...` (their `servers` block is the sandbox host) and the Data API example uses
-   `/openapi/market-data/...`: both are real. The sandbox serves the unprefixed paths, production
-   serves the prefixed ones. Hand-rolled code must switch the prefix with the host; the SDK
-   already does.
-2. **Auth precedes entitlement, so this probe cannot answer the subscription question.** The
-   go/no-go still requires one valid sandbox key. The probe script that answers it is written and
-   self-tested (it creates a token, then reads bars/snapshot/income/ratings/capital-flow/news/
-   instruments and prints an explicit entitlement verdict); it lives outside the repo as a
-   throwaway until P1 promotes it.
+### Works in the sandbox, no subscription (measured)
 
-**Error envelopes the provider must parse (two shapes).** `401` and `417` carry
-`{"error_code": ..., "message": ...}` (`MISSING_APP_KEY`, `UNAUTHORIZED`, `INVALID_PARAMETER`);
-an unrouted path carries `{"error_msg": "404 Route Not Found"}`. Map the first to typed
-`WebullAuthError`/`WebullPermissionError`, the second to `NoMarketDataError` rather than crashing on
-`KeyError`.
+| Endpoint | What came back |
+|---|---|
+| `POST /market-data/stocks/bars/list` | real daily bars, e.g. AAPL `2026-09-15` open 330.135 / close 331.340 / vol 31,748,183; also for `US_ETF` (`IEI`) |
+| `GET /market-data/stocks/snapshots/list` | quote row with `price/open/high/low/volume/change/ask/bid/bps/lot_size` |
+| `GET /market-data/stocks/ticks/list` | tick rows (`result[2]`) |
+| `GET /market-data/screeners/{gainers-losers,top-actives,high-dividend-ranks,week52-high-low}/list` | 200 rows each |
+| `GET /market-data/screeners/market-sectors/list` | 20 sector rows (`data[20]`) |
+| `GET /market-data/fundamentals/company-profiles/get` | 10 fields (address, ceo, employees, establish_date, …) |
+| `GET /market-data/fundamentals/indicators/get` | `currency` + a `values` map (cap_surplus_ps, debt_to_assets, diluted_eps_incl_extra, …) |
+| `GET /market-data/fundamentals/analysis/ratings/get` | buy/hold/sell counts, `effective_start_date` |
+| `GET /market-data/fundamentals/analysis/target-prices/get` | mean/high/low, `effective_start_date` |
+| `GET /market-data/fundamentals/filings/list` | 6 filing rows |
+| `GET /market-data/fundamentals/capital-flows/get` | 5 rows |
+| `GET /market-data/fundamentals/forecast-eps/get` | 5 rows |
+| `GET /market-data/fundamentals/{earnings-calendars,dividend-calendars}/list` | 2 rows each |
+| `GET /market-data/fundamentals/financial-alerts/get` | next report `2026-10-28`, `fiscal_year=2026 fiscal_period=4`, `eps_est=1.97754` vs `eps_ly=1.85`, `rev_est=113.6B` |
+| `GET /market-data/fundamentals/fund-brief/get` (`IEI`) | aum, benchmark, custodian, investment_objective, issuer, launch_date |
+| `GET /market-data/fundamentals/fund-performances/get` (`IEI`) | returns 1m/3m/6m/1y/3y/5y |
+| `GET /trading/instruments/stocks/profiles/list` | **1000 instruments** with `exchange_code`, `shortable`, `marginable`, `lot_size`, `sub_category` (e.g. `ETF`) + `pagination_key` |
 
-**Token facts confirmed from the endpoint spec** (`/auth/tokens/create`): the response is
-`{token (32-hex), expires_at (unix ms), status (PENDING|NORMAL|INVALID|EXPIRED)}`. The docs make two
-statements about the 15-day figure - the token page says a token becomes `INVALID` after 15
-consecutive days without API calls, the endpoint page says tokens are time-sensitive with a default
-15-day expiry. Treat both as real until a live token says otherwise: check status before a run and
-persist the token under `data_cache_dir/`.
+### Reachable but empty in the sandbox
 
-## Fit against this repo's `data_vendors` categories
+`income-statements/get`, `balance-sheets/get`, `cash-flows/get` returned `[]` for every variant
+tried (AAPL/MSFT/TSLA, `type=ANNUAL|QUARTERLY`, `count` 1-8) - the routes are authorized but the
+sandbox carries no statement data. Same for the rest of the `fund-*` family (holdings, net-values,
+ratings, splits, files, allocations, dividends), `industry-comparisons/get` (empty body),
+`watchlists/list` (no lists on this account), and the event-contract `events`/`markets` lists.
 
-| Category | Webull endpoint | Verdict |
+### Refused, with an explicit reason (the entitlement vocabulary)
+
+| Endpoint | Error | Meaning |
 |---|---|---|
-| `core_stock_apis` | bars (batch 20), snapshot | **Strong** (US only); the D-bars are forward-adjusted, M-bars unadjusted - journal which |
-| `fundamental_data` | income / cashflow / balance sheet, indicators, company profile | **Strongest fit** - basis- and publish-date-tagged rows |
-| `analyst_ratings` | analyst rating, analyst target price | **Strong** |
-| `earnings_calendar` | earnings calendar, dividend calendar | **Strong** |
-| `capital_flow` | capital flow distribution | **Strong** (currently moomoo-only) |
-| `market_movers` / `equity_screener` | top gainers/losers, most active, market sectors (+detail), high dividend, 52-week high/low | **Partial** (rankings, not a screener DSL) |
-| `options_data` | option tick / snapshot / historical bars | **Partial** - no chain summary or greeks; needs the OPRA non-display subscription |
-| `corporate_actions` | corporate actions (Display Solution family) | **Partial** - note the Display-Solution caveat below |
-| `prediction_markets` | event contracts | **Unproven** - verify breadth before touching that chain; it is not a Polymarket substitute |
-| `sec_filings` | filings | **Low value** - `sec_edgar` is free and already wired |
-| `news_data` / `news_sentiment` | news summary (LLM SSE) | **No** - not a headline feed; an LLM summary inside an LLM pipeline is circular |
-| `technical_indicators` | - | **No** - but irrelevant: the repo computes indicators locally from OHLCV |
-| `macro_data`, `exchange_symbols`, `short_interest`, `institution_data`, `insider_transactions` | - | **No endpoint** |
+| `GET /market-data/stocks/footprints/list` | `403 MARKET_DATA_NOT_SUBSCRIBED` | order-flow needs the paid subscription - and the API says so, in code |
+| `GET /trading/{assets/balances,assets/positions,orders/*,activities/*}` | `403 ACCOUNT_ACCESS_DENIED` | no funded account linked to this app (irrelevant for research) |
+| futures/options/crypto endpoints | `417 UNSUPPORTED_CATEGORY` | they take their own category values; not chased (see open questions) |
+| `news/summaries/get`, NOII, `/broker*` (50 ops), event market data | `404` / `400` | not exposed in the sandbox (Display-Solution families are a different product) |
 
-**Display Solution families are a different product.** The `broker-market-data-api/*` endpoints
-(client token, watchlists, logos, some corporate actions, some ratings) exist for *displaying*
-data to end users of a broker platform. A non-display analytics pipeline should use the primary
-families and the non-display entitlement, not those endpoints.
+### Behaviour facts worth coding against
 
-**A genuinely additive surface, not a substitution:** NOII bars/snapshot (net order imbalance,
-i.e. auction imbalance) and Footprint (order-flow volume profile). Neither has a counterpart in
-the current chains; the market analyst could use NOII for open/close auction context. Treat as a
-separate, later proposal with its own evidence requirements - not as part of this integration.
+- **`real_time_required=false` moves the window**: with it, daily bars ended `2026-09-11`; with the
+  default they ended `2026-09-15`. The flag is a data-basis choice, not a nicety.
+- **Daily and above are forward-adjusted; minute bars are unadjusted** - the provider text must say
+  which, because the verifier journals bases.
+- **`category=US_ETF` works** end to end: `IEI` bars, snapshot, fund brief and fund performance all
+  returned data with it.
+- **Token responses carry both `expires` and `expires_at`** (ms) - read `expires_at`.
+- **Error-code vocabulary for typed mapping**: `MISSING_APP_KEY`, `UNAUTHORIZED`,
+  `MARKET_DATA_NOT_SUBSCRIBED`, `ACCOUNT_ACCESS_DENIED`, `ILLEGAL_PARAMETER`,
+  `UNSUPPORTED_CATEGORY`, `UNSUPPORTED_SYMBOL`, `WATCHLIST_NOT_FOUND`, `SYSTEM_ERROR` - all under
+  `{"error_code","message"}`, while unrouted paths use `{"error_msg":"404 Route Not Found"}`.
+- **The instrument master is a usable asset on its own**: 1000 rows with ETF/shortability/margin
+  metadata and a `pagination_key`, i.e. a candidate source for symbol validation, ETF
+  classification and an `exchange_symbols` chain that today rests on one vendor.
+
+## Fit against this repo's `data_vendors` categories (measured, not inferred)
+
+| Category | Webull surface | Verdict after the sweep |
+|---|---|---|
+| `core_stock_apis` | bars (batch, US_STOCK + US_ETF), snapshots, ticks | **Works, no subscription** - US only; journal adjusted-vs-unadjusted and the `real_time_required` basis |
+| `fundamental_data` | company profiles, indicators, ratings, target prices, filings, capital flows, forecast EPS, alerts | **Works**; the three financial STATEMENTS come back empty in the sandbox (prod unverified) |
+| `analyst_ratings` | `analysis/ratings` + `analysis/target-prices` | **Works, no subscription** |
+| `earnings_calendar` | `earnings-calendars`, `dividend-calendars`, `financial-alerts` | **Works** |
+| `capital_flow` | `capital-flows` | **Works** (currently a moomoo-only category) |
+| `equity_screener` / `market_movers` | 5 screener feeds, 200 rows each; market sectors | **Works** (rankings, not a screener DSL) |
+| `sec_filings` | `filings` (6 rows for AAPL) | **Works** - but `sec_edgar` is free and richer; keep it first |
+| `exchange_symbols` | instrument master (1000 rows, ETF/short/margin metadata, pagination) | **Strong candidate** - today this category rests on one vendor |
+| `options_data` | options bars/snapshots/ticks | Category value + OPRA entitlement unresolved; the repo's tools need a chain summary Webull does not expose |
+| `prediction_markets` | event-contract categories/series lists | Instrument lists work; the market-data side was not exposed in the sandbox - not a Polymarket substitute |
+| `institution_data`, `short_interest`, `insider_transactions`, `macro_data`, `news_sentiment` | - | **No endpoint** |
+| `news_data` | `news/summaries/get` (LLM SSE over a watchlist) | **No** - 404 in the sandbox, and an LLM summary inside an LLM pipeline is circular |
+| `technical_indicators` | - | **No** (irrelevant: the repo computes indicators from OHLCV) |
+
+**Additive surfaces with no counterpart today:** the instrument master with ETF/shortability
+metadata, the five screener feeds, financial alerts (next-report estimate vs last year, useful for
+the catalyst overlay), and - once entitled - NOII auction imbalance and Footprint order flow. The
+one endpoint that *proves* the entitlement boundary is `footprints` with its explicit
+`403 MARKET_DATA_NOT_SUBSCRIBED`.
 
 ## Constraints and blockers
 
-1. **US-only.** `US_STOCK`/`US_ETF` categories, US options/futures/event contracts. `0700.HK`,
-   `7203.T`, `BTC-USD` etc. have no path here. In this repo that is fine and already modelled:
-   `dataflows/moomoo.py` raises `NoMarketDataError` for an unmapped symbol and the router falls
-   through to the next vendor. Webull must behave identically.
-2. **Real-time is a separately-purchased Nasdaq non-display subscription**, and app/QT
-   subscriptions do not count. **Only one device may use L1/L2 at a time** - a batch of 4 workers
-   *is* multiple consumers, so either every worker shares one HTTP path (it does: bars are
-   snapshots, not a stream) or the operator's Webull app must not be streaming the same
-   entitlement during a run. Worth an explicit note in the runbook.
-3. **Token lifecycle is a real operational sharp edge for an on-demand tool.** Production tokens
-   need in-app SMS verification within 5 minutes when created, and go `INVALID` after **15
-   consecutive days without API calls** - a tool that runs on demand will hit that. Mitigations:
-   persist the token under `data_cache_dir/`, check status before a run, and treat an invalid
-   token as a typed auth error that falls back to the next vendor rather than failing the batch.
-   **Sandbox tokens need no 2FA** - the development and CI-shaped path is clean.
-4. **Per-endpoint limits are tighter than the global one** (60 req/60s for income statements).
-   A provider-level limiter must respect the tightest budget it uses, not just 300/min.
-5. **No fundamentals for ETFs in the statement family** (ETF coverage is the `Fund*`
-   endpoints: brief, performance, net value, holdings, dividends, rating, splits, allocation,
-   files). `IEI`-style names need their own mapping, or they fall through to the current vendor.
+1. **US-only.** `US_STOCK`/`US_ETF` categories, US options/futures/crypto/event contracts.
+   Non-US symbols must raise a typed `NoMarketDataError` and fall through, exactly like
+   `moomoo.py`. The measured route/auth behaviour in the sandbox confirms this is enforced at the
+   endpoint, not in configuration.
+2. **Two keys, two environments.** The key now in `.env` is a **sandbox** key: it authenticates on
+   `api.sandbox.webull.com` and is rejected by production (`401 UNAUTHORIZED` "…correct
+   environment"). Production needs its own application (1-2 business days) and its own key, and
+   production market-data paths live under `/openapi`. Nothing above should be read as "prod
+   behaves like the sandbox".
+3. **Financial statements are the open surface.** Income/balance/cash-flow returned `[]` in the
+   sandbox for every symbol/type/count variant tried. Whether they work in production is the
+   question a prod key answers; until then the provider must not be the *only* statement source.
+4. **Real-time is a separately-purchased Nasdaq non-display subscription**, and app/QT
+   subscriptions do not count; only one device may use L1/L2 at a time. The API states the boundary
+   itself: `footprints` answers `403 MARKET_DATA_NOT_SUBSCRIBED` today.
+5. **Token lifecycle.** Sandbox tokens are `NORMAL` immediately with no 2FA (measured). Production
+   tokens need in-app SMS verification within 5 minutes and are documented as expiring after 15
+   days (and as going `INVALID` after 15 idle days) - check status before a run, persist the token
+   under `data_cache_dir/`, and treat an invalid token as a typed auth error that falls through.
+6. **Per-endpoint limits are tighter than the global one** (60 req/60s for income statements vs
+   300/min overall). The limiter must respect the tightest budget it uses.
+7. **ETF coverage is a different family** (`fund-brief`, `fund-performances` returned real data for
+   `IEI`; holdings/net-values/ratings/splits/files/allocations were empty in the sandbox), so the
+   provider needs an explicit instrument-type branch, not a statement call with a different symbol.
 
 ## Design
 
@@ -210,40 +250,40 @@ tradingagents/dataflows/webull.py          the category functions the router dis
   what makes the provider cheap inside a 4-worker batch. Reuse the run-level OHLCV cache rather
   than re-fetching per analyst.
 
-## Implementation plan
+## Implementation plan (P0 is done)
 
 | Phase | Work | Acceptance |
 |---|---|---|
-| **P0** (operator, no code) | Create a Webull account, apply for the **sandbox** API (auto-approved, minutes), generate App Key/Secret. Decide on the production app (1-2 days) and on buying Nasdaq Basic/Totalview **non-display**. | Keys in `.env`; someone has answered "can the sandbox serve US daily bars at all?" (see open question 1) |
-| **P1** | `webull_common.py` + a `--once`-style smoke script (not in the batch path). | Signature conformance test passes against the documented vector; token persist/check works; limiter math unit-tested; a live sandbox call returns bars |
-| **P2** | `webull.py` bars + snapshot; chain adding Webull **last** in `core_stock_apis`; `--vendor webull` preset in `batch.py`. | Same-symbol OHLCV agrees with the primary vendor within tolerance on N symbols; `tests/test_batch_vendor_preset.py` still passes (a preset must cover every category key); fallback proven by simulating a 403 |
-| **P3** | Fundamentals family into `fundamental_data` as a **co-equal head** (`webull,moomoo,yfinance,...`) and `analyst_ratings`/`earnings_calendar`/`capital_flow`. | A report tree whose `statement_parsing` reads a period-tagged series, and whose `verify_flags.json` `basis` registry shows provider-sourced `fy_annual`/`quarterly` instead of `level` fallbacks |
-| **P4** (optional) | MQTT streaming (protobuf, 5-connection cap, no resubscribe on reconnect). | Only if a consumer needs sub-second quotes; the research pipeline does not |
-| **P5** (optional) | NOII / Footprint as additive tools | Separate proposal with its own evidence plan |
+| **P0** ✅ **done** | Sandbox application + App Key/Secret in `.env`; signer verified against the vendor vector; full 167-operation sweep with statuses recorded (Appendix A); path/environment matrix measured | Keys stored (never committed); probe runs; the usable set is known rather than assumed |
+| **P1** | `webull_common.py` (signing, token store, limiter, typed errors from the measured vocabulary) + `webull.py` with bars/snapshots; chain Webull **last** in `core_stock_apis`; `--vendor webull` preset | Signature conformance test; a live sandbox bars+snapshot call from inside the package; preset-completeness test passes; fallback proven against a simulated `403` |
+| **P2** | Fundamentals-lite (profiles, indicators, ratings, targets, filings, capital flows, calendars, alerts) + ETF branch via the `fund-*` family | Trees where those reads appear in evidence with the provider named, and the `basis` registry shows the provider's own `fiscal_*`/`effective_start_date` fields |
+| **P3** | Instrument master (`/trading/instruments/stocks/profiles/list`, 1000 rows + `pagination_key`) as a candidate `exchange_symbols`/ETF-classification source | Symbol validation and ETF detection served from a second source; no behaviour change while it is a fallback |
+| **P4** | Production application + keys; re-probe the statement endpoints there | The statement question answered with data, then statements wired or explicitly not wired |
+| **P5** (optional) | Streaming (MQTT/protobuf, 5-connection cap) and, *only after* the purchase, NOII + Footprint | A consumer that actually needs sub-second or order-flow data |
 
-Tests follow the repo's hermetic convention: a transport seam injected into `WebullSession`, no
-network in unit tests, one signature vector test, one mapping test per endpoint, one fallback
-test per typed error, and the existing preset-completeness test extended.
+Tests keep the repo's hermetic convention: a transport seam, no network in unit tests, one
+signature-vector test, one mapping test per endpoint family, one fall-through test per typed error,
+plus the existing preset-completeness test.
 
-Rollout is zero-risk by construction: chains are unchanged unless `.env` selects Webull, keys
-live in `.env` (mirrored in `.env.example`), and every failure degrades to the next vendor.
+Rollout stays zero-risk: chains unchanged unless `.env` selects Webull, keys in `.env`
+(mirrored in `.env.example`), every failure degrades to the next vendor.
 
 ## Open questions (each with how to close it)
 
-1. **Does the sandbox serve US daily bars and statements without a paid entitlement?** The
-   overview says non-display OpenAPI usage requires Nasdaq Basic/Totalview, while the sandbox is
-   documented as 15-minute delayed "by default" - these two statements only reconcile if the
-   sandbox is usable unentitled. **This is the go/no-go for the whole integration** and it costs
-   one P0 smoke call to answer - the probe for it is written and self-tested (creates a token,
-   then reads bars/snapshot/income/ratings/capital-flow/news/instruments and prints an
-   entitlement verdict); it only needs `WEBULL_APP_KEY`/`WEBULL_APP_SECRET` from an
-   auto-approved sandbox application.
-2. Are statements available for ETFs, or only the `Fund*` family? (Affects `IEI`-style names.)
-3. Is `Filings` metadata-only, and does it add anything over `sec_edgar`? (Probably not - default: skip.)
-4. Is the event-contract universe broad enough to be a `prediction_markets` source, or is it
-   Webull's own product set? (Default: leave that chain alone.)
-5. Subscription price for Nasdaq Basic/Totalview non-display: not published on the docs pages;
-   the operator must price it on the purchase page before P2 goes to production.
+1. **Do the financial statements work in production?** The sandbox returns `[]` for all three. Close
+   with a prod key (P4) and one call each to `income-statements/get`, `balance-sheets/get`,
+   `cash-flows/get`.
+2. **Which category values do options/futures/crypto endpoints take, and are they entitled?** They
+   answered `417 UNSUPPORTED_CATEGORY` for `US_STOCK`; their reference pages carry the enums. Close
+   by reading those pages, then one call each with a real contract/pair symbol.
+3. **NOII parameters.** `noii-snapshots` answered `400 Parameters not valid`; the reference page
+   lists the required set. Close by reading it and re-probing; then decide whether L1/L2 is needed.
+4. **Depth (`stocks/depths/list`)**: `400 Parameters not valid` with a minimal parameter set -
+   parameter gap, entitlement, or both. Close the same way.
+5. **Price of the advanced-quotes subscription** (not published on the docs pages): the operator
+   prices it on the purchase page before any P5 work. Note the measured evidence that the surfaces
+   the repo actually wants (bars, snapshots, screeners, fundamentals-lite, instrument master) need
+   no purchase at all.
 
 ## Recommendation
 
@@ -257,3 +297,239 @@ streaming and NOII/Footprint as separate, later decisions.
 The two things that can still kill it: entitlement economics (open question 5) and the 15-day
 idle token invalidation (constraint 3) - the first is a purchase decision, the second is a
 design detail that must not be allowed to break a batch.
+
+## Appendix A — full endpoint inventory (167 operations, swept 2026-09-16)
+
+Harvested from the 184 reference pages in Webull's `llms.txt` index and probed against the sandbox
+with a real token. "not called (mutating)" = deliberately not invoked (order/account/watchlist
+mutations).
+
+### Auth & tokens
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| POST | `/auth/client-tokens/create` | createClientToken | `SKIPPED` — None |
+| POST | `/auth/client-tokens/refresh` | refreshClientToken | `404` — not in sandbox |
+| POST | `/auth/tokens/check` | checkToken | `400` — Bad Request: Required request body is missing: public … |
+| POST | `/auth/tokens/create` | createToken | `SKIPPED` — None |
+
+### Stocks market data
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/stocks/bars/get` | barsUsingGET | `404` — not in sandbox |
+| POST | `/market-data/stocks/bars/list` | historicalBars | `200` — result[1] |
+| GET | `/market-data/stocks/depths/list` | quotes | `200` — asks,bids,instrument_id,quote_time,symbol |
+| GET | `/market-data/stocks/footprints/list` | footprint | `400` — 400: Parameters type miss match |
+| GET | `/market-data/stocks/noii-bars/list` | getNoiiBars | `400` — 400: Parameters not valid |
+| GET | `/market-data/stocks/noii-snapshots/list` | getNoiiSnapshot | `400` — 400: Parameters not valid |
+| GET | `/market-data/stocks/snapshots/list` | snapshot | `200` — list[1] |
+| POST | `/market-data/stocks/snapshots/list` | snapshotUsingGET | `404` — not in sandbox |
+| GET | `/market-data/stocks/ticks/list` | tickUsingGET | `200` — result[2] |
+
+### Fundamentals
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/fundamentals/analysis/ratings/get` | listAnalystRatingUsingGET | `200` — buy,category,effective_start_date,hold,number |
+| GET | `/market-data/fundamentals/analysis/target-prices/get` | listAnalystTargetPriceUsingGET | `200` — category,currency,effective_start_date,high,low |
+| GET | `/market-data/fundamentals/balance-sheets/get` | financialBalancesheet | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/capital-flows/get` | capitalFlow | `200` — list[5] |
+| GET | `/market-data/fundamentals/cash-flows/get` | financialCashflow | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/company-profiles/get` | listCompanyProfileUsingGET | `200` — address,category,ceo,company_name,employees |
+| GET | `/market-data/fundamentals/dividend-calendars/list` | dividendCalendar | `200` — list[2] |
+| GET | `/market-data/fundamentals/earnings-calendars/list` | earningsCalendar | `200` — list[2] |
+| GET | `/market-data/fundamentals/filings/list` | filings | `200` — category,filings,symbol |
+| GET | `/market-data/fundamentals/financial-alerts/get` | financialAlert | `200` — currency,end_date,eps_est,eps_ly,fiscal_period |
+| GET | `/market-data/fundamentals/forecast-eps/get` | forecastEps | `200` — list[5] |
+| GET | `/market-data/fundamentals/fund-allocations/get` | fundAllocation | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-brief/get` | fundBrief | `200` — issuer |
+| GET | `/market-data/fundamentals/fund-dividends/get` | fundDividends | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-files/get` | fundFiles | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-holdings/get` | fundHoldings | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-net-values/get` | fundNetValue | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-performances/get` | fundPerformance | `200` —  |
+| GET | `/market-data/fundamentals/fund-ratings/get` | fundRating | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/fund-splits/get` | fundSplits | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/income-statements/get` | financialIncome | `200` — no data in sandbox |
+| GET | `/market-data/fundamentals/indicators/get` | financialIndicators | `200` — currency,values |
+| GET | `/market-data/fundamentals/industry-comparisons/get` | industryComparison | `200` —  |
+| POST | `/market-data/fundamentals/logos/list` | batchLogoUsingPOST | `404` — not in sandbox |
+
+### Screener / rankings
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/screeners/gainers-losers/list` | getGainersLosers | `200` — list[200] |
+| GET | `/market-data/screeners/high-dividend-ranks/list` | getHighDividend | `200` — list[200] |
+| GET | `/market-data/screeners/market-sectors/get` | getMarketSectorsDetail | `200` — advanced,change_ratio,declined,flat,id |
+| GET | `/market-data/screeners/market-sectors/list` | getMarketSectors | `200` — data[20] |
+| GET | `/market-data/screeners/top-actives/list` | topActiveUsingGETNew | `200` — list[200] |
+| GET | `/market-data/screeners/week52-high-low/list` | getWeek52HighLow | `200` — list[200] |
+
+### Watchlists
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| POST | `/market-data/watchlists/create` | createWatchlist | `400` — 400: Request body not readable |
+| POST | `/market-data/watchlists/delete` | deleteWatchlist | `417` — WATCHLIST_NOT_FOUND: The watchlist does not exist or d… |
+| POST | `/market-data/watchlists/instruments/add` | addWatchlistInstruments | `417` — ILLEGAL_PARAMETER: instruments is empty. |
+| GET | `/market-data/watchlists/instruments/list` | getWatchlistInstruments | `417` — WATCHLIST_NOT_FOUND: The watchlist does not exist or d… |
+| POST | `/market-data/watchlists/instruments/remove` | removeWatchlistInstruments | `417` — ILLEGAL_PARAMETER: instruments is empty. |
+| POST | `/market-data/watchlists/instruments/update` | updateWatchlistInstruments | `417` — ILLEGAL_PARAMETER: instruments is empty. |
+| GET | `/market-data/watchlists/list` | getWatchlist | `200` — no data in sandbox |
+| POST | `/market-data/watchlists/update` | updateWatchlist | `417` — WATCHLIST_NOT_FOUND: The watchlist does not exist or d… |
+
+### Futures
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/futures/bars/list` | futuresHistoricalBars | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/market-data/futures/depths/list` | futuresDepthOfBook | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/market-data/futures/footprints/list` | futuresFootprint | `400` — 400: Parameters type miss match |
+| GET | `/market-data/futures/snapshots/list` | futuresSnapshot | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/market-data/futures/ticks/list` | futuresTick | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+
+### Options
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/options/bars/list` | optionHistoricalBars | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/market-data/options/snapshots/list` | optionSnapshot | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/market-data/options/ticks/list` | optionTick | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+
+### Crypto
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/crypto/bars/list` | cryptoBars | `400` — 400: Parameters type miss match |
+| GET | `/market-data/crypto/snapshots/list` | cryptoSnapshot | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+
+### Event contracts (market data)
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/event-contracts/bars/list` | eventBars | `400` — 400: Parameters type miss match |
+| GET | `/market-data/event-contracts/depths/list` | eventDepth | `417` — UNSUPPORTED_SYMBOL: invalid symbols: [AAPL] |
+| GET | `/market-data/event-contracts/game-stats/get` | eventGameStatsUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/live-data/get` | eventLiveDataUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/markets/bars/list` | eventMarketBarsUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/markets/bars/list-by-event` | eventMarketBarsByEventUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/markets/depths/list` | eventMarketDepthUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/markets/snapshots/list` | eventMarketSnapshotUsingGET | `404` — not in sandbox |
+| GET | `/market-data/event-contracts/snapshots/list` | eventSnapshot | `417` — UNSUPPORTED_SYMBOL: invalid symbols: [AAPL] |
+| GET | `/market-data/event-contracts/ticks/list` | eventTick | `417` — UNSUPPORTED_SYMBOL: invalid symbols: [AAPL] |
+
+### News
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| POST | `/market-data/news/summaries/get` | newsSummary | `404` — not in sandbox |
+
+### Instruments & profiles (trading API)
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/trading/instruments/crypto/profiles/list` | cryptoInstrumentList | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/trading/instruments/event-contracts/categories/list` | eventCategoriesList | `200` — list[9] |
+| GET | `/trading/instruments/event-contracts/events/list` | eventEventsList | `200` — no data in sandbox |
+| GET | `/trading/instruments/event-contracts/markets/list` | eventMarketList | `200` — no data in sandbox |
+| GET | `/trading/instruments/event-contracts/series/list` | eventSeriesList | `200` — data[500] |
+| GET | `/trading/instruments/futures/contracts/list` | futuresInstrumentList | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/trading/instruments/futures/product-classes/list` | futuresProductsClass | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/trading/instruments/futures/product-codes/list` | futuresProducts | `417` — UNSUPPORTED_CATEGORY: The category is not supported by… |
+| GET | `/trading/instruments/stocks/profiles/list` | instrumentList | `200` — data[1000] |
+
+### Accounts / orders / assets (trading API)
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/trading/accounts/list` | accountList | `200` — list[5] |
+| GET | `/trading/activities/cash-activities/list` | tradeCashActivityByType | `403` — ACCOUNT_ACCESS_DENIED |
+| GET | `/trading/assets/balances/get` | accountBalance | `403` — ACCOUNT_ACCESS_DENIED |
+| GET | `/trading/assets/positions/list` | accountPosition | `403` — ACCOUNT_ACCESS_DENIED |
+| POST | `/trading/orders/batch-place` | Order Batch Place | `SKIPPED` — None |
+| POST | `/trading/orders/cancel` | Common Order Cancel | `SKIPPED` — None |
+| GET | `/trading/orders/get` | orderDetail | `403` — ACCOUNT_ACCESS_DENIED |
+| GET | `/trading/orders/historical-orders/list` | orderHistory | `403` — ACCOUNT_ACCESS_DENIED |
+| GET | `/trading/orders/open-orders/list` | orderOpen | `403` — ACCOUNT_ACCESS_DENIED |
+| POST | `/trading/orders/place` | Common Order Place | `SKIPPED` — None |
+| POST | `/trading/orders/preview` | Common Order Preview | `SKIPPED` — None |
+| POST | `/trading/orders/replace` | Common Order Replace | `SKIPPED` — None |
+
+### Broker / Display Solution
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/broker/accounts/applications/get` | getAccountApplicationDetail | `404` — not in sandbox |
+| POST | `/broker/accounts/close` | closeAccount | `404` — not in sandbox |
+| POST | `/broker/accounts/create` | createAccountApply | `SKIPPED` — None |
+| GET | `/broker/accounts/get` | getAccountDetail | `404` — not in sandbox |
+| GET | `/broker/accounts/list` | listAccounts | `404` — not in sandbox |
+| POST | `/broker/accounts/update` | updateAccountApply | `SKIPPED` — None |
+| GET | `/broker/activities/cash-activities/list` | brokerCashActivityByType | `404` — not in sandbox |
+| GET | `/broker/agreements/get` | brokerGetAgreementDetails | `SKIPPED` — None |
+| GET | `/broker/agreements/list` | brokerListAgreementsByType | `SKIPPED` — None |
+| GET | `/broker/assets/balances/get` | accountBalance | `404` — not in sandbox |
+| GET | `/broker/assets/positions/list` | accountPosition | `404` — not in sandbox |
+| GET | `/broker/assets/summaries/get` | summary | `404` — not in sandbox |
+| POST | `/broker/credits/create` | brokerFundingCreditCreate | `SKIPPED` — None |
+| GET | `/broker/credits/get` | brokerFundingCreditQuery | `SKIPPED` — None |
+| GET | `/broker/documents/download` | documentDownload | `SKIPPED` — None |
+| POST | `/broker/documents/upload` | documentUpload | `SKIPPED` — None |
+| POST | `/broker/fees/create` | brokerFundingFeeCreate | `SKIPPED` — None |
+| GET | `/broker/fees/get` | brokerFundingFeeQuery | `SKIPPED` — None |
+| GET | `/broker/forms/get` | getFormContent | `404` — not in sandbox |
+| GET | `/broker/forms/list` | getFormList | `404` — not in sandbox |
+| GET | `/broker/forms/versions/list` | getFormVersionList | `404` — not in sandbox |
+| POST | `/broker/funding/ach-relationships/create` | createAchRelationship | `SKIPPED` — None |
+| POST | `/broker/funding/ach-relationships/delete` | deleteAchRelationship | `SKIPPED` — None |
+| GET | `/broker/funding/ach-relationships/list` | listAchRelationships | `SKIPPED` — None |
+| POST | `/broker/funding/bank-relationships/create` | createBankRelationship | `SKIPPED` — None |
+| POST | `/broker/funding/bank-relationships/delete` | deleteBankRelationship | `SKIPPED` — None |
+| GET | `/broker/funding/bank-relationships/list` | listLinkedBankAccounts | `SKIPPED` — None |
+| POST | `/broker/funding/instant-funding/create` | brokerFundingInstantCreate | `SKIPPED` — None |
+| GET | `/broker/funding/instant-funding/get` | brokerFundingInstantQuery | `SKIPPED` — None |
+| POST | `/broker/funding/transfers/cancel` | cancelTransfer | `SKIPPED` — None |
+| POST | `/broker/funding/transfers/create` | createTransfer | `SKIPPED` — None |
+| GET | `/broker/funding/transfers/get` | transferDetail | `SKIPPED` — None |
+| GET | `/broker/funding/transfers/list` | transferList | `SKIPPED` — None |
+| GET | `/broker/instruments/event-contracts/categories/list` | brokerEventCategoriesList | `404` — not in sandbox |
+| GET | `/broker/instruments/event-contracts/events/list` | brokerEventEventsList | `404` — not in sandbox |
+| GET | `/broker/instruments/event-contracts/markets/list` | brokerEventMarketList | `404` — not in sandbox |
+| GET | `/broker/instruments/event-contracts/series/list` | brokerEventSeriesList | `404` — not in sandbox |
+| GET | `/broker/instruments/stocks/corporate-actions/get` | brokerCorporateActionsDetail | `404` — not in sandbox |
+| GET | `/broker/instruments/stocks/profiles/list` | listStockInstruments | `404` — not in sandbox |
+| POST | `/broker/journals/cash-journals/create` | brokerJournalCashCreate | `SKIPPED` — None |
+| GET | `/broker/journals/cash-journals/get` | brokerJournalCashQuery | `404` — not in sandbox |
+| GET | `/broker/master-data/enums/list` | listEnums | `404` — not in sandbox |
+| GET | `/broker/master-data/trading-calendars/list` | listTradeCalendar | `404` — not in sandbox |
+| POST | `/broker/orders/cancel` | Common Order Cancel | `SKIPPED` — None |
+| GET | `/broker/orders/get` | orderDetail | `404` — not in sandbox |
+| GET | `/broker/orders/historical-orders/list` | orderHistory | `404` — not in sandbox |
+| GET | `/broker/orders/open-orders/list` | orderOpen | `404` — not in sandbox |
+| POST | `/broker/orders/place` | Common Order Place | `SKIPPED` — None |
+| POST | `/broker/orders/preview` | Common Order Preview | `SKIPPED` — None |
+| POST | `/broker/orders/replace` | Common Order Replace | `SKIPPED` — None |
+
+### Connect API (OAuth)
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/oauth2/auth-codes/get` | getAuthorizationCode | `404` — not in sandbox |
+| POST | `/oauth2/tokens/create` | CreateAndRefreshToken | `SKIPPED` — None |
+
+### Other
+
+| Method | Path | What it is | Sandbox result |
+|---|---|---|---|
+| GET | `/market-data/instruments/event-contracts/categories/tags/list` | allTagsUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/event-contracts/events/list` | eventListUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/event-contracts/milestones/list` | milestonesUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/event-contracts/series/list` | seriesListUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/event-contracts/sports-filters/list` | sportsFilterUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/stocks/corporate-actions/list` | corpActionUsingGET | `404` — not in sandbox |
+| GET | `/market-data/instruments/stocks/corporate-actions/list-by-market` | corpMarketUsingGET | `404` — not in sandbox |
+| POST | `/market-data/instruments/stocks/profiles/list` | listUsingGET | `404` — not in sandbox |
+| POST | `/market-data/streaming/subscribe` | subscribeUsingPOST | `SKIPPED` — None |
+| POST | `/market-data/streaming/unsubscribe` | unsubscribeUsingPOST | `SKIPPED` — None |
