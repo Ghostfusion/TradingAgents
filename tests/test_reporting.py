@@ -827,6 +827,54 @@ def test_run_card_consistency_is_null_when_no_analyst_report_exists(tmp_path):
     assert _run_card_analyst_consistency(tmp_path) is None
 
 
+def test_run_card_records_the_evidence_mode(tmp_path):
+    """The card must say which evidence mode built the tree. The three
+    2026-09-16 17:2x trees (MSFT/VTV/IEI) ran with the deterministic gather
+    disabled - no ``_rendered_block``, no ``_model_pool`` - so their
+    prompt-level identity / reference-price lines were absent and the verifier
+    could not ground a venue or a fund mandate. That was inferable only from a
+    missing reserved key."""
+    from tradingagents.reporting import _run_card_evidence
+
+    forced_state = {
+        "tool_evidence": {
+            "_rendered_block": [{"analyst": "market", "block": "x"}],
+            "_model_pool": {"market": []},
+            "market": [{"tool": "get_indicators"}],
+            "news": [{"tool": "get_news"}],
+        }
+    }
+    out = _run_card_evidence(forced_state, {"analyst_forced_tools": ["ALL"]})
+    assert out["mode"] == "forced"
+    assert out["forced_tools"] == ["ALL"]
+    assert out["analysts"] == ["market", "news"]      # reserved keys are not analysts
+    assert out["rendered_blocks"] == 1
+
+    legacy = _run_card_evidence({"tool_evidence": {"market": [{"tool": "get_indicators"}]}},
+                                {"analyst_forced_tools": []})
+    assert legacy["mode"] == "llm" and legacy["rendered_blocks"] == 0
+
+
+def test_run_card_evidence_block_survives_a_hostile_state():
+    """A card block is advisory: it must not be able to cost the whole card."""
+    from tradingagents.reporting import _run_card_evidence
+
+    class _Hostile(dict):
+        def get(self, key, *default):
+            raise RuntimeError("boom")
+
+    assert _run_card_evidence(_Hostile(), {})["mode"] == "unknown"
+
+
+def test_run_card_carries_the_evidence_block(tmp_path):
+    """Wiring: the mode record reaches a real run card."""
+    write_report_tree(_state(), "TST", tmp_path, config={"analyst_forced_tools": ["ALL"]})
+
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["evidence"]["mode"] == "llm"          # _state() carries no gather
+    assert card["evidence"]["forced_tools"] == ["ALL"]
+
+
 def test_run_card_carries_the_analyst_consistency_record(tmp_path, monkeypatch):
     """Wiring: the identity record must reach a real run card, not only the
     helper. NVDA 2026-09-12 - the checks existed but ran only in the opt-in

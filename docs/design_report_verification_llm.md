@@ -326,6 +326,23 @@ correct reports; each has a reproducer).**
   stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
   content). The deterministic half is stable; the LLM half is not, which is why
   every non-GROUNDED claim is adjudicated rather than counted.
+- **A legacy-mode tree cannot be verified for prompt-level facts.** The three
+  trees regenerated at 2026-09-16 17:2x (MSFT/VTV/IEI
+  `20260916_174952/175407/175246`) were built with `analyst_forced_tools` empty
+  - the `TRADINGAGENTS_ANALYST_FORCED_TOOLS=" "` value the test suite exports
+  had leaked into that shell - so `_rendered_block` and `_model_pool` are absent
+  from their `tool_evidence.json` and the digest's `instrument_identity` /
+  `reference_price` lines are empty (an analyst's prompt-level facts are then
+  ungroundable: the IEI news stem's "owns 3-7 Year Treasury Bond exposure" came
+  back UNSUPPORTED on one pass, PASS on the next). The gather-off path is
+  deliberate (hermetic tests) but the downgrade was silent; `run_card.json` now
+  records `evidence: {mode, forced_tools, analysts, rendered_blocks}` so a tree
+  states which mode built it. **IEI 17:52 re-verified after this round's
+  corrections: market PASS, news PASS, sentiment PASS, fundamentals FLAG on the
+  disclosed beta pair above** (the only surviving claim; the market table's
+  "6th straight lower close" vs the body's "Eighth", the `get_vif_read` factor
+  attribution, and the split QQQ relative-strength row were report-text defects,
+  all corrected).
 
 Confirmed-but-unfixed, per working-agreement rule 8. None blocks delivery; all
 are advisory-noise or capture gaps with a known reproducer.

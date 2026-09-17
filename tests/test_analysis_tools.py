@@ -957,6 +957,20 @@ def test_strategy_quality_derives_returns_from_ohlcv(monkeypatch):
     assert "n=" in out
 
 
+def test_strategy_quality_charges_a_buy_and_hold_once(monkeypatch):
+    """A price-derived series is buy-and-hold: the round trip is charged once,
+    not to every one of n daily returns. The per-day bleed fabricated a -21.10%
+    net CAGR and a 26.15% "backtest" drawdown for IEI from a price path with a
+    raw +1.53% CAGR / 3.32% max drawdown (2026-09-16)."""
+    flat = [100.0] * 300
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": flat})
+    out = T.get_strategy_quality.invoke({"ticker": "IEI", "cost_bps": 10.0})
+    net_cagr = float(out.split("net_cagr=")[1].split("%")[0])
+    # 2 legs x 10bp on a flat path is ~-0.17% annualized (per-period cost: -22%;
+    # cost silently dropped: 0.0%).
+    assert -0.5 < net_cagr < -0.05
+
+
 def test_strategy_quality_too_few_returns_degrades(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [100.0, 101.0]})
     out = T.get_strategy_quality.invoke({"ticker": "AAPL"})

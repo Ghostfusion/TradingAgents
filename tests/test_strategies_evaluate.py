@@ -4,11 +4,13 @@ from tradingagents.strategies.evaluate import (
     cagr,
     deflated_sharpe,
     equity_curve,
+    information_ratio,
     max_drawdown,
     net_returns,
     pbo_flag,
     sharpe,
     total_return,
+    tracking_error,
     volatility,
     walk_forward_splits,
 )
@@ -32,6 +34,21 @@ def test_net_returns_illiq_scales_cost():
 def test_total_return_compounds():
     assert abs(total_return([0.1, 0.1]) - 0.21) < 1e-9
     assert total_return([]) == 0.0
+
+
+def test_tracking_error_of_a_constant_offset_is_zero():
+    """A flat cost offset on an exactly-tracked series is zero TE, not float
+    noise: the std of the ~1e-18 residuals annualized to a TE ~7e-18 and then
+    divided into a nonsense information ratio (IEI 2026-09-16 shipped
+    info_ratio=-2.9e17 in an analyst prompt)."""
+    raw = [0.012345, -0.009876, 0.004321, 0.007654,
+           -0.003210, 0.001234, -0.005432, 0.002345]
+    offset = [r - 0.001 for r in raw]
+    assert tracking_error(offset, raw) == 0.0
+    assert information_ratio(offset, raw) is None
+    # A genuinely divergent series still measures.
+    te = tracking_error(raw, [r * 1.5 for r in raw])
+    assert te is not None and te > 1e-3
 
 
 def test_cagr_zero_on_empty():

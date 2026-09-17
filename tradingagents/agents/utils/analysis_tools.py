@@ -3578,7 +3578,7 @@ def get_strategy_quality(
     returns: Annotated[
         list[float] | None, "optional daily/simple returns; defaults to price-derived"
     ] = None,
-    cost_bps: Annotated[float, "per-trade cost in basis points, default 10"] = 10.0,
+    cost_bps: Annotated[float, "round-trip cost in basis points, default 10"] = 10.0,
 ) -> str:
     """Risk-adjusted quality of a strategy over its return series: net CAGR,
     annualized volatility and Sharpe ratio. Use when judging whether a
@@ -3587,7 +3587,10 @@ def get_strategy_quality(
     Args:
         ticker: ticker symbol (used to derive default returns when not given).
         returns: optional explicit daily/% returns list.
-        cost_bps: per-trade cost subtracted from each period return.
+        cost_bps: cost in basis points. A price-derived series is buy-and-hold
+            (one entry + one exit), so the two legs are charged once each; an
+            explicit strategy series keeps the per-period convention, where
+            each period is a rebalance/trade.
 
     Returns:
         A single line with the computed metrics, or an explicit 'unavailable'.
@@ -3618,14 +3621,29 @@ def get_strategy_quality(
         from tradingagents.strategies.rate_utils import gain_to_pain
     except Exception as exc:  # noqa: BLE001
         return f"strategy quality unavailable: {exc}"
+    price_derived = False
     if returns is None or not returns:
         closes = _ohlcv(ticker).get("closes") or []
         if len(closes) < 30:
             return f"strategy quality unavailable for {ticker}: not enough price history."
         returns = _daily_returns(closes)
+        price_derived = True
     if len(returns) < 4:
         return f"strategy quality unavailable for {ticker}: need >=4 returns."
-    net = net_returns(returns, cost_bps=cost_bps)
+    # Cost is per TRADE, and a price-derived series is buy-and-hold: one entry,
+    # one exit. Charging cost_bps to each of the n daily returns compounded a
+    # 10bp/day bleed contradicting the very price path it came from (IEI
+    # 2026-09-16: net_cagr -21.10%, max_dd(backtest) 26.15%, sharpe -7.01 from
+    # a series whose raw CAGR is +1.53% with a 3.32% max drawdown). Charge the
+    # two legs once each; an explicit strategy series keeps the per-period
+    # convention (one trade per period, as the backtest paths assume).
+    if price_derived:
+        one_way = float(cost_bps) / 10000.0 if cost_bps else 0.0
+        net = list(returns)
+        net[0] = net[0] - one_way
+        net[-1] = net[-1] - one_way
+    else:
+        net = net_returns(returns, cost_bps=cost_bps)
     cg = cagr(net)
     vol = volatility(net)
     shr = sharpe(net)

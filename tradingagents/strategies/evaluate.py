@@ -459,6 +459,15 @@ def tracking_error(returns: list[float], benchmark: list[float],
     if n < 2:
         return None
     diff = [r[i] - b[i] for i in range(n)]
+    # A constant difference series - exact tracking, or a flat per-period cost
+    # offset - leaves only floating-point residue, and the std of ~1e-19
+    # residuals annualizes to a TE around 1e-18, which then divides into a
+    # meaningless ratio (IEI 2026-09-16 surfaced te=7.7e-19 -> ir=-2.9e17 in
+    # an analyst prompt). A spread that is within float precision of the
+    # values themselves IS zero tracking error.
+    spread = max(diff) - min(diff)
+    if spread <= max(abs(x) for x in diff) * 1e-12:
+        return 0.0
     md = sum(diff) / n
     var = sum((d - md) * (d - md) for d in diff) / (n - 1)
     return math.sqrt(var * periods_per_year)

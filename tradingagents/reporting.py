@@ -726,6 +726,41 @@ def write_research_decision(
     )
 
 
+def _run_card_evidence(final_state: dict, cfg: dict | None) -> dict:
+    """Evidence-mode record for run_card.json (advisory; additive key).
+
+    The deterministic gatherer freezes each analyst's first-rendered evidence
+    block under ``_rendered_block``; the legacy LLM-selected path never writes
+    that key. A tree built in the legacy mode still carries the model's own
+    tool leaves, but none of the prompt-level lines (resolved identity,
+    reference price) - so its venue / mandate / price-basis claims cannot be
+    re-verified post-hoc, and the mode was inferable only from a missing
+    reserved key. It is reachable by accident: an empty ``analyst_forced_tools``
+    (e.g. the ``" "`` value the test suite exports) silently disables the
+    gather for a whole batch. Three trees of the 2026-09-16 17:2x batch
+    (MSFT/VTV/IEI) were built that way and carry no ``_rendered_block``.
+    """
+    try:
+        from tradingagents.agents.utils.evidence_gather import RENDERED_BLOCK_KEY
+
+        evidence = final_state.get("tool_evidence") or {}
+        rendered = evidence.get(RENDERED_BLOCK_KEY)
+        analysts = sorted(
+            str(k)
+            for k, v in evidence.items()
+            if not str(k).startswith("_") and isinstance(v, list)
+        )
+        forced = [str(n) for n in ((cfg or {}).get("analyst_forced_tools") or [])]
+    except Exception:  # noqa: BLE001 - a card block must never cost the card
+        return {"mode": "unknown", "forced_tools": [], "analysts": [], "rendered_blocks": 0}
+    return {
+        "mode": "forced" if isinstance(rendered, list) and rendered else "llm",
+        "forced_tools": forced,
+        "analysts": analysts,
+        "rendered_blocks": len(rendered) if isinstance(rendered, list) else 0,
+    }
+
+
 def _write_tool_evidence(final_state: dict, ticker: str, save_path):
     """Persist per-analyst forced-tool evidence for reproducibility diffing.
 
@@ -1403,6 +1438,11 @@ def write_report_tree(
             # audit "no data" vs "rate-limited" vs "not configured" without
             # re-running the fetch. Advisory; null on success paths.
             "data_absence": _run_card_data_absence(save_path),
+            # Which evidence mode built this tree: the deterministic forced
+            # gather (prompt-level identity / reference-price lines frozen in
+            # tool_evidence.json) or the legacy LLM-selected path, which has
+            # neither. Advisory; additive key.
+            "evidence": _run_card_evidence(final_state, cfg),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),
