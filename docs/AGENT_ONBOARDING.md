@@ -388,6 +388,33 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the four-score architecture (owner's spec) is added to
+  `docs/design_fundamental_factor_weight_model.md` as **§3.7**, grounded component-by-component against the engine by
+  three read-only inventories (technical / regime / risk), with a literature pass. The shape: four SEPARATE 0-100
+  scores - `FundamentalScore` (the ten categories + bands 80-100 exceptional / 65-79 strong / 50-64 average / 35-49
+  weak / 0-34 poor; a high score is NOT Buy), `TechnicalScore` (trend 25 / momentum 20 / setup 20 / RS 12 / volume 10
+  / breakout 8 / mean-reversion 5), `RegimeScore` (trend 20 / vol 20 / momentum 15 / choppiness 15 / sector 10 /
+  relative 10 / event 10), `RiskScore` (portfolio 20 / tail 15 / vol 15 / liquidity 10 / concentration 15 / drawdown
+  10 / event 10 / gap 5) - **all in one direction (100 = favourable), so `RiskScore` is inverted relative to how risk
+  is measured**; then `TradeScore = 0.40F + 0.25T + 0.15R + 0.20K`, which **never overrides a hard gate** and whose
+  weights are learned empirically later. Readiness measured: `TechnicalScore` is an aggregation over existing leaves
+  (no composite technical score exists anywhere; five consumers read the OPPOSITE polarity - RSI band, MFI oversold,
+  stochastic oversold, the elder thermometer's quiet dip, and `support_structure`'s near-200-SMA-good vs `swing`'s
+  above-200-SMA-good), `RegimeScore` has no market-level score at all (only states, multipliers and raw numerics),
+  and `RiskScore` has **no 0-100 producer anywhere** (grep both repos: zero hits) though all eight components have
+  producers and six existing numbers already sit in the favourable direction. The reported MSFT regime conflict is
+  resolved as a **name collision**: `get_regime_read` (3-valued vol proxy + hardcoded chop=0.4 -> neutral + scale
+  0.47x) and `get_regime_state` (ATR/EMA/benchmark/252-bar high -> four labels + F_regime = min of three legs) share
+  no call path, are gated independently, and are BOTH bound to the market analyst - so a RegimeScore must name one
+  producer per component or arbitrate with a stored reason. Score/scale/state/confidence stay separate (sizing is not
+  conviction). **Six code defects found and NOT fixed (design-only pass), recorded in §1.5:** (1) `overlays.py:57`
+  passes a hardcoded `chop=0.4` against `regime_label`'s default `chop_threshold=0.30`, so the chop branch is dead
+  and with the common `vol_pct == 0.5` the label is `neutral` REGARDLESS OF TREND - a quoted `regime=neutral` may
+  carry no information; (2) the same quantity is passed on two incompatible scales (`chop_threshold=30.0` at
+  `analysis_tools.py:2176`); (3) `donchian_channel` returns breakout flags None by construction with no caller
+  deriving them; (4) `parabolic_sar` called without `closes` at `analysis_tools.py:1160`; (5) `BookState.net_beta`
+  has no reader; (6) gap fill probability / days-to-fill are constants. **Next pass: fix those six** (rule 10) -
+  defects 1-2 first, since they affect report text today and the RegimeScore arbitration is blocked on them.
 - 2026-09-17 `(working tree)` - **Design only, no code:** the five open questions in
   `docs/design_fundamental_factor_weight_model.md` §8 are ANSWERED by the owner and the design is updated to them.
   Decisions: **Q1** the composite never reaches `opportunity_score` (stays a tool-leaf / `run_card` advisory metric;
