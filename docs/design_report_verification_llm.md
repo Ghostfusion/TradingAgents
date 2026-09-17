@@ -409,6 +409,17 @@ are advisory-noise or capture gaps with a known reproducer.
 - **SIMO net-cash capture**: not reproducible with `_NET_FIGURE_RE` /
   `_table_cell_pair_value`; dump the two values the reader binds before touching
   the checker (the report's own $12.5M net cash is correct).
+- **A DCF leaf is not reproducible from itself.** `get_dcf_valuation` prints
+  wacc / rf / beta / erp / fcf_latest / shares but never the EV->equity bridge,
+  so the fair value cannot be recomputed from its own line - and the bridge is
+  not the obvious one: it uses `cash` (cash and cash equivalents only) less
+  `total_debt`, which for MSFT 2026-09-16 is $35.89bn net debt against EV
+  $854.00bn and excludes the $55.72bn of short-term investments (including them
+  is worth ~$7.5/share). Reconstructed by hand for the MSFT review; the
+  alternative is to print `cash=`/`debt=` beside `fcf_latest=` (the health tool
+  already prints the rows its ratio divided). Decided against changing the
+  output in the reader-fix round: the shape is parsed by the verifier's digest
+  and pinned in `test_analysis_tools`, so it needs its own pass.
 - **Vendor statement-basis drift** (data layer, not the verifier): the same
   (ticker, date) resolved FY2025-annual flows at 22:5xZ where the 19:08Z run had
   TTM quarters, moving ROE 22.09 -> 18.90, P/E 30.12 -> 35.41, EV/EBIT 32.79 ->
