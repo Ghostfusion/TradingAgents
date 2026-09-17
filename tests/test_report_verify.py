@@ -255,12 +255,12 @@ def test_sentiment_prompt_pins_macro_to_the_leaf():
     with_leaf = _build_system_message(
         **blocks, macro_block="**Latest:** 4.95 (2026-09-10) | Change +0.23"
     )
-    assert "MACRO MUSTS" in with_leaf
+    assert "MACRO DATA PROVENANCE" in with_leaf
     assert "4.95" in with_leaf
     assert "must be quoted from the macro leaf above" in with_leaf
 
     without = _build_system_message(**blocks)
-    assert "MACRO MUSTS" not in without
+    assert "MACRO DATA PROVENANCE" not in without
     assert "Macro rate level" not in without
     assert without == _build_system_message(**blocks, macro_block="")
 
@@ -1644,7 +1644,8 @@ def test_r_multiple_compound_4digit_3r_captured():
 # news.md quoted "Polymarket: no Fed rate cuts in 2026 = Yes 93%", "10Y at
 # 4.78 FRED print", "RRP at 0.432B", "WTI 91.48" with NO
 # get_prediction_markets / get_macro_indicators leaf in the tree — the
-# MACRO MUSTS prompt pin was not enforced. The gate must flag these lines
+# macro-provenance prompt pin (then headed MACRO MUSTS, now MACRO DATA
+# PROVENANCE) was not enforced. The gate must flag these lines
 # independent of the LLM verdict.
 
 _SKHY_STYLE_NEWS = (

@@ -388,6 +388,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-16 `(working tree)` - Analyst rule-prose consolidation across the market / news / fundamentals prompts (plus the
+  sentiment prompt's conflict-weighting and verbatim-count rules): the same
+  principle was stated two or three times under different headers (four basis rules → `BASIS DISCIPLINE`; six quote/session
+  rules → `QUOTE-TYPE & SESSION INTEGRITY`, seven → `CANONICAL VALUE DISCIPLINE`, three → `ATR & STOP MECHANICS`;
+  `FOMC DIRECTION`+`CATALYST LABEL` → `FED-EVENT LABELING`; `MACRO MUSTS`+`10Y FRED ID`+`DAY COUNTS` → `MACRO DATA
+  PROVENANCE`; index/SEC-8-K/insider → `EVENT-SIGNAL RESTRAINT`; `EARNINGS DATE`+`TOOL-STATED CAVEAT` → `CONFIDENCE &
+  CAVEAT CARRYING`), plus one new rule per prompt class: `DCF PLAUSIBILITY CHECK` (fundamentals), `INTRINSIC-VALUE
+  PLAUSIBILITY` (market, against the options-implied read) and `SIGNAL SYNTHESIS` (all of them: name the conflict, state what
+  was weighted). The sentiment macro pin takes the same `MACRO DATA PROVENANCE` header - `test_news_analyst_prompt.py` now
+  asserts the two modules agree, so one rename cannot land without the other. Every tool name/parameter/citation verified
+  preserved (the market indicator/tool block is byte-identical to the previous revision), the market tool block's stray
+  4-space indent (which had pushed the longest bullet to 527 for a whitespace-only reason) is stripped, and `MARKET_CEILING`
+  raised 40_300 → 42_050 (measured 41,999) with the reason in the comment. See CHANGELOG.
+  Tests: `test_prompt_budget_contract.py`, `test_analyst_evidence_wiring.py`, `test_news_analyst_prompt.py` (+1),
+  `test_report_verify.py`, `test_structured_agents.py`; full suite 4324 passed / 5 skipped, all four rendered system
+  messages carry every new section header.
 - 2026-09-16 `(working tree)` - Two argument contracts inside the trader's tool loop, found by running its verify prompt
   against the live provider after the markup fix: (1) **the unit trap** - every sizing/risk argument is a FRACTION of
   capital while its name ends in `_pct`, so `get_risk_gate(size_pct=1.0)` for a 1% proposal answered

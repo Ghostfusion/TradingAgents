@@ -1184,13 +1184,14 @@ _METRIC_WINDOW = 40
 def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) -> list[VerifierClaim]:
     """Deterministic: market-implied/macro terms need a matching tool leaf.
 
-    The MACRO MUSTS prompt pins the tools, but prompt policy alone is not
-    enforced: the SKHY 2026-09-09 news.md carried Polymarket 93% no-cut,
-    10Y 4.78 FRED print and WTI 91.48 with no ``get_prediction_markets`` /
-    ``get_macro_indicators`` leaf anywhere in the document. The LLM pass may
-    ground the wording against other leaves; this gate holds each such line
-    to the pinned tool group regardless. Advisory: adds UNSUPPORTED claims,
-    never edits the report.
+    The news prompt's MACRO DATA PROVENANCE pins (the sentiment prompt pins the
+    same header for its 10-year leaf) put the tools in policy, but prompt policy
+    alone is not enforced: the SKHY 2026-09-09 news.md carried Polymarket 93%
+    no-cut, 10Y 4.78 FRED print and WTI 91.48 with no
+    ``get_prediction_markets`` / ``get_macro_indicators`` leaf anywhere in the
+    document. The LLM pass may ground the wording against other leaves; this
+    gate holds each such line to the pinned tool group regardless. Advisory:
+    adds UNSUPPORTED claims, never edits the report.
     """
     if not report_text:
         return []

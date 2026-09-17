@@ -742,7 +742,7 @@ class TestSentimentAnalystAgent:
         assert leaves[-1]["status"] == "ok"
         # The 10-year leaf is what the prompt is pinned to.
         assert calls == [("10y_treasury", "2026-01-15", 30)]
-        assert "MACRO MUSTS" in str(captured["prompt"])
+        assert "MACRO DATA PROVENANCE" in str(captured["prompt"])
 
     def test_journal_respects_summary_window_truncation(self, monkeypatch):
         from types import SimpleNamespace

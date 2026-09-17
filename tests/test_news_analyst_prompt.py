@@ -32,8 +32,26 @@ def test_news_prompt_macro_must_source_tools():
     0.626B and Polymarket 93% with zero tool leaves. The prompt must pin every
     macro class to its tool."""
     text = prompt_strings(na.__file__)
-    assert "MACRO MUSTS" in text
+    assert "MACRO DATA PROVENANCE" in text
     assert "MUST come from get_macro_indicators" in text
     assert "MUST come from get_prediction_markets" in text
     assert "MUST come from get_tga_balance" in text
     assert "Never paste a recalled" in text
+
+
+@pytest.mark.unit
+def test_the_macro_provenance_header_is_shared_with_the_sentiment_pin():
+    """One header per rule, pipeline-wide (2026-09-16 consolidation).
+
+    The news prompt consolidated ``MACRO MUSTS`` + ``10Y FRED ID`` +
+    ``DAY COUNTS`` under ``MACRO DATA PROVENANCE``; the sentiment analyst pins
+    the same macro leaf under its own header. Renaming one without the other
+    leaves two names for one rule, which is what this asserts against."""
+    import tradingagents.agents.analysts.sentiment_analyst as sa
+
+    news_text = prompt_strings(na.__file__)
+    sentiment_text = prompt_strings(sa.__file__)
+
+    assert "MACRO DATA PROVENANCE" in news_text
+    assert "MACRO DATA PROVENANCE" in sentiment_text
+    assert "MACRO MUSTS" not in sentiment_text

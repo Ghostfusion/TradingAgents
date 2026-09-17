@@ -33,9 +33,24 @@ ANALYSTS = REPO / "tradingagents" / "agents" / "analysts"
 # argument contracts that produced wrong numbers in the reports - every `*_pct`
 # argument is a FRACTION (0.01 = 1%) and the exit tools MEASURE their price/ATR when
 # given a ticker (NVDA 2026-09-15 read a 1% proposal as 100% and passed an invented
-# atr=7.0). The wording was trimmed to the minimum that carries both facts; the
-# slack is now 69 chars, so the next growth must trim something or raise this again.
-MARKET_CEILING = 40_300
+# atr=7.0). The wording was trimmed to the minimum that carries both facts.
+#
+# 40_300 -> 42_050 (2026-09-16, deliberate): the rule-prose consolidation. Six
+# scattered rules became QUOTE-TYPE & SESSION INTEGRITY, seven became CANONICAL
+# VALUE DISCIPLINE and three became ATR & STOP MECHANICS, and two rules are new -
+# INTRINSIC-VALUE PLAUSIBILITY (sanction `get_scenario_dcf` against the
+# options-implied read and the trend/regime tools before a directional call; the
+# MSFT 2026-09-16 DCF-vs-consensus case) and SIGNAL SYNTHESIS (name a conflict and
+# say what was weighted, routing `get_vif_read`-flagged redundant signals away from
+# being restated as independent confirmations). Measured 41,999 chars, so the slack
+# is 51 - the next growth must trim something or raise this again.
+#
+# The block's leading four-space indent was stripped back to column 0 in the same
+# pass: it padded every line of the prompt text (456 chars) and pushed the longest
+# tool bullet to 527 for a whitespace-only reason, leaving the indicator/tool block
+# byte-identical to the previous revision. The bullet COUNT is capped as well as the
+# ceiling, so a reflow cannot hide growth.
+MARKET_CEILING = 42_050
 MARKET_BULLET_LIMIT = 95
 LONGEST_BULLET_LIMIT = 523
 BULLET_RE = re.compile(r"^\s*-\s*[a-z_]+\s*\(")

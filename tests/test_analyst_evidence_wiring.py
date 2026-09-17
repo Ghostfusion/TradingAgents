@@ -207,7 +207,10 @@ def test_fundamentals_prompt_states_same_metric_and_share_count_rules():
         _FakeLLM(["f"], captured), config=None
     )(_base_state())
     sys_text = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
-    assert "SAME METRIC IN TWO BLOCKS" in sys_text
+    # The rule consolidated the four basis cases under one header (2026-09-16);
+    # the same-metric case is sub-case (1) of it.
+    assert "BASIS DISCIPLINE" in sys_text
+    assert "SAME METRIC, TWO BLOCKS" in sys_text
     assert "basis unstated" in sys_text
     assert "IMPLIED SHARE COUNT" in sys_text
     assert "10.79B vs 10.88B" in sys_text

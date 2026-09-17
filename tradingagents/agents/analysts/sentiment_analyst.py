@@ -311,7 +311,7 @@ def _build_system_message(
         else ""
     )
     macro_pin = (
-        "- **MACRO MUSTS (10-year).** Any macro rate level you mention (10-year "
+        "- **MACRO DATA PROVENANCE (10-year).** Any macro rate level you mention (10-year "
         "Treasury / DGS10, Fed funds) must be quoted from the macro leaf above "
         "with its date. Recalled levels — from headlines, posts, or memory — must "
         "not appear as figures: if the feeds talk about a level you cannot find in "
@@ -355,9 +355,9 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 {macro_section}
 ## How to analyze this data (best practices)
 
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
+1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal, calibrated to sample size.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Base rates on the actual message count, not percentages alone — a 90/10 split on 10 messages is a much weaker signal than the same split on 200, and the gap between those two cases is exactly what the `confidence` field and the data-limits note (see below) exist to capture.
 
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
+2. **Look for cross-source divergences, and say which source you weighted more when they conflict.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious). Don't just note the divergence and move on: when it's large enough to push `overall_band` toward Mixed or to pull `overall_score` away from a naive average, state in the narrative which source(s) drove the final call and why (e.g. sample size, recency, event- vs. opinion-based) — never resolve a real conflict silently.
 
 3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
 
@@ -371,16 +371,18 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 8. **Ground every macro figure in the leaf.**
 {macro_pin}
-9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+9. **Copy counts and quotes verbatim.** Message counts, upvote/comment totals, and any figure from the computed block are quoted exactly as given, never rounded or estimated from a partial read of the blocks above.
+
+10. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 
 Fill the following fields:
 
-- **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
-- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band. When the Deterministic computed sentiment block above is present, anchor it there: map computed_score in [-1, 1] to the 0-10 scale as `5 + 5 * computed_score` and keep your score within ±0.5 of that anchor — never contradict a computed value (the report verifier cross-checks the saved report against the tool evidence).
+- **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent. When you use Mixed, the narrative must name which sources are in conflict (per item 2 above) — Mixed is a finding to explain, not a way to avoid resolving the divergence.
+- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band. When the Deterministic computed sentiment block above is present, anchor it there: map computed_score in [-1, 1] to the 0-10 scale as `5 + 5 * computed_score` and keep your score within ±0.5 of that anchor — never contradict a computed value (the report verifier cross-checks the saved report against the tool evidence). When no computed block is present, derive the score directly from the source evidence and say so in `confidence`.
 - **confidence**: low / medium / high, based on data quality and sample size.
-- **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+- **narrative**: Full source-by-source breakdown, divergences (with the weighting stated per item 2), dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
 ## Grounding
 
