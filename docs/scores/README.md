@@ -122,20 +122,34 @@ persistence, sector and regime robustness, redundancy, OOS) before any of them
 may replace the deterministic baseline. **EventScore has no weight in this
 table** — the open question is in `IMPLEMENTATION_PLAN.md` §13 Q7 and in `EventScore.md` §7.
 
-Two conflicts inside the owner's own diagrams are **flagged, not resolved**:
+Two conflicts inside the owner's own diagrams were **flagged, not resolved**.
+**Both are now resolved by the owner (2026-09-17):**
 
-1. **Gate order.** His first diagram puts the hard gates *before* position size;
-   his staged diagram puts them *after* it. The engine implements
-   **gates-before-sizing** — the gate verdict feeds `strategies/risk/sizing.py:144`
-   — and this document keeps that, because a gate *after* sizing must unwind a
-   size it has already authorised. If the owner wants the staged order, it is a
-   contract change, not a diagram fix.
-2. **Which composite governs.** The earlier `TradeScore = 0.40F + 0.25T + 0.15R +
-   0.20K` is a *decision* composite over four engines; the staged allocation is a
-   *research* allocation over six. They are different objects and must not share
-   a name. The staged set is newer and governs the research layer; the four-score
-   `TradeScore` remains as the decision-composite sketch, superseded in weights
-   and awaiting its own name.
+1. **Gate order -> gates before sizing** (decision Q8). His first diagram puts the
+   hard gates *before* position size; his staged diagram puts them *after* it. The
+   engine implements **gates-before-sizing** - the gate verdict feeds
+   `strategies/risk/sizing.py:144` - and this document keeps that, because a gate
+   *after* sizing must unwind a size it has already authorised.
+2. **Which composite governs -> both, as separate objects** (decision Q2, confirmed
+   by the owner the same day). `TradeScore = 0.40F + 0.25T + 0.15R + 0.20K` is the
+   **four-engine decision composite**; the staged table above is the **six-engine
+   research allocation**. Different objects, different names, different jobs - so
+   the two weight sets are not in conflict. Two ledger statements make it explicit:
+
+   > **`RiskScore` is a `TradeScore` engine, not a risk gate.** `RiskScore`
+   > contributes the `R` component to the four-engine `TradeScore`. Risk Gates
+   > operate **downstream** of `TradeScore` and can hard-block a proposed action
+   > regardless of the composite score.
+
+   > **The six-engine Research Allocation and the four-engine `TradeScore` are
+   > separate objects.** Fundamental, Technical, Regime and Risk feed `TradeScore`.
+   > News and Sentiment participate in the Research Allocation for attribution and
+   > do **not** directly contribute to `TradeScore`.
+
+   `NewsScore` and `SentimentScore` can still be highly informative without being
+   direct decision-score inputs: their information may affect research attribution,
+   diagnostics, explanations and *potentially separately authorised sizing
+   mechanisms* - but must not silently become a fifth/sixth `TradeScore` factor.
 
 **What the composite may not do** (unchanged from the earlier pass, and the
 reason the repo already behaves correctly): a composite score **never overrides a
@@ -164,8 +178,11 @@ The first iteration of this design (before the owner's staged spec) proposed
 $$TradeScore = 0.40\,F + 0.25\,T + 0.15\,R + 0.20\,K$$
 
 with every score on the same 0-100 convention and `RiskScore` inverted (100 =
-low risk). The owner has since withdrawn that weight vector as a production
-score and staged the six-engine allocation of §1.4. **The four-score version is
+low risk). The owner withdrew that weight vector as *the whole* production score
+and staged the six-engine allocation of §1.4 - **but re-affirmed it on 2026-09-17
+as the four-engine decision composite** (§1.4, ledger statements): the withdrawal
+was of the four-score version as the entire score, not of `TradeScore` as the
+decision object. **The four-score version is
 kept here as the record** — it is what produced the direction convention (§1.2),
 the four output types (score / scale / state / confidence), and the readiness
 measurements that the engine map in §1.3 summarises. Where the two disagree, the
@@ -216,7 +233,7 @@ swing setup NO) — a single "bullish" label would erase the disagreement.
 7. **No `factor_score=NN` in prose.** The scores are tool leaves and printed
    blocks, not sentences the LLM may paraphrase. (Owner decision Q5.)
 
-### 2.1 The seven anti-double-counting invariants (owner, 2026-09-17)
+### 2.1 The anti-double-counting invariants (owner, 2026-09-17)
 
 Each one names a way this set could silently collapse into fewer signals than it
 claims. They are binding on every workstream, and `IMPLEMENTATION_PLAN.md` §13.2
@@ -243,6 +260,17 @@ carries them beside the decisions that produced them.
     intraday metric part of the daily score: `RSI_daily` and `RSI_intraday` are
     separate fields. Promotion is explicit, per metric - the full contract is in
     `IMPLEMENTATION_PLAN.md` §13.2.
+17. **The research allocation and the decision composite are separate objects.**
+    Fundamental, Technical, Regime and Risk feed `TradeScore`; News and Sentiment
+    participate in the research allocation for attribution, diagnostics and
+    explanation and do **not** directly contribute to `TradeScore`. **No engine
+    enters the decision composite by adjacency** - an engine joins only by an
+    explicit decision, never by being drawn next to the others.
+18. **`RiskScore` is a `TradeScore` engine, not a risk gate.** It contributes the
+    `R` component of the four-engine composite. The hard gates operate
+    **downstream** of `TradeScore` and can block a proposed action regardless of
+    the composite score. The two must never be drawn or implemented as one
+    object, or the producer of one of the four numbers disappears.
 
 
 ---
@@ -434,10 +462,12 @@ and `enable_score_eval_rows` already gates the IC harness
 **The twelve architecture decisions of the same day are in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13** — the canonical regime
 path, the two composite names, the per-name/book `RiskScore` split, the moved
-bindings, the sentiment toolset, EventScore's ownership of materiality, the
-structured event state, the gate order, the coverage sign, score-vs-sizing, the
+bindings, the sentiment toolset, EventScore's ownership of materiality, the structured event state, the gate order, the coverage sign, score-vs-sizing, the
 daily horizon, and the semivariance measure. The five below are this document's
-own.
+own. **The owner's confirmation the same day of two ledger statements - `RiskScore`
+is a `TradeScore` engine and not a risk gate, and the six-engine research
+allocation is a separate object from the four-engine decision composite - is
+recorded in §1.4 and, as binding rules 17-18, in §2.1.**
 
 The five questions this document opened are answered. Recorded with the
 rationale, because the reasoning is what future changes have to respect.

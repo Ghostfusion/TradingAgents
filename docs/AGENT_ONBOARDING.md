@@ -388,6 +388,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the owner **confirms both diagram completions** and the two
+  **ledger statements** are now recorded verbatim in `IMPLEMENTATION_PLAN.md` §13.1 and `README.md` §1.4, and as binding
+  rules: **`RiskScore` is a `TradeScore` engine, not a risk gate** (it contributes the `R` component of
+  `0.40F + 0.25T + 0.15R + 0.20K`; the gates operate downstream and can hard-block regardless of the composite score -
+  master **rule 18** / plan rule 12) and **the six-engine research allocation and the four-engine `TradeScore` are
+  separate objects** (F/T/R/K feed `TradeScore`; News and Sentiment are attribution-only - master **rule 17** / plan rule
+  11, *no engine enters the decision composite by adjacency*). The owner's implication is recorded: News and Sentiment
+  can be highly informative without being decision-score inputs - attribution, diagnostics, explanations, and
+  *potentially separately authorised sizing mechanisms* - but must never silently become a fifth/sixth `TradeScore`
+  factor. **Two stale flags retired (rule 9):** §1.4's "two conflicts, flagged not resolved" is now a resolution (gate
+  order = Q8, which composite = Q2 + this confirmation), §1.5's "withdrawn as a production score" is corrected (the
+  withdrawal was of the four-score version as *the whole* score, not of `TradeScore` as the decision object), and §2.1's
+  heading no longer says "seven". Suites untouched: engine **4402 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** the owner confirms the **architecture diagram's missing
   `FundamentalScore` was an oversight, not a design decision**, so `IMPLEMENTATION_PLAN.md` §13.1's flow diagram now
   carries it with its **own data root** (statements/filings, not market data) feeding `TradeScore` directly, and the

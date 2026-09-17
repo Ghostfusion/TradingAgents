@@ -1162,8 +1162,8 @@ oversight, not by design**, so the diagram now carries it with its own data root
 - **`RiskScore` is drawn as an engine**, not only as "Risk Gates". It is one of the
   four `TradeScore` inputs (`0.40F + 0.25T + 0.15R + 0.20K`) and a composite never
   overrides a hard gate (master §1.4) - conflating the score with the gate would
-  hide the engine that produces one of the four numbers. *This one is my addition,
-  not the owner's; flagged for confirmation.*
+  hide the engine that produces one of the four numbers. *This one was my addition, not the owner's. **Confirmed by the owner
+  2026-09-17 and kept** - see the ledger statements below.*
 - **The two arrows out of the engine row are separate objects** (Q2): the six
   engines feed the **research allocation** (attribution only), while the four -
   Fundamental, Technical, Regime, Risk - feed **`TradeScore`**, which is what
@@ -1173,9 +1173,31 @@ oversight, not by design**, so the diagram now carries it with its own data root
 The full engine map remains the diagram above it; this one is the **flow to
 execution**.
 
+#### The two ledger statements (owner, 2026-09-17)
+
+Recorded verbatim, because both are load-bearing and both were implicit before:
+
+> **`RiskScore` is a `TradeScore` engine, not a risk gate.** `RiskScore`
+> contributes the `R` component to the four-engine `TradeScore`. Risk Gates operate
+> **downstream** of `TradeScore` and can hard-block a proposed action regardless of
+> the composite score.
+
+> **The six-engine Research Allocation and the four-engine `TradeScore` are
+> separate objects.** Fundamental, Technical, Regime and Risk feed `TradeScore`.
+> News and Sentiment participate in the Research Allocation for attribution and do
+> **not** directly contribute to `TradeScore`.
+
+The owner adds the implication: **`NewsScore` and `SentimentScore` can still be
+highly informative without being direct decision-score inputs.** Their information
+may affect research attribution, diagnostics, explanations and *potentially
+separately authorised sizing mechanisms* - but must not silently become a
+fifth/sixth `TradeScore` factor. "Separately authorised" is the operative word:
+a sizing path that consumes them is its own decision with its own contract, not an
+adjacency in this diagram.
+
 ### 13.2 The anti-double-counting invariants (binding)
 
-Recorded in the master's §2 as rules 8-14. Each one names a way the set could
+Recorded in the master's §2 as rules 8-18. Each one names a way the set could
 silently collapse into fewer signals than it claims.
 
 1. **One quantity -> one authoritative producer.**
@@ -1198,6 +1220,17 @@ silently collapse into fewer signals than it claims.
 10. **Missing data is `unavailable`, never zero** - including a missing calendar,
     which is *unknown*, not "no event exists" and not a negative reading. (Master
     rule 1, stated here in the form the event and calendar work needs.)
+11. **The research allocation and the decision composite are separate objects.**
+    Fundamental, Technical, Regime and Risk feed `TradeScore`; News and Sentiment
+    participate in the research allocation for attribution, diagnostics and
+    explanation and do **not** directly contribute to `TradeScore`. **No engine
+    enters the decision composite by adjacency** - an engine joins only by an
+    explicit decision, never by being drawn next to the others.
+12. **`RiskScore` is a `TradeScore` engine, not a risk gate.** It contributes the
+    `R` component of the four-engine composite; the hard gates operate
+    **downstream** of `TradeScore` and can block regardless of the composite
+    score. Drawing the score and the gate as one object hides the producer of one
+    of the four numbers.
 
 
 #### The metric-horizon contract (rule 9)
