@@ -388,6 +388,25 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** `docs/design_fundamental_factor_weight_model.md`, the adoption
+  design for an external 106-factor fundamental weight master table. Method: inventory first (every factor read at its
+  definition site), then accept/reject with cited evidence, then a four-phase plan. Findings that decide the design -
+  **36 of 106 factors already computed here (42.15 points of the proposed weight), 26 partial (20.35), 44 absent
+  (41.50)**; Valuation (20% of weight) is the most complete category at 13.25/20 while Cash Flow (17%) is the biggest
+  hole at 11.00 absent; the source's own per-factor weights sum to **104.00%**, not the stated 100%, across four
+  categories. Adopted: the four sub-score split (quality/growth/valuation/risk) instead of one master number, an
+  `EffectiveWeight` chain over measured surfaces only, a derived A/B/C/D confidence grade, a `dcf_confidence` over four
+  legs the DCF family already prints, and `capex_quality_read` as the capex direction source. Refused with evidence:
+  unmeasured "production weights" (DeMiguel 1/N; round-3 rule 2), learned/regime weights (McLean-Pontiff; Asness
+  factor-timing; ground rule 1), bank/REIT overlays (metrics absent from the canonical vocabulary - a data project),
+  the literal `1/(1+Σ|Corr|)` constant, and wiring any composite into `opportunity_score` (owner decision; the slot is
+  deliberately null at `execution_contract.py:240-252`). Structural defects recorded for the next pass:
+  `roa_series`/`revenue_series` have **no producer** (G-Score G4/G5 are dead legs), `industry_neutral_z` demeans by
+  sector while the final percentile is taken across the whole peer set (so `QUALITY_BANDS`' "sector median" band is
+  mislabelled), and `scripts/value_screener.py`'s docstring advertises two screens with no implementing symbol. Biggest
+  wiring opportunity: level ROIC (invested capital is built at `value_dip_tools.py:510` only as a ΔIC denominator),
+  gross margin (stored at `statement_parsing.py:841`, never rendered), interest coverage (`interest_expense` has no
+  reader), and buyback/shareholder yield (`share_buybacks` has no reader).
 - 2026-09-16 `(working tree)` - The MSFT fundamentals review round: the DCF family now says what a price REQUIRES, and
   the net-debt basis is disclosed instead of relabelled an error. Reviewer feedback on `reports/MSFT_20260916_231406` read
   against the tree + the FY2026 release: every quoted number checked out, and the diagnosis was sharper than the report's -
