@@ -673,9 +673,13 @@ def volume_profile(closes, volumes, bins: int = 20) -> dict:
     """Volume profile: distribute each bar's volume across price bins.
 
     Returns the point of control (POC = price bin with the most volume) and
-    the value area (bins containing ~70% of volume around the POC). A dip
-    into the POC / value-area low is a stronger mean-reversion support zone.
-    None when history insufficient.
+    the value area: the smallest contiguous band around the POC holding >=70%
+    of the volume, expanded one bin at a time toward the heavier neighbour (at
+    a range edge the expansion is necessarily one-sided, so a bimodal
+    distribution can legitimately span the whole range - `value_area_pct` is
+    returned so that is visible rather than assumed). A dip into the POC /
+    value-area low is a stronger mean-reversion support zone. None when
+    history insufficient.
     """
     if len(closes) < 2 or len(volumes) < 2 or bins < 2:
         return {"poc": None, "value_area_high": None, "value_area_low": None}
@@ -699,19 +703,21 @@ def volume_profile(closes, volumes, bins: int = 20) -> dict:
         acc = vol_by_bin[poc_idx]
         lo_i = hi_i = poc_idx
         while acc < target and (lo_i > 0 or hi_i < bins - 1):
+            # Expand toward the heavier neighbour. The while guard guarantees
+            # the else branch has room (lo_i == 0 implies hi_i < bins - 1).
             if lo_i > 0 and (hi_i >= bins - 1 or vol_by_bin[lo_i - 1] >= vol_by_bin[hi_i + 1]):
                 lo_i -= 1
-            elif hi_i < bins - 1:
-                hi_i += 1
             else:
-                lo_i -= 1
-            acc += vol_by_bin[lo_i] if lo_i != hi_i else 0
-            # re-add the moved bin correctly
+                hi_i += 1
+            # The band is the accumulation: recompute it from the bins rather
+            # than incrementally (the incremental add that used to sit here was
+            # immediately overwritten, i.e. dead).
             acc = sum(vol_by_bin[lo_i : hi_i + 1])
         return {
             "poc": round(poc, 4),
             "value_area_high": round(lo + (hi_i + 0.5) * width, 4),
             "value_area_low": round(lo + (lo_i + 0.5) * width, 4),
+            "value_area_pct": round(acc / total, 4),
         }
     except (TypeError, ValueError, ZeroDivisionError):
         return {"poc": None, "value_area_high": None, "value_area_low": None}

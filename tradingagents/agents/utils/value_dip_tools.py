@@ -1006,6 +1006,7 @@ def get_support_structure(
     support / near the 200-day / multi-month base' claim. Requires 200+ closes.
     """
     try:
+        from tradingagents.strategies.size import atr as _atr
         from tradingagents.strategies.value_dip import support_structure
     except Exception as exc:  # noqa: BLE001
         return f"support structure unavailable for {ticker}: {exc}"
@@ -1015,7 +1016,14 @@ def get_support_structure(
     lows = ohlcv.get("lows") or []
     if len(closes) < 205:
         return f"support structure unavailable for {ticker}: need 200+ closes."
-    sp = support_structure(closes, highs, lows)
+    # The ATR is required by the producer's primary verdict ("within 1.5 ATR
+    # of the base low"). It was never passed, so that branch was unreachable
+    # and "multi-month-base-support" could never be emitted.
+    try:
+        atr_v = _atr(highs, lows, closes, window=14)
+    except Exception:  # noqa: BLE001 - degrade to the non-ATR branches
+        atr_v = None
+    sp = support_structure(closes, highs, lows, atr_value=atr_v)
     if sp.get("verdict") == "unknown":
         return f"support structure unavailable for {ticker}: insufficient history."
     return (

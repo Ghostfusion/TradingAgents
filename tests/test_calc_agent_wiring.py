@@ -37,7 +37,8 @@ LEGACY_WHITELIST = {
     "strategies/capital_income.py:apply_top_n": "dead helper (capital_income screener path)",
     "strategies/debate_claim.py:for_round": "dead helper after structured-debate refactor",
     "strategies/factors.py:z_composite_alpha": "legacy factor composite (qlib factor_expressions is the live path)",
-    "strategies/factors.py:momentum_multihorizon": "legacy factor composite (qlib factor_expressions is the live path)",
+    # momentum_multihorizon was whitelisted as legacy; it is now wired into
+    # get_momentum_detail (the 21/63/126/252 ensemble), so it left the list.
     "strategies/liquidity_risk.py:volume_share_slippage": "legacy slippage model (not used by the liquidity gate)",
     "strategies/liquidity_risk.py:market_impact_slippage": "legacy slippage model (not used by the liquidity gate)",
     "dataflows/config.py:reset_config": "test/utility helper, not a calc",

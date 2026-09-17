@@ -388,6 +388,35 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **The TWELVE remaining inventory defects are FIXED** (`docs/scores/README.md` §3.2), each
+  with a regression test; **10 of the 11 new tests fail before the fix and pass after** (the 11th pins a producer key the
+  graph was misreading). (7) `volume_profile`'s value-area loop carried a DEAD incremental add and its band could span the
+  whole range for a bimodal distribution (AMAT `va_low == poc == 169.56`, `va_high == 424.64`) - the loop is now the band
+  recomputation alone plus a new `value_area_pct` (printed as `va_pct=`). (8) `support_structure`'s primary branch was
+  unreachable because the leaf never passed `atr_value` - it now measures ATR(14), so `multi-month-base-support` can be
+  emitted. (9) **`size.atr` returned `0.0` on a missing/mismatched series** (NA-as-zero) - now `None`, matching
+  `stop_loss_atr`/`etf_risk._atr`, with the four call sites that would have raised on None fixed too. (10) A missing
+  drawdown percentile in `rank_sectors_multifactor` was substituted with 0.0 = the WORST rank - the risk leg now
+  renormalises over the available legs (best sector on the available leg scores 100, was 60). (11) **`knife_factor` was
+  model-supplied** - `get_position_risk_multiplier` now MEASURES all three factors (`knife_guard.knife_score`,
+  `regime_state.regime_state` -> F_regime, `regime_state.vol_cap_factor`), labels an override `caller-supplied`, and reads
+  1.0 + says so when unmeasurable. (12) **`trend_score` was model-supplied** - `get_skill_read` now prints provenance for
+  both it and `baseline_score` (`[trend_score 72 (caller-supplied opinion, not measured)]`). (13) Unbounded Chaikin was
+  labelled `(positive=buying pressure)` - now `(A/D units; sign = net accumulation vs distribution, magnitude not
+  comparable across names)`. (14) The dead `implied_move_pct` key (the graph read a key the snapshot never emits) - now
+  reads `implied_move`, with the producer contract pinned by a test. (15) **The premarket hard block was DEAD** - the leaf
+  never passed `catalyst_snapshot` to `review_decision`; a new shared `_catalyst_snapshot(ticker)` feeds it and the line
+  prints `catalyst=<verdict> scale=<scale> hard_block=<bool>`. (16) **The regime gate's catalyst veto was inert** -
+  `catalyst_window` is now `bool | None = None` (omitted = measured from the snapshot), and the graph's compiled-context
+  line derives it from the overlay's stamped snapshot and prints `catalyst_window=`. (17) `rule_signal_macd_hist_rising`
+  (the only MACD-histogram-slope producer, script-reader only) and (18) `factors.momentum_multihorizon` (built,
+  whitelisted unreachable) are both surfaced by `get_momentum_detail` (`momentum_mh: ... ensemble=`, `macd_hist_rising=`),
+  and the wiring gate's whitelist entry is removed so the audit proves it. Suites: engine **4402 passed / 5 skipped**
+  (baseline 4392 + 11 new - 1 exempted case that is now wired), executor **1105**, web **149**. Live MSFT:
+  `execution multiplier MSFT: factor=0.75 (regime 0.75 (measured), vol_cap 1.0 (measured), knife 1.0 (measured))`,
+  `momentum_mh: 21d=+3.2%, 63d=+31.2%, 126d=+27.2%, 252d=-1.7% ensemble=+15.0%`, `macd_hist_rising=True`,
+  `volume_profile: ... va_pct=0.7463`, `premarket review MSFT: verdict=CONFIRM ... catalyst=no-imminent-catalyst
+  scale=1.0 hard_block=False`.
 - 2026-09-17 `(working tree)` - **The six code defects the score-engine inventories found are FIXED** (`docs/scores/README.md`
   §3.1), each with a regression test. (1) **The regime label was trend-blind**: `overlays.build_strategy_overlays` passed a
   literal `chop=0.4` against `regime_label`'s `0.30` default, so the choppiness branch could never fire and with the common

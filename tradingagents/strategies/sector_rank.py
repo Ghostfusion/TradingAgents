@@ -533,7 +533,17 @@ def rank_sectors_multifactor(
     for etf, r in row_by.items():
         s = sharpe_pct.get(etf)
         d = mdd_pct.get(etf)
-        r["risk"] = round(0.6 * (s if s is not None else 0.0) + 0.4 * (d if d is not None else 0.0), 2) if (s is not None or d is not None) else None
+        # Renormalise over the legs that exist. Substituting 0.0 for a missing
+        # percentile scored an unmeasurable drawdown as the WORST possible one
+        # (0.0 is the floor of a higher-is-better percentile) - NA as a
+        # penalty, against the no-fabrication rule.
+        legs = [(s, 0.6), (d, 0.4)]
+        avail = [(v, w) for v, w in legs if v is not None]
+        r["risk"] = (
+            round(sum(v * w for v, w in avail) / sum(w for _, w in avail), 2)
+            if avail
+            else None
+        )
 
     # weighted score over available factors
     for _etf, r in row_by.items():

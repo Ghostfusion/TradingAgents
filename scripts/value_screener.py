@@ -1827,7 +1827,7 @@ def main(argv: list[str] | None = None) -> int:
 
                         a = _atr(ohlcv["highs"], ohlcv["lows"], closes, window=14)
                         last = closes[-1]
-                        if last <= 0 or (a / last * 100.0) < args.min_atr_pct:
+                        if last <= 0 or a is None or (a / last * 100.0) < args.min_atr_pct:
                             continue
                 gated.append(m)
             movers = gated[: args.movers_count]

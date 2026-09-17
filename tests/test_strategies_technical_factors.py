@@ -171,3 +171,24 @@ def test_volume_profile():
     assert r["poc"] is not None
     assert r["value_area_low"] <= r["poc"] <= r["value_area_high"]
     assert volume_profile([1], [1])["poc"] is None
+
+
+def test_volume_profile_reports_its_own_coverage():
+    """Regression: the value-area loop carried a dead incremental add (the
+    accumulator was recomputed from the bins on the next line), and the band it
+    produced could legitimately span the whole price range for a bimodal
+    distribution - which the AMAT 2026-09-14 read (va_low == poc == 169.56,
+    va_high == 424.64) could not be distinguished from a broken accumulator.
+    The band is the smallest one holding >=70% of the volume, and
+    `value_area_pct` now says how much it actually holds."""
+    closes, _, _, vols = _uptrend()
+    r = volume_profile(closes, vols)
+    assert r["value_area_pct"] >= 0.7
+    assert r["value_area_low"] <= r["poc"] <= r["value_area_high"]
+    # two tight clusters at opposite ends: the 70% band must span both, and the
+    # coverage read makes the width explicit instead of looking like a bug
+    c = [100.0 + (i % 2) * 40.0 for i in range(80)]
+    r2 = volume_profile(c, [1e6] * 80)
+    assert r2["value_area_pct"] >= 0.7
+    assert r2["value_area_high"] - r2["value_area_low"] > 20.0
+    assert volume_profile([1], [1])["poc"] is None

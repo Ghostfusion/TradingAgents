@@ -1156,6 +1156,31 @@ def get_dip_technical(
         return f"dip technical unavailable for {ticker}: {exc}"
 
 
+def _catalyst_snapshot(ticker: str, trade_date: str | None = None) -> dict | None:
+    """The B1 catalyst snapshot for a ticker, or None when it cannot be built.
+
+    One producer for the leaves that need the scheduled-event window
+    (`get_premarket_review`, `get_regime_gate_read`). Never fabricated: a
+    failure returns None and the caller degrades to its non-catalyst path.
+    """
+    try:
+        import datetime as _dt
+
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.catalyst import (
+            build_catalyst_snapshot,
+            fetch_catalyst_data,
+        )
+
+        date = trade_date or _dt.date.today().isoformat()
+        data = fetch_catalyst_data(ticker, date)
+        if data is None:
+            return None
+        return build_catalyst_snapshot(data, date, get_config())
+    except Exception:  # noqa: BLE001 - advisory read degrades to None
+        return None
+
+
 @tool
 def get_mean_reversion_tech(
     ticker: Annotated[str, "ticker symbol"],
@@ -2207,8 +2232,9 @@ def get_consensus(
 def get_momentum_detail(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
-    "Exact momentum microstructure (pillars, RVOL, VWAP, first-pullback, session) for a ticker."
+    "Exact momentum microstructure (pillars, RVOL, VWAP, first-pullback, session) plus the multi-horizon momentum ensemble and the MACD-histogram-slope rule."
     try:
+        from tradingagents.strategies.factors import momentum_multihorizon
         from tradingagents.strategies.momentum import (
             ema9,
             first_pullback,
@@ -2216,6 +2242,7 @@ def get_momentum_detail(
             rvol,
             vwap,
         )
+        from tradingagents.strategies.rule_eval import rule_signal_macd_hist_rising
     except Exception as exc:  # noqa: BLE001
         return f"momentum detail unavailable for {ticker}: {exc}"
     data = _ohlcv(ticker)
@@ -2252,6 +2279,24 @@ def get_momentum_detail(
                 parts.append(f"  pillar_{k}={p[k]}")
     if fp:
         parts.append(f"  first_pullback={fp}")
+    # Multi-horizon momentum (21/63/126/252 + ensemble): built and unreachable
+    # before this - no leaf exposed it, so the analyst could only quote one
+    # lookback at a time.
+    try:
+        mh = momentum_multihorizon(closes)
+        if mh.get("horizons") or mh.get("ensemble") is not None:
+            hs = ", ".join(f"{k}d={v:+.1%}" for k, v in sorted(mh["horizons"].items(), key=lambda kv: int(kv[0])))
+            ens = mh.get("ensemble")
+            parts.append(f"  momentum_mh: {hs} ensemble={ens:+.1%}" if ens is not None else f"  momentum_mh: {hs}")
+    except Exception:  # noqa: BLE001 - advisory
+        pass
+    # MACD histogram rising (the one MACD-slope rule the repo has): its only
+    # reader was a script, so the momentum sub-factor was unscoreable.
+    try:
+        rising = rule_signal_macd_hist_rising(closes, highs, lows, vols)
+        parts.append(f"  macd_hist_rising={bool(rising)}")
+    except Exception:  # noqa: BLE001 - advisory
+        pass
     return "\n".join(parts)
 
 
@@ -5400,12 +5445,17 @@ def get_technical_factors(
             f"  aroon: up={ar.get('aroon_up')} down={ar.get('aroon_down')} "
             f"verdict={ar.get('verdict')}",
             f"  fisher={fi.get('fisher') if fi else None} trigger={fi.get('trigger') if fi else None}",
-            f"  chaikin={ch} (positive=buying pressure)",
+            # The oscillator is in raw A/D units, so its MAGNITUDE is not
+            # comparable across names (AMAT printed 869687.156 next to
+            # di- > di+). The SIGN is the read; say so instead of implying the
+            # number is a strength score.
+            f"  chaikin={ch} (A/D units; sign = net accumulation vs distribution, "
+            f"magnitude not comparable across names)",
             f"  elder_ray: bull={er.get('bull_power')} bear={er.get('bear_power')} "
             f"verdict={er.get('verdict')}",
             f"  supertrend: line={st.get('line')} direction={st.get('direction')}",
             f"  volume_profile: poc={vp.get('poc')} va_high={vp.get('value_area_high')} "
-            f"va_low={vp.get('value_area_low')}",
+            f"va_low={vp.get('value_area_low')} va_pct={vp.get('value_area_pct')}",
         ]
         return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
@@ -6594,17 +6644,28 @@ def get_premarket_review(
             from tradingagents.strategies.size import atr as _atr
 
             atr_v = _atr(_ohlcv(ticker).get("highs") or [], _ohlcv(ticker).get("lows") or [], closes)
+        # review_decision reads `catalyst_snapshot` to raise the earnings-window
+        # REJECT/REVISE. It was never passed, so that fail-closed branch was
+        # unreachable from this leaf (the arbiter could only act on the gap).
+        catalyst = _catalyst_snapshot(ticker)
         r = _review(
             prior_close=prior_close,
             open_price=open_price,
             prior_stop=prior_stop,
             entry_price=entry_price,
             atr_value=atr_v,
+            catalyst_snapshot=catalyst,
+        )
+        cat_txt = (
+            f"catalyst={catalyst.get('verdict')} scale={catalyst.get('scale')} "
+            f"hard_block={bool(catalyst.get('hard_block'))}"
+            if catalyst
+            else "catalyst=unavailable"
         )
         return (
             f"premarket review {ticker}: verdict={r.get('verdict')} "
             f"entry={r.get('entry')} stop={r.get('stop')} size_pct={r.get('size_pct')} "
-            f"reasons={r.get('reasons') or []}"
+            f"{cat_txt} reasons={r.get('reasons') or []}"
         )
     except Exception as exc:  # noqa: BLE001
         return f"premarket review unavailable for {ticker}: {exc}"
@@ -8476,7 +8537,7 @@ def get_alpha_scoring(
 @tool
 def get_regime_gate_read(
     ticker: Annotated[str, "ticker symbol"],
-    catalyst_window: Annotated[bool, "treat an open catalyst window as blocking, default False"] = False,
+    catalyst_window: Annotated[bool | None, "treat an open catalyst window as blocking; omit to measure it from the ticker's catalyst snapshot"] = None,
 ) -> str:
     """Mean-reversion regime gate (A1): the knife-guard verdict.
 
@@ -8487,6 +8548,10 @@ def get_regime_gate_read(
     Args:
         ticker: ticker symbol.
         catalyst_window: when True, an open catalyst window blocks the entry.
+            Omitted/None MEASURES it: the ticker's catalyst snapshot is read and
+            an open earnings window (or a hard block) sets it. It used to
+            default to False with no producer, so the advertised veto could
+            never fire.
 
     Returns:
         verdict + vol/downtrend reasons line.
@@ -8502,6 +8567,11 @@ def get_regime_gate_read(
             return f"regime gate read unavailable for {ticker}: need >= 60 bars ({len(closes)})"
         _idx_sym = _cfg_idx()
         index_closes = _ohlcv(_idx_sym).get("closes") if _idx_sym else []
+        if catalyst_window is None:
+            from tradingagents.strategies.pre_market import catalyst_window_read
+
+            cat = catalyst_window_read(_catalyst_snapshot(ticker), get_config())
+            catalyst_window = bool(cat.get("hard_block") or cat.get("tightened"))
         rg = regime_gate_read(
             closes, cfg=get_config(), catalyst_window=bool(catalyst_window),
             index_closes=index_closes or None,
@@ -9282,7 +9352,16 @@ def get_skill_read(
     skills = load_skills(skill_dir)
     req = [x.strip() for x in (requested or "").split(",") if x.strip()] or None
     picked = select_skills(skills, regime, requested=req)
-    lines = [f"Regime (from opinion): {regime or 'n/a (fail-open)'}"]
+    # Provenance, stated: `trend_score` and `baseline_score` are inputs the
+    # CALLER supplies (this leaf's whole design is regime-from-opinion). Both
+    # were printed bare, so a model-authored number could be quoted back as if
+    # it had been computed - "trend_score=72" / "Fold 60 + 12 = 72.0/100".
+    trend_src = (
+        f"trend_score {trend_score:g} (caller-supplied opinion, not measured)"
+        if trend_score is not None
+        else "trend_score n/a (opinion absent)"
+    )
+    lines = [f"Regime (from opinion): {regime or 'n/a (fail-open)'} [{trend_src}]"]
     if not picked:
         lines.append("Skills: none - skill_dir has no matching YAMLs")
     for name in picked:
@@ -9301,7 +9380,10 @@ def get_skill_read(
             for v in skills[n].bounded_adjustments.values()
         )
         folded = max(0.0, min(100.0, float(baseline_score) + delta))
-        lines.append(f"Folded score (advisory): {float(baseline_score):g} + {delta:+.2f} = {folded:.1f}/100")
+        lines.append(
+            f"Folded score (advisory): {float(baseline_score):g} (caller-supplied baseline) "
+            f"+ {delta:+.2f} (YAML skill adjustments) = {folded:.1f}/100"
+        )
     elif baseline_score is not None:
         lines.append("Folded score (advisory): none - no skills selected")
     return "\n".join(lines)

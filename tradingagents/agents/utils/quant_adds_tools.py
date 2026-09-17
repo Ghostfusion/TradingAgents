@@ -95,31 +95,72 @@ def get_kalman_spread(
 @tool
 def get_position_risk_multiplier(
     ticker: Annotated[str, "ticker symbol"],
-    knife_factor: Annotated[float, "composite knife factor (0..1), default 1"] = 1.0,
-    regime_factor: Annotated[float, "regime factor (0..1), default 1"] = 1.0,
-    vol_cap_factor: Annotated[float, "vol-cap ladder factor (0..1), default 1"] = 1.0,
+    knife_factor: Annotated[float | None, "override the MEASURED knife factor (0..1); omit to measure"] = None,
+    regime_factor: Annotated[float | None, "override the MEASURED regime factor (0..1); omit to measure"] = None,
+    vol_cap_factor: Annotated[float | None, "override the MEASURED vol-cap factor (0..1); omit to measure"] = None,
 ) -> str:
     """The execution multiplier over the two-tier soft/hard policy
     (strategies/risk_multiplier.py - the halve-not-block material): soft guards
     multiply exposure down, hard guards (halt / insufficient_liquidity /
     max_portfolio_risk / data_quality_failure / broker_safety) block to 0.
-    Pass the computed factors; any hard guard name blocks regardless. Call
-    before any 'the position should be sized X because of risk' claim. Advisory.
+
+    **Each factor is measured from the ticker's own series by default**:
+    `knife_guard.knife_score` -> its graduated factor, `regime_state.regime_state`
+    -> F_regime, `regime_state.vol_cap_factor` over the ATR ratio. A supplied
+    value is an explicit override and is labelled caller-supplied in the output,
+    so a number the model invented is never presented as measured. An
+    unmeasurable leg reads 1.0 (no reduction) and says so. Call before any 'the
+    position should be sized X because of risk' claim. Advisory.
     """
     try:
         from tradingagents.strategies.risk_multiplier import RiskMultiplier, combine
     except Exception as exc:  # noqa: BLE001
         return f"risk multiplier unavailable: {exc}"
+
+    measured: dict[str, float | None] = {"knife": None, "regime": None, "vol_cap": None}
     try:
-        kf = max(0.0, min(1.0, float(knife_factor)))
-        rf = max(0.0, min(1.0, float(regime_factor)))
-        vf = max(0.0, min(1.0, float(vol_cap_factor)))
-    except (TypeError, ValueError):
-        return f"risk multiplier unavailable for {ticker}: non-numeric factor"
-    r = combine(RiskMultiplier(soft={"regime": rf, "vol_cap": vf, "knife": kf}))
+        from tradingagents.strategies.knife_guard import knife_score
+        from tradingagents.strategies.regime_state import (
+            regime_state as _rs,
+            vol_cap_factor as _vcf,
+        )
+
+        oh = _ohlcv(ticker)
+        closes = oh.get("closes") or []
+        if len(closes) >= 40:
+            ks = knife_score(
+                closes,
+                highs=oh.get("highs") or None,
+                lows=oh.get("lows") or None,
+                volumes=oh.get("volumes") or None,
+            )
+            measured["knife"] = ks.get("factor")
+            st = _rs(closes, oh.get("highs") or None, oh.get("lows") or None)
+            measured["regime"] = st.get("factor")
+            measured["vol_cap"] = _vcf(st.get("vol_ratio"))
+    except Exception:  # noqa: BLE001 - a failed measurement degrades to "unknown"
+        pass
+
+    supplied = {"knife": knife_factor, "regime": regime_factor, "vol_cap": vol_cap_factor}
+    vals: dict[str, float] = {}
+    srcs: list[str] = []
+    for key, label in (("regime", "regime"), ("vol_cap", "vol_cap"), ("knife", "knife")):
+        v = supplied[key] if supplied[key] is not None else measured[key]
+        if v is None:
+            vals[key] = 1.0
+            srcs.append(f"{label} 1.0 (not measurable - no reduction)")
+            continue
+        try:
+            vals[key] = max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return f"risk multiplier unavailable for {ticker}: non-numeric {label}_factor"
+        srcs.append(
+            f"{label} {vals[key]} ({'caller-supplied' if supplied[key] is not None else 'measured'})"
+        )
+    r = combine(RiskMultiplier(soft={"regime": vals["regime"], "vol_cap": vals["vol_cap"], "knife": vals["knife"]}))
     return (
         f"execution multiplier {ticker}: factor={r['factor']} "
-        f"(regime {rf}, vol_cap {vf}, knife {kf}, blocked={r['blocked']})"
+        f"({', '.join(srcs)}, blocked={r['blocked']})"
     )
 
 

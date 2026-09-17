@@ -824,6 +824,142 @@ def test_momentum_detail_empty_history_degrades(monkeypatch):
     out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
     assert "unavailable" in out
 
+def test_momentum_detail_reaches_the_multihorizon_vector_and_macd_rule(monkeypatch):
+    """Regression: `factors.momentum_multihorizon` was built and whitelisted as
+    unreachable legacy, and `rule_eval.rule_signal_macd_hist_rising` (the only
+    MACD-histogram-slope producer) had a script as its only reader - so the
+    analyst could not score either from any leaf."""
+    n = 320
+    closes = [100.0 + 0.2 * i for i in range(n)]
+    fake = {
+        "closes": closes,
+        "opens": closes[:],
+        "highs": [c + 0.5 for c in closes],
+        "lows": [c - 0.5 for c in closes],
+        "volumes": [1000] * n,
+    }
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
+    assert "momentum_mh:" in out and "ensemble=" in out
+    assert "252d=" in out
+    assert "macd_hist_rising=" in out
+
+
+def test_position_risk_multiplier_measures_its_factors(monkeypatch):
+    """Regression: knife_factor/regime_factor/vol_cap_factor were
+    caller-supplied numbers ("computed execution multiplier" fed an invented
+    factor). They are measured from the ticker's own series by default; an
+    explicit override is labelled caller-supplied."""
+    from tradingagents.agents.utils import quant_adds_tools as Q
+
+    n = 260
+    closes = [200.0 - 0.3 * i for i in range(n)]  # a falling knife, by construction
+    fake = {
+        "closes": closes,
+        "opens": closes[:],
+        "highs": [c + 0.5 for c in closes],
+        "lows": [c - 0.5 for c in closes],
+        "volumes": [2_000_000] * n,
+    }
+    monkeypatch.setattr(Q, "_ohlcv", lambda ticker: fake)
+    out = Q.get_position_risk_multiplier.invoke({"ticker": "AAPL"})
+    assert "knife" in out and "(measured)" in out
+    out2 = Q.get_position_risk_multiplier.invoke({"ticker": "AAPL", "knife_factor": 0.5})
+    assert "knife 0.5 (caller-supplied)" in out2
+
+
+def test_skill_read_labels_the_caller_supplied_numbers():
+    """Regression: `trend_score` and `baseline_score` are CALLER inputs (the
+    leaf is regime-from-opinion) but were printed bare, so a model-authored
+    number could be quoted back as computed - "trend_score=72" / "Fold 60 + 12
+    = 72.0/100"."""
+    out = T.get_skill_read.invoke(
+        {"ma_alignment": "bullish", "trend_score": 72.0, "baseline_score": 60.0}
+    )
+    assert "caller-supplied opinion, not measured" in out
+    assert "caller-supplied baseline" in out
+
+
+def test_chaikin_is_not_labelled_a_verdict(monkeypatch):
+    """Regression: the leaf printed `chaikin=<raw A/D units> (positive=buying
+    pressure)`, so an unbounded magnitude read as a strength score (AMAT
+    2026-09-14: 869687.156 beside di- > di+)."""
+    closes = _uptrend(260)
+    with mock.patch(
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
+    ):
+        out = T.get_technical_factors.invoke({"ticker": "AAPL"})
+    assert "A/D units" in out
+    assert "positive=buying pressure" not in out
+
+
+def test_support_structure_reaches_the_atr_branch(monkeypatch):
+    """Regression: the leaf called support_structure without `atr_value`, so the
+    producer's primary branch ("within 1.5 ATR of the base low") was
+    unreachable and `multi-month-base-support` could never be emitted."""
+    n = 205
+    closes = [200.0 - 0.5 * i for i in range(n)]
+    highs = [c + 2.0 for c in closes]
+    lows = [c - 2.0 for c in closes]
+    # value_dip_tools binds its own `_ohlcv` at import time, so that is the
+    # name to patch (never a live fetch).
+    monkeypatch.setattr(
+        V,
+        "_ohlcv",
+        lambda ticker: {"closes": closes, "highs": highs, "lows": lows, "volumes": [1e6] * n},
+    )
+    out = V.get_support_structure.invoke({"ticker": "AAPL"})
+    assert "multi-month-base-support" in out
+
+
+def test_premarket_review_reaches_the_catalyst_hard_block(monkeypatch):
+    """Regression: the leaf never passed `catalyst_snapshot` to the arbiter, so
+    its earnings-window REJECT/REVISE branch was unreachable and a fail-closed
+    path was dead."""
+    closes = _uptrend(260)
+    monkeypatch.setattr(
+        T,
+        "_catalyst_snapshot",
+        lambda ticker, trade_date=None: {
+            "verdict": "earnings-hard-block",
+            "scale": 0.25,
+            "hard_block": {"days_until": 2, "window_days": 5, "earnings_date": "2026-09-19"},
+            "earnings": {"days_until": 2},
+            "reasons": ["earnings in 2d within the hard-block window"],
+        },
+    )
+    with mock.patch(
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes}),
+    ):
+        out = T.get_premarket_review.invoke({"ticker": "AAPL"})
+    assert "REJECT" in out
+    assert "hard_block=True" in out
+
+
+def test_regime_gate_measures_the_catalyst_window(monkeypatch):
+    """Regression: `catalyst_window` defaulted to False with no producer, so the
+    veto the gate advertises could never fire. Omitted, it is now measured from
+    the ticker's catalyst snapshot."""
+    closes = _uptrend(260)
+    monkeypatch.setattr(
+        T,
+        "_ohlcv",
+        lambda ticker: {"closes": closes, "highs": [c + 2 for c in closes],
+                        "lows": [c - 2 for c in closes], "volumes": [1e6] * len(closes)},
+    )
+    monkeypatch.setattr(
+        T,
+        "_catalyst_snapshot",
+        lambda ticker, trade_date=None: {"verdict": "earnings-window", "scale": 0.6},
+    )
+    out = T.get_regime_gate_read.invoke({"ticker": "AAPL"})
+    assert "catalyst-window" in out
+    # an explicit False still overrides the measurement
+    out2 = T.get_regime_gate_read.invoke({"ticker": "AAPL", "catalyst_window": False})
+    assert "catalyst-window" not in out2
+
 
 # --------------------------------------------------------------------------
 # DCF valuation tool - hermetic (mock route_to_vendor)

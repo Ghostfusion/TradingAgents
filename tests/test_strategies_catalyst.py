@@ -395,6 +395,18 @@ def test_fetch_catalyst_data_unpacks_live_shape(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_snapshot_exposes_the_implied_move_key_the_contract_reads():
+    """Regression: the graph read `implied_move_pct` from the snapshot while the
+    producer emits `implied_move`, so the position contract's implied-move
+    de-risk never applied. One key, one name - pinned here so the reader and the
+    producer cannot drift apart again."""
+    from tradingagents.strategies.catalyst import build_catalyst_snapshot
+
+    snap = build_catalyst_snapshot({}, "2026-09-17", {})
+    assert "implied_move" in snap
+    assert "implied_move_pct" not in snap
+
+
 def test_graph_overlay_wiring_enable_events(monkeypatch):
     """_apply_strategy_overlays runs the catalyst fold when enable_events is on."""
     import tradingagents.graph.trading_graph as tg

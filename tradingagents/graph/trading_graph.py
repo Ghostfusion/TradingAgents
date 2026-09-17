@@ -963,7 +963,10 @@ class TradingAgentsGraph:
                         catalyst_scale=(catalyst_snapshot or {}).get("scale"),
                         entry_price=entry_price,
                         trail_stop=(final_state.get("swing_exits") or {}).get("chandelier"),
-                        implied_move_pct=(catalyst_snapshot or {}).get("implied_move_pct"),
+                        # The snapshot emits `implied_move` (a fraction); this
+                        # read `implied_move_pct`, a key nothing ever wrote, so
+                        # the contract's implied-move de-risk never applied.
+                        implied_move_pct=(catalyst_snapshot or {}).get("implied_move"),
                         knife_factor=_kf,
                         regime_factor=_rf,
                         vol_cap_factor=_vcf,
@@ -1262,13 +1265,25 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001
             pass
         try:
+            from tradingagents.strategies.pre_market import catalyst_window_read
             from tradingagents.strategies.regime import regime_gate_read
 
-            rg = regime_gate_read(closes, cfg=self.config, catalyst_window=False) or {}
+            # The catalyst window is derived from the snapshot the overlay
+            # already carries (fold_catalyst_into_overlay stamps it under
+            # "catalyst"). It used to be hardcoded False, so the veto the gate
+            # advertises could never fire.
+            cat_snap = ((state or {}).get("strategy_overlays") or {}).get("catalyst")
+            try:
+                cat = catalyst_window_read(cat_snap, self.config)
+                cat_window = bool(cat.get("hard_block") or cat.get("tightened"))
+            except Exception:  # noqa: BLE001 - no snapshot -> no veto
+                cat_window = False
+            rg = regime_gate_read(closes, cfg=self.config, catalyst_window=cat_window) or {}
             out.append(
                 "Computed regime gate (mean-reversion entry): "
                 f"verdict={rg.get('verdict')} pass={rg.get('pass')} "
                 f"vol_pct={rg.get('vol_pct')} fast_downtrend={rg.get('fast_downtrend')} "
+                f"catalyst_window={rg.get('catalyst_window')} "
                 f"reasons={'; '.join(rg.get('reasons') or [])}"
             )
         except Exception:  # noqa: BLE001

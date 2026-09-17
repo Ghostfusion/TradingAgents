@@ -88,7 +88,7 @@ def _atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
         from tradingagents.strategies.size import atr
 
         a = atr(high, low, closes, window=window)
-        if a > 0:
+        if a is not None and a > 0:
             return a, "h/l"
     sample = closes[-window:] if len(closes) > window else closes
     rets = _log_returns(sample)

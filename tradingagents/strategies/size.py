@@ -128,16 +128,23 @@ def composite_position_size(
     }
 
 
-def atr(high: list[float], low: list[float], close: list[float], window: int = 14) -> float:
-    """Average True Range over the window."""
+def atr(high: list[float], low: list[float], close: list[float], window: int = 14) -> float | None:
+    """Average True Range over the window; **None** when unmeasurable.
+
+    Mismatched/missing series or fewer than two bars have no ATR, and this
+    used to return `0.0` for them - a caller testing `is not None` read
+    "unknown volatility" as "zero volatility" (the NA-as-zero defect class the
+    module's own no-fabrication contract forbids; `stop_loss_atr` and
+    `etf_risk._atr` already return None for exactly this reason).
+    """
     if not (len(high) == len(low) == len(close)) or len(high) < 2:
-        return 0.0
+        return None
     trs = []
     for i in range(1, len(high)):
         tr = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
         trs.append(tr)
     sample = trs[-window:]
-    return sum(sample) / len(sample) if sample else 0.0
+    return sum(sample) / len(sample) if sample else None
 
 
 def stop_loss_atr(
@@ -145,7 +152,7 @@ def stop_loss_atr(
 ) -> float:
     """Stop level = close - atr_mult * ATR; None when insufficient data."""
     a = atr(high, low, close)
-    if a <= 0 or not close:
+    if a is None or a <= 0 or not close:
         # No-fabrication contract: insufficient/degenerate data -> None, never a
         # fabricated stop at 0 (a "stop at zero" read as a plausible level).
         return None

@@ -43,6 +43,19 @@ def test_stop_below_close():
     assert stop_loss_atr(close, high, low) < close[-1]
 
 
+def test_atr_is_none_when_unmeasurable():
+    """Regression: `atr` returned 0.0 for a missing or mismatched series, so a
+    caller testing `is not None` read "unknown volatility" as "zero
+    volatility" - the NA-as-zero defect class. `stop_loss_atr` and
+    `etf_risk._atr` already returned None for the same reason."""
+    assert atr([1.0], [1.0], [1.0]) is None
+    assert atr([1.0, 2.0], [1.0], [1.0, 2.0]) is None  # mismatched lengths
+    assert atr([], [], []) is None
+    assert stop_loss_atr([100.0, 101.0], [100.0], [99.0]) is None
+    a = atr([100.0, 101.0, 102.0], [99.0, 100.0, 101.0], [99.5, 100.5, 101.5])
+    assert a is not None and a > 0
+
+
 def test_cvar_negative_tail():
     bad = [-0.1, -0.08, -0.05, 0.01, 0.05]
     assert cvar_budget(bad, alpha=0.2) < 0

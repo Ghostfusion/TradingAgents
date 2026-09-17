@@ -239,6 +239,23 @@ def test_industry_rank_excludes_vgt_from_pool():
     assert r["top3_3m"] == ["SOXX", "IGV"]
 
 
+def test_a_missing_drawdown_leg_is_not_scored_as_the_worst(monkeypatch):
+    """Regression: a missing mdd percentile was substituted with 0.0 - the floor
+    of a higher-is-better percentile, i.e. the WORST possible rank - so a sector
+    whose drawdown could not be measured was actively penalised. The risk leg
+    now renormalises over the legs that exist, so the best sector on the
+    available leg scores 100 there (it scored 60 under the old formula)."""
+    import tradingagents.strategies.sector_rank as sr
+
+    cm = {"XLK": _uptrend(step=0.9), "XLF": _uptrend(step=0.4), "XLE": _uptrend(step=0.1)}
+    monkeypatch.setattr(sr, "_max_drawdown", lambda closes, window: None)
+    r = rank_sectors_multifactor(cm, bench_closes=_bench())
+    risks = [row["risk"] for row in r["ranked"] if row["risk"] is not None]
+    assert risks and max(risks) == 100.0
+    for row in r["ranked"]:
+        assert row["mdd_126"] is None
+
+
 def test_dual_benchmark_emits_rs2():
     """rank_sectors_multifactor with a second benchmark emits per-row ``rs2``
     (the IT-vs-VGT answer) WITHOUT re-ranking the SPY-relative ``rs``."""
