@@ -388,6 +388,38 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the score-engine design is RESTRUCTURED into a master document plus one
+  document per engine, in **`docs/scores/`**. `docs/design_fundamental_factor_weight_model.md` is **moved** (git mv) to
+  `docs/scores/FundamentalScore.md` and **scoped to the fundamental engine only**; six new documents join it -
+  `TechnicalScore.md`, `RegimeScore.md`, `NewsScore.md`, `SentimentScore.md`, `EventScore.md`, `RiskScore.md` - under
+  `docs/scores/README.md` (master: architecture, direction convention, engine map, the composite + the gate-order conflict,
+  cross-engine rules, the CODE-DEFECT LEDGER, wiring contracts, phase plan, verification requirements, decision record, open
+  questions, Appendix B, evidence ledger). **Nothing was dropped in the move**: the fundamental document keeps §0 method, §1
+  what exists, §2 the 106-factor ledger, §3.1-3.6 the four sub-scores, Appendix A and C.1; the other engines' material moved
+  into their own documents, each expanded with a component ledger, tool-leaf map, defect list, build order and methodology
+  ledger. **Every row in every ledger was re-verified at the definition site by a read-only scout** (six inventories), and
+  the load-bearing findings are: `TechnicalScore` - no composite technical score exists in ANY of the three repos (the only
+  0-100 "trend score" is an LLM-supplied argument at `analysis_tools.py:9247`), five of nine categories scorable, and six
+  non-monotonic inputs that must be band-mapped rather than ramped; `RegimeScore` - the "regime conflict" is a NAME COLLISION
+  between two paths sharing no inputs/scales/labels (`get_regime_read`→`overlays` with `enable_strategy_overlays` default
+  True vs `get_regime_state`→`regime_state.regime_state` with `regime_state_enable` default False), both bound to the market
+  analyst; `RiskScore` - no 0-100 risk score exists anywhere, all eight categories exist as components at THREE incompatible
+  sign/unit conventions (CVaR negative vs positive vs equity fraction; drawdown positive vs negative-labelled vs negative; two
+  cap families), so the document pins one convention each and prints raw values beside aligned contributions; `NewsScore` -
+  5 of 9 categories ABSENT, `score_news_article:53` scores RELEVANCE not MATERIALITY (quoted), the duplicate-of-Sentiment
+  question is NOT settled by construction (four couplings); `SentimentScore` - four holes (20d momentum, acceleration,
+  per-source breadth, institutional bound to the FUNDAMENTALS toolset at `toolsets.py:395`), Sentiment x Price Confirmation
+  PARTIAL (no quadrant, no abnormal return, and the wired fold is a single-name self-correlation, gated off), plus the GDELT
+  -100..100 vs -1..1 scale mismatch on the news-sentiment route; `EventScore` - no weights from the owner and that is coherent
+  (every producer is a multiplier/day-count/boolean), occurrence for 4 of 7 families, the ONLY event hard block is the
+  earnings blackout, and the executor's 17 GATE_PRECEDENCE checks contain NO event check. The master's §3 is the defect
+  ledger: the six §1.5 defects being fixed plus TWELVE more found by these inventories (dead value-area accumulator,
+  unreachable `support_structure` branch, `size.atr` returning 0.0, an NA->0 substitution in `rank_sectors_multifactor`, two
+  LLM-supplied numbers presented as computed, an unbounded Chaikin labelled a verdict, a dead `implied_move_pct` key, an
+  unreachable premarket hard block, an inert `catalyst_window` veto, an unread MACD-slope producer, an unreachable
+  multi-horizon momentum vector). References updated for the move: `scripts/value_screener.py`,
+  `tradingagents/strategies/factors.py`, `docs/design_quant_formulas_research_round3.md` (earlier CHANGELOG/onboarding entries
+  keep their original paths - they are dated records).
 - 2026-09-17 `(working tree)` - **Design only, no code:** the owner staged `docs/ScoreWeight/{fundamental,market,news_sentiment}.md`
   (their own newer spec) and the design doc is folded into it. **Six engines plus a recommended seventh** (Fundamental,
   Technical, Regime, News, Sentiment, Risk, + Event), four factor catalogs targeting ~250-300 factors, research

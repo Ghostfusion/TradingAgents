@@ -27,7 +27,7 @@ and **Shareholder Yield** (the canonical ``share_buybacks`` and
 ``debt_repayment`` keys have no reader, so the buyback and debt-reduction legs
 are missing - the dividend leg alone would print a wrong number under that
 name). They are recorded as wiring gaps in
-``docs/design_fundamental_factor_weight_model.md`` §3.6 rather than shipped as
+``docs/scores/FundamentalScore.md`` §3.6 rather than shipped as
 an "n/a" column. Every other row above is computed.
 
 The screener never fabricates: a missing line item makes the corresponding

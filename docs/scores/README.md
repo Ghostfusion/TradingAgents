@@ -1,0 +1,424 @@
+# Score engines — master design
+
+**The design set.** One document per score engine plus this master:
+
+| Engine | Document | Owner's weight table | Readiness |
+| --- | --- | --- | --- |
+| FundamentalScore | [`FundamentalScore.md`](FundamentalScore.md) | 106 factors, 10 categories | largely computable; the ledger names the third that is not |
+| TechnicalScore | [`TechnicalScore.md`](TechnicalScore.md) | 9 categories | **no composite exists**; components do |
+| RegimeScore | [`RegimeScore.md`](RegimeScore.md) | 8 categories | **two independent paths**, no score |
+| NewsScore | [`NewsScore.md`](NewsScore.md) | 9 categories | **5 of 9 ABSENT** |
+| SentimentScore | [`SentimentScore.md`](SentimentScore.md) | 10 categories | mostly buildable, four holes |
+| EventScore | [`EventScore.md`](EventScore.md) | *(none given)* | occurrence producers exist for 4 of 7 families |
+| RiskScore | [`RiskScore.md`](RiskScore.md) | 8 categories | **no 0-100 risk score exists anywhere** |
+
+The owner's own specification of record is preserved verbatim, unedited, in
+[`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
+[`../ScoreWeight/market.md`](../ScoreWeight/market.md) and
+[`../ScoreWeight/news_sentiment.md`](../ScoreWeight/news_sentiment.md). **This
+document set is what interprets them against the engine**; where the documents
+and the specs disagree, the specs govern the *intent* and the documents govern
+what is *buildable*.
+
+Status: **design (2026-09-17). Not started.** Nothing here is implemented. The
+engine already computes most of the *components*; what does not exist anywhere is
+a composite per engine, and that is what this set designs.
+
+Scope of this master: the architecture, the cross-engine rules, the composite and
+its gate rules, the weight reconciliation between the owner's two iterations, the
+**code defects the inventories found**, the wiring contracts, the phase plan, the
+verification requirements, the decision record and the open questions. Each
+engine's components, producers and gaps are in that engine's own document.
+
+---
+
+## 1. The architecture
+
+### 1.1 Seven engines, not one composite
+
+The owner's staged specification keeps the scores **completely separate** rather
+than building one giant 250-300 factor composite:
+
+```
+                    STOCK
+                      │
+   ┌──────────┬───────┴───────┬──────────┐
+   ▼          ▼               ▼          ▼
+FUNDAMENTAL  TECHNICAL      REGIME      RISK          NEWS    SENTIMENT   EVENT
+   │          │               │          │              │        │          │
+   ▼          ▼               ▼          ▼              ▼        ▼          ▼
+Fundamental Technical      Regime      Risk           News   Sentiment   Event
+  Score       Score          Score      Score          Score     Score     Score
+   │          │               │          │              │        │          │
+   └──────────┴───────┬───────┴──────────┴──────────────┴────────┴──────────┘
+                      ▼
+              DECISION / OPPORTUNITY ENGINE
+                      ▼
+              Entry / Hold / Exit
+                      ▼
+                 Position Size
+                      ▼
+                 HARD GATES
+```
+
+The reason is diagnostic, and the owner states it: with four separate numbers you
+can say *"excellent fundamental profile, constructive longer-term trend,
+deteriorating short-term momentum, elevated risk"*; with one `MarketScore = 63`
+you cannot. The repo already agrees — its own history is a **funnel over a single
+score** (round 3 §S3, `design_institutional_value_dip_workflow.md`).
+
+### 1.2 Direction convention — 100 = favourable, for every engine
+
+Every engine scores **0-100 with 100 = favourable**. For RiskScore that means the
+score is **inverted** relative to how risk is normally measured: a *high*
+`RiskScore` means *low* risk. The alternative (high = dangerous) was rejected
+because a reader comparing `Fundamental 88 / Technical 61 / Regime 68 / Risk 54`
+must not have to remember that one of the four points the other way.
+
+Consequence: **every component prints its raw value with units and sign beside
+its aligned contribution.** The repo currently carries three incompatible
+conventions for the same quantity (`CVaR` as a negative loss, as a positive
+magnitude, and as an equity fraction; drawdown as a negative number and as a
+labelled band; a notional cap and a correlation-cluster cap), and a single
+aligned score would silently pick one of them. Printing both ends the ambiguity.
+
+
+### 1.3 The engine map
+
+| Engine | What it answers | Components with a real producer | Components ABSENT | Composite today |
+| --- | --- | --: | --: | --- |
+| FundamentalScore | *Is this a good business at a good price?* | see [`FundamentalScore.md`](FundamentalScore.md) §2 — the ledger marks all 106 | 0-100, advisory only |
+| TechnicalScore | *What is this stock doing?* | 9 categories largely populated | the composite itself | **none** |
+| RegimeScore | *What environment is this stock trading in?* | two independent paths | market-wide breadth, VIX percentile/term structure, credit | **none** |
+| NewsScore | *What new information arrived, and how material is it?* | 4 of 9 categories | novelty, materiality, fundamental impact, guidance change, corporate events, persistence | **none** |
+| SentimentScore | *How is the market positioned around it?* | 6 of 10 categories | 20-day momentum, acceleration, per-source breadth, institutional on this surface | **none** |
+| EventScore | *Is a high-impact event happening now?* | 4 of 7 families | product/clinical, court, investor day | **none** |
+| RiskScore | *How much can this hurt?* | all 8 categories as components | the aggregation | **none** |
+
+**"Composite today: none" is a grep result, not an impression.** No 0-100
+technical score, no market-level regime score and no 0-100 risk score exists
+anywhere in `TradingAgents` or `TradingExecution`; the only existing composites
+in this space are the LLM-produced analyst scores (`SentimentReport.overall_score`
+0-10, `agents/schemas.py:463`) and the deterministic per-factor libraries. A
+score that does not exist cannot be quoted, and no document in this set may
+imply one does.
+
+
+### 1.4 The composite — research allocation, and the gate-order conflict
+
+The owner's staged research allocation for the six weighted engines:
+
+| Engine | Fundamental | Technical | Regime | Risk | News | Sentiment |
+| --- | --: | --: | --: | --: | --: | --: |
+| Research weight | **35%** | **20%** | **15%** | **15%** | **7.5%** | **7.5%** |
+
+He labels these **research weights, not production truth**, and pairs them with
+the empirical ladder (IC, Rank IC, ICIR, decile spread, monotonicity, turnover,
+persistence, sector and regime robustness, redundancy, OOS) before any of them
+may replace the deterministic baseline. **EventScore has no weight in this
+table** — the open question is in §8.3.
+
+Two conflicts inside the owner's own diagrams are **flagged, not resolved**:
+
+1. **Gate order.** His first diagram puts the hard gates *before* position size;
+   his staged diagram puts them *after* it. The engine implements
+   **gates-before-sizing** — the gate verdict feeds `strategies/risk/sizing.py:144`
+   — and this document keeps that, because a gate *after* sizing must unwind a
+   size it has already authorised. If the owner wants the staged order, it is a
+   contract change, not a diagram fix.
+2. **Which composite governs.** The earlier `TradeScore = 0.40F + 0.25T + 0.15R +
+   0.20K` is a *decision* composite over four engines; the staged allocation is a
+   *research* allocation over six. They are different objects and must not share
+   a name. The staged set is newer and governs the research layer; the four-score
+   `TradeScore` remains as the decision-composite sketch, superseded in weights
+   and awaiting its own name.
+
+**What the composite may not do** (unchanged from the earlier pass, and the
+reason the repo already behaves correctly): a composite score **never overrides a
+hard gate**. 17 fail-closed checks live in `GATE_PRECEDENCE`
+(`../TradingExecution/signald/contracts.py:42`); the risk governor never reads a
+score; `risk_multiplier.combine` zeroes the soft product when a hard flag fires.
+The acceptance case is `F 92 / T 85 / R 78 / K 35` → *"high quality, strong
+setup, favourable regime, high risk → NO NEW RISK"*.
+
+**Score, scale, state and confidence are four different outputs.** `RegimeScore
+68` (a score), `RegimeScale 0.47x` (a sizing multiplier), `RegimeState
+STRONG_BULL` (a label) and `RegimeConfidence 0.75` (how much to trust the first
+three) must never be collapsed into one number. Sizing is not conviction:
+volatility targeting sizes *inversely* to volatility, and fractional Kelly
+discounts for estimation error.
+
+
+---
+
+
+### 1.5 The earlier four-score iteration — recorded, superseded in weights
+
+The first iteration of this design (before the owner's staged spec) proposed
+**four** scores — Fundamental, Technical, Regime, Risk — combined as
+
+$$TradeScore = 0.40\,F + 0.25\,T + 0.15\,R + 0.20\,K$$
+
+with every score on the same 0-100 convention and `RiskScore` inverted (100 =
+low risk). The owner has since withdrawn that weight vector as a production
+score and staged the six-engine allocation of §1.4. **The four-score version is
+kept here as the record** — it is what produced the direction convention (§1.2),
+the four output types (score / scale / state / confidence), and the readiness
+measurements that the engine map in §1.3 summarises. Where the two disagree, the
+staged set governs (§3).
+
+The owner's 2026-09-17 specification, refined the same day by three staged docs
+(`docs/ScoreWeight/{fundamental,market,news_sentiment}.md`). **Separate** 0-100
+scores, one per dimension, and only then a combination. The staged docs frame
+the factor side as **four catalogs** — fundamental ~106, technical ~80-120,
+market/regime ~50-80, risk/portfolio ~40-60, i.e. a **250-300 factor target
+across the engines** — and make the point this document already enforces: *"106
+does not mean your system has proven that 106 independent pieces of information
+exist"* (FCF yield, price/FCF, normalized FCF yield and earnings yield overlap;
+§3.2's redundancy leg is what handles it). The staged spec's formula is the same
+renormalising mean this document specifies: `Score_j = Σ wᵢxᵢ / Σ wᵢ` over
+normalised 0-100 factor scores, with missing factors excluded rather than scored
+zero (`NA ≠ 0`, §3.2). The governing sentence is *"do not mix
+them into one score too early"*, and there is literature behind it: Asness,
+Moskowitz & Pedersen find value and momentum are **negatively correlated
+(≈ −0.60)** and that separate sleeves / a 50-50 allocation historically beat
+merging the signals into one ranking; composite-indicator practice recommends
+keeping dimensions separate for root-cause attribution and to avoid a
+**misleading cancellation** where one dimension deteriorates while the total
+stays flat. The MSFT example in the owner's brief is exactly that case (strong
+long-term trend, deteriorating MACD, RSI fallen, price below the 10/20 EMA,
+swing setup NO) — a single "bullish" label would erase the disagreement.
+
+---
+
+## 2. Cross-engine rules (non-negotiable)
+
+1. **`NA ≠ 0`.** A missing input reduces the *available* weight; it never becomes
+   a zero that punishes the name. A missing metric is never manufactured from a
+   generic factor. Every score prints its coverage.
+2. **A score is not a rating.** Nothing feeds `decision_guardrail.SCORE_BANDS`;
+   each engine carries its own band table.
+3. **One number, one producer.** If two engines would read the same computation,
+   that is a naming problem. The engine's rule is *one implementation, many
+   readers* — and the documents must therefore name, per component, which
+   producer it reads. The known couplings are in §5.3.
+4. **A composite never overrides a hard gate.** See §1.4.
+5. **Measure, don't assume.** Anything that can only be a constant is labelled a
+   constant, in the document *and* in the output.
+6. **No weight vector is invented.** Every weight in this set is the owner's,
+   labelled as a starting hypothesis, and every one is subject to Phase C.
+7. **No `factor_score=NN` in prose.** The scores are tool leaves and printed
+   blocks, not sentences the LLM may paraphrase. (Owner decision Q5.)
+
+
+---
+
+---
+
+## 3. Code defects found by the inventories (2026-09-17)
+
+Found while grounding the seven engines against the engine. Each is a confirmed
+defect with a named consequence and a pair of `file:line`s that disagree. **§3.1
+is the set being fixed in this pass** (the owner's instruction); §3.2 is the rest,
+recorded with their evidence.
+
+### 3.1 Fixed in this pass
+
+| # | Defect | Evidence | Consequence |
+| --: | --- | --- | --- |
+| 1 | **A dead branch makes the regime label trend-blind on the default path.** `overlays.build_strategy_overlays` calls `regime_label(vol_pct, trend, 0.4)` while `regime_label`'s default `chop_threshold` is `0.30`, so `chop <= chop_threshold` is **always False** | `strategies/overlays.py:57` vs `strategies/regime.py:126-145` | with `vol_pct == 0.5` (the middle band, the common case) `get_regime_read` returns `neutral` **regardless of the trend input** — the trend leg is inert, and every report that quotes `regime=neutral` is quoting a constant |
+| 2 | **Choppiness is passed on two incompatible scales.** `get_regime_components` compares chop against `chop_threshold=30.0` (0-100) while `overlays.py` hardcodes `0.4` against a 0.30 default | `agents/utils/analysis_tools.py:2176` vs `strategies/overlays.py:57`; producer `strategies/regime.py:87 choppiness` | the two callers cannot both be right; whichever is wrong makes its branch either dead (see #1) or always-on |
+| 3 | **Donchian breakout is unreachable.** `donchian_channel` returns `breakout_up/breakout_dn = None` by construction ("closes not passed; caller derives") and **no caller derives them** | `strategies/technical_factors.py:377` | the Breakout component's most canonical input is ABSENT as a value while the function appears to compute it |
+| 4 | **`parabolic_sar` is called without `closes`**, so its `below`/`exit` flag is unreachable | call at `agents/utils/analysis_tools.py:1160`; def `strategies/technical_factors.py:432` | the mean-reversion leaf prints the SAR level but never the flag its consumers would read |
+| 5 | **`BookState.net_beta` is a dead field** — it has **neither producer nor reader** | `../TradingExecution/signald/risk/state.py:77`; every `BookState(...)` construction site omits it | a book-level beta leg is declared and never populated; the RiskScore's concentration component cannot use it, and a reader of the state sees a permanently-`None` field |
+| 6 | **Gap fill probability / days-to-fill are constants**, not measurements | `strategies/market_session.py:178-193` (`fill_probability` 0.3/0.6/0.4/0.8 and `days_to_fill` 5/3/4/2, literals per branch) | the Gap/execution component is the weakest of the eight for a data reason, not a modelling one — and the report prints a lookup table as if it were measured |
+
+### 3.2 Found and recorded, not yet fixed
+
+| # | Defect | Evidence | Consequence |
+| --: | --- | --- | --- |
+| 7 | `volume_profile`'s value-area accumulator is dead arithmetic (`acc` incremented then overwritten) | `strategies/technical_factors.py:688-692` | the value area can collapse to the whole price range — measured on `reports/AMAT_20260914_191359/tool_evidence.json:3341`: `poc=169.56 va_high=424.64 va_low=169.56` on a 424 close |
+| 8 | `support_structure`'s primary branch is unreachable from its only leaf (no `atr_value` passed) | `strategies/value_dip.py:738` vs `agents/utils/value_dip_tools.py:1018` | "multi-month-base support" can never be emitted; only the 3%-proximity branch fires |
+| 9 | `size.atr` returns **`0.0`**, not `None`, on insufficient data | `strategies/size.py:131-140` | an `atr is not None` caller reads "unknown volatility" as "zero volatility" — an `NA ≠ 0` violation (§2 rule 1) |
+| 10 | `rank_sectors_multifactor` substitutes `0.0` for a missing percentile in the risk leg | `strategies/sector_rank.py:536` | a sector with unmeasurable drawdown is scored as if it had the **worst** percentile — `NA ≠ 0` violation |
+| 11 | `get_position_risk_multiplier` takes `knife_factor` (0..1) from the LLM; no leaf computes the composite K | `agents/utils/quant_adds_tools.py:96-125` vs `strategies/knife_guard.py:156` | a "computed execution multiplier" is fed an invented factor; 0.0 (block) and 1.0 (no reduction) both look measured |
+| 12 | `get_skill_read` accepts a 0-100 `trend_score` from the model and prints a folded number | `agents/utils/analysis_tools.py:9247` + `:9294-9300` | the report can quote `trend_score=72` / `Fold 60 + 12 = 72.0/100` with no producer behind either number (live evidence: `ToolCallLog/MSFT_tool_calls.jsonl:187`) |
+| 13 | `chaikin_oscillator` returns an unbounded A/D-unit difference while the leaf labels it `(positive=buying pressure)` | `strategies/technical_factors.py:560` vs the leaf's suffix in `get_technical_factors` | the sign is a scale artefact, not a verdict — the AMAT tree shows `chaikin=869687.156 (positive=buying pressure)` beside `di- > di+` |
+| 14 | A dead `implied_move_pct` key: the graph reads a key `build_catalyst_snapshot` never emits | `graph/trading_graph.py:966` vs `strategies/catalyst.py:219` | the premarket path silently loses the implied move |
+| 15 | The premarket hard block is unreachable — the leaf never passes `catalyst_snapshot` | `agents/utils/analysis_tools.py:6561` (`get_premarket_review`) vs `strategies/pre_market.py:198-240` | a fail-closed path is dead: a catalyst block cannot REJECT through the premarket review |
+| 16 | `regime_gate_read`'s `catalyst_window` veto is inert — no producer ever sets it | `strategies/regime.py:261` vs `strategies/catalyst.py` | the regime gate advertises a veto that can never fire |
+| 17 | `rule_signal_macd_hist_rising` (the only MACD-histogram-slope producer) has no production reader | `strategies/rule_eval.py:103` | the momentum sub-factor is unscoreable from any analyst leaf |
+| 18 | `factors.momentum_multihorizon` is built and unreachable (whitelisted as legacy) | `strategies/factors.py:400` vs `tests/test_calc_agent_wiring.py:40` | a per-name 21/63/126/252 momentum vector exists and no analyst can call it |
+
+Defects 9, 10, 14, 15 and 16 are the same class as the six in §3.1 — an `NA`
+becoming a zero, or a fail-closed branch that cannot fire — and are the natural
+next pass. Defects 7, 8, 11, 12, 13, 17 and 18 are either arithmetic inside a
+producer, or a producer/leaf pair that was never joined.
+
+---
+
+## 4. Wiring and contracts
+
+The cheap path and the expensive path differ by an order of magnitude in blast
+radius. Decide deliberately.
+---
+
+## 5. Phased plan
+
+Each phase is default-off behind a new gate (`enable_fundamental_factor_model`,
+plus `enable_factor_confidence` and `enable_factor_redundancy` if they land
+separately), flipped one at a time under the dark-launch protocol (ground rule
+10): labelled run, same basket, `scripts/repro_check.py --evidence` diff,
+`scripts/report_verify.py`, `scripts/verify_sweep.py` exiting 0 on CONFIRMED.
+---
+
+## 6. Verification requirements
+
+- Every new pure function gets a test that **fails under a mutation** of the
+  code it guards (ground rule 4). For a composite: flip a direction sign, drop
+  the coverage floor, remove the renormalisation — each must break a test.
+- The renormalisation and coverage behaviour is pinned on a synthetic panel with
+  known answers (a name with 3 of 7 metrics present must be withheld at
+  `min_coverage=3` if the floor resolves above 3, and scored otherwise).
+- Weights must be **printed**: a test asserts the `basis` string contains the
+  weight vector actually used, so no run can silently change its weights.
+- No factor may be scored from a vendor passthrough without the leaf saying so.
+- With the gate off, the tool must not exist in the toolset and the run output
+  must be byte-identical (the existing gate convention).
+- `metric_reconcile` / `disagreement_flag` must fire on a synthetic
+  two-vendor disagreement, proving the confidence leg can fail.
+- **`NA ≠ 0` is pinned (Q3):** a panel where one factor is absent for a name
+  must renormalise over the present factors and never score the absent one as
+  `0`; a name below the coverage floor is withheld with its reason, and a
+  `sector_scope` factor with no supplier contributes no weight at all.
+- **No score in prose (Q5):** a test asserts no analyst prompt string requires a
+  composite score in the narrative (the existing
+  `tests/test_analyst_evidence_wiring.py` pattern for named rule strings is the
+  place), and that the score reaches the reader only through the structured
+  leaf / `run_card` block.
+- **Validation status is pinned (Q4):** a panel below the cross-section floors
+  reports `INSUFFICIENT_CROSS_SECTION` and yields no weight vector; the test
+  must fail if the label is dropped.
+- **The composite is not on the wire (Q1):** a test asserts the advisory score
+  does not reach `research_decision.json` / `opportunity_score`, and that the
+  reason constant is present and stable when that key is added.
+- **Direction is pinned per component (§3.7.1):** a test asserts each component's
+  raw value and its aligned contribution have the declared relationship (e.g.
+  inverting the alignment must move the score the other way), and that the
+  `RiskScore` leg is *inverted* relative to its producers' native loss sign.
+- **The five polarity conflicts stay declared (§3.7.3):** RSI, MFI, stochastic,
+  the elder thermometer and the support-proximity read must each carry their
+  polarity, and a mutation that makes one of them monotone must fail a test.
+- **`TradeScore` cannot unlock a gate (§3.7.6):** a test drives the executor's
+  gate to BLOCK and asserts a maximal `TradeScore` changes nothing — the same
+  shape as the existing `risk_multiplier.combine` hard-flag test.
+- **Score and scale stay separate (§3.7.4):** a test asserts the regime sizing
+  scale is not an input to `RegimeScore` and vice versa, so a hostile regime
+  cannot rewrite the score and a good score cannot inflate the size.
+- **Arbitration is recorded (§3.7.4):** whichever regime producer a component
+  reads, the leaf names it, and a test asserts the name is printed.
+
+---
+---
+
+## 7. Decision record (owner, 2026-09-17)
+
+The five questions this document opened are answered. Recorded with the
+rationale, because the reasoning is what future changes have to respect.
+
+**Q1 — Does a composite fundamental score ever reach `opportunity_score`?**
+**Decided: (a) never, for now.** It stays a tool-leaf / `run_card` advisory
+metric. *Rationale (owner):* "The current 'would dress an estimate up as a
+measurement' rationale is sound." A deterministic `FundamentalScore = 84` does
+not imply `Opportunity = 84` — a name can have outstanding fundamentals with
+poor current opportunity characteristics (`FundamentalScore 92`,
+`TechnicalScore 61`, `RegimeScore 68`, `RiskScore 54`, `ValuationScore 37`). The
+distinction preserved is **measurement vs interpretation**: the artifact keeps
+`opportunity_score: null` and gains a producer-owned
+`opportunity_score_reason` (§5.2).
+
+**Q2 — Learned walk-forward weights?**
+**Decided: yes, as a separate research/experimental layer — not in the
+deterministic production score yet.** *Rationale (owner):* removing Phase 4
+merely because the current rule is deterministic would be wrong; what matters is
+that the learned vector is compared against the deterministic baseline on IC,
+decile monotonicity, spread and stability, and does not become production "merely
+because it improves in-sample results". Promotion is the ladder
+`RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`; the schema /
+contract / hash migration is only reached at step three (§5.2, §6 Phase D).
+
+**Q3 — Sector overlays?**
+**Decided: yes — architecture in scope now, suppliers deferred.** The factor
+schema carries `sector_scope` / `supplier` / `availability` from the first
+commit (`ROIC scope=ALL`, `NIM scope=BANKS`, `CET1 scope=BANKS`,
+`ROTCE scope=BANKS`, `FFO_Yield scope=REITS`, `AFFO_Yield scope=REITS`,
+`NAV_Discount scope=REITS`, `Occupancy scope=REITS`). Until a supplier exists
+they are `NA`, **not zero** — *"missing data should reduce the available factor
+weight, rather than punish the company"* — and the design must **not manufacture
+missing metrics from generic factors** (§3.2, §4.2).
+
+**Q4 — Evaluation universe?**
+**Decided: the full EODHD US panel** is the official validation universe; the
+named basket stays a development/test universe and is labelled
+`VALIDATION_STATUS = INSUFFICIENT_CROSS_SECTION` — *"rather than allowing it to
+produce authoritative factor weights"*. IC, ICIR, decile spread and
+monotonicity only become meaningful with hundreds/thousands of eligible names
+(§6 Phase C).
+
+**Q5 — `factor_score=NN` in prose?**
+**Decided: no.** The number lives in structured output
+(`fundamental_score`, `fundamental_score_status`,
+`fundamental_score_confidence`); narrative states quality in words. *Rationale
+(owner):* a bare score in prose "creates an apparent objective ground truth",
+after which every verifier/report comparison asks why 84.2 and not 81.7, which
+factor moved it, and whether 84.2 beats 78.4 — turning an **advisory composite
+into a quasi-official measurement** (§3.1, §5.3).
+
+---
+
+## Appendix B — what the canonical vocabulary cannot express
+
+From `dataflows/statement_parsing._ROW_ALIASES` (75-192): **35 keys**, aliases in
+match-priority order. The factors in §2 marked ABSENT are bounded by these gaps,
+not by missing formulas:
+
+| Missing key | Blocks |
+| --- | --- |
+| `ebitda` | #7 EBITDA margin, #21 EBITDA growth, #33/#34 FCF\|OCF ÷ EBITDA, #60 net debt/EBITDA |
+| `deferred_revenue` | #79 (and `revenue` deliberately excludes `deferred`/`unearned` labels) |
+| `goodwill` / `intangibles` | bank P/TBV reasoning, ROTCE |
+| R&D / advertising (referenced by `growth_metrics` but never aliased) | G-Score G6/G8 legs |
+| `roa_series` / `revenue_series` | #80 earnings volatility, G-Score G4/G5 — produced since 2026-09-17 (§1.4), still bounded by the 4-5 year vendor history |
+| multi-year tag series | #14/#17/#18/#20/#23/#38/#90 CAGR family |
+| segment data | any segment-level factor (vendor passthrough only) |
+| bank/REIT operating metrics | NIM, CET1, ROTCE, FFO, AFFO, NAV, occupancy, non-performing loans, deposit growth, efficiency ratio |
+| debt maturity schedule | #100 |
+
+Keys that exist with **zero code consumers** (their only mentions are the alias
+table and the `quantitative_scores.py` vocabulary docstring): `interest_expense`
+(#64, #98), `share_buybacks` (#92, #94), `debt_repayment`; plus `sga`, `cogs`
+and `retained_earnings`, which are read only inside Beneish/GP-A/Altman.
+
+---
+---
+
+### C.2 Evidence ledger for the score architecture
+
+| # | Source | Used for |
+| --: | --- | --- |
+| 13 | Grinold & Kahn, *Active Portfolio Management* — the risk model is built and used separately from the alpha model; "risk is not alpha"; the optimiser trades alpha against a risk forecast | `RiskScore` as its own dimension, and the rule that it is not an alpha factor (§3.7.5) |
+| 14 | Sizing practice: volatility targeting sizes *inversely* to volatility; fractional Kelly discounts full Kelly for estimation error; conviction is bounded by volatility, correlation and drawdown tolerance | the score ≠ scale separation (`RegimeScore` 68 vs `RegimeScale` 0.47x, §3.7.4) and `TradeScore` not being a size |
+| 15 | Rockafellar & Uryasev — CVaR/expected shortfall is convex and optimisable as an LP; ES/CVaR is **coherent**, VaR is not (subadditivity) | the tail-risk component's measure choice, and why the loss-sign conventions must be pinned (§3.7.1) |
+| 16 | Moreira & Muir, volatility-managed portfolios — scaling by inverse recent variance raised Sharpe in the original evidence (50-100% of the original), with later work finding no systematic improvement | the sizing multiplier's existence *and* its limits: it is a sizing rule, not a score input |
+| 17 | Moskowitz, Ooi & Pedersen (time-series momentum, 1-12 months, across asset classes); George & Hwang (nearness to the 52-week high) | the trend and momentum components are the best-supported legs; `high_distance` already exists here |
+| 18 | Technical-indicator evidence quality: ADX is non-directional and lagging with little standalone predictive power (best used as a filter); volume is a **confirmation** variable, not a standalone predictor | ADX belongs in Trend *strength*, not as a directional signal; the volume component (10%) is a confirmer |
+| 19 | Jegadeesh (1990) — short-term reversal ≈2%/month at a one-month horizon; De Bondt & Thaler (long-horizon overreaction, a different mechanism) | the mean-reversion component is real but small — consistent with its 5% weight |
+| 20 | Asness, Moskowitz & Pedersen, "Value and Momentum Everywhere" — value and momentum are negatively correlated (≈ −0.60); separate sleeves / 50-50 allocation historically beat merging the signals into one ranking | **the evidence for "do not mix them into one score too early"** (§3.7's opening) and for a dimension-level combination layer rather than factor-level blending |
+| 21 | Composite-indicator practice — decomposed dimensions give root-cause attribution and avoid a **misleading cancellation**; a composite is defensible when its components belong together | four scores, printed with their components and their attribution (§3.7.6 rule 3) |
+| 22 | Regime detection: Hurst exponent and variance ratio are complementary *shape* diagnostics (VR(k) ≈ k^(2H−1)), not robust regime detectors on their own; Markov-switching models infer the volatility state and its persistence (expected duration 1/(1−p)) | the choppiness/persistence component's role and its limits (§3.7.4) |
+| 23 | Liquidity and gap risk: Amihud measures price impact per unit of volume, the bid-ask spread measures execution cost, and overnight gap risk is neither — size on the plausible gap, and cut overnight/event exposure to roughly 25-50% of normal; earnings implied move is read from the ATM straddle | the liquidity, gap and event components' distinct measures, and the event-risk sizing rule (§3.7.5) |
+| 24 | Hard-constraint practice — risk, leverage, liquidity and mandate limits define the feasible set **before** optimisation; expected return never overrides a hard risk limit | `TradeScore` never overrides a hard gate (§3.7.6 rule 1), which the repo already implements (17 fail-closed checks, `GATE_PRECEDENCE`; `risk_multiplier.combine` zeroes the soft product on a hard flag) |
+| 25 | Tetlock, "Giving Content to Investor Sentiment" — media pessimism predicts **next-day declines then a reversal within days**; extreme pessimism predicts **volume**; low returns produce more pessimistic tone (a feedback loop) | sentiment is short-horizon and partly reversing, not a permanent alpha weight; and the price→sentiment feedback is why the confirmation check exists (§3.8.2, §3.8.4) |
+| 26 | Baker & Wurgler, investor sentiment — high sentiment predicts **lower** subsequent returns, concentrated in hard-to-value, hard-to-arbitrage names | the sentiment leg is contrarian in the cross-section and name-dependent; supports the small research weight |
+| 27 | Barber & Odean (attention-based trading) and the limited-attention reading of PEAD — fresh, salient news is incorporated immediately while stale or competing information drifts | NewsScore's novelty/materiality emphasis is the right shape, and the one strong leg (earnings surprise + drift) is already implemented |
+| 28 | Da, Engelberg & Gao and the StockTwits literature — **attention** spikes predict negative next-day returns while **bullish sentiment** predicts positive ones; small caps are more sensitive to both | attention and sentiment are different signals with opposite short-horizon signs and must not be merged (§3.8.2 consequence 2) |

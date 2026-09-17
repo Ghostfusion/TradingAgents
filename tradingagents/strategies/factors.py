@@ -196,7 +196,7 @@ def z_composite_alpha(factors_by_ticker: dict, weights: dict | None = None) -> d
 # percentile that produces the 0-100 score stays peer-wide, so the label would
 # have claimed a reference set the number does not use). A within-sector
 # percentile is a separate, unimplemented option -
-# docs/design_fundamental_factor_weight_model.md §3.2.
+# docs/scores/FundamentalScore.md §3.2.
 QUALITY_BANDS: tuple = (
     (70.0, "elite"),
     (60.0, "above-average"),
