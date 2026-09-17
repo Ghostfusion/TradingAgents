@@ -388,6 +388,42 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the score-engine set gets a **comprehensive
+  implementation plan** - `docs/scores/IMPLEMENTATION_PLAN.md` (new, ~74 KB, 15 sections), built from the
+  eight design documents read end to end and grounded with web checks on every external source it depends
+  on. Structure: **WP-0** the prerequisites (SEC XBRL structured series - `sec_edgar.get_financial_history:173`
+  loops `_TAG_MAP:56-65` calling `companyconcept` once per tag and returns a *string*, so the CAGR path cannot
+  consume it, while `companyfacts` returns every tag in one call against a published 10 req/s ceiling; the
+  EODHD US panel - bulk fundamentals is stocks-only, needs the Extended Fundamentals plan, 100 calls per
+  exchange request, 500-symbol cap, 100k/day paid; market-wide breadth from the S&P map the sector screens
+  already fetch, no new vendor; VIX percentile from FRED `VIXCLS`; VIX term structure from the Cboe CDN CSVs
+  - VIX9D is **not** on FRED; FINRA's bi-monthly short-interest settlement series; three toolset bindings on
+  the wrong surface; the five recorded defects still open, `position_mult_by_side` first because it is a real
+  sizing bug), **WP-1** the shared kernel (`align`/`combine`/`band_label`, three functions and no framework,
+  because seven engines need the same three operations and ground rule 2 makes seven copies a defect),
+  **WP-2..WP-8** the seven engines (each with its prerequisite order, component map, acceptance and the
+  decision that gates it), **WP-9** the advisory surface, **WP-10** the measurement layer (the existing
+  `alpha_health.score_evaluation_rows:440` harness plus the redundancy matrix as a **gate** on the weight
+  tables), **WP-11** the composite. Then **six phases (0, A-E)** each default-off behind its own gate and
+  flipped one at a time under the dark-launch protocol, with entry and exit criteria; the parallelism and
+  **file-collision map** (`toolsets.py`, `default_config.py`, `analysis_tools.py`, `reporting.py`,
+  `graph/trading_graph.py` - one owner at a time); a consolidated verification checklist; a ten-item risk
+  register; the **eleven decisions the owner still has to make**, each with the recommendation already on
+  record; and the external-source appendix with endpoints and limits. **The plan invents no weight (rule 6)
+  and resolves no conflict the owner left open** (gate order, canonical regime path, whether macro/Fed/OPEX
+  may hard-block). Gate names were checked before being proposed: `enable_factor_model` already means the
+  *learned* model (`scripts/factor_model_train.py:7`), `enable_factors`/`enable_regime` are **inert**
+  (`.env.example:470-471`, `tests/test_gate_env_toggles.py:87`), `enable_score_eval_rows` already gates the
+  IC harness (`scripts/strategy_quality_report.py:340`). **Five documentation/hygiene defects recorded in the
+  master's new §3.3:** (D-1) the master's §4/§5 were **stubs** - `68931f3` left the wiring contract as two
+  sentences and the phase plan as a paragraph that stopped mid-sentence; (D-2) the master and
+  `FundamentalScore.md` cited §3.7.x/§3.8.x/§4.2/§5.x/§6 Phases A-E/§8/§8.3, none of which exist any more -
+  **all repointed**, with the dead names kept only inside the D-2 record; (D-3) `sec_edgar.py:30`'s
+  `User-Agent` contact is the non-deliverable `research@example.com`; (D-4) 11 per-tag requests where one
+  `companyfacts` call would do; (D-5) `enable_factor_model` is not a free name. The master's §4/§5 are
+  repointed (cheap path vs expensive path; the plan's §9 plus the gate collisions) and the header names the
+  plan as the build order. Suites untouched: engine **4402 passed / 5 skipped**, executor **1105**, web
+  **149**.
 - 2026-09-17 `(working tree)` - **The TWELVE remaining inventory defects are FIXED** (`docs/scores/README.md` §3.2), each
   with a regression test; **10 of the 11 new tests fail before the fix and pass after** (the 11th pins a producer key the
   graph was misreading). (7) `volume_profile`'s value-area loop carried a DEAD incremental add and its band could span the

@@ -152,15 +152,15 @@ document leans on when it accepts or refuses an item. Full ledger in Appendix C.
 ### 0.5 Recorded decisions (owner, 2026-09-17)
 
 The five questions this design opened are closed. Each decision is stated with
-the section it changes; §8 carries the full rationale.
+the section it changes; the full rationale is in the master’s §7.
 
 | # | Question | Decision | Where it lands |
 | --: | --- | --- | --- |
-| Q1 | Does the composite reach `opportunity_score`? | **Never, for now.** It stays a tool-leaf / `run_card` advisory metric. `opportunity_score` keeps its `null` and gains a published *reason* — a deterministic `FundamentalScore = 84` does not mean `Opportunity = 84`; those are different questions, and the executor treats the second as a validated 0-100 measurement | §3.1, §5.2 |
-| Q2 | Learned walk-forward weights? | **Yes, as a separate research layer — never in the deterministic production score.** Promotion is a ladder: `RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`, each step evidenced, none automatic | §3.1, §6 Phase D |
+| Q1 | Does the composite reach `opportunity_score`? | **Never, for now.** It stays a tool-leaf / `run_card` advisory metric. `opportunity_score` keeps its `null` and gains a published *reason* — a deterministic `FundamentalScore = 84` does not mean `Opportunity = 84`; those are different questions, and the executor treats the second as a validated 0-100 measurement | §3.1; `IMPLEMENTATION_PLAN.md` §6 |
+| Q2 | Learned walk-forward weights? | **Yes, as a separate research layer — never in the deterministic production score.** Promotion is a ladder: `RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`, each step evidenced, none automatic | §3.1; `IMPLEMENTATION_PLAN.md` §9 Phase D |
 | Q3 | Sector overlays? | **Architecture in scope now, suppliers deferred.** The factor schema carries `sector_scope`/`supplier`/`availability` from day one; bank/REIT metrics are `NA` until a supplier exists — **`NA ≠ 0`**, and missing data reduces the *available* weight instead of punishing the name | §3.2; architecture decided in the master's decision record |
-| Q4 | Evaluation universe? | **The full EODHD US panel** is the official validation universe. The named basket stays a dev/diagnostic set and is labelled `INSUFFICIENT_CROSS_SECTION` — it may never produce authoritative factor weights | §6 Phase C |
-| Q5 | `factor_score=NN` in prose? | **No.** Scores live in structured output (`fundamental_score`, `fundamental_score_status`, `fundamental_score_confidence`); narrative states quality in words. A number in prose becomes apparent objective ground truth and turns an advisory composite into a quasi-official measurement | §3.1, §5.3 |
+| Q4 | Evaluation universe? | **The full EODHD US panel** is the official validation universe. The named basket stays a dev/diagnostic set and is labelled `INSUFFICIENT_CROSS_SECTION` — it may never produce authoritative factor weights | `IMPLEMENTATION_PLAN.md` §9 Phase C |
+| Q5 | `factor_score=NN` in prose? | **No.** Scores live in structured output (`fundamental_score`, `fundamental_score_status`, `fundamental_score_confidence`); narrative states quality in words. A number in prose becomes apparent objective ground truth and turns an advisory composite into a quasi-official measurement | §3.1; `IMPLEMENTATION_PLAN.md` §6 |
 
 **The three-stage separation this produces** (owner's framing): `RESEARCH`
 (factor measurements: IC / rank IC, decile spreads, stability, redundancy) →
@@ -186,7 +186,7 @@ own document beside this one. Each is a
 separate 0-100 score, all in the **same direction (100 = favourable, so
 `RiskScore` 100 = low risk)**, and only then combined:
 `TradeScore = 0.40·F + 0.25·T + 0.15·R + 0.20·K`, which **never overrides a hard
-gate** and whose weights are learned empirically later (§6 Phase D). The
+gate** and whose weights are learned empirically later (`IMPLEMENTATION_PLAN.md` §9 Phase D). The
 governing sentence is *"do not mix them into one score too early"* — the
 evidence for keeping the dimensions separate (and for a regime **score** being
 distinct from the regime **sizing scale**) is in [`README.md`](README.md) and
@@ -241,7 +241,7 @@ Empty slots, all deliberate:
 
 | Empty slot | Path:line | What it means for this design |
 | --- | --- | --- |
-| `opportunity_score` — declared 0-100, **always `null`** | `tradingagents/execution_contract.py:240-252` | The executor already validates a 0-100 producer-owned scale (`../TradingExecution/signald/contracts.py:215-227`). The docstring records the decision: publishing an estimate under a field the executor may rank on "would dress an estimate up as a measurement". **Wiring a fundamental composite here was an owner decision and is now answered: never, for now (Q1).** The slot keeps its `null` and gains a producer-owned reason string (§5.2). |
+| `opportunity_score` — declared 0-100, **always `null`** | `tradingagents/execution_contract.py:240-252` | The executor already validates a 0-100 producer-owned scale (`../TradingExecution/signald/contracts.py:215-227`). The docstring records the decision: publishing an estimate under a field the executor may rank on "would dress an estimate up as a measurement". **Wiring a fundamental composite here was an owner decision and is now answered: never, for now (Q1).** The slot keeps its `null` and gains a producer-owned reason string (`IMPLEMENTATION_PLAN.md` §6). |
 | `decision_guardrail.SCORE_BANDS` | `strategies/decision_guardrail.py:27` | The 0-100 ↔ rating contract; its only caller passes `None` (`agents/managers/portfolio_manager.py:364`). Ground rule 6 forbids this design from feeding it. |
 | `quant_baseline.quant_signal` | `strategies/quant_baseline.py:74` | The only `{category: score}` dict in the repo (momentum/value/quality/trend/volatility with keyword weights) — computed but **unwired**; tests only. It is the shape template for §3.1, not a component. |
 | `run_card["sections"]` | `tradingagents/reporting.py:1455` | Hard-coded `[]`, no reader anywhere. Not a usable slot. |
@@ -572,8 +572,8 @@ The owner's decision of 2026-09-17 draws the line this design must not blur:
   withdrew the source's `0.35/0.25/0.25/0.15`: unless the combination is shown
   to have out-of-sample predictive validity, it is a **research composite**, not
   an empirically validated measurement. It ships only inside the research layer
-  (§6 Phase C/D), labelled `RESEARCH_ONLY`, and only a validated vector may be
-  promoted (§6 Phase D).
+  (`IMPLEMENTATION_PLAN.md` §9 Phases C and D), labelled `RESEARCH_ONLY`, and only a validated vector may be
+  promoted (`IMPLEMENTATION_PLAN.md` §9 Phase D).
 - **The status vocabulary** every published score carries:
   `ADVISORY` (deterministic diagnostic) / `RESEARCH_ONLY` (a fitted or
   unvalidated combination) / `VALIDATED` (out-of-sample evidence, still not the
@@ -588,7 +588,7 @@ The owner's decision of 2026-09-17 draws the line this design must not blur:
   | `RegimeScore` | market/sector/regime composite, 0-100 | advisory + sizing context | tool leaf + `run_card` |
   | `RiskScore` | risk-condition composite, 0-100 | advisory | tool leaf + `run_card` |
   | `OpportunityScore` | **separate validated measurement** | `null` until validated | the executor's existing 0-100 slot |
-  | `TradeScore` | `0.40·F + 0.25·T + 0.15·R + 0.20·K` over the four above | advisory (weights learned later, §6 Phase D) | tool leaf + `run_card`, **before** the hard gates |
+  | `TradeScore` | `0.40·F + 0.25·T + 0.15·R + 0.20·K` over the four above | advisory (weights learned later, `IMPLEMENTATION_PLAN.md` §9 Phase D) | tool leaf + `run_card`, **before** the hard gates |
 
   Only `FundamentalScore` is this document's scope; the other engines are
   specified in their own documents beside this one
@@ -632,7 +632,7 @@ never a code fork:
 | `direction` | `+1` / `-1` | the sign the composite applies |
 | `base_weight` | the (hypothesis) weight, or equal | printed in `basis` |
 | `sector_scope` | `ALL` / `BANKS` / `REITS` / … | an overlay is a scope, not a new model |
-| `normalization_method` | percentile / z / winsorised-z / sector percentile | must match the band table's claim (§3.2 below) |
+| `normalization_method` | percentile / z / winsorised-z / sector percentile | must match the band table's claim (§3.2) |
 | `supplier` | the vendor or the repo module that carries it | names what has to exist before the factor can score |
 | `availability` | `present` / `NA` | **`NA` is not `0`** |
 
@@ -696,7 +696,7 @@ printed by the DCF family:
 Design: `dcf_confidence` returns a 0-1 score plus the four legs and the
 thresholds it used, and the **DCF upside factor (#56/#57) is scaled by it** —
 so a low-confidence DCF contributes less to VS without anyone writing "the DCF
-is an artifact" in prose. Fixed thresholds are hypotheses (§6 Phase C measures
+is an artifact" in prose. Fixed thresholds are hypotheses (`IMPLEMENTATION_PLAN.md` §9 Phase C measures
 them against realised forward returns from the alpha ledger).
 
 ---

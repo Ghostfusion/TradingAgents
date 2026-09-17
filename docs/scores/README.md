@@ -12,6 +12,10 @@
 | EventScore | [`EventScore.md`](EventScore.md) | *(none given)* | occurrence producers exist for 4 of 7 families |
 | RiskScore | [`RiskScore.md`](RiskScore.md) | 8 categories | **no 0-100 risk score exists anywhere** |
 
+The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
+prerequisites, the seven workstreams, the phases, the verification requirements
+and the decisions still open.
+
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
 [`../ScoreWeight/market.md`](../ScoreWeight/market.md) and
@@ -116,7 +120,7 @@ He labels these **research weights, not production truth**, and pairs them with
 the empirical ladder (IC, Rank IC, ICIR, decile spread, monotonicity, turnover,
 persistence, sector and regime robustness, redundancy, OOS) before any of them
 may replace the deterministic baseline. **EventScore has no weight in this
-table** — the open question is in §8.3.
+table** — the open question is in `IMPLEMENTATION_PLAN.md` §13 Q7 and in `EventScore.md` §7.
 
 Two conflicts inside the owner's own diagrams are **flagged, not resolved**:
 
@@ -201,12 +205,12 @@ swing setup NO) — a single "bullish" label would erase the disagreement.
 3. **One number, one producer.** If two engines would read the same computation,
    that is a naming problem. The engine's rule is *one implementation, many
    readers* — and the documents must therefore name, per component, which
-   producer it reads. The known couplings are in §5.3.
+   producer it reads. The known couplings are in `IMPLEMENTATION_PLAN.md` §5 (the per-engine component maps).
 4. **A composite never overrides a hard gate.** See §1.4.
 5. **Measure, don't assume.** Anything that can only be a constant is labelled a
    constant, in the document *and* in the output.
 6. **No weight vector is invented.** Every weight in this set is the owner's,
-   labelled as a starting hypothesis, and every one is subject to Phase C.
+   labelled as a starting hypothesis, and every one is subject to Phase C of `IMPLEMENTATION_PLAN.md` §9.
 7. **No `factor_score=NN` in prose.** The scores are tool leaves and printed
    blocks, not sentences the LLM may paraphrase. (Owner decision Q5.)
 
@@ -288,19 +292,62 @@ producer, or a producer/leaf pair that was never joined.
 
 ---
 
+### 3.3 Found while writing the implementation plan (2026-09-17)
+
+Five documentation and hygiene defects, none of them code, found by reading the
+set end to end to write [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (its
+§14 has the same table with the consequences spelled out).
+
+| # | Defect | Evidence | Consequence |
+| --: | --- | --- | --- |
+| D-1 | **This document's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md` as committed at `68931f3` | the set had **no wiring contract and no phase plan** - the two things an implementation needs. §4 and §5 above are now the pointer and the summary; the bodies are the plan's §3-§8 and §9 |
+| D-2 | **Cross-references to sections that no longer exist.** §6 cited §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; §7 cited §5.2/§5.3 and "§6 Phase C/D"; §1.4 cited §8.3. `FundamentalScore.md` cited "§8", §5.2/§5.3 and §6 Phase C/D | the master's headings end at §7 plus appendices; `FundamentalScore.md`'s end at §3.6 plus appendices. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) carried §3.7 (the four-score architecture), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E) and §8 (the decision record with §8.3) | a reader following a cross-reference landed nowhere. Every reference is now repointed at the live section (this document, the plan, or the engine document that owns the material) |
+| D-3 | **The SEC `User-Agent` carries a placeholder contact** | `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (... contact: research@example.com)`; the comment at `:28` states a descriptive UA with a contact is required | `example.com` is not a deliverable address; the SEC's published fair-access ceiling is 10 requests/second per IP and a reachable contact is what the policy asks for |
+| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do** | `sec_edgar.get_financial_history:173` loops `_TAG_MAP:56-65` calling `_COMPANYCONCEPT_URL:66` once per tag (`:206-215`) | the `companyfacts` endpoint returns every tag in one payload; 11x the requests against a 10 req/s ceiling for the same data, and it is why extending the tag set is expensive as written |
+| D-5 | **`enable_factor_model` is not a free name.** Three design documents describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`; `design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109` | a plan that reused it for the deterministic composite would silently couple two different objects; the plan's six engine gates are new names for this reason |
+
+---
+
 ## 4. Wiring and contracts
 
-The cheap path and the expensive path differ by an order of magnitude in blast
-radius. Decide deliberately.
+**The contracts are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §3-§8** -
+the prerequisites, the shared kernel, the per-engine component maps, the advisory
+surface, the measurement layer and the composite boundary. The two paths this
+section exists to separate are still worth naming here, because the blast radius
+differs by an order of magnitude:
+
+- **The cheap path** is a tool leaf: a pure function over inputs the run already
+  fetched, printed beside the evidence, reading no gate and sizing nothing. Every
+  engine in this set ships this way first.
+- **The expensive path** is a number on the wire: a producer-owned 0-100 value the
+  executor may rank on. `opportunity_score` is that slot and it stays `null`
+  (§7 Q1) - the reason string is the only part of it that ships.
+
+**Two couplings the wiring must respect** (rule 3): `get_news_sentiment_series` is
+bound to both `news_tools()` (`agents/toolsets.py:352`) and `market_tools()`
+(`:279`), and `news_relevance.score_news_article:53` **is** the confidence weight
+of `sentiment.aggregate_weighted_sentiment:616`. One producer feeding two readers
+is the repo's rule; the separation is enforced by **naming the producer per
+component**, which is what `IMPLEMENTATION_PLAN.md` §5 does row by row.
 ---
 
 ## 5. Phased plan
 
-Each phase is default-off behind a new gate (`enable_fundamental_factor_model`,
-plus `enable_factor_confidence` and `enable_factor_redundancy` if they land
-separately), flipped one at a time under the dark-launch protocol (ground rule
-10): labelled run, same basket, `scripts/repro_check.py --evidence` diff,
-`scripts/report_verify.py`, `scripts/verify_sweep.py` exiting 0 on CONFIRMED.
+**The phase plan is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §9** -
+Phase 0 (the data and wiring prerequisites), A (the kernel plus the two engines
+whose components already exist), B (the environment, the risk and the event
+state), C (measure, don't assume), D (news and sentiment), E (the composite).
+
+Each phase is **default-off behind its own gate**, flipped **one at a time** under
+the dark-launch protocol (ground rule 10): a labelled run on the same basket, a
+`scripts/repro_check.py --evidence` diff against the gate-off run, then
+`scripts/report_verify.py` and `scripts/verify_sweep.py` exiting 0 on
+`CONFIRMED`. The gate names are in the plan's §1.1, with the collisions to avoid:
+`enable_factor_model` already means the *learned* advisory model
+(`scripts/factor_model_train.py:7`), `enable_factors` and `enable_regime` are
+documented **inert** (`.env.example:470-471`, `tests/test_gate_env_toggles.py:87`),
+and `enable_score_eval_rows` already gates the IC harness
+(`scripts/strategy_quality_report.py:340`).
 ---
 
 ## 6. Verification requirements
@@ -333,20 +380,20 @@ separately), flipped one at a time under the dark-launch protocol (ground rule
 - **The composite is not on the wire (Q1):** a test asserts the advisory score
   does not reach `research_decision.json` / `opportunity_score`, and that the
   reason constant is present and stable when that key is added.
-- **Direction is pinned per component (§3.7.1):** a test asserts each component's
+- **Direction is pinned per component (master §1.2, and each engine document’s component ledger):** a test asserts each component's
   raw value and its aligned contribution have the declared relationship (e.g.
   inverting the alignment must move the score the other way), and that the
   `RiskScore` leg is *inverted* relative to its producers' native loss sign.
-- **The five polarity conflicts stay declared (§3.7.3):** RSI, MFI, stochastic,
+- **The five polarity conflicts stay declared (TechnicalScore.md §0.3):** RSI, MFI, stochastic,
   the elder thermometer and the support-proximity read must each carry their
   polarity, and a mutation that makes one of them monotone must fail a test.
-- **`TradeScore` cannot unlock a gate (§3.7.6):** a test drives the executor's
+- **`TradeScore` cannot unlock a gate (master §1.4):** a test drives the executor's
   gate to BLOCK and asserts a maximal `TradeScore` changes nothing — the same
   shape as the existing `risk_multiplier.combine` hard-flag test.
-- **Score and scale stay separate (§3.7.4):** a test asserts the regime sizing
+- **Score and scale stay separate (master §1.4):** a test asserts the regime sizing
   scale is not an input to `RegimeScore` and vice versa, so a hostile regime
   cannot rewrite the score and a good score cannot inflate the size.
-- **Arbitration is recorded (§3.7.4):** whichever regime producer a component
+- **Arbitration is recorded (master §1.4):** whichever regime producer a component
   reads, the leaf names it, and a test asserts the name is printed.
 
 ---
@@ -366,7 +413,7 @@ poor current opportunity characteristics (`FundamentalScore 92`,
 `TechnicalScore 61`, `RegimeScore 68`, `RiskScore 54`, `ValuationScore 37`). The
 distinction preserved is **measurement vs interpretation**: the artifact keeps
 `opportunity_score: null` and gains a producer-owned
-`opportunity_score_reason` (§5.2).
+`opportunity_score_reason` (`IMPLEMENTATION_PLAN.md` §6).
 
 **Q2 — Learned walk-forward weights?**
 **Decided: yes, as a separate research/experimental layer — not in the
@@ -376,7 +423,7 @@ that the learned vector is compared against the deterministic baseline on IC,
 decile monotonicity, spread and stability, and does not become production "merely
 because it improves in-sample results". Promotion is the ladder
 `RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`; the schema /
-contract / hash migration is only reached at step three (§5.2, §6 Phase D).
+contract / hash migration is only reached at step three (`IMPLEMENTATION_PLAN.md` §6, §9 Phase D).
 
 **Q3 — Sector overlays?**
 **Decided: yes — architecture in scope now, suppliers deferred.** The factor
@@ -386,7 +433,7 @@ commit (`ROIC scope=ALL`, `NIM scope=BANKS`, `CET1 scope=BANKS`,
 `NAV_Discount scope=REITS`, `Occupancy scope=REITS`). Until a supplier exists
 they are `NA`, **not zero** — *"missing data should reduce the available factor
 weight, rather than punish the company"* — and the design must **not manufacture
-missing metrics from generic factors** (§3.2, §4.2).
+missing metrics from generic factors** (master §2 rule 1).
 
 **Q4 — Evaluation universe?**
 **Decided: the full EODHD US panel** is the official validation universe; the
@@ -394,7 +441,7 @@ named basket stays a development/test universe and is labelled
 `VALIDATION_STATUS = INSUFFICIENT_CROSS_SECTION` — *"rather than allowing it to
 produce authoritative factor weights"*. IC, ICIR, decile spread and
 monotonicity only become meaningful with hundreds/thousands of eligible names
-(§6 Phase C).
+(`IMPLEMENTATION_PLAN.md` §9 Phase C).
 
 **Q5 — `factor_score=NN` in prose?**
 **Decided: no.** The number lives in structured output
@@ -403,7 +450,7 @@ monotonicity only become meaningful with hundreds/thousands of eligible names
 (owner):* a bare score in prose "creates an apparent objective ground truth",
 after which every verifier/report comparison asks why 84.2 and not 81.7, which
 factor moved it, and whether 84.2 beats 78.4 — turning an **advisory composite
-into a quasi-official measurement** (§3.1, §5.3).
+into a quasi-official measurement** (`IMPLEMENTATION_PLAN.md` §6).
 
 ---
 
@@ -437,19 +484,19 @@ and `retained_earnings`, which are read only inside Beneish/GP-A/Altman.
 
 | # | Source | Used for |
 | --: | --- | --- |
-| 13 | Grinold & Kahn, *Active Portfolio Management* — the risk model is built and used separately from the alpha model; "risk is not alpha"; the optimiser trades alpha against a risk forecast | `RiskScore` as its own dimension, and the rule that it is not an alpha factor (§3.7.5) |
-| 14 | Sizing practice: volatility targeting sizes *inversely* to volatility; fractional Kelly discounts full Kelly for estimation error; conviction is bounded by volatility, correlation and drawdown tolerance | the score ≠ scale separation (`RegimeScore` 68 vs `RegimeScale` 0.47x, §3.7.4) and `TradeScore` not being a size |
-| 15 | Rockafellar & Uryasev — CVaR/expected shortfall is convex and optimisable as an LP; ES/CVaR is **coherent**, VaR is not (subadditivity) | the tail-risk component's measure choice, and why the loss-sign conventions must be pinned (§3.7.1) |
+| 13 | Grinold & Kahn, *Active Portfolio Management* — the risk model is built and used separately from the alpha model; "risk is not alpha"; the optimiser trades alpha against a risk forecast | `RiskScore` as its own dimension, and the rule that it is not an alpha factor (RiskScore.md §5) |
+| 14 | Sizing practice: volatility targeting sizes *inversely* to volatility; fractional Kelly discounts full Kelly for estimation error; conviction is bounded by volatility, correlation and drawdown tolerance | the score ≠ scale separation (`RegimeScore` 68 vs `RegimeScale` 0.47x, master §1.4) and `TradeScore` not being a size |
+| 15 | Rockafellar & Uryasev — CVaR/expected shortfall is convex and optimisable as an LP; ES/CVaR is **coherent**, VaR is not (subadditivity) | the tail-risk component's measure choice, and why the loss-sign conventions must be pinned (RiskScore.md §0.3) |
 | 16 | Moreira & Muir, volatility-managed portfolios — scaling by inverse recent variance raised Sharpe in the original evidence (50-100% of the original), with later work finding no systematic improvement | the sizing multiplier's existence *and* its limits: it is a sizing rule, not a score input |
 | 17 | Moskowitz, Ooi & Pedersen (time-series momentum, 1-12 months, across asset classes); George & Hwang (nearness to the 52-week high) | the trend and momentum components are the best-supported legs; `high_distance` already exists here |
 | 18 | Technical-indicator evidence quality: ADX is non-directional and lagging with little standalone predictive power (best used as a filter); volume is a **confirmation** variable, not a standalone predictor | ADX belongs in Trend *strength*, not as a directional signal; the volume component (10%) is a confirmer |
 | 19 | Jegadeesh (1990) — short-term reversal ≈2%/month at a one-month horizon; De Bondt & Thaler (long-horizon overreaction, a different mechanism) | the mean-reversion component is real but small — consistent with its 5% weight |
-| 20 | Asness, Moskowitz & Pedersen, "Value and Momentum Everywhere" — value and momentum are negatively correlated (≈ −0.60); separate sleeves / 50-50 allocation historically beat merging the signals into one ranking | **the evidence for "do not mix them into one score too early"** (§3.7's opening) and for a dimension-level combination layer rather than factor-level blending |
-| 21 | Composite-indicator practice — decomposed dimensions give root-cause attribution and avoid a **misleading cancellation**; a composite is defensible when its components belong together | four scores, printed with their components and their attribution (§3.7.6 rule 3) |
-| 22 | Regime detection: Hurst exponent and variance ratio are complementary *shape* diagnostics (VR(k) ≈ k^(2H−1)), not robust regime detectors on their own; Markov-switching models infer the volatility state and its persistence (expected duration 1/(1−p)) | the choppiness/persistence component's role and its limits (§3.7.4) |
-| 23 | Liquidity and gap risk: Amihud measures price impact per unit of volume, the bid-ask spread measures execution cost, and overnight gap risk is neither — size on the plausible gap, and cut overnight/event exposure to roughly 25-50% of normal; earnings implied move is read from the ATM straddle | the liquidity, gap and event components' distinct measures, and the event-risk sizing rule (§3.7.5) |
-| 24 | Hard-constraint practice — risk, leverage, liquidity and mandate limits define the feasible set **before** optimisation; expected return never overrides a hard risk limit | `TradeScore` never overrides a hard gate (§3.7.6 rule 1), which the repo already implements (17 fail-closed checks, `GATE_PRECEDENCE`; `risk_multiplier.combine` zeroes the soft product on a hard flag) |
-| 25 | Tetlock, "Giving Content to Investor Sentiment" — media pessimism predicts **next-day declines then a reversal within days**; extreme pessimism predicts **volume**; low returns produce more pessimistic tone (a feedback loop) | sentiment is short-horizon and partly reversing, not a permanent alpha weight; and the price→sentiment feedback is why the confirmation check exists (§3.8.2, §3.8.4) |
+| 20 | Asness, Moskowitz & Pedersen, "Value and Momentum Everywhere" — value and momentum are negatively correlated (≈ −0.60); separate sleeves / 50-50 allocation historically beat merging the signals into one ranking | **the evidence for "do not mix them into one score too early"** (master §1.1) and for a dimension-level combination layer rather than factor-level blending |
+| 21 | Composite-indicator practice — decomposed dimensions give root-cause attribution and avoid a **misleading cancellation**; a composite is defensible when its components belong together | four scores, printed with their components and their attribution (master §1.4) |
+| 22 | Regime detection: Hurst exponent and variance ratio are complementary *shape* diagnostics (VR(k) ≈ k^(2H−1)), not robust regime detectors on their own; Markov-switching models infer the volatility state and its persistence (expected duration 1/(1−p)) | the choppiness/persistence component's role and its limits (RegimeScore.md §0.3) |
+| 23 | Liquidity and gap risk: Amihud measures price impact per unit of volume, the bid-ask spread measures execution cost, and overnight gap risk is neither — size on the plausible gap, and cut overnight/event exposure to roughly 25-50% of normal; earnings implied move is read from the ATM straddle | the liquidity, gap and event components' distinct measures, and the event-risk sizing rule (RiskScore.md §5) |
+| 24 | Hard-constraint practice — risk, leverage, liquidity and mandate limits define the feasible set **before** optimisation; expected return never overrides a hard risk limit | `TradeScore` never overrides a hard gate (master §1.4), which the repo already implements (17 fail-closed checks, `GATE_PRECEDENCE`; `risk_multiplier.combine` zeroes the soft product on a hard flag) |
+| 25 | Tetlock, "Giving Content to Investor Sentiment" — media pessimism predicts **next-day declines then a reversal within days**; extreme pessimism predicts **volume**; low returns produce more pessimistic tone (a feedback loop) | sentiment is short-horizon and partly reversing, not a permanent alpha weight; and the price→sentiment feedback is why the confirmation check exists (SentimentScore.md §0.2, §0.3) |
 | 26 | Baker & Wurgler, investor sentiment — high sentiment predicts **lower** subsequent returns, concentrated in hard-to-value, hard-to-arbitrage names | the sentiment leg is contrarian in the cross-section and name-dependent; supports the small research weight |
 | 27 | Barber & Odean (attention-based trading) and the limited-attention reading of PEAD — fresh, salient news is incorporated immediately while stale or competing information drifts | NewsScore's novelty/materiality emphasis is the right shape, and the one strong leg (earnings surprise + drift) is already implemented |
-| 28 | Da, Engelberg & Gao and the StockTwits literature — **attention** spikes predict negative next-day returns while **bullish sentiment** predicts positive ones; small caps are more sensitive to both | attention and sentiment are different signals with opposite short-horizon signs and must not be merged (§3.8.2 consequence 2) |
+| 28 | Da, Engelberg & Gao and the StockTwits literature — **attention** spikes predict negative next-day returns while **bullish sentiment** predicts positive ones; small caps are more sensitive to both | attention and sentiment are different signals with opposite short-horizon signs and must not be merged (SentimentScore.md §0.2 point 3) |
