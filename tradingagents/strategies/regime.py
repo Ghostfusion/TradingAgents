@@ -1,10 +1,11 @@
 """Phase 1 - market-regime gate.
 
 Deterministic features first: realized volatility (21d percentile vs a
-reference window), 200-SMA trend, and a choppiness proxy (close/open vs
-high-low proximity). An optional 2-3 state hidden Markov model (hmmlearn)
-labels bull/bear/choppy when installed; the deterministic path is always
-available and testable offline.
+reference window), 200-SMA trend, and choppiness on ONE scale (0-100,
+high = ranging: canonical CHOP with OHLC, the inverted Kaufman efficiency
+ratio on closes alone). An optional 2-3 state hidden Markov model (hmmlearn)
+labels bull/bear when installed; the deterministic path is always available
+and testable offline.
 
 Wire-up: compute features from daily OHLCV in a pre-graph step, stash
 `regime` in graph state, and let the risk node scale position size /
@@ -85,15 +86,24 @@ def trend_strength(close: list[float], sma_window: int = 200) -> float:
 
 
 def choppiness(close: list[float], highs: list | None = None,
-               lows: list | None = None, window: int = 14) -> float:
-    """Canonical Choppiness Index (Dreiss 1990s), 0-100 scale.
+               lows: list | None = None, window: int = 14) -> float | None:
+    """Choppiness, **always on the 0-100 scale**, high = ranging.
 
-    CHOP = 100 * log10(sum(ATR_i, n) / (HH(n) - LL(n))) / log10(n). High =
-    ranging/choppy, low = trending. Requires OHLC; when only closes are given
-    (no high/low) falls back to the 0-1 log-return-dispersion proxy so callers
-    that only carry closes still get a bounded regime read. The old behavior
-    (std of log returns on the 0-1 scale) was NOT the CHOP index and inverted
-    the semantics (high = volatile instead of ranging).
+    Two branches, one unit, so that every caller compares against the same
+    threshold:
+
+    * OHLC present -> the canonical Choppiness Index (Dreiss 1990s),
+      ``CHOP = 100 * log10(sum(TR_i, n) / (HH(n) - LL(n))) / log10(n)``.
+    * Close-only -> ``100 * (1 - efficiency ratio)``, where
+      ``ER = |c[-1] - c[-n-1]| / sum(|c[i] - c[i-1]|)``. The efficiency ratio
+      is the standard close-only trending measure (Kaufman); inverting it puts
+      it on the same axis and direction as CHOP.
+
+    Returns ``None`` when there is not enough history to measure either - the
+    previous 0.5/0.01 return values were a fabricated neutral and a
+    volatility measure respectively, and callers on different scales could not
+    both be right (``overlays`` passed a literal 0.4 against a 0.30 default
+    threshold while ``get_regime_components`` passed 30.0).
     """
     n = max(2, int(window))
     h = [float(x) for x in (highs or []) if x is not None]
@@ -110,37 +120,48 @@ def choppiness(close: list[float], highs: list | None = None,
         rng = hi_hi - lo_lo
         if rng > 0 and tr_sum > 0:
             return float(100.0 * math.log10(tr_sum / rng) / math.log10(n))
-    # fallback: 0-1 log-return dispersion proxy (close-only series)
-    logrets = []
-    prev = c[0] if c else None
-    for p in c[1:]:
-        if prev and prev > 0 and p > 0:
-            logrets.append(math.log(p / prev))
-        prev = p
-    sample = logrets[-n:]
-    if len(sample) < 3:
-        return 0.5
-    return float(pstdev(sample) or 0.5)
+    if len(c) >= n + 1:
+        # close-only: 100 * (1 - Kaufman efficiency ratio)
+        path = 0.0
+        for i in range(len(c) - n, len(c)):
+            path += abs(c[i] - c[i - 1])
+        if path <= 0:
+            return 100.0  # no net movement at all = maximally non-trending
+        er = abs(c[-1] - c[-n - 1]) / path
+        return float(100.0 * (1.0 - min(er, 1.0)))
+    return None
+
+
+#: CHOP at or below this reads as "trending" (canonical CHOP is ~20-80 in
+#: practice; 30/60 is the conventional trending/ranging split). This is the ONE
+#: threshold both callers use - see `regime_label`.
+CHOP_TREND_THRESHOLD = 30.0
 
 
 def regime_label(
     vol_pct: float,
     trend: float,
-    chop: float,
+    chop: float | None,
     vol_hi: float = 0.75,
     vol_lo: float = 0.25,
     trend_threshold: float = 0.02,
-    chop_threshold: float = 0.30,
+    chop_threshold: float = CHOP_TREND_THRESHOLD,
 ) -> str:
-    """Rule-based regime: high-vol | bull | bear | choppy (fallback neutral).
+    """Rule-based regime: high-vol | bull | bear | neutral.
 
     Priority: volatility state first (risk gate), then trend, then choppiness.
+
+    ``chop`` is on the 0-100 scale of :func:`choppiness` and ``chop_threshold``
+    defaults to the same constant both callers use. The trend leg fires when
+    the tape is measurably trending (low CHOP) **or** when the volatility
+    percentile is in the low band; a ``None`` chop means "not measurable" and
+    falls through to ``neutral`` rather than asserting a trend.
     """
     if vol_pct >= vol_hi:
         return "high_vol"
     if vol_pct <= vol_lo and abs(trend) >= trend_threshold:
         return "bull" if trend > 0 else "bear"
-    if chop <= chop_threshold:
+    if chop is not None and chop <= chop_threshold:
         return "bull" if trend > 0 else "bear"
     return "neutral"
 
@@ -490,6 +511,7 @@ __all__ = [
     "vol_percentile",
     "trend_strength",
     "choppiness",
+    "CHOP_TREND_THRESHOLD",
     "regime_label",
     "hmm_regime",
     "make_vol_series_of_closes",

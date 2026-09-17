@@ -374,22 +374,40 @@ def keltner_channel(closes, atr_value=None, n: int = 20, k: float = 2.0) -> dict
     }
 
 
-def donchian_channel(highs, lows, n: int = 20) -> dict:
+def donchian_channel(highs, lows, n: int = 20, closes=None) -> dict:
     """Donchian Channel: N-day highest high / lowest low + breakout signal.
 
-    Close above the upper channel = bullish breakout; below lower = bearish.
+    ``upper`` / ``lower`` / ``mid`` are the N-bar range *including* the latest
+    bar (a level read). The breakout flags compare the latest **close** against
+    the channel formed by the **prior** N bars - the standard definition, and
+    the only one that can ever be true, since a close cannot exceed the high of
+    the bar it belongs to. ``breakout_ref_up`` / ``breakout_ref_dn`` are those
+    prior-window levels, so the flag is checkable against the printed numbers.
+
+    ``closes`` is optional: without it the flags stay ``None`` (the levels are
+    still returned). Every in-repo caller passes it.
     """
     if len(highs) < n or len(lows) < n:
-        return {"upper": None, "lower": None, "mid": None, "breakout_up": None, "breakout_dn": None}
+        return {"upper": None, "lower": None, "mid": None, "breakout_up": None,
+                "breakout_dn": None, "breakout_ref_up": None, "breakout_ref_dn": None}
     up = max(float(x) for x in highs[-n:])
     lo = min(float(x) for x in lows[-n:])
     mid = (up + lo) / 2.0
+    breakout_up = breakout_dn = ref_up = ref_dn = None
+    if closes is not None and len(closes) and len(highs) >= n + 1 and len(lows) >= n + 1:
+        ref_up = max(float(x) for x in highs[-n - 1:-1])
+        ref_dn = min(float(x) for x in lows[-n - 1:-1])
+        last = float(closes[-1])
+        breakout_up = bool(last > ref_up)
+        breakout_dn = bool(last < ref_dn)
     return {
         "upper": round(up, 4),
         "lower": round(lo, 4),
         "mid": round(mid, 4),
-        "breakout_up": None,  # closes not passed; caller derives
-        "breakout_dn": None,
+        "breakout_up": breakout_up,
+        "breakout_dn": breakout_dn,
+        "breakout_ref_up": round(ref_up, 4) if ref_up is not None else None,
+        "breakout_ref_dn": round(ref_dn, 4) if ref_dn is not None else None,
     }
 
 

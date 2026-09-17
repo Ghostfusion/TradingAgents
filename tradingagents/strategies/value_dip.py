@@ -1378,9 +1378,9 @@ def value_dip_setup(
         rows["rsi2"] = _rsi2(closes)
         rows["williams_r"] = _wr(highs, lows, closes)
         rows["keltner"] = _kelt(closes, atr_value=a)
-        rows["donchian"] = _don(highs, lows)
+        rows["donchian"] = _don(highs, lows, closes=closes)
         rows["obv"] = _obv(closes, volumes)
-        rows["psar"] = _psar(highs, lows)
+        rows["psar"] = _psar(highs, lows, closes=closes)
         rows["elder"] = _elder(volumes)
     except Exception:  # noqa: BLE001 - technicals degrade to n/a
         pass

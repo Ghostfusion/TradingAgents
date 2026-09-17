@@ -388,6 +388,28 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **The six code defects the score-engine inventories found are FIXED** (`docs/scores/README.md`
+  §3.1), each with a regression test. (1) **The regime label was trend-blind**: `overlays.build_strategy_overlays` passed a
+  literal `chop=0.4` against `regime_label`'s `0.30` default, so the choppiness branch could never fire and with the common
+  `vol_pct == 0.5` the label was `neutral` whatever the trend was - proven before the fix (a monotone uptrend AND a monotone
+  downtrend both returned `regime=neutral`); the overlay now passes a MEASURED choppiness and the label moves with the trend.
+  (2) **Choppiness had two scales**: the producer returned 0-100 (canonical CHOP) but fell back to a 0-1 dispersion on closes
+  alone (~8e-07 on a clean trend) while one caller compared `0.4` against `0.30` and the other the real value against `30.0`
+  - now ONE scale (0-100 both branches; the close-only branch is `100 x (1 - Kaufman efficiency ratio)`), one exported
+  `CHOP_TREND_THRESHOLD = 30.0`, and `None` (not a fabricated neutral) when unmeasurable. (3) **Donchian breakout flags were
+  unreachable** (`None` by construction, no caller derived them) - `donchian_channel` now takes `closes` and compares the
+  latest close against the PRIOR N-bar channel (the only definition that can be true), with the reference levels returned;
+  every caller passes closes. (4) **`parabolic_sar`'s `below`/`exit` were unreachable** - the leaf now passes `closes` and
+  prints the flags. (5) **`BookState.net_beta` was a declared field with no producer** defaulting to `0.0` (NA-as-zero) - now
+  `float | None = None`, unknown until something computes it. (6) **Gap fill statistics were a constant table printed as a
+  measurement** (0.3/0.6/0.4/0.8 and 5/3/4/2) - now MEASURED over the same-class gaps in the history the caller already
+  passes (10-bar fill window, median days, current bar excluded), with the lookup kept only below
+  `GAP_FILL_MIN_SAMPLE = 8` and a new `fill_basis` printed on every read; a measured 0% is now reachable. Prompt dose: the
+  market analyst's `get_gap_type` line asks for the basis. Suites: engine **4392 passed / 5 skipped** (baseline 4385 + 7),
+  executor **1105** (baseline 1104 + 1, `test_sleeves.py` +1), web **149**. Live smoke on MSFT: `chop=57.11 label=neutral`
+  (0-100 scale), `donchian ... breakout_up=False breakout_dn=False (vs prior-20-bar 517.78/478.4593)`, `psar ... below=False
+  exit=False`, `gap type MSFT: common gap_pct=1.53% fill_probability=92% days_to_fill=0 [measured (280 historical common
+  gaps)]`.
 - 2026-09-17 `(working tree)` - **Design only, no code:** the score-engine design is RESTRUCTURED into a master document plus one
   document per engine, in **`docs/scores/`**. `docs/design_fundamental_factor_weight_model.md` is **moved** (git mv) to
   `docs/scores/FundamentalScore.md` and **scoped to the fundamental engine only**; six new documents join it -

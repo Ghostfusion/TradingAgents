@@ -1,6 +1,7 @@
 """Phase 1 unit tests: regime features + rule labels (offline, no hmm)."""
 
 from tradingagents.strategies.regime import (
+    CHOP_TREND_THRESHOLD,
     choppiness,
     realized_vol,
     regime_label,
@@ -41,10 +42,57 @@ def test_rule_labels():
     assert regime_label(0.5, 0.0, 90.0) == "neutral"  # CHOP scale 0-100
 
 
-def test_choppiness_close_only_fallback_bounds():
-    # close-only input -> the 0-1 dispersion proxy fallback stays bounded
+def test_choppiness_close_only_is_on_the_same_0_100_scale():
+    """Close-only input now uses 100*(1 - efficiency ratio): the SAME 0-100
+    scale and direction as the OHLC branch. It used to return a 0-1 dispersion
+    (~0.01), which is why `overlays` passed a literal 0.4 and the label's
+    choppiness branch could never fire."""
     c = choppiness(_uptrend())
-    assert 0.0 <= c <= 1.0
+    assert c is not None
+    assert 0.0 <= c <= 100.0
+    # a monotone trend is maximally efficient -> LOW choppiness
+    assert c < CHOP_TREND_THRESHOLD
+    # a flat tape makes no directional progress -> maximally choppy
+    assert choppiness([100.0] * 40) == 100.0
+
+
+def test_choppiness_is_none_when_unmeasurable():
+    """Neither branch can be measured -> None, never a fabricated neutral."""
+    assert choppiness([]) is None
+    assert choppiness([100.0, 101.0, 102.0]) is None
+
+
+def test_regime_label_moves_with_the_trend_on_the_default_path():
+    """Regression for the dead chop branch: with vol_pct in the middle band
+    (the common case) the label used to be `neutral` whatever the trend was,
+    because overlays passed a literal chop of 0.4 against a 0.30 default."""
+    from tradingagents.strategies.overlays import build_strategy_overlays
+
+    cfg = {"enable_strategy_overlays": True}
+    up = build_strategy_overlays(cfg, _trend_closes())
+    down = build_strategy_overlays(cfg, _trend_closes(step=-0.05))
+    assert up is not None and down is not None
+    assert up["regime"] != down["regime"]
+    assert up["regime"] == "bull" and down["regime"] == "bear"
+
+
+def test_chop_threshold_sits_on_the_producers_own_scale():
+    """The threshold must be comparable with what `choppiness` returns: the
+    canonical branch is 0-100, so the trending/ranging split is 30. The other
+    caller passed a literal 0.4 against a 0.30 default, which made the branch
+    unreachable; this pins the contract in both directions."""
+    highs = [100.0 + 1.0 * i for i in range(30)]
+    lows = [99.0 + 1.0 * i for i in range(30)]
+    closes = [99.5 + 1.0 * i for i in range(30)]
+    c = choppiness(closes, highs=highs, lows=lows, window=14)
+    assert c is not None and c < CHOP_TREND_THRESHOLD
+    # a measurably trending tape fires the branch, in the direction of the trend
+    assert regime_label(0.5, 0.05, c) == "bull"
+    assert regime_label(0.5, -0.05, c) == "bear"
+    # a ranging tape does not
+    assert regime_label(0.5, 0.05, 70.0) == "neutral"
+    # and an unmeasurable one does not assert a trend either
+    assert regime_label(0.5, 0.05, None) == "neutral"
 
 
 def test_choppiness_ohlc_trend_is_low():

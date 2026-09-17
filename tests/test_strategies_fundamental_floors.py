@@ -120,6 +120,30 @@ def test_donchian_channel():
     assert d["upper"] > d["lower"]
 
 
+def test_donchian_breakout_flags_are_reachable():
+    """Regression: breakout_up/breakout_dn were hardcoded None ("closes not
+    passed; caller derives") and no caller derived them, so the Breakout
+    component's canonical input did not exist. The flags compare the latest
+    CLOSE against the PRIOR n-bar channel - a close can never exceed the high
+    of its own bar, so that is the only definition that can be true."""
+    n = 20
+    flat_h = [101.0] * n
+    flat_l = [99.0] * n
+    # a close above the prior channel high -> breakout up
+    up = donchian_channel(flat_h + [102.0], flat_l + [99.0], n=n, closes=[100.0] * n + [101.5])
+    assert up["breakout_up"] is True and up["breakout_dn"] is False
+    assert up["breakout_ref_up"] == 101.0
+    # a close below the prior channel low -> breakout down
+    dn = donchian_channel(flat_h + [101.0], flat_l + [98.0], n=n, closes=[100.0] * n + [98.5])
+    assert dn["breakout_dn"] is True and dn["breakout_up"] is False
+    # inside the channel -> neither
+    mid = donchian_channel(flat_h + [101.0], flat_l + [99.0], n=n, closes=[100.0] * n + [100.0])
+    assert mid["breakout_up"] is False and mid["breakout_dn"] is False
+    # without closes the levels still come back and the flags stay unknown
+    no_c = donchian_channel(flat_h, flat_l, n=n)
+    assert no_c["upper"] == 101.0 and no_c["breakout_up"] is None
+
+
 def test_obv_divergence():
     closes, _, _, vols = _series()
     o = obv_divergence(closes, vols)
@@ -148,6 +172,23 @@ def test_parabolic_sar():
     p = parabolic_sar(highs, lows)
     assert p["sar"] is not None
     assert parabolic_sar([1.0], [1.0])["sar"] is None
+
+
+def test_parabolic_sar_below_flag_needs_closes():
+    """Regression: the only leaf called parabolic_sar without `closes`, so the
+    below/exit flag its consumers would read was unreachable (always None)."""
+    n = 40
+    highs = [100.0 + 0.5 * i for i in range(n)]
+    lows = [99.0 + 0.5 * i for i in range(n)]
+    closes = [99.5 + 0.5 * i for i in range(n)]
+    # close well above the SAR -> not below
+    p_up = parabolic_sar(highs, lows, closes=closes + [closes[-1] + 3.0])
+    assert p_up["below"] is False and p_up["exit"] is False
+    # close far below the SAR -> the exit flag fires
+    p_dn = parabolic_sar(highs, lows, closes=closes + [lows[-1] - 20.0])
+    assert p_dn["below"] is True and p_dn["exit"] is True
+    # no closes -> unknown, not False
+    assert parabolic_sar(highs, lows)["below"] is None
 
 
 def test_elder_thermometer():

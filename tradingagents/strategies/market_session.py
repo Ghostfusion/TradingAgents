@@ -134,8 +134,91 @@ def opening_range(highs, lows, closes=None, n_minutes: int = 15) -> dict:
         }
 
 
+#: How long a gap is given to fill (bars). A gap "fills" when price trades
+#: back through the prior close.
+GAP_FILL_HORIZON = 10
+
+#: Minimum same-class historical gaps before the fill statistics are reported
+#: as measured. Below this the lookup heuristic is used and *labelled* as such.
+GAP_FILL_MIN_SAMPLE = 8
+
+#: Heuristic fill stats per gap class, used only when the history is too thin
+#: to measure. These were previously the ONLY values, printed as if measured.
+_GAP_HEURISTIC: dict[str, tuple[float, int]] = {
+    "breakaway": (0.3, 5),
+    "exhaustion": (0.6, 3),
+    "runaway": (0.4, 4),
+    "common": (0.8, 2),
+}
+
+
+def _classify_gap(abs_gap: float, vol_ratio: float | None) -> str:
+    """Gap class from size + volume, the one rule both the live bar and the
+    historical sample are classified with."""
+    if vol_ratio is not None and vol_ratio >= 2.0 and abs_gap >= 0.02:
+        return "breakaway"
+    if abs_gap >= 0.05:
+        return "exhaustion"
+    if abs_gap >= 0.02:
+        return "runaway"
+    return "common"
+
+
+def _gap_fill_stats(
+    closes, opens, highs, lows, volumes, gtype: str, n: int
+) -> tuple[float | None, int | None, int]:
+    """Empirical fill rate + median days-to-fill for one gap class.
+
+    Walks the bars the caller already passed, classifies each historical gap
+    with :func:`_classify_gap`, and asks whether price traded back through the
+    prior close within :data:`GAP_FILL_HORIZON` bars. The most recent bar (the
+    gap being classified) is excluded, so the sample is out-of-sample.
+
+    Returns ``(fill_probability, median_days, sample_size)``; the first two are
+    ``None`` when the class has no occurrences at all.
+    """
+    present = [bool(opens) and x is not None for x in (opens or [])]
+    use_open = bool(opens) and all(present)
+    fills: list[int] = []
+    for i in range(n, len(closes) - 1):
+        try:
+            prev_close = float(closes[i - 1])
+            today_open = float(opens[i]) if use_open else float(closes[i])
+            if prev_close <= 0:
+                continue
+            gap = (today_open - prev_close) / prev_close
+            avg_vol = sum(float(v) for v in volumes[i - n:i]) / n
+            vr = float(volumes[i]) / avg_vol if avg_vol > 0 else None
+            if _classify_gap(abs(gap), vr) != gtype:
+                continue
+            end = min(i + GAP_FILL_HORIZON, len(closes) - 1)
+            for j in range(i, end + 1):
+                hit = (
+                    float(lows[j]) <= prev_close
+                    if gap > 0
+                    else float(highs[j]) >= prev_close
+                )
+                if hit:
+                    fills.append(j - i)
+                    break
+            else:
+                fills.append(GAP_FILL_HORIZON + 1)  # never filled in the window
+        except (TypeError, ValueError, IndexError, ZeroDivisionError):
+            continue
+    if not fills:
+        return None, None, 0
+    filled = [d for d in fills if d <= GAP_FILL_HORIZON]
+    prob = len(filled) / len(fills)
+    if filled:
+        ordered = sorted(filled)
+        median = ordered[len(ordered) // 2]
+    else:
+        median = None
+    return prob, median, len(fills)
+
+
 def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
-    """Classify the most recent overnight gap + estimate fill behavior.
+    """Classify the most recent overnight gap + its fill behavior.
 
     Gap = today's open vs yesterday's close. Types (Investopedia):
       common     - small gap, normal volume, fills fast (high fill prob)
@@ -143,12 +226,18 @@ def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
       runaway    - mid-trend continuation gap (low fill)
       exhaustion - gap after a sharp run, likely trend end (high fill)
 
-    Returns ``{type, gap_pct, fill_probability, days_to_fill}`` where the
-    fill stats are heuristic estimates from the gap size + volume (never
-    fabricated — None when the inputs are insufficient).
+    Returns ``{type, gap_pct, fill_probability, days_to_fill, fill_basis,
+    fill_sample}``. The fill statistics are **measured** over the same-class
+    gaps in the history the caller passed (``GAP_FILL_HORIZON`` bars to fill,
+    median days among those that did); when a class has fewer than
+    ``GAP_FILL_MIN_SAMPLE`` historical occurrences the fixed lookup values are
+    used and ``fill_basis`` says so. Nothing is fabricated: with no inputs the
+    whole read is ``None``.
     """
+    empty = {"type": None, "gap_pct": None, "fill_probability": None,
+             "days_to_fill": None, "fill_basis": None, "fill_sample": 0}
     if len(closes) < n + 2 or len(highs) < n + 2 or len(lows) < n + 2 or len(volumes) < n + 2:
-        return {"type": None, "gap_pct": None, "fill_probability": None, "days_to_fill": None}
+        return empty
     try:
         prev_close = float(closes[-2])
         # The gap is today's OPEN vs yesterday's close. A close-proxy for the
@@ -158,7 +247,7 @@ def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
         # when no open series exists.
         today_open = float(opens[-1]) if (opens and opens[-1] is not None) else float(closes[-1])
         if prev_close <= 0:
-            return {"type": None, "gap_pct": None, "fill_probability": None, "days_to_fill": None}
+            return empty
         gap_pct = (today_open - prev_close) / prev_close
         avg_vol = sum(float(v) for v in volumes[-n:]) / n
         vol_ratio = float(volumes[-1]) / avg_vol if avg_vol > 0 else None
@@ -168,32 +257,25 @@ def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
         rng = max(seg_h) - min(seg_l)
         abs_gap = abs(gap_pct)
         if rng <= 0:
-            return {"type": None, "gap_pct": round(gap_pct, 6), "fill_probability": None, "days_to_fill": None}
-        # heuristic classification
-        if vol_ratio is not None and vol_ratio >= 2.0 and abs_gap >= 0.02:
-            gtype = "breakaway"
-            fill_prob = 0.3
-            days = 5
-        elif abs_gap >= 0.05:
-            gtype = "exhaustion"
-            fill_prob = 0.6
-            days = 3
-        elif abs_gap >= 0.02:
-            gtype = "runaway"
-            fill_prob = 0.4
-            days = 4
+            return {**empty, "gap_pct": round(gap_pct, 6)}
+        gtype = _classify_gap(abs_gap, vol_ratio)
+        prob, days, sample = _gap_fill_stats(
+            closes, opens, highs, lows, volumes, gtype, n)
+        if prob is not None and sample >= GAP_FILL_MIN_SAMPLE:
+            basis = f"measured ({sample} historical {gtype} gaps)"
         else:
-            gtype = "common"
-            fill_prob = 0.8
-            days = 2
+            prob, days = _GAP_HEURISTIC[gtype]
+            basis = f"heuristic ({sample} historical {gtype} gaps < {GAP_FILL_MIN_SAMPLE})"
         return {
             "type": gtype,
             "gap_pct": round(gap_pct, 6),
-            "fill_probability": fill_prob,
+            "fill_probability": round(prob, 4),
             "days_to_fill": days,
+            "fill_basis": basis,
+            "fill_sample": sample,
         }
     except (TypeError, ValueError, ZeroDivisionError):
-        return {"type": None, "gap_pct": None, "fill_probability": None, "days_to_fill": None}
+        return empty
 
 
 def order_imbalance(inst_net: float | None, retail_net: float | None) -> dict:

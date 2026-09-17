@@ -1193,18 +1193,21 @@ def get_mean_reversion_tech(
         atr_v = atr(data["highs"], data["lows"], closes, window=14)
         s = _srsi(closes)
         k = _kelt(closes, atr_value=atr_v)
-        d = _don(data["highs"], data["lows"])
+        d = _don(data["highs"], data["lows"], closes=closes)
         o = _obv(closes, data["volumes"])
-        p = _psar(data["highs"], data["lows"])
+        p = _psar(data["highs"], data["lows"], closes=closes)
         e = _elder(data["volumes"])
         lines = [
             f"mean reversion tech {ticker}:",
             f"  stochrsi={s.get('stochrsi')} oversold={s.get('oversold')}",
             f"  rsi2={_rsi2(closes)} williams_r={_wr(data['highs'], data['lows'], closes)}",
             f"  keltner mid={k.get('mid')} pct={k.get('pct')}",
-            f"  donchian up={d.get('upper')} lo={d.get('lower')}",
+            f"  donchian up={d.get('upper')} lo={d.get('lower')} "
+            f"breakout_up={d.get('breakout_up')} breakout_dn={d.get('breakout_dn')} "
+            f"(vs prior-{20}-bar {d.get('breakout_ref_up')}/{d.get('breakout_ref_dn')})",
             f"  obv_up={o.get('obv_up')} bullish_div={o.get('bullish_div')}",
-            f"  psar={p.get('sar')} elder_ratio={e.get('ratio')} heavy={e.get('heavy')}",
+            f"  psar={p.get('sar')} below={p.get('below')} exit={p.get('exit')} "
+            f"elder_ratio={e.get('ratio')} heavy={e.get('heavy')}",
         ]
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
@@ -2166,14 +2169,18 @@ def get_regime_components(
         windows = [closes[i - window : i] for i in range(window, len(closes) + 1, window)]
         vol_pct = vol_percentile(windows or [closes], current_window=window)
         trend = trend_strength(closes, sma_window=min(200, max(2, len(closes) // 2)))
-        # CHOP runs 0-100 (low = trend); threshold 30 sits on the classic
-        # 30/60 rule of thumb (trending < 30, ranging > 60)
+        # CHOP runs 0-100 (low = trend) in BOTH of its branches now, and is
+        # None when there is too little history to measure either one. The
+        # threshold is the shared CHOP_TREND_THRESHOLD constant - this leaf and
+        # `overlays.build_strategy_overlays` used to pass different scales for
+        # the same quantity.
         chop = choppiness(
             closes, highs=data.get("highs"), lows=data.get("lows"), window=14)
-        label = regime_label(vol_pct, trend, chop, chop_threshold=30.0)
+        label = regime_label(vol_pct, trend, chop)
     except Exception as exc:  # noqa: BLE001
         return f"regime components unavailable for {ticker}: {exc}"
-    return f"regime {ticker}: vol_pct={vol_pct:.2f} trend={trend:.4f} chop={chop:.2f} label={label}"
+    chop_txt = f"{chop:.2f}" if chop is not None else "n/a (insufficient history)"
+    return f"regime {ticker}: vol_pct={vol_pct:.2f} trend={trend:.4f} chop={chop_txt} label={label}"
 
 
 @tool
@@ -5190,11 +5197,13 @@ def get_gap_type(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
     """Overnight gap classification: common / breakaway / runaway / exhaustion
-    + heuristic fill probability and days-to-fill.
+    + fill probability and days-to-fill, MEASURED over the same-class gaps in
+    the history when there are enough of them, otherwise the labelled lookup
+    heuristic.
 
     Call before any 'gap will fill / breakaway gap / gap risk' claim on a
-    pre-market or post-close read. The fill stats are heuristic estimates
-    from gap size + volume (never fabricated).
+    pre-market or post-close read. The basis is always printed, so a heuristic
+    is never quoted as a measurement.
     """
     data = _ohlcv(ticker)
     closes = data["closes"]
@@ -5208,7 +5217,8 @@ def get_gap_type(
             return f"gap type unavailable for {ticker}: insufficient data."
         return (
             f"gap type {ticker}: {r['type']} gap_pct={r['gap_pct']:.2%} "
-            f"fill_probability={r['fill_probability']:.0%} days_to_fill={r['days_to_fill']}"
+            f"fill_probability={r['fill_probability']:.0%} days_to_fill={r['days_to_fill']} "
+            f"[{r.get('fill_basis') or 'basis unavailable'}]"
         )
     except Exception as exc:  # noqa: BLE001
         return f"gap type unavailable for {ticker}: {exc}"

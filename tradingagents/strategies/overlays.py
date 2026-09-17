@@ -28,7 +28,7 @@ def build_strategy_overlays(config: Mapping, closes: list) -> dict | None:
     if not closes or len(closes) < 60:
         return None
     from .factors import high_distance, momentum
-    from .regime import regime_label, trend_strength
+    from .regime import choppiness, regime_label, trend_strength
     from .size import volatility_target_scale
 
     closes_f = [float(c) for c in closes]
@@ -54,7 +54,13 @@ def build_strategy_overlays(config: Mapping, closes: list) -> dict | None:
             else (0.1 if vol_all > 0 and vol_now < 0.5 * vol_all else 0.5)
         )
     trend = trend_strength(closes_f, sma_window=min(200, len(closes_f) // 2))
-    label = regime_label(vol_pct, trend, 0.4)
+    # Measured, not a literal: this call used to pass a hardcoded 0.4 against
+    # regime_label's 0.30 default on a 0-1 scale, so the choppiness branch was
+    # unreachable and the label was `neutral` for every mid-volatility tape
+    # regardless of trend. `choppiness` now returns 0-100 for both its OHLC and
+    # close-only branches, and this path is close-only.
+    chop = choppiness(closes_f, window=14)
+    label = regime_label(vol_pct, trend, chop)
     # `volatility_estimator` switch (default close): ewma / garch use only the
     # closing series (parkinson / garman_klass need OHLC -> tool-only).
     vol_override = None
