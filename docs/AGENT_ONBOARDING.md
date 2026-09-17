@@ -403,10 +403,26 @@ has changed before); never assume an endpoint works — the SDK's
   deliberately null at `execution_contract.py:240-252`). Structural defects recorded for the next pass:
   `roa_series`/`revenue_series` have **no producer** (G-Score G4/G5 are dead legs), `industry_neutral_z` demeans by
   sector while the final percentile is taken across the whole peer set (so `QUALITY_BANDS`' "sector median" band is
-  mislabelled), and `scripts/value_screener.py`'s docstring advertises two screens with no implementing symbol. Biggest
-  wiring opportunity: level ROIC (invested capital is built at `value_dip_tools.py:510` only as a ΔIC denominator),
-  gross margin (stored at `statement_parsing.py:841`, never rendered), interest coverage (`interest_expense` has no
-  reader), and buyback/shareholder yield (`share_buybacks` has no reader).
+  mislabelled), and `scripts/value_screener.py`'s docstring advertises two screens with no implementing symbol.
+  **All four were then fixed in the same pass** (owner: "fix all found defects"): (1) new
+  `statement_parsing.annual_series` is the producer the G-Score G4/G5 and Dechow-Dichev readers never had - one
+  canonical dict per fiscal year through the same row matcher, a moomoo payload's per-statement tables merged by
+  year, `roa_series` derived on beginning-of-year assets aligned by fiscal year, no key spliced across payloads, and
+  `fetch_ticker` attaching revenue / net income / total assets / operating cashflow series with provenance naming the
+  period span; (2) the 50 band is renamed "peer median" because the percentile is over the scored peer set, with the
+  within-sector percentile left as design work; (3) the screener docstring now marks Return on Capital and
+  Shareholder Yield as unimplemented and names the missing inputs; (4) the Dechow-Dichev caller reads the real series
+  with accruals on the Sloan proxy `(NI - CFO) / total assets`, the substitution printed beside the value, and
+  `DD_MIN_PERIODS = 8` states the true bar (6 residual rows need n-2 >= 6) for both the function and the caller.
+  11 new tests (7 statement-parsing incl. the producer->G-Score integration, 3 earnings-quality caller, 1
+  Dechow-Dichev bar); affected suites 326 + 54 + 38 green, full suite **4385 passed / 5 skipped**. Live smoke: MSFT and AAPL now carry
+  5 series keys over 4 annual periods (roa n=3, all `annual`, no conflicts) and the earnings-quality leaf prints
+  `dd_aq=n/a (needs 8+ annual periods)` - so both new producers are correct and UNFIRED on today's vendor history: G4/G5 need a 5th
+  period and Dechow-Dichev needs 8. `sec_edgar.get_financial_history` (15 annual years, US filers, tool at `analysis_tools.py:8783`) is
+  the unlock and is design item §3.6/8. Remaining wiring opportunity unchanged and larger than
+  before: level ROIC (invested capital is built at `value_dip_tools.py:510` only as a ΔIC denominator), gross margin
+  (stored at `statement_parsing.py:841`, never rendered), interest coverage (`interest_expense` has no reader), and
+  buyback/shareholder yield (`share_buybacks` has no reader).
 - 2026-09-16 `(working tree)` - The MSFT fundamentals review round: the DCF family now says what a price REQUIRES, and
   the net-debt basis is disclosed instead of relabelled an error. Reviewer feedback on `reports/MSFT_20260916_231406` read
   against the tree + the FY2026 release: every quoted number checked out, and the diagnosis was sharper than the report's -

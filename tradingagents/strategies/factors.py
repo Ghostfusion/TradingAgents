@@ -183,16 +183,24 @@ def z_composite_alpha(factors_by_ticker: dict, weights: dict | None = None) -> d
 
 # --- Quality composite (round-3 S3) -----------------------------------------
 #
-# fffinstill's published band table for its sector-percentile composite, the
+# fffinstill's published band table for its *sector-percentile* composite, the
 # only band table the round-3 sources publish for a composite of this shape
 # (docs/design_quant_formulas_research_round3.md §2 S3). These are *quality*
 # bands and are deliberately not the decision rating bands in
 # strategies/decision_guardrail.py::SCORE_BANDS (ground rule 6: a score is not
 # a rating).
+#
+# The 50 band is renamed from the source's "sector median" to "peer median":
+# this composite takes its percentile across the SCORED PEER SET, not within
+# the name's sector (``industry_neutral`` demeans the z by sector but the
+# percentile that produces the 0-100 score stays peer-wide, so the label would
+# have claimed a reference set the number does not use). A within-sector
+# percentile is a separate, unimplemented option -
+# docs/design_fundamental_factor_weight_model.md §3.2.
 QUALITY_BANDS: tuple = (
     (70.0, "elite"),
     (60.0, "above-average"),
-    (50.0, "sector median"),
+    (50.0, "peer median"),
     (40.0, "below-average"),
     (20.0, "poor"),
     (0.0, "distressed"),

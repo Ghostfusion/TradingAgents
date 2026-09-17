@@ -257,7 +257,12 @@ the tie-aware cross-sectional percentile the repo already has.
   weights, six lens weight sets, and a band table
   (70-100 elite, 60-69 above average, 50-59 sector median, 40-49 below,
   20-39 poor, <20 distressed)
-  ([src](https://fffinstill.com/research/methodology)). The repo's own
+  ([src](https://fffinstill.com/research/methodology)). **The shipped table
+  renames that 50 band to "peer median"** (2026-09-17): the composite
+  percentiles over the scored peer set, not within the name's sector, so the
+  source's label named a reference set the number does not use. A within-sector
+  percentile is designed but unimplemented —
+  `docs/design_fundamental_factor_weight_model.md` §3.2. The repo's own
   `rank_sectors_multifactor` already implements the same renormalisation over
   present factors at percentile 0-100.
 - **Fit:** the engine holds ~10 independent quality/distress point scores and

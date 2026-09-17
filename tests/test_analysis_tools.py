@@ -1726,6 +1726,65 @@ def test_earnings_quality_no_data_degrades(monkeypatch):
     assert "unavailable" in out.lower()
 
 
+def test_earnings_quality_feeds_dechow_dichev_from_the_annual_series(monkeypatch):
+    """The DD branch used to require ``operating_cashflow`` to be a dict of >= 6
+    keys - a shape the canonical merge never produces - and fed an all-zero
+    accruals list when it did fire. It now reads the series ``fetch_ticker``
+    derives, with accruals on the Sloan proxy, and prints the basis."""
+    from tradingagents.dataflows import statement_parsing as sp
+
+    cfo = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0, 8.0, 11.0]
+    fin = _eq_canonical()
+    fin.update(
+        {
+            "operating_cashflow_series": cfo,
+            # (NI - CFO) / TA = 0.5 * CFO exactly, so the DD regression fits
+            # perfectly and the residual std is 0.
+            "net_income_series": [1.5 * c for c in cfo],
+            "total_assets_series": [100.0] * len(cfo),
+        }
+    )
+    monkeypatch.setattr(sp, "fetch_ticker", lambda ticker, date, **kw: fin)
+    monkeypatch.setattr(sp, "screen_ticker", lambda ticker, f: {})
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "dd_aq=0.0 (accruals=(NI-CFO)/total assets over 10 periods)" in out
+
+
+def test_earnings_quality_dd_needs_the_full_period_window(monkeypatch):
+    """Seven periods is not enough for the regression (6 residual rows need 8
+    periods), and the leaf says so instead of printing a number."""
+    from tradingagents.dataflows import statement_parsing as sp
+
+    cfo = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0]
+    fin = _eq_canonical()
+    fin.update(
+        {
+            "operating_cashflow_series": cfo,
+            "net_income_series": [1.5 * c for c in cfo],
+            "total_assets_series": [100.0] * len(cfo),
+        }
+    )
+    monkeypatch.setattr(sp, "fetch_ticker", lambda ticker, date, **kw: fin)
+    monkeypatch.setattr(sp, "screen_ticker", lambda ticker, f: {})
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "dd_aq=n/a (needs 8+ annual periods)" in out
+
+
+def test_earnings_quality_dd_never_scores_a_fabricated_accrual_list(monkeypatch):
+    """Regression guard: a multi-key cash-flow DICT (the shape the dead branch
+    keyed on) must not produce a DD value - the old code filled the accrual
+    series with zeros, which is a number no statement supports."""
+    from tradingagents.dataflows import statement_parsing as sp
+
+    fin = _eq_canonical()
+    fin["operating_cashflow"] = {f"{2018 + i}": float(i + 1) for i in range(6)}
+    monkeypatch.setattr(sp, "fetch_ticker", lambda ticker, date, **kw: fin)
+    monkeypatch.setattr(sp, "screen_ticker", lambda ticker, f: {})
+    out = T.get_earnings_quality.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "dd_aq=n/a" in out
+    assert "dd_aq=0" not in out
+
+
 # --------------------------------------------------------------------------
 # Value Dip + Swing hybrid tools (value_dip_tools) - computed signals
 # --------------------------------------------------------------------------

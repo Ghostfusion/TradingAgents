@@ -185,10 +185,13 @@ def test_a_cross_section_that_yields_no_scored_name_withholds_everything() -> No
 
 
 def test_bands_are_the_quality_bands_not_the_decision_rating_bands() -> None:
+    # The 50 band reads "peer median", not the source table's "sector median":
+    # this composite percentiles over the SCORED PEER SET, so the label must
+    # name the reference set the number actually uses (2026-09-17).
     labels = {label for _, label in QUALITY_BANDS}
     assert quality_band(100) == "elite"
     assert quality_band(65) == "above-average"
-    assert quality_band(55) == "sector median"
+    assert quality_band(55) == "peer median"
     assert quality_band(45) == "below-average"
     assert quality_band(30) == "poor"
     assert quality_band(10) == "distressed"

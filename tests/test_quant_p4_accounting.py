@@ -88,6 +88,19 @@ def test_dd_aq_none_short():
     assert dechow_dichev_aq([], []) is None
 
 
+def test_dd_aq_bar_is_eight_periods_not_six():
+    """The regressor rows are ``[cfo_{t-1}, cfo_t, cfo_{t+1}]`` for t in 1..n-2,
+    so 6 residual rows need 8 periods - the docstring said ">= 6" while the
+    code returned None at 6 and 7, which a caller could not distinguish from
+    bad data (2026-09-17)."""
+    from tradingagents.strategies.earnings_quality import DD_MIN_PERIODS
+
+    assert DD_MIN_PERIODS == 8
+    cfo = [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0, 8.0, 11.0]
+    assert dechow_dichev_aq([0.5 * c for c in cfo[:7]], cfo[:7]) is None
+    assert dechow_dichev_aq([0.5 * c for c in cfo[:8]], cfo[:8]) is not None
+
+
 def test_quality_verdict_unchanged_by_dd():
     r = earnings_quality_verdict(10, 9, 100, fcf=4, eps_growth=0.2, fcf_growth=-0.1)
     assert r["level"] == "HIGH"  # regression guard: DD addition didn't change the verdict

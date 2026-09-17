@@ -20,6 +20,16 @@ Screens (from ``strategies/Math.md``):
 * Net-Net: market cap < 2/3 * (current assets - total liabilities).
 * Fraud / bankruptcy guards: Beneish M-Score, Altman Z-Score.
 
+Two of those rows are **not implemented** and no column carries them:
+**Return on Capital** (no invested-capital denominator is built on this path;
+only the 3-year incremental ROIC exists, in ``strategies/capex_quality.py``)
+and **Shareholder Yield** (the canonical ``share_buybacks`` and
+``debt_repayment`` keys have no reader, so the buyback and debt-reduction legs
+are missing - the dividend leg alone would print a wrong number under that
+name). They are recorded as wiring gaps in
+``docs/design_fundamental_factor_weight_model.md`` §3.6 rather than shipped as
+an "n/a" column. Every other row above is computed.
+
 The screener never fabricates: a missing line item makes the corresponding
 screen "n/a" rather than a guessed number.
 """

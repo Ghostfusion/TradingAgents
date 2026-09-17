@@ -173,6 +173,13 @@ Empty slots, all deliberate:
 
 ### 1.3 The wiring gaps that matter more than the missing formulas
 
+> **Status 2026-09-17: the four defects found by this inventory are FIXED** (see
+> §1.4). The table below is kept as the record of what the gaps were and how
+> large each fix is; the two structural defects in it — `roa_series` /
+> `revenue_series` having no producer, and the mislabelled quality band — are
+> closed. The remaining rows are **capability gaps** (values the engine does not
+> yet compute), not defects, and are §3.6's ranked work.
+
 The dominant pattern in the inventory is not "the engine lacks the inputs" — it
 is **values computed and never exposed**, and **canonical keys with no
 consumer**. Each of these is a small, high-value fix and several are
@@ -187,10 +194,27 @@ prerequisites for factors in §2:
 | Debt growth (numeric) | only the Piotroski `f_dlever` boolean exists | small |
 | Asset growth (numeric) | only `overpriced_score` C6's `>0.10` boolean | small |
 | Receivable-days / inventory-days | DSRI is an internal Beneish input; the C-score's C2/C3 are booleans | small |
-| `roa_series` / `revenue_series` | read by `growth_metrics` (`quantitative_scores.py:786-818`) for G-Score G4/G5; **no producer exists anywhere**, so those legs are structurally dead and always emit "5-year ROA series unavailable" | medium — needs a series producer |
-| 5Y CAGRs beyond revenue | `capex_quality._cagr(min_span=5)` needs ≥6 annual points; vendor history is ~4-5 years; `sec_edgar.get_financial_history` gives up to 15 years for US filers (tool at `analysis_tools.py:8783`) but **does not feed the CAGR path** | medium — wire SEC XBRL into the series producer |
-| Dechow-Dichev AQ | `earnings_quality.dechow_dichev_aq` needs ≥6 periods; the tool feeds a synthetic all-zero accruals list (`analysis_tools.py:4985-4993`) so it always returns `n/a` | medium — fix the caller or delete the claim |
-| Screener docstring vaporware | `scripts/value_screener.py:15,19` advertises "Magic Formula Return on Capital" and "Shareholder Yield"; **no implementing symbol exists** | trivial — docstring fix (rule 9: correct the invalidated doc) |
+| `roa_series` / `revenue_series` | read by `growth_metrics` (`quantitative_scores.py:786-818`) for G-Score G4/G5; **no producer exists anywhere**, so those legs are structurally dead and always emit "5-year ROA series unavailable" | **FIXED 2026-09-17 — §1.4** |
+| 5Y CAGRs beyond revenue | `capex_quality._cagr(min_span=5)` needs ≥6 annual points; vendor history is ~4-5 years; `sec_edgar.get_financial_history` gives up to 15 years for US filers (tool at `analysis_tools.py:8783`) but **does not feed the CAGR path** | medium — the series producer now exists (§1.4); wiring SEC XBRL into it is the remaining step |
+| Dechow-Dichev AQ | `earnings_quality.dechow_dichev_aq` needs ≥6 periods; the tool feeds a synthetic all-zero accruals list (`analysis_tools.py:4985-4993`) so it always returns `n/a` | **FIXED 2026-09-17 — §1.4** |
+| Screener docstring vaporware | `scripts/value_screener.py:15,19` advertises "Magic Formula Return on Capital" and "Shareholder Yield"; **no implementing symbol exists** | **FIXED 2026-09-17 — §1.4** (docstring corrected; the two screens remain unbuilt and are §3.6 work) |
+
+### 1.4 The four defects this design's inventory found, and how they were fixed
+
+All four were fixed on sight on 2026-09-17 (owner standing order 10) with
+regression tests; no score semantics changed.
+
+| # | Defect | Fix | Test |
+| --: | --- | --- | --- |
+| 1 | `roa_series` / `revenue_series` had **no producer**, so the G-Score's G4/G5 legs could never compute (always "5-year ROA series unavailable (n=0)") | New `statement_parsing.annual_series` (+ `_period_canonicals`, `_period_token`): stacks one canonical dict per fiscal year through `_flat_canonical` — the same row matcher the merged payload uses — merging a moomoo payload's per-statement tables by year, deriving `roa_series` on **beginning-of-year** assets aligned **by fiscal year** (the convention `growth_metrics` uses for the ROA level), and never splicing one key's values across payloads. `fetch_ticker` attaches the four series (`revenue`, `net_income`, `total_assets`, `operating_cashflow`) with provenance naming the period span and re-using `_period_kind` | 7 in `test_statement_parsing.py`, incl. the moomoo year-merge, the cross-payload year join, the gap rule, and the producer→G-Score integration. **Live 2026-09-17:** MSFT/AAPL carry 5 series keys over 4 annual periods (`roa_series` n=3), all `annual`, no conflicts - so G4/G5 remain excluded on vendor history alone (4 < 5 periods) with an honest `n`; wiring SEC XBRL (15 years) into the producer is the unlock |
+| 2 | `QUALITY_BANDS`' 50 band said **"sector median"** while the percentile is taken across the scored **peer set** | Renamed to "peer median"; the source table's label is quoted in the comment with the reason it does not apply. A within-sector percentile stays a design item (§3.2) | `test_quality_composite.py::test_bands_are_the_quality_bands_not_the_decision_rating_bands` |
+| 3 | `scripts/value_screener.py`'s docstring advertised **Return on Capital** and **Shareholder Yield** with no implementing symbol | Docstring now marks both as not implemented, names the missing inputs (`invested_capital`; the `share_buybacks`/`debt_repayment` keys with no reader), and points at §3.6 | docstring only (no code claim left) |
+| 4 | The Dechow-Dichev caller required `operating_cashflow` to be a **dict of ≥6 keys** — a shape the merge never produces — and fed an **all-zero accruals list** when it did fire | Reads the series from #1, accruals on the Sloan proxy `(NI − CFO) / total assets`, with the substitution printed beside the value. `DD_MIN_PERIODS = 8` now states the real bar (6 residual rows need n−2 ≥ 6), used by both the function and the caller, and the n/a text names it | 3 in `test_analysis_tools.py` (a perfect-fit value, the 7-period refusal, and a guard that a multi-key cash-flow dict no longer produces a number) + 1 in `test_quant_p4_accounting.py` |
+
+**Not fixed, deliberately:** the two screens in #3 are *features* (they need an
+invested-capital basis decision — the same basis problem the DCF bridge had —
+and a shareholder-yield definition), not doc defects; they stay ranked in §3.6.
+The remaining §1.3 rows are capability gaps of the same class.
 
 ---
 
@@ -308,7 +332,7 @@ existing implementation.
 | 77 | Receivables growth vs revenue | 0.75 | **P** | DSRI internal to Beneish; C2 boolean |
 | 78 | Inventory growth vs revenue | 0.50 | **P** | C3 boolean |
 | 79 | Deferred revenue growth | 0.50 | **A** | no canonical key; `revenue` explicitly excludes deferred/unearned labels |
-| 80 | Earnings volatility (−std) | 0.50 | **P** | G-Score G4/G5 read `roa_series`/`revenue_series`, which **no producer populates** |
+| 80 | Earnings volatility (−std) | 0.50 | **P** | G-Score G4/G5 read `roa_series`/`revenue_series` — the producer now exists (`statement_parsing.annual_series`, §1.4) but needs 5+ annual periods, and vendor history is 4-5; below that the leg is excluded with its `n` printed |
 | 81 | OCF/NI divergence | 0.50 | **P** | the LEVEL is computed (`cash_conversion`); the growth-rate divergence is not |
 | 82 | Quality of earnings | 1.00 | **C** | `earnings_quality_verdict:24` + `normalized.trap_verdict:57`; leaves `get_earnings_quality` |
 
@@ -530,7 +554,7 @@ Every row is a **wiring** job unless stated; §1.3 gives the evidence.
 | 5 | Net debt/EBITDA (#60), net debt/FCF (#63), OCF/debt (#71), cash/debt (#67) | the leverage family, 3.5% of weight; needs an EBITDA helper (already inline at `ratios.py:162`) | `ratios.compute_ratios` |
 | 6 | Gross margin + EBIT-margin series + margin stability (#6, #8, #10, #11) | value computed and stored but never rendered; stability legs unlock 1.5% | expose `fin["gross_margin"]`, return the margin series from `median_norm_ebit`'s caller |
 | 7 | EV/FCF (#55) | trivial given `ev` and `free_cash_flow` | `ratios.compute_ratios` |
-| 8 | Multi-year series producer (revenue/EPS/FCF/EBITDA/EBIT annual series) | the CAGR family + `roa_series`/`revenue_series` are blocked on it; `sec_edgar.get_financial_history` (15 years, US filers) exists and does not feed the path | new small module or an extension of `_annual_statement_series` |
+| 8 | Multi-year series producer — **partly built 2026-09-17** (`annual_series`: revenue / net income / total assets / operating cashflow / ROA) | the CAGR family (#14/#17/#18/#20/#23/#38/#90) is still blocked on EPS/FCF/EBITDA/EBIT series; `sec_edgar.get_financial_history` (15 years, US filers) exists and does not feed the path — and it is the one source that can clear the 5-period bar G4/G5 need | extend `annual_series` with the remaining keys, then wire SEC XBRL |
 | 9 | Normalized FCF yield (#42), FCF stability std (#37), cash-conversion stability (#39) | normalized FCF and cycle-FCF stats already exist; only the division/std is missing | `normalized_fcf.py`, `cycle_dcf.py` |
 | 10 | Asset growth numeric (#76), receivables/inventory-days exposure (#77, #78), WC/assets (#69), debt growth numeric (#70) | boolean-only today; the underlying values exist inside Beneish/C-score | `quantitative_scores` + `normalized` |
 
@@ -796,7 +820,7 @@ not by missing formulas:
 | `deferred_revenue` | #79 (and `revenue` deliberately excludes `deferred`/`unearned` labels) |
 | `goodwill` / `intangibles` | bank P/TBV reasoning, ROTCE |
 | R&D / advertising (referenced by `growth_metrics` but never aliased) | G-Score G6/G8 legs |
-| `roa_series` / `revenue_series` | #80 earnings volatility, G-Score G4/G5 (dead today) |
+| `roa_series` / `revenue_series` | #80 earnings volatility, G-Score G4/G5 — produced since 2026-09-17 (§1.4), still bounded by the 4-5 year vendor history |
 | multi-year tag series | #14/#17/#18/#20/#23/#38/#90 CAGR family |
 | segment data | any segment-level factor (vendor passthrough only) |
 | bank/REIT operating metrics | NIM, CET1, ROTCE, FFO, AFFO, NAV, occupancy, non-performing loans, deposit growth, efficiency ratio |

@@ -684,6 +684,156 @@ def income_series(payload: str) -> list[dict] | None:
     return rows
 
 
+# --- Multi-year canonical series -------------------------------------------
+#
+# One producer for the per-year series the score readers already expect:
+# ``growth_metrics`` reads ``roa_series`` / ``revenue_series`` for the Mohanram
+# G-Score's G4/G5 legs, and the earnings-quality tool reads the cash-flow
+# series for Dechow-Dichev accrual quality. Both readers existed with NO writer
+# (found in the 2026-09-17 factor-model inventory): G4/G5 always reported
+# "5-year ROA series unavailable (n=0)" and ``dd_aq`` was structurally n/a.
+# Every period is canonicalised through ``_flat_canonical`` - the same matcher
+# the flat merge uses - so a series value cannot disagree with the newest-period
+# value for the same key.
+
+#: Canonical keys a series is emitted for, in emission order. Only keys with a
+#: consumer: ``revenue``/``roa`` feed the G-Score, the other three feed
+#: Dechow-Dichev (accruals = (NI - CFO) / total assets).
+SERIES_KEYS: tuple = ("revenue", "net_income", "total_assets", "operating_cashflow")
+
+
+def _period_token(label: str) -> str:
+    """Short period token from a table header or a CSV date column.
+
+    ``"Income Statement (2025/FY)"`` -> ``"2025/FY"``; a bare date stays as it
+    is. Only used to label a series in provenance, so it never invents a period
+    the payload does not state.
+    """
+    text = str(label or "").strip()
+    if text.endswith(")") and "(" in text:
+        return text[text.rindex("(") + 1 : -1].strip() or text
+    return text
+
+
+def _period_canonicals(payload: str) -> list:
+    """Per-period ``(year, period_token, canonical)`` from one statement
+    payload, OLDEST first.
+
+    Markdown (moomoo) sends one table per STATEMENT per period - a
+    ``get_fundamentals`` payload concatenates income + balance + cashflow for
+    four years, i.e. 12 tables for 4 periods - so tables are MERGED BY FISCAL
+    YEAR into one canonical dict per year (the same "search every table for the
+    key" rule ``_markdown_canonical`` applies to the newest period). The
+    yfinance/tiingo CSV shape resolves to one canonical dict per date column.
+
+    Both shapes read their rows through ``_flat_canonical``, the same matcher
+    the merged payload uses, so a series value cannot disagree with the
+    newest-period value for the same key.
+    """
+    text = (payload or "").strip()
+    if not text or text.startswith("NO_DATA") or text.startswith("DATA_"):
+        return []
+    by_year: dict = {}
+    token_by_year: dict = {}
+    tables = _markdown_period_tables(text)
+    if tables:
+        for period, rows in tables:
+            year = _period_year(period)
+            canon = _flat_canonical(rows)
+            if year <= 0 or not canon:
+                continue
+            slot = by_year.setdefault(year, {})
+            for key, value in canon.items():
+                slot.setdefault(key, value)
+            token_by_year.setdefault(year, _period_token(period))
+    else:
+        rows = _parse_csv_statement_rows(text)
+        for date in sorted({d for vals in rows.values() for d in vals}):
+            year = int(str(date)[:4]) if str(date)[:4].isdigit() else 0
+            if year <= 0:
+                continue
+            canon = _flat_canonical({k: v[date] for k, v in rows.items() if date in v})
+            if not canon:
+                continue
+            by_year.setdefault(year, canon)
+            token_by_year.setdefault(year, str(date))
+    return [(year, token_by_year[year], by_year[year]) for year in sorted(by_year)]
+
+
+def _series_from_payload(payload: str) -> dict:
+    """Complete per-year series ONE payload supports (oldest -> newest).
+
+    ``{key_series: {"values": [...], "years": [...], "periods": [...]}}``. A key
+    missing in ANY period of this payload is omitted rather than zero-filled - a
+    series with a hole is not a series.
+    """
+    periods = _period_canonicals(payload)
+    if len(periods) < 2:
+        return {}
+    years = [year for year, _label, _canon in periods]
+    labels = [label for _year, label, _canon in periods]
+    out: dict = {}
+    for key in SERIES_KEYS:
+        vals = [canon.get(key) for _year, _label, canon in periods]
+        if all(v is not None for v in vals):
+            out[f"{key}_series"] = {
+                "values": [float(v) for v in vals],
+                "years": list(years),
+                "periods": list(labels),
+            }
+    return out
+
+
+def annual_series(payloads) -> dict:
+    """Multi-year canonical series stacked from the statement payloads.
+
+    ``payloads`` is an ordered iterable of raw statement texts (any shape
+    ``_canonicalize`` accepts). Each payload is stacked INDEPENDENTLY and the
+    longest complete series wins per key - the values of one key are never
+    spliced across payloads, because a vendor switch mid-series would join
+    periods that need not share a scale or a currency (the mix the ``currency``
+    guard exists to refuse).
+
+    ``roa_series`` is then derived from the chosen net-income and total-asset
+    series, ALIGNED BY FISCAL YEAR and on beginning-of-year assets - the
+    convention ``growth_metrics`` uses for the ROA level (NI / prior-year total
+    assets), so the level and the variance of the series cannot disagree. That
+    join can cross payloads, exactly as the level ROA already does in
+    ``enrich_screen_ratios`` (income and balance arrive as separate payloads on
+    the yfinance path); a year without a prior-year balance sheet is skipped,
+    so the ROA series is shorter than the revenue series and never indexed by
+    position.
+
+    Returns ``{key_series: {"values": [...], "years": [...], "periods": [...]}}``;
+    empty when no payload carries two complete periods.
+    """
+    best: dict = {}
+    for payload in payloads or ():
+        for key, entry in _series_from_payload(payload).items():
+            if len(entry["values"]) > len((best.get(key) or {}).get("values") or ()):
+                best[key] = entry
+    ni = best.get("net_income_series")
+    ta = best.get("total_assets_series")
+    if ni and ta:
+        ta_by_year = dict(zip(ta["years"], ta["values"]))
+        roa_years, roa_vals, roa_labels = [], [], []
+        ni_by_year = dict(zip(ni["years"], ni["values"]))
+        label_by_year = dict(zip(ni["years"], ni["periods"]))
+        for year in sorted(ni_by_year):
+            prior = ta_by_year.get(year - 1)
+            if prior:
+                roa_years.append(year)
+                roa_vals.append(ni_by_year[year] / prior)
+                roa_labels.append(label_by_year.get(year, str(year)))
+        if len(roa_vals) >= 2:
+            best["roa_series"] = {
+                "values": roa_vals,
+                "years": roa_years,
+                "periods": roa_labels,
+            }
+    return best
+
+
 def _parse_csv_statement_rows(payload: str) -> dict:
     """yfinance-style CSV -> {label: {date: value}} (header date columns)."""
     import io as _io
@@ -1065,6 +1215,7 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
     """
     canonical = {}
     provenance: dict[str, dict] = {}
+    payloads: list = []
 
     def absorb(payload: str, source: str, basis: str) -> None:
         got = _canonicalize(payload)
@@ -1076,6 +1227,7 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
                 ticker, source, entry["period"], entry["observed_kind"], basis, len(got),
             )
         canonical.update(got)
+        payloads.append(payload)
         for key in got:
             provenance[key] = dict(entry)
 
@@ -1131,6 +1283,24 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
         ta = _latest(canonical.get("total_assets"))
         if mc and ta and ta / mc > 1000:
             canonical["currency"] = "non_usd"
+    # Multi-year series (one producer: ``annual_series``). Attached only when a
+    # payload carries two complete periods, so a reader's "n=0" reason stays
+    # honest when the chain has no history. The provenance row names the period
+    # span and re-uses the payload-kind classifier: a series built from a
+    # quarterly payload while ``annual`` was requested flags a conflict here
+    # rather than printing as a clean annual series.
+    for key, entry in annual_series(payloads).items():
+        vals = entry["values"]
+        labels = entry["periods"]
+        kind = _period_kind(labels[-1] if labels else None)
+        canonical[key] = vals
+        provenance[key] = {
+            "source": "derived",
+            "basis": f"annual series, {len(vals)} period(s), oldest -> newest",
+            "period": f"{labels[0]} .. {labels[-1]}" if len(labels) > 1 else (labels[0] if labels else None),
+            "observed_kind": kind,
+            "basis_conflict": _basis_conflict("annual", kind),
+        }
     # Derive working capital when both sides are available (Altman Z needs it).
     if "working_capital" not in canonical:
         ca = _latest(canonical.get("current_assets"))

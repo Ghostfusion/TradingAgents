@@ -4984,21 +4984,44 @@ def get_earnings_quality(
     cx = _latest(fin.get("capex"))
     verdict = earnings_quality_verdict(ni, cfo, ta, capex=cx)
     accrual = verdict.get("accrual")
-    # Dechow-Dichev accrual quality (regression residual std) needs a >=6
-    # period cash-flow + accruals history; the canonical chain carries at most
-    # {current, prior}, so this is honestly n/a until a multi-period source is
-    # wired. The pipe is live: pass aligned series to light it up.
+    # Dechow-Dichev accrual quality (residual std of accruals on lagged /
+    # current / lead CFO) needs >= 6 ALIGNED periods. The previous guard
+    # required ``operating_cashflow`` to be a dict of >= 6 keys - a shape the
+    # canonical merge never produces (it carries a float or {current, prior})
+    # - and, had it ever fired, fed an all-zero accruals list, i.e. a number no
+    # statement supports. It now reads the multi-year series ``fetch_ticker``
+    # derives, with accruals on the Sloan proxy the repo already defines:
+    # (net income - CFO) / total assets. The substitution is printed beside the
+    # value, never silent (2026-09-17 factor-model inventory).
     dd_aq = None
+    dd_basis = None
+    dd_note = "n/a (needs a longer annual series)"
     try:
-        from tradingagents.strategies.earnings_quality import dechow_dichev_aq as _dd
+        from tradingagents.strategies.earnings_quality import (
+            DD_MIN_PERIODS,
+            dechow_dichev_aq as _dd,
+        )
 
-        cf_hist = fin.get("operating_cashflow")
-        if isinstance(cf_hist, dict) and len(cf_hist) >= 6:
-            _cfo = [cf_hist.get(k) for k in sorted(cf_hist) if cf_hist.get(k) is not None]
-            _acc = [0.0 for _ in _cfo]
-            dd_aq = _dd(_acc, _cfo)
+        dd_note = f"n/a (needs {DD_MIN_PERIODS}+ annual periods)"
+        cfo_s = fin.get("operating_cashflow_series")
+        ni_s = fin.get("net_income_series")
+        ta_s = fin.get("total_assets_series")
+        if all(isinstance(s, list) for s in (cfo_s, ni_s, ta_s)):
+            n = min(len(cfo_s), len(ni_s), len(ta_s))
+            if n >= DD_MIN_PERIODS:
+                cfo_w = [float(v) for v in cfo_s[-n:]]
+                ni_w = [float(v) for v in ni_s[-n:]]
+                ta_w = [float(v) for v in ta_s[-n:]]
+                acc_w = [
+                    (ni_w[i] - cfo_w[i]) / ta_w[i] for i in range(n) if ta_w[i]
+                ]
+                if len(acc_w) == n:
+                    dd_aq = _dd(acc_w, cfo_w)
+                    if dd_aq is not None:
+                        dd_basis = f"accruals=(NI-CFO)/total assets over {n} periods"
     except Exception:  # noqa: BLE001 - advisory
         dd_aq = None
+        dd_basis = None
     lines = [f"earnings quality {ticker}:"]
     if verdict.get("level") is None:
         lines.append("  consensus: n/a (needs net_income + operating_cashflow + total_assets)")
@@ -5012,7 +5035,9 @@ def get_earnings_quality(
             lines.append(f"    - {ev}")
         cc = verdict.get("cash_conversion")
         fc = verdict.get("fcf")
-        _dd_line = f" dd_aq={dd_aq}" if dd_aq is not None else " dd_aq=n/a"
+        _dd_line = (
+            f" dd_aq={dd_aq} ({dd_basis})" if dd_aq is not None else f" dd_aq={dd_note}"
+        )
         lines.append(
             f"  cash_conversion={cc if cc is not None else 'n/a'} "
             f"accrual={accrual if accrual is not None else 'n/a'} "

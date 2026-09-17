@@ -406,3 +406,196 @@ def test_trailing_twelve_months_sums_only_a_full_window(monkeypatch):
     assert full["periods"][0] == "2026-07-31"
     assert full["net_income_ttm"] == pytest.approx(192878000000.0)
     assert full["complete"] is True
+
+
+# --- Multi-year canonical series -------------------------------------------
+#
+# The Mohanram G-Score's G4/G5 legs read ``roa_series`` / ``revenue_series`` and
+# the earnings-quality tool reads the cash-flow series for Dechow-Dichev - and
+# NONE of those keys had a producer (2026-09-17 factor-model inventory), so
+# ``var_roa`` / ``var_sales_growth`` were structurally absent and ``dd_aq``
+# could not fire. ``annual_series`` is that producer.
+
+_MOOMOO_MULTIYEAR = (
+    "### Income Statement (2025/FY)\n"
+    "| Item | 2025/FY | YoY |\n| --- | --- | --- |\n"
+    "| Total Operating Revenue | 281,724,000,000 | 17.4% |\n"
+    "| Net Income to Common | 101,832,000,000 | 15.7% |\n"
+    "### Balance Sheet (2025/FY)\n"
+    "| Item | 2025/FY |\n| --- | --- |\n"
+    "| Total Assets | 619,003,000,000 |\n"
+    "### Income Statement (2024/FY)\n"
+    "| Item | 2024/FY | YoY |\n| --- | --- | --- |\n"
+    "| Total Operating Revenue | 240,000,000,000 | 20.0% |\n"
+    "| Net Income to Common | 88,000,000,000 | 22.2% |\n"
+    "### Balance Sheet (2024/FY)\n"
+    "| Item | 2024/FY |\n| --- | --- |\n"
+    "| Total Assets | 512,163,000,000 |\n"
+    "### Income Statement (2023/FY)\n"
+    "| Item | 2023/FY | YoY |\n| --- | --- | --- |\n"
+    "| Total Operating Revenue | 200,000,000,000 | 7.0% |\n"
+    "| Net Income to Common | 72,000,000,000 | 12.0% |\n"
+    "### Balance Sheet (2023/FY)\n"
+    "| Item | 2023/FY |\n| --- | --- |\n"
+    "| Total Assets | 411,976,000,000 |\n"
+)
+
+_INCOME_CSV = (
+    ",2025-09-30,2024-09-30,2023-09-30\n"
+    "Total Revenue,281724000000,240000000000,200000000000\n"
+    "Net Income,101832000000,88000000000,72000000000\n"
+)
+
+_BALANCE_CSV = (
+    ",2025-09-30,2024-09-30,2023-09-30\n"
+    "Total Assets,619003000000,512163000000,411976000000\n"
+)
+
+
+@pytest.mark.unit
+def test_annual_series_merges_a_moomoo_payload_by_fiscal_year():
+    """A moomoo ``get_fundamentals`` payload carries one table per STATEMENT
+    per period. Two tables for one year must merge into ONE period, not two
+    half-empty ones - otherwise the revenue (income table) and the assets
+    (balance table) never coexist in a year and no series can form."""
+    got = sp.annual_series([_MOOMOO_MULTIYEAR])
+    assert got["revenue_series"]["values"] == pytest.approx(
+        [200.0e9, 240.0e9, 281.724e9]
+    )
+    assert got["revenue_series"]["years"] == [2023, 2024, 2025]
+    assert got["revenue_series"]["periods"] == ["2023/FY", "2024/FY", "2025/FY"]
+    assert got["net_income_series"]["values"][-1] == pytest.approx(101.832e9)
+    assert got["total_assets_series"]["values"] == pytest.approx(
+        [411.976e9, 512.163e9, 619.003e9]
+    )
+    # ROA on BEGINNING-of-year assets (the convention growth_metrics uses for
+    # the level), so the oldest year drops out: 2024 NI / 2023 TA.
+    assert got["roa_series"]["years"] == [2024, 2025]
+    assert got["roa_series"]["values"][0] == pytest.approx(88.0e9 / 411.976e9)
+    assert got["roa_series"]["values"][1] == pytest.approx(101.832e9 / 512.163e9)
+
+
+@pytest.mark.unit
+def test_annual_series_joins_income_and_balance_across_payloads():
+    """The yfinance path pulls the income and balance statements as SEPARATE
+    payloads, and the level ROA already joins them (``enrich_screen_ratios``);
+    the series does the same, aligned by fiscal year rather than by position."""
+    got = sp.annual_series([_INCOME_CSV, _BALANCE_CSV])
+    assert got["revenue_series"]["values"] == pytest.approx(
+        [200.0e9, 240.0e9, 281.724e9]
+    )
+    assert got["total_assets_series"]["values"] == pytest.approx(
+        [411.976e9, 512.163e9, 619.003e9]
+    )
+    assert got["roa_series"]["years"] == [2024, 2025]
+    assert got["roa_series"]["values"][1] == pytest.approx(101.832e9 / 512.163e9)
+
+
+@pytest.mark.unit
+def test_annual_series_skips_a_year_with_no_prior_balance_sheet():
+    """A gap in the balance series is SKIPPED, never closed by re-indexing: the
+    ROA of 2025 divides by the 2024 balance sheet, and a missing 2024 means no
+    2025 ROA rather than a division by the 2023 figure."""
+    balance_missing_2024 = (
+        ",2025-09-30,2023-09-30\n"
+        "Total Assets,619003000000,411976000000\n"
+    )
+    got = sp.annual_series([_INCOME_CSV, balance_missing_2024])
+    assert "roa_series" not in got  # only 2025 could be computed -> < 2 points
+    assert got["total_assets_series"]["years"] == [2023, 2025]
+
+
+@pytest.mark.unit
+def test_annual_series_omits_an_incomplete_key():
+    """A key missing in ANY period is omitted, never zero-filled."""
+    holey = (
+        ",2025-09-30,2024-09-30,2023-09-30\n"
+        "Total Revenue,281724000000,240000000000,200000000000\n"
+        "Net Income,,88000000000,72000000000\n"
+    )
+    got = sp.annual_series([holey])
+    assert "revenue_series" in got
+    assert "net_income_series" not in got
+
+
+@pytest.mark.unit
+def test_annual_series_needs_two_periods_and_a_payload():
+    one_year = ",2025-09-30\nTotal Revenue,281724000000\nNet Income,101832000000\n"
+    assert sp.annual_series([one_year]) == {}
+    assert sp.annual_series([]) == {}
+    assert sp.annual_series(["NO_DATA_AVAILABLE: x"]) == {}
+    assert sp.annual_series(["not a statement at all"]) == {}
+
+
+@pytest.mark.unit
+def test_fetch_ticker_attaches_the_series_with_provenance(monkeypatch):
+    """The series reaches the canonical dict the score readers consume, and its
+    provenance states that it is derived and over which periods."""
+
+    def _fake(method, *args, **kwargs):
+        if method == "get_income_statement":
+            return _INCOME_CSV
+        if method == "get_balance_sheet":
+            return _BALANCE_CSV
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+    fin, prov = sp.fetch_ticker("TST", "2026-09-12", with_provenance=True)
+    assert fin["revenue_series"] == pytest.approx([200.0e9, 240.0e9, 281.724e9])
+    assert fin["roa_series"] == pytest.approx(
+        [88.0e9 / 411.976e9, 101.832e9 / 512.163e9]
+    )
+    entry = prov["revenue_series"]
+    assert entry["source"] == "derived"
+    assert "3 period(s)" in entry["basis"]
+    assert entry["period"] == "2023-09-30 .. 2025-09-30"
+    # A bare date header states no kind, so no conflict is claimed on layout.
+    assert entry["observed_kind"] == "unstated"
+    assert entry["basis_conflict"] is False
+
+
+@pytest.mark.unit
+def test_fetch_ticker_series_light_up_the_g_score_legs(monkeypatch):
+    """The producer's whole point: the G-Score's variance legs stop reporting
+    "series unavailable". Six periods, so G4/G5 are computable when the peer
+    medians are supplied."""
+    six_year_income = (
+        ",2025-09-30,2024-09-30,2023-09-30,2022-09-30,2021-09-30,2020-09-30\n"
+        "Total Revenue,281724000000,240000000000,200000000000,"
+        "180000000000,170000000000,160000000000\n"
+        "Net Income,101832000000,88000000000,72000000000,"
+        "60000000000,55000000000,50000000000\n"
+    )
+    six_year_balance = (
+        ",2025-09-30,2024-09-30,2023-09-30,2022-09-30,2021-09-30,2020-09-30\n"
+        "Total Assets,619003000000,512163000000,411976000000,"
+        "380000000000,350000000000,320000000000\n"
+    )
+
+    def _fake(method, *args, **kwargs):
+        if method == "get_income_statement":
+            return six_year_income
+        if method == "get_balance_sheet":
+            return six_year_balance
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+    fin = sp.fetch_ticker("TST", "2026-09-12")
+
+    from tradingagents.dataflows.quantitative_scores import growth_metrics, growth_score
+
+    g = growth_metrics(fin)
+    assert g["roa_series_n"] == 5  # six assets years -> five beginning-of-year ROAs
+    assert g["revenue_series_n"] == 6
+    assert g["var_roa"] is not None and g["var_sales_growth"] is not None
+
+    read = growth_score(
+        fin,
+        medians={
+            "var_roa": {"median": 0.01, "n": 9},
+            "var_sales_growth": {"median": 0.01, "n": 9},
+        },
+    )
+    assert isinstance(read["signals"]["g4"], bool)
+    assert isinstance(read["signals"]["g5"], bool)
+    assert not [d for d in read["deviations"] if "series unavailable" in d]

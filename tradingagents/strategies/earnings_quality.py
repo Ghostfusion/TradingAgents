@@ -107,21 +107,30 @@ def earnings_quality_verdict(
     }
 
 
+#: Aligned periods Dechow-Dichev needs before the regression is meaningful.
+#: The regressor rows are ``[cfo_{t-1}, cfo_t, cfo_{t+1}]`` for t in 1..n-2, so
+#: n periods give n-2 residual rows and the function's own floor of 6 rows is
+#: reached at n = 8. The docstring previously said ">= 6 periods", which a
+#: caller could satisfy and still get None with no reason (2026-09-17).
+DD_MIN_PERIODS = 8
+
+
 def dechow_dichev_aq(accruals: list, cfo: list) -> float | None:
     """Dechow-Dichev accrual quality = residual std of the regression of
     working-capital accruals on cash from operations lagged/current/lead.
 
     Regresses ``accruals_t`` on ``[cfo_{t-1}, cfo_t, cfo_{t+1}]`` (OLS) and
     returns the residual standard deviation (smaller = better accrual quality
-    — accruals map into cash flow). Requires >= 6 aligned periods (enough
-    residual degrees of freedom); None otherwise / zero-variance regressor.
+    — accruals map into cash flow). Requires ``DD_MIN_PERIODS`` (8) aligned
+    periods: the regressor rows number n-2, and the fit needs 6 of them. None
+    otherwise / zero-variance regressor.
     The accrual series is centered first (the classical DD uses period t
     working-capital accruals; a mean-shift is immaterial to the residual std).
     """
     a = [float(x) for x in (accruals or []) if x is not None]
     c = [float(x) for x in (cfo or []) if x is not None]
     n = min(len(a), len(c))
-    if n < 6:
+    if n < DD_MIN_PERIODS:
         return None
     # build aligned regressor rows: [cfo_{t-1}, cfo_t, cfo_{t+1}]
     rows = []
