@@ -581,7 +581,7 @@ Dechow-Dichev (#unreachable as currently wired).
 The cheap path and the expensive path differ by an order of magnitude in blast
 radius. Decide deliberately.
 
-### 5.1 Cheap path — a tool leaf (recommended for Phases 1-2)
+### 5.1 Cheap path — a tool leaf (recommended for Phases A-B)
 
 A new `get_fundamental_factor_model(ticker, current_date)` (or an extension of
 `get_quality_factors`) that returns the sub-scores, the factor book, the
