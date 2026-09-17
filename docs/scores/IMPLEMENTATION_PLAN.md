@@ -1118,42 +1118,60 @@ research attribution only (Q2).
 **The owner's second diagram (same day) adds the decision flow to execution:**
 
 ```
-                         MARKET DATA
-                             |
-                 +-----------+-----------+
-                 |                       |
-             RegimeScore             EventScore
-                 |                       |
-        market environment       catalysts / expected move
-                 |                       |
-                 +-----------+-----------+
-                             |
-        +--------------------+---------------------+
-        |                    |                     |
- TechnicalScore         NewsScore          SentimentScore
-        |                    |                     |
-        +--------------------+---------------------+
-                             |
-                         TradeScore
-                       (4-engine decision)
-                             |
-                             v
-                       Risk Gates
-                             |
-                             v
-                          Sizing
-                             |
-                             v
-                         Execution
+   FUNDAMENTAL DATA                     MARKET DATA
+ (statements, filings)                      |
+         |                     +------------+------------+
+         |                     |                         |
+         |                 RegimeScore               EventScore
+         |                     |                         |
+         |            market environment     catalysts / expected move
+         |                     |                         |
+         |                     +------------+------------+
+         |                                  |
+   FundamentalScore                       |
+         |                                  |
+         +---------------+------------------+
+                         |
+        +----------------+----------------+----------------+
+        |                |                |                |
+  TechnicalScore    NewsScore      SentimentScore       RiskScore
+        |                |                |                |
+        +----------------+----------------+----------------+
+                         |
+             +-----------+-----------+
+             |                       |
+     RESEARCH ALLOCATION        TradeScore
+    (6 engines, attribution)  (4 engines: F/T/R/K)
+                                     |
+                                     v
+                                Risk Gates
+                                     |
+                                     v
+                                   Sizing
+                                     |
+                                     v
+                                 Execution
 ```
 
-**Flagged, not resolved: this diagram does not show `FundamentalScore`** (nor
-`RiskScore` as a node of its own - it appears only as "Risk Gates"). The diagram
-above it does, and the owner's weight tables cover both engines. Read the two
-together: the second one describes the **decision flow to execution**, not the full
-set of engines. If the omission is deliberate - fundamentals and risk entering only
-through the gates and the composite - that is a contract change worth stating
-explicitly, because `FundamentalScore` carries the largest research weight (35%).
+**Corrected 2026-09-17.** The owner confirms `FundamentalScore` was **omitted by
+oversight, not by design**, so the diagram now carries it with its own data root
+(statements and filings, not market data) feeding `TradeScore` directly.
+
+**Two completions worth naming**, so the drawing and the contracts agree:
+
+- **`RiskScore` is drawn as an engine**, not only as "Risk Gates". It is one of the
+  four `TradeScore` inputs (`0.40F + 0.25T + 0.15R + 0.20K`) and a composite never
+  overrides a hard gate (master §1.4) - conflating the score with the gate would
+  hide the engine that produces one of the four numbers. *This one is my addition,
+  not the owner's; flagged for confirmation.*
+- **The two arrows out of the engine row are separate objects** (Q2): the six
+  engines feed the **research allocation** (attribution only), while the four -
+  Fundamental, Technical, Regime, Risk - feed **`TradeScore`**, which is what
+  reaches the gates. `NewsScore` and `SentimentScore` are in the six and not in the
+  four, so they reach the decision only through the research layer, never directly.
+
+The full engine map remains the diagram above it; this one is the **flow to
+execution**.
 
 ### 13.2 The anti-double-counting invariants (binding)
 

@@ -388,6 +388,15 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the owner confirms the **architecture diagram's missing
+  `FundamentalScore` was an oversight, not a design decision**, so `IMPLEMENTATION_PLAN.md` §13.1's flow diagram now
+  carries it with its **own data root** (statements/filings, not market data) feeding `TradeScore` directly, and the
+  "flagged, not resolved" caveat is gone. **Two completions named with it:** `RiskScore` is drawn as an **engine**, not
+  only as "Risk Gates" (it is one of the four `TradeScore` inputs and a composite never overrides a hard gate - **my
+  addition, flagged for confirmation**), and the two arrows out of the engine row are **separate objects** per decision
+  Q2 - the **six** engines feed the research allocation (attribution only) while the **four** (F/T/R/K) feed
+  `TradeScore`, so News and Sentiment reach the decision only through the research layer. Suites untouched: engine
+  **4402 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** **all 28 engine-document questions are answered** - the 18
   still-open ones resolved by the owner plus the 10 closed earlier, so every §7 question in the six engine docs carries
   its decision inline and each §7 is retitled "Decisions (owner, 2026-09-17) - all resolved". Highlights: RegimeScore
