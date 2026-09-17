@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
 
 _ETF_SYSTEM_TAIL = (
     " SECURITY-TYPE: ETF/FUND. This is an index or exchange-traded fund "
@@ -123,18 +124,8 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
             "  different periods is not a decomposition (NVDA 2026-09-12: 'DuPont"
             "  on the latest quarter' paired a TTM net margin with quarter-end"
             "  turnover and leverage)."
-            "  NEVER RESTART OR RE-EMIT: if you notice a repeated line, a"
-            "  mistyped figure, or that the answer is unravelling, finish the"
-            "  current sentence and STOP. Never write 'correction needed',"
-            "  'this is degenerating', 'I am stuck repeating myself',"
-            "  'disregard this draft' or 'I will restart cleanly', and never"
-            "  emit a second copy of the body. One report = ONE body and ONE"
-            "  'FINAL TRANSACTION PROPOSAL' line; a repetition loop or a"
-            "  restart leaves the whole stem unusable (HPE 2026-09-14"
-            "  fundamentals.md: a line repeated twelve times, a self-"
-            "  disavowal, then a space-stripped second copy - the stem had to"
-            "  be discarded and the tree now carries a note in its place)."
-            "  SERIES COUNT LABEL: an N-quarter trend series must list N"
+            + REPORT_HYGIENE_RULES
+            + "  SERIES COUNT LABEL: an N-quarter trend series must list N"
             "  entries (or N+1 including the base) and say which - a"
             "  four-quarter uptrend with five values is a labeling slip"
             "  (ADBE 2026-09-10 wrote a four-quarter uptrend as 5.873 ->"

@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
 
 # These two live in their own tool modules (not re-exported by agent_utils),
 # matching how graph/trading_graph.py imports them for the market ToolNode.
@@ -181,14 +182,8 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             " When you must state a derived percentage or level (e.g. price"
             " vs a moving average), compute it from verbatim-copied inputs,"
             " and never re-derive a value the tools already computed for you."
-            " NEVER RESTART OR RE-EMIT: on a repeated line, a mistyped"
-            " figure or a spiralling answer, finish the sentence and STOP."
-            " Never write 'correction needed', 'this is degenerating',"
-            " 'disregard this draft' or 'I will restart cleanly', and never"
-            " emit a second body: ONE report = ONE body with ONE 'FINAL"
-            " TRANSACTION PROPOSAL' line (HPE 2026-09-14 fundamentals.md"
-            " was discarded for this)."
-            " If two tools disagree on the same quantity, quote BOTH with"
+            + REPORT_HYGIENE_RULES
+            + " If two tools disagree on the same quantity, quote BOTH with"
             " their tool names and flag the conflict; never splice or silently"
             " reconcile them (a stop level belongs to one tool with its own"
             " ATR basis - do not mix two tools' ATRs in one claim)."

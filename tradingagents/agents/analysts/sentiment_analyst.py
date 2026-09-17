@@ -37,6 +37,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_output_budget,
 )
+from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -385,7 +386,7 @@ Fill the following fields:
 
 You also have `get_news(ticker, start_date, end_date)` - the headline feed for the ticker; anchor your sentiment claims in specific headlines and adjustment dates rather than raw scores.
 
-{get_language_instruction()}{get_output_budget("analyst")}"""
+{get_language_instruction()}{get_output_budget("analyst")}{REPORT_HYGIENE_RULES}"""
 
 
 

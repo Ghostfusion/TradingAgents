@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
 
 
 def create_news_analyst(llm, backup_llm=None, config=None):
@@ -55,22 +56,8 @@ def create_news_analyst(llm, backup_llm=None, config=None):
             " the same quantity (e.g. two ATRs, two 200-day averages, two"
             " moves), quote BOTH with their tool names and flag the conflict -"
             " never splice, substitute, or reconcile silently."
-            "  NO SELF-CORRECTION ARTIFACTS: never leave a value in the"
-            "  report with an inline (corrected: / correction -) caveat."
-            "  If you catch a retype mid-edit, rewrite cleanly - a final"
-            "  artifact must never contain a wrong value plus a correction"
-            "  marker (HPE 2026-09-10 news.md leaked both 9.87 corrected:"
-            "  4.8 and 172.346 correction - 154.3360)."
-            "  NEVER RESTART OR RE-EMIT: if you notice a repeated line, a"
-            "  mistyped figure, or that the answer is unravelling, finish the"
-            "  current sentence and STOP. Never write 'correction needed',"
-            "  'this is degenerating', 'I am stuck repeating myself',"
-            "  'disregard this draft' or 'I will restart cleanly', and never"
-            "  emit a second copy of the body. One report = ONE body and ONE"
-            "  'FINAL TRANSACTION PROPOSAL' line; a repetition loop or a"
-            "  restart leaves the whole stem unusable (HPE 2026-09-14"
-            "  fundamentals.md had to be discarded for exactly that)."
-            "  FOMC DIRECTION: a Fed modal target range is only a hold if"
+            + REPORT_HYGIENE_RULES
+            + "  FOMC DIRECTION: a Fed modal target range is only a hold if"
             "  the CURRENT effective-rate band equals it. Derive the band"
             "  from the effective rate (floor to 25bp) and label the modal"
             "  outcome HIKE/HOLD/CUT - never call a 25bp modal move a"
