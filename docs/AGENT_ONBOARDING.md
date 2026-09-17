@@ -389,7 +389,7 @@ has changed before); never assume an endpoint works — the SDK's
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
 - 2026-09-17 `(working tree)` - **Design only, no code:** the score-engine set gets a **comprehensive
-  implementation plan** - `docs/scores/IMPLEMENTATION_PLAN.md` (new, ~74 KB, 15 sections), built from the
+  implementation plan** - `docs/scores/IMPLEMENTATION_PLAN.md` (new, 73.6 KB, 16 numbered sections §0-§15), built from the
   eight design documents read end to end and grounded with web checks on every external source it depends
   on. Structure: **WP-0** the prerequisites (SEC XBRL structured series - `sec_edgar.get_financial_history:173`
   loops `_TAG_MAP:56-65` calling `companyconcept` once per tag and returns a *string*, so the CAGR path cannot

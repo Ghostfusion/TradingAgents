@@ -12,12 +12,15 @@ done*, and *what must not be touched*. It is written from the eight documents
 above, read end to end on 2026-09-17, with every existing-code anchor re-verified
 at the definition site.
 
-**What it supersedes.** The master's §4 ("Wiring and contracts") and §5 ("Phased
-plan") are stubs — the restructure of `68931f3` left their bodies behind, and the
-master's §6 and §7 still cite §3.7.x, §3.8.x, §4.2, §5.2, §5.3 and §8.3, which
-no longer exist. The wiring contracts are §3-§8 below and the phase plan is §9.
-The defect is recorded in the master's §3.3 (§14 of this document has the full
-list of what the restructure dropped).
+**What it supersedes, and what it repaired.** The master's §4 ("Wiring and
+contracts") and §5 ("Phased plan") were **stubs** — the restructure of `68931f3`
+left their bodies behind — and the master's §6 and §7 cited §3.7.x, §3.8.x,
+§4.2, §5.2, §5.3 and §8.3, none of which exist any more. The wiring contracts are
+§3-§8 below and the phase plan is §9; the master's §4 and §5 are now pointers to
+them, and every dangling cross-reference in the master and in
+[`FundamentalScore.md`](FundamentalScore.md) was repointed in the same pass. The
+defects are recorded in the master's §3.3 — §14 of this document has the full
+list of what the restructure dropped.
 
 Status: **plan (2026-09-17). Nothing implemented.** No code has been written for
 any engine, no gate has been added, and no weight in any document has been
@@ -1075,8 +1078,8 @@ hygiene, and the first is the reason this document exists.
 
 | # | Defect | Evidence | Consequence |
 | --: | --- | --- | --- |
-| D-1 | **The master's §4 and §5 are stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stops mid-sentence | `README.md:291-304` — §5's paragraph ends at *"…if they land"* and the next line is a `---` | the design set has **no wiring contract and no phase plan**, which is exactly what an implementation plan needs; §3-§8 and §9 of this document are their replacement |
-| D-2 | **Both the master and `FundamentalScore.md` cite sections that no longer exist.** The master's §6 cites §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; its §7 cites §5.2/§5.3 and "§6 Phase C/D"; its §1.4 cites §8.3. `FundamentalScore.md`'s §0.5 cites "§8", its §3.1 cites §6 Phase C/D and §5.2/§5.3 | `README.md` headings end at §7 + appendices; `FundamentalScore.md` headings end at §3.6 + appendices | a reader following a cross-reference lands nowhere. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) had §3.7 (the four-score architecture, ~340 lines), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E), §8 (the decision record + §8.3 open questions) |
+| D-1 | **The master's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md:291-304` at `0ce42b3` — §5's paragraph ended at *"…if they land"* and the next line was a `---` | the design set had **no wiring contract and no phase plan**, which is exactly what an implementation plan needs. §3-§8 and §9 of this document are their replacement, and the master's §4/§5 are now pointers to it |
+| D-2 | **Both the master and `FundamentalScore.md` cited sections that no longer exist** (repointed in the same pass). The master's §6 cites §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; its §7 cites §5.2/§5.3 and "§6 Phase C/D"; its §1.4 cites §8.3. `FundamentalScore.md`'s §0.5 cites "§8", its §3.1 cites §6 Phase C/D and §5.2/§5.3 | `README.md` headings end at §7 + appendices; `FundamentalScore.md` headings end at §3.6 + appendices | a reader following a cross-reference lands nowhere. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) had §3.7 (the four-score architecture, ~340 lines), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E), §8 (the decision record + §8.3 open questions) |
 | D-3 | **The SEC `User-Agent` carries a placeholder contact.** `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (…; contact: research@example.com)` | `sec_edgar.py:28-30` — the comment states a descriptive UA with a contact is required; `example.com` is not a deliverable address | the SEC's fair-access policy asks for a reachable contact; a non-deliverable one is the kind of thing that gets an IP throttled, and the ceiling (10 req/s) is published |
 | D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:173` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written |
 | D-5 | **`enable_factor_model` is not a free name.** Three documents (`design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109`) describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`, `scripts/factor_model_train.py:7` | a plan that reused it for the deterministic composite would silently couple two different objects; the six engine gates in §1.1 are new names for this reason |
