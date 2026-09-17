@@ -242,7 +242,20 @@ measures it, rather than a `0.0` nobody computed.
 | 5 | **`BookState.net_beta` is a dead field** — it has **neither producer nor reader** | `../TradingExecution/signald/risk/state.py:77`; every `BookState(...)` construction site omits it | a book-level beta leg is declared and never populated; the RiskScore's concentration component cannot use it, and a reader of the state sees a permanently-`None` field |
 | 6 | **Gap fill probability / days-to-fill are constants**, not measurements | `strategies/market_session.py:178-193` (`fill_probability` 0.3/0.6/0.4/0.8 and `days_to_fill` 5/3/4/2, literals per branch) | the Gap/execution component is the weakest of the eight for a data reason, not a modelling one — and the report prints a lookup table as if it were measured |
 
-### 3.2 Found and recorded, not yet fixed
+### 3.2 Fixed in this pass (`2c05701`) — the remaining twelve
+
+**All twelve are fixed, each with a regression test.** 10 of the 11 new tests
+fail before the fix and pass after; the eleventh pins the producer key the graph
+was misreading (it was correct at the producer and wrong at the reader, so it
+cannot fail on the producer side).
+
+**One correction to the table below:** defect 7's stated consequence was
+overstated. The dead `acc +=` line could not change the result (the accumulator
+was recomputed from the bins on the next line), and the AMAT read
+(`va_low == poc == 169.56`, `va_high == 424.64`) is a *genuine* 70% band for a
+bimodal distribution, not a broken sum. What was missing was any way to see
+that — so the fix is the dead-line removal plus a new `value_area_pct`, printed
+by the leaf.
 
 | # | Defect | Evidence | Consequence |
 | --: | --- | --- | --- |
@@ -259,9 +272,18 @@ measures it, rather than a `0.0` nobody computed.
 | 17 | `rule_signal_macd_hist_rising` (the only MACD-histogram-slope producer) has no production reader | `strategies/rule_eval.py:103` | the momentum sub-factor is unscoreable from any analyst leaf |
 | 18 | `factors.momentum_multihorizon` is built and unreachable (whitelisted as legacy) | `strategies/factors.py:400` vs `tests/test_calc_agent_wiring.py:40` | a per-name 21/63/126/252 momentum vector exists and no analyst can call it |
 
-Defects 9, 10, 14, 15 and 16 are the same class as the six in §3.1 — an `NA`
-becoming a zero, or a fail-closed branch that cannot fire — and are the natural
-next pass. **They are still open**: this pass fixed §3.1 only. Defects 7, 8, 11, 12, 13, 17 and 18 are either arithmetic inside a
+**Still open** (recorded in the per-engine documents, not fixed here): the
+`position_mult_by_side` catalyst argument is inert (`events.py:42` compares a
+0..1 scale as if it were >1, so the beat/miss multiplier is only ever 1.0/0.5);
+`get_earnings_calendar`'s `look_back_days` names a forward window
+(`analyst_data_tools.py:33` vs `finnhub.py:195`); `get_tail_risk` passes a
+close-price series as an equity curve to CDaR (`analysis_tools.py:4690`);
+`portfolio_cvar` and `book_correlated_stress` re-implement the same
+weight-normalisation rules twice; the two regime-path limitations (the
+3-valued `vol_pct` proxy and `get_regime_components`' non-overlapping windows);
+`get_macro_regime_read` requiring caller-supplied markers when the FRED leaves
+hold the same data; and the NewsScore/SentimentScore wiring items in their own
+documents. Defects 7, 8, 11, 12, 13, 17 and 18 are either arithmetic inside a
 producer, or a producer/leaf pair that was never joined.
 
 ---
