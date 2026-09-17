@@ -148,7 +148,13 @@ the section it changes; §8 carries the full rationale.
 that feed the decision/risk engine; `OpportunityScore` is a **separate validated
 measurement** and stays `null` until empirical validation establishes it.
 
-**Added 2026-09-17 (second pass): §3.7 specifies the four scores.** Each is a
+**Added 2026-09-17 (second pass): §3.7-§3.8 specify the score engines.** The
+owner's staged `docs/ScoreWeight/{fundamental,market,news_sentiment}.md` refine
+the four-score version to **six engines plus a recommended seventh**
+(Fundamental, Technical, Regime, News, Sentiment, Risk, + Event), with a research
+allocation of 35 / 20 / 15 / 7.5 / 7.5 / 15 and EventScore's weight still open
+(§8.3). Where the staged weights differ from the first iteration they govern, and
+the superseded numbers are kept in the tables for the record. Each is a
 separate 0-100 score, all in the **same direction (100 = favourable, so
 `RiskScore` 100 = low risk)**, and only then combined:
 `TradeScore = 0.40·F + 0.25·T + 0.15·R + 0.20·K`, which **never overrides a hard
@@ -687,8 +693,18 @@ Dechow-Dichev (#unreachable as currently wired).
 
 ### 3.7 The four-score architecture (Fundamental / Technical / Regime / Risk → TradeScore)
 
-The owner's 2026-09-17 specification. Four **separate** 0-100 scores, one per
-dimension, and only then a combination. The governing sentence is *"do not mix
+The owner's 2026-09-17 specification, refined the same day by three staged docs
+(`docs/ScoreWeight/{fundamental,market,news_sentiment}.md`). **Separate** 0-100
+scores, one per dimension, and only then a combination. The staged docs frame
+the factor side as **four catalogs** — fundamental ~106, technical ~80-120,
+market/regime ~50-80, risk/portfolio ~40-60, i.e. a **250-300 factor target
+across the engines** — and make the point this document already enforces: *"106
+does not mean your system has proven that 106 independent pieces of information
+exist"* (FCF yield, price/FCF, normalized FCF yield and earnings yield overlap;
+§3.2's redundancy leg is what handles it). The staged spec's formula is the same
+renormalising mean this document specifies: `Score_j = Σ wᵢxᵢ / Σ wᵢ` over
+normalised 0-100 factor scores, with missing factors excluded rather than scored
+zero (`NA ≠ 0`, §3.2). The governing sentence is *"do not mix
 them into one score too early"*, and there is literature behind it: Asness,
 Moskowitz & Pedersen find value and momentum are **negatively correlated
 (≈ −0.60)** and that separate sleeves / a 50-50 allocation historically beat
@@ -750,15 +766,27 @@ table is the score's own (`QUALITY_BANDS`' pattern), never
 Components and the owner's initial weights, with readiness measured against the
 engine (§1 inventory, 2026-09-17):
 
-| Component | Wt | Status | Existing producers (exact) | What is missing |
+**Weights: the owner's staged spec supersedes the first iteration.** The
+pasted-text version (Trend 25 / Momentum 20 / Setup 20 / RS 12 / Volume 10 /
+Breakout 8 / Mean-reversion 5) is superseded by
+`docs/ScoreWeight/market.md` (Trend 20 / Momentum 18 / RS 12 / Price structure
+12 / Volume 10 / Breakout-pullback 10 / Mean reversion 8 / **Volatility-ATR 5** /
+**Breadth-participation 5**), which adds two components and re-weights the rest.
+The table below keeps the superseded weights in a column so the change is
+visible; the governing column is `Wt`.
+
+| Component | Wt (superseded) | Status | Existing producers (exact) | What is missing |
 | --- | --: | --- | --- | --- |
-| Trend architecture | 25% | **SCORABLE** | `swing.trend_architecture:71` (`stacked`/`above50`/`above200`/`sma50_rising`/`sma200_rising`/`ema20_above_sma50`), `regime_state.regime_trend:65` (continuous `(EMA20−EMA50)/ATR14`), `technical_factors.adx:179` (adx + DI±), `aroon:495`, `extended_indicators.ichimoku:78`, `golden_death_cross:53`, `sector_rank._ma_alignment:236` | price-vs-10-SMA ABSENT; SMA slopes are **booleans**, not continuous values; no DI± comparison flag |
-| Momentum | 20% | **SCORABLE** | `swing.rsi:39` + `rsi_band:118`, `stochastic_oscillator:146`, `kst:53`, `roc:149`, `momentum_oscillator:160`, `trix:171`, `rotation.clenow_momentum:89`, `momentum.momentum_12_1:358`, `factors.momentum:24`/`high_distance:35` | MACD line/histogram has no public leaf (`value_dip._macd_hist:500` is private; only `macd_divergence:540`); no momentum **slope** on the wire (`factors.momentum_multihorizon:400` is unwired) |
-| Swing / setup quality | 20% | **SCORABLE, but binary** | `swing.swing_report:441`, `pullback_setup:156`, `swing_low_stop:185`, `vcp_setup:326`, `momentum.first_pullback:210`, `value_dip.vdu_entry_setup:670` | entry-distance magnitude missing (fib unwired); breakout/pullback quality are booleans, so the component needs a graded wrapper, not a new measure |
-| Relative strength | 12% | **PARTIAL** | `relative_strength.relative_strength_report:132` + `slope_pct:49`, `rotation.relative_rotation:43` (RRG), `regime_state.regime_relative:127`, `sector_rank.rank_sectors_multifactor:391` + `sector_standing:176` (ETF level) | **name-vs-sector and name-vs-industry strength is ABSENT** — only the sector's own rank vs SPY exists |
-| Volume / accumulation | 10% | **SCORABLE** | `momentum.rvol:25`, `chaikin_money_flow:261`, `accumulation_distribution:222`, `vpt:246`, `mf_index:112`, `chaikin_oscillator:560`, `obv_divergence:396`, `elder_thermometer:476`, `volume_profile:654`, `value_dip.volume_dry_up:601` | A/D and VPT print **cumulative levels**, so direction is not derivable from the leaf |
-| Breakout / price structure | 8% | **PARTIAL** | `swing.vcp_setup.near_breakout:326`, `market_session.opening_range:72` (`breakout=`), `value_dip.trigger_candle:625`, `higher_low_structure:656`, `scan_candlesticks:385`, `pivot_points:239`, `supertrend:619`, `keltner_channel:349` | `donchian_channel:377` returns `breakout_up/breakout_dn = None` **by construction** and no caller derives them (§1.5); `vcp_setup.pivot` (the buy point) is computed but not printed |
-| Mean-reversion | 5% | **SCORABLE** | `stoch_rsi:283`, `rsi2:315`, `williams_r:338`, `cci:126`, `fisher_transform:523`, `bollinger_pct_b:75`, `mean_reversion.hurst_exponent:112`/`variance_ratio:216` via `get_mean_reversion_quality` | `parabolic_sar:432` is called without `closes` at `analysis_tools.py:1160`, so its `below/exit` flag is unreachable (§1.5) |
+| Trend architecture | 20% (25%) | **SCORABLE** | `swing.trend_architecture:71` (`stacked`/`above50`/`above200`/`sma50_rising`/`sma200_rising`/`ema20_above_sma50`), `regime_state.regime_trend:65` (continuous `(EMA20−EMA50)/ATR14`), `technical_factors.adx:179` (adx + DI±), `aroon:495`, `extended_indicators.ichimoku:78`, `golden_death_cross:53`, `sector_rank._ma_alignment:236` | price-vs-10-SMA ABSENT; SMA slopes are **booleans**, not continuous values; no DI± comparison flag |
+| Momentum | 18% (20%) | **SCORABLE** | `swing.rsi:39` + `rsi_band:118`, `stochastic_oscillator:146`, `kst:53`, `roc:149`, `momentum_oscillator:160`, `trix:171`, `rotation.clenow_momentum:89`, `momentum.momentum_12_1:358`, `factors.momentum:24`/`high_distance:35` | MACD line/histogram has no public leaf (`value_dip._macd_hist:500` is private; only `macd_divergence:540`); no momentum **slope** on the wire (`factors.momentum_multihorizon:400` is unwired) |
+| Swing / setup quality (price structure in the staged spec) | 12% (20%) | **SCORABLE, but binary** | `swing.swing_report:441`, `pullback_setup:156`, `swing_low_stop:185`, `vcp_setup:326`, `momentum.first_pullback:210`, `value_dip.vdu_entry_setup:670` | entry-distance magnitude missing (fib unwired); breakout/pullback quality are booleans, so the component needs a graded wrapper, not a new measure |
+| Relative strength | 12% (12%) | **PARTIAL** | `relative_strength.relative_strength_report:132` + `slope_pct:49`, `rotation.relative_rotation:43` (RRG), `regime_state.regime_relative:127`, `sector_rank.rank_sectors_multifactor:391` + `sector_standing:176` (ETF level) | **name-vs-sector and name-vs-industry strength is ABSENT** — only the sector's own rank vs SPY exists |
+| Volume / accumulation | 10% (10%) | **SCORABLE** | `momentum.rvol:25`, `chaikin_money_flow:261`, `accumulation_distribution:222`, `vpt:246`, `mf_index:112`, `chaikin_oscillator:560`, `obv_divergence:396`, `elder_thermometer:476`, `volume_profile:654`, `value_dip.volume_dry_up:601` | A/D and VPT print **cumulative levels**, so direction is not derivable from the leaf |
+| Breakout / pullback | 10% (8%) | **PARTIAL** | `swing.vcp_setup.near_breakout:326`, `market_session.opening_range:72` (`breakout=`), `value_dip.trigger_candle:625`, `higher_low_structure:656`, `scan_candlesticks:385`, `pivot_points:239`, `supertrend:619`, `keltner_channel:349` | `donchian_channel:377` returns `breakout_up/breakout_dn = None` **by construction** and no caller derives them (§1.5); `vcp_setup.pivot` (the buy point) is computed but not printed |
+| Mean-reversion | 8% (5%) | **SCORABLE** | `stoch_rsi:283`, `rsi2:315`, `williams_r:338`, `cci:126`, `fisher_transform:523`, `bollinger_pct_b:75`, `mean_reversion.hurst_exponent:112`/`variance_ratio:216` via `get_mean_reversion_quality` | `parabolic_sar:432` is called without `closes` at `analysis_tools.py:1160`, so its `below/exit` flag is unreachable (§1.5) |
+
+| **Volatility / ATR** (new) | 5% | **SCORABLE** | `size.atr:131`, `volatility_models` (Parkinson / Garman-Klass / Yang-Zhang / EWMA / GARCH11), `regime.vol_percentile:49`, `etf_risk:142` (ATR% + vol percentile), `momentum.rvol:25` | direction must be declared: for a *setup* score, lower volatility is generally favourable, which is the **opposite** polarity from the risk family — the same number serves both only because the polarity is explicit |
+| **Breadth / participation** (new) | 5% | **PARTIAL** | `sector_rank.constituent_breadth:654`, `leadership_ratio:674`, `sector_screener.dispersion_trend:161`, `pullback_divergence:185` | these are **sector/ETF-level** breadth reads; a per-name "participation" measure does not exist (the closest is the name's own volume/RS legs) |
 
 **No composite technical score exists** (verified): the nearest artifacts are
 `quant_baseline.quant_signal` (unwired, tests only),
@@ -802,15 +830,25 @@ must not be treated as a directional signal.
 
 Components and the owner's weights, with readiness:
 
-| Component | Wt | Status | Existing producers | Gap |
+**Weights: staged spec governs.** The pasted-text set (trend 20 / vol 20 /
+momentum 15 / choppiness 15 / sector 10 / relative 10 / event 10) is superseded
+by `docs/ScoreWeight/market.md` (Market trend 20 / Volatility 20 / Market
+momentum 15 / **Breadth 15** / Choppiness-persistence 10 / Sector rotation 10 /
+**Macro-credit 5** / Event 5) — breadth rises to 15% and relative-regime is
+replaced by macro-credit.
+
+| Component | Wt (superseded) | Status | Existing producers | Gap |
 | --- | --: | --- | --- | --- |
-| Market trend regime | 20% | **SCORABLE** | `regime_state.regime_trend:65` (four labels + continuous score), `regime.regime_gate_read:178`, `sector_screener.classify_regime:108` (SPY vs SMA200 + slope) | three producers, no arbitration (below) |
-| Volatility regime | 20% | **SCORABLE** | `regime.vol_percentile:49`, `regime_state.regime_vol_ratio:92` (ATR ratio → LOW/NORMAL/HIGH/EXTREME), all five `volatility_models.py` estimators incl. GARCH | two of these are already 0-1 percentiles with a stated direction → band map, not a model |
-| Momentum regime | 15% | **SCORABLE** | `regime_state.regime_relative:127`, `factors.momentum:24`, `momentum.momentum_12_1:358`, `rotation.clenow_momentum:89` | — |
-| Choppiness / persistence | 15% | **PARTIAL** | `regime.choppiness:87`, `regime.hmm_regime:148`, `cusum:295`, `ewma_control:340`, `bocpd:389`, `mean_reversion.hurst_exponent:112`, `variance_ratio:216` | **unit + direction policy missing** and currently *contradictory*: `get_regime_components` compares chop against `chop_threshold=30.0` (0-100 scale) while `overlays.py:57` hardcodes `chop=0.4` against a default threshold of 0.30 (§1.5). Hurst/VR are complementary *shape* diagnostics, not robust regime detectors on their own |
-| Sector regime | 10% | **SCORABLE** | `sector_rank.rank_sectors_multifactor:391` (row `score` 0-100, `quadrant`), `sector_standing:176`, `constituent_breadth:654` | ETF level only, no per-name sector regime |
-| Relative regime | 10% | **SCORABLE** | `regime_state.regime_relative:127` (R_stock − R_bench), `rotation.relative_rotation:43` | overlaps the TechnicalScore RS component — the *reference* differs (regime = market-relative, RS = benchmark/sector), and both must say which |
-| Event / macro regime | 10% | **PARTIAL** | `catalyst.build_catalyst_snapshot:219` (`scale` 0.25-1.0 + `hard_block`), `events.catalyst_risk_penalty:53`, `credit_spread.credit_stress_level:44` (level + scale), `cycle_tilt.macro_stance:128`, `taylor_rule:89`, `pre_market`, `get_shift_detection` | categorical + one 0..1 scale; no percentile basis |
+| Market trend regime | 20% (20%) | **SCORABLE** | `regime_state.regime_trend:65` (four labels + continuous score), `regime.regime_gate_read:178`, `sector_screener.classify_regime:108` (SPY vs SMA200 + slope) | three producers, no arbitration (below) |
+| Volatility regime | 20% (20%) | **SCORABLE** | `regime.vol_percentile:49`, `regime_state.regime_vol_ratio:92` (ATR ratio → LOW/NORMAL/HIGH/EXTREME), all five `volatility_models.py` estimators incl. GARCH | two of these are already 0-1 percentiles with a stated direction → band map, not a model |
+| Market momentum regime | 15% (15%) | **SCORABLE** | `regime_state.regime_relative:127`, `factors.momentum:24`, `momentum.momentum_12_1:358`, `rotation.clenow_momentum:89` | — |
+| Choppiness / persistence | 10% (15%) | **PARTIAL** | `regime.choppiness:87`, `regime.hmm_regime:148`, `cusum:295`, `ewma_control:340`, `bocpd:389`, `mean_reversion.hurst_exponent:112`, `variance_ratio:216` | **unit + direction policy missing** and currently *contradictory*: `get_regime_components` compares chop against `chop_threshold=30.0` (0-100 scale) while `overlays.py:57` hardcodes `chop=0.4` against a default threshold of 0.30 (§1.5). Hurst/VR are complementary *shape* diagnostics, not robust regime detectors on their own |
+| Sector rotation | 10% (10%) | **SCORABLE** | `sector_rank.rank_sectors_multifactor:391` (row `score` 0-100, `quadrant`), `sector_standing:176`, `constituent_breadth:654` | ETF level only, no per-name sector regime |
+| Relative regime *(superseded by breadth + macro-credit)* | — (10%) | **SCORABLE** | `regime_state.regime_relative:127` (R_stock − R_bench), `rotation.relative_rotation:43` | overlaps the TechnicalScore RS component — the *reference* differs (regime = market-relative, RS = benchmark/sector), and both must say which |
+| Event / macro regime | 5% (10%) | **PARTIAL** | `catalyst.build_catalyst_snapshot:219` (`scale` 0.25-1.0 + `hard_block`), `events.catalyst_risk_penalty:53`, `credit_spread.credit_stress_level:44` (level + scale), `cycle_tilt.macro_stance:128`, `taylor_rule:89`, `pre_market`, `get_shift_detection` | categorical + one 0..1 scale; no percentile basis |
+
+| **Breadth** (new) | 15% | **SCORABLE (sector level)** | `sector_rank.constituent_breadth:654`, `leadership_ratio:674`, `sector_screener.dispersion_trend:161`, `% above MA` reads inside `rank_sectors_multifactor` | market-wide breadth (advance/decline, new highs/lows, % of stocks above the 50/200-SMA) is not computed — the existing reads are per-sector |
+| **Macro / credit** (new) | 5% | **SCORABLE** | `credit_spread.credit_stress_level:44` (level + scale), `cycle_tilt.macro_stance:128`, `taylor_rule:89`, `get_macro_regime_read`, `get_sofr_curve`, `get_shift_detection` | the staged spec also names VIX term structure and Treasury volatility / yield curve — `get_vol_surface_shape` and the FRED chain partially cover these; a named term-structure regime read does not exist |
 
 **The engine has no market-level regime score** — only categorical states,
 sizing multipliers (`position_scale`, `F_regime`, `F_vol`, credit scale, catalyst
@@ -851,16 +889,26 @@ Components and the owner's weights. **No 0-100 risk score exists anywhere**
 **new model** — but every component has existing producers, and six existing
 numbers already sit in the proposed favourable direction:
 
-| Component | Wt | Status | Existing producers | Gap |
+**Weights: staged spec governs.** The pasted-text set (portfolio 20 / tail 15 /
+vol 15 / liquidity 10 / concentration-correlation 15 / drawdown 10 / event 10 /
+gap 5) is superseded by `docs/ScoreWeight/market.md` (Volatility 15 / Tail 15 /
+Liquidity 10 / **Gap 10** / Correlation 15 / Concentration 10 / Portfolio
+drawdown 15 / Event 10) — drawdown rises to 15%, gap doubles to 10%,
+concentration and correlation are **split into two components**, and the
+portfolio/book leg is absorbed into drawdown + correlation.
+
+| Component | Wt (superseded) | Status | Existing producers | Gap |
 | --- | --: | --- | --- | --- |
-| Portfolio / book risk | 20% | **SCORABLE** | `book_risk.portfolio_cvar:28`, `book_correlated_stress:128`, `component_var:256`, `incremental_var:222`, `min_cvar_weights:628`; executor `risk/tail.py:145 es_estimate` (a tail-budget ratio already compares `es.value_pct + requested_risk_pct` against house/sleeve budgets); `book_context.measured_book_drawdown:102` | loss-fraction convention → inversion only |
-| Tail risk | 15% | **SCORABLE, sign-hazardous** | `book_risk.simple_var:9`, `cvar:18`, `cdar:174`, `var_cvar_horizon:341`, `extreme_quantile_var:451` (GPD/EVT); `size.modified_var:187` | three conventions coexist (§3.7.1) — pin one |
-| Volatility risk | 15% | **SCORABLE — easiest** | `regime.realized_vol:29`, `vol_percentile:49`; `volatility_models` (Parkinson/Garman-Klass/Yang-Zhang/EWMA/GARCH11); `regime_state.regime_vol_ratio:92`; `etf_risk:142`; executor `risk/voltarget.py:92 vol_scalar` | band map over existing percentiles |
-| Liquidity risk | 10% | **PARTIAL** | `liquidity_risk.amihud_illiquidity:71`, `float_turnover:53`, `days_to_absorb:103`, `free_float_factor:34`, `ownership_hhi:130`, `kyle_lambda:262`, spread estimators `:309/:363/:407/:442`; executor `risk/gate.py:516 _liquidity` | `liquidity_verdict` is a 3-level ordinal string; no ILLIQ → 0-100 map |
-| Concentration / correlation | 15% | **SCORABLE** | `portfolio.weight_hhi:417`, `effective_holdings:398`, `weight_entropy:431`, `active_share:379`, `_max_pairwise_corr:61`, `mean_correlation:252`, `correlation_penalty:274`; `hierarchical_risk_parity:165`; `portfolio_optimizer:82/:246` | no threshold→score map (only caps and an opt-in penalty); `weight_entropy`/`effective_holdings` are already higher = better |
-| Drawdown risk | 10% | **SCORABLE** | `book_risk.portfolio_drawdown:100`, `cdar:174`, `drawdown_gate:167`; `regime_state.regime_drawdown:146` (bands NORMAL > −5% > CORRECTION > −15% > BEAR > −25% > SEVERE); governor HWM tiers (`risk_hwm_soft_pct` 0.10 / `risk_hwm_hard_pct` 0.20); executor `risk/ladder.py:82 rung_for` | the banding exists as labels, not a number |
-| Event risk | 10% | **SCORABLE** | `catalyst.build_catalyst_snapshot:219` (`scale` 0.25-1.0 + `hard_block`), `last_earnings_surprise:70`, `next_earnings:90`, `fed_imminence:142`, `macro_imminence:123`; `events.surprise_score:17`, `catalyst_risk_penalty:53` | already in the favourable direction, but floored at 0.25 (a size multiplier, not a 0-100) |
-| Gap / execution risk | 5% | **WEAKEST — mostly PARTIAL** | `market_session.gap_type:137`, `pre_market.premarket_gap:40`; executor `signals/costgate.check_cost_gate:152` + `impact_bps:65`; `liquidity_risk.volume_share_slippage:220`, `market_impact_slippage:243`; `execution_schedule.almgren_chriss:47` | gap fill probability / days-to-fill are **constants**; execution risk exists only as a cost-gate decision (ok/not-ok) and per-share slippage, never as a 0-100 |
+| Portfolio / book risk *(superseded; absorbed into drawdown + correlation)* | — (20%) | **SCORABLE** | `book_risk.portfolio_cvar:28`, `book_correlated_stress:128`, `component_var:256`, `incremental_var:222`, `min_cvar_weights:628`; executor `risk/tail.py:145 es_estimate` (a tail-budget ratio already compares `es.value_pct + requested_risk_pct` against house/sleeve budgets); `book_context.measured_book_drawdown:102` | loss-fraction convention → inversion only |
+| Tail risk | 15% (15%) | **SCORABLE, sign-hazardous** | `book_risk.simple_var:9`, `cvar:18`, `cdar:174`, `var_cvar_horizon:341`, `extreme_quantile_var:451` (GPD/EVT); `size.modified_var:187` | three conventions coexist (§3.7.1) — pin one |
+| Volatility risk | 15% (15%) | **SCORABLE — easiest** | `regime.realized_vol:29`, `vol_percentile:49`; `volatility_models` (Parkinson/Garman-Klass/Yang-Zhang/EWMA/GARCH11); `regime_state.regime_vol_ratio:92`; `etf_risk:142`; executor `risk/voltarget.py:92 vol_scalar` | band map over existing percentiles |
+| Liquidity risk | 10% (10%) | **PARTIAL** | `liquidity_risk.amihud_illiquidity:71`, `float_turnover:53`, `days_to_absorb:103`, `free_float_factor:34`, `ownership_hhi:130`, `kyle_lambda:262`, spread estimators `:309/:363/:407/:442`; executor `risk/gate.py:516 _liquidity` | `liquidity_verdict` is a 3-level ordinal string; no ILLIQ → 0-100 map |
+| Correlation risk | 15% (15%) | **SCORABLE** | `portfolio.weight_hhi:417`, `effective_holdings:398`, `weight_entropy:431`, `active_share:379`, `_max_pairwise_corr:61`, `mean_correlation:252`, `correlation_penalty:274`; `hierarchical_risk_parity:165`; `portfolio_optimizer:82/:246` | no threshold→score map (only caps and an opt-in penalty); `weight_entropy`/`effective_holdings` are already higher = better |
+| Portfolio drawdown | 15% (10%) | **SCORABLE** | `book_risk.portfolio_drawdown:100`, `cdar:174`, `drawdown_gate:167`; `regime_state.regime_drawdown:146` (bands NORMAL > −5% > CORRECTION > −15% > BEAR > −25% > SEVERE); governor HWM tiers (`risk_hwm_soft_pct` 0.10 / `risk_hwm_hard_pct` 0.20); executor `risk/ladder.py:82 rung_for` | the banding exists as labels, not a number |
+| Event risk | 10% (10%) | **SCORABLE** | `catalyst.build_catalyst_snapshot:219` (`scale` 0.25-1.0 + `hard_block`), `last_earnings_surprise:70`, `next_earnings:90`, `fed_imminence:142`, `macro_imminence:123`; `events.surprise_score:17`, `catalyst_risk_penalty:53` | already in the favourable direction, but floored at 0.25 (a size multiplier, not a 0-100) |
+| Gap risk | 10% (5%) | **WEAKEST — mostly PARTIAL** | `market_session.gap_type:137`, `pre_market.premarket_gap:40`; executor `signals/costgate.check_cost_gate:152` + `impact_bps:65`; `liquidity_risk.volume_share_slippage:220`, `market_impact_slippage:243`; `execution_schedule.almgren_chriss:47` | gap fill probability / days-to-fill are **constants**; execution risk exists only as a cost-gate decision (ok/not-ok) and per-share slippage, never as a 0-100 |
+
+| **Concentration risk** (split out) | 10% | **SCORABLE** | `portfolio.weight_hhi:417`, `effective_holdings:398`, `weight_entropy:431`, `active_share:379`; the caps `sector_cap_limit` 0.35 / `max_name_weight` 0.25 / `cluster_cap_pct` | no threshold→score map |
 
 **Already in the proposed direction (higher = favourable)** — the model can lift
 these rather than invent them: `regime_state.regime_factor:191` (1.0/0.5/0.25/0.0),
@@ -889,7 +937,43 @@ max_portfolio_risk, data_quality_failure, broker_safety}` force the soft product
 to **0.0**, with `SOFT_CATALOG = (regime, vol_cap, knife, drawdown, liquidity,
 momentum, flow)`.
 
-#### 3.7.6 TradeScore — the combination, and what it may not do
+#### 3.7.6 The composite, the research allocation, and the gate-order conflict
+
+**The staged spec adds two engines and re-weights the composite.** The
+pasted-text four-score composite `TradeScore = 0.40F + 0.25T + 0.15R + 0.20K`
+is the **first iteration**. `docs/ScoreWeight/news_sentiment.md` (which the
+owner staged after the Q1-Q5 decisions) supersedes it with **six engines** —
+`FundamentalScore`, `TechnicalScore`, `RegimeScore`, `NewsScore`,
+`SentimentScore`, `RiskScore` — and an initial **research** allocation:
+
+| Engine | Initial research weight |
+| --- | --: |
+| Fundamental | 35% |
+| Technical | 20% |
+| Regime | 15% |
+| Risk | 15% |
+| News | 7.5% |
+| Sentiment | 7.5% |
+
+The owner labels those *"research weights, not production truth"*, which is the
+same rule the category weights already ship under (Q2's ladder): the composite
+is `RESEARCH_ONLY` until Phase C measures it. News and sentiment are explicitly
+**event/confirmation variables**, not permanent alpha replacements for
+fundamentals.
+
+**A conflict between the owner's own two diagrams — flagged, not silently
+resolved.** The pasted-text pipeline puts the hard gates *before* sizing
+(`TradeScore → HARD GATES → Position sizing`); the staged `news_sentiment.md`
+diagram puts them *after* (`DECISION ENGINE → Entry/Hold/Exit → Position Size →
+HARD GATES`). They are not equivalent: a gate after sizing must unwind a size it
+has already authorised. **The engine's existing behaviour is gates-before-sizing**
+— the executor's `risk/gate.py` verdict feeds `risk/sizing.size:144`, then
+`order/guard.guard:290`, then `order/stops.protective_orders:194` — so this
+document keeps the pasted-text ordering (gates binding, before sizing) and
+records the staged diagram as an open question rather than implementing an
+inversion (§8.3).
+
+#### 3.7.7 TradeScore — the combination, and what it may not do
 
 ```
 TradeScore = 0.40·FundamentalScore + 0.25·TechnicalScore
@@ -930,7 +1014,7 @@ Three rules the implementation inherits:
    dimension drove the number — the attribution requirement the
    composite-indicator literature makes and the same basis discipline as §3.7.1.
 
-#### 3.7.7 What the four scores change in the existing contract
+#### 3.7.8 What the scores change in the existing contract
 
 - `FundamentalScore` is §3.1's four sub-scores plus their composite; nothing new
   is needed for the contract, only the band table above.
@@ -943,6 +1027,155 @@ Three rules the implementation inherits:
 - None of the four reaches `opportunity_score` (Q1) or `SCORE_BANDS` (ground
   rule 6), and none is required in prose (Q5) — they surface through the tool
   leaf / `run_card` block, and `TradeScore` likewise.
+
+---
+
+### 3.8 NewsScore, SentimentScore and EventScore (the staged spec's additions)
+
+The staged `docs/ScoreWeight/news_sentiment.md` adds two engines and recommends a
+third, with the separation principle stated as: **NewsScore = information flow**
+("what new information has arrived, and how materially could it affect the
+company"), **SentimentScore = interpretation/positioning** ("how are investors,
+analysts, media and markets positioned or reacting"), **EventScore = occurrence**
+("is a high-impact event happening right now"). The owner's own illustration is
+the test: *NVIDIA announces a major AI contract* (NewsScore ↑) → *analysts turn
+positive* (SentimentScore ↑) → *the stock is +8% on 3× volume* (TechnicalScore ↑)
+are **three separate observations, not three votes for the same thing**.
+
+#### 3.8.1 NewsScore — mostly NOT buildable today
+
+Nine components, the owner's weights, readiness measured against the engine
+(2026-09-17 inventory):
+
+| Component | Wt | Status | Existing producers | Gap |
+| --- | --: | --- | --- | --- |
+| News relevance / materiality | 20% | **PARTIAL** | `news_relevance.score_news_article:53` is the only news-side 0-100 score — it scores **relevance, not materiality**; `admit_article:97`, `is_official:48`, `degrade_triple:108` | materiality (would this move the stock?) has no producer |
+| News novelty | 15% | **ABSENT** | — | the spec's "repeated-news decay" has no implementation |
+| Fundamental impact | 20% | **ABSENT** | — | revenue-impact and margin-impact estimates do not exist |
+| Earnings / guidance news | 15% | **PARTIAL** | `events.surprise_score:17`, `drift_side:26`, `position_mult_by_side:37`, `post_earnings_play` (the PEAD leg), `get_earnings_surprise`, `get_earnings_event_read` | **guidance change** has no producer; the surprise leg is real and is the best-supported piece here |
+| Corporate events | 10% | **ABSENT** | — | product/partnership/contract/management-change classification does not exist |
+| Regulatory / legal | 5% | **PARTIAL** | `text_factors.divergence:198` is the only lexical lawsuit/regulatory signal | no event typing, no severity |
+| Analyst / rating changes | 5% | **SCORABLE** | `analyst_revisions.revision_ratio:79` (coverage-guarded), `estimate_change_index:176` (unavailable by construction), `consensus.agreement_score:14` | — |
+| Macro / industry news | 5% | **SCORABLE** | `get_macro_regime_read`, `events.catalyst_risk_penalty:53`, `cycle_tilt.macro_stance:128` | industry-level news is not separated from market-level |
+| News persistence | 5% | **ABSENT** | — | — |
+
+So **4 of 9 categories have computed inputs** and five are ABSENT. The
+literature agrees with the owner's emphasis: **novelty and attention drive
+immediate incorporation, and stale or competing information drifts** (Barber &
+Odean attention-based trading; the limited-attention reading of PEAD), which is
+exactly why "count positive/negative headlines" is the wrong shape and why the
+one strong leg here (the earnings surprise + drift) is already implemented.
+
+#### 3.8.2 SentimentScore — buildable from existing leaves, with four holes
+
+| Component | Wt | Status | Existing producers | Gap |
+| --- | --: | --- | --- | --- |
+| News sentiment | 15% | **SCORABLE** | `sentiment.aggregate_weighted_sentiment:616`, `weighted_rolling_sentiment:722`, `score_from_counts:149`, `aggregate_daily_sentiment:438`, `daily_sentiment_sma:501`; leaves `get_sentiment_computed`, `get_news_sentiment_series` | — |
+| Sentiment momentum | 15% | **PARTIAL** | a **7-day innovation** exists (`sentiment_research.sentiment_lead_lag:65` with `innovations=True`) | the spec's `Sentiment_today − Sentiment_20d` has no producer |
+| Sentiment breadth | 10% | **PARTIAL** | per-day aggregates exist | no per-source **positive-share** producer (the spec's "percentage of sources expressing positive sentiment") |
+| Institutional sentiment | 15% | **PARTIAL** | exists only as a raw level, and it is **bound to the fundamentals toolset** | not on the sentiment surface at all; no change/flow measure |
+| Analyst sentiment | 10% | **SCORABLE** | `analyst_revisions.revision_ratio:79`, `consensus.agreement_score:14` / `weighted_consensus:32`, `get_analyst_verdict` | — |
+| Retail / social sentiment | 10% | **SCORABLE** | `sentiment.compute_social_scores:273`, `crowd_ratio:163`, `mention_volume:43`, `sentiment_velocity:25` | the two most useful helpers (`sentiment_velocity`, `mention_volume`) are **unwired** |
+| Options sentiment | 10% | **SCORABLE** | `get_options_iv_read:6034`, `get_derivatives_flow:3142`, `get_options_surface:7553`, `get_orderflow_read:1215` | — |
+| Short-interest sentiment | 5% | **PARTIAL** | `get_short_sale_volume:8886` (raw) | no percentile or change basis |
+| Sentiment dispersion | 5% | **SCORABLE** | `sentiment.sentiment_dispersion:209` | — |
+| Sentiment extreme / crowding | 5% | **PARTIAL** | a display-only social band | no crowding/extreme measure with a stated scale |
+
+The evidence says the same thing about *how* to read these: media pessimism
+predicts **next-day declines followed by a reversal within days** and extremes
+predict **volume** (Tetlock); high aggregate sentiment predicts **lower**
+subsequent returns in hard-to-value, hard-to-arbitrage names (Baker & Wurgler);
+and attention and sentiment are **different signals with opposite short-horizon
+signs** — attention spikes predict negative next-day returns while bullish
+sentiment predicts positive ones, with small caps more sensitive to both (Da,
+Engelberg & Gao and the StockTwits literature). Three consequences the design
+must carry:
+
+1. **Sentiment is short-horizon and partly reversing**, so it cannot be a
+   permanent alpha weight — consistent with the owner's 7.5% research weight and
+   with its placement as an event/confirmation variable.
+2. **Attention ≠ sentiment.** The engine must not merge mention volume with
+   tone: they point in opposite directions at short horizons.
+3. **The price→sentiment feedback is real** (low returns produce more pessimistic
+   tone), which is precisely why the confirmation check below matters.
+
+#### 3.8.3 The duplicate question is NOT settled by construction
+
+The owner requires that NewsScore not become a duplicate of SentimentScore. The
+inventory found **four places where the same numbers already feed both**:
+
+| Coupling | Evidence |
+| --- | --- |
+| The news path's relevance **is** the sentiment aggregation's confidence weight | `strategies/sentiment.py:589 _weighted_basis` |
+| One leaf serves both surfaces | `get_news_sentiment_series` is bound to `news_tools()` (`agents/toolsets.py:352`) **and** `market_tools()` (`:279`) |
+| The sentiment analyst pre-fetches the news analyst's leaf | `agents/analysts/sentiment_analyst.py:88` |
+| A bundled endpoint already merges the two feeds | `domain_bundles.get_sentiment_flow_feed:93` |
+
+This is not a defect in itself — one producer feeding two readers is the repo's
+rule, not a violation of it — but it means the *separation the owner wants is a
+design requirement that must be enforced by naming*, not an emergent property:
+each engine states which producer each of its components read, and a component
+that would read the other engine's number is either dropped or renamed. Without
+that, "NewsScore" and "SentimentScore" would be two labels over one signal.
+
+#### 3.8.4 Sentiment × Price Confirmation — the divergence verdict
+
+The owner's rule is *"don't assume positive sentiment is bullish"*, with the
+2×2: positive+rising = confirmed positive, positive+falling = **divergence**,
+negative+falling = confirmed negative, negative+rising = **divergence**.
+
+Today this is **PARTIAL**: `sentiment_research.sentiment_lead_lag:65` (with
+`innovations=True`) computes `Corr(dSentiment, dPrice)` per name and is surfaced
+by `get_sentiment_lead_lag`; the wired fold
+`sentiment_research.sentiment_factor_scale:570` uses sign-agreement between the
+**measured historical IC direction** and today's innovation (gated off by
+default). What is missing is the owner's actual output shape: a
+`Sign(dSentiment) × Sign(abnormal return)` **quadrant label**, and a
+market-adjusted (abnormal) return on that path. Design: the quadrant is the
+*interface* — "sentiment = +0.72" alone is not actionable, and the literature's
+attention-versus-sentiment split shows why the sign of the tone is not the
+signal.
+
+#### 3.8.5 EventScore — the seventh engine, and its overlap with RiskScore
+
+The staged spec recommends adding **EventScore** *"before allowing NewsScore to
+influence `opportunity_score`"*, to separate *"the company received positive
+news"* from *"there is a high-impact event occurring right now"* (earnings, FDA,
+CPI/FOMC, product launches, court decisions, investor days, OPEX).
+
+Producers already exist and are the *same family* the RiskScore's event
+component reads: `catalyst.build_catalyst_snapshot:219` (a `scale` in [0.25, 1.0]
+**plus a `hard_block` flag**), `next_earnings:90`, `fed_imminence:142`,
+`macro_imminence:123`, `events.surprise_score:17` / `catalyst_risk_penalty:53`,
+`pre_market` gap/event reads, and the options/OPEX family
+(`get_options_*`, `get_derivatives_flow`).
+
+**The overlap must be resolved explicitly**, because two engines claiming one
+number is the failure mode this document keeps refusing: EventScore answers
+**"is a high-impact event occurring now"** (occurrence + imminence + the hard
+block), while RiskScore's event leg answers **"how dangerous is that event for
+this position"** (the implied/expected move against the loss budget). Same
+producers, different questions — so EventScore's components must be the
+*occurrence* measures and RiskScore's the *exposure* measures, and neither may
+re-derive the other's number (§3.8.3's naming rule).
+
+#### 3.8.6 What the three engines change
+
+- The composite becomes **seven engines** if EventScore is adopted. The staged
+  spec's research allocation covers six (35/20/15/15/7.5/7.5); **EventScore has
+  no weight in it** — either it takes a slice of the existing weights, or it
+  enters as *context* (a hard block plus a printed imminence) rather than as a
+  weighted score. That is an open question, recorded in §8.3.
+- NewsScore ships **late**: five of its nine categories are ABSENT, so Phase E
+  can only ship a partial engine, and a partial engine must print its coverage
+  (the same rule as `NA ≠ 0`).
+- No news/sentiment/event 0-100 score exists anywhere today. The only existing
+  composites in this space are the LLM-produced `SentimentReport.overall_score`
+  (0-10, `agents/schemas.py:463`, anchored to the deterministic `computed_score`),
+  `aggregate_weighted_sentiment`'s per-day weighted score, and the
+  `sentiment_factor_scale` multiplier (0.8/1.0/1.2, gated off). The 0-10
+  `overall_score` is the **analyst's** output, not an engine score, and must not
+  be re-labelled as one.
 
 ---
 
@@ -1207,9 +1440,19 @@ reaches a decision:
    (strong trend + deteriorating momentum + setup NO) as its acceptance test.
 4. **RiskScore** as a new model over existing producers (§3.7.5), with the
    score/scale separation respected: the existing multipliers keep their jobs.
-5. **TradeScore** last, printed advisory with its attribution
-   (`TradeScore = 61.2 (F 0.40·88 + T 0.25·61 + R 0.15·68 + K 0.20·54)`), and
-   with a test proving it cannot unlock a blocked trade.
+5. **NewsScore and SentimentScore** (§3.8) — separate engines for *information
+   flow* and *interpretation*, with the duplicate-question test the owner
+   insists on ("NVIDIA announces a contract" is one observation, "analysts turn
+   positive" is another, "the stock is +8% on 3x volume" is a third) and the
+   sentiment × price confirmation check (positive sentiment with falling price
+   is a **divergence**, not a buy).
+6. **EventScore** (§3.8.5) — occurrence, not exposure — with the overlap against
+   RiskScore's event leg resolved by naming, and the staged spec's own reason for
+   it respected: it is the gate between NewsScore and any influence on
+   `opportunity_score`.
+7. **The composite** last, printed advisory with its attribution
+   (`61.2 (F 0.35·88 + T 0.20·61 + R 0.15·68 + N 0.075·72 + S 0.075·54 + K 0.15·54)`),
+   and with a test proving it cannot unlock a blocked trade.
 
 Acceptance: the four scores and `TradeScore` print on one leaf; a hard-gate
 block survives a maximal `TradeScore`; the mixed-state MSFT case produces a
@@ -1363,13 +1606,16 @@ into a quasi-official measurement** (§3.1, §5.3).
             X   NOT automatically opportunity_score (Q1)
             │
             ▼
-   ┌──────────────────────────────────────────────────────────────┐
-   │  FundamentalScore   TechnicalScore   RegimeScore   RiskScore │  §3.7
-   │  (100 = favourable for all four; RiskScore 100 = low risk)   │
-   └───────────────────────────┬──────────────────────────────────┘
+   ┌───────────────────────────────────────────────────────────────┐
+   │  FundamentalScore  TechnicalScore  RegimeScore  NewsScore      │  §3.7-§3.8
+   │  SentimentScore    RiskScore       (EventScore recommended)    │
+   │  (100 = favourable for all; RiskScore 100 = low risk)          │
+   └───────────────────────────┬───────────────────────────────────┘
                                ▼
-                  TradeScore = .40F + .25T + .15R + .20K          advisory,
-                               │                                 weights learned later
+      research allocation: 35 / 20 / 15 / 7.5 / 7.5 / 15   (owner's
+      staged spec; the earlier 4-score TradeScore = .40F+.25T+.15R+.20K
+      is the first iteration, §3.7.6)                      advisory,
+                               │                           weights learned later
                                ▼
                   ┌────────────────────────────┐
                   │  HARD GATES (binding)      │  executor: 17 fail-closed
@@ -1380,6 +1626,38 @@ into a quasi-official measurement** (§3.1, §5.3).
                   Position sizing (score ≠ scale: the
                   multipliers keep their own jobs)
 ```
+
+### 8.3 Open questions raised by the staged spec (2026-09-17, second pass)
+
+1. **Gate order.** The pasted-text pipeline puts the hard gates *before* sizing;
+   the staged `news_sentiment.md` diagram puts them *after*. The engine
+   implements gates-before-sizing (the executor's gate verdict feeds
+   `risk/sizing.size:144`). This document keeps the implemented order and treats
+   the staged diagram as unconfirmed — an inversion must be an explicit
+   decision, because a gate after sizing has to unwind a size it already
+   authorised (§3.7.6).
+2. **Which composite governs.** `TradeScore` (4 scores, 40/25/15/20) versus the
+   six-engine research allocation (35/20/15/15/7.5/7.5). Both are the owner's;
+   the staged one is newer and the document treats it as governing, with the
+   4-score version recorded as the first iteration. If both are wanted — a
+   4-score decision composite *and* a 6-engine research composite — they must be
+   named differently so a reader cannot confuse them.
+3. **EventScore's weight.** The staged spec recommends the engine but its
+   allocation covers only six (35/20/15/15/7.5/7.5). Either EventScore takes a
+   slice, or it enters as context (hard block + printed imminence) rather than as
+   a weighted score — and if it is weighted, its components must be the
+   *occurrence* measures while RiskScore's event leg keeps the *exposure* ones
+   (§3.8.5), or two engines will claim one number.
+4. **The news/sentiment separation must be enforced by naming.** Four couplings
+   already feed one number to both engines (§3.8.3). The owner's requirement
+   ("don't let NewsScore become a duplicate of SentimentScore") is therefore a
+   build-time rule, not an emergent property: each engine names the producer of
+   each component, and a component that would read the other engine's number is
+   dropped or renamed.
+5. **The owner's staged docs themselves** (`docs/ScoreWeight/*.md`) are
+   uncommitted and modified in the working tree. They are the owner's work, so
+   they are **not** committed by this document's commits; whether they should be
+   tracked as the specification of record is the owner's call.
 
 **Still open, and only these** (each is a data or measurement question, not a
 design question):
@@ -1504,4 +1782,8 @@ contradict the source's Phase 1 and Phase 4.
 | 22 | Regime detection: Hurst exponent and variance ratio are complementary *shape* diagnostics (VR(k) ≈ k^(2H−1)), not robust regime detectors on their own; Markov-switching models infer the volatility state and its persistence (expected duration 1/(1−p)) | the choppiness/persistence component's role and its limits (§3.7.4) |
 | 23 | Liquidity and gap risk: Amihud measures price impact per unit of volume, the bid-ask spread measures execution cost, and overnight gap risk is neither — size on the plausible gap, and cut overnight/event exposure to roughly 25-50% of normal; earnings implied move is read from the ATM straddle | the liquidity, gap and event components' distinct measures, and the event-risk sizing rule (§3.7.5) |
 | 24 | Hard-constraint practice — risk, leverage, liquidity and mandate limits define the feasible set **before** optimisation; expected return never overrides a hard risk limit | `TradeScore` never overrides a hard gate (§3.7.6 rule 1), which the repo already implements (17 fail-closed checks, `GATE_PRECEDENCE`; `risk_multiplier.combine` zeroes the soft product on a hard flag) |
+| 25 | Tetlock, "Giving Content to Investor Sentiment" — media pessimism predicts **next-day declines then a reversal within days**; extreme pessimism predicts **volume**; low returns produce more pessimistic tone (a feedback loop) | sentiment is short-horizon and partly reversing, not a permanent alpha weight; and the price→sentiment feedback is why the confirmation check exists (§3.8.2, §3.8.4) |
+| 26 | Baker & Wurgler, investor sentiment — high sentiment predicts **lower** subsequent returns, concentrated in hard-to-value, hard-to-arbitrage names | the sentiment leg is contrarian in the cross-section and name-dependent; supports the small research weight |
+| 27 | Barber & Odean (attention-based trading) and the limited-attention reading of PEAD — fresh, salient news is incorporated immediately while stale or competing information drifts | NewsScore's novelty/materiality emphasis is the right shape, and the one strong leg (earnings surprise + drift) is already implemented |
+| 28 | Da, Engelberg & Gao and the StockTwits literature — **attention** spikes predict negative next-day returns while **bullish sentiment** predicts positive ones; small caps are more sensitive to both | attention and sentiment are different signals with opposite short-horizon signs and must not be merged (§3.8.2 consequence 2) |
 

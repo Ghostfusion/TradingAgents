@@ -388,6 +388,31 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the owner staged `docs/ScoreWeight/{fundamental,market,news_sentiment}.md`
+  (their own newer spec) and the design doc is folded into it. **Six engines plus a recommended seventh** (Fundamental,
+  Technical, Regime, News, Sentiment, Risk, + Event), four factor catalogs targeting ~250-300 factors, research
+  allocation 35/20/15/7.5/7.5/15 with EventScore's weight open. Staged weights GOVERN where they differ from the
+  pasted-text iteration (TechnicalScore gains volatility-ATR + breadth; RegimeScore gains breadth 15% + macro-credit
+  and drops relative-regime; RiskScore splits concentration out of correlation, raises drawdown to 15% and gap to
+  10%); superseded numbers are kept in the tables. §3.8 grounds the new engines: **NewsScore is 5-of-9 ABSENT**
+  (novelty, materiality, fundamental impact, guidance change, corporate events, persistence) with only relevance
+  (`news_relevance.score_news_article:53` - relevance not materiality), the PEAD leg, analyst revisions and macro
+  reads computed, so it ships PARTIAL with its coverage printed; **SentimentScore is mostly buildable** with four
+  holes (momentum is only a 7-day innovation, acceleration ABSENT, no per-source breadth, institutional sentiment
+  bound to the FUNDAMENTALS toolset). **The news/sentiment duplicate question is NOT settled by construction** -
+  four couplings feed one number to both (`sentiment.py:589 _weighted_basis` uses the news relevance as the sentiment
+  confidence weight; `get_news_sentiment_series` bound to both `news_tools()` and `market_tools()`; the sentiment
+  analyst pre-fetches `get_news` at `sentiment_analyst.py:88`; `domain_bundles.get_sentiment_flow_feed:93` bundles
+  them) - so the owner's separation requirement is a build-time NAMING rule. **Sentiment x Price Confirmation is
+  PARTIAL**: `sentiment_lead_lag:65` gives Corr(dSentiment, dPrice) and `sentiment_factor_scale:570` uses sign
+  agreement, but the owner's `Sign(dSentiment) x Sign(abnormal return)` quadrant with a market-adjusted return does
+  not exist. **EventScore** (the staged spec's seventh engine, the gate before NewsScore touches `opportunity_score`)
+  overlaps RiskScore's event leg: occurrence vs exposure, same producers, resolved by naming. Two conflicts in the
+  owner's own diagrams are FLAGGED in §8.3, not silently resolved: gate order (pasted: gates before sizing; staged:
+  after; the engine implements before) and which composite governs. Evidence added: Tetlock (pessimism -> next-day
+  decline then reversal, extremes -> volume, price->tone feedback), Baker-Wurgler (high sentiment -> lower returns in
+  hard-to-value names), Barber-Odean/PEAD (novelty and attention drive immediate incorporation), Da-Engelberg-Gao
+  (**attention** -> negative next-day vs **bullish sentiment** -> positive: do not merge them).
 - 2026-09-17 `(working tree)` - **Design only, no code:** the four-score architecture (owner's spec) is added to
   `docs/design_fundamental_factor_weight_model.md` as **§3.7**, grounded component-by-component against the engine by
   three read-only inventories (technical / regime / risk), with a literature pass. The shape: four SEPARATE 0-100
