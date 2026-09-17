@@ -2451,3 +2451,63 @@ def test_verify_report_dir_carries_the_basis_registry(tmp_path):
     triples = {(b["metric"], b["value"], b["basis"], b["source"]) for b in entry["basis"]}
     assert ("diluted eps", 24.67, "level", "evidence") in triples, triples
     assert ("ev/ebit", 32.79, "ttm:ttm", "evidence") in triples, triples
+
+
+def test_a_stated_weighting_is_not_a_claim_about_the_world():
+    """The mandated SIGNAL SYNTHESIS line names the signals the analyst weighed
+    and why. No leaf can hold a weighting decision, so the LLM pass flags it
+    UNSUPPORTED (MSFT 2026-09-16 17:49 news.md: "note inputs were
+    analyst-supplied fractions so treat directionally advisory only"). The owner
+    decided 2026-09-17 that the statement itself is exempt."""
+
+    def _v(*claims):
+        return rv.ReportVerification(
+            report="news",
+            overall="FLAG",
+            claims=[
+                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf")
+                for c in claims
+            ],
+        )
+
+    for claim in (
+        "I weighted the technicals more heavily because momentum is deteriorating",
+        "Weighting the news signal over fundamentals given the pending catalyst",
+        "The regime factor was given greater weight than sentiment",
+        "Weighing evidence: favouring the technical read",
+    ):
+        a = rv._anchor_claims(_v(claim), set())
+        assert a.claims[0].status == "GROUNDED", claim
+        assert "methodological judgment" in a.claims[0].reason
+        assert a.overall == "PASS"
+
+    # A weighting claim that also cites a figure the evidence lacks keeps its
+    # flag: the exemption covers the statement, never the figures it cites.
+    off = rv._anchor_claims(_v("We weighted the technicals more heavily at RSI 23.15"), set())
+    assert off.claims[0].status == "UNSUPPORTED"
+    assert off.overall == "FLAG"
+
+
+def test_a_world_claim_that_merely_says_weighted_is_not_exempted():
+    """The cue is narrow: the weighting verb must take one of the analyst's own
+    signals as its object beside a comparative, so an ordinary world-claim
+    containing "weighted" is still judged on its figures."""
+
+    def _v(*claims):
+        return rv.ReportVerification(
+            report="market",
+            overall="FLAG",
+            claims=[
+                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf")
+                for c in claims
+            ],
+        )
+
+    for claim in (
+        "risk-weighted assets are higher this quarter",
+        "the index is cap-weighted toward tech",
+        "volume-weighted average price rose",
+        "the portfolio weights are more concentrated than last quarter",
+    ):
+        assert not rv._is_weighting_statement(claim), claim
+        assert rv._anchor_claims(_v(claim), set()).claims[0].status == "UNSUPPORTED"

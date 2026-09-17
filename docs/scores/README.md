@@ -467,7 +467,13 @@ daily horizon, and the semivariance measure. The five below are this document's
 own. **The owner's confirmation the same day of two ledger statements - `RiskScore`
 is a `TradeScore` engine and not a risk gate, and the six-engine research
 allocation is a separate object from the four-engine decision composite - is
-recorded in §1.4 and, as binding rules 17-18, in §2.1.**
+recorded in §1.4 and, as binding rules 17-18, in §2.1.** The six items that sit
+**outside** the score set - the three legacy-mode trees, the 25 poisoned trees, the
+DISCLOSED-vendor-pair tradeoff, the weighting-decision UNSUPPORTED family, the
+sentiment-score anchor when the computed block is absent, and intraday event-risk
+sizing - are decided too, and recorded with their evidence in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13.4 and
+[`../design_report_verification_llm.md`](../design_report_verification_llm.md).
 
 The five questions this document opened are answered. Recorded with the
 rationale, because the reasoning is what future changes have to respect.

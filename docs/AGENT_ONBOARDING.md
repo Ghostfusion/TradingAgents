@@ -388,6 +388,28 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **The six items outside the score set are decided.** One code change, one corpus
+  regeneration, the rest documentation. **(1) The three legacy-mode trees** -> kept as the documented gather-off
+  downgrade example, **explicitly labelled**: `LEGACY_GATHER_OFF.md` in each tree root records the leaked
+  `TRADINGAGENTS_ANALYST_FORCED_TOOLS` value, the absent `_rendered_block`/`_model_pool`, the empty digest lines, and the
+  missing `evidence` block in `run_card.json` (predates the writer at `reporting.py:1445`). **(2) The 25 poisoned trees**
+  -> correct/regenerate: the list is **re-verified independently** by scanning each tree's own `get_balance_sheet` leaf
+  for a `Current Assets` / `Total Non-Current Assets` row equal to the health leaf's `current_assets` **over every
+  column** (the health tool merges the latest as-reported period per line item), reproducing exactly 25 of 37 with AMAT,
+  LRCX, MSFT `231406`, NVDA `223229` and WDC `120300` clean; each carries `POISONED_LEAF.md` and a fresh tree is
+  regenerated per ticker (run in flight). **(3) The DISCLOSED-vendor-pair tradeoff** -> keep both survivors flagged
+  until a reproducer runs; **do not weaken the detector merely to eliminate the flags**. **(4) The weighting-decision
+  UNSUPPORTED family** -> **the explicit exemption, implemented** in `report_verifier.py`: a stated analyst weighting is
+  a **methodological judgment, not a claim about the external world** (`_is_weighting_statement` requires the analyst's
+  own signal as the object plus a comparative token - "risk" excluded so "risk-weighted assets are higher" and
+  "cap-weighted toward tech" are untouched; the `_anchor_claims` branch fires **only when the claim carries no decimal**,
+  i.e. the statement and never the figures it cites; plus a `_VERIFY_INSTRUCTIONS` bullet). Two new tests, both failing
+  against the pre-change module. **(5) The sentiment-score anchor** -> leave open until a live case occurs, then choose
+  from what the pipeline produces; no pre-commitment on a hypothetical. **(6) Intraday event-risk sizing vs latency** ->
+  **recorded with a document home** (`EventScore.md` §8): latency, data quality, idempotence/re-entry and fail-closed are
+  the hard halves, the daily contract must not move, and any such path is a **separately authorised sizing input**, never
+  a silent second `TradeScore` input. `IMPLEMENTATION_PLAN.md` §13.4 is now a **decision record**. Engine suite
+  **4404 passed / 5 skipped** (2 new), executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** the owner **confirms both diagram completions** and the two
   **ledger statements** are now recorded verbatim in `IMPLEMENTATION_PLAN.md` §13.1 and `README.md` §1.4, and as binding
   rules: **`RiskScore` is a `TradeScore` engine, not a risk gate** (it contributes the `R` component of

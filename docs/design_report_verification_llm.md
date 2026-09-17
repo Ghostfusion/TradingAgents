@@ -301,6 +301,11 @@ regenerated trees (IEI/MSFT/VTV, 12 stems) came out clean on every class.
 
 ## Open items (state 2026-09-16)
 
+**All six were decided by the owner on 2026-09-17; the decision is recorded at
+the end of each item below and in `scores/IMPLEMENTATION_PLAN.md` §13.4.** The
+items stay in place because the evidence and the reproducers are what the
+decisions rest on.
+
 **New from the 2026-09-16 MSFT fundamentals adjudication (the strongest
 limitation found so far; both have a reproducer).**
 
@@ -348,6 +353,36 @@ limitation found so far; both have a reproducer).**
   correcting (or regenerating) if it is to be read again; the reader now binds
   correctly whatever vendor answers, so no future tree carries this.
 
+  **DECIDED 2026-09-17 (owner): correct/regenerate.** A balance-sheet leaf
+  reading current assets from non-current assets is a **source/data-binding
+  defect, not a legitimate scenario**; since no stored gate outcome changed, this
+  is primarily a **verification-artifact integrity** issue. Both halves are done:
+
+  - **Re-verified independently, not taken from the paragraph above.** Scanning
+    each tree's own `get_balance_sheet` leaf for a `Current Assets` /
+    `Total Non-Current Assets` row whose value equals the health leaf's
+    `current_assets` (over every column, since the health tool merges the latest
+    as-reported period per line item) reproduces **exactly these 25 of 37 trees**:
+    `AMKR_20260914_233709`, `AMZN_20260914_192119`, `AMZN_20260915_113032`,
+    `AMZN_20260916_113950`, `AMZN_20260916_161226`, `ASML_20260914_212011`,
+    `HPE_20260914_213213`, `IBM_20260916_112819`, `JCI_20260914_234241`,
+    `LULU_20260915_135945`, `MSFT_20260915_140253`, `MSFT_20260916_113036`,
+    `MSFT_20260916_130442`, `MSFT_20260916_161458`, `MSFT_20260916_174952`,
+    `NFLX_20260915_140346`, `NFLX_20260915_152207`, `NVDA_20260915_141952`,
+    `SIMO_20260914_235634`, `SMCI_20260914_211758`, `TSM_20260914_191519`,
+    `TSM_20260915_112829`, `VST_20260914_234008`, `VST_20260915_112409`,
+    `WDC_20260914_191447`. Clean by the same test: `AMAT_20260914_191359`,
+    `LRCX_20260914_211703`, `MSFT_20260916_231406`, `NVDA_20260915_223229`,
+    `WDC_20260915_120300`. `SKHY_20260914_174651` has no `get_balance_sheet`
+    leaf to compare against, and the four IEI trees plus both VTV trees have no
+    health leaf at all.
+  - **Each of the 25 carries `POISONED_LEAF.md`** in its tree root: what was
+    mis-bound, the health leaf's value, the true current-assets value from the
+    same tree, the fact that no gate outcome changed, and the decision. The tree
+    states its own status instead of leaving it to be inferred.
+  - **A fresh tree is generated per affected ticker** (`AMKR AMZN ASML HPE IBM
+    JCI LULU MSFT NFLX NVDA SIMO SMCI TSM VST WDC`, shallow depth, verify on).
+
 **New from the 2026-09-16 four-symbol round (both are verifier noise on
 correct reports; each has a reproducer).**
 
@@ -363,6 +398,11 @@ correct reports; each has a reproducer).**
   `_match_row` binding the non-current rows and is fixed at the source** (see
   the poisoning item above; the corrected paragraph now says "one ratio, three
   sources, all 1.23" and the verifier no longer flags it).
+
+  **DECIDED 2026-09-17 (owner): keep both survivors flagged until a reproducer is
+  run**, then decide whether `_disclosed_pair` needs broader matching cues.
+  **Do not weaken the detector merely to eliminate the flags** - a widened cue
+  that mutes a real undisclosed conflict costs more than the two false positives.
 - **A meta-statement about the analyst's own call is ungroundable.** MSFT
   2026-09-16 (17:49) news.md: "note inputs were analyst-supplied fractions so
   treat directionally advisory only" - a provenance caveat on the analyst's own
@@ -377,6 +417,30 @@ correct reports; each has a reproducer).**
   decide then between the digest half (carry the stem's own call arguments), an
   explicit "a stated weighting is not a claim about the world" exemption in the
   verifier instructions, or living with it - measured first, as usual.
+
+  **DECIDED 2026-09-17 (owner): the explicit exemption.** A stated analyst
+  weighting is a **methodological judgment, not a factual claim about the external
+  world**, provided the weighting is explicitly stated in the synthesis itself -
+  otherwise the verifier is demanding evidence for something that is not
+  externally measurable. **Implemented, deterministically rather than by prompt
+  hope** (`tradingagents/agents/utils/report_verifier.py`):
+
+  - `_is_weighting_statement` - narrow cue: the weighting verb must take one of
+    the analyst's **own signals** (signal / factor / evidence / technicals /
+    fundamentals / news / sentiment / regime / catalyst / momentum / valuation /
+    quality / flow / breadth / thesis / inputs / reads) as its object **and** sit
+    beside a comparative or explanatory token. "risk" is deliberately not an
+    object, so "risk-weighted assets are higher this quarter" and "the index is
+    cap-weighted toward tech" are untouched.
+  - The `_anchor_claims` branch grounds an UNSUPPORTED weighting claim **only when
+    it carries no decimal figure**, which is what "the statement, never the figures
+    it cites" means in code: a weighting claim that also quotes a figure the
+    evidence lacks keeps its flag.
+  - A `_VERIFY_INSTRUCTIONS` bullet states the same rule to the LLM pass, so the
+    flag is not raised in the first place.
+  - Tests: `tests/test_report_verify.py::test_a_stated_weighting_is_not_a_claim_about_the_world`
+    and `::test_a_world_claim_that_merely_says_weighted_is_not_exempted` (both
+    fail against the pre-change module).
 - **The sentiment score has no anchor when the computed block is absent.** The
   2026-09-16 sentiment-prompt pass added "when no computed block is present,
   derive the score directly from the source evidence and say so in
@@ -391,6 +455,11 @@ correct reports; each has a reproducer).**
   ticker whose stem states a score and read the claim status. The options then
   are an anchored-by-statement exemption (the claim says it was derived) or a
   source-based band; not before a live case exists.
+
+  **DECIDED 2026-09-17 (owner): leave open until a live case occurs**, then choose
+  between the two from what the pipeline actually produces. **No pre-commitment on
+  a hypothetical** - the same discipline as the rest of this file, and the
+  reproducer above is what would fire it.
 - **Verifier per-run variance.** Re-verifying the same patched tree flags a
   different tail of meta/qualitative claims each time (the MSFT fundamentals
   stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
@@ -429,6 +498,15 @@ complete.
   "6th straight lower close" vs the body's "Eighth", the `get_vif_read` factor
   attribution, and the split QQQ relative-strength row were report-text defects,
   all corrected).
+
+  **DECIDED 2026-09-17 (owner): keep them as the documented gather-off downgrade
+  example, explicitly labelled** - do not leave their status ambiguous. Each of
+  the three trees now carries `LEGACY_GATHER_OFF.md` in its root, recording the
+  leaked `TRADINGAGENTS_ANALYST_FORCED_TOOLS` value, the absent
+  `_rendered_block`/`_model_pool`, the empty digest lines, and the fact that their
+  `run_card.json` has no `evidence` block (it predates the writer at
+  `tradingagents/reporting.py:1445`). Regenerate any tree that is to represent
+  current production verification.
 
 Confirmed-but-unfixed, per working-agreement rule 8. None blocks delivery; all
 are advisory-noise or capture gaps with a known reproducer.

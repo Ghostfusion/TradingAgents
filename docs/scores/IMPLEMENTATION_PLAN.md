@@ -1275,20 +1275,22 @@ inline in the document named below, and the question text is kept as the record.
 | `EventScore.md` §7 Q4 | per-name or market-level? | **both, with explicit scope** - `EventScope = NAME` vs `MARKET`, each event individually scoped; market events never hard-block |
 | `EventScore.md` §7 Q5 | build the missing calendars? | **implementation coverage, not architecture** - define the four calendar interfaces returning `available \| missing \| not_applicable`, and never convert missing data to `score = 0` |
 
-### 13.4 Still open - outside the score set
+### 13.4 Outside the score set - the six decisions (owner, 2026-09-17)
 
-These were **not** among the answers above and remain open. Four of them live in
+These were **not** among the answers above. They live in
 [`../design_report_verification_llm.md`](../design_report_verification_llm.md)'s
-own "Open items"; the last has no document home yet.
+own "Open items", except the last, which had no document home - it now has one,
+in `EventScore.md` §8. All six are decided; each row states the class the owner
+gave it and the decision that now governs.
 
-| # | Open item | Where |
-| --: | --- | --- |
-| 1 | The **three legacy-mode trees** (`MSFT_20260916_174952`, `VTV_20260916_175407`, `IEI_20260916_175246`) - regenerate, or keep as the documented example of the gather-off downgrade? | `design_report_verification_llm.md` ~:399 |
-| 2 | The **25 poisoned trees** - correct/regenerate, or leave as local artifacts? The reader is fixed and no stored gate outcome changed; only the printed current ratio / working capital / Altman block moved | same, ~:340 |
-| 3 | The **DISCLOSED-vendor-pair tradeoff** - widen `_disclosed_pair`'s cues (risks muting a real undisclosed conflict) or leave the two survivors flagging? A reproducer per survivor first | same, ~:354 |
-| 4 | The **weighting-decision UNSUPPORTED family** - the mandated `SIGNAL SYNTHESIS` rule names which signal was weighted and why, and the leaves cannot ground that. Three options on record; "measured first" | same, ~:375 |
-| 5 | The **sentiment-score anchor** when the computed block is absent - latent (0 of 36 stored stems), two options on record | same, ~:380 |
-| 6 | **Intraday event-risk sizing vs latency** (the FinancialJuice question) - needs a paid licensed feed. **Not recorded in any document** | this conversation only |
+| # | Item | Class (owner) | **Decision** |
+| --: | --- | --- | --- |
+| 1 | The **three legacy-mode trees** (`MSFT_20260916_174952`, `VTV_20260916_175407`, `IEI_20260916_175246`) | artifact decision | **Keep as the documented gather-off downgrade example, explicitly labelled.** Each tree carries `LEGACY_GATHER_OFF.md`; regenerate any tree that is to represent current production verification. Their status is no longer ambiguous |
+| 2 | The **25 poisoned trees** | artifact / data-integrity issue | **Correct/regenerate.** A balance-sheet leaf reading current assets from non-current assets is a **source/data-binding defect, not a legitimate scenario**. The reader is fixed and no stored gate outcome changed, so this is primarily a **verification-artifact integrity** issue: each tree carries `POISONED_LEAF.md` (with the poisoned and true values) and a fresh tree is generated per ticker |
+| 3 | The **DISCLOSED-vendor-pair tradeoff** | implementation tuning | **Keep both survivors flagged until a reproducer is run**, then decide whether `_disclosed_pair` needs broader cues. **Do not weaken the detector merely to eliminate the flags** |
+| 4 | The **weighting-decision UNSUPPORTED family** | verification-contract question | **The explicit exemption.** A stated analyst weighting is a **methodological judgment, not a factual claim about the external world**, provided the weighting is explicitly stated in the synthesis itself - otherwise the verifier demands evidence for something not externally measurable. **Implemented** in `report_verifier.py`: `_is_weighting_statement` + the `_anchor_claims` branch + a `_VERIFY_INSTRUCTIONS` bullet; the exemption covers the statement, never the figures it cites |
+| 5 | The **sentiment-score anchor** when the computed block is absent | fallback-contract question | **Leave open until a live case occurs**, then choose between a statement-based anchor and a source-derived band from what the pipeline actually produces. **No pre-commitment on a hypothetical** |
+| 6 | **Intraday event-risk sizing vs latency** | genuine architecture question - needs a document home | **Recorded, with a home** (`EventScore.md` §8). It is **not merely a FinancialJuice integration question**: it decides **whether fresh intraday event information may modify sizing, and under what latency and data-quality conditions** |
 
 Two further items are decisions in shape but were recorded as engineering with a
 policy question attached: **which metric classes may move intraday** versus may not

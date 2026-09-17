@@ -472,6 +472,11 @@ Rules:
   UNSUPPORTED even if the rest sounds plausible.
 - Qualitative framing ("strong momentum", "compelling") is not a fact;
   do not flag it.
+- A stated WEIGHTING is not a claim about the world: when the report names
+  the signals it weighed and says which it favoured and why (the mandated
+  SIGNAL SYNTHESIS line), that sentence is GROUNDED - no leaf could hold it.
+  The exemption covers the weighting statement itself, never the figures it
+  cites: a figure the evidence lacks stays UNSUPPORTED.
 - A sentiment SCORE on the 0-10 scale is not a leaf value: the sentiment
   analyst is required to map ``computed_score`` in [-1, 1] to
   ``5 + 5 * computed_score`` and stay within +/-0.5 of that anchor. A headline
@@ -531,6 +536,39 @@ _UNAVAILABLE_CUES = re.compile(
     r"|did not surface|absent from the",
     re.I,
 )
+
+# The mandated SIGNAL SYNTHESIS rule (all four analyst prompts) requires the
+# report to name the signals it weighed, say which it favoured and why. That is
+# a methodological judgment, not a claim about the external world - no leaf can
+# hold it - so the LLM pass flags it UNSUPPORTED (MSFT 2026-09-16 17:49 news.md:
+# "note inputs were analyst-supplied fractions so treat directionally advisory
+# only"). The exemption is deliberately narrow: the weighting verb must take one
+# of the analyst's OWN signals as its object AND sit beside a comparative or
+# explanatory token, so a world-claim that merely contains the word is untouched
+# ("risk-weighted assets are higher this quarter", "the index is cap-weighted
+# toward tech"). "risk" is left out of the objects for exactly that reason.
+_WEIGHT_VERB_RE = re.compile(r"(?i)\bweigh(?:ed|ing|s)?\b|\bweight(?:ed|ing|s)?\b")
+_SIGNAL_OBJECT_RE = re.compile(
+    r"(?i)\b(?:signals?|factors?|evidence|technicals?|fundamentals?|news|"
+    r"sentiment|regime|catalysts?|momentum|valuation|quality|flow|breadth|"
+    r"thesis|inputs?|reads?)\b"
+)
+_WEIGHT_COMPARATIVE_RE = re.compile(
+    r"(?i)\b(?:more|most|less|least|greater|greatest|higher|heaviest|heavier|"
+    r"over|toward|towards|because|since|given|favou?r\w*|prioriti[sz]\w*|"
+    r"dominant|primary|secondary|emphasis|emphasi[sz]\w*|leaned)\b"
+)
+_WEIGHTING_WINDOW = 60
+
+
+def _is_weighting_statement(claim: str) -> bool:
+    """Is this claim the mandated statement of which signal was weighted, why?"""
+    text = claim or ""
+    for m in _WEIGHT_VERB_RE.finditer(text):
+        window = text[max(0, m.start() - _WEIGHTING_WINDOW): m.end() + _WEIGHTING_WINDOW]
+        if _SIGNAL_OBJECT_RE.search(window) and _WEIGHT_COMPARATIVE_RE.search(window):
+            return True
+    return False
 
 
 def _parse_verdict(text: str, report_name: str) -> ReportVerification:
@@ -617,6 +655,21 @@ def _anchor_claims(
                     reason=c.reason
                     + " [anchored: the prompt's mandated 0-10 rescale of "
                     f"computed_score is {sentiment_anchor:.1f} +/-{_SENTIMENT_BAND}]",
+                )
+            )
+            continue
+        if c.status == "UNSUPPORTED" and not decs and _is_weighting_statement(c.claim):
+            # A stated weighting is a methodological judgment, not a claim about
+            # the world (the owner's decision, 2026-09-17). Only the statement
+            # itself is exempt: a weighting claim that also cites figures the
+            # evidence lacks keeps its flag.
+            anchored.append(
+                VerifierClaim(
+                    claim=c.claim,
+                    status="GROUNDED",
+                    reason=(c.reason or "")
+                    + " [anchored: a stated weighting is a methodological "
+                    "judgment, not a claim about the external world]",
                 )
             )
             continue

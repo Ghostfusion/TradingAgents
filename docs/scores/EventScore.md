@@ -345,6 +345,47 @@ certainly not "a negative event".
 
 ---
 
+## 8. Outside the score set - intraday event-risk sizing vs latency (OPEN)
+
+**This is the one event question the score set does not answer, and until
+2026-09-17 it had no document home.** It is recorded here because `EventScore`
+owns the event risk; it is **not** an engine-internal question and it does not
+change any decision above.
+
+**The question.** When an event lands *during* the session (a print, a headline, a
+halt), may that fresh information **modify sizing** - and under what latency and
+data-quality conditions? Today the answer is implicit: the daily score does not
+move intraday (rule 9 / §13.2's metric-horizon contract), the hard block reads the
+earnings window, and the governor never reads a score. What is undecided is the
+path *between* those: a **separately authorised sizing input** fed by intraday
+event information (the ledger statements of §13.1 allow exactly that - "potentially
+separately authorised sizing mechanisms"), or nothing at all.
+
+**Why it is not merely a vendor integration question.** A paid licensed feed (the
+FinancialJuice class) would supply the events, but the feed is the easy half. The
+hard half is the contract:
+
+- **Latency.** What is the maximum age at which an intraday event may still change
+  a size? A headline read 40 seconds late is a different instrument from one read
+  4 seconds late, and the answer cannot be "as fresh as possible".
+- **Data quality.** The event must arrive with a provenance and a confidence the
+  sizing path can act on - an unconfirmed headline is not a print.
+- **Idempotence and re-entry.** A size changed intraday must not be re-applied on
+  every refresh, and the executor's idempotency key (`signals/` dedup) is the
+  existing mechanism that would have to cover it.
+- **The daily contract must not move.** Rule 9 (master) / §13.2 rule 9 (plan):
+  daily is canonical, and an intraday metric joins the daily score only by
+  explicit per-metric promotion. This question is about a **separate sizing
+  authorisation**, never a silent second `TradeScore` input (master rule 17).
+- **Fail-closed.** If the feed is stale or down, the existing behaviour must stand
+  - no size change - rather than a size computed from partial data.
+
+**Status: OPEN.** Not decided, not scoped, not started; it needs a feed decision
+and a latency contract before any code. Recorded so that the next pass over the
+event work finds it in a document rather than in a conversation.
+
+---
+
 ## Appendix — methodology ledger
 
 | Claim | Source | Where it bites |
