@@ -388,6 +388,29 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** the five open questions in
+  `docs/design_fundamental_factor_weight_model.md` §8 are ANSWERED by the owner and the design is updated to them.
+  Decisions: **Q1** the composite never reaches `opportunity_score` (stays a tool-leaf / `run_card` advisory metric;
+  the slot keeps its `null` and gains a producer-owned `opportunity_score_reason`) - a `FundamentalScore = 84` is not
+  an `Opportunity = 84`; **Q2** learned walk-forward weights are IN SCOPE as a separate research layer, never inside
+  the deterministic production score, promoted only along `RESEARCH_ONLY -> VALIDATED -> CONTRACT_MIGRATION ->
+  PRODUCTION`; **Q3** sector overlays are architecture-in-scope now (factor schema carries `sector_scope` /
+  `supplier` / `availability`), suppliers deferred, and **`NA != 0`** - a missing metric reduces the available weight
+  instead of punishing the name, and a missing metric is never manufactured from generic factors; **Q4** the full
+  EODHD US panel is the official validation universe, the named basket is dev-only and labelled
+  `INSUFFICIENT_CROSS_SECTION`; **Q5** no `factor_score=NN` in prose - scores live in structured output
+  (`fundamental_score`, `..._status`, `..._confidence`), because a number in prose becomes apparent objective ground
+  truth. The owner also withdrew his own earlier `TradeScore = 40/25/15/20` for the same reason, so the composite
+  ships as a RESEARCH artifact with a status vocabulary and the four deterministic sub-scores are the advisory
+  output. Doc changes: new §0.5 (decision summary + three-stage separation), §3.1 (score contract: Fundamental /
+  Technical / Regime / Risk advisory, Opportunity separate and null), §3.2 (per-factor schema + `NA != 0`), §4
+  restructured into decided / still-refused / deferred, §5.2 (the reason field, contract migration NOT scheduled),
+  §5.3 (Q5 closes the prose-ground-truth coupling), Phase C (EODHD universe, IC/ICIR/decile-spread/monotonicity,
+  the `score_evaluation_rows` floor gap), Phase D (the promotion ladder), §7 (four new verification requirements),
+  §8 (the decision record with rationale). **No code defect was implicated:** no prompt requires a score in prose,
+  the gated `quality composite` leaf is already the structured-diagnostics surface Q5 asks for, and the `NA != 0`
+  convention is already implemented (coverage floor + `withheld`, omit-don't-zero in `growth_metrics`,
+  renormalisation in `capex_quality_read`).
 - 2026-09-17 `(working tree)` - **Design only, no code:** `docs/design_fundamental_factor_weight_model.md`, the adoption
   design for an external 106-factor fundamental weight master table. Method: inventory first (every factor read at its
   definition site), then accept/reject with cited evidence, then a four-phase plan. Findings that decide the design -

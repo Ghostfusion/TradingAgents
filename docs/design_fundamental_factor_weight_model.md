@@ -1,9 +1,11 @@
 # Fundamental Factor Weight Model — 106-Factor Master Table, Adoption Design
 
-Status: **design (2026-09-17). Not started.** Nothing in this document is
-implemented; it defines what would be built, in what order, under which gates,
-and — more importantly — what is **already** in the engine so that no second
-implementation is created.
+Status: **design (2026-09-17), decisions recorded. Not started.** Nothing in
+this document is implemented; it defines what would be built, in what order,
+under which gates, and — more importantly — what is **already** in the engine so
+that no second implementation is created. **All five open questions were answered
+by the owner on 2026-09-17**: §0.5 summarises each decision and where it lands,
+§8 keeps the full record with the rationale.
 
 Source: an external, LLM-authored answer proposing a **106-factor fundamental
 weight master table** in ten categories with "starting production weights"
@@ -110,7 +112,7 @@ document leans on when it accepts or refuses an item. Full ledger in Appendix C.
 | Claim used here | Evidence |
 | --- | --- |
 | Equal weights are a hard baseline to beat out-of-sample; estimated optimal weights are usually worse than `1/N`. | DeMiguel, Garlappi & Uppal (2009): across 14 optimisation models and 7 datasets, none consistently beat `1/N` on Sharpe, certainty-equivalent return or turnover; estimation error dominates the diversification benefit. Supports **equal-weight-first**, not "starting production weights". |
-| Signal weighting by quality (IC / rank IC, covariance-aware) is standard; `IR ≈ TC·IC·√BR`. | Grinold–Kahn's Fundamental Law; rank IC is the robustness-preferred form (Spearman). Supports **Phase 3 before Phase 4** — measure IC per factor, then weight. |
+| Signal weighting by quality (IC / rank IC, covariance-aware) is standard; `IR ≈ TC·IC·√BR`. | Grinold–Kahn's Fundamental Law; rank IC is the robustness-preferred form (Spearman). Supports **Phase C before Phase D** — measure IC per factor, then weight. |
 | "Quality" is a four-pillar construct: profitability, growth, safety, payout; and quality is strongest when *not* overpriced. | Asness, Frazzini & Pedersen, *Quality Minus Junk*: `quality = z(Profitability + Growth + Safety + Payout)`; lower prices for quality names predict higher returns. Directly supports the source's Q/G/BS/payout split **and** its insistence that valuation is not allowed to be cancelled by quality. |
 | Gross profitability beats earnings-based profitability and subsumes ROE. | Novy-Marx (2013): GP/A has roughly book-to-market's predictive power and "completely subsumes" earnings-based measures. Supports the source's GP/A ≥ ROE ordering (2.5% vs 2.0%) — one of the few weight orderings with literature behind it. |
 | Aggressive investment / asset growth predicts weak subsequent returns. | Titman, Wei & Xie (2004); Cooper, Gulen & Schill (2008). Supports treating asset growth and capex as **risk flags, not short signals** — exactly the asterisk the source puts on both. |
@@ -121,6 +123,30 @@ document leans on when it accepts or refuses an item. Full ledger in Appendix C.
 | Published predictors decay: ~26% out-of-sample, ~58% post-publication. | McLean & Pontiff (2016), 97 predictors. Supports refusing fitted weights that are validated on one sample, and the repo's existing DSR/PBO discipline. |
 | Factor timing is deceptively difficult; conditional weights rarely improve robustly. | Asness, Chandra, Ilmanen, Israel & Moskowitz. Supports **refusing** the source's Phase-4 learned/regime weights without an owner decision. |
 | Bank valuation = P/B through ROE/ROTCE, NIM, CET1; REIT valuation = P/FFO, P/AFFO, NAV, not GAAP earnings. | Sector-valuation consensus. Supports the *existence* of sector overlays but shows the required metrics are not in the canonical vocabulary (Appendix B). |
+
+### 0.5 Recorded decisions (owner, 2026-09-17)
+
+The five questions this design opened are closed. Each decision is stated with
+the section it changes; §8 carries the full rationale.
+
+| # | Question | Decision | Where it lands |
+| --: | --- | --- | --- |
+| Q1 | Does the composite reach `opportunity_score`? | **Never, for now.** It stays a tool-leaf / `run_card` advisory metric. `opportunity_score` keeps its `null` and gains a published *reason* — a deterministic `FundamentalScore = 84` does not mean `Opportunity = 84`; those are different questions, and the executor treats the second as a validated 0-100 measurement | §3.1, §5.2 |
+| Q2 | Learned walk-forward weights? | **Yes, as a separate research layer — never in the deterministic production score.** Promotion is a ladder: `RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`, each step evidenced, none automatic | §3.1, §6 Phase D |
+| Q3 | Sector overlays? | **Architecture in scope now, suppliers deferred.** The factor schema carries `sector_scope`/`supplier`/`availability` from day one; bank/REIT metrics are `NA` until a supplier exists — **`NA ≠ 0`**, and missing data reduces the *available* weight instead of punishing the name | §3.2, §4.1 |
+| Q4 | Evaluation universe? | **The full EODHD US panel** is the official validation universe. The named basket stays a dev/diagnostic set and is labelled `INSUFFICIENT_CROSS_SECTION` — it may never produce authoritative factor weights | §6 Phase C |
+| Q5 | `factor_score=NN` in prose? | **No.** Scores live in structured output (`fundamental_score`, `fundamental_score_status`, `fundamental_score_confidence`); narrative states quality in words. A number in prose becomes apparent objective ground truth and turns an advisory composite into a quasi-official measurement | §3.1, §5.3 |
+
+**The three-stage separation this produces** (owner's framing): `RESEARCH`
+(factor measurements: IC / rank IC, decile spreads, stability, redundancy) →
+`SCORE ENGINE` (deterministic weights → *ProductionScore*; learned weights →
+*ResearchScore*) → `run_card` advisory. **Never automatically
+`opportunity_score`.**
+
+**The score contract** (§3.1): `FundamentalScore`, `TechnicalScore`,
+`RegimeScore` and `RiskScore` are deterministic 0-100 **advisory** composites
+that feed the decision/risk engine; `OpportunityScore` is a **separate validated
+measurement** and stays `null` until empirical validation establishes it.
 
 ---
 
@@ -165,7 +191,7 @@ Empty slots, all deliberate:
 
 | Empty slot | Path:line | What it means for this design |
 | --- | --- | --- |
-| `opportunity_score` — declared 0-100, **always `null`** | `tradingagents/execution_contract.py:240-252` | The executor already validates a 0-100 producer-owned scale (`../TradingExecution/signald/contracts.py:215-227`). The docstring records the decision: publishing an estimate under a field the executor may rank on "would dress an estimate up as a measurement". **Wiring a fundamental composite here is an owner decision, not an implementation detail** (§8 Q1). |
+| `opportunity_score` — declared 0-100, **always `null`** | `tradingagents/execution_contract.py:240-252` | The executor already validates a 0-100 producer-owned scale (`../TradingExecution/signald/contracts.py:215-227`). The docstring records the decision: publishing an estimate under a field the executor may rank on "would dress an estimate up as a measurement". **Wiring a fundamental composite here was an owner decision and is now answered: never, for now (Q1).** The slot keeps its `null` and gains a producer-owned reason string (§5.2). |
 | `decision_guardrail.SCORE_BANDS` | `strategies/decision_guardrail.py:27` | The 0-100 ↔ rating contract; its only caller passes `None` (`agents/managers/portfolio_manager.py:364`). Ground rule 6 forbids this design from feeding it. |
 | `quant_baseline.quant_signal` | `strategies/quant_baseline.py:74` | The only `{category: score}` dict in the repo (momentum/value/quality/trend/volatility with keyword weights) — computed but **unwired**; tests only. It is the shape template for §3.1, not a component. |
 | `run_card["sections"]` | `tradingagents/reporting.py:1455` | Hard-coded `[]`, no reader anywhere. Not a usable slot. |
@@ -441,7 +467,7 @@ category group, with `QUALITY_BANDS`-style band tables per sub-score and a
 and whether the weights were equal or published.
 
 Sub-score metric sets, chosen **only from factors already COMPUTED** (§2) so
-Phase 1 can ship something real:
+Phase A can ship something real:
 
 | Sub-score | Metrics available today | Proposal weight it covers |
 | --- | --- | --- |
@@ -453,6 +479,40 @@ Phase 1 can ship something real:
 The composite is then `Σ w_c · S_c` over **present** sub-scores, renormalised,
 with the weights printed. Ground rule 6 applies: this composite never reaches
 `SCORE_BANDS`.
+
+#### The sub-scores are advisory; the composite is a RESEARCH artifact (Q1, Q2, Q5)
+
+The owner's decision of 2026-09-17 draws the line this design must not blur:
+
+- **Published (advisory, 0-100, deterministic):** the four category sub-scores,
+  each with its band table, coverage, withheld names and printed basis. They are
+  diagnostics a reader can check against the factors that produced them.
+- **Not published as a production score:** the *composite*. The owner withdrew
+  his own earlier `TradeScore = 40/25/15/20` proposal for the same reason he
+  withdrew the source's `0.35/0.25/0.25/0.15`: unless the combination is shown
+  to have out-of-sample predictive validity, it is a **research composite**, not
+  an empirically validated measurement. It ships only inside the research layer
+  (§6 Phase C/D), labelled `RESEARCH_ONLY`, and only a validated vector may be
+  promoted (§6 Phase D).
+- **The status vocabulary** every published score carries:
+  `ADVISORY` (deterministic diagnostic) / `RESEARCH_ONLY` (a fitted or
+  unvalidated combination) / `VALIDATED` (out-of-sample evidence, still not the
+  executor's measurement) — plus the confidence grade from §3.3.
+- **The score contract.** Four deterministic advisory composites feed the
+  decision/risk engine; `OpportunityScore` is separate and stays `null`:
+
+  | Score | Kind | Status | Feeds |
+  | --- | --- | --- | --- |
+  | `FundamentalScore` | deterministic composite of fundamental factors, 0-100 | advisory | tool leaf + `run_card` |
+  | `TechnicalScore` | deterministic technical/setup composite, 0-100 | advisory | tool leaf + `run_card` |
+  | `RegimeScore` | market/sector/regime composite, 0-100 | advisory + sizing context | tool leaf + `run_card` |
+  | `RiskScore` | risk-condition composite, 0-100 | advisory | tool leaf + `run_card` |
+  | `OpportunityScore` | **separate validated measurement** | `null` until validated | the executor's existing 0-100 slot |
+
+  Only `FundamentalScore` is this document's scope; the other three are named
+  because the contract is only meaningful as a whole (they already exist in
+  fragments — `strategies/sector_rank.py` for the sector composite,
+  `strategies/risk_*` and `liquidity_risk.py` for risk conditions).
 
 ### 3.2 `EffectiveWeight` — adopt the chain, define every multiplier over a measured input
 
@@ -467,10 +527,35 @@ and each leg names the existing surface it reads:
 | Multiplier | Definition | Source in the repo | Status |
 | --- | --- | --- | --- |
 | `Base` | The proposal's weight, or equal weights (rule 2) | new literal table, gated | to build |
-| `Sector` | 1.0 for universal factors; a per-category applicability map for `security_type`/sector-keyed factors (e.g. bank `pb` vs industrials `ev_ebit`) | `security_type.py`, `sector_rank.sector_group_of`, the canonical `sector` key | to build; data-limited (§4.3) |
+| `Sector` | 1.0 for universal factors; a per-category applicability map for `security_type`/sector-keyed factors (e.g. bank `pb` vs industrials `ev_ebit`) | `security_type.py`, `sector_rank.sector_group_of`, the canonical `sector` key | to build; architecture decided (Q3, §4.1), suppliers deferred |
 | `DataQuality` | `data_quality.aggregate_quality(...)['score']/100` mapped to [0.3, 1.0], plus a hard 0 for a factor whose input is `unavailable` | `strategies/data_quality.py:24,63` (and `disagreement_flag` for cross-vendor spread) | exists |
 | `Stability` | 1 − (rank autocorrelation penalty) over consecutive snapshots, or a coverage-derived floor while no history exists | `alpha_health.score_evaluation_rows` **stability** row | exists (unused) |
 | `Redundancy` | `1 / (1 + Σ_j |Corr_ij|)` **or** cluster-representative selection (§3.3) | `cross_section` primitives; **no fundamental correlation panel exists** | to build |
+
+**Every factor carries a schema record** (Q3), so an overlay is a data event,
+never a code fork:
+
+| Field | Values | Why it exists |
+| --- | --- | --- |
+| `factor` | canonical name (e.g. `roic`, `nim`, `ffo_yield`) | one identity per measure (ground rule 2) |
+| `category` | the ten categories of §2 | the weight vector's unit |
+| `formula` | the pure function that computes it | auditability |
+| `direction` | `+1` / `-1` | the sign the composite applies |
+| `base_weight` | the (hypothesis) weight, or equal | printed in `basis` |
+| `sector_scope` | `ALL` / `BANKS` / `REITS` / … | an overlay is a scope, not a new model |
+| `normalization_method` | percentile / z / winsorised-z / sector percentile | must match the band table's claim (§3.2 below) |
+| `supplier` | the vendor or the repo module that carries it | names what has to exist before the factor can score |
+| `availability` | `present` / `NA` | **`NA` is not `0`** |
+
+**`NA ≠ 0` is a hard rule (Q3).** A missing factor is excluded and the remaining
+weights renormalise — so a bank without a NIM feed is scored on the factors it
+*does* have, rather than penalised for a metric no supplier provides. This is
+the convention the engine already implements (`quality_composite`'s coverage
+floor and `withheld`, `growth_metrics`' omit-don't-zero, `capex_quality_read`'s
+"renormalizes over measured components", `signal_summary`'s refusal to print a
+partial sum under the full denominator); the design extends it rather than
+introducing it. The opposite rule — scoring `NA` as `0` — would make every bank
+look distressed and every REIT look unprofitable on the day the overlay lands.
 
 The **sector-relative percentile defect** must be fixed in the same pass:
 `industry_neutral_z` demeans by sector but the final percentile is taken across
@@ -518,7 +603,7 @@ printed by the DCF family:
 Design: `dcf_confidence` returns a 0-1 score plus the four legs and the
 thresholds it used, and the **DCF upside factor (#56/#57) is scaled by it** —
 so a low-confidence DCF contributes less to VS without anyone writing "the DCF
-is an artifact" in prose. Fixed thresholds are hypotheses (§6 Phase 3 measures
+is an artifact" in prose. Fixed thresholds are hypotheses (§6 Phase C measures
 them against realised forward returns from the alpha ledger).
 
 ### 3.5 CapEx direction — use the engine's existing counterweight, not a `↓`
@@ -558,37 +643,48 @@ Every row is a **wiring** job unless stated; §1.3 gives the evidence.
 | 9 | Normalized FCF yield (#42), FCF stability std (#37), cash-conversion stability (#39) | normalized FCF and cycle-FCF stats already exist; only the division/std is missing | `normalized_fcf.py`, `cycle_dcf.py` |
 | 10 | Asset growth numeric (#76), receivables/inventory-days exposure (#77, #78), WC/assets (#69), debt growth numeric (#70) | boolean-only today; the underlying values exist inside Beneish/C-score | `quantitative_scores` + `normalized` |
 
-Explicitly **not** in Phase 1: deferred revenue (#79, no canonical key and
+Explicitly **not** in Phase A: deferred revenue (#79, no canonical key and
 `revenue` deliberately excludes unearned labels), debt-maturity risk (#100, no
 maturity data), capital-employed turnover (#85, no definition in the repo),
 Dechow-Dichev (#unreachable as currently wired).
 
 ---
 
-## 4. Rejected, deferred, and why
+## 4. Decisions, refusals, and deferrals
 
-### 4.1 Rejected outright
+### 4.1 Decided by the owner (2026-09-17) — three items this document had refused
+
+Each was refused here for lack of an owner decision or lack of evidence, not on
+principle. The decisions change the *scope*, never the ground rules.
+
+| Item | Decision | What it changes |
+| --- | --- | --- |
+| Walk-forward **learned** weights | **In scope as a separate research layer**, never inside the deterministic production score. The vector must earn its way: `RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION` | §3.1's status vocabulary; §6 Phase D's ladder; the comparison is baseline-vs-learned on **IC, decile monotonicity, spread, stability** — an in-sample improvement promotes nothing |
+| **Sector overlays** (banks/REITs/insurance) | **Architecture in scope now; suppliers deferred.** The factor schema carries `sector_scope`/`supplier`/`availability` from the first commit; the metrics stay `NA` until a supplier exists | §3.2's schema table and the `NA ≠ 0` rule. **Do not manufacture a missing metric from generic factors** — a bank scored on `ev_ebit` is not a bank score |
+| **Evaluation universe** | **The full EODHD US panel** (`resolve_peer_universe`) is the official validation universe; the named basket is dev/diagnostic only and is labelled `INSUFFICIENT_CROSS_SECTION` | §6 Phase C. A 9-name cross-section is useful for diagnostics and inadequate for factor validation — it may not produce authoritative weights |
+
+### 4.2 Still refused outright
 
 | Source item | Why not |
 | --- | --- |
-| "Starting **production** weights" shipped as production (its Phase 1) | Ground rule 2 ("no weight vector is invented") and DeMiguel et al.: estimated weights usually lose to `1/N` out of sample. The weights ship as an **equal-weight default plus a named table that is printed as a hypothesis**, and the table is only promoted after §6 Phase 3 measures it. |
-| Walk-forward **learned** weights (its Phase 4) | Collides with the deterministic-and-auditable rule that already caused ML score replacement to be refused in round 3 (McLean–Pontiff decay is the supporting evidence). Requires an explicit owner decision (§8 Q2); the repo's existing `enable_tuner` (Q19) and `enable_factor_proposal_loop` (Q11, "LLM-proposed candidates, math decides") are the precedents for how such a thing would be gated. |
-| Regime-conditional weights as a default | Asness et al.: factor timing is deceptively difficult; conditional weights rarely improve robustly. Keep `regime` as a *printed context*, not a weight modifier, until Phase 3 evidence exists. |
-| Per-metric sector percentile *invented per sector* for banks/REITs | The metrics do not exist in the data (Appendix B): no NIM, CET1, ROTCE, FFO, AFFO, NAV, occupancy. Adopting the metrics is a **data-source project**, not a scoring change. |
-| The literal `1/(1+Σ|Corr_ij|)` penalty constant | Structure yes, constant no: it is untested, and on a 106-factor panel with correlated families it can drive a redundant pair's combined weight below a single member's. Use cluster-representative selection or the penalty with a floor, and measure the effect (§6 Phase 2). |
-| A single master number as the interface to the executor | The `opportunity_score` slot is deliberately `null` (`execution_contract.py:240-252`) with a written reason. Changing that is an owner decision (§8 Q1), and it must not be done as a side effect of a scoring feature. |
+| "Starting **production** weights" shipped as production (its Phase 1) | Ground rule 2 ("no weight vector is invented") and DeMiguel et al.: estimated weights usually lose to `1/N` out of sample. The weights ship as an **equal-weight default plus a named table that is printed as a hypothesis**, and the table is only promoted after §6 Phase C measures it. The owner's 2026-09-17 decision extends this to *any* composite, including his own earlier `TradeScore = 40/25/15/20`: an unvalidated combination is a research artifact. |
+| **Regime-conditional** weights as a default | Asness et al.: factor timing is deceptively difficult; conditional weights rarely improve robustly. Keep `regime` as a *printed context*, not a weight modifier, until Phase C evidence exists. |
+| Manufacturing bank/REIT metrics from **generic** factors | Q3 keeps the architecture overlay-ready but forbids substitution: `NA` is not `0`, and a proxy is not the metric. The missing inputs are listed in Appendix B. |
+| The literal `1/(1+Σ|Corr_ij|)` penalty constant | Structure yes, constant no: it is untested, and on a 106-factor panel with correlated families it can drive a redundant pair's combined weight below a single member's. Use cluster-representative selection or the penalty with a floor, and measure the effect (§6 Phase B). |
+| A single master number as the interface to the executor | **Decided: never, for now** (Q1). The `opportunity_score` slot is deliberately `null` (`execution_contract.py:240-252`) and now gains a published *reason* (§5.2) instead of a number. |
+| ML replacement of the deterministic scores | Round-3 already refused this (McLean–Pontiff decay is the supporting evidence). Q2 does not reopen it: the learned vector lives in the research layer, and only a validated vector with a completed contract migration may reach production. |
 
-### 4.2 Deferred (in scope later, each with a trigger)
+### 4.3 Deferred (in scope later, each with a trigger)
 
 | Item | Trigger to start |
 | --- | --- |
 | Insider routine-vs-opportunistic classification (#101-#106) | Needs Form 4 transaction codes in XML (already a deferred data-source project). Until then the prompt rule `INSIDER WEIGHTING` stands and the category stays at 2%. |
 | Distress maturity-wall (#100) | Needs a debt-maturity dataset; no vendor currently supplies it. |
 | Capital-returns dividend growth (#90) | Needs a dividend series producer; `get_corporate_actions` supplies raw history only. |
-| Bank/REIT overlays | A data-supplier decision (Appendix B lists exactly what is missing). |
+| Bank/REIT overlay **metrics** (the architecture is already in scope, Q3) | A data-supplier decision (Appendix B lists exactly what is missing). |
 | Merton distance-to-default as a factor (#97) | Needs a tool that resolves equity/debt/equity-vol from the statement chain instead of requiring caller input. |
 
-### 4.3 Two source items that are actually already better in this repo
+### 4.4 Two source items that are actually already better in this repo
 
 1. **Distress (2%).** The source asks for Altman Z, Ohlson O, Merton, coverage
    stress, liquidity stress, maturity risk at 2% total. The repo has Altman Z
@@ -632,15 +728,55 @@ body, hence `artifact_sha256` and `decision_hash` for **every** artifact) →
 `../TradingExecution/contracts/research_decision.v1.schema.json`
 (`tests/test_execution_contract.py:134-142` diffs them) →
 `../TradingExecution/signald/{schema,contracts,processor}.py` (range check
-`215-227`, envelope emission `323-370`). Do not start this without §8 Q1
-answered.
+`215-227`, envelope emission `323-370`).
+
+**Q1 decided: never, for now.** The composite stays a tool leaf + `run_card`
+advisory key, and `opportunity_score` stays `null`. The migration above is
+therefore **not scheduled** — it is the cost of a future decision, not this
+one's.
+
+**What does change (still a contract migration, so designed, not built):** the
+`null` gains a published **reason**, so a reader of the artifact knows the
+absence is a decision rather than a missing value. The owner's shape:
+
+```json
+"opportunity_score": null,
+"opportunity_score_reason": "Not published: composite fundamental score has not
+  demonstrated sufficient out-of-sample predictive validity to qualify as an
+  opportunity measurement."
+```
+
+That string is a *producer-owned constant*, not prose the model writes — it
+belongs beside `opportunity_score()` in `execution_contract.py` (which already
+returns the deliberate `None` with its rationale in the docstring, so the reason
+exists today only where a reader of the source can see it). Adding the key
+touches the sealed body, so it carries the same `artifact_sha256` /
+`decision_hash` consequences as any envelope change and must land with the
+vendored-schema diff test (`tests/test_execution_contract.py:134-142`). Note
+also that a *constant* reason string adds no per-run variance: it cannot leak
+into the executor's ranking because the executor does not read it as a number.
 
 ### 5.3 Two silent couplings to respect
 
 - `agents/researchers/structured_debate.py:280-313` parses `key=value` numeric
   pairs out of the fundamentals **prose** into debate ground truth. Any
   `factor_score=NN` line printed into the report text becomes a debated claim
-  automatically. Decide whether that is wanted *before* it happens.
+  automatically. **Q5 decided: no score in prose**, which closes this coupling
+  rather than exploiting it. Consequences, all of which the implementation must
+  respect:
+  - The composite reaches the reader through **structured output** —
+    `{fundamental_score, fundamental_score_status, fundamental_score_confidence}`
+    in the tool leaf / `run_card` advisory block — never as a narrative number.
+  - **No prompt rule may require quoting the score.** The prompt may say what
+    the *factors* show ("profitability and cash generation are strong, valuation
+    is a constraint"); it may not ask for `FundamentalScore = NN`.
+  - The existing `get_composite_rank` prompt line ("cite its standing vs peers")
+    stays as it is: a percentile *standing within a named peer set* is a
+    measurement of position, not a weighted quality index — the distinction the
+    decision turns on. The gated `quality composite` row is already a structured
+    diagnostic line, which is exactly where Q5 wants scores to live.
+  - The verifier therefore gains **no** new quotable metric, and
+    `_INTERNAL_CONFLICT_METRICS` stays untouched by this feature.
 - `alpha_health.score_evaluation_rows` is the IC harness and
   `scripts/alpha_health.py` the wired ledger reader; a fundamental panel is a
   new *caller*, not a new evaluator. One implementation per computation.
@@ -690,30 +826,71 @@ Acceptance: a factor that is a vendor passthrough, or whose input is
 `unavailable`, or whose producers disagree, demonstrably loses weight, and the
 loss is printed per factor.
 
-### Phase C — measure, don't assume
+### Phase C — measure, don't assume (universe decided: the full EODHD panel)
 
-1. Build the fundamental panel `{date: {ticker: score}}` over the peer universe
-   with a point-in-time discipline (the `PIT` invariant already exists in
-   `data_quality.fundamentals_pit_ok`).
-2. Run `alpha_health.score_evaluation_rows` (IC, ICIR, deciles, monotonicity,
-   coverage, stability) per category and per factor, plus
+**Q4 decided: the full EODHD US panel is the official validation universe**
+(`peer_universe.resolve_peer_universe` — the EODHD US common-stock list filtered
+to NYSE/Nasdaq, or an explicit list), with eligibility filters, survivorship
+controls, a minimum-liquidity floor and a minimum-observations floor before any
+factor is computed. The named basket stays a **dev/diagnostic** universe.
+
+1. Build the fundamental panel `{date: {ticker: score}}` over that universe with
+   a point-in-time discipline (the `PIT` invariant already exists in
+   `data_quality.fundamentals_pit_ok`; `enable_pit_registry` is the existing
+   gate). Forward-return labels come from the `_ohlcv` chain, joined exactly as
+   `scripts/alpha_health.py::_monitor_report` already joins them.
+2. **Label the cross-section before computing anything on it.** Any panel that
+   fails the floors is reported `VALIDATION_STATUS = INSUFFICIENT_CROSS_SECTION`
+   and produces **no** authoritative factor weight. *Known gap to close here:*
+   `alpha_health.score_evaluation_rows(scores_by_date, prices, holding=5,
+   n_buckets=10, min_names=4, min_obs=5)` is the ready-made harness, but its
+   floors are a smoke floor (4 names) and it emits no insufficiency status — it
+   does say its rows "are inputs to the DSR/PBO multiple-testing check, never a
+   standalone verdict", so nothing today reads it as one. Adding the status is
+   part of this phase, before any weight fitting is authorised.
+3. Compute, per factor and per category, over the panel:
+   `IC_i,t = Corr(Factor_i,t, Return_t+H)`; `MeanIC_i = (1/T)·Σ_t IC_i,t`;
+   `ICIR_i = Mean(IC_i) / Std(IC_i)`; `DecileSpread = Return(D10) − Return(D1)`;
+   `Monotonicity = (# correctly ordered adjacent decile pairs) / 9`. The
+   harness's rows supply IC/ICIR, deciles + monotonicity, coverage and
+   stability; the multiple-testing discipline is
    `evaluate.purged_cpcv_splits` / `deflated_sharpe` / `pbo_flag` /
-   `reality_check` / `spa` for multiple-testing discipline.
-3. Report per-factor rank IC with its t-stat, turnover, and stability by year;
-   then, and only then, compare the candidate weight vector against equal
-   weights on the same panel. Publish the result either way — a table that
-   loses to `1/N` is a finding, not a failure.
+   `reality_check` / `spa`.
+4. Report per-factor rank IC with its t-stat, turnover and stability by year;
+   **then, and only then**, compare the candidate weight vector against equal
+   weights on the same panel. Publish the result either way — a table that loses
+   to `1/N` is a finding, not a failure.
 
-Acceptance: a table of measured IC per factor with the weight comparison, and a
-written decision on whether the source's weights are promoted, modified, or
-replaced by equal weights.
+Acceptance: a table of measured IC per factor with the weight comparison, the
+`VALIDATION_STATUS` line on every panel, and a written decision on whether the
+source's weights are promoted, modified, or replaced by equal weights.
 
-### Phase D — learned weights (owner decision required, §8 Q2)
+### Phase D — the research layer and the promotion ladder (Q2 decided: yes, as research)
 
-Only if Phase C produces evidence that fixed weights are leaving measurable
-performance on the table **and** the owner accepts a non-deterministic weight
-source. The repo's precedent is `enable_tuner` + `enable_factor_proposal_loop`
-("LLM-proposed candidates, math decides").
+**In scope, but never inside the deterministic production score.** Phase D
+estimates `w*_i = f(IC_i, IC stability_i, decile spread_i, redundancy_i,
+sector_i)` on walk-forward samples and compares the learned vector against the
+deterministic baseline on the same four statistics — IC, decile monotonicity,
+spread, stability. An in-sample improvement promotes nothing.
+
+The promotion ladder, each step evidenced and none automatic:
+
+```
+RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION
+```
+
+- `RESEARCH_ONLY`: computed, stored, labelled; no consumer beyond the research
+  path. The repo's precedents for this shape are `enable_tuner` (Q19) and
+  `enable_factor_proposal_loop` (Q11, "LLM-proposed candidates, math decides").
+- `VALIDATED`: out-of-sample evidence on the full panel, with the DSR/PBO
+  multiple-testing discipline and the CPCV masks — i.e. the vector survived the
+  tests designed to kill it.
+- `CONTRACT_MIGRATION`: only if the validated vector is ever to reach a
+  consumer, which for `opportunity_score` is the §5.2 migration and remains
+  **not scheduled** (Q1).
+- `PRODUCTION`: the deterministic score stays the production score unless the
+  owner promotes a validated vector explicitly. Ground rule 1's
+  deterministic-and-auditable requirement is not relaxed by this phase.
 
 ---
 
@@ -732,34 +909,131 @@ source. The repo's precedent is `enable_tuner` + `enable_factor_proposal_loop`
   must be byte-identical (the existing gate convention).
 - `metric_reconcile` / `disagreement_flag` must fire on a synthetic
   two-vendor disagreement, proving the confidence leg can fail.
+- **`NA ≠ 0` is pinned (Q3):** a panel where one factor is absent for a name
+  must renormalise over the present factors and never score the absent one as
+  `0`; a name below the coverage floor is withheld with its reason, and a
+  `sector_scope` factor with no supplier contributes no weight at all.
+- **No score in prose (Q5):** a test asserts no analyst prompt string requires a
+  composite score in the narrative (the existing
+  `tests/test_analyst_evidence_wiring.py` pattern for named rule strings is the
+  place), and that the score reaches the reader only through the structured
+  leaf / `run_card` block.
+- **Validation status is pinned (Q4):** a panel below the cross-section floors
+  reports `INSUFFICIENT_CROSS_SECTION` and yields no weight vector; the test
+  must fail if the label is dropped.
+- **The composite is not on the wire (Q1):** a test asserts the advisory score
+  does not reach `research_decision.json` / `opportunity_score`, and that the
+  reason constant is present and stable when that key is added.
 
 ---
 
-## 8. Open questions for the owner
+## 8. Decision record (owner, 2026-09-17)
+
+The five questions this document opened are answered. Recorded with the
+rationale, because the reasoning is what future changes have to respect.
 
 **Q1 — Does a composite fundamental score ever reach `opportunity_score`?**
-The slot exists, is validated 0-100 by the executor, and is deliberately `null`
-with a written reason ("would dress an estimate up as a measurement"). Options:
-(a) never — keep it a tool leaf + `run_card` advisory key (this document's
-default); (b) publish it once Phase C shows a measured IC; (c) publish it gated
-per-run. (b) and (c) require the schema + sibling-contract + hash migration in
-§5.2.
+**Decided: (a) never, for now.** It stays a tool-leaf / `run_card` advisory
+metric. *Rationale (owner):* "The current 'would dress an estimate up as a
+measurement' rationale is sound." A deterministic `FundamentalScore = 84` does
+not imply `Opportunity = 84` — a name can have outstanding fundamentals with
+poor current opportunity characteristics (`FundamentalScore 92`,
+`TechnicalScore 61`, `RegimeScore 68`, `RiskScore 54`, `ValuationScore 37`). The
+distinction preserved is **measurement vs interpretation**: the artifact keeps
+`opportunity_score: null` and gains a producer-owned
+`opportunity_score_reason` (§5.2).
 
-**Q2 — Is a learned walk-forward weight vector ever in scope?** It contradicts
-the deterministic-score rule as written; the source's Phase 4 assumes it.
+**Q2 — Learned walk-forward weights?**
+**Decided: yes, as a separate research/experimental layer — not in the
+deterministic production score yet.** *Rationale (owner):* removing Phase 4
+merely because the current rule is deterministic would be wrong; what matters is
+that the learned vector is compared against the deterministic baseline on IC,
+decile monotonicity, spread and stability, and does not become production "merely
+because it improves in-sample results". Promotion is the ladder
+`RESEARCH_ONLY → VALIDATED → CONTRACT_MIGRATION → PRODUCTION`; the schema /
+contract / hash migration is only reached at step three (§5.2, §6 Phase D).
 
-**Q3 — Is a sector-overlay data project in scope** (bank NIM/CET1/ROTCE, REIT
-FFO/AFFO/NAV/occupancy)? The scoring structure can accept overlays now; the
-metrics need a new supplier.
+**Q3 — Sector overlays?**
+**Decided: yes — architecture in scope now, suppliers deferred.** The factor
+schema carries `sector_scope` / `supplier` / `availability` from the first
+commit (`ROIC scope=ALL`, `NIM scope=BANKS`, `CET1 scope=BANKS`,
+`ROTCE scope=BANKS`, `FFO_Yield scope=REITS`, `AFFO_Yield scope=REITS`,
+`NAV_Discount scope=REITS`, `Occupancy scope=REITS`). Until a supplier exists
+they are `NA`, **not zero** — *"missing data should reduce the available factor
+weight, rather than punish the company"* — and the design must **not manufacture
+missing metrics from generic factors** (§3.2, §4.2).
 
-**Q4 — What is the evaluation universe?** The full EODHD US panel
-(`resolve_peer_universe`, thousands of names, needs a bulk fetch) or a named
-basket (fast, small, noisier IC)? IC stability and decile monotonicity both need
-`min_obs`/`min_names` that a 9-name Finnhub peer set cannot satisfy.
+**Q4 — Evaluation universe?**
+**Decided: the full EODHD US panel** is the official validation universe; the
+named basket stays a development/test universe and is labelled
+`VALIDATION_STATUS = INSUFFICIENT_CROSS_SECTION` — *"rather than allowing it to
+produce authoritative factor weights"*. IC, ICIR, decile spread and
+monotonicity only become meaningful with hundreds/thousands of eligible names
+(§6 Phase C).
 
-**Q5 — Do we want `factor_score=NN` in the report prose at all?** It becomes
-debate ground truth automatically (§5.3) and adds a quotable metric the verifier
-will then have to police.
+**Q5 — `factor_score=NN` in prose?**
+**Decided: no.** The number lives in structured output
+(`fundamental_score`, `fundamental_score_status`,
+`fundamental_score_confidence`); narrative states quality in words. *Rationale
+(owner):* a bare score in prose "creates an apparent objective ground truth",
+after which every verifier/report comparison asks why 84.2 and not 81.7, which
+factor moved it, and whether 84.2 beats 78.4 — turning an **advisory composite
+into a quasi-official measurement** (§3.1, §5.3).
+
+### 8.1 What the decisions changed in this document
+
+| Section | Change |
+| --- | --- |
+| §0.5 | new — the decision summary and the three-stage separation |
+| §3.1 | the sub-scores are advisory, the composite is a research artifact with a status vocabulary; the five-score contract |
+| §3.2 | the per-factor schema (`sector_scope`/`supplier`/`availability`) and the `NA ≠ 0` rule |
+| §4.1 | new — the three previously-refused items are now decided, with scope; §4.2 keeps the genuine refusals |
+| §5.2 | Q1's reason field designed (a producer-owned constant, contract migration, not scheduled) |
+| §5.3 | Q5 closes the prose-ground-truth coupling; the prompt may state factors, not the score |
+| §6 Phase C | the EODHD validation universe, the four statistics, `INSUFFICIENT_CROSS_SECTION`, and the `score_evaluation_rows` floor gap |
+| §6 Phase D | the research layer and the promotion ladder |
+| §7 | verification requirements for `NA ≠ 0`, no-score-in-prose, the validation status and the wire exclusion |
+
+### 8.2 The architecture the decisions produce
+
+```
+                    RESEARCH
+                       │
+            ┌──────────▼──────────┐
+            │ Factor measurements │   IC / rank IC · decile spreads
+            │                     │   stability · redundancy
+            └──────────┬──────────┘
+                       │
+                 SCORE ENGINE
+                       │
+            ┌──────────┴──────────┐
+            │                     │
+     Deterministic             Learned
+        weights                weights
+            │                     │
+            ▼                     ▼
+     ProductionScore        ResearchScore
+            │                     │
+            ▼                     └── RESEARCH_ONLY → VALIDATED →
+     run_card advisory                 CONTRACT_MIGRATION → PRODUCTION
+            │
+            X   NOT automatically opportunity_score (Q1)
+            │
+            ▼
+     Decision / risk engine
+```
+
+**Still open, and only these** (each is a data or measurement question, not a
+design question):
+
+1. **Suppliers** for the sector-overlay metrics (bank NIM/CET1/ROTCE, REIT
+   FFO/AFFO/NAV/occupancy) — Q3 defers them.
+2. **Whether the validation panel can be built** from the EODHD bulk fetch
+   within the existing rate limits and run budget — Q4 names the universe, not
+   the fetch plan.
+3. **The measured IC table** — until Phase C produces it, every weight in §2 is
+   still a hypothesis, and the document's stance on the source's numbers does
+   not change.
 
 ---
 
