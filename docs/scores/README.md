@@ -222,7 +222,16 @@ defect with a named consequence and a pair of `file:line`s that disagree. **§3.
 is the set being fixed in this pass** (the owner's instruction); §3.2 is the rest,
 recorded with their evidence.
 
-### 3.1 Fixed in this pass
+### 3.1 Fixed in this pass (`ba50b5f` in TradingAgents, `a4f8ecf` in TradingExecution)
+
+**All six are fixed, each with a regression test.** The before/after is recorded
+where it is provable: a monotone uptrend and a monotone downtrend both returned
+`regime=neutral` before the fix and return `bull`/`bear` after; the close-only
+choppiness was `7.9e-07` (a 0-1 dispersion) against a `30.0` threshold; the
+Donchian and PSAR flags were `None` in every call; the gap fill table printed
+`0.8`/`2` as if measured and now prints `measured (280 historical common gaps)`.
+Defect 5's fix is deliberately minimal: the field is `None` until something
+measures it, rather than a `0.0` nobody computed.
 
 | # | Defect | Evidence | Consequence |
 | --: | --- | --- | --- |
@@ -252,7 +261,7 @@ recorded with their evidence.
 
 Defects 9, 10, 14, 15 and 16 are the same class as the six in §3.1 — an `NA`
 becoming a zero, or a fail-closed branch that cannot fire — and are the natural
-next pass. Defects 7, 8, 11, 12, 13, 17 and 18 are either arithmetic inside a
+next pass. **They are still open**: this pass fixed §3.1 only. Defects 7, 8, 11, 12, 13, 17 and 18 are either arithmetic inside a
 producer, or a producer/leaf pair that was never joined.
 
 ---
