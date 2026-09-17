@@ -2423,15 +2423,36 @@ def _dcf_beta(fund):
 
 
 def _dcf_cash_debt(bal):
-    """(cash, total_debt) as provider-reported floats, or None when absent.
+    """``(cash, debt, cash_basis, debt_basis)`` for the DCF EV -> equity bridge.
 
-    The caller substitutes 0.0 for the EV->equity bridge and labels it as an
-    assumption, so a missing vendor line is never rendered as a measurement.
+    Cash INCLUDING short-term investments is the right leg for a net-debt
+    statement, and both vendors in play here carry it (`cash_and_investments`:
+    yfinance 76.651bn, moomoo 76.65bn on MSFT 2026-09-16). Reading the narrower
+    `cash` row instead made the bridge basis depend on which vendor answered -
+    yfinance's cash-and-equivalents row is 20.935bn, so the same ticker printed
+    a net-cash bridge of +29.05bn or -35.89bn depending on the payload the merge
+    happened to see. The basis is returned so the printed leaf can name it: a
+    fair value whose bridge is invisible is not reproducible from itself, and
+    the swing here was $8.58/share (124.80 vs 116.22) on identical FCF and WACC.
+
+    The caller substitutes 0.0 for an absent line and labels it as an
+    assumption, so a missing vendor row is never rendered as a measurement.
     """
-    cash = _dcf_latest(bal.get("cash"))
+    wide = _dcf_latest(bal.get("cash_and_investments"))
+    narrow = _dcf_latest(bal.get("cash"))
+    if wide is not None:
+        cash, cash_basis = float(wide), "cash + ST investments"
+    elif narrow is not None:
+        cash, cash_basis = float(narrow), "cash and equivalents (no ST-investments row)"
+    else:
+        cash, cash_basis = None, "cash assumed 0"
     debt = _dcf_latest(bal.get("total_debt"))
-    return (float(cash) if cash is not None else None,
-            float(debt) if debt is not None else None)
+    return (
+        cash,
+        float(debt) if debt is not None else None,
+        cash_basis,
+        "total debt" if debt is not None else "debt assumed 0",
+    )
 
 
 def _dcf_shares(fund, bal, market_cap, ticker):
@@ -2487,6 +2508,99 @@ def _dcf_last_close(ticker):
     return closes[-1] if closes else None
 
 
+def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
+    """The inputs the DCF family shares: FCF run rate, shares, WACC, bridge.
+
+    One definition for the current-FCF DCF, the reverse DCF and the
+    capex-normalized DCF, so the three cannot disagree about the same ticker's
+    cash flow, share basis or net-debt bridge - they did on MSFT 2026-09-16,
+    where the scenario tool was called with a different share count and no
+    bridge at all. Returns ``{"error": <message>}`` when no usable series or
+    share basis exists; the message text is part of the analyst-facing contract.
+    """
+    from tradingagents.dataflows.statement_parsing import fetch_ticker
+    from tradingagents.agents.utils.value_dip_tools import _ttm_fcf_from_quarterly
+
+    # Prefer the trailing-12M FCF (sum of the newest 4 quarterly FCFs) so the
+    # DCF anchors on the CURRENT run rate, not the last fiscal year (annual
+    # FYxx is silently stale in a capex-accelerating quarter - e.g. AMZN:
+    # FY2025 annual FCF +$7.7B vs trailing-12M -$2.5B). When the quarterly
+    # series exists but is NOT positive, degrade honestly instead of silently
+    # reusing the stale positive annual value. Only when NO quarterly payload
+    # is available do we fall back to the annual series (legacy behavior).
+    q_payload = route_to_vendor("get_cashflow", ticker, "quarterly", current_date) or ""
+    ttm = _ttm_fcf_from_quarterly(q_payload) if q_payload else None
+    if ttm is not None and ttm > 0:
+        fcf = [ttm]
+    elif ttm is not None:
+        return {
+            "error": (
+                f"trailing-12M FCF is not positive ({ttm:,.0f}); use a "
+                f"normalized/forward-FCF model instead of a trailing perpetuity."
+            )
+        }
+    else:
+        cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
+        fcf = _dcf_fcf_series(cf_payload)
+        if not fcf:
+            return {"error": "no usable free cash flow series."}
+    rf = _dcf_rf(current_date)
+    # Screener-grade canonical line items (fundamentals + balance sheet +
+    # income statement + finnhub gap-fill), so market cap / shares resolve
+    # even when moomoo's statement payload has no "Market Cap" row.
+    fin = fetch_ticker(ticker, current_date) or {}
+    market_cap = _dcf_market_cap(fin)
+    beta = _dcf_beta(fin)
+    beta_assumed = beta is None
+    if beta_assumed:
+        beta = 1.0
+    cash, debt, cash_basis, debt_basis = _dcf_cash_debt(fin)
+    cash_assumed = cash is None
+    debt_assumed = debt is None
+    cash = 0.0 if cash_assumed else cash
+    debt = 0.0 if debt_assumed else debt
+    # A missing vendor line is substituted for the bridge but must be reported
+    # as an assumption, never as provider-derived data.
+    cash_debt_note = ""
+    if cash_assumed or debt_assumed:
+        missing = "/".join(
+            name for name, absent in (("cash", cash_assumed), ("debt", debt_assumed))
+            if absent
+        )
+        cash_debt_note = f"; {missing} assumed 0 (not reported)"
+    shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
+    if not shares:
+        return {"error": "no shares outstanding."}
+    return {
+        "error": None,
+        "fin": fin,
+        "fcf": fcf,
+        "fcf_latest": fcf[-1],
+        "shares": shares,
+        "shares_basis": shares_basis,
+        "rf": 0.04 if rf is None else rf,
+        "beta": beta,
+        "beta_assumed": beta_assumed,
+        "erp": erp,
+        "cash": cash,
+        "debt": debt,
+        "cash_basis": cash_basis,
+        "debt_basis": debt_basis,
+        "cash_debt_note": cash_debt_note,
+        "market_cap": market_cap,
+        "price": (market_cap / shares) if (market_cap and shares) else 0.0,
+        "net_cash": cash - debt,
+        "wacc": _dcf_wacc(0.04 if rf is None else rf, beta, erp),
+    }
+
+
+def _dcf_wacc(rf: float, beta: float, erp: float) -> float:
+    """CAPM cost of equity used as WACC (one definition, three DCF tools)."""
+    from tradingagents.strategies.dcf import wacc_from_beta
+
+    return wacc_from_beta(rf, beta, erp)
+
+
 @tool
 def get_dcf_valuation(
     ticker: Annotated[str, "ticker symbol"],
@@ -2501,59 +2615,16 @@ def get_dcf_valuation(
     except Exception as exc:  # noqa: BLE001
         return f"dcf unavailable for {ticker}: {exc}"
     try:
-        # Prefer the trailing-12M FCF (sum of the newest 4 quarterly FCFs) so
-        # the DCF anchors on the CURRENT run rate, not the last fiscal year
-        # (annual FYxx is silently stale in a capex-accelerating quarter - e.g.
-        # AMZN: FY2025 annual FCF +$7.7B vs trailing-12M -$2.5B). When the
-        # quarterly series exists but is NOT positive, DCF degrades honestly
-        # ("no usable free cash flow") instead of silently reusing the stale
-        # positive annual value. Only when NO quarterly payload is available
-        # do we fall back to the annual series (legacy behavior).
-        q_payload = route_to_vendor("get_cashflow", ticker, "quarterly", current_date) or ""
-        from tradingagents.agents.utils.value_dip_tools import _ttm_fcf_from_quarterly
-
-        ttm = _ttm_fcf_from_quarterly(q_payload) if q_payload else None
-        if ttm is not None and ttm > 0:
-            fcf = [ttm]
-        elif ttm is not None:
-            return f"dcf unavailable for {ticker}: trailing-12M FCF is not positive ({ttm:,.0f}); use a normalized/forward-FCF model instead of a trailing perpetuity."
-        else:
-            cf_payload = route_to_vendor("get_cashflow", ticker, "annual", current_date) or ""
-            fcf = _dcf_fcf_series(cf_payload)
-            if not fcf:
-                return f"dcf unavailable for {ticker}: no usable free cash flow series."
-        rf = _dcf_rf(current_date)
-        # Screener-grade canonical line items (fundamentals + balance sheet +
-        # income statement + finnhub gap-fill), so market cap / shares resolve
-        # even when moomoo's statement payload has no "Market Cap" row.
-        from tradingagents.dataflows.statement_parsing import fetch_ticker
-
-        fin = fetch_ticker(ticker, current_date) or {}
-        market_cap = _dcf_market_cap(fin)
-        beta = _dcf_beta(fin)
-        beta_assumed = beta is None
-        if beta_assumed:
-            beta = 1.0
-        cash, debt = _dcf_cash_debt(fin)
-        cash_assumed = cash is None
-        debt_assumed = debt is None
-        cash = 0.0 if cash_assumed else cash
-        debt = 0.0 if debt_assumed else debt
-        # A missing vendor line is substituted for the bridge but must be
-        # reported as an assumption, never as provider-derived data.
-        cash_debt_note = ""
-        if cash_assumed or debt_assumed:
-            missing = "/".join(
-                name for name, absent in (("cash", cash_assumed), ("debt", debt_assumed))
-                if absent
-            )
-            cash_debt_note = f"; {missing} assumed 0 (not reported)"
-        shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
-        price = market_cap / shares if (market_cap and shares) else 0.0
-        if not shares:
-            return f"dcf unavailable for {ticker}: no shares outstanding."
-        if rf is None:
-            rf = 0.04
+        ctx = _dcf_context(ticker, current_date, erp=erp)
+        if ctx.get("error"):
+            return f"dcf unavailable for {ticker}: {ctx['error']}"
+        fcf = ctx["fcf"]
+        shares, shares_basis = ctx["shares"], ctx["shares_basis"]
+        rf, beta, beta_assumed = ctx["rf"], ctx["beta"], ctx["beta_assumed"]
+        cash, debt = ctx["cash"], ctx["debt"]
+        cash_basis, debt_basis = ctx["cash_basis"], ctx["debt_basis"]
+        cash_debt_note = ctx["cash_debt_note"]
+        price = ctx["price"]
     except Exception as exc:  # noqa: BLE001
         return f"dcf unavailable for {ticker}: {exc}"
     res = compute_dcf(
@@ -2577,17 +2648,211 @@ def get_dcf_valuation(
         )
     if not res:
         return f"dcf unavailable for {ticker}: inputs not usable (no positive FCF or g>=wacc)."
+    # An assumed beta is an assumption about WACC, not a measurement, and it
+    # moves the fair value by ~5-8% per 0.1 of beta at a 5% ERP. Print the
+    # swing so the reader can see what the assumption is worth rather than
+    # treating one point value as measured (MSFT 2026-09-16 printed 124.80 on
+    # an assumed 1.00 while another tool in the same run had measured beta
+    # 1.108 -> 116.68).
+    sensitivity = ""
+    if beta_assumed:
+        legs = []
+        for alt in (0.8, 0.9, 1.1, 1.2):
+            alt_res = compute_dcf(
+                fcf, rf=rf, beta=alt, erp=erp, growth=growth, years=years,
+                shares=shares, cash=cash, debt=debt,
+            )
+            if alt_res:
+                legs.append(f"{alt:.1f}->{alt_res['price']:.2f}")
+        if legs:
+            sensitivity = " beta_sensitivity=(" + " ".join(legs) + ")"
     return (
         f"dcf {ticker}: fair_value={res['price']:.2f} "
         f"ev={res['ev']:.2f} pv_explicit={res['pv_explicit']:.2f} "
         f"pv_terminal={res['pv_tv']:.2f} terminal_share={res['terminal_share']:.0%} "
         f"wacc={res['wacc']:.2%} g={res['growth']:.2%} "
         f"rf={rf:.2%} beta={beta:.2f}"
-        f"{' (assumed, no provider beta)' if beta_assumed else ''} "
+        f"{' (assumed, no provider beta)' if beta_assumed else ''}"
+        f"{sensitivity} "
         f"erp={erp:.2%} (wacc = CAPM rf + beta*erp) "
         f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
         f"share_basis={shares_basis or 'n/a'} "
+        f"cash={cash:,.0f} debt={debt:,.0f} net_debt={cash - debt:,.0f} "
+        f"bridge=({cash_basis} - {debt_basis}) equity={res['equity_value']:,.0f} "
+        f"fair_value = equity / shares "
         f"(provider-derived; growth/ERP are analyst overrides{cash_debt_note})"
+    )
+
+
+@tool
+def get_reverse_dcf(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+    growths: Annotated[
+        str | None,
+        "optional comma-separated perpetual growth rates to invert at (fractions, e.g. '0.025,0.05'); default 2/2.5/3/4/5/7%",
+    ] = None,
+) -> str:
+    """Reverse (price-implied) DCF: the steady-state free cash flow, and the
+    perpetual growth rate, that the MARKET PRICE requires under the engine's own
+    perpetuity convention. Use it before any 'the DCF is an artifact / the model
+    cannot explain the price / the stock is mispriced' claim: it answers "what
+    must be true for this price to be right" instead of printing one point fair
+    value that the price can only contradict. Advisory; None-safe.
+    """
+    try:
+        from tradingagents.strategies.reverse_dcf import reverse_dcf
+    except Exception as exc:  # noqa: BLE001
+        return f"reverse dcf unavailable for {ticker}: {exc}"
+    try:
+        ctx = _dcf_context(ticker, current_date)
+        if ctx.get("error"):
+            return f"reverse dcf unavailable for {ticker}: {ctx['error']}"
+        growth_list = None
+        if growths:
+            growth_list = []
+            for part in str(growths).replace(";", ",").split(","):
+                part = part.strip().rstrip("%")
+                if not part:
+                    continue
+                try:
+                    value = float(part)
+                except ValueError:
+                    return f"reverse dcf unavailable for {ticker}: growths={growths!r} is not numeric."
+                growth_list.append(value / 100.0 if value >= 1.0 else value)
+            if not growth_list:
+                growth_list = None
+        r = reverse_dcf(
+            ctx["price"] or None,
+            ctx["shares"],
+            ctx["wacc"],
+            growths=growth_list or (0.02, 0.025, 0.03, 0.04, 0.05, 0.07),
+            current_fcf=ctx["fcf_latest"],
+            cash=ctx["cash"],
+            debt=ctx["debt"],
+        )
+        if not r["usable"]:
+            return f"reverse dcf unavailable for {ticker}: {r['reason'] or 'no usable row'}"
+    except Exception as exc:  # noqa: BLE001
+        return f"reverse dcf unavailable for {ticker}: {exc}"
+    rows = " ".join(
+        f"g={row['g']:.2%}->fcf {row['implied_fcf'] / 1e9:,.1f}B" for row in r["rows"]
+    )
+    cross = (
+        f"{r['crossing_g']:.2%}" if r["crossing_g"] is not None else "n/a (no crossing below WACC)"
+    )
+    return (
+        f"reverse dcf {ticker}: price={r['price']:,.2f} wacc={r['wacc']:.2%} "
+        f"net_cash={r['net_cash']:,.0f} current_fcf={r['current_fcf']:,.0f} "
+        f"implied_steady_state_fcf=[{rows}] "
+        f"implied_growth_for_current_fcf={cross} "
+        f"(basis: {r['basis']})"
+    )
+
+
+@tool
+def get_normalized_fcf_dcf(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+    revenue_growth: Annotated[
+        float | None, "revenue CAGR as a fraction; omit to use the provider's revenue YoY"
+    ] = None,
+    defensive_capex_share: Annotated[
+        float | None,
+        "share of today's EXCESS capex intensity that is permanently required (0..1); 1.0 = no normalization",
+    ] = None,
+    years: Annotated[int, "explicit forecast years (capex fades over them), default 5"] = 5,
+) -> str:
+    """Capex-normalized FCF DCF: revenue-driven, with capex intensity (capex as
+    a share of revenue) fading from today's buildout level toward depreciation
+    (steady state: capex tracks D&A), plus the maintenance-capex floor in the
+    same leaf. Use it for a company whose capital spending is temporarily
+    elevated (AI/data-center buildouts) before quoting a trailing-FCF fair
+    value: a current-FCF perpetuity assumes today's capex intensity is
+    permanent, which is the assumption the price is actually disputing. Advisory;
+    None-safe.
+    """
+    try:
+        from tradingagents.strategies.normalized_fcf import (
+            maintenance_fcf,
+            normalized_fcf_dcf,
+        )
+        from tradingagents.strategies.dcf import terminal_value_gordon
+    except Exception as exc:  # noqa: BLE001
+        return f"normalized fcf dcf unavailable for {ticker}: {exc}"
+    try:
+        ctx = _dcf_context(ticker, current_date)
+        if ctx.get("error"):
+            return f"normalized fcf dcf unavailable for {ticker}: {ctx['error']}"
+        fin = ctx["fin"]
+        revenue = _dcf_latest(fin.get("revenue"))
+        ocf = _dcf_latest(fin.get("operating_cashflow"))
+        capex = _dcf_latest(fin.get("capex"))
+        dep = _dcf_latest(fin.get("depreciation"))
+        missing = [
+            name
+            for name, value in (("revenue", revenue), ("operating_cashflow", ocf),
+                                ("capex", capex), ("depreciation", dep))
+            if value is None
+        ]
+        if missing:
+            return (
+                f"normalized fcf dcf unavailable for {ticker}: the canonical merge "
+                f"carries no {'/'.join(missing)} row; the capex-fade model needs all "
+                f"four legs (revenue, ocf, capex, D&A)."
+            )
+        # Both legs are modelled as magnitudes: vendors sign capex as an outflow
+        # (moomoo "Net PPE Purchase and Sale" -115.95bn, yfinance "Capital
+        # Expenditure" -15bn) and D&A as an expense. The raw signs are printed.
+        capex_raw, dep_raw = float(capex), float(dep)
+        capex_arg, dep_arg = abs(capex_raw), abs(dep_raw)
+        growth = revenue_growth
+        growth_basis = "analyst override"
+        if growth is None:
+            yoy = _dcf_latest(fin.get("revenue_yoy"))
+            if yoy is not None:
+                growth, growth_basis = float(yoy), "provider revenue YoY"
+            else:
+                growth, growth_basis = 0.05, "assumed 5% (no provider YoY)"
+        d = normalized_fcf_dcf(
+            float(revenue), float(ocf), capex_arg, dep_arg,
+            ctx["shares"], ctx["wacc"], float(growth),
+            years=years,
+            terminal_growth=0.025,
+            cash=ctx["cash"],
+            debt=ctx["debt"],
+            defensive_capex_share=defensive_capex_share,
+        )
+        if not d["usable"]:
+            return f"normalized fcf dcf unavailable for {ticker}: {d['reason']}"
+        maint = d["maintenance"]
+        floor = None
+        m_fcf = maint.get("maintenance_fcf")
+        if m_fcf and d["shares"]:
+            tv = terminal_value_gordon(m_fcf, d["wacc"], 0.025)
+            if tv != float("inf"):
+                floor = (tv + ctx["cash"] - ctx["debt"]) / d["shares"]
+    except Exception as exc:  # noqa: BLE001
+        return f"normalized fcf dcf unavailable for {ticker}: {exc}"
+    a = d["assumptions"]
+    floor_s = f"{floor:,.2f}" if floor is not None else "n/a"
+    return (
+        f"normalized fcf dcf {ticker}: fair_value={d['fair_value']:.2f} "
+        f"(revenue={float(revenue):,.0f} revenue_growth={float(growth):.2%} "
+        f"({growth_basis}) cash_margin={a['margin']:.2%} "
+        f"capex/revenue={a['initial_capex_ratio']:.2%}->{a['terminal_capex_ratio_effective']:.2%} "
+        f"over {a['capex_fade_years']}y terminal_growth={a['terminal_growth']:.2%} "
+        f"defensive_capex_share={a['defensive_capex_share']:.2f} wacc={d['wacc']:.2%} "
+        f"years={a['years']}) "
+        f"capex_raw={capex_raw:,.0f} depreciation_raw={dep_raw:,.0f} "
+        f"pv_explicit={d['pv_explicit']:.2f} pv_terminal={d['pv_terminal']:.2f} "
+        f"terminal_share={d['terminal_share']:.0%} shares={d['shares']:,.1f} "
+        f"bridge=({ctx['cash_basis']} - {ctx['debt_basis']}) net_cash={ctx['net_cash']:,.0f} "
+        f"maintenance_fcf={m_fcf if m_fcf is None else format(m_fcf, ',.0f')} "
+        f"(ocf - D&A; reported_fcf={maint.get('reported_fcf') if maint.get('reported_fcf') is None else format(maint['reported_fcf'], ',.0f')} "
+        f"growth_capex={maint.get('growth_capex') if maint.get('growth_capex') is None else format(maint['growth_capex'], ',.0f')}) "
+        f"maintenance_basis_fair_value={floor_s} "
+        f"(provider-derived; growth/ERP are analyst overrides{ctx['cash_debt_note']})"
     )
 
 

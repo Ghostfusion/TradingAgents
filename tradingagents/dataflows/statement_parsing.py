@@ -105,6 +105,22 @@ _ROW_ALIASES = {
     "interest_expense": ["interest expense", "interest paid"],
     "tax_expense": ["tax provision", "income tax", "tax expense"],
     "cash": ["cash and cash equivalents", "cash & equivalents", "cash & cash"],
+    # Cash INCLUDING liquid short-term investments - the basis a net-debt or
+    # net-cash statement needs (both vendors in play here carry it under a
+    # different label: yfinance "Cash Cash Equivalents And Short Term
+    # Investments" 76.651bn, moomoo "Cash and Cash Equivalents & Short-Term
+    # Investments" 76.65bn), where `cash` alone binds yfinance's 20.935bn
+    # cash-and-equivalents row. Reading `cash` for the DCF bridge made the
+    # bridge basis depend on which vendor answered (MSFT 2026-09-16: net cash
+    # +29.05bn in the printed leaf vs +19.83bn on the balance sheet's own
+    # total debt).
+    "cash_and_investments": [
+        "cash and cash equivalents & short term investments",
+        "cash cash equivalents and short term investments",
+        "cash and cash equivalents and short term investments",
+        "cash and short term investments",
+        "cash equivalents and short term investments",
+    ],
     "total_debt": [
         "total debt",
         "total borrowings",
@@ -112,6 +128,15 @@ _ROW_ALIASES = {
         "long term borrowings",
         "interest-bearing liabilities",
         "total liabilities",  # last-resort fallback only
+    ],
+    # Only read to complete `total_debt` when the payload carries no total row
+    # (see `_total_debt_match`).
+    "short_term_debt": [
+        "short-term debt and capital lease obligation",
+        "current debt and capital lease obligation",
+        "short-term debt",
+        "current debt",
+        "short-term borrowings",
     ],
     "market_cap": ["market cap", "market capitalization", "marketcapitalization"],
     "beta": ["beta"],
@@ -163,7 +188,7 @@ _ROW_ALIASES = {
     "dividends_paid": ["cash dividends paid", "dividends paid"],
     "share_buybacks": ["repurchase of common", "share repurchase", "buyback"],
     "debt_repayment": ["repayment of debt", "debt repayment"],
-    "capex": ["capital expenditure", "purchase of property"],
+    "capex": ["capital expenditure", "purchase of property", "net ppe purchase"],
 }
 
 
@@ -468,12 +493,42 @@ def _detect_currency(payload: str) -> str:
     return ""
 
 
+def _total_debt_match(rows: dict):
+    """Total borrowings: a dedicated total row, else long-term + short-term legs.
+
+    The legs exist because a payload can carry only the aggregates - moomoo's
+    balance sheet has "Long Term Debt and Capital Lease Obligation" and
+    "Short-Term Debt and Capital Lease Obligation" and NO total row, so the
+    alias scan bound ``total_debt`` to the long-term leg alone. The DCF bridge
+    then charged 47.60bn of debt against 56.83bn, printing $1.22/share too much
+    fair value and +29.05bn of net cash against the balance sheet's own
+    +19.825bn (MSFT 2026-09-16). The sum reproduces the vendor's own Total Debt
+    exactly: 47,599 + 9,227 = 56,826.
+    """
+    match = _match_row(rows, "total_debt")
+    if match is not None:
+        norm = _norm(match[0])
+        if "long term" not in norm and "non current" not in norm:
+            return match
+    short = _match_row(rows, "short_term_debt")
+    if match is not None and short is not None:
+        return (f"{match[0]} + {short[0]}", match[1] + short[1])
+    return match
+
+
+def _match_canonical(rows: dict, key: str):
+    """``_match_row`` plus the derivations no single row carries."""
+    if key == "total_debt":
+        return _total_debt_match(rows)
+    return _match_row(rows, key)
+
+
 def _flat_canonical(rows: dict) -> dict:
     """Canonical line items from a flat single-period ``{label: value}`` row
     dict (yfinance CSV, alpha_vantage JSON, fundamentals text, Finnhub)."""
     canonical = {}
     for key in _ROW_ALIASES:
-        match = _match_row(rows, key)
+        match = _match_canonical(rows, key)
         if match is not None:
             canonical[key] = match[1]
     return canonical
@@ -499,7 +554,7 @@ def _markdown_canonical(text: str) -> dict:
     for key in _ROW_ALIASES:
         best = None  # (year, label, value, table_index)
         for idx, (period, rows) in enumerate(tables):
-            m = _match_row(rows, key)
+            m = _match_canonical(rows, key)
             if m is None:
                 continue
             year = _period_year(period)
@@ -514,6 +569,14 @@ def _markdown_canonical(text: str) -> dict:
             if jdx == idx:
                 continue
             v = rows.get(label)
+            if v is None:
+                # The label is synthesized for keys no single row carries
+                # (`total_debt` summed from its long/short-term legs), so an
+                # exact-label lookup misses it in every other table. Re-match
+                # the key there instead of dropping the prior period: the
+                # Piotroski deleveraging and Beneish LVGI legs both read it.
+                m2 = _match_canonical(rows, key)
+                v = m2[1] if m2 is not None else None
             if v is None:
                 continue
             y2 = _period_year(period)
@@ -1038,7 +1101,7 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
 
         bf = get_basic_financials_finnhub(ticker, curr_date)
         bf_canon = _canonicalize(bf)
-        for k in ("eps_yoy", "revenue_yoy", "roe", "market_cap"):
+        for k in ("eps_yoy", "revenue_yoy", "roe", "market_cap", "beta"):
             if k not in canonical and bf_canon.get(k) is not None:
                 canonical[k] = bf_canon.get(k)
                 # Finnhub's own payload period, classified the same way as the

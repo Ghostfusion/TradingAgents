@@ -128,6 +128,14 @@ def _patch_dcf_vendors(monkeypatch, side):
     monkeypatch.setattr(T, "route_to_vendor", side)
     monkeypatch.setattr(_sp, "route_to_vendor", side)
     monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": [200.0, 205.0, 210.0]})
+    # `fetch_ticker` gap-fills from Finnhub directly (not through
+    # route_to_vendor), and Finnhub's basic financials carry a real `beta`.
+    # Pin that leg so the beta tests below assert WHICH source supplied the
+    # number instead of depending on whether the live vendor answered.
+    monkeypatch.setattr(
+        "tradingagents.dataflows.finnhub.get_basic_financials_finnhub",
+        lambda *a, **k: "",
+    )
 
 
 def _dcf_side(fundamentals: str, balance: str = "Cash Cash Equivalents: 60000000000\nTotal Debt: 110000000000"):
@@ -193,3 +201,96 @@ def test_beat_streak_identity_parses_word_above_six():
     assert len(claims) == 1
     assert claims[0].status == "INTERNAL_CONFLICT"
     assert "3 consecutive" in claims[0].claim
+
+
+# --------------------------------------------------------------------------
+# (d) The DCF leaf must carry its own EV -> equity bridge, and an assumed
+#     beta must show what it is worth.
+# --------------------------------------------------------------------------
+
+
+def _leaf_floats(out: str) -> dict:
+    import re as _re
+
+    vals = {}
+    for key in ("fair_value", "equity", "shares", "cash", "debt", "net_debt", "ev"):
+        m = _re.search(rf"\b{key}=([-\d,.]+)", out)
+        if m:
+            vals[key] = float(m.group(1).replace(",", ""))
+    return vals
+
+
+def test_dcf_leaf_carries_the_bridge_it_used(monkeypatch):
+    """A fair value with an invisible bridge is not reproducible from itself.
+    MSFT 2026-09-16 printed 124.80 while the same FCF at an equivalent WACC
+    gives 123.57 (cash + ST investments less TOTAL debt) or 116.22 (cash and
+    equivalents less total debt): an $8.58/share swing that no reader could
+    see, because `cash`, `debt` and `equity` were not in the leaf."""
+    _patch_dcf_vendors(
+        monkeypatch,
+        _dcf_side(
+            "Beta: 1.35\nMarket Cap: 3000000000000",
+            balance=(
+                "Cash and Cash Equivalents: 20935000000\n"
+                "Cash Cash Equivalents And Short Term Investments: 76651000000\n"
+                "Total Debt: 56826000000\n"
+            ),
+        ),
+    )
+
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    # Cash INCLUDING short-term investments is the leg a net-debt statement
+    # needs, and it must be named.
+    assert "cash=76,651,000,000" in out
+    assert "debt=56,826,000,000" in out
+    assert "net_debt=19,825,000,000" in out
+    assert "bridge=(cash + ST investments - total debt)" in out
+    # ...and the three printed numbers must reproduce the printed fair value.
+    v = _leaf_floats(out)
+    assert abs(v["equity"] / v["shares"] - v["fair_value"]) < 0.01
+    assert abs((v["cash"] - v["debt"]) - v["net_debt"]) < 1.0
+
+
+def test_dcf_falls_back_to_the_narrow_cash_row_and_names_that_basis(monkeypatch):
+    _patch_dcf_vendors(
+        monkeypatch,
+        _dcf_side(
+            "Beta: 1.35\nMarket Cap: 3000000000000",
+            balance="Cash and Cash Equivalents: 60000000000\nTotal Debt: 110000000000\n",
+        ),
+    )
+
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "cash=60,000,000,000" in out
+    assert "bridge=(cash and equivalents (no ST-investments row) - total debt)" in out
+
+
+def test_dcf_shows_what_an_assumed_beta_is_worth(monkeypatch):
+    """The assumed-beta path is a WACC assumption, and it moved MSFT's fair
+    value 124.80 -> 116.68 against the provider beta the same run already had
+    (1.108). Print the sensitivity instead of one point value."""
+    _patch_dcf_vendors(monkeypatch, _dcf_side("Market Cap: 3000000000000"))
+
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "beta=1.00 (assumed, no provider beta)" in out
+    assert "beta_sensitivity=(0.8->" in out
+    v = _leaf_floats(out)
+    # Every printed leg is a real fair value, and the sensitivity straddles it.
+    legs = dict(
+        (float(a), float(b))
+        for a, b in (pair.split("->") for pair in
+                     out.split("beta_sensitivity=(")[1].split(")")[0].split())
+    )
+    assert legs[1.1] < v["fair_value"] < legs[0.8]
+
+
+def test_dcf_with_a_provider_beta_prints_no_sensitivity(monkeypatch):
+    _patch_dcf_vendors(monkeypatch, _dcf_side("Beta: 1.35\nMarket Cap: 3000000000000"))
+
+    out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "beta=1.35" in out
+    assert "beta_sensitivity" not in out

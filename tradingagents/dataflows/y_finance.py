@@ -481,49 +481,145 @@ _STATEMENT_UNITS_NOTE = (
 )
 
 
-def _net_debt_note(csv_string: str, ticker: str) -> str:
-    """Cross-check a yfinance balance-sheet CSV's ``Net Debt`` row against its
-    own ``Total Debt`` and ``Cash (incl. STI)`` rows, and return a correction
-    note when the sign is internally inconsistent.
+#: The standard ways a vendor can compute a ``Net Debt`` row, as
+#: ``(debt rows to add, cash row, description)``. A vendor row is only
+#: unexplained when NO basis reproduces it: excluding short-term investments -
+#: or capital-lease obligations - from net debt is a convention, not a sign
+#: error, and two vendors can disagree in sign without either being wrong
+#: (MSFT 2026-09-16: yfinance's row is 56,826 - 20,935 = 19,359 on financial
+#: debt excluding leases less cash, while cash + ST investments less total debt
+#: including leases is +19,825 NET CASH - the two numbers differ by ~0.5bn in
+#: magnitude and by the whole sign, so the old note called the vendor row
+#: mis-signed and the report repeated that claim).
+_NET_DEBT_BASES = (
+    (
+        ("Total Debt",),
+        "Cash And Cash Equivalents",
+        "total debt less cash and equivalents",
+    ),
+    (
+        ("Total Debt",),
+        "Cash Cash Equivalents And Short Term Investments",
+        "total debt less cash and ST investments",
+    ),
+    (
+        ("Long Term Debt And Capital Lease Obligation", "Current Debt And Capital Lease Obligation"),
+        "Cash And Cash Equivalents",
+        "total debt including lease obligations, less cash and equivalents",
+    ),
+    (
+        ("Long Term Debt And Capital Lease Obligation", "Current Debt And Capital Lease Obligation"),
+        "Cash Cash Equivalents And Short Term Investments",
+        "total debt including lease obligations, less cash and ST investments",
+    ),
+    (
+        ("Long Term Debt", "Current Debt"),
+        "Cash And Cash Equivalents",
+        "financial debt excluding capital-lease obligations, less cash and equivalents",
+    ),
+    (
+        ("Long Term Debt", "Current Debt"),
+        "Cash Cash Equivalents And Short Term Investments",
+        "financial debt excluding capital-lease obligations, less cash and ST investments",
+    ),
+)
 
-    yfinance's ``Net Debt`` row often uses cash-only (or excludes short-term
-    investments), so a company that is genuinely NET CASH (cash+STI > total
-    debt) can be reported with a positive "Net Debt" — the INTU 2026-09-08
-    case (vendor Net Debt 1.48B while its own cash+STI 8.44B > debt 6.9B).
-    Advisory: returns "" when the rows aren't all present or the sign is
-    consistent; never raises.
 
+def _row_values(csv_string: str) -> dict[str, float]:
+    """``{exact row label: newest non-empty value}`` for a vendor CSV payload.
+
+    Exact labels on purpose: substring matching cannot separate yfinance's
+    ``Long Term Debt`` from ``Long Term Debt And Capital Lease Obligation``,
+    and the wider row is listed first (so a substring reader silently adds
+    16.5bn of lease obligations to a debt leg, or drops them from the cash
+    cross-check).
     """
+    out: dict[str, float] = {}
+    for line in csv_string.splitlines():
+        if line.startswith("#"):
+            continue
+        cells = line.split(",")
+        label = cells[0].strip()
+        if not label or label.startswith("-"):
+            continue
+        for cell in cells[1:]:
+            cell = cell.strip()
+            if not cell:
+                continue
+            try:
+                out[label.lower()] = float(cell)
+            except ValueError:
+                pass
+            break
+    return out
 
-    def _latest_num(label_frag: str) -> float | None:
-        for ln in csv_string.splitlines():
-            if not ln.startswith("#") and label_frag in ln:
-                cells = ln.split(",")
-                for c in cells[1:]:
-                    c = c.strip()
-                    if c:
-                        try:
-                            return float(c)
-                        except ValueError:
-                            continue
-                break
-        return None
 
-    nd = _latest_num("Net Debt")
-    debt = _latest_num("Total Debt")
-    cash_sti = _latest_num("Cash Cash Equivalents And Short Term Investments")
-    if None in (nd, debt, cash_sti):
+def _net_debt_note(csv_string: str, ticker: str) -> str:
+    """Disclose the BASIS of a yfinance balance-sheet ``Net Debt`` row.
+
+    Never raises; returns "" when the payload cannot disagree with itself.
+
+    The old revision fired whenever cash + ST investments exceeded total debt
+    and told the model the vendor row "is net-CASH ... do not quote it" - a
+    definitional difference relabelled as a vendor error (MSFT 2026-09-16: the
+    vendor row is consistent with financial debt excluding capital-lease
+    obligations less cash and equivalents; the report then wrote that the row
+    "is mis-signed", a claim about the vendor's formula that was never traced).
+    Now the row is reconciled against ``_NET_DEBT_BASES`` first: a row that
+    some standard basis reproduces is DISCLOSED (naming that basis, the widest
+    basis, and its own figure), and only a row that no basis can reproduce is
+    reported as unreproducible - still without asserting what the vendor meant.
+    """
+    rows = _row_values(csv_string)
+    nd = rows.get("net debt")
+    debt_sti = rows.get("total debt")
+    cash_sti = rows.get("cash cash equivalents and short term investments")
+    if None in (nd, debt_sti, cash_sti):
         return ""
-    if nd is None or debt is None or cash_sti is None:
+    wide_net = cash_sti - debt_sti
+    tolerance = 0.01 * abs(nd) + 1.0
+
+    def _basis_value(debt_labels, cash_label) -> float | None:
+        legs = [rows.get(label.lower()) for label in debt_labels]
+        cash = rows.get(cash_label.lower())
+        if cash is None or any(leg is None for leg in legs):
+            return None
+        return sum(legs) - cash
+
+    matched: tuple[str, float] | None = None
+    for debt_labels, cash_label, description in _NET_DEBT_BASES:
+        value = _basis_value(debt_labels, cash_label)
+        if value is not None and abs(value - nd) <= tolerance:
+            matched = (description, value)
+            break
+
+    if wide_net <= 0:
+        # The widest basis agrees this is net debt. Silence, as before: a
+        # magnitude difference there is a definition (AMZN's row reconciles
+        # against financial debt EXCLUDING its large operating-lease
+        # liabilities, which this payload does not carry as a separable row),
+        # and a note would only teach the model to distrust a row whose sign is
+        # right.
         return ""
-    if cash_sti <= debt:
-        return ""  # genuinely net debt; vendor sign fine
-    net_cash = cash_sti - debt
+    if matched is not None:
+        description, value = matched
+        return (
+            f"\n# NOTE: the vendor 'Net Debt' row ({nd:,.2f}) is consistent with "
+            f"the narrower basis it uses - {description} ({value:,.2f}). On the "
+            f"widest basis (cash + ST investments {cash_sti:,.2f} minus total debt "
+            f"{debt_sti:,.2f}) the company is NET CASH by {wide_net:,.2f}. Quote "
+            f"one basis, name it, and do not call the vendor row a sign error: "
+            f"the difference is the definition, not the arithmetic."
+        )
     return (
-        f"\n# NOTE: vendor 'Net Debt' ({nd:,.2f}) is net-CASH when cross-checked: "
-        f"cash + ST investments ({cash_sti:,.2f}) exceed total debt ({debt:,.2f}) "
-        f"by {net_cash:,.2f}. Treat this company as NET CASH; do not quote the "
-        f"vendor Net Debt row as a positive debt position."
+        f"\n# NOTE: the vendor 'Net Debt' row ({nd:,.2f}) cannot be reproduced "
+        f"from this payload's own debt and cash rows (the rows that would "
+        f"explain it - financial debt excluding lease obligations, or a "
+        f"cash-only definition - are not all carried here). Cash + ST "
+        f"investments ({cash_sti:,.2f}) exceed total debt ({debt_sti:,.2f}), so "
+        f"on the widest basis the company is NET CASH by {wide_net:,.2f}. State "
+        f"the basis you quote; do not present the vendor row as the company's "
+        f"own net position."
     )
 
 

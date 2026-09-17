@@ -939,6 +939,131 @@ def test_get_dcf_valuation_positive_ttm_preferred(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# Reverse DCF + capex-normalized FCF DCF: the values a price REQUIRES, and a
+# capex-faded basis, instead of one trailing-FCF point value.
+# --------------------------------------------------------------------------
+_CF_TTM_Q = """# Cash Flow data for AAPL (quarterly)
+
+,2026-06-30,2026-03-31,2025-12-31,2025-09-30
+Operating Cash Flow,30000000000,28000000000,26000000000,24000000000
+Capital Expenditure,-12000000000,-11000000000,-10000000000,-9000000000
+Free Cash Flow,18000000000,17000000000,16000000000,15000000000
+"""
+
+
+def _fade_side(method, *a, **k):
+    """The canonical legs the capex-fade model needs, in one payload."""
+    return {
+        "get_cashflow": _CF_TTM_Q,
+        "get_fundamentals": (
+            "Total Revenue: 331800000000\nRevenue YoY: 0.178\n"
+            "Operating Cash Flow: 182900000000\nCapital Expenditure: 115900000000\n"
+            "Depreciation & Amortization: 43450000000\n"
+            "Beta: 1.1\nMarket Cap: 3000000000000"
+        ),
+        "get_balance_sheet": (
+            "Cash Cash Equivalents And Short Term Investments: 76650000000\n"
+            "Total Debt: 56830000000"
+        ),
+        "get_macro_indicators": "## FRED 10Y\nLatest: 4.2",
+        "get_stock_data": "",
+    }.get(method, "")
+
+
+def test_reverse_dcf_reports_what_the_price_requires(monkeypatch):
+    """The instrument the report was missing: it turns 'the DCF is an artifact'
+    into 'the price implies X'. The implied FCF must fall as the growth it is
+    allowed to assume rises - that is the whole arithmetic."""
+    _patch_dcf_vendors(monkeypatch, _fade_side)
+
+    out = T.get_reverse_dcf.invoke(
+        {"ticker": "AAPL", "current_date": "2026-08-20", "growths": "0.025,0.05"}
+    )
+
+    assert "reverse dcf AAPL" in out
+    assert "implied_steady_state_fcf=[" in out
+    assert "implied_growth_for_current_fcf=" in out
+    rows = {
+        float(g) / 100.0: float(v.replace(",", ""))
+        for g, v in re.findall(r"g=([\d.]+)%->fcf ([\d,.]+)B", out)
+    }
+    assert rows[0.025] > rows[0.05] > 0
+
+
+def test_reverse_dcf_names_the_growth_rates_it_inverted(monkeypatch):
+    """A caller-supplied grid is echoed, and a percent-style grid means percent
+    (2.5 is 2.5%, not 250%) - the analyst reads these numbers back."""
+    _patch_dcf_vendors(monkeypatch, _fade_side)
+
+    out = T.get_reverse_dcf.invoke(
+        {"ticker": "AAPL", "current_date": "2026-08-20", "growths": "2.5, 4"}
+    )
+
+    assert "g=2.50%->fcf" in out and "g=4.00%->fcf" in out
+    assert "g=5.00%" not in out
+
+
+def test_reverse_dcf_rejects_a_non_numeric_grid(monkeypatch):
+    _patch_dcf_vendors(monkeypatch, _fade_side)
+
+    out = T.get_reverse_dcf.invoke(
+        {"ticker": "AAPL", "current_date": "2026-08-20", "growths": "low,high"}
+    )
+
+    assert "reverse dcf unavailable" in out and "not numeric" in out
+
+
+def test_normalized_fcf_dcf_prices_the_capex_fade_above_the_run_rate(monkeypatch):
+    """On a name whose capex is temporarily elevated the fade must price ABOVE
+    the trailing-FCF perpetuity (that is the assumption the price disputes), and
+    the maintenance floor sits between them - the floor is a floor at zero
+    revenue growth, so the ordering is run-rate < floor < fade."""
+    _patch_dcf_vendors(monkeypatch, _fade_side)
+
+    fade_out = T.get_normalized_fcf_dcf.invoke(
+        {"ticker": "AAPL", "current_date": "2026-08-20", "revenue_growth": 0.10}
+    )
+    run_out = T.get_dcf_valuation.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "normalized fcf dcf AAPL" in fade_out
+    assert "capex/revenue=34.93%->13.10%" in fade_out  # fade endpoint = D&A / revenue
+    assert "maintenance_fcf=139,450,000,000" in fade_out
+    run_fv = float(run_out.split("fair_value=")[1].split()[0])
+    fade_fv = float(fade_out.split("fair_value=")[1].split()[0])
+    floor_fv = float(fade_out.split("maintenance_basis_fair_value=")[1].split()[0].replace(",", ""))
+    assert run_fv < floor_fv < fade_fv
+
+
+def test_normalized_fcf_dcf_defaults_revenue_growth_to_the_provider_yoy(monkeypatch):
+    _patch_dcf_vendors(monkeypatch, _fade_side)
+
+    out = T.get_normalized_fcf_dcf.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "revenue_growth=17.80% (provider revenue YoY)" in out
+
+
+def test_normalized_fcf_dcf_names_a_missing_capex_leg(monkeypatch):
+    """The fade needs all four legs; a partial merge must say which one is
+    missing rather than silently modelling a capex-free company."""
+
+    def side(method, *a, **k):
+        payload = _fade_side(method, *a, **k)
+        if method == "get_fundamentals":
+            return "\n".join(
+                line for line in payload.splitlines()
+                if not line.startswith("Capital Expenditure")
+            )
+        return payload
+
+    _patch_dcf_vendors(monkeypatch, side)
+
+    out = T.get_normalized_fcf_dcf.invoke({"ticker": "AAPL", "current_date": "2026-08-20"})
+
+    assert "normalized fcf dcf unavailable" in out
+    assert "capex" in out
+
+
+# --------------------------------------------------------------------------
 # New decision-grounding tools (sector / quality / safety / composite / tail)
 # --------------------------------------------------------------------------
 

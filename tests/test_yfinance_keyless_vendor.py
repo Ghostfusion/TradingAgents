@@ -193,19 +193,64 @@ _NVDA_QUARTERLY_BALANCE_CSV = (
 )
 
 
-class TestNetDebtSignNote(unittest.TestCase):
-    """D7 (NVDA 2026-09-12): the delivered balance-sheet payload carried the
-    vendor's own ``Net Debt`` row (10,923,000,000) even though that payload's
-    cash + ST investments (62,469,000,000) exceed total debt (38,351,000,000).
-    The correction note existed for exactly this case and had no test."""
+_MSFT_QUARTERLY_BALANCE_CSV = (
+    # Verbatim 2026-06-30 column of the yfinance payload the 2026-09-16 MSFT run
+    # delivered: the vendor "Net Debt" row reconciles against financial debt
+    # EXCLUDING capital-lease obligations less cash and equivalents
+    # (31,067 + 9,227 - 20,935 = 19,359), so the old note's "is net-CASH ...
+    # do not quote it" was a false vendor-error claim, and the report repeated
+    # it as "the vendor 'Net Debt' row is mis-signed".
+    ",2026-06-30,2026-03-31\n"
+    "Net Debt,19359000000.0,8157000000.0\n"
+    "Total Debt,56826000000.0,56965000000.0\n"
+    "Cash Cash Equivalents And Short Term Investments,76651000000.0,78228000000.0\n"
+    "Cash And Cash Equivalents,20935000000.0,32105000000.0\n"
+    "Long Term Debt And Capital Lease Obligation,47599000000.0,48126000000.0\n"
+    "Current Debt And Capital Lease Obligation,9227000000.0,8839000000.0\n"
+    "Long Term Debt,31067000000.0,31423000000.0\n"
+    "Current Debt,9227000000.0,8839000000.0\n"
+)
 
-    def test_fires_on_the_real_nvda_quarterly_payload(self):
-        note = y_finance._net_debt_note(_NVDA_QUARTERLY_BALANCE_CSV, "NVDA")
+
+class TestNetDebtSignNote(unittest.TestCase):
+    """D7 (NVDA 2026-09-12) + MSFT 2026-09-16.
+
+    The note disclosed a BASIS question as a vendor error: it fired whenever
+    cash + ST investments exceeded total debt and told the model the vendor row
+    "is net-CASH ... do not quote it". Both payloads below reconcile under a
+    narrower, entirely standard basis (cash and equivalents only, and/or
+    financial debt excluding lease obligations), so the note must now name the
+    basis and the widest-basis figure instead of asserting what the vendor
+    meant."""
+
+    def test_msft_row_is_disclosed_as_a_basis_not_an_error(self):
+        note = y_finance._net_debt_note(_MSFT_QUARTERLY_BALANCE_CSV, "MSFT")
+        self.assertIn("19,359,000,000.00", note)
+        # The basis that reproduces the row is named, with its arithmetic.
+        self.assertIn("excluding capital-lease obligations", note)
+        self.assertIn("19,359,000,000.00", note)
+        # ...and the widest basis is stated with its own direction.
         self.assertIn("NET CASH", note)
+        self.assertIn("76,651,000,000.00", note)
+        self.assertIn("56,826,000,000.00", note)
+        self.assertIn("19,825,000,000.00", note)
+        # The instructions that made the report write "mis-signed" are gone,
+        # and the note now says the opposite in as many words.
+        self.assertIn("do not call the vendor row a sign error", note)
+        self.assertNotIn("mis-signed", note)
+        self.assertNotIn("Treat this company as NET CASH", note)
+        self.assertNotIn("do not quote", note)
+
+    def test_nvda_row_without_the_component_rows_is_neutral_not_an_accusation(self):
+        # This fixture carries only the three rows the old check read, so the
+        # basis that would explain the row is not available here: the note must
+        # say so and still not claim the vendor is wrong.
+        note = y_finance._net_debt_note(_NVDA_QUARTERLY_BALANCE_CSV, "NVDA")
         self.assertIn("10,923,000,000.00", note)
-        self.assertIn("62,469,000,000.00", note)
-        self.assertIn("38,351,000,000.00", note)
-        self.assertIn("do not quote the vendor Net Debt row", note)
+        self.assertIn("cannot be reproduced", note)
+        self.assertIn("NET CASH", note)
+        self.assertIn("24,118,000,000.00", note)  # 62,469 - 38,351
+        self.assertNotIn("Treat this company as NET CASH", note)
 
     def test_silent_when_the_company_is_genuinely_net_debt(self):
         payload = (
@@ -216,8 +261,22 @@ class TestNetDebtSignNote(unittest.TestCase):
         )
         self.assertEqual(y_finance._net_debt_note(payload, "TST"), "")
 
+    def test_silent_when_the_widest_basis_agrees_the_sign(self):
+        # AMZN 2026-09-14 shape: the row does not reproduce from the carried
+        # rows (its basis excludes operating-lease liabilities) but the widest
+        # basis agrees the company is in net debt - a note would only teach the
+        # model to distrust a row whose sign is right.
+        payload = (
+            ",2026-06-30\n"
+            "Net Debt,17258000000.0\n"
+            "Total Debt,209888000000.0\n"
+            "Cash Cash Equivalents And Short Term Investments,143089000000.0\n"
+            "Cash And Cash Equivalents,101816000000.0\n"
+        )
+        self.assertEqual(y_finance._net_debt_note(payload, "AMZN"), "")
+
     def test_silent_when_any_row_is_absent(self):
-        rows = _NVDA_QUARTERLY_BALANCE_CSV.splitlines()
+        rows = _MSFT_QUARTERLY_BALANCE_CSV.splitlines()
         for dropped in (
             "Net Debt",
             "Total Debt",
@@ -225,7 +284,18 @@ class TestNetDebtSignNote(unittest.TestCase):
         ):
             with self.subTest(dropped=dropped):
                 kept = [ln for ln in rows if not ln.startswith(f"{dropped},")]
-                self.assertEqual(y_finance._net_debt_note("\n".join(kept) + "\n", "NVDA"), "")
+                self.assertEqual(y_finance._net_debt_note("\n".join(kept) + "\n", "MSFT"), "")
+
+    def test_exact_labels_keep_the_lease_rows_apart(self):
+        """Substring matching cannot separate `Long Term Debt` from `Long Term
+        Debt And Capital Lease Obligation` - and the wider row is listed FIRST,
+        so a fragment reader adds 16.5bn of leases to the narrow leg and then
+        fails to reproduce a row that is exactly reproducible."""
+        rows = y_finance._row_values(_MSFT_QUARTERLY_BALANCE_CSV)
+        self.assertEqual(rows["long term debt"], 31_067_000_000.0)
+        self.assertEqual(
+            rows["long term debt and capital lease obligation"], 47_599_000_000.0
+        )
 
     def test_note_survives_the_payload_get_balance_sheet_returns(self):
         """Delivery-path regression: the note must be IN the string the analyst
@@ -258,12 +328,8 @@ class TestNetDebtSignNote(unittest.TestCase):
         self.assertIn("Net Debt,10923000000.0", out)
         self.assertIn("NET CASH", out)
         self.assertIn("62,469,000,000.00", out)
-        self.assertTrue(
-            out.rstrip().endswith(
-                "do not quote the vendor Net Debt row as a positive debt position."
-            ),
-            out[-400:],
-        )
+        self.assertIn("cannot be reproduced", out)
+        self.assertNotIn("do not quote the vendor Net Debt row", out)
 
 
 if __name__ == "__main__":

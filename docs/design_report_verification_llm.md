@@ -430,17 +430,46 @@ are advisory-noise or capture gaps with a known reproducer.
 - **SIMO net-cash capture**: not reproducible with `_NET_FIGURE_RE` /
   `_table_cell_pair_value`; dump the two values the reader binds before touching
   the checker (the report's own $12.5M net cash is correct).
-- **A DCF leaf is not reproducible from itself.** `get_dcf_valuation` prints
-  wacc / rf / beta / erp / fcf_latest / shares but never the EV->equity bridge,
-  so the fair value cannot be recomputed from its own line - and the bridge is
-  not the obvious one: it uses `cash` (cash and cash equivalents only) less
-  `total_debt`, which for MSFT 2026-09-16 is $35.89bn net debt against EV
-  $854.00bn and excludes the $55.72bn of short-term investments (including them
-  is worth ~$7.5/share). Reconstructed by hand for the MSFT review; the
-  alternative is to print `cash=`/`debt=` beside `fcf_latest=` (the health tool
-  already prints the rows its ratio divided). Decided against changing the
-  output in the reader-fix round: the shape is parsed by the verifier's digest
-  and pinned in `test_analysis_tools`, so it needs its own pass.
+- ~~**A DCF leaf is not reproducible from itself.**~~ **CLOSED 2026-09-16.** The
+  leaf now prints `cash=` / `debt=` / `net_debt=` / `bridge=(<cash basis> - <debt
+  basis>)` / `equity=`, so `fair_value = equity / shares` is recomputable from
+  the line, and both legs come from the *canonical* merge with their basis named.
+  Three defects were fixed underneath it, all measured: (1) `total_debt` bound
+  the long-term row alone when a payload carried only aggregate legs (moomoo has
+  no `Total Debt` row), charging 47.60bn against 56.83bn - it is now completed
+  from the long/short-term legs and reproduces the vendor's own total exactly
+  (47.599 + 9.227 = 56.826, with `{current, prior}` intact for Piotroski/Beneish);
+  (2) the cash leg had no payload-independent basis - a new canonical
+  `cash_and_investments` (76,651m yfinance / 76,650m moomoo on MSFT) is preferred
+  over the narrow `cash` row (20,935m yfinance), where the same ticker previously
+  printed +29.05bn (leaf), +19.83bn (balance sheet's own total debt) or -35.89bn
+  (yfinance cash row) of net cash - an $8.58/share swing on identical FCF and
+  WACC; (3) `beta` was always assumed in this environment (no beta row in
+  moomoo's fundamentals payload) - Finnhub's basic financials now gap-fill it
+  (1.0626 for MSFT). Live MSFT fair value **124.80 -> 118.73**. The original
+  hand-reconstruction below is kept for the record. When beta is still assumed
+  the leaf prints `beta_sensitivity=` (four beta legs), so the assumption's worth
+  is visible instead of implicit. Pinned by
+  `test_render_honesty.py::test_dcf_leaf_carries_the_bridge_it_used`.
+  *Original note:* `get_dcf_valuation` printed wacc / rf / beta / erp /
+  fcf_latest / shares but never the EV->equity bridge, so the fair value could
+  not be recomputed from its own line - and the bridge was not the obvious one:
+  it used `cash` (cash and cash equivalents only) less `total_debt`, which for
+  MSFT 2026-09-16 was $35.89bn net debt against EV $854.00bn and excluded the
+  $55.72bn of short-term investments (including them is worth ~$7.5/share).
+- **The vendor "Net Debt" row is a basis, not an error** (closed 2026-09-16 in
+  the producer). `y_finance._net_debt_note` told the model the row "is net-CASH
+  ... do not quote it" and the report repeated it as "mis-signed". MSFT's row
+  reconciles exactly on the narrower basis (financial debt excluding lease
+  obligations less cash and equivalents: 31,067 + 9,227 - 20,935 = 19,359). The
+  note now reconciles against four standard bases and discloses, names the widest
+  basis and its figure, and forbids calling the difference a sign error;
+  unreproducible rows (AMAT, WDC) are reported as such with no imperative and
+  sign-agreeing rows (AMZN) stay silent. Corpus: 8 of 20 stored payloads carried
+  the note before and after, but 6 of the 8 were false vendor-error claims, now
+  disclosures. The verifier's `_NET_FIGURE_REJECT_RE` cue is left in place (it
+  sees report text, not the producer), and the prompt now carries `NET-DEBT
+  BASIS` so the report states one basis instead of accusing the field.
 - **Vendor statement-basis drift** (data layer, not the verifier): the same
   (ticker, date) resolved FY2025-annual flows at 22:5xZ where the 19:08Z run had
   TTM quarters, moving ROE 22.09 -> 18.90, P/E 30.12 -> 35.41, EV/EBIT 32.79 ->

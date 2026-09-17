@@ -388,6 +388,32 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-16 `(working tree)` - The MSFT fundamentals review round: the DCF family now says what a price REQUIRES, and
+  the net-debt basis is disclosed instead of relabelled an error. Reviewer feedback on `reports/MSFT_20260916_231406` read
+  against the tree + the FY2026 release: every quoted number checked out, and the diagnosis was sharper than the report's -
+  `compute_dcf` is not *nearly* a current-FCF perpetuity, it **is** one (the N-year window at `g` plus Gordon at the same `g`
+  telescopes: 8.85 x 1.025/0.075 + 3.84 bridge = **124.80**, the printed leaf to the cent). Chasing his net-debt point
+  exposed a false claim in our own producer: `y_finance._net_debt_note` declared the vendor row "net-CASH ... do not quote
+  it" and the report repeated it as "mis-signed" - the row reconciles exactly on the narrower basis (31,067 + 9,227 - 20,935 =
+  19,359). The note now reconciles four standard bases and DISCLOSES (basis + widest basis + figure, one instruction not to
+  call it a sign error); unreproducible rows (AMAT/WDC) are named, sign-agreeing rows (AMZN, whose net debt excludes
+  operating leases) stay silent. Corpus: 8 of 20 stored payloads fired before and after, but **6 of the 8 were false
+  vendor-error claims**. Fixes under the same pass: canonical `total_debt` now completes from the long/short-term legs when
+  a payload has no total row (moomoo; reproduces the vendor's 47,599 + 9,227 = 56,826 exactly, prior period intact), a new
+  `cash_and_investments` key gives the DCF bridge a payload-independent cash basis (76,651m vs the narrow 20,935m), Finnhub
+  gap-fills `beta` (1.0626 for MSFT - previously always assumed), and `get_dcf_valuation` prints `cash=/debt=/net_debt=/
+  bridge=/equity=` plus `beta_sensitivity=` when beta is assumed. Live MSFT: **124.80 -> 118.73**.
+  New instruments (new `strategies/reverse_dcf.py` + `strategies/normalized_fcf.py`, both bound to the fundamentals analyst):
+  `get_reverse_dcf(ticker, current_date, growths=?)` inverts the convention for the market price - MSFT at 490.30 implies
+  **281.3bn** steady-state FCF at 2.5% (186.7bn at 5%, 114.3bn at 7%) or **8.35%/yr perpetual growth** on today's 66.98bn;
+  `get_normalized_fcf_dcf(...)` runs the revenue-driven capex fade (capex/revenue 34.94% -> 11.61% = D&A/revenue over 5y)
+  with the maintenance floor (OCF - D&A) in the same leaf and `defensive_capex_share` as the counterweight - MSFT: **437.55**
+  faded / **217.94** defensive / **252.97** maintenance against the run-rate **118.73**. Prompt: `DCF PLAUSIBILITY CHECK` now
+  REQUIRES basis-mismatch labeling (a 12-month PT is not an intrinsic value and never overrides a DCF), the price-implies
+  question, and a valuation conclusion rather than "the model is an artifact"; new `NET-DEBT BASIS` and `INSIDER WEIGHTING`
+  rules. See CHANGELOG.
+  Tests: `test_reverse_dcf.py` +19, `test_normalized_fcf.py` +12, `test_analysis_tools.py` +6, `test_render_honesty.py` +3,
+  `test_yfinance_keyless_vendor.py` re-pointed to the basis contract; full suite **4374 passed / 5 skipped**.
 - 2026-09-16 `(working tree)` - Prompt-budget pass, on the owner's instruction plus one defect found while measuring. `MARKET_CEILING`
   raised 42_050 → **50_000** (standing headroom; the market prompt still measures 41,999, bullet count 79/95 and the
   longest-bullet pin 523 unchanged and still binding). The sentiment prompt's verbatim-counts item is now pinned by
