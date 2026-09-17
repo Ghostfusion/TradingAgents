@@ -152,3 +152,112 @@ def test_alpha_vantage_overview_keeps_single_level_numeric_fields():
     assert canon.get("shares") == 15000000000.0            # needed the camel-case split
     assert canon.get("beta") == 1.24
     assert canon.get("revenue") == 400000000000.0          # snake_case report key
+
+
+# ---------------------------------------------------------------------------
+# A negated row is not the row: "non current" is not current, "other
+# non-operating income" is not operating income
+# ---------------------------------------------------------------------------
+
+# yfinance's balance-sheet row order (Ticker.balance_sheet, 2026-09): the
+# non-current aggregates precede the current ones, and the current rows carry no
+# "Total" prefix, so the ``current assets`` fallback alias used to land on the
+# non-current line. MSFT 2026-09-16: current_assets 550.67bn (= total
+# NON-current) against the statement's own 207.71bn, giving the balance-sheet
+# health tool a 3.74 current ratio against ratios' 1.23 and a 403.5bn working
+# capital against 38.9bn (Altman Z, Ohlson and Zmijewski all read it).
+_YF_BALANCE_ROWS = {
+    "Total Liabilities Net Minority Interest": 315989000000.0,
+    "Total Non Current Liabilities Net Minority Interest": 147164000000.0,
+    "Long Term Debt": 31070000000.0,
+    "Current Liabilities": 168825000000.0,
+    "Total Assets": 758376000000.0,
+    "Total Non Current Assets": 550666000000.0,
+    "Net PPE": 337253000000.0,
+    "Current Assets": 207710000000.0,
+    "Cash And Cash Equivalents": 20935000000.0,
+    "Retained Earnings": 328265000000.0,
+    "Gains Losses Not Affecting Retained Earnings": -3284000000.0,
+    "Accumulated Depreciation": -118691000000.0,
+    "Total Debt": 56826000000.0,
+}
+
+
+def test_current_assets_prefers_the_current_row_over_the_non_current_one():
+    assert _match_row(_YF_BALANCE_ROWS, "current_assets") == ("Current Assets", 207710000000.0)
+
+
+def test_current_liabilities_prefers_the_current_row_over_the_non_current_one():
+    assert (
+        _match_row(_YF_BALANCE_ROWS, "current_liabilities")
+        == ("Current Liabilities", 168825000000.0)
+    )
+
+
+def test_retained_earnings_ignores_the_aoci_row():
+    assert (
+        _match_row(_YF_BALANCE_ROWS, "retained_earnings")
+        == ("Retained Earnings", 328265000000.0)
+    )
+
+
+def test_depreciation_of_a_balance_sheet_is_not_the_accumulated_contra_row():
+    # A balance sheet states no period depreciation; the accumulated contra
+    # account (-118.69bn) must not stand in for the expense.
+    assert _match_row(_YF_BALANCE_ROWS, "depreciation") is None
+
+
+def test_revenue_ignores_a_deferred_revenue_liability():
+    assert _match_row({"Non Current Deferred Revenue": 2747000000.0}, "revenue") is None
+
+
+def test_canonicalize_reads_the_current_rows_of_a_yfinance_balance_sheet():
+    """The observable effect: the canonical items, not the matcher internals."""
+    payload = ",2026-06-30,2025-06-30\n" + "".join(
+        f"{label},{value},0\n" for label, value in _YF_BALANCE_ROWS.items()
+    )
+    canonical = _canonicalize(payload)
+
+    assert canonical["current_assets"] == 207710000000.0
+    assert canonical["current_liabilities"] == 168825000000.0
+    assert canonical["retained_earnings"] == 328265000000.0
+
+
+def test_operating_income_ignores_other_non_operating_income():
+    # moomoo's annual income statement labels the real row "Operating Profit";
+    # "Other Non-Operating Income (Expenses)" (4.72bn on MSFT) matched the
+    # ``operating income`` alias first and produced EV/EBIT 779 against a true
+    # 23.7 and an 0.13% earnings yield against 4.22%.
+    rows = {
+        "Other Income (Expense)": 10450000000.0,
+        "Other Non-Operating Income (Expenses)": 4720000000.0,
+        "Operating Profit": 155240000000.0,
+        "Pretax Profit": 165930000000.0,
+    }
+
+    assert _match_row(rows, "operating_income") == ("Operating Profit", 155240000000.0)
+
+
+def test_a_negated_only_row_still_matches_on_the_retry():
+    # Some items are only ever reported negated: moomoo's income statement has
+    # no plain "Interest Expense" row for MSFT, so the negated label is the
+    # right answer once the plain scan finds nothing.
+    rows = {"Non-Operating Interest Income": 3300000000.0, "Non-Operating Interest Expense": 3050000000.0}
+
+    assert _match_row(rows, "interest_expense") == ("Non-Operating Interest Expense", 3050000000.0)
+
+
+def test_canonicalize_reads_operating_profit_when_moomoo_reports_it_so():
+    payload = (
+        "### 2026/FY\n"
+        "| Item | Value | YoY | QoQ |\n"
+        "| --- | --- | --- | --- |\n"
+        "| Other Non-Operating Income (Expenses) | $4.72B | 199.94% | -- |\n"
+        "| Operating Profit | $155.24B | 20.78% | -- |\n"
+    )
+
+    canonical = _canonicalize(payload)
+
+    # A single-period payload yields a flat value (the prior dict form needs a
+    # second period table).
+    assert canonical["operating_income"] == 155240000000.0

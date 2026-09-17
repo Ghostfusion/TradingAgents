@@ -301,19 +301,68 @@ regenerated trees (IEI/MSFT/VTV, 12 stems) came out clean on every class.
 
 ## Open items (state 2026-09-16)
 
+**New from the 2026-09-16 MSFT fundamentals adjudication (the strongest
+limitation found so far; both have a reproducer).**
+
+- **A report can be fully GROUNDED against a poisoned leaf.** MSFT 2026-09-16
+  (17:49) fundamentals quoted `EV/EBIT 779`, `EY 0.13%`, `Altman Z 8.00`, an
+  EPV of $49.48bn and a 3.74 current ratio, and the verifier passed every one:
+  the leaves carry the same numbers, because `_match_row` had bound
+  `operating_income` to `Other Non-Operating Income (Expenses)` ($4.72bn vs
+  $155.24bn) and `current_assets`/`current_liabilities` to the **non-current**
+  rows (working capital $403.50bn vs $38.89bn). Grounding is against the tool
+  OUTPUT; a wrong-row read is invisible to it by construction. The reader is
+  fixed (`_match_row` skips a label that negates the item; `_ROW_LABEL_EXCLUDES`
+  gained the AOCI / contra-asset / deferred-revenue rows), and the corrected
+  figures are EY 4.22%, EV/EBIT 23.71, EV/EBITDA 19.00, Z 8.83, EPV
+  $1,724.89bn, working capital $38.89bn. **The lesson for the verifier: a
+  figure that agrees with its leaf is necessary, not sufficient - the *leaf*
+  needs its own plausibility screen** (the cross-tool checks the report already
+  performs - e.g. ratios' EV/EBITDA against Finnhub's, or the statement's own
+  current assets against the health tool's inputs - are what caught this one;
+  the deterministic half could adopt the second form as a cross-leaf check).
+- **A post-run correction is ungroundable, and the verifier says so - correctly.**
+  The corrected MSFT stem now carries a `Correction (applied after the run)`
+  note with `was` values, and re-verifying it flags all 11 corrected figures
+  UNSUPPORTED (no leaf holds them: this tree's leaves hold the poisoned values).
+  That is the right answer for a number whose provenance is "re-read after the
+  fact, with source fixed" - the alternative (teaching the verifier to exempt a
+  `was` clause) would mute a real class (a silently edited figure). The
+  current-ratio INTERNAL_CONFLICT did **not** reappear: the renamed paragraph
+  says "Total **Non-Current** Assets" and the existing `\bnon[- ]current\b`
+  disclosure cue matches, which is exactly what that cue was added for.
+- **The poisoning is corpus-wide, not one tree.** Scanning every stored tree's
+  `tool_evidence.json` for a `get_balance_sheet_health` leaf whose
+  `current_assets` equals the ticker's *non-current* assets (the same
+  wrong-row read) finds **25 of 37 trees**: AMKR 09-14, AMZN
+  `20260914_192119`/`20260915_113032`/`20260916_113950`/`20260916_161226`,
+  ASML 09-14, HPE 09-14, IBM `20260916_112819`, JCI 09-14, LULU 09-15, MSFT
+  `20260915_140253`/`20260916_113036`/`20260916_130442`/`20260916_161458`/`20260916_174952`,
+  NFLX 09-15 ×2, NVDA `20260915_141952`, SIMO 09-14, SMCI 09-14, TSM 09-14 +
+  `20260915_112829`, VST 09-14 + `20260915_112409`, WDC 09-14. Only the three
+  where the wrong ratio fell below 1.5 (IBM, VST ×2) kept the health verdict
+  `pass=False`, so **no stored value-dip gate outcome changed** (the leg fails
+  only when D/E >= 1.0 AND cr <= 1.5); the *printed* current ratio, working
+  capital and the Altman Z / Ohlson / Zmijewski block did change in all of
+  them. Those trees are local artifacts and predate the fix - each needs
+  correcting (or regenerating) if it is to be read again; the reader now binds
+  correctly whatever vendor answers, so no future tree carries this.
+
 **New from the 2026-09-16 four-symbol round (both are verifier noise on
 correct reports; each has a reproducer).**
 
-- **A DISCLOSED vendor pair still flags.** MSFT 2026-09-16 (17:49) fundamentals
-  states `current ratio 3.7419` (vendor block) beside `1.23` (balance-sheet
-  derived) with the sentence "**Both current ratios are reported; the 3.74
-  figure is not the balance-sheet-date ratio**", and `debt/equity 0.1285` vs
-  `0.11`; IEI 2026-09-16 (17:52) fundamentals states `Beta is 0.03 vs QQQ ...
-  The same block reports beta 0.15310799`. Both pairs are explicitly
+- **A DISCLOSED vendor pair still flags.** IEI 2026-09-16 (17:52) fundamentals
+  states `Beta is 0.03 vs QQQ ... The same block reports beta 0.15310799`, and
+  MSFT 2026-09-16 (17:49) fundamentals prints `debt/equity 0.1285` (health
+  tool) beside `0.11` (ratios) and `0.2416` (Finnhub). Both pairs are explicitly
   reconciled and both were flagged INTERNAL_CONFLICT. `_disclosed_pair`'s cues
-  do not cover these forms ("Both X are reported", "the N figure is not the Y
-  basis", "the same block reports N"); widening them risks muting a real
-  undisclosed conflict, so each survivor needs its own reproducer first.
+  do not cover these forms ("the same block reports N", three vendors named in
+  one sentence); widening them risks muting a real undisclosed conflict, so each
+  survivor needs its own reproducer first. **The MSFT current-ratio half of this
+  item is CLOSED - it was never a vendor pair: the 3.74 came from
+  `_match_row` binding the non-current rows and is fixed at the source** (see
+  the poisoning item above; the corrected paragraph now says "one ratio, three
+  sources, all 1.23" and the verifier no longer flags it).
 - **A meta-statement about the analyst's own call is ungroundable.** MSFT
   2026-09-16 (17:49) news.md: "note inputs were analyst-supplied fractions so
   treat directionally advisory only" - a provenance caveat on the analyst's own

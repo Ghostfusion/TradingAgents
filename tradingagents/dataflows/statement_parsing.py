@@ -47,7 +47,30 @@ _ROW_LABEL_EXCLUDES = {
     "operating_income": ("ebitda",),
     "total_liabilities": ("equity",),
     "total_debt": ("equity",),
+    # AOCI-style "Gains Losses Not Affecting Retained Earnings" is not retained
+    # earnings, and yfinance lists it FIRST (MSFT/AMZN/NVDA 2026-09-16: Altman
+    # Z's X2 read the -3.28bn AOCI row instead of +328.26bn on MSFT).
+    "retained_earnings": ("not affecting",),
+    # A contra-asset is not the period's depreciation expense. yfinance's
+    # BALANCE SHEET carries only "Accumulated Depreciation" (-118.69bn on
+    # MSFT), so without this the reader hands EV/EBITDA (and Beneish's
+    # depreciation/gross-PPE leg) a negative expense wherever the balance
+    # sheet is absorbed and no income/cash-flow row corrects it.
+    "depreciation": ("accumulated",),
+    # Deferred / unearned revenue is a liability, never revenue: yfinance's
+    # balance sheet is the only payload in play here whose rows carry the word.
+    "revenue": ("deferred", "unearned"),
 }
+
+#: Tokens that NEGATE the item an alias names. The exclusion list above cannot
+#: express them because the token is not adjacent to the alias: yfinance's
+#: "Total Non Current Assets" contains the ``current assets`` alias and moomoo's
+#: "Other Non-Operating Income (Expenses)" the ``operating income`` alias, and
+#: both name the opposite of the row being read (MSFT 2026-09-16: the non-current
+#: rows supplied a 3.74 current ratio against the statement's own 1.23 and a
+#: 403.5bn working capital against 38.9bn; the non-operating row supplied
+#: EV/EBIT 779 and an 0.13% earnings yield against 23.7 and 4.22%).
+_NEGATION_TOKENS = ("non ", "not ", "excluding ")
 
 _ROW_ALIASES = {
     # ``sales`` must precede the ``operating income`` last-resort alias, else a
@@ -162,6 +185,16 @@ def _label(key: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip()
 
 
+def _negates(norm_label: str, key: str) -> bool:
+    """True when ``norm_label`` states the NEGATION of the ``key`` alias.
+
+    ``"total non current assets"`` contains the ``current assets`` alias and
+    ``"other non operating income expenses"`` the ``operating income`` alias;
+    both name the opposite item, so the alias scan must not stop there.
+    """
+    return any(token in norm_label and token not in key for token in _NEGATION_TOKENS)
+
+
 def _match_row(rows: dict, canonical: str):
     """Return the (label, value) for the best matching row, or None.
 
@@ -177,17 +210,31 @@ def _match_row(rows: dict, canonical: str):
     contra-account breakdowns (e.g. ``-Accumulated Depreciation``, ``-Cash and
     Cash Equivalents``) and are skipped so the canonical value always comes from
     the aggregate line that precedes them.
+
+    The scan runs TWICE. The first pass skips every label that negates the item
+    (see ``_negates``), so a "Non Current" row cannot stand in for a current one
+    while a plain row exists in the same payload; the second pass repeats it
+    allowing them, because some items are only ever reported negated (moomoo's
+    "Non-Operating Interest Expense" IS MSFT's interest expense row). Payloads
+    whose rows are already correct therefore bind identically under both passes
+    - the retry only ever rescues a row the first pass skipped.
     """
     excludes = _ROW_LABEL_EXCLUDES.get(canonical, ())
-    for alias in _ROW_ALIASES.get(canonical, []):
-        key = _norm(alias)
-        for label, value in rows.items():
-            if label.startswith("-"):
+    for allow_negated in (False, True):
+        for alias in _ROW_ALIASES.get(canonical, []):
+            key = _norm(alias)
+            if not key:
                 continue
-            norm_label = _norm(label)
-            if any(needle in norm_label for needle in excludes):
-                continue
-            if key and key in norm_label:
+            for label, value in rows.items():
+                if label.startswith("-"):
+                    continue
+                norm_label = _norm(label)
+                if any(needle in norm_label for needle in excludes):
+                    continue
+                if key not in norm_label:
+                    continue
+                if not allow_negated and _negates(norm_label, key):
+                    continue
                 return (label, value)
     return None
 

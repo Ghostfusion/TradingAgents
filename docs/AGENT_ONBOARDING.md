@@ -291,6 +291,26 @@ tests/                     # conftest (autouse fixtures), test_* per area
     must NOT include a bare `d&a`.
   - `net_receivables` prefers the aggregate `receivables` row (the `-Accounts
     Receivable` sub-line must be skipped).
+  - `_match_row` (the alias scan) must NEVER bind a row that NEGATES the item:
+    yfinance's balance sheet calls its current rows `Current Assets` /
+    `Current Liabilities` (no "Total" prefix) and lists `Total Non Current
+    Assets` / `Total Non Current Liabilities Net Minority Interest` FIRST, so
+    the `current assets` fallback alias landed on the non-current line (MSFT
+    2026-09-16: current ratio 3.74 vs 1.23, working capital 403.5bn vs
+    38.9bn, and Altman Z / Ohlson / Zmijewski all read it); moomoo's income
+    statement has no plain operating row but does carry `Other Non-Operating
+    Income (Expenses)`, which matched the `operating income` alias (EBIT
+    4.72bn vs 155.24bn -> EV/EBIT 779 vs 23.7, earnings yield 0.13% vs 4.22%,
+    EPV 49.5bn vs 1,724.9bn). The scan now runs twice - negated labels are
+    skipped first and only allowed if nothing plain matches (moomoo's
+    `Non-Operating Interest Expense` IS MSFT's interest expense row). Keep the
+    second pass: an item that is only ever reported negated must still bind.
+  - `_ROW_LABEL_EXCLUDES` carries the wrong-adjacent-row cases that negation
+    cannot express: `Gains Losses Not Affecting Retained Earnings` is not
+    retained earnings (yfinance lists it first - Altman X2 read -3.28bn
+    instead of +328.26bn on MSFT), `Accumulated Depreciation` is not the
+    period's D&A (a negative expense poisons EV/EBITDA), and a deferred /
+    unearned revenue liability is not revenue.
   - DO NOT "fix" the period-year regex (`r"(20\d{2})"`) with a doubled
     backslash - a raw-string `\\d` matches a literal backslash and breaks the
     newest-first sort (current/prior dicts silently become flat values).
