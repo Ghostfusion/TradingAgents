@@ -377,6 +377,20 @@ correct reports; each has a reproducer).**
   decide then between the digest half (carry the stem's own call arguments), an
   explicit "a stated weighting is not a claim about the world" exemption in the
   verifier instructions, or living with it - measured first, as usual.
+- **The sentiment score has no anchor when the computed block is absent.** The
+  2026-09-16 sentiment-prompt pass added "when no computed block is present,
+  derive the score directly from the source evidence and say so in
+  `confidence`" - correct as prompt policy (the model otherwise improvises
+  silently), but `_anchor_claims` only grounds a 0-10 score against
+  `computed_score`, so in that branch (`compute_social_scores` returned None -
+  StockTwits unavailable) a mandated derived score falls through to the LLM
+  verdict, which flagged exactly this shape before the anchor existed (AMZN
+  9.5/10, IEI ~0/10 on 2026-09-16). **Measured before changing anything: 0 of
+  the 36 stored sentiment stems lack the anchor leaf**, so this is latent, not
+  live. Reproducer when it fires: force `compute_social_scores` to None for a
+  ticker whose stem states a score and read the claim status. The options then
+  are an anchored-by-statement exemption (the claim says it was derived) or a
+  source-based band; not before a live case exists.
 - **Verifier per-run variance.** Re-verifying the same patched tree flags a
   different tail of meta/qualitative claims each time (the MSFT fundamentals
   stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
