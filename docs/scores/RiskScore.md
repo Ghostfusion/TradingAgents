@@ -261,6 +261,12 @@ RiskScore: the owner's staged weights, in one direction (100 = low risk / favour
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Which cap family does "correlation risk 15%" mean** — the notional cluster
    cap (`config.cluster_cap_pct:109`), a true correlation coefficient, or a new
    scalar (largest cluster share / average pairwise |ρ|)? **Recommendation:** the
@@ -280,7 +286,7 @@ RiskScore: the owner's staged weights, in one direction (100 = low risk / favour
 5. **Is `RiskScore` per-name or per-book?** The owner's table mixes both
    (liquidity and volatility are name-level; correlation, concentration and
    drawdown are book-level). The document assumes both are reported and only the
-   book-level ones feed the composite; that assumption needs his confirmation.
+   book-level ones feed the composite. **CLOSED 2026-09-17 (plan §13 Q3): both are reported; only the book-level components feed the composite.**
 
 ---
 

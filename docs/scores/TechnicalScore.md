@@ -364,6 +364,12 @@ Nothing here is implemented. The design constraints:
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Does the owner want a technical *score* or a technical *state*?** Six of the
    nine categories are state descriptions (trend, structure, breakout), three are
    oscillators. A single 0-100 mixes them; the alternative is a score plus a
@@ -375,7 +381,7 @@ Nothing here is implemented. The design constraints:
    per-stock QQQ/sector leg is wired.
 3. **Intraday or daily?** `market_session.opening_range:72` and
    `momentum.intraday_pullback:325` need intraday bars; the rest of the engine is
-   daily. The score's horizon must be stated once, not per component.
+   daily. The score's horizon must be stated once, not per component. **CLOSED 2026-09-17 (plan §13 Q11): the horizon is daily** - the intraday leaves stay leaves and do not enter the daily score implicitly.
 4. **Does the volatility category invert?** Volatility is *risk-increasing*: a
    favourable technical score arguably wants **low** volatility (or a *volatility
    contraction* — VCP — which is what `swing.vcp_setup:326` already detects). The

@@ -241,10 +241,16 @@ master's §3.2.
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Does the score size, or only inform?** Today the only wired confirmation
    path is a *sizing* multiplier (`sentiment_factor_scale:570`, default off).
    The owner's staged table puts SentimentScore at 7.5% of a research composite —
-   a score, not a multiplier. Both can exist; they must not be the same object.
+   a score, not a multiplier. Both can exist; they must not be the same object. **CLOSED 2026-09-17 (plan §13 Q10): the score informs only** — `sentiment_factor_scale` stays a separate sizing multiplier.
 2. **Which institutional measure** — holdings level, period-over-period Δ, or the
    orderflow proxy (`orderflow.summarize` via `get_orderflow_read:1215`)? They
    answer different questions and only the first is currently on the fundamentals
@@ -252,7 +258,7 @@ master's §3.2.
 3. **Is a "sentiment toolset" needed?** `sentiment_analyst` binds **no tools**
    (`agents/toolsets.py`; `analyst_toolset` raises `KeyError: 'sentiment'`), so
    every leaf in §2 reaches this engine only through the market or news analyst.
-   If SentimentScore is to be built, this is the wiring decision that gates it.
+   If SentimentScore is to be built, this is the wiring decision that gates it. **CLOSED 2026-09-17 (plan §13 Q5): the toolset exists** — bind `sentiment_analyst` and register `sentiment`.
 4. **Should the 20-day momentum be a delta or a regression slope?**
    `sentiment_velocity:25` already computes an OLS slope/day (unwired);
    `daily_sentiment_sma:501` gives a 7-day innovation. The owner's formula is a

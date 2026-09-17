@@ -268,19 +268,22 @@ to influence anything. The design constraints:
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Which sign for coverage?** `mention_volume:43` is a coverage measure; the
    neglected-firm evidence says low coverage has historically meant *higher*
    forward returns. The owner's "news volume acceleration" implies high = good.
-   These conflict, and the resolution decides the persistence category's
-   direction.
+   These conflict, and the resolution decides the persistence category's direction. **CLOSED 2026-09-17 (plan §13 Q9): the neglected-firm sign** - lower abnormal coverage is the positive signal; do not reverse it into an attention-is-good factor.
 2. **Is materiality a news property or an event property?** A magnitude estimate
    is arguably `EventScore`'s (it owns the expected move). If so, this category
-   should read EventScore's number rather than build a second one — which is
-   exactly the "one number, one producer" rule.
+   should read EventScore's number rather than build a second one — which is exactly the "one number, one producer" rule. **CLOSED 2026-09-17 (plan §13 Q6): `EventScore` owns it; this engine consumes that number.**
 3. **Where does the analyst-revision index live?** It is currently bound to the
    fundamentals toolset (`toolsets.py:393`) while this engine's 5% category needs
-   it. Either the news surface gains the leaf, or the category is dropped and the
-   weight redistributed.
+   it. Either the news surface gains the leaf, or the category is dropped and the weight redistributed. **CLOSED 2026-09-17 (plan §13 Q4): the binding moves; the category keeps its weight.**
 4. **Should `NewsScore` be per-name at all**, or is it a market-level flow
    measure? Most of the owner's categories are name-level; the macro/industry
    ones are not.

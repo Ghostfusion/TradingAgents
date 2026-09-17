@@ -307,14 +307,18 @@ occurring right now"), and which cannot be mistaken for a signal.
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Does the owner want a 0-100 `EventScore`, or the structured event state of
    §5.3?** The staged spec recommends the engine *before* NewsScore is allowed to
-   influence `opportunity_score` — a gate-shaped role, which the state satisfies
-   and a score does not.
+   influence `opportunity_score` — a gate-shaped role, which the state satisfies and a score does not. **CLOSED 2026-09-17 (plan §13 Q7): the structured state is the deliverable** — no 0-100 `EventScore`.
 2. **Should macro/Fed/OPEX be able to hard-block?** Today only earnings can
    (`catalyst.py:280-288`). Extending it is a **fail-closed behaviour change**
-   that would start rejecting trades the engine currently takes; it needs the
-   owner's explicit decision, not a default.
+   that would start rejecting trades the engine currently takes; it needs the owner's explicit decision, not a default. **CLOSED 2026-09-17 (plan §13 Q7): not extended** — only earnings may hard-block, and a test pins it.
 3. **The two "expected move" producers**: `options_surface.implied_move_pct:42`
    (ATM-implied, live) vs `catalyst.implied_move_from_history:111` (earnings
    history). Which is canonical for sizing? (Same question as

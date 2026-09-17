@@ -234,11 +234,16 @@ third (the score) must not become a fourth.
 
 ## 7. Open questions
 
+**Status 2026-09-17:** the questions the implementation plan raised are
+answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
+decisions). The marked ones below are **closed**; the unmarked ones remain open
+and are listed in that section's §13.3.
+
+
 1. **Which path is canonical for a score — A, B, or a new market-level C?** This
    is the owner's call, and it decides whether the score can ship before the
    market-level producers exist. **Recommendation: C** (market-level inputs,
-   reusing B's four-axis vocabulary) — A is name-level and B's sizing fold is off
-   by default.
+   reusing B's four-axis vocabulary) — A is name-level and B's sizing fold is off by default. **CLOSED 2026-09-17 (plan §13 Q1): path C is canonical** - market-level inputs reusing B's four-axis vocabulary.
 2. **Does the event category (5%) survive** if `EventScore` ships? The overlap is
    real (`build_catalyst_snapshot:219` feeds both). Master §3.2 defect 16 records
    the dead `catalyst_window` veto in `regime_gate_read:261` — the regime gate

@@ -369,14 +369,15 @@ in `tradingagents/agents/toolsets.py`, verified:
 
 | # | Today | Needed by | Action |
 | --: | --- | --- | --- |
-| P0-7a | `get_institution_holdings` is bound **only** at `:395` (`fundamentals_company_tools`); it also appears at `:105` in the module's import block, which is not a binding | `SentimentScore`'s institutional category (15%) | add it to `market_tools()`/the sentiment surface, or accept the category as unreachable and drop its weight. **Owner decision §13 Q4** |
-| P0-7b | `get_analyst_revision_index` is bound only at `:393` (`fundamentals_company_tools`) | `NewsScore`'s analyst category (5%) | same choice, same decision (§13 Q4) |
+| P0-7a | `get_institution_holdings` is bound **only** at `:395` (`fundamentals_company_tools`); it also appears at `:105` in the module's import block, which is not a binding | `SentimentScore`'s institutional category (15%) | add it to `market_tools()`/the sentiment surface. **Decided (Q4): move the binding** — the category keeps the weight the owner set |
+| P0-7b | `get_analyst_revision_index` is bound only at `:393` (`fundamentals_company_tools`) | `NewsScore`'s analyst category (5%) | **Decided (Q4): move the binding** |
 | P0-7c | `get_market_breadth` is bound **only** to `news_tools()` (`:368`) | `TechnicalScore`'s breadth category, `RegimeScore` | bind to `market_tools()` as well — it is a market read |
 
-**A fourth binding is a decision, not a fix:** `sentiment_analyst` binds **no
-tools** and `analyst_toolset` raises `KeyError: 'sentiment'` (`toolsets.py:479`),
-so every sentiment leaf reaches the engine only through the market or news
-analyst. Whether a `sentiment_tools()` exists is §13 Q5.
+**A fourth binding is decided (Q5): the sentiment toolset exists and needs
+binding repair.** `sentiment_analyst` binds **no tools** and `analyst_toolset`
+raises `KeyError: 'sentiment'` (`toolsets.py:479`), so every sentiment leaf
+reaches the engine only through the market or news analyst. Bind
+`sentiment_analyst` and register `sentiment`.
 
 ### 3.8 P0-8 — the five recorded defects still open
 
@@ -585,7 +586,7 @@ the whole workstream** — the document's §5.1 ordering is binding:
 | 2 | Market-wide breadth (P0-3) | the data is already fetched for the sector screens |
 | 3 | VIX percentile (P0-4) | turns a raw level into a regime input |
 | 4 | VIX term structure (P0-5) | the equity-IV slope is not a substitute |
-| 5 | The canonical-path decision (§13 Q1) | until one path is named, a score is a third label for one word |
+| 5 | **Path C, decided (Q1)** — build the market-level producers above and reuse B's four-axis vocabulary | the decision is made, so the score reads one named path instead of becoming a third label for one word |
 | 6 | The score | only then is there something to weight |
 
 **Deliverable.** `strategies/regime_score.py::regime_score(...)`, one producer
@@ -627,7 +628,7 @@ raw value with units and sign beside its aligned contribution.
 `net_beta` producer in the executor's book builder (`sum(w_i · beta_i)`, with
 `etf_risk._beta:38` as the per-name beta — the field is `None` today and a frozen
 dataclass cannot be assigned post-hoc); the book-level components either in the
-executor or in a book-mode of the same function (§13 Q3).
+executor or in a book-mode of the same function. **Decided (Q3): both are reported** — only the book-level components feed the composite; name-level risk is diagnostic.
 
 **Acceptance.** (a) A known negative CVaR and a known positive `stress_loss`
 align to the same favourable direction; (b) a missing correlation input *raises*
@@ -645,15 +646,16 @@ contributions recompute the printed score; (g) the semivariance leg consumes `�
 **ships last**: five of nine categories are ABSENT and the largest weight
 (materiality, half of 20%) has no producer.
 
-**Prerequisites.** WP-1; WP-8 (materiality may be EventScore's number, §13 Q6);
-P0-7b for the analyst-revision category.
+**Prerequisites.** WP-1; WP-8 (**decided, Q6: `EventScore` owns materiality and
+the expected move — this engine consumes that number rather than building a second
+one**); P0-7b for the analyst-revision category, whose binding **moves (Q4)**.
 
 **Build order** (the document's own value ÷ effort):
 
 | Order | Item | Why |
 | --: | --- | --- |
 | 1 | **Novelty** (15%) | known recipe (similarity to the previous stories about the firm), data present (article timestamps from every vendor; the normaliser `sentiment._normalise_headline:604` already exists for syndication dedupe), sign known (stale news reverses) |
-| 2 | **Materiality** (half of 20%) | the largest weight has no producer; derivable as `|expected/implied move| × event-class weight` from `catalyst.implied_move_from_history:111` plus the print-day volume ratio — or read from EventScore (§13 Q6) |
+| 2 | **Materiality** (half of 20%) | the largest weight has no producer of its own. **Decided (Q6): read `EventScore`'s materiality / expected-move output** — one authoritative producer, not a second estimate |
 | 3 | **Persistence / volume acceleration** (5%) | `sentiment.mention_volume:43` and `sentiment.decayed_weight:91` already exist; this is wiring, not building |
 | 4 | **Corporate-event typing** (10%) | extend `sec_edgar._FORM_LABELS:36` and add a keyword classifier over `get_news`, **printing its basis** |
 | 5 | **Guidance change** | needs a source the engine does not have; do not fake it from the EPS estimate |
@@ -698,7 +700,7 @@ comparable `sma_7d`/`innovation`, or the code refuses to mix them.
 | 20-day momentum (`Sentiment_today − Sentiment_20d`) | add the delta beside `sma_7d` in `sentiment.daily_sentiment_sma:501`, calendar-reindexed and `None`-safe |
 | Acceleration | surface `sentiment.sentiment_velocity:25` (OLS slope/day, `window=5`) — it has no production caller today |
 | Per-source breadth | per-day `mean(s>0)` plus a per-host breakdown from the rows `aggregate_weighted_sentiment:616` already holds (`_article_url:612` gives the host) |
-| Institutional | bind `get_institution_holdings` to the sentiment/market surface (P0-7a) and use the period-over-period Δ in % of float, z-scored |
+| Institutional | bind `get_institution_holdings` to the sentiment/market surface (**decided, Q4: move the binding**) and use the period-over-period Δ in % of float, z-scored. *Which* institutional measure is still open (`SentimentScore.md` §7 Q2) |
 
 **Also in scope, as recorded defects:** `_sentiment_factor_read:1178` hardcodes
 `source="eodhd"` (`:1235`) and returns `None` instead of falling back, and its
@@ -729,7 +731,7 @@ so there is nothing to weight yet. **This plan does not invent weights.**
 | --- | --- | --- |
 | 1 | `imminence(days_until, horizon) -> clamp(1 − days/horizon, 0, 1)` over `next_earnings.days_until`, `macro_imminence.min_days`, `fed_imminence.days_until`, `opex_status.days_to_next` | new, mechanical, **no new fetch** |
 | 2 | The window flags (`in_opex_week`, `post_opex_unwind`, `catalyst_window`) and the **hard block**, printed as a structured event state `{families, imminence, hard_block, coverage: 4/7}` | exists; the block stays **authoritative** |
-| 3 | A 0-100 score | only if the owner wants one (§13 Q7) — it needs a per-family severity weight and a normalisation that do not exist |
+| 3 | A 0-100 score | **not built — decided (Q7): the structured state is the deliverable.** A score would need a per-family severity weight and a normalisation that do not exist |
 
 **The block must not move.** `catalyst.build_catalyst_snapshot:219` sets
 `hard_block` **only** on earnings (`catalyst.py:284-288`, default 5 days,
@@ -748,7 +750,8 @@ renders; (d) `EventScore`'s and `RiskScore`'s event components are **disjoint ke
 sets**; (e) no event path reaches `GATE_PRECEDENCE` through a score.
 
 **Gate.** `enable_event_state`. Note `enable_events` (`:770`) is already **on by
-default** and gates the existing PEAD/catalyst sizing — a different object.
+default** and gates the existing PEAD/catalyst sizing — a different object. **The hard block
+is not extended (Q7):** macro/Fed/OPEX still never set it, and a test pins that.
 
 ---
 
@@ -827,16 +830,16 @@ manual.
 
 | Object | Definition | Status |
 | --- | --- | --- |
-| `TradeScore` | `0.40·F + 0.25·T + 0.15·R + 0.20·K` over four engines | the **decision** composite sketch; weights withdrawn by the owner as production weights, awaiting its own name (§13 Q2) |
+| `TradeScore` | `0.40·F + 0.25·T + 0.15·R + 0.20·K` over four engines | the **decision** composite; **decided (Q2): separate objects, separate names** — this is the 4-engine decision composite, the six-engine object is a research allocation |
 | the research allocation | `35 / 20 / 15 / 15 / 7.5 / 7.5` over Fundamental / Technical / Regime / Risk / News / Sentiment | the **research** allocation; EventScore has no weight in it |
 | `OpportunityScore` | a separate **validated** 0-100 measurement | stays `null` (owner Q1) |
 
-**The gate-order conflict stays flagged, not resolved.** The owner's first diagram
-puts the hard gates **before** sizing; his staged diagram puts them **after**. The
-engine implements **gates-before-sizing** (the verdict feeds
-`strategies/risk/sizing.py:144`) and this plan keeps it, because a gate *after*
-sizing must unwind a size it has already authorised. If the staged order is
-wanted, that is a contract change, not a diagram fix (§13 Q8).
+**The gate-order conflict is resolved (Q8): gates before sizing.** The owner's
+first diagram puts the hard gates **before** sizing, his staged diagram puts them
+**after**; the decision keeps the first, which is what the engine already
+implements (the verdict feeds `strategies/risk/sizing.py:144`). A gate *after*
+sizing would have to unwind a size it had already authorised, so the staged order
+remains a contract change rather than a diagram edit.
 
 **What the composite may never do.** It never overrides a hard gate: 17
 fail-closed checks live in `GATE_PRECEDENCE`, the risk governor never reads a
@@ -1017,8 +1020,8 @@ naming here because they are the ones a build is most likely to skip:
   the failure mode to prevent is silent reconciliation.
 - **`SentimentScore`:** the gated producers are exercised **in the test**, so a
   default-off flag cannot hide a broken path.
-- **`EventScore`:** `hard_block` fires only on earnings, pinned by a test — until
-  the extension is decided (§13 Q7).
+- **`EventScore`:** `hard_block` fires only on earnings, pinned by a test —
+  decided (Q7) that it is **not** extended to macro/Fed/OPEX.
 
 ### 11.3 Run-level acceptance
 
@@ -1051,24 +1054,101 @@ naming here because they are the ones a build is most likely to skip:
 
 ---
 
-## 13. Decisions the owner must make
+## 13. Decisions (owner, 2026-09-17) - the twelve are answered
 
-Ordered by what each one blocks. Each carries the recommendation already made in
-the engine document; a recommendation is not a decision.
+The owner answered every question this plan opened, and added a twelfth. Each row
+keeps the **recommendation that was on record** so the reasoning stays visible, and
+states the **decision** that now governs. Where the two differ, the decision
+governs and the document that carried the question is corrected in the same pass.
 
-| # | Decision | Blocks | Recommendation on record |
+| # | Question | Recommendation on record | **Decision** |
 | --: | --- | --- | --- |
-| Q1 | **Which regime path is canonical — A, B, or a new market-level C?** | WP-4's score (not its producers) | **C**: market-level inputs reusing B's four-axis vocabulary — A is name-level and B's sizing fold is off by default |
-| Q2 | **Do `TradeScore` (4 engines) and the six-engine research allocation need different names?** | WP-11's module name | different objects, different names: the four-score is a decision composite, the six are a research allocation |
-| Q3 | **Is `RiskScore` per-name or per-book?** | WP-5's function shape | the owner's table mixes both; report both, feed the composite only from the book-level ones |
-| Q4 | **Do the mis-homed leaves move, or does the category drop?** — `get_institution_holdings` (`toolsets.py:395`), `get_analyst_revision_index` (`:393`) | WP-7's 15% institutional category, WP-6's 5% analyst category | move the bindings; dropping them silently redistributes weight the owner set |
-| Q5 | **Does a `sentiment_tools()` toolset exist?** | WP-7 entirely | yes — today `sentiment_analyst` binds **no tools** and `analyst_toolset` raises `KeyError: 'sentiment'` |
-| Q6 | **Is materiality a news property or an event property?** | WP-6's 20% category | it is arguably EventScore's (it owns the expected move); if so NewsScore **reads** that number rather than building a second one (master rule 3) |
-| Q7 | **Does the owner want a 0-100 `EventScore`, or the structured state?** And: **may macro/Fed/OPEX hard-block?** | WP-8 layer 3 | the state; and **no** to the extension without an explicit decision — it is a fail-closed behaviour change that would start rejecting trades the engine currently takes |
-| Q8 | **Gate order: before sizing (as implemented) or after (as the staged diagram shows)?** | nothing yet; it is a contract change if the staged order is wanted | keep gates-before-sizing; a gate after sizing must unwind a size it already authorised |
-| Q9 | **Which sign for news coverage?** — `mention_volume` as neglected-firm evidence (low coverage → higher returns) vs the owner's "volume acceleration" (high = good) | WP-6's persistence category (5%), WP-7's attention row | decide explicitly; the two readings have opposite signs and the evidence supports the neglected-firm one |
-| Q10 | **Does the score size, or only inform?** — `sentiment_factor_scale:570` is already a sizing multiplier | WP-7's boundary | only inform; the multiplier stays where it is and is a different object |
-| Q11 | **Is the intraday horizon in scope?** — `market_session.opening_range:72` and `momentum.intraday_pullback:325` need intraday bars while the rest of the engine is daily | WP-3's horizon statement | state one horizon for the score; keep the intraday leaves as leaves |
+| Q1 | Which regime path is canonical - A, B, or a new market-level C? | C | **C - market-level.** Reuse B's four-axis vocabulary; do not import A's name-level regime or B's optional sizing fold |
+| Q2 | Do `TradeScore` (4 engines) and the six-engine research allocation need different names? | different objects | **Separate objects, separate names.** `TradeScore` is the 4-engine decision composite; the six-engine object is a research allocation |
+| Q3 | Is `RiskScore` per-name or per-book? | report both, book feeds the composite | **Both.** Report both; only the **book-level** risk feeds the composite - name-level risk is diagnostic/reporting |
+| Q4 | Do the mis-homed leaves move, or does the category drop? | move the bindings | **Move the bindings.** Preserve the owner's category weights; never silently redistribute weight by dropping a leaf |
+| Q5 | Does a `sentiment_tools()` toolset exist? | yes | **Yes - it exists and needs binding repair.** Bind `sentiment_analyst` and register `sentiment` so `analyst_toolset` stops raising `KeyError: 'sentiment'` |
+| Q6 | Is materiality a news property or an event property? | arguably EventScore's | **`EventScore` owns it.** `NewsScore` **consumes** EventScore's materiality / expected-move output - one authoritative producer |
+| Q7 | A 0-100 `EventScore` or the structured state? May macro/Fed/OPEX hard-block? | the state; no to the extension | **Structured state; no new hard block.** Extending the block to macro/Fed/OPEX needs an explicit contract decision of its own |
+| Q8 | Gate order - before sizing (as implemented) or after (as the staged diagram shows)? | keep gates-before-sizing | **Gates before sizing.** Preserve existing behaviour; a post-sizing gate would have to unwind an already-authorised size |
+| Q9 | Which sign for news coverage? | the neglected-firm reading | **Neglected-firm sign.** Lower abnormal coverage -> a positive signal; do not reverse it into an attention-is-good factor |
+| Q10 | Does the score size, or only inform? | only inform | **Informs only.** `sentiment_factor_scale:570` remains a separate sizing multiplier; the two must not merge |
+| Q11 | Is the intraday horizon in scope? | state one horizon | **Daily score horizon.** The intraday leaves stay available but do not enter the daily score implicitly |
+| Q12 | *(added)* Which directional-volatility measure? | - | **Semivariance, not the conditional-sigma ratio.** Directional volatility uses upside/downside semivariance; conditional standard deviations stay distinct descriptive metrics. Specified in `TechnicalScore.md` §1/§4 and `RiskScore.md` §0.3 (`8535da2`) |
+
+### 13.1 The architecture the decisions produce
+
+```
+                    MARKET
+                      |
+                      v
+             Market Regime C
+          (four-axis vocabulary)
+                      |
+          +-----------+-----------+
+          v           v           v
+     Fundamental    Market      Event/News
+       engines       engines       engines
+          |           |           |
+          |      +----+----+      |
+          |      |         |      |
+          |   Momentum  Volatility|
+          |                |      |
+          |          +-----+-----+|
+          |          |           ||
+          |       Total       Directional
+          |       Vol         Semi-Variance
+          |                      |
+          +-----------+----------+
+                      v
+                  TradeScore
+              (4-engine decision)
+                      |
+                      v
+                 Risk Gates
+              (book-level risk)
+                      |
+                      v
+                    Sizing
+```
+
+The six-engine research allocation stays **separate from `TradeScore`** and feeds
+research attribution only (Q2).
+
+### 13.2 The seven anti-double-counting invariants (binding)
+
+Recorded in the master's §2 as rules 8-14. Each one names a way the set could
+silently collapse into fewer signals than it claims.
+
+1. **One quantity -> one authoritative producer.**
+2. **`EventScore` owns materiality / expected move; `NewsScore` consumes it.**
+3. **Book risk -> the composite. Name risk -> diagnostic/reporting.**
+4. **Score -> decision information. Sizing multiplier -> sizing. Do not merge them.**
+5. **Market regime -> market-level. Security regime -> name-level diagnostic.**
+6. **Daily `TradeScore` -> daily inputs. Intraday indicators remain leaves unless explicitly promoted.**
+7. **Directional volatility -> the semivariance ratio, NOT `sigma_up/sigma_down`** - which is what stops the volatility factor quietly becoming a second momentum factor through drift contamination.
+
+### 13.3 What is still open
+
+The decisions above close twelve questions. These engine-document questions were
+**not** among them and remain open. **The numbers in this table are each
+document's own §7 numbering, not this section's Q-numbers** - `NewsScore.md` §7 Q4
+and the decision `Q4` above are two different questions.
+
+| Where | Question |
+| --- | --- |
+| `RegimeScore.md` §7 Q2-Q4 | does the 5% event category survive `EventScore`; Hurst / variance-ratio as the persistence producer; how a regime *change* is scored |
+| `RiskScore.md` §7 Q1, Q2, Q4 | which cap family "correlation risk 15%" means; whether the executor or the engine owns the book-level components; whether the two `expected move` producers reconcile |
+| `TechnicalScore.md` §7 Q1, Q2, Q4 | score or state; which benchmark for relative strength; does the volatility category invert |
+| `NewsScore.md` §7 Q4, Q5 | per-name or market-level; a per-article relevance block |
+| `SentimentScore.md` §7 Q2, Q4, Q5 | which institutional measure; 20-day momentum as a delta or a slope; percentile-based crowd bands |
+| `EventScore.md` §7 Q3, Q4, Q5 | which expected-move producer is canonical; per-name or market-level; the three absent calendars |
+
+**One distinction worth keeping straight:** Q6 assigns **ownership** of materiality
+and the expected move to `EventScore`. It does **not** choose between the two
+producers (`options_surface.implied_move_pct:42` vs
+`catalyst.implied_move_from_history:111`), so `EventScore.md` §7 Q3 stays open as
+a producer question.
 
 ---
 

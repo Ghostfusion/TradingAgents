@@ -388,6 +388,28 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** **the twelve architecture decisions are recorded and
+  propagated.** `IMPLEMENTATION_PLAN.md` §13 is now a **decision record** (each row keeps the recommendation that was on
+  record beside the decision that governs): Q1 canonical regime path = **C** (market-level, B's four-axis vocabulary);
+  Q2 `TradeScore` and the six-engine object are **separate names** (decision composite vs research allocation);
+  Q3 `RiskScore` = **both** name- and book-level, only book-level feeding the composite; Q4 the mis-homed leaves
+  **move** (weights preserved, never silently redistributed); Q5 the **sentiment toolset exists** and needs binding
+  repair; Q6 **`EventScore` owns materiality/expected move**, `NewsScore` consumes it; Q7 the **structured event
+  state** ships and macro/Fed/OPEX may **not** hard-block; Q8 **gates before sizing**; Q9 the **neglected-firm sign**
+  for coverage; Q10 the score **informs only**; Q11 **daily** horizon; Q12 **semivariance, not the conditional-σ
+  ratio**. **Seven anti-double-counting invariants** are now binding in the master's new §2.1 (rules 8-14), including
+  "directional volatility -> the semivariance ratio, NOT σ_up/σ_down - the rule that stops the volatility factor
+  quietly becoming a second momentum factor through drift contamination". The plan also gains **§13.1** (the
+  architecture the decisions produce) and **§13.3** (what is *still* open, by document and question number), so the
+  record cannot read as "everything is decided". **Ten engine-document questions are closed in place** - each resolved
+  question in `RegimeScore.md`/`RiskScore.md`/`TechnicalScore.md`/`NewsScore.md`/`SentimentScore.md`/`EventScore.md`
+  now carries a `**CLOSED 2026-09-17 (plan §13 Qn)**` line and each §7 opens with a status note; the unmarked ones
+  stay open. **Kept explicit:** Q6 assigns *ownership* of materiality to `EventScore`, not the choice between the two
+  producers (`options_surface.implied_move_pct:42` vs `catalyst.implied_move_from_history:111`), so `EventScore.md`
+  §7 Q3 remains open as a producer question. All of the plan's inline `§13 Qn` references were updated with it (P0-7,
+  WP-4's prerequisite 5, WP-5's book-mode, WP-6's materiality, WP-8's layer 3 and block note, WP-11's names and gate
+  order, §11.2) - none is left dangling. Suites untouched: engine **4402 passed / 5 skipped**, executor **1105**,
+  web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** **signed semivariance is specified** in the score-engine
   set - the one addition from the volatility-factor review that survived scrutiny. **Owner: `docs/scores/TechnicalScore.md`**
   (§1's volatility ledger gains three rows, §4 gains the producer spec, the methodology appendix gains three entries);

@@ -214,6 +214,25 @@ swing setup NO) — a single "bullish" label would erase the disagreement.
 7. **No `factor_score=NN` in prose.** The scores are tool leaves and printed
    blocks, not sentences the LLM may paraphrase. (Owner decision Q5.)
 
+### 2.1 The seven anti-double-counting invariants (owner, 2026-09-17)
+
+Each one names a way this set could silently collapse into fewer signals than it
+claims. They are binding on every workstream, and `IMPLEMENTATION_PLAN.md` §13.2
+carries them beside the decisions that produced them.
+
+8. **One quantity -> one authoritative producer.**
+9. **`EventScore` owns materiality and the expected move; `NewsScore` consumes
+   it** - it does not build a second estimate.
+10. **Book risk -> the composite. Name risk -> diagnostic/reporting.**
+11. **Score -> decision information. Sizing multiplier -> sizing. Do not merge
+    them.**
+12. **Market regime -> market-level. Security regime -> name-level diagnostic.**
+13. **Daily `TradeScore` -> daily inputs.** Intraday indicators remain leaves
+    unless explicitly promoted.
+14. **Directional volatility -> the semivariance ratio, NOT `sigma_up/sigma_down`**
+    - the rule that stops the volatility factor quietly becoming a second momentum
+    factor through drift contamination. Specified in `TechnicalScore.md` §1/§4.
+
 
 ---
 
@@ -400,6 +419,14 @@ and `enable_score_eval_rows` already gates the IC harness
 ---
 
 ## 7. Decision record (owner, 2026-09-17)
+
+**The twelve architecture decisions of the same day are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13** — the canonical regime
+path, the two composite names, the per-name/book `RiskScore` split, the moved
+bindings, the sentiment toolset, EventScore's ownership of materiality, the
+structured event state, the gate order, the coverage sign, score-vs-sizing, the
+daily horizon, and the semivariance measure. The five below are this document's
+own.
 
 The five questions this document opened are answered. Recorded with the
 rationale, because the reasoning is what future changes have to respect.
