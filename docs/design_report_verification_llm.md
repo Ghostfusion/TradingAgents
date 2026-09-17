@@ -369,7 +369,14 @@ correct reports; each has a reproducer).**
   `get_taylor_read` call, flagged UNSUPPORTED because the digest carries the
   tool's OUTPUT, never the arguments the analyst passed. Either the digest
   gains the stem's own call arguments, or the instructions state that a
-  self-provenance caveat is not a claim about the world.
+  self-provenance caveat is not a claim about the world. **This class is now
+  MANDATED, not incidental:** the 2026-09-16 `SIGNAL SYNTHESIS` rule (all four
+  analyst prompts) requires the report to name a conflict and state which
+  signal it weighted more heavily and why. The leaves cannot ground a weighting
+  decision, so expect a new UNSUPPORTED family on the next verified tree and
+  decide then between the digest half (carry the stem's own call arguments), an
+  explicit "a stated weighting is not a claim about the world" exemption in the
+  verifier instructions, or living with it - measured first, as usual.
 - **Verifier per-run variance.** Re-verifying the same patched tree flags a
   different tail of meta/qualitative claims each time (the MSFT fundamentals
   stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
