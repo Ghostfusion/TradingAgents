@@ -558,6 +558,7 @@ category):
 | OBV **value** (not just divergence) | return the cumulative OBV that `technical_factors.obv_divergence:396` already computes locally at `:404` and discards |
 | per-name RS vs QQQ and the sector ETF | call `relative_strength.relative_strength_report:132` once per benchmark (it is benchmark-agnostic); the sector map exists (`sector_rank.sector_group_of:163`) |
 | market-wide breadth | P0-3 |
+| upside / downside semivariance | `volatility_models.semivariance` beside the existing estimators — `RS⁻ + RS⁺ = RV` **exactly**, `None` below `min_obs`, the score consuming `√RS⁻` and the ratio. Producer spec in `TechnicalScore.md` §4, unit pinning in `RiskScore.md` §0.3 |
 
 **Deliverable.** `strategies/technical_score.py::technical_score(components, *,
 weights=None) -> dict` over the already-computed component dicts — **no new
@@ -634,7 +635,7 @@ coverage-weighted uncertainty and never lowers the score; (c) no-data returns
 `None`; (d) the value appears in no `GATE_PRECEDENCE` check and no
 `risk_multiplier` input; (e) the score reads `book_context.measured_book_drawdown:102`
 and **not** `regime_state.regime_drawdown:146` (opposite signs); (f) the printed
-contributions recompute the printed score.
+contributions recompute the printed score; (g) the semivariance leg consumes `√RS⁻` (return units) with the raw sums printed beside it, and a fixture where `RS⁻ + RS⁺ ≠ RV` fails — the identity is the test.
 
 **Gate.** `enable_risk_score`.
 

@@ -388,6 +388,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** **signed semivariance is specified** in the score-engine
+  set - the one addition from the volatility-factor review that survived scrutiny. **Owner: `docs/scores/TechnicalScore.md`**
+  (§1's volatility ledger gains three rows, §4 gains the producer spec, the methodology appendix gains three entries);
+  **consumer: `docs/scores/RiskScore.md`** §1 (a named dependency, not a re-derivation) and §0.3 (a fourth pinned
+  convention - the semivariance unit); **build row** in `IMPLEMENTATION_PLAN.md` §5.2 with the acceptance in §5.4; and
+  the master's rule 3 now names the coupling so the shared producer has one owner. The spec: `volatility_models.semivariance(returns,
+  *, min_obs=20) -> {"rs_up","rs_down","rs_total","rs_ratio","n"}` with `RS⁻ = Σ r²·1[r<0]`, `RS⁺ = Σ r²·1[r>0]` and
+  **`RS⁻ + RS⁺ = RV` exactly** (Patton & Sheppard 2015); `None` below `min_obs`, never 0; the score consumes `√RS⁻`
+  (return units, comparable to `regime.realized_vol:29`) plus the ratio, raw sums printed beside. **Rejected in the same
+  pass:** the review's `σ_up = StdDev(r | r>0)` (a conditional std does not decompose - `evaluate.downside_deviation:430`
+  is that object, not semivariance) and its `σ_up/σ_down` ratio (confounded with drift - it moves with the mean return,
+  so it partly re-measures momentum). Direction pinned from the evidence: the **downside** leg is the persistent one, so
+  it carries the risk weight, and volatility stays **risk-increasing** in every row. The methodology appendix now also
+  carries the counter-evidence the review omitted: the **IVOL puzzle** (Ang/Hodrick/Xing/Zhang 2006), the
+  **low-volatility anomaly** (Baker/Bradley/Wurgler 2011) and the **MAX/lottery effect** (Bali/Cakici/Whitelaw 2011) -
+  which the repo already screens the other way (`get_lottery_factors:8739` → `strategies/lottery.py:88`, `toolsets.py:282`).
+  Suites untouched: engine **4402 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** the score-engine set gets a **comprehensive
   implementation plan** - `docs/scores/IMPLEMENTATION_PLAN.md` (new, 73.6 KB, 16 numbered sections §0-§15), built from the
   eight design documents read end to end and grounded with web checks on every external source it depends

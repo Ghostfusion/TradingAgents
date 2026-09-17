@@ -205,7 +205,7 @@ swing setup NO) — a single "bullish" label would erase the disagreement.
 3. **One number, one producer.** If two engines would read the same computation,
    that is a naming problem. The engine's rule is *one implementation, many
    readers* — and the documents must therefore name, per component, which
-   producer it reads. The known couplings are in `IMPLEMENTATION_PLAN.md` §5 (the per-engine component maps).
+   producer it reads. The known couplings are in `IMPLEMENTATION_PLAN.md` §5 (the per-engine component maps). One is now explicit: **semivariance is owned by `TechnicalScore.md`** (§1 and §4) and read by `RiskScore.md`'s volatility leg, which names it as a dependency rather than re-deriving it.
 4. **A composite never overrides a hard gate.** See §1.4.
 5. **Measure, don't assume.** Anything that can only be a constant is labelled a
    constant, in the document *and* in the output.
