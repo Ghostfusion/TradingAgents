@@ -1873,6 +1873,13 @@ _TOTAL_DEBT_RE = re.compile(
 _NET_FIGURE_RE = re.compile(
     r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*\-]*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
+# A line that names a quoted net row as WRONG rejects it as the report's own
+# figure (the row is quoted to be corrected, not asserted). Narrow on purpose:
+# the cue needs an explicit defect word next to the figure.
+_NET_FIGURE_REJECT_RE = re.compile(
+    r"(?i)\bmis-?sign|\bwrong\s+sign|\bnot\s+quot|\bdo(?:es)?\s+not\s+(?:quote|use|rely)"
+    r"|\bunreliable\b|\bmislabel|\bstale\b"
+)
 
 
 def _money_billions(raw: str, suffix: str | None) -> float | None:
@@ -1908,6 +1915,14 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
         line_start = report_text.rfind("\n", 0, m.start()) + 1
         line_end = report_text.find("\n", m.end())
         line = report_text[line_start: line_end if line_end != -1 else len(report_text)]
+        # A vendor row the report names as wrong is QUOTED, not asserted: MSFT
+        # 2026-09-16 fundamentals.md wrote 'the vendor "Net Debt
+        # 19,359,000,000" row is mis-signed and I do not quote it as debt'
+        # beside its own +19,825,000,000 net cash, and the checker read the
+        # rejected row as the report's net figure (same shape: MSFT 11:30, AMAT
+        # 2026-09-14 'the vendor's "Net Debt" row is a mislabel').
+        if _NET_FIGURE_REJECT_RE.search(line):
+            continue
         pair = _table_cell_pair_value(line, m)
         net_matches.append((m, pair[0] if pair else m.group(2), pair[1] if pair else None))
     if not net_matches:
@@ -2892,8 +2907,40 @@ def _sma200_pct_is_foreign(line: str, m: re.Match) -> bool:
 
 
 _GARCH_COND = re.compile(r"garch[^\n]{0,40}?\bcond(?:itional)?[^0-9]{0,8}(\d+(?:\.\d+)?)%", re.I)
-_CHANDELIER_EQ = re.compile(r"chandelier[^=\n]*=\s*(\d+(?:\.\d+)?)", re.I)
-_CHANDELIER_SPACE = re.compile(r"chandelier\s+(\d+(?:\.\d+)?)(?!\s*[x×XATR])", re.I)
+# The `(n x ATR)` leg is not the stop: "chandelier 486.7536 (= 3x10.3422 below
+# the 22-bar anchor high 517.78)" read the 3 as a second chandelier value
+# (MSFT 2026-09-16 13:04 market.md).
+_CHANDELIER_MULTIPLE_AFTER = r"(?!\s*[x\u00d7X])(?!\s*ATR)"
+# The `=` form's gap may carry prose ("chandelier 3xATR below 22-bar high =
+# 54.11") but never ANOTHER metric's assignment: "... chandelier 485.9179 (3x
+# ATR below the 22-bar high), 1R=4.3821" is the 1R's value, and the gap ends in
+# its label (a label sitting next to a figure carries a digit - 1R, t1, t2 -
+# where prose does not: high, stop, level). MSFT 2026-09-16 23:14 market.md was
+# flagged INTERNAL_CONFLICT on 4.3821 vs 485.9179 by exactly that grab.
+_CHANDELIER_EQ = re.compile(
+    rf"chandelier([^=\n]*)=\s*\**\s*(\d+(?:\.\d+)?){_CHANDELIER_MULTIPLE_AFTER}", re.I
+)
+_CHANDELIER_GAP_FOREIGN_RE = re.compile(r"\d\S*\s*$")
+# The space form tolerates the word "stop" between label and value: the old
+# reader demanded a digit straight after "chandelier ", so "chandelier stop
+# 486.3121" (MSFT 2026-09-15 14:02 market.md) was invisible to it.
+_CHANDELIER_SPACE = re.compile(
+    rf"chandelier\s*(?:stop)?\s+(\d+(?:\.\d+)?){_CHANDELIER_MULTIPLE_AFTER}", re.I
+)
+
+
+def _chandelier_values(report_text: str) -> list[str]:
+    """Chandelier stop figures, from both printed forms.
+
+    ``=`` form: the gap may hold prose, but a gap ending in another label
+    (``1R=``) is that other quantity, not this stop. ``space`` form: an
+    optional "stop" between label and value, never the ``(n x ATR)`` leg.
+    """
+    return [
+        m.group(2)
+        for m in _CHANDELIER_EQ.finditer(report_text)
+        if not _CHANDELIER_GAP_FOREIGN_RE.search(m.group(1))
+    ] + [m.group(1) for m in _CHANDELIER_SPACE.finditer(report_text)]
 
 
 _PRIMARY_PRICE = re.compile(
@@ -3091,8 +3138,7 @@ def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    raw = [m.group(1) for m in _CHANDELIER_EQ.finditer(report_text)]
-    raw += [m.group(1) for m in _CHANDELIER_SPACE.finditer(report_text)]
+    raw = _chandelier_values(report_text)
     vals = _cluster_value_tokens(raw)
     if len(vals) <= 1:
         return []

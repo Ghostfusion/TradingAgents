@@ -1100,6 +1100,38 @@ def test_chandelier_identity_clean():
     assert rv._chandelier_identity(t) == []
 
 
+def test_chandelier_identity_ignores_a_neighbouring_metrics_assignment():
+    # MSFT 2026-09-16 23:14 market.md: the chandelier is 485.9179 and the
+    # "1R=4.3821" printed beside it belongs to the R-multiple read. The loose
+    # "=" reader walked past the 22-bar-high parenthetical to that "=" and
+    # flagged 4.3821 as a second chandelier stop.
+    t = ("- `get_swing_exits`: chandelier 485.9179 (3x ATR below the 22-bar "
+         "high), 1R=4.3821, t1=499.0642, t2=503.4463.")
+    assert rv._chandelier_values(t) == ["485.9179"]
+    assert rv._chandelier_identity(t) == []
+
+
+def test_chandelier_identity_reads_the_stop_after_the_word_stop():
+    # "chandelier stop 486.3121" was invisible to the space reader (it wanted a
+    # digit straight after the label) while the "=" reader took the
+    # "t1=522.6358" two clauses later as the stop (MSFT 2026-09-15 14:02).
+    t = ("- `get_swing_exits`: **chandelier stop 486.3121** (3x ATR below the "
+         "22-bar high), ema20 trail 492.9986, **t1=522.6358, t2=534.7438, "
+         "1R=12.1079**.")
+    assert rv._chandelier_values(t) == ["486.3121"]
+    assert rv._chandelier_identity(t) == []
+
+
+def test_chandelier_identity_ignores_the_atr_multiple_leg():
+    # "chandelier 486.7536 (= 3x10.3422 below the 22-bar anchor high 517.78)"
+    # read the 3 of the ATR multiple as a second chandelier value (MSFT
+    # 2026-09-16 13:04), flagging one stop against itself.
+    t = ("Swing exits: chandelier 486.7536 (= 3x10.3422 below the 22-bar anchor "
+         "high 517.78), exit=False; EMA20 trail 492.9439.\n"
+         "| Stop / targets | structure stop 475.6578; chandelier 486.7536 |")
+    assert rv._chandelier_identity(t) == []
+
+
 def test_money_ellipsis_flagged_as_artifact():
     # HPE 2026-09-10: 'Total debt $8.22B... verbatim $20.24B' leaks a
     # mid-edit dollar value into the final report.
@@ -1452,6 +1484,23 @@ def test_net_debt_identity_clean_when_net_cash_agrees():
         "Cash + ST Investments $62.47B; Total Debt $38.35B; net cash of $24.12B."
     )
     assert rv._net_debt_identity(text) == []
+
+
+def test_net_debt_identity_ignores_a_vendor_row_the_report_rejects():
+    # MSFT 2026-09-16 fundamentals.md quotes the vendor "Net Debt
+    # 19,359,000,000" row in order to correct it ("mis-signed and I do not
+    # quote it as debt") beside its own +19,825,000,000 net cash. The quoted
+    # row is not the report's figure, so there is nothing to reconcile.
+    row = "the vendor \"Net Debt 19,359,000,000\" row {0}."
+    body = ("**Net cash**: cash + ST investments 76,651,000,000 vs total debt "
+            "56,826,000,000 = **+19,825,000,000 net cash**; ")
+    rejected = body + row.format("is mis-signed and I do not quote it as debt")
+    assert rv._net_debt_identity(rejected) == []
+    # ...and the cue is what suppresses it: quoted as-is, the same row is read
+    # as the report's net figure and the identity check fires (19.36 vs 19.83).
+    quoted = body + row.format("is carried beside it")
+    cs = rv._net_debt_identity(quoted)
+    assert len(cs) == 1 and "19.36" in cs[0].claim
 
 
 def test_current_ratio_identity_flags_r1_cr_vs_pair():
