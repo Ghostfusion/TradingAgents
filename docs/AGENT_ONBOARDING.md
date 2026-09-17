@@ -388,6 +388,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-16 `(working tree)` - Prompt-budget pass, on the owner's instruction plus one defect found while measuring. `MARKET_CEILING`
+  raised 42_050 → **50_000** (standing headroom; the market prompt still measures 41,999, bullet count 79/95 and the
+  longest-bullet pin 523 unchanged and still binding). The sentiment prompt's verbatim-counts item is now pinned by
+  `test_report_verify.py::test_sentiment_prompt_requires_verbatim_counts`, which renders the real prompt, finds the item by its
+  lead (renumbering is free) and asserts inside that item alone: the three governed figures (message counts, upvote/comment
+  totals, computed-block values), the no-rounding prohibition, and the obligation wording - mutation-checked, and a match that
+  finds nothing cannot pass. The counts half of that class has no deterministic backstop (`_anchor_claims` covers only
+  `computed_score`), so the prompt is the control. **Defect fixed on sight:** `prompt_literal_text` excluded every `Constant`
+  inside an `ast.JoinedStr` to avoid double counting, but `ast.walk` already visits f-string segments once - so f-string prompt
+  text was invisible to the ceiling: news 13,160 → **15,337**, sentiment 1,406 → **7,105** (its whole system message is one
+  f-string), market/fundamentals unchanged; `test_other_analyst_prompts_stay_bounded` now includes sentiment, so all four prompt
+  modules are size-checked. See CHANGELOG.
+  Tests: `test_prompt_budget_contract.py` (helper fix + ceiling), `test_report_verify.py` +1; full suite 4330 passed / 5 skipped.
 - 2026-09-16 `(working tree)` - Analyst rule-prose consolidation across the market / news / fundamentals prompts (plus the
   sentiment prompt's conflict-weighting and verbatim-count rules): the same
   principle was stated two or three times under different headers (four basis rules → `BASIS DISCIPLINE`; six quote/session
@@ -400,7 +413,8 @@ has changed before); never assume an endpoint works — the SDK's
   asserts the two modules agree, so one rename cannot land without the other. Every tool name/parameter/citation verified
   preserved (the market indicator/tool block is byte-identical to the previous revision), the market tool block's stray
   4-space indent (which had pushed the longest bullet to 527 for a whitespace-only reason) is stripped, and `MARKET_CEILING`
-  raised 40_300 → 42_050 (measured 41,999) with the reason in the comment. See CHANGELOG.
+  raised 40_300 → 42_050 (measured 41,999) with the reason in the comment - raised again to 50,000 the same day, and the
+  news size quoted there corrected, in the entry above. See CHANGELOG.
   Tests: `test_prompt_budget_contract.py`, `test_analyst_evidence_wiring.py`, `test_news_analyst_prompt.py` (+1),
   `test_report_verify.py`, `test_structured_agents.py`; full suite 4324 passed / 5 skipped, all four rendered system
   messages carry every new section header.

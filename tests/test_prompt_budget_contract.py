@@ -50,7 +50,22 @@ ANALYSTS = REPO / "tradingagents" / "agents" / "analysts"
 # tool bullet to 527 for a whitespace-only reason, leaving the indicator/tool block
 # byte-identical to the previous revision. The bullet COUNT is capped as well as the
 # ceiling, so a reflow cannot hide growth.
-MARKET_CEILING = 42_050
+#
+# 42_050 -> 50_000 (2026-09-16, owner's call, deliberate): standing headroom so the
+# next rule additions do not each need a budget decision. Measured 41,999 chars - the
+# consolidation's real size, unchanged by the helper fix below - so the slack is
+# 8,001. The bullet count (95) and the longest-bullet pin (523) are unchanged and
+# still bind; only the whole-prompt number is looser. `test_other_analyst_prompts_stay_bounded`
+# reuses this constant as a coarse backstop for the other three prompt modules, which
+# it was already loose for - none of them has a per-rule style of its own: news
+# 15,337, fundamentals 27,617, sentiment 7,105.
+#
+# `prompt_literal_text` no longer excludes `JoinedStr` segments (2026-09-16, defect
+# fixed on sight): an f-string's literal parts ARE `Constant` nodes that `ast.walk`
+# visits exactly once, so the exclusion was not a dedup - it was a blind spot that
+# hid 2,177 chars of the news prompt and all but 1,406 chars of the sentiment system
+# message. Sizes above are post-fix; market/fundamentals did not move.
+MARKET_CEILING = 50_000
 MARKET_BULLET_LIMIT = 95
 LONGEST_BULLET_LIMIT = 523
 BULLET_RE = re.compile(r"^\s*-\s*[a-z_]+\s*\(")
@@ -59,8 +74,12 @@ BULLET_RE = re.compile(r"^\s*-\s*[a-z_]+\s*\(")
 def prompt_literal_text(path: Path) -> str:
     """The module's prompt-bearing literals, counted once.
 
-    Mirrors ``tests/prompt_text.py`` but excludes a ``JoinedStr`` child that
-    its parent already contributes, so an f-string cannot be counted twice.
+    Every non-docstring string constant, joined. An f-string's literal segments
+    ARE ``Constant`` nodes, and ``ast.walk`` visits each exactly once, so no
+    special case is needed for ``ast.JoinedStr`` - and adding one is a silent
+    blind spot: the earlier revision excluded every segment of a ``JoinedStr``,
+    which hid 2,177 chars of the news prompt and effectively the whole sentiment
+    system message (1,406 counted against 7,105 real) from the ceiling.
     """
     tree = ast.parse(Path(path).read_text(encoding="utf-8"))
     docstrings: set[int] = set()
@@ -74,19 +93,12 @@ def prompt_literal_text(path: Path) -> str:
                 and isinstance(body[0].value.value, str)
             ):
                 docstrings.add(id(body[0].value))
-    in_joined: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.JoinedStr):
-            for value in node.values:
-                if isinstance(value, ast.Constant):
-                    in_joined.add(id(value))
     parts = [
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
         and id(node) not in docstrings
-        and id(node) not in in_joined
         and node.value.strip()
     ]
     return "\n".join(parts)
@@ -119,10 +131,17 @@ def test_market_prompt_within_budget():
 
 
 @pytest.mark.parametrize(
-    "name", ["news_analyst.py", "fundamentals_analyst.py"], ids=lambda n: n
+    "name",
+    ["news_analyst.py", "fundamentals_analyst.py", "sentiment_analyst.py"],
+    ids=lambda n: n,
 )
 def test_other_analyst_prompts_stay_bounded(name):
-    """The other prompts have no per-line style, but they must not balloon."""
+    """The other prompts have no per-line style, but they must not balloon.
+
+    All three prompt-bearing analysts are listed: sentiment's system message is
+    one f-string, so before the ``JoinedStr`` blind spot in ``prompt_literal_text``
+    was fixed it was not measured at all (1,406 chars counted against 7,105 real).
+    """
     text = prompt_literal_text(ANALYSTS / name)
     assert len(text) < MARKET_CEILING, f"{name} prompt grew past the market ceiling"
 

@@ -236,6 +236,40 @@ def test_sentiment_prompt_binds_verdict_to_computed_score():
     assert "### Deterministic computed sentiment" not in plain
 
 
+def test_sentiment_prompt_requires_verbatim_counts():
+    """The verbatim-counts item governs the three figures the report cannot
+    recompute: the message counts, the Reddit engagement totals, and the values
+    of the deterministic computed block. Only the score half of that class has a
+    deterministic backstop (`_anchor_claims` rescales and checks
+    `computed_score`); a rounded or half-read count is undetectable after the
+    fact, so the prompt is the whole control. The item is isolated before
+    asserting so a neighbouring rule's wording cannot satisfy any of these, and
+    located by its lead (not its number) so renumbering the list is free."""
+    from tradingagents.agents.analysts.sentiment_analyst import _build_system_message
+
+    msg = _build_system_message(
+        ticker="NVDA",
+        start_date="2026-09-01",
+        end_date="2026-09-08",
+        news_block="",
+        stocktwits_block="",
+        reddit_block="",
+        computed_line="computed_score=+0.08",
+    )
+    m = re.search(
+        r"\*\*Copy counts and quotes verbatim\.\*\*(.*?)(?=\n\s*\d+\.\s+\*\*)", msg, re.S
+    )
+    assert m, "the sentiment prompt dropped the verbatim-counts item"
+    item = m.group(1)
+    assert re.search(r"message counts", item, re.I)
+    assert re.search(r"upvote/comment", item, re.I)
+    assert re.search(r"computed block", item, re.I)
+    assert re.search(r"never\s+rounded", item)
+    # The rule exists to stop numbers drifting: it must state the obligation, not
+    # merely name the figures.
+    assert re.search(r"quoted exactly as given", item)
+
+
 def test_sentiment_prompt_pins_macro_to_the_leaf():
     """SKHY 2026-09-14: the sentiment stem stated "US 10-year above 5%" while no
     macro leaf existed anywhere in its evidence (the news stem had one), so the
