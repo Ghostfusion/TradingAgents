@@ -362,30 +362,40 @@ Nothing here is implemented. The design constraints:
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Does the owner want a technical *score* or a technical *state*?** Six of the
    nine categories are state descriptions (trend, structure, breakout), three are
    oscillators. A single 0-100 mixes them; the alternative is a score plus a
    state label, which the repo already does elsewhere
-   (`regime_state.regime_state:215` returns four labels plus a factor).
+   (`regime_state.regime_state:215` returns four labels plus a factor). **DECIDED
+2026-09-17:** `TechnicalScore` stays a **score**; the leaves stay **states**. The
+chain is `raw metric -> state / classification -> normalised contribution -> score`,
+so not every leaf has to produce its own 0-100.
 2. **Which benchmark for relative strength?** Today the leaf binds only SPY
    (`analysis_tools._benchmark_closes:302`). The owner names SPY, QQQ *and* the
-   sector ETF; the sector map exists (`sector_rank.sector_group_of:163`) but no
-   per-stock QQQ/sector leg is wired.
+   sector ETF; the sector map exists (`sector_rank.sector_group_of:163`) but no per-stock QQQ/sector leg is wired. **DECIDED 2026-09-17:** the **sector ETF is
+the primary** benchmark and SPY / QQQ are **contextual diagnostics** - a stock
+beating SPY proves nothing if its whole sector is beating SPY. One canonical field
+`relative_strength_vs_sector`, with `relative_strength_vs_spy` and
+`relative_strength_vs_qqq` retained as diagnostics rather than three equally
+weighted factors.
 3. **Intraday or daily?** `market_session.opening_range:72` and
    `momentum.intraday_pullback:325` need intraday bars; the rest of the engine is
    daily. The score's horizon must be stated once, not per component. **CLOSED 2026-09-17 (plan §13 Q11): the horizon is daily** - the intraday leaves stay leaves and do not enter the daily score implicitly.
 4. **Does the volatility category invert?** Volatility is *risk-increasing*: a
    favourable technical score arguably wants **low** volatility (or a *volatility
-   contraction* — VCP — which is what `swing.vcp_setup:326` already detects). The
-   owner's 5% weight does not say which.
+   contraction* — VCP — which is what `swing.vcp_setup:326` already detects). The owner's 5% weight does not say which. **DECIDED 2026-09-17:** **no blanket
+inversion.** The category is **non-monotonic / contextual**: volatility magnitude
+stays a context-and-risk variable, and the directional interpretation uses the
+canonical semivariance method of §1 and §4. A test must not assert a mechanical
+inversion.
 
 ---
 

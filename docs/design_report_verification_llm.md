@@ -396,7 +396,23 @@ correct reports; each has a reproducer).**
   stem went 3 flags -> 2 with disjoint sets across two passes on unchanged
   content). The deterministic half is stable; the LLM half is not, which is why
   every non-GROUNDED claim is adjudicated rather than counted.
-- **A legacy-mode tree cannot be verified for prompt-level facts.** The three
+- **The `verify_flags.json` contract (decided 2026-09-17).** A missing file is a
+**contract/implementation gap, not evidence of `false`.** A tree's verification state
+is stated, never inferred from absence:
+
+```
+verify_flags:
+    status = VERIFIED | PARTIAL | UNAVAILABLE | NOT_APPLICABLE
+```
+
+The ambiguity this removes is the dangerous one: today a missing file reads the same
+as `false`, and `false` can mean either *"we verified the condition does not hold"*
+or *"we had no verification data"* - two different states that must not be spelled
+the same way. The seven trees without the file either generate one or **declare why
+they do not require one**; no empty file is fabricated to make the tree look
+complete.
+
+**A legacy-mode tree cannot be verified for prompt-level facts.** The three
   trees regenerated at 2026-09-16 17:2x (MSFT/VTV/IEI
   `20260916_174952/175407/175246`) were built with `analyst_forced_tools` empty
   - the `TRADINGAGENTS_ANALYST_FORCED_TOOLS=" "` value the test suite exports

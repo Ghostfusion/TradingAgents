@@ -239,12 +239,12 @@ master's §3.2.
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Does the score size, or only inform?** Today the only wired confirmation
@@ -252,20 +252,27 @@ and are listed in that section's §13.3.
    The owner's staged table puts SentimentScore at 7.5% of a research composite —
    a score, not a multiplier. Both can exist; they must not be the same object. **CLOSED 2026-09-17 (plan §13 Q10): the score informs only** — `sentiment_factor_scale` stays a separate sizing multiplier.
 2. **Which institutional measure** — holdings level, period-over-period Δ, or the
-   orderflow proxy (`orderflow.summarize` via `get_orderflow_read:1215`)? They
-   answer different questions and only the first is currently on the fundamentals
-   surface.
+   orderflow proxy (`orderflow.summarize` via `get_orderflow_read:1215`)? They answer different questions and only the first is currently on the fundamentals
+surface. **DECIDED 2026-09-17:** the **period-over-period change** in institutional
+holdings is canonical - a 70% institutional level says nothing about whether
+institutional sentiment is improving. The level stays contextual and the orderflow
+proxy stays a **separate diagnostic**, never a silent substitute.
 3. **Is a "sentiment toolset" needed?** `sentiment_analyst` binds **no tools**
    (`agents/toolsets.py`; `analyst_toolset` raises `KeyError: 'sentiment'`), so
    every leaf in §2 reaches this engine only through the market or news analyst.
    If SentimentScore is to be built, this is the wiring decision that gates it. **CLOSED 2026-09-17 (plan §13 Q5): the toolset exists** — bind `sentiment_analyst` and register `sentiment`.
 4. **Should the 20-day momentum be a delta or a regression slope?**
    `sentiment_velocity:25` already computes an OLS slope/day (unwired);
-   `daily_sentiment_sma:501` gives a 7-day innovation. The owner's formula is a
-   simple difference.
+   `daily_sentiment_sma:501` gives a 7-day innovation. The owner's formula is a simple difference. **DECIDED 2026-09-17:** the
+**regression slope is canonical** (`sentiment_velocity:25`) - no second 20-day
+delta producer. The three outputs answer different questions: **level** (where
+sentiment is), **slope** (its direction and rate), **innovation** (the recent shock).
 5. **Do the crowd bands become percentile-based?** Today `_CROWD_BULL`/`_CROWD_BEAR`
-   are hardcoded 40/60 (`sentiment.py`, above `crowd_ratio:163`) with no
-   percentile basis, and the baseline file exists to compute one.
+   are hardcoded 40/60 (`sentiment.py`, above `crowd_ratio:163`) with no percentile basis, and the baseline file exists to compute one. **DECIDED
+2026-09-17:** move to **percentile bands over the name's own history** (<= 20th
+crowd-bearish extreme, 20-80 neutral/mixed, >= 80th crowd-bullish extreme), keep the
+current 40/60 constants as the **fallback until enough history exists**, and keep the
+percentile thresholds **configuration, not hard-coded methodology**.
 
 ---
 

@@ -1115,7 +1115,47 @@ governs and the document that carried the question is corrected in the same pass
 The six-engine research allocation stays **separate from `TradeScore`** and feeds
 research attribution only (Q2).
 
-### 13.2 The seven anti-double-counting invariants (binding)
+**The owner's second diagram (same day) adds the decision flow to execution:**
+
+```
+                         MARKET DATA
+                             |
+                 +-----------+-----------+
+                 |                       |
+             RegimeScore             EventScore
+                 |                       |
+        market environment       catalysts / expected move
+                 |                       |
+                 +-----------+-----------+
+                             |
+        +--------------------+---------------------+
+        |                    |                     |
+ TechnicalScore         NewsScore          SentimentScore
+        |                    |                     |
+        +--------------------+---------------------+
+                             |
+                         TradeScore
+                       (4-engine decision)
+                             |
+                             v
+                       Risk Gates
+                             |
+                             v
+                          Sizing
+                             |
+                             v
+                         Execution
+```
+
+**Flagged, not resolved: this diagram does not show `FundamentalScore`** (nor
+`RiskScore` as a node of its own - it appears only as "Risk Gates"). The diagram
+above it does, and the owner's weight tables cover both engines. Read the two
+together: the second one describes the **decision flow to execution**, not the full
+set of engines. If the omission is deliberate - fundamentals and risk entering only
+through the gates and the composite - that is a contract change worth stating
+explicitly, because `FundamentalScore` carries the largest research weight (35%).
+
+### 13.2 The anti-double-counting invariants (binding)
 
 Recorded in the master's §2 as rules 8-14. Each one names a way the set could
 silently collapse into fewer signals than it claims.
@@ -1127,28 +1167,83 @@ silently collapse into fewer signals than it claims.
 5. **Market regime -> market-level. Security regime -> name-level diagnostic.**
 6. **Daily `TradeScore` -> daily inputs. Intraday indicators remain leaves unless explicitly promoted.**
 7. **Directional volatility -> the semivariance ratio, NOT `sigma_up/sigma_down`** - which is what stops the volatility factor quietly becoming a second momentum factor through drift contamination.
+8. **No derived quantity may have two independent authoritative producers.** A
+   secondary implementation may be a **fallback**, a **validation cross-check** or
+   a **diagnostic**, but it must not independently contribute to the same
+   composite. This one rule resolves most of the ambiguity in this set - expected
+   move, materiality, volatility, sentiment velocity, institutional sentiment and
+   relative strength are all instances of it.
+9. **Daily is the canonical horizon.** An intraday refresh does **not**
+   automatically make an intraday metric part of the daily score: `RSI_daily` and
+   `RSI_intraday` are separate fields, as are `momentum.daily` and
+   `momentum.intraday_pullback`. Promotion is explicit, per metric.
+10. **Missing data is `unavailable`, never zero** - including a missing calendar,
+    which is *unknown*, not "no event exists" and not a negative reading. (Master
+    rule 1, stated here in the form the event and calendar work needs.)
 
-### 13.3 What is still open
 
-The decisions above close twelve questions. These engine-document questions were
-**not** among them and remain open. **The numbers in this table are each
-document's own §7 numbering, not this section's Q-numbers** - `NewsScore.md` §7 Q4
-and the decision `Q4` above are two different questions.
+#### The metric-horizon contract (rule 9)
 
-| Where | Question |
-| --- | --- |
-| `RegimeScore.md` §7 Q2-Q4 | does the 5% event category survive `EventScore`; Hurst / variance-ratio as the persistence producer; how a regime *change* is scored |
-| `RiskScore.md` §7 Q1, Q2, Q4 | which cap family "correlation risk 15%" means; whether the executor or the engine owns the book-level components; whether the two `expected move` producers reconcile |
-| `TechnicalScore.md` §7 Q1, Q2, Q4 | score or state; which benchmark for relative strength; does the volatility category invert |
-| `NewsScore.md` §7 Q4, Q5 | per-name or market-level; a per-article relevance block |
-| `SentimentScore.md` §7 Q2, Q4, Q5 | which institutional measure; 20-day momentum as a delta or a slope; percentile-based crowd bands |
-| `EventScore.md` §7 Q3, Q4, Q5 | which expected-move producer is canonical; per-name or market-level; the three absent calendars |
+| Metric class | Default horizon | May update intraday? | May affect the daily score? |
+| --- | --- | --- | --- |
+| ATR | daily | yes | yes, from the latest valid daily series |
+| RSI | daily | yes | yes - and only as an explicitly named intraday RSI |
+| Relative strength | daily | yes | yes |
+| Price / volume | intraday | yes | only through an explicitly promoted feature |
+| DCF fair value | fundamental | no | yes |
+| Financial statements | fundamental | no | yes |
+| Institutional holdings | periodic | no | yes |
+| Earnings / event calendar | event | yes | yes |
+| News | intraday | yes | yes |
+| Sentiment | intraday / daily | yes | yes, per its declared horizon |
 
-**One distinction worth keeping straight:** Q6 assigns **ownership** of materiality
-and the expected move to `EventScore`. It does **not** choose between the two
-producers (`options_surface.implied_move_pct:42` vs
-`catalyst.implied_move_from_history:111`), so `EventScore.md` §7 Q3 stays open as
-a producer question.
+### 13.3 The engine questions - all resolved (owner, 2026-09-17)
+
+The twelve above are the cross-document architecture decisions. The engine
+documents' own §7 questions are now answered too; each carries its decision
+inline in the document named below, and the question text is kept as the record.
+
+| Where | Question | Decision |
+| --- | --- | --- |
+| `RegimeScore.md` §7 Q2 | does the 5% event category survive `EventScore`? | **remove it** when `EventScore` ships - the same producer feeds both, so a second factor double-counts one catalyst. Regime = environment, Event = catalyst |
+| `RegimeScore.md` §7 Q3 | Hurst / variance ratio as the persistence producer? | **variance ratio is canonical** (`mean_reversion.variance_ratio:216`); **Hurst stays a diagnostic/research input** and does not also enter the score |
+| `RegimeScore.md` §7 Q4 | how is a regime *change* scored? | as a **separate state/flag** (CUSUM / EWMA control / BOCPD), not another weighted category |
+| `RiskScore.md` §7 Q1 | which cap family does "correlation risk 15%" mean? | the **cluster/notional concentration share**, renamed explicitly (`cluster_exposure / portfolio_exposure`) - never printed as a correlation coefficient |
+| `RiskScore.md` §7 Q2 | executor or engine owns the book-level components? | the **executor / portfolio-risk layer owns the computation**; `RiskScore` owns the per-security view and consumes the book inputs |
+| `RiskScore.md` §7 Q3 | add a `net_beta` producer? | **planned implementation, not an open question** - WP-5 owns it |
+| `RiskScore.md` §7 Q4 | do the two `expected move` producers reconcile? | `options_surface.implied_move_pct:42` **canonical** when a valid surface exists; `catalyst.implied_move_from_history:111` **fallback and validation cross-check**; no reconciliation model. `EventScore` owns the field |
+| `TechnicalScore.md` §7 Q1 | score or state? | **a score composed from state/metric leaves** - `raw metric -> state -> normalised contribution -> score` |
+| `TechnicalScore.md` §7 Q2 | which benchmark for relative strength? | the **sector ETF is primary**; SPY and QQQ are contextual diagnostics. One canonical `relative_strength_vs_sector`, the other two retained as diagnostics rather than equally weighted factors |
+| `TechnicalScore.md` §7 Q4 | does the volatility category invert? | **no blanket inversion** - the category is non-monotonic/contextual, with the directional reading from the canonical semivariance method |
+| `NewsScore.md` §7 Q4 | per-name or market-level? | **primarily per-name**; market-wide news belongs to `RegimeScore` (environment) or `EventScore` (catalyst) |
+| `NewsScore.md` §7 Q5 | a per-article relevance block? | per-article information is **retained internally**; the **aggregate is the primary output**, with a concise highest-impact-articles section |
+| `SentimentScore.md` §7 Q2 | which institutional measure? | the **period-over-period change** in holdings is canonical; the level stays contextual and the orderflow proxy stays a separate diagnostic |
+| `SentimentScore.md` §7 Q4 | 20-day momentum: delta or slope? | the **regression slope** (`sentiment_velocity:25`) - no second delta producer. Level / slope / innovation answer different questions |
+| `SentimentScore.md` §7 Q5 | percentile crowd bands? | **percentile bands over the name's own history** (<=20 / 20-80 / >=80), with the 40/60 constants as the fallback until enough history exists, and the thresholds as configuration |
+| `EventScore.md` §7 Q3 | which expected-move producer is canonical? | same decision as `RiskScore.md` §7 Q4 - **answered once, here**: options canonical, history fallback/validation, `EventScore` owns the field |
+| `EventScore.md` §7 Q4 | per-name or market-level? | **both, with explicit scope** - `EventScope = NAME` vs `MARKET`, each event individually scoped; market events never hard-block |
+| `EventScore.md` §7 Q5 | build the missing calendars? | **implementation coverage, not architecture** - define the four calendar interfaces returning `available \| missing \| not_applicable`, and never convert missing data to `score = 0` |
+
+### 13.4 Still open - outside the score set
+
+These were **not** among the answers above and remain open. Four of them live in
+[`../design_report_verification_llm.md`](../design_report_verification_llm.md)'s
+own "Open items"; the last has no document home yet.
+
+| # | Open item | Where |
+| --: | --- | --- |
+| 1 | The **three legacy-mode trees** (`MSFT_20260916_174952`, `VTV_20260916_175407`, `IEI_20260916_175246`) - regenerate, or keep as the documented example of the gather-off downgrade? | `design_report_verification_llm.md` ~:399 |
+| 2 | The **25 poisoned trees** - correct/regenerate, or leave as local artifacts? The reader is fixed and no stored gate outcome changed; only the printed current ratio / working capital / Altman block moved | same, ~:340 |
+| 3 | The **DISCLOSED-vendor-pair tradeoff** - widen `_disclosed_pair`'s cues (risks muting a real undisclosed conflict) or leave the two survivors flagging? A reproducer per survivor first | same, ~:354 |
+| 4 | The **weighting-decision UNSUPPORTED family** - the mandated `SIGNAL SYNTHESIS` rule names which signal was weighted and why, and the leaves cannot ground that. Three options on record; "measured first" | same, ~:375 |
+| 5 | The **sentiment-score anchor** when the computed block is absent - latent (0 of 36 stored stems), two options on record | same, ~:380 |
+| 6 | **Intraday event-risk sizing vs latency** (the FinancialJuice question) - needs a paid licensed feed. **Not recorded in any document** | this conversation only |
+
+Two further items are decisions in shape but were recorded as engineering with a
+policy question attached: **which metric classes may move intraday** versus may not
+(now answered - see §13.2 rule 9), and the **seven trees without
+`verify_flags.json`** (now answered - see the verification contract in
+[`../design_report_verification_llm.md`](../design_report_verification_llm.md)).
 
 ---
 

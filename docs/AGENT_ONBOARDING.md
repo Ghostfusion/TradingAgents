@@ -388,6 +388,32 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **Design only, no code:** **all 28 engine-document questions are answered** - the 18
+  still-open ones resolved by the owner plus the 10 closed earlier, so every §7 question in the six engine docs carries
+  its decision inline and each §7 is retitled "Decisions (owner, 2026-09-17) - all resolved". Highlights: RegimeScore
+  **drops its event category** when EventScore ships (same producer, would double-count), **variance ratio is the
+  canonical persistence producer** with Hurst demoted to a diagnostic, a regime **change** is a separate state/flag;
+  RiskScore's "correlation risk 15%" is the **cluster/notional share** renamed explicitly (never a correlation
+  coefficient), the **executor owns the book-level computations** while RiskScore consumes them, `net_beta` is **planned
+  WP-5 work**, and expected move is **options canonical / history fallback+validation** with **EventScore owning the
+  field**; TechnicalScore is a **score composed from state leaves**, the **sector ETF is the primary** RS benchmark, and
+  volatility does **not** mechanically invert; NewsScore is **per-name** with per-article evidence retained internally
+  and the **aggregate as the primary output**; SentimentScore uses **delta institutional holdings**, the **regression
+  slope** for velocity, and **percentile crowd bands** with the 40/60 constants as fallback; EventScore carries an
+  explicit **`EventScope = NAME | MARKET`** and its four missing calendars are **implementation coverage** returning
+  `available | missing | not_applicable`, never `score = 0`. **Two new invariants + one contract:** *no derived quantity
+  may have two independent authoritative producers* (master rule 15 / plan rule 8 - covers expected move, materiality,
+  volatility, sentiment velocity, institutional sentiment, relative strength), *daily is the canonical horizon* with
+  explicit per-metric intraday promotion (master rule 16 / plan rule 9, with the full metric-class table), and *missing
+  data is `unavailable`, never zero - a missing calendar is unknown, not "no event exists"* (master rule 1 extended).
+  The **`verify_flags.json` contract** is recorded in `design_report_verification_llm.md`: missing is a
+  contract/implementation gap, **not evidence of `false`**, with `status = VERIFIED | PARTIAL | UNAVAILABLE |
+  NOT_APPLICABLE`. The owner's **second architecture diagram** is in the plan's §13.1 and **flagged, not resolved** - it
+  omits `FundamentalScore` (and RiskScore as a node), so read it as the decision flow to execution, not the engine set.
+  **Six items remain open** in the plan's new §13.4 and are explicitly not covered by this answer set: the three
+  legacy-mode trees, the 25 poisoned trees, the DISCLOSED-vendor-pair tradeoff, the weighting-decision UNSUPPORTED
+  family, the sentiment-score anchor when the computed block is absent, and the intraday event-risk latency question
+  (still no document home). Suites untouched: engine **4402 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **Design only, no code:** **the twelve architecture decisions are recorded and
   propagated.** `IMPLEMENTATION_PLAN.md` §13 is now a **decision record** (each row keeps the recommendation that was on
   record beside the decision that governs): Q1 canonical regime path = **C** (market-level, B's four-axis vocabulary);

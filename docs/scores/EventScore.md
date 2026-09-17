@@ -305,12 +305,12 @@ occurring right now"), and which cannot be mistaken for a signal.
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Does the owner want a 0-100 `EventScore`, or the structured event state of
@@ -322,13 +322,26 @@ and are listed in that section's §13.3.
 3. **The two "expected move" producers**: `options_surface.implied_move_pct:42`
    (ATM-implied, live) vs `catalyst.implied_move_from_history:111` (earnings
    history). Which is canonical for sizing? (Same question as
-   [`RiskScore.md`](RiskScore.md) §7 Q4 — it must be answered once.)
+   [`RiskScore.md`](RiskScore.md) §7 Q4 — it must be answered once.) **DECIDED 2026-09-17:** `options_surface.implied_move_pct:42`
+is **canonical** when a valid surface exists; `catalyst.implied_move_from_history:111`
+is the **fallback and validation cross-check**; no reconciliation model. **`EventScore`
+owns the authoritative field and `RiskScore` consumes it** - the same decision as
+`RiskScore.md` §7 Q4, answered once, here.
 4. **Is `EventScore` per-name or market-level?** Earnings and OPEX are name-level;
-   CPI/FOMC are market-level. The owner's framing ("a high-impact event occurring
-   right now") spans both.
+   CPI/FOMC are market-level. The owner's framing ("a high-impact event occurring right now") spans both. **DECIDED 2026-09-17:**
+**both, with explicit scope** - `EventScope = NAME` (earnings, product, clinical,
+litigation, investor day) and `EventScope = MARKET` (FOMC, CPI, payrolls, OPEX). A
+stock report shows its name events plus the relevant market events, and each
+underlying event keeps its own scope. **Market events do not become hard blockers**
+(plan §13 Q7).
 5. **Do product/clinical, court and investor-day calendars get built?** They are
    ABSENT, and the smallest honest producer is a forward-calendar adapter
    modelled on `moomoo.get_economic_calendar_moomoo:1758` + `catalyst._calendar_window:394`.
+**DECIDED 2026-09-17:** this is **implementation coverage, not an architecture
+question**. Define the four calendar interfaces (product, clinical, court, investor
+day) each returning `available | missing | not_applicable`, and **never convert
+missing calendar data to `score = 0`** - unknown is not "no event exists" and
+certainly not "a negative event".
 
 ---
 

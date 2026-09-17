@@ -259,34 +259,47 @@ RiskScore: the owner's staged weights, in one direction (100 = low risk / favour
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Which cap family does "correlation risk 15%" mean** — the notional cluster
    cap (`config.cluster_cap_pct:109`), a true correlation coefficient, or a new
    scalar (largest cluster share / average pairwise |ρ|)? **Recommendation:** the
-   cluster share, labelled a proxy, until Phase C measures whether a correlation
-   scalar adds anything.
+   cluster share, labelled a proxy, until Phase C measures whether a correlation scalar adds anything. **DECIDED
+2026-09-17:** keep the cluster/notional concentration **share** as the proxy, renamed
+explicitly - `cluster_exposure / portfolio_exposure`. It is **not** a correlation
+coefficient and must never be printed as one.
 2. **Does the executor or the engine own the book-level components?** Tail,
    drawdown and cluster notionals are *book* quantities; the engine sees one
    name. The score may therefore need two modes (name-level and book-level) or to
-   live in the executor. This is a contract decision, not a modelling one.
+   live in the executor. This is a contract decision, not a modelling one. **DECIDED 2026-09-17:** the
+executor / portfolio-risk layer **owns** the book-level computations (book CVaR,
+drawdown, cluster concentration, portfolio beta, correlated stress). `RiskScore`
+owns the **per-security** view and **consumes** the book inputs - book calculations
+do not move into the name engine merely because the score displays them.
 3. **Should a `net_beta` producer be added?** §3.3 shows it is neither
    produced nor read; the `0.0` default that made it look flat is gone (it is
    `None` now). Implementing it needs a per-name beta (`etf_risk._beta:38`
-   exists, private) times position weights, in the executor's book builder.
+   exists, private) times position weights, in the executor's book builder. **DECIDED 2026-09-17:** this
+is **planned implementation work, not an open design question** - `net_beta` is a
+required book-level input and `IMPLEMENTATION_PLAN.md` WP-5 owns the producer.
 4. **Do the two `expected move` producers reconcile?** `options_surface.implied_move_pct:42`
    (ATM-implied) and `catalyst.implied_move_from_history:111` (earnings history)
-   are different numbers under one name.
+   are different numbers under one name. **DECIDED 2026-09-17:**
+`options_surface.implied_move_pct:42` is **canonical** when a valid surface exists;
+`catalyst.implied_move_from_history:111` is the **fallback and validation
+cross-check**. No reconciliation model - a blended third quantity would need its own
+validation. **`EventScore` owns the authoritative field; this engine consumes it**
+(see `EventScore.md` §7 Q3 - answered once, there).
 5. **Is `RiskScore` per-name or per-book?** The owner's table mixes both
    (liquidity and volatility are name-level; correlation, concentration and
    drawdown are book-level). The document assumes both are reported and only the
-   book-level ones feed the composite. **CLOSED 2026-09-17 (plan §13 Q3): both are reported; only the book-level components feed the composite.**
+   book-level ones feed the composite. **CLOSED 2026-09-17 (plan §13 Q3): both are reported; only the book-level components feed the composite.** **And (engine decision, same day): the book-level *computations* are owned by the executor / portfolio-risk layer** - see Q2 above for the ownership contract.
 
 ---
 

@@ -199,7 +199,9 @@ swing setup NO) — a single "bullish" label would erase the disagreement.
 
 1. **`NA ≠ 0`.** A missing input reduces the *available* weight; it never becomes
    a zero that punishes the name. A missing metric is never manufactured from a
-   generic factor. Every score prints its coverage.
+   generic factor. Every score prints its coverage. **A missing calendar is
+   `unknown`, not "no event exists" and not a negative reading** - the four event
+   calendars return `available | missing | not_applicable`.
 2. **A score is not a rating.** Nothing feeds `decision_guardrail.SCORE_BANDS`;
    each engine carries its own band table.
 3. **One number, one producer.** If two engines would read the same computation,
@@ -232,6 +234,15 @@ carries them beside the decisions that produced them.
 14. **Directional volatility -> the semivariance ratio, NOT `sigma_up/sigma_down`**
     - the rule that stops the volatility factor quietly becoming a second momentum
     factor through drift contamination. Specified in `TechnicalScore.md` §1/§4.
+15. **No derived quantity may have two independent authoritative producers.** A
+    secondary implementation may be a **fallback**, a **validation cross-check** or
+    a **diagnostic**, but it must not independently contribute to the same
+    composite. Expected move, materiality, volatility, sentiment velocity,
+    institutional sentiment and relative strength are all instances of this rule.
+16. **Daily is the canonical horizon.** An intraday refresh does not make an
+    intraday metric part of the daily score: `RSI_daily` and `RSI_intraday` are
+    separate fields. Promotion is explicit, per metric - the full contract is in
+    `IMPLEMENTATION_PLAN.md` §13.2.
 
 
 ---

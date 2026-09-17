@@ -266,12 +266,12 @@ to influence anything. The design constraints:
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Which sign for coverage?** `mention_volume:43` is a coverage measure; the
@@ -285,11 +285,16 @@ and are listed in that section's §13.3.
    fundamentals toolset (`toolsets.py:393`) while this engine's 5% category needs
    it. Either the news surface gains the leaf, or the category is dropped and the weight redistributed. **CLOSED 2026-09-17 (plan §13 Q4): the binding moves; the category keeps its weight.**
 4. **Should `NewsScore` be per-name at all**, or is it a market-level flow
-   measure? Most of the owner's categories are name-level; the macro/industry
-   ones are not.
+   measure? Most of the owner's categories are name-level; the macro/industry ones are not.
+**DECIDED 2026-09-17:** primarily **per-name** - the score answers what the current
+news environment implies *for this security*. Market-wide news belongs to
+`RegimeScore` (environment) or `EventScore` (catalyst).
 5. **Does the report print a per-article relevance list** (an attribution block),
-   or only the aggregate? Today the score reaches the report only when the LLM
-   volunteers it (defect 1 in §3).
+   or only the aggregate? Today the score reaches the report only when the LLM volunteers it (defect 1 in §3).
+**DECIDED 2026-09-17:** keep the per-article information **internally** (relevance,
+sentiment, novelty, the materiality reference, timestamp) and make the **aggregate
+the primary report output**, with a concise evidence section naming the
+highest-impact articles. Auditability without an unreadable report.
 
 ---
 

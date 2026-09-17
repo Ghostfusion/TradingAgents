@@ -232,12 +232,12 @@ third (the score) must not become a fourth.
 
 ---
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-09-17) - all resolved
 
-**Status 2026-09-17:** the questions the implementation plan raised are
-answered - see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13 (twelve
-decisions). The marked ones below are **closed**; the unmarked ones remain open
-and are listed in that section's §13.3.
+**All decided (owner, 2026-09-17).** Each question keeps its text as the record
+and carries its decision inline. The architecture decisions are in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13; the engine-internal
+answers are here.
 
 
 1. **Which path is canonical for a score — A, B, or a new market-level C?** This
@@ -246,14 +246,21 @@ and are listed in that section's §13.3.
    reusing B's four-axis vocabulary) — A is name-level and B's sizing fold is off by default. **CLOSED 2026-09-17 (plan §13 Q1): path C is canonical** - market-level inputs reusing B's four-axis vocabulary.
 2. **Does the event category (5%) survive** if `EventScore` ships? The overlap is
    real (`build_catalyst_snapshot:219` feeds both). Master §3.2 defect 16 records
-   the dead `catalyst_window` veto in `regime_gate_read:261` — the regime gate
-   advertises an event veto that can never fire.
+   the dead `catalyst_window` veto in `regime_gate_read:261` — the regime gate advertises an event veto that can never fire. **DECIDED 2026-09-17:**
+remove the standalone event category from this engine when `EventScore` ships. The
+same producer feeds both, so a second 5% factor double-counts one catalyst -
+**RegimeScore describes the environment, EventScore describes the catalyst**.
 3. **Hurst/variance-ratio as the persistence producer?** They exist, are formal,
-   and are unwired. The alternative is to keep the choppiness index and label it
-   a proxy.
+   and are unwired. The alternative is to keep the choppiness index and label it a proxy. **DECIDED
+2026-09-17:** the **variance ratio** (`mean_reversion.variance_ratio:216`) is the
+canonical persistence producer; **Hurst stays a diagnostic/research input** and
+must not also enter the score. One authoritative producer, not two.
 4. **How is a regime *change* scored** as opposed to a regime *level*? The
    `cusum:295` / `ewma_control:340` / `bocpd:389` shift detectors exist and are
-   surfaced by `get_shift_detection:7106`; none is part of the owner's table.
+   surfaced by `get_shift_detection:7106`; none is part of the owner's table. **DECIDED 2026-09-17:** a regime **change** is a
+separate **state/flag** (CUSUM / EWMA control / BOCPD, surfaced by
+`get_shift_detection:7106`), not another weighted score category - "is the regime
+changing?" and "what regime are we in?" are different dimensions.
 
 ---
 
