@@ -388,6 +388,21 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **D-11: the compiled context's `catalyst_window` can never be `True` - and the `2c05701` "FIXED"
+  claim for defect 16 is wrong.** Found while building WP-12, by executing the path instead of reading the ledger.
+  `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`),
+  and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`); the only writer is
+  `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`:686`).
+  So `cat_snap` at `trading_graph.py:1275` is always `None` and the line always prints `catalyst_window=False` - a positive
+  assertion, not an NA. **Measured:** 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader
+  (`pre_market.catalyst_window_read`) says the window is **active** (`scale` 0.25/0.6); all **19** printed
+  `catalyst_window=` occurrences read `False`; on NFLX 2026-09-15 the context printed `verdict=tradable pass=True
+  reasons=['...no catalyst']` where the snapshot implies `verdict=catalyst-window pass=False reasons=['catalyst window open']`.
+  **Recorded, not unilaterally fixed:** reviving the veto re-introduces the event read into `RegimeScore`, which the owner's
+  2026-09-17 decision moved to `EventScore`; removing the flag or printing `unavailable` both change a shipped context
+  string (forbidden as a side effect by §9 D3). Corrected in the same pass: master ledger §3.2 framing + defect 16's row,
+  `EventScore.md` D3, and the entry (16) below - which also claimed `regime.py` declares `catalyst_window: bool | None =
+  None` when it still declares `bool = False` (`regime.py:252`). Earlier claims kept and tagged, never deleted.
 - 2026-09-18 `(working tree)` - **`WP-12` enumerated into a work list, which found a third stale claim on this seam.** The build order in
   `docs/scores/ResearchLayerWiring.md` §7 is now the tracked work list (14 open, 2 blocked): `P12-1` .. `P12-11` verbatim, plus the two
   acceptance cases §7's Verification paragraph adds. Enumerating it exposed a requirement with **no build item**: **§4.2 claimed *"Level 3
@@ -797,7 +812,13 @@ has changed before); never assume an endpoint works — the SDK's
   never passed `catalyst_snapshot` to `review_decision`; a new shared `_catalyst_snapshot(ticker)` feeds it and the line
   prints `catalyst=<verdict> scale=<scale> hard_block=<bool>`. (16) **The regime gate's catalyst veto was inert** -
   `catalyst_window` is now `bool | None = None` (omitted = measured from the snapshot), and the graph's compiled-context
-  line derives it from the overlay's stamped snapshot and prints `catalyst_window=`. (17) `rule_signal_macd_hist_rising`
+  line derives it from the overlay's stamped snapshot and prints `catalyst_window=`. **[CORRECTED 2026-09-18: this entry is
+  wrong on both counts, and the veto is still inert. `strategies/regime.py:252` still declares `catalyst_window: bool =
+  False`, not `bool | None = None`; and the compiled-context line is built from `init_agent_state` BEFORE `graph.invoke`
+  (`graph/trading_graph.py:645-647`) while the overlay snapshot is stamped AFTER the graph (`:686`), so the read is always
+  `None` and the line always prints `False`. Re-confirmed by execution against 160 persisted runs — 15 hold a snapshot whose
+  own reader says the window is active, and all 19 printed occurrences in the report corpus read `False`. Carried as defect
+  D-11 in `docs/scores/README.md` §3.5 and `EventScore.md` D3.]** (17) `rule_signal_macd_hist_rising`
   (the only MACD-histogram-slope producer, script-reader only) and (18) `factors.momentum_multihorizon` (built,
   whitelisted unreachable) are both surfaced by `get_momentum_detail` (`momentum_mh: ... ensemble=`, `macd_hist_rising=`),
   and the wiring gate's whitelist entry is removed so the audit proves it. Suites: engine **4402 passed / 5 skipped**

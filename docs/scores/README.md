@@ -341,7 +341,8 @@ measures it, rather than a `0.0` nobody computed.
 **All twelve are fixed, each with a regression test.** 10 of the 11 new tests
 fail before the fix and pass after; the eleventh pins the producer key the graph
 was misreading (it was correct at the producer and wrong at the reader, so it
-cannot fail on the producer side).
+cannot fail on the producer side). **Correction 2026-09-18: eleven of the twelve
+are fixed — defect 16 is not. See the second correction below.**
 
 **One correction to the table below:** defect 7's stated consequence was
 overstated. The dead `acc +=` line could not change the result (the accumulator
@@ -350,6 +351,17 @@ was recomputed from the bins on the next line), and the AMAT read
 bimodal distribution, not a broken sum. What was missing was any way to see
 that — so the fix is the dead-line removal plus a new `value_area_pct`, printed
 by the leaf.
+
+**A second correction, made 2026-09-18: defect 16 is not fixed.** The `2c05701`
+change made the compiled-context line *derive* `catalyst_window` from the
+overlay's stamped snapshot — but the context is compiled **before** the graph
+runs (`graph/trading_graph.py:645-647`) and the snapshot is stamped **after** it
+(`:686`). The read is therefore always `None` and the line always prints
+`catalyst_window=False`, exactly as before. Re-confirmed by execution against 160
+persisted runs: 15 of them hold a snapshot whose own reader says the window is
+active, while all 19 printed occurrences in the report corpus read `False`.
+Carried as **D-11** (§3.5); it bounds WP-12 and needs an owner decision on which
+resolution to take.
 
 | # | Defect | Evidence | Consequence |
 | --: | --- | --- | --- |
@@ -362,7 +374,7 @@ by the leaf.
 | 13 | `chaikin_oscillator` returns an unbounded A/D-unit difference while the leaf labels it `(positive=buying pressure)` | `strategies/technical_factors.py:560` vs the leaf's suffix in `get_technical_factors` | the sign is a scale artefact, not a verdict — the AMAT tree shows `chaikin=869687.156 (positive=buying pressure)` beside `di- > di+` |
 | 14 | A dead `implied_move_pct` key: the graph reads a key `build_catalyst_snapshot` never emits | `graph/trading_graph.py:966` vs `strategies/catalyst.py:219` | the premarket path silently loses the implied move |
 | 15 | The premarket hard block is unreachable — the leaf never passes `catalyst_snapshot` | `agents/utils/analysis_tools.py:6561` (`get_premarket_review`) vs `strategies/pre_market.py:198-240` | a fail-closed path is dead: a catalyst block cannot REJECT through the premarket review |
-| 16 | `regime_gate_read`'s `catalyst_window` veto is inert — no producer ever sets it | `strategies/regime.py:261` vs `strategies/catalyst.py` | the regime gate advertises a veto that can never fire |
+| 16 | `regime_gate_read`'s `catalyst_window` veto is inert — no producer ever sets it | `strategies/regime.py:261` vs `strategies/catalyst.py` | the regime gate advertises a veto that can never fire. **NOT FIXED — see the correction below and §3.5 D-11** |
 | 17 | `rule_signal_macd_hist_rising` (the only MACD-histogram-slope producer) has no production reader | `strategies/rule_eval.py:103` | the momentum sub-factor is unscoreable from any analyst leaf |
 | 18 | `factors.momentum_multihorizon` is built and unreachable (whitelisted as legacy) | `strategies/factors.py:400` vs `tests/test_calc_agent_wiring.py:40` | a per-name 21/63/126/252 momentum vector exists and no analyst can call it |
 
@@ -436,6 +448,7 @@ from them is in that document**; this is the ledger.
 | D-8 | **The D-6 class is not closed.** `_trade_score_engines` computes all four engines unconditionally, while `_run_card_trade_score` reads each engine from the sibling card block — which exists only when **that engine's own gate** is on | `agents/utils/analysis_tools.py::_trade_score_engines` vs `reporting.py::_run_card_trade_score` | with `enable_trade_score` on and any sub-gate off, the leaf and the card print **different composites** | **open** — `ResearchLayerWiring.md` §3.4 resolves it by making all readers use one rule |
 | D-9 | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `graph/trading_graph.py:343-345` builds `market, news, fundamentals` only; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `agents/toolsets.py:533-538` records it as deliberate | the sentiment score can be computed and never read — so the scorecard must carry it through the snapshot, not an analyst's tool path | **deliberate, not a defect** — but it bounds the design |
 | D-10 | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books at `docs/implementation_plan_defect_audit.md:51`, whose line references (`:605`, `:2208`) have drifted | the independent-consensus termination contour never fires; debates run to the cap | **pre-existing, open, outside this workstream** |
+| D-11 | **The compiled context's `catalyst_window` can never be `True`.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None` and `catalyst_window` is always `False` | 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader (`pre_market.catalyst_window_read`) says the window is **active** (`scale` 0.25/0.6, verdicts `earnings-window`/`fed-catalyst`); all 19 printed `catalyst_window=` occurrences in the report corpus read `False`; executed on NFLX 2026-09-15 (`fed-catalyst`, `scale` 0.6) the context printed `verdict=tradable pass=True reasons=['volatility contained + no fast downtrend + no catalyst']`, where the snapshot implies `verdict=catalyst-window pass=False reasons=['catalyst window open']` | the context **asserts "no catalyst"** for runs whose own snapshot says a catalyst window is open — a false positive assertion reaching ten prompt sites, not an honest `NA` | **open** — the `2c05701` "FIXED" claim for defect 16 (§3.2) is **wrong**; see the correction there. Bounds WP-12: the event engine cannot enter the pre-graph snapshot |
 
 **Two stale claims on this seam, both corrected in the same pass.** They are the
 D-6 failure mode — a stale line hiding a wire — and both understated what the

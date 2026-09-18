@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**D-11 — the compiled context's `catalyst_window` can never be `True`; the `2c05701` "FIXED" claim for defect 16 is wrong (2026-09-18).** Found while building WP-12, by executing the path rather than reading the ledger.
+
+- **The defect.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None`, and the context line always prints `catalyst_window=False` — a positive assertion, not an `NA`.
+- **Measured.** 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader (`pre_market.catalyst_window_read`) says the window is **active** (`scale` 0.25/0.6, verdicts `earnings-window`/`fed-catalyst`). All **19** printed `catalyst_window=` occurrences in the report corpus read `False`. Executed on NFLX 2026-09-15 (`fed-catalyst`, `scale` 0.6) the context printed `verdict=tradable pass=True reasons=['volatility contained + no fast downtrend + no catalyst']`, where the snapshot implies `verdict=catalyst-window pass=False reasons=['catalyst window open']`.
+- **Consequence.** The context **asserts "no catalyst"** for runs whose own snapshot says a catalyst window is open — reaching ten prompt sites, the L1 ground-truth registry and report section `IVa`. The trailer in that `reasons` list (`"…no catalyst"`) has no basis at that call site.
+- **Recorded, not unilaterally fixed.** Three resolutions exist and two of them rewrite a contract the owner set: reviving the veto re-introduces the event read into `RegimeScore`, which the owner's 2026-09-17 decision moved to `EventScore` (*"RegimeScore describes the environment, EventScore describes the catalyst"*); removing the flag and printing `unavailable` both change a shipped context string, which §9 D3 forbids doing as a side effect of the scorecard rollout. The resolution is the owner's.
+- **Corrected in the same pass:** the master ledger's §3.2 framing ("all twelve are fixed" → eleven), defect 16's row, `EventScore.md` D3's `FIXED 2026-09-17, 2c05701` tag, and the `AGENT_ONBOARDING.md` entry (16), which additionally claimed `regime.py` declares `catalyst_window: bool | None = None` when it still declares `bool = False` (`regime.py:252`). The earlier claims are kept and tagged, not deleted.
+
+Docs only — no code changed, so no suite re-run was needed for this entry.
+
+**Web impact**: none — a defect record.
+
 **D-7 - the leaf scored the wall clock, the card scored the run date (2026-09-18).** Found while designing the research-layer wiring (`docs/scores/ResearchLayerWiring.md`), by executing both paths to the same number with different dates - the same technique that found D-6.
 - **The defect.** `_trade_score_engines` called `fundamental_score_for_ticker(ticker)` with no date, and `fundamental_score_for_ticker` falls back to `datetime.now()` (`strategies/fundamental_score.py:550`) - one of only two legs that scores *as of a date*. `_run_card_fundamental_score` (`reporting.py:881-882`) passes `pm_decision.trade_date`. On the documented `batch.py --date 2026-07-22` invocation (`batch.py:5`) those are different panels.
 - **Measured, on MSFT:** leaf **`66.25`**, card **`62.50`** - same basis string, same `panel_n=9`. One vector, two numbers on two surfaces, and **the leaf was the wrong one**: it scored a July decision against September's peer panel.

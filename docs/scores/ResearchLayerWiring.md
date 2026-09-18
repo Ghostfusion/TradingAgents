@@ -207,6 +207,14 @@ returns their results verbatim. It computes nothing itself: no alignment, no
 re-weighting, no substitution. An engine that raises or cannot measure returns
 `None` with its reason, exactly as `_trade_score_engines` already does.
 
+**One engine cannot be measured on this path, and the reason is recorded rather
+than worked around.** `event_state` consumes the catalyst snapshot, which
+`_apply_strategy_overlays` stamps **after** the graph; the scorecard is built
+**before** it. So on the pre-graph path `event_state` is absent-with-its-reason
+(§6.3, D-11), which costs the composite nothing — `trade_score` never read it —
+and the post-run readers that hold the snapshot pass it in and get the engine
+measured. The signature therefore takes an optional `catalyst_snapshot`.
+
 **Every engine is read through the date the run is for.** This is not a detail:
 it is defect D-7 (§6). The card already applies the convention uniformly to the
 three date-dependent engines — `_run_card_fundamental_score:881-882`,
@@ -497,6 +505,7 @@ Found by executing the path, not by reading the set. Recorded in the master's
 | **D-8** | **The D-6 class is not closed.** `_trade_score_engines` computes all four engines unconditionally; `_run_card_trade_score:996-1004` reads each engine from the sibling card block, which exists only when that engine's own gate is on. With `enable_trade_score` on and any sub-gate off, the leaf and the card print **different composites** | `agents/utils/analysis_tools.py::_trade_score_engines` vs `reporting.py::_run_card_trade_score` | **open — §3.4 resolves it by design** |
 | **D-9** | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `trading_graph.py:343-345` builds `market, news, fundamentals`; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `toolsets.py:533-538` records it as deliberate | **deliberate, not a defect — but it bounds the design (§1.3)** |
 | **D-10** | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books: `docs/implementation_plan_defect_audit.md:51` (its line references, `:605` and `:2208`, have drifted) | **pre-existing, open, not this workstream's** |
+| **D-11** | **The compiled context's `catalyst_window` can never be `True`.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None` | 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader says the window is **active**; all 19 printed `catalyst_window=` occurrences read `False`; executed on NFLX 2026-09-15 the context printed `verdict=tradable ... reasons=['...no catalyst']` where the snapshot implies `verdict=catalyst-window pass=False` | **open** — and the `2c05701` "FIXED" claim for master defect 16 is **wrong**. Bounds this design: the event engine cannot enter the pre-graph snapshot |
 
 ### 6.1 Three stale claims on this seam
 
@@ -527,6 +536,41 @@ are corrected in the same pass as this document:
 the function passed *in*. D-6 was found by walking a live example; D-7 was found
 the same way, by calling the two paths with different dates and comparing. **A
 test that pins a function's output but not its arguments cannot see this class.**
+
+### 6.3 D-11, and what it settles for this design
+
+D-11 (§6) is the same shape a fourth time, and it decides one design question
+here rather than leaving it to be discovered at `P12-1`.
+
+**The catalyst snapshot does not exist when the snapshot is built.** The
+scorecard is built before the graph (§3.3) because that is the only place the
+debate can be handed the same number the report will print. The catalyst
+snapshot is stamped after the graph, because `_apply_strategy_overlays` also
+folds in the position contract, which needs the PM's decision. So on the
+pre-graph path there is **no** catalyst snapshot to measure
+`event_state` from.
+
+The honest consequence, and the one `P12-1` implements: the event engine is
+**absent with its reason** on the pre-graph path, never `0` and never a guess.
+That costs the composite nothing — `trade_score` reads only
+`{fundamental, technical, regime, risk}` (master rule 17), so `EventScore` was
+never a composite input — and the post-run readers that *do* hold the snapshot
+pass it in and get the engine measured. The one rule that matters is that the
+absence is **named**, which is rule 2.
+
+**What D-11 does not settle, and should not be decided here.** Whether the veto
+in `regime_gate_read` should be revived, removed, or printed as unavailable is a
+separate question about a live advisory surface:
+
+- reviving it re-introduces the event read into `RegimeScore`, which the owner's
+  2026-09-17 decision moved to `EventScore` (*"RegimeScore describes the
+  environment, EventScore describes the catalyst"*);
+- removing the flag changes a shipped context string, which §9 D3 forbids doing
+  as a side effect of this rollout;
+- printing `unavailable` instead of `False` also changes that string.
+
+All three are owner decisions. `P12-1` takes none of them, and the design above
+does not depend on any of them.
 
 ---
 
