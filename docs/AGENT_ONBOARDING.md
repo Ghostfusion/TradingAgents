@@ -388,6 +388,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-11` + the three-surface verification case landed.** `scorecard_basis` is an ADDITIVE
+  field on the card's `quant_scorecard` key (§9 D3: a field `basis`'s consumer still reads is `basis`, so the scorecard's
+  explanation gets its own name and home; `trade_score`'s shipped `basis` and its rendered text are untouched, and the test
+  asserts the frozen wording is smuggled into neither the new field nor the new block). **The verification case the design adds
+  to plan §11.3 is now a test:** one run, three surfaces - the rendered block (what `IVa` prints and the debate reads), the card
+  key, and the leaf's rendered text - all carrying the snapshot's composite, with the card's per-engine map equal to the leaf's
+  input value-for-value. **A fixture bug worth recording:** the render fixture hardcoded a composite (`67.925`) inconsistent with
+  its own drivers (which imply `76.75`) - exactly what the real producer never does - which made the three-surface test unable to
+  mean anything; the fixture now computes the composite from the drivers unless a test passes one explicitly. 154 passed across
+  `test_quant_scorecard.py`, `test_trade_score.py`, `test_reporting.py`, `test_structured_agent_prompts.py`.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-6` + `P12-7` landed: the card key and §4.6's explicit status.** `enable_quant_scorecard`
   (default off) governs the scorecard SURFACE only; the engine gates decide what populates it. With the gate on `run_card.json`
   gains exactly one key, `quant_scorecard`, carrying **the same rendered block the debate read** plus each engine's

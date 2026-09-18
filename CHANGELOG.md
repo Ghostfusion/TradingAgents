@@ -14,6 +14,16 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**WP-12 `P12-11` — the scorecard's explanation is a new field, and the three-surface verification case (2026-09-18).**
+
+- **`P12-11` — `scorecard_basis`, additive.** §9 D3's rule is that the scorecard's explanation goes in a **new** field, never as a rewrite of the composite's shipped `basis` string: *a field that `basis`'s consumer still reads is `basis`*. So `run_card.json`'s `quant_scorecard` key carries `scorecard_basis` — what the snapshot is, and the difference between enablement, measurement and movement — while `trade_score`'s `basis` and its rendered text are untouched. The test asserts the frozen negative-constraint wording is smuggled into **neither** the new field nor the new block, and that the purpose line lives on the block while the field name lives on the card.
+- **The verification case the design adds to plan §11.3 — *the debate's number and the report's number are the same number*.** One run, three surfaces: the rendered block (what section `IVa` prints and the debate reads), the card key, and the leaf's rendered text. All three carry the composite the snapshot holds, and the card's per-engine map is the leaf's input value-for-value. A disagreement here means a reader stopped using the producer.
+- **A fixture bug worth recording, because it is the same class the workstream hunts.** The render-test fixture originally hardcoded a composite (`67.925`) inconsistent with its own four drivers (which imply `76.75`). That is precisely what the real producer never does — `trade_score` *is* the composite's producer — and it made the three-surface test unable to mean anything. The fixture now computes the composite from the drivers unless a test passes one explicitly (the rounding test does, because it is about the printed *form*).
+
+Tests: 154 passed across `tests/test_quant_scorecard.py`, `test_trade_score.py`, `test_reporting.py` and `test_structured_agent_prompts.py`.
+
+**Web impact**: none — one additive `run_card.json` field, off by default.
+
 **WP-12 `P12-6` + `P12-7` — the card key, and the scorecard's status is explicit (2026-09-18).**
 
 - **`P12-6` — the gate and the card key.** `enable_quant_scorecard` (default **off**, added with `P12-2`) governs the scorecard **surface** only; the eight engine gates decide which engines populate it. With the gate on, `run_card.json` gains exactly one key, `quant_scorecard`, carrying **the same rendered block the debate read** plus the engines' `score`/`coverage`/`band`/`enabled`/`reason` — so "the number in the prompt is the number in the card" is checkable in the artifact rather than trusted. With the gate off the key is absent, not empty.

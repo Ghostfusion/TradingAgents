@@ -1055,6 +1055,7 @@ def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
         return None
     try:
         from tradingagents.strategies.quant_scorecard import (
+            SCORECARD_BASIS,
             format_quant_scorecard,
             scorecard_status,
         )
@@ -1066,6 +1067,9 @@ def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
     return {
         "ticker": snapshot.get("ticker"),
         "trade_date": snapshot.get("trade_date"),
+        # §9 D3: the scorecard's explanation lives in a NEW field. The composite's
+        # shipped `basis` string is not touched, here or anywhere.
+        "scorecard_basis": SCORECARD_BASIS,
         "scorecard_status": status["scorecard_status"],
         "vector_status": status["vector_status"],
         "movement": status["movement"],

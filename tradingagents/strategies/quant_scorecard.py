@@ -46,6 +46,7 @@ __all__ = [
     "COMPOSITE_ENGINES",
     "ENGINE_GATES",
     "EVENT_NO_SNAPSHOT",
+    "SCORECARD_BASIS",
     "SCORECARD_HEADER",
     "SCORECARD_MAX_CHARS",
     "SCORECARD_PURPOSE",
@@ -425,6 +426,21 @@ SCORECARD_HEADER = (
 SCORECARD_PURPOSE = (
     "Purpose: the highest-level quantitative evidence summary, for human "
     "research review - not an order, not a position size and not a gate."
+)
+
+#: The scorecard's own explanation, on the **new** surface (§9 D3 / §9.1).
+#: `basis` - the composite's shipped negative-constraint string - is **not**
+#: rewritten and not touched by this rollout; a field its consumer still reads is
+#: `basis`, so the scorecard's explanation gets its own name and its own home.
+SCORECARD_BASIS = (
+    "One deterministic snapshot of this run's own engine results, computed once "
+    "before the graph and read by the debate block, the report card and the tool "
+    "leaf, so all three print the same number. Enablement and measurement are "
+    "separate axes: `Scorecard status` says which engines are switched on, "
+    "`Vector status` says how far the weight vector itself has been validated, and "
+    "`Movement` stays UNAVAILABLE until a prior observation exists under the same "
+    "validated vector. The engines' own `basis` fields are unchanged and remain "
+    "authoritative for what each engine measured."
 )
 
 #: The bound on the rendered block (§4.4). The block is placed **first** in

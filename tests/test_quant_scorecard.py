@@ -514,10 +514,22 @@ def test_the_scorecard_gate_exists_and_defaults_off():
 
 
 def _render(scores=None, coverage=None, status=None, enabled=None):
-    """A snapshot shaped like the producer's, for render-only tests."""
-    scores = {"trade": 67.925, **(scores or {})}
+    """A snapshot shaped like the producer's, for render-only tests.
+
+    The composite is **computed from the drivers** unless the caller passes one
+    explicitly, because that is what the real producer does: a fixture that
+    hardcoded it would be internally inconsistent, and the three-surface
+    agreement test could not mean anything.
+    """
+    from tradingagents.strategies.trade_score import trade_score
+
+    scores = dict(scores or {})
     coverage = coverage or {}
     enabled = enabled if enabled is not None else set(qs.ENGINE_GATES)
+    if "trade" in enabled and "trade" not in scores:
+        scores["trade"] = trade_score(
+            {n: (scores.get(n) if n in enabled else None) for n in qs.COMPOSITE_ENGINES}
+        ).get("score")
     engines = {}
     for name in qs.ENGINE_GATES:
         engines[name] = {
@@ -575,7 +587,8 @@ def test_the_block_parses_to_exactly_the_keys_it_prints():
         "risk_score",
         "risk_coverage",
     }
-    assert parsed["trade_score"] == 67.925
+    # the printed composite is the snapshot's own number, not a re-derivation
+    assert parsed["trade_score"] == snap["engines"]["trade"]["score"]
     assert parsed["trade_coverage"] == 0.95
     assert parsed["risk_score"] == 35.0
     assert parsed["risk_coverage"] == 0.45
@@ -583,8 +596,9 @@ def test_the_block_parses_to_exactly_the_keys_it_prints():
 
 def test_the_printed_number_is_the_engines_number_not_a_rounded_copy():
     """`67.925` must not become `67.93`: the block's claim is that these ARE the
-    engines' numbers."""
-    snap = _render(scores={"fundamental": 92.0})
+    engines' numbers. The composite is passed explicitly here because this test is
+    about the *form* of a three-decimal value, not about how it is derived."""
+    snap = _render(scores={"trade": 67.925, "fundamental": 92.0})
     text = qs.format_quant_scorecard(snap)
     assert "trade_score=67.925" in text
     assert "67.93" not in text
@@ -630,7 +644,7 @@ def test_a_gated_off_engine_is_not_printed_and_not_called_absent():
     """A gate-off engine is not part of the scorecard — it is not "missing
     evidence"."""
     snap = _render(
-        scores={"fundamental": 92.0},
+        scores={"trade": 70.0, "fundamental": 92.0},
         enabled={"trade", "fundamental"},
     )
     text = qs.format_quant_scorecard(snap)
@@ -660,6 +674,7 @@ def test_the_block_becomes_citable_ground_truth():
 
     snap = _render(
         scores={
+            "trade": 67.925,
             "fundamental": 92.0,
             "technical": 85.0,
             "regime": 78.0,
@@ -689,6 +704,7 @@ def test_the_debate_prompt_keeps_the_scorecard_when_the_context_is_truncated():
 
     snap = _render(
         scores={
+            "trade": 67.925,
             "fundamental": 92.0,
             "technical": 85.0,
             "regime": 78.0,
@@ -820,7 +836,7 @@ def test_the_status_lines_add_no_spurious_registry_keys():
     )
 
     snap = _render(
-        scores={"fundamental": 92.0},
+        scores={"trade": 70.0, "fundamental": 92.0},
         enabled={"trade", "fundamental"},
         status="RESEARCH_ONLY",
     )
@@ -913,6 +929,78 @@ def test_gate_off_leaves_the_context_and_the_card_unchanged():
         )
         is None
     )
+
+
+def test_the_debate_block_the_card_key_and_the_leaf_print_one_number():
+    """The verification case the design adds to plan §11.3.
+
+    *The debate's number and the report's number are the same number* — asserted
+    in one run across the rendered block (`IVa`), the card key, and the leaf's
+    rendered text. Three surfaces, one snapshot, so a disagreement here means a
+    reader stopped using the producer.
+    """
+    from tradingagents.reporting import _run_card_quant_scorecard
+    from tradingagents.strategies.trade_score import format_trade_score, trade_score
+
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        coverage={"trade": 0.95, "risk": 0.45},
+        status="RESEARCH_ONLY",
+    )
+
+    # 1. what the debate reads, and what section IVa renders
+    block = qs.format_quant_scorecard(snap)
+    # 2. what the card writes
+    card_key = _run_card_quant_scorecard(
+        {"quant_scorecard": snap}, {"enable_quant_scorecard": True}
+    )
+    # 3. what the tool leaf renders, from the same snapshot
+    leaf_text = format_trade_score(
+        trade_score(qs.engine_scores(snap)), ticker="MSFT"
+    )
+
+    composite = snap["engines"]["trade"]["score"]
+    assert f"trade_score={composite}" in block
+    assert card_key["block"] == block
+    assert f"trade_score={composite}" in card_key["block"]
+    # the leaf prints the same composite, from the same four values
+    assert composite is not None
+    leaf_composite = trade_score(qs.engine_scores(snap))["score"]
+    assert leaf_composite == composite
+    assert "Advisory only" in leaf_text
+    # and the card's engines map is the leaf's input, value for value
+    assert {
+        name: card_key["engines"][name]["score"] for name in qs.COMPOSITE_ENGINES
+    } == qs.engine_scores(snap)
+
+
+def test_the_scorecard_explanation_is_a_new_field_and_basis_is_untouched():
+    """§9 D3's invariant, as a test: a field `basis`'s consumer reads is `basis`.
+
+    The scorecard explains itself in `scorecard_basis`. The composite's shipped
+    `basis` string is not rewritten, not appended to, and not renamed.
+    """
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    snap = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    card_key = _run_card_quant_scorecard(
+        {"quant_scorecard": snap}, {"enable_quant_scorecard": True}
+    )
+    assert card_key["scorecard_basis"] == qs.SCORECARD_BASIS
+    block = qs.format_quant_scorecard(snap)
+    # the purpose IS on the new block surface (§4.1)...
+    assert qs.SCORECARD_PURPOSE in block
+    # ...while the field name itself belongs to the card, not the prompt
+    assert "scorecard_basis" not in block
+    # and the frozen negative-constraint wording is smuggled nowhere new
+    assert "never an opportunity_score" not in card_key["scorecard_basis"]
+    assert "never an opportunity_score" not in block
+    assert "never a gate, never a size" not in card_key["scorecard_basis"]
 
 
 def test_the_block_is_bounded_even_with_every_engine_absent():
