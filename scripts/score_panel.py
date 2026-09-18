@@ -2,21 +2,23 @@
 """WP-10 - the validation panel and the factor-measurement layer.
 
 Implements `docs/scores/IMPLEMENTATION_PLAN.md` section 7 (WP-10) and its exit
-criteria in section 9, Phase C, plus `docs/scores/README.md` Q4 (the full EODHD
-US panel is the validation universe).
+criteria in section 9, Phase C, plus `docs/scores/README.md` Q4 (a broad US panel
+is the validation universe).
 
 Three objects, and they are separate on purpose:
 
 1. **The panel** - one cross-sectional snapshot per trading date,
    ``data_cache_dir/panels/<date>.json``, of ``{ticker: {metric: value}}``.
-   The vendor's bulk-fundamentals endpoint is the fundamentals leg
-   (500-symbol chunks; 100 API calls a whole-exchange request, ``100 + N`` when
-   a ``symbols`` list is passed - plan section 3.2/section 15); the technical
-   leg assembles the ``TechnicalScore`` components from each name's own bars up
-   to that date. **Per-date caching is the contract**: a date whose file exists
-   is never re-fetched, so a second invocation makes zero network calls.
-   Every file records its call cost, fetch timestamp and coverage under the one
-   reserved ``_meta`` key (a ticker can never be named ``_meta``).
+   **SEC EDGAR XBRL is the fundamentals leg** (owner decision, 2026-09-18): one
+   keyless ``companyfacts`` request per filer, read point-in-time so a panel for
+   a past date sees only the annual reports already *filed* by then. It replaced
+   the EODHD bulk-fundamentals leg, whose Extended Fundamentals plan is
+   support-gated ("By request") and could not be bought at any published tier.
+   The technical leg assembles the ``TechnicalScore`` components from each
+   name's own bars up to that date. **Per-date caching is the contract**: a date
+   whose file exists is never re-fetched, so a second invocation makes zero
+   network calls. Every file records its call cost, fetch timestamp and coverage
+   under the one reserved ``_meta`` key (a ticker can never be named ``_meta``).
 
 2. **The statistics** - per factor and per sub-score, from the harness that
    already exists, `alpha_health.score_evaluation_rows`: IC / rank IC / ICIR,
@@ -46,12 +48,14 @@ manual and only echoes that gate's state), it imports no sizing path, no
 invents no coefficient: the only weight vectors it prints are the engines' own
 declared tables, labelled with their measured evidence and ``RESEARCH_ONLY``.
 
-**What cannot be verified here.** The EODHD *Extended Fundamentals* plan is
-support-gated on the vendor side, so the live bulk fetch has no credentials to
-be exercised against: the transport is injectable, and the caching / chunking /
-cost / labelling are proven against a stub (``tests/test_score_panel.py``). The
-payload field paths in ``BULK_YEARLY_STATEMENTS`` are declared, documented as
-unverified, and corrected in one place when the vendor grants the plan.
+**What cannot be verified here.** The live SEC fetch needs the network, so the
+transport is injectable and the caching / chunking / cost / labelling are proven
+against a stub (``tests/test_score_panel.py``); the mapping from EDGAR's tags to
+the canonical ``fin`` keys is exercised against recorded payload shapes. Two
+coverage limits are structural and are recorded per name rather than hidden: SEC
+XBRL carries annual *statements* only (no market capitalisation and no TTM), and
+a filer that files neither a 10-K, a 20-F nor a 40-F - a pre-XBRL filer, or one
+reporting under IFRS - contributes no fundamentals row at all.
 
 Examples::
 
@@ -75,17 +79,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tradingagents.strategies import alpha_health, evaluate  # noqa: E402
 
-# --- The vendor's own cost model (plan section 3.2, section 15) --------------
+# --- The source's own cost model (SEC EDGAR fair access) ---------------------
 
-#: The bulk endpoint's per-request cap (plan section 15: "500 symbols max").
+#: How many names one transport call is handed. SEC has no per-request symbol
+#: cap; the batch exists so the build reports progress and so one name's failure
+#: costs a batch rather than the whole universe. (500 was the EODHD plan's
+#: per-request cap; it survives only as the batch default, and no longer means a
+#: vendor limit.)
 CHUNK_SIZE = 500
-#: One whole-exchange bulk request costs this many API calls.
-BULK_REQUEST_CALLS = 100
-#: A `symbols` list request costs `BULK_REQUEST_CALLS + len(chunk)`.
-PER_SYMBOL_CALLS = 1
-#: The bulk endpoint's exchange codes; the generic `US` code is for the symbol
-#: list, and the plan records that the snapshot variant 404s on it.
-EXCHANGE_CODES = ("NASDAQ", "NYSE", "AMEX", "BATS")
+#: SEC's published fair-access ceiling: 10 requests per second per IP. The live
+#: transport paces itself to this rather than earning a 403 under batch load.
+SEC_REQUESTS_PER_SECOND = 10.0
 
 #: The one reserved key in a panel file. A ticker symbol cannot be named this.
 META_KEY = "_meta"
@@ -160,31 +164,29 @@ def split_chunks(symbols, size: int = CHUNK_SIZE) -> list[list[str]]:
 
 
 def estimate_cost(n_symbols: int, *, chunk_size: int = CHUNK_SIZE) -> dict:
-    """The API-call cost of a ``symbols``-list build, from the vendor's model.
+    """The request cost of a panel build, from the source's own model.
 
-    ``100 + N`` per request with a 500-symbol cap, so N symbols in c chunks
-    cost ``100 * c + N``. A whole-exchange request is a flat 100 calls
-    (``exchange_cost``), which is why the cost is printed *before* a run.
+    One ``companyfacts`` request per filer **per run**, whatever the number of
+    dates: the payload is per-filer and date-independent, so the transport
+    fetches it once and re-reads it for every date (the point-in-time selection
+    is a local filter). A name whose companyfacts payload fails falls back to one
+    request per tag, which is an upper bound this estimate cannot know in
+    advance - the build records the requests it actually spent.
     """
     n = max(0, int(n_symbols))
     chunks = math.ceil(n / max(1, int(chunk_size))) if n else 0
     return {
-        "source": "bulk fundamentals (EODHD Extended Fundamentals)",
+        "source": "SEC EDGAR XBRL companyfacts (free, keyless)",
         "symbols": n,
         "chunk_size": int(chunk_size),
         "chunks": chunks,
-        "api_calls": BULK_REQUEST_CALLS * chunks + PER_SYMBOL_CALLS * n,
+        "api_calls": n,
         "model": (
-            f"{BULK_REQUEST_CALLS} calls per request + {PER_SYMBOL_CALLS} per "
-            f"symbol, {int(chunk_size)}-symbol cap per request "
-            "(docs/scores/IMPLEMENTATION_PLAN.md section 3.2)"
+            "1 companyfacts request per filer, fetched once and reused for "
+            "every date; no symbol cap and no key (SEC fair access: "
+            f"{SEC_REQUESTS_PER_SECOND:g} requests/second per IP)"
         ),
     }
-
-
-def exchange_cost(n_requests: int) -> int:
-    """Cost of whole-exchange requests: a flat ``BULK_REQUEST_CALLS`` each."""
-    return BULK_REQUEST_CALLS * max(0, int(n_requests))
 
 
 def read_panel(path: str) -> tuple[dict, dict] | None:
@@ -220,58 +222,74 @@ def write_panel(path: str, rows: dict, meta: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The vendor leg: bulk fundamentals -> canonical financials -> panel row
+# The source leg: SEC XBRL annual facts -> canonical financials -> panel row
 # ---------------------------------------------------------------------------
 #
-# UNVERIFIED FIELD PATHS (the one thing this environment cannot check): the
-# Extended Fundamentals plan is support-gated, so no live bulk payload could be
-# read while writing this. The map below is therefore declared policy, kept in
-# ONE table so a live run corrects it once, and the panel records the metrics it
-# could not derive rather than substituting a number.
+# One table, one meaning. SEC files its own tag vocabulary and this module maps
+# it to the canonical ``fin`` keys the engines already read (``compute_ratios``,
+# ``screen_ticker``, ``normalized``) - so the panel cannot disagree with the
+# engine it measures, and there is no second vocabulary to drift.
 
-#: canonical item -> (EODHD statement block, field name)
-BULK_YEARLY_STATEMENTS: dict[str, tuple[str, str]] = {
-    "revenue": ("Income_Statement", "totalRevenue"),
-    "net_income": ("Income_Statement", "netIncome"),
-    "operating_income": ("Income_Statement", "operatingIncome"),
-    "gross_profit": ("Income_Statement", "grossProfit"),
-    "eps": ("Income_Statement", "eps"),
-    "total_assets": ("Balance_Sheet", "totalAssets"),
-    "total_liabilities": ("Balance_Sheet", "totalLiabilities"),
-    "total_equity": ("Balance_Sheet", "totalStockholderEquity"),
-    "current_assets": ("Balance_Sheet", "totalCurrentAssets"),
-    "current_liabilities": ("Balance_Sheet", "totalCurrentLiabilities"),
-    "inventory": ("Balance_Sheet", "inventory"),
-    "cash": ("Balance_Sheet", "cashAndEquivalents"),
-    "short_term_investments": ("Balance_Sheet", "shortTermInvestments"),
-    "total_debt": ("Balance_Sheet", "longTermDebtTotal"),
-    "operating_cashflow": ("Cash_Flow", "totalCashFromOperatingActivities"),
-    "capex": ("Cash_Flow", "capitalExpenditures"),
-    "depreciation": ("Cash_Flow", "depreciationAndAmortization"),
-    "free_cash_flow": ("Cash_Flow", "freeCashFlow"),
+#: SEC XBRL row label (``sec_edgar._TAG_MAP``) -> canonical ``fin`` key.
+#:
+#: Two mappings are NOT one-to-one and are assembled below rather than here:
+#: ``total_debt`` is the long-term row plus its current portion (the same
+#: "dedicated total, else the legs" rule ``statement_parsing._total_debt_match``
+#: applies to vendor payloads), and ``market_cap`` has no EDGAR tag at all - it
+#: is price x shares, so the panel derives it from its own close and the
+#: cover-page share count.
+SEC_FIN_KEYS: dict[str, str] = {
+    "Revenue": "revenue",
+    "Net income (loss)": "net_income",
+    "Diluted EPS": "eps",
+    "Operating income": "operating_income",
+    "D&A": "depreciation",
+    "Gross profit": "gross_profit",
+    "Operating cash flow": "operating_cashflow",
+    "Capex (-)": "capex",
+    "Total assets": "total_assets",
+    "Total liabilities": "total_liabilities",
+    "Stockholders equity": "total_equity",
+    "Cash & equivalents": "cash",
+    "Current assets": "current_assets",
+    "Current liabilities": "current_liabilities",
+    "Inventory": "inventory",
+    "Short-term investments": "short_term_investments",
+    "Retained earnings": "retained_earnings",
+    "Cost of revenue": "cogs",
+    "Liabilities and equity": "liabilities_and_equity",
 }
 
-#: canonical item -> EODHD ``Highlights`` field (flat, current period only).
-BULK_HIGHLIGHTS: dict[str, str] = {
-    "market_cap": "MarketCapitalization",
-    "shares_outstanding": "SharesOutstanding",
-    "eps": "EarningsShare",
-    "ebitda": "EBITDA",
-    "revenue_ttm": "RevenueTTM",
-    "gross_profit_ttm": "GrossProfitTTM",
-    "net_income_ttm": "NetIncomeTTM",
-    "return_on_equity": "ReturnOnEquityTTM",
-    "return_on_assets": "ReturnOnAssetsTTM",
-}
+#: The two labels that assemble the borrowings total (long-term, plus the
+#: portion due within a year).
+SEC_DEBT_LABELS: tuple[str, str] = ("Long-term debt", "Long-term debt, current")
+
+#: The labels whose newest eligible fiscal end defines the filer's reference
+#: year. Every annual filer tags them, so the newest of them is the filer's
+#: latest reported fiscal year rather than one tag's own stray period end.
+SEC_REFERENCE_LABELS: tuple[str, ...] = (
+    "Total assets", "Revenue", "Net income (loss)",
+)
 
 
-class BulkResult(NamedTuple):
-    """One bulk request's outcome: the rows plus what it cost."""
+class FetchResult(NamedTuple):
+    """One transport call's outcome: the financials, the cost, and the gaps.
 
-    rows: dict
+    ``fins`` is ``{ticker: canonical fin}``, NOT a finished panel row: the row is
+    assembled by the builder, after the price leg, because the valuation block
+    needs a market capitalisation and EDGAR has no price. A market cap is
+    price x shares, so the close and the cover-page share count have to meet -
+    and they arrive on two different legs.
+    """
+
+    fins: dict
     requests: int
     api_calls: int
     symbols_requested: int
+    #: ``{ticker: reason}`` for the names this call could not supply a fin for.
+    #: A gap is recorded, never silently dropped: the panel's coverage prints
+    #: it, so a thin cross-section reads as thin rather than as a market.
+    gaps: dict
 
 
 def _num(value) -> float | None:
@@ -283,86 +301,120 @@ def _num(value) -> float | None:
     return v if math.isfinite(v) else None
 
 
-def _dig(payload: dict, *path):
-    """Walk a nested payload; None when any step is absent."""
-    cur = payload
-    for key in path:
-        if isinstance(cur, dict):
-            cur = cur.get(key)
-        elif isinstance(cur, (list, tuple)) and isinstance(key, int):
-            cur = cur[key] if 0 <= key < len(cur) else None
-        else:
-            return None
-    return cur
+def _eligible(by_end: dict, asof: str | None) -> dict[str, dict]:
+    """The facts whose filing date is on or before ``asof`` (all when None).
 
-
-def _statement_year(statement, index: int) -> dict:
-    """The ``index``-th yearly period of a statement block (0 = newest).
-
-    The vendor's own payload shape could not be read while writing this (the
-    Extended Fundamentals plan is support-gated), so both documented shapes are
-    accepted: a list of periods, or an object keyed by period end date (whose
-    keys are sorted newest-first). Anything else is absent.
+    This is the point-in-time filter, and it is the reason the panel can measure
+    anything: a fundamental for a past trading date must be the one an investor
+    could actually have read that day. Using the newest fiscal year regardless of
+    its filing date would let a 2026-09-17 panel see a 10-K filed in October,
+    which is look-ahead bias and inflates every measured IC.
     """
-    if isinstance(statement, (list, tuple)):
-        if not 0 <= index < len(statement):
-            return {}
-        row = statement[index]
-        return row if isinstance(row, dict) else {}
-    if isinstance(statement, dict):
-        keys = sorted((k for k in statement if k != "date"), reverse=True)
-        if not 0 <= index < len(keys):
-            return {}
-        row = statement[keys[index]]
-        return row if isinstance(row, dict) else {}
-    return {}
+    if not asof:
+        return dict(by_end or {})
+    cutoff = str(asof)[:10]
+    return {
+        end: entry
+        for end, entry in (by_end or {}).items()
+        if str((entry or {}).get("filed") or "")[:10] <= cutoff
+    }
 
 
-def canonical_fin_from_bulk(payload: dict) -> dict:
-    """Map one item of an EODHD bulk-fundamentals payload to canonical ``fin``.
+def canonical_fin_from_sec(facts: dict, *, asof: str | None = None) -> dict:
+    """Canonical ``fin`` for one name, from its SEC XBRL annual facts.
 
-    The canonical shape is the chain's own: a flow/stock item is either a flat
-    float or ``{"current": .., "prior": ..}`` so the period-over-period legs
-    (Piotroski's deleveraging, the growth factors) can run - see
-    ``statement_parsing``. ``capex`` is normalised to a **positive magnitude**
-    because ``ratios.compute_ratios`` subtracts ``abs(capex)``; the vendor
-    reports it as a negative outflow. A field the payload does not carry is
-    absent, never 0.
+    The canonical shape is the chain's own: an item is either a flat float or
+    ``{"current": .., "prior": ..}`` so the period-over-period legs (Piotroski's
+    deleveraging, the growth factors) can run - see ``statement_parsing``.
+
+    Two rules make the result honest:
+
+    - **Point-in-time.** Only facts filed on or before ``asof`` are eligible
+      (:func:`_eligible`), so a panel for a past date reads what was public then.
+    - **One fiscal year for every leg.** The reference year is the newest
+      eligible end carried by the core statement lines
+      (:data:`SEC_REFERENCE_LABELS`); a tag with no value at that end is
+      **absent**, never substituted from another year. Without this, a filer that
+      stopped tagging inventory in 2013 would contribute a 2013 inventory beside
+      a 2025 balance sheet - a mixed-vintage row that looks measured and is not.
+
+    ``capex`` is filed as a positive outflow by the SEC, which is the sign
+    ``compute_ratios`` subtracts under ``abs()``, so it is passed through
+    unchanged. A field the facts do not carry is absent, never 0.
     """
-    if not isinstance(payload, dict):
+    series = {
+        label: _eligible(by_end, asof)
+        for label, by_end in ((facts or {}).get("series") or {}).items()
+    }
+    ends = sorted({end for label in SEC_REFERENCE_LABELS
+                   for end in (series.get(label) or {})}, reverse=True)
+    if not ends:
         return {}
+    ref = ends[0]
+    prior = next((e for e in ends[1:] if e < ref), None)
+
+    def _at(label: str, end: str | None):
+        entry = (series.get(label) or {}).get(end) if end else None
+        return _num((entry or {}).get("val"))
+
     fin: dict = {}
-    yearlies = _dig(payload, "Financials") or {}
-    for canonical, (block, field) in BULK_YEARLY_STATEMENTS.items():
-        series = _dig(yearlies, block, "yearly") if isinstance(yearlies, dict) else None
-        cur = _num(_statement_year(series, 0).get(field))
-        prior = _num(_statement_year(series, 1).get(field))
-        if canonical == "capex":
-            cur = abs(cur) if cur is not None else None
-            prior = abs(prior) if prior is not None else None
-        if cur is None and prior is None:
+    for label, key in SEC_FIN_KEYS.items():
+        cur = _at(label, ref)
+        if cur is None:
             continue
-        fin[canonical] = {"current": cur, "prior": prior}
-    for canonical, field in BULK_HIGHLIGHTS.items():
-        v = _num(_dig(payload, "Highlights", field))
-        if v is not None and canonical not in fin:
-            fin[canonical] = v
-    cash = _num(_dig(fin.get("cash"), "current")) if isinstance(fin.get("cash"), dict) else _num(fin.get("cash"))
-    sti = _num(_dig(fin.get("short_term_investments"), "current")) if isinstance(fin.get("short_term_investments"), dict) else None
-    if cash is not None:
-        fin["cash_and_investments"] = cash + (sti or 0.0)
-    # FCF is derived only when the vendor did not report it (and only from the
-    # canonical legs, never from a generic proxy).
-    fcf = _num(_dig(fin.get("free_cash_flow"), "current")) if isinstance(fin.get("free_cash_flow"), dict) else None
-    if fcf is None:
-        ocf = _num(_dig(fin.get("operating_cashflow"), "current")) if isinstance(fin.get("operating_cashflow"), dict) else None
-        capex = _num(_dig(fin.get("capex"), "current")) if isinstance(fin.get("capex"), dict) else None
-        if ocf is not None and capex is not None:
-            fin["free_cash_flow"] = {"current": ocf - capex, "prior": None}
-    sector = _dig(payload, "General", "Sector")
-    if isinstance(sector, str) and sector:
-        fin["sector"] = sector
+        fin[key] = {"current": cur, "prior": _at(label, prior)}
+    # Liabilities: EDGAR's dedicated ``Liabilities`` total is not filed by every
+    # filer (AMZN files only ``LiabilitiesAndStockholdersEquity``), and
+    # ``total_liabilities`` is an Altman X4 / Ohlson O / NOA / net-net input, so
+    # its absence costs four metrics. The fallback is the balance-sheet identity
+    # the statement itself states - liabilities and equity, less equity - the
+    # same "a dedicated row, else the legs" rule the borrowings use.
+    if "total_liabilities" not in fin:
+        lae = _at("Liabilities and equity", ref)
+        eq = _at("Stockholders equity", ref)
+        if lae is not None and eq is not None:
+            lae_p, eq_p = _at("Liabilities and equity", prior), _at("Stockholders equity", prior)
+            fin["total_liabilities"] = {
+                "current": lae - eq,
+                "prior": (lae_p - eq_p) if (lae_p is not None and eq_p is not None) else None,
+            }
+    # Working capital is the same "a dedicated row, else the legs" assembly the
+    # borrowings use (``statement_parsing._total_debt_match``): EDGAR has no
+    # working-capital concept, but Altman's X1 is exactly current assets minus
+    # current liabilities, and both legs are already above. Requiring BOTH legs
+    # keeps a filer that tags only one from contributing a half-measure.
+    ca, cl = _at("Current assets", ref), _at("Current liabilities", ref)
+    if ca is not None and cl is not None:
+        ca_p, cl_p = _at("Current assets", prior), _at("Current liabilities", prior)
+        fin["working_capital"] = {
+            "current": ca - cl,
+            "prior": (ca_p - cl_p) if (ca_p is not None and cl_p is not None) else None,
+        }
+    # Borrowings: the long-term row plus the portion due within a year. Either
+    # leg alone would understate debt, so the total needs at least one of them
+    # and names which it had.
+    lt, cur_lt = SEC_DEBT_LABELS
+    legs = [v for v in (_at(lt, ref), _at(cur_lt, ref)) if v is not None]
+    if legs:
+        fin["total_debt"] = {
+            "current": sum(legs),
+            "prior": _num_pair(_at(lt, prior), _at(cur_lt, prior)),
+        }
+    # The cover-page share count is its own series with its own (much fresher)
+    # period ends, so it is read at its newest eligible end, not at the fiscal
+    # year end. It is what lets the panel derive a market capitalisation from a
+    # close it already has.
+    shares = _eligible((facts or {}).get("shares") or {}, asof)
+    if shares:
+        newest = max(shares)
+        fin["shares_outstanding"] = _num((shares[newest] or {}).get("val"))
     return fin
+
+
+def _num_pair(a, b):
+    """Sum two optional legs, or None when neither is present."""
+    legs = [v for v in (a, b) if v is not None]
+    return sum(legs) if legs else None
 
 
 def panel_row_from_fin(ticker: str, fin: dict) -> dict:
@@ -383,68 +435,72 @@ def panel_row_from_fin(ticker: str, fin: dict) -> dict:
     return row
 
 
-def panel_row_from_bulk(ticker: str, payload: dict) -> dict:
-    """One bulk payload item -> one panel row ({} when the payload is empty)."""
-    fin = canonical_fin_from_bulk(payload)
-    if not fin:
-        return {}
-    try:
-        return panel_row_from_fin(ticker, fin)
-    except Exception:  # noqa: BLE001 - a per-name derivation failure is a gap
-        return {}
-
-
-def _bulk_items(payload) -> dict[str, dict]:
-    """Normalise a bulk response to ``{symbol: item}``.
-
-    The vendor returns either an object keyed by symbol or a list of items each
-    carrying its own symbol; both shapes are accepted because the live payload
-    could not be read here (support-gated plan).
-    """
-    out: dict[str, dict] = {}
-    if isinstance(payload, dict):
-        for key, item in payload.items():
-            if isinstance(item, dict):
-                code = str(item.get("Code") or item.get("code") or key)
-                out[code.split(".")[0].strip().upper()] = item
-    elif isinstance(payload, (list, tuple)):
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            code = item.get("Code") or item.get("code") or item.get("symbol")
-            if code:
-                out[str(code).split(".")[0].strip().upper()] = item
-    return out
-
-
-def eodhd_bulk_transport(*, exchange: str = "US", chunk_size: int = CHUNK_SIZE):
-    """The live transport: chunked bulk-fundamentals requests, one per chunk.
+def sec_xbrl_transport(*, rate_limit: float = SEC_REQUESTS_PER_SECOND):
+    """The live transport: one SEC EDGAR ``companyfacts`` request per filer.
 
     Injectable by design - the panel builder takes any
-    ``transport(chunk, date) -> BulkResult``; the live one is the only thing
-    this environment cannot exercise (the Extended Fundamentals plan is
-    support-gated on the vendor side).
-    """
-    def _fetch(chunk, date):  # noqa: ARG001 - the date is the cache key, not a param
-        from tradingagents.dataflows.eodhd import _eodhd_get
+    ``transport(chunk, date) -> FetchResult``, and the stub in
+    ``tests/test_score_panel.py`` exercises the caching / cost / gap paths
+    without the network.
 
-        codes = [str(c).upper() for c in chunk]
-        query = ",".join(codes if "." in c else f"{c}.US" for c in codes)
-        payload = _eodhd_get(f"bulk-fundamentals/{exchange}", {"fmt": "json", "symbols": query})
-        items = _bulk_items(payload)
-        rows = {}
-        for code in codes:
-            item = items.get(code.split(".")[0])
-            if not item:
+    The facts payload is per-**filer** and date-independent, so it is fetched
+    once and re-read for every date: a 30-date panel over 464 names costs 464
+    requests, not 13,920. The date enters only through the point-in-time filter
+    (``canonical_fin_from_sec(asof=date)``), which is local.
+
+    Requests are paced to SEC's published fair-access ceiling (10/second per
+    IP); a 403 under batch load is what the pacing exists to avoid. A name that
+    cannot be resolved - no CIK, a pre-XBRL filer, an IFRS filer with no us-gaap
+    facts - is recorded in ``gaps`` with its reason and contributes no row. One
+    name's failure never aborts the batch: unlike a bulk request, a per-filer
+    fetch has nothing shared to lose.
+    """
+    from tradingagents.dataflows import sec_edgar
+
+    facts_cache: dict[str, dict] = {}
+    min_interval = 1.0 / float(rate_limit) if rate_limit and rate_limit > 0 else 0.0
+    last = [0.0]
+
+    def _pace() -> None:
+        if min_interval <= 0.0:
+            return
+        import time
+
+        wait = min_interval - (time.monotonic() - last[0])
+        if wait > 0:
+            time.sleep(wait)
+        last[0] = time.monotonic()
+
+    def _fetch(chunk, date):
+        fins: dict = {}
+        gaps: dict = {}
+        requests = 0
+        for code in [str(c).upper() for c in chunk]:
+            ticker = code.split(".")[0]
+            if ticker not in facts_cache:
+                _pace()
+                requests += 1
+                try:
+                    facts_cache[ticker] = sec_edgar.annual_facts(ticker)
+                except Exception as exc:  # noqa: BLE001 - one name's gap, not the batch's
+                    facts_cache[ticker] = {}
+                    gaps[ticker] = f"{type(exc).__name__}: {exc}"
+            facts = facts_cache[ticker]
+            if not facts:
+                gaps.setdefault(ticker, "no annual XBRL facts on EDGAR (no CIK, "
+                                        "pre-XBRL filer, or an IFRS filer)")
                 continue
-            row = panel_row_from_bulk(code.split(".")[0], item)
-            if row:
-                rows[code.split(".")[0]] = row
-        return BulkResult(
-            rows=rows,
-            requests=1,
-            api_calls=BULK_REQUEST_CALLS + PER_SYMBOL_CALLS * len(codes),
-            symbols_requested=len(codes),
+            fin = canonical_fin_from_sec(facts, asof=date)
+            if not fin:
+                gaps[ticker] = "no eligible annual facts filed on or before the panel date"
+                continue
+            fins[ticker] = fin
+        return FetchResult(
+            fins=fins,
+            requests=requests,
+            api_calls=requests,
+            symbols_requested=len(chunk),
+            gaps=gaps,
         )
 
     return _fetch
@@ -620,16 +676,25 @@ def build_panel(
         rows: dict = {}
         wanted = 0
         fundamentals_error: str | None = None
+        # `{ticker: reason}` for the names the fundamentals leg could not supply
+        # on THIS date. Recorded per date because the reason is date-dependent:
+        # a name whose only 10-K was filed after the panel date is a gap here
+        # and a row on a later date.
+        gaps: dict = {}
+        # `{ticker: canonical fin}` as the fundamentals leg returned it, held
+        # until the price leg has written its closes (see below).
+        fins: dict = {}
         if transport is not None:
             for chunk in chunks:
                 try:
                     res = transport(chunk, date)
-                except Exception as exc:  # noqa: BLE001 - the vendor gate is a finding
-                    # A transport failure is the vendor-gate finding the plan
-                    # asks to record (P0-2: the Extended Fundamentals plan is
-                    # support-gated), not a crash: the rest of the panel - the
-                    # technical leg - still builds, and the reason is written
-                    # into the file so no reader mistakes it for a thin market.
+                except Exception as exc:  # noqa: BLE001 - a whole-leg failure is a finding
+                    # A transport that raises for the WHOLE batch is a finding to
+                    # record, not a crash: the rest of the panel - the technical
+                    # leg - still builds, and the reason is written into the file
+                    # so no reader mistakes it for a thin market. A per-NAME
+                    # failure does not land here: the SEC transport records it in
+                    # `gaps` and keeps going.
                     fundamentals_error = f"{type(exc).__name__}: {exc}"
                     break
                 wanted += int(res.symbols_requested)
@@ -637,9 +702,11 @@ def build_panel(
                 cost["api_calls"] += int(res.api_calls)
                 cost["chunks"] += 1
                 cost["symbols_requested"] += int(res.symbols_requested)
-                for code, row in (res.rows or {}).items():
-                    if row:
-                        rows.setdefault(str(code).upper(), {}).update(row)
+                for code, reason in (getattr(res, "gaps", None) or {}).items():
+                    gaps.setdefault(str(code).upper(), reason)
+                for code, fin in (getattr(res, "fins", None) or {}).items():
+                    if fin:
+                        fins.setdefault(str(code).upper(), {}).update(fin)
         if fundamentals_error:
             cost.setdefault("errors", []).append(
                 {"date": date, "leg": "fundamentals", "error": fundamentals_error}
@@ -650,6 +717,27 @@ def build_panel(
                     rows.setdefault(code, {}).update(comps)
             for code, close in closes_asof(universe_all, date, price_provider).items():
                 rows.setdefault(code, {})["close"] = close
+        # The fundamentals rows are assembled HERE, after the price leg, because
+        # the valuation block needs a market capitalisation and EDGAR has no
+        # price: a market cap is the close this leg just wrote times the
+        # cover-page share count the SEC leg carries. Deriving the row inside the
+        # transport would leave every price-based ratio (EV/EBITDA, P/E, P/B,
+        # earnings yield) permanently NA for no reason.
+        for code, fin in fins.items():
+            close = _num((rows.get(code) or {}).get("close"))
+            shares = _num(fin.get("shares_outstanding"))
+            if (close is not None and shares is not None
+                    and _num(fin.get("market_cap")) is None):
+                fin["market_cap"] = close * shares
+            try:
+                row = panel_row_from_fin(code, fin)
+            except Exception as exc:  # noqa: BLE001 - a per-name derivation failure is a gap
+                gaps[code] = f"{type(exc).__name__}: {exc}"
+                continue
+            if row:
+                rows.setdefault(code, {}).update(row)
+            else:
+                gaps.setdefault(code, "no panel metric could be derived from the SEC facts")
         meta = {
             "date": date,
             "fetched_at": stamp,
@@ -663,8 +751,8 @@ def build_panel(
             },
             "legs": {
                 "fundamentals": (
-                    "eodhd bulk-fundamentals" if transport is not None
-                    and not fundamentals_error else
+                    "SEC EDGAR XBRL annual facts (companyfacts, point-in-time)"
+                    if transport is not None and not fundamentals_error else
                     (fundamentals_error or "not fetched")
                 ),
                 "technical": (
@@ -672,12 +760,18 @@ def build_panel(
                     if (price_provider is not None and technical) else "not fetched"
                 ),
             },
-            "vendor_gate": fundamentals_error,
+            "fundamentals_error": fundamentals_error,
+            # The names the fundamentals leg could not supply, with the reason.
+            # Recorded so a thin cross-section is visible as thin: an SEC panel
+            # legitimately loses every filer with no 10-K/20-F/40-F facts.
+            "fundamentals_gaps": dict(sorted(gaps.items())),
             "basis": (
                 "cross-sectional panel for one trading date; metrics are the "
                 "score engines' own component names, NA when a producer could "
-                "not measure (never 0). EODHD Extended Fundamentals is "
-                "support-gated: the live fetch is unverified."
+                "not measure (never 0). Fundamentals are SEC EDGAR XBRL annual "
+                "facts, read point-in-time (only reports filed on or before "
+                "this date) and aligned to one fiscal year; market cap is the "
+                "panel's own close times the EDGAR cover-page share count."
             ),
         }
         if not rows:
@@ -687,7 +781,8 @@ def build_panel(
             per_date[date] = {
                 "path": path, "source": "empty-fetch", "n_names": 0, "n_metrics": 0,
                 "symbols_requested": wanted or len(universe_all), "fetched_at": stamp,
-                "cost": None, "vendor_gate": fundamentals_error,
+                "cost": None, "fundamentals_error": fundamentals_error,
+                "gaps": len(gaps),
             }
             continue
         write_panel(path, rows, meta)
@@ -696,7 +791,8 @@ def build_panel(
             "path": path, "source": "fetched", "n_names": len(rows),
             "n_metrics": meta["n_metrics"], "symbols_requested": meta["symbols_requested"],
             "fetched_at": stamp, "cost": meta["cost"],
-            "vendor_gate": fundamentals_error,
+            "fundamentals_error": fundamentals_error,
+            "gaps": len(gaps),
         }
 
     names_by_date = [per_date[d]["n_names"] for d in dates]
@@ -725,9 +821,11 @@ def build_panel(
         "status_reason": status["reason"],
         "floors": status["floors"],
         "observed": status["observed"],
-        "vendor_gate": next(
-            (d["vendor_gate"] for d in per_date.values() if d.get("vendor_gate")), None
+        "fundamentals_error": next(
+            (d["fundamentals_error"] for d in per_date.values()
+             if d.get("fundamentals_error")), None
         ),
+        "gaps": sum(int(d.get("gaps") or 0) for d in per_date.values()),
         "basis": (
             f"panel build: {len(dates)} date(s) x {len(universe_all)} symbol(s) in "
             f"{len(chunks)} chunk(s); cached dates are never re-fetched "
@@ -1624,11 +1722,16 @@ def render_text(report: dict, build: dict | None = None) -> str:
             f"{cov.get('ratio')}"
         )
         lines.append(f"label: {build.get('status')} - {build.get('status_reason')}")
-        if build.get("vendor_gate"):
+        if build.get("fundamentals_error"):
             lines.append(
-                "vendor gate: the fundamentals leg did not run - "
-                f"{build['vendor_gate']} (recorded, not hidden: this is the "
-                "support-gated EODHD Extended Fundamentals plan)"
+                "fundamentals leg: the whole leg did not run - "
+                f"{build['fundamentals_error']} (recorded, not hidden)"
+            )
+        if build.get("gaps"):
+            lines.append(
+                f"fundamentals gaps: {build['gaps']} name-date(s) carried no row "
+                "(no CIK, pre-XBRL, IFRS, or no report filed by that date) - "
+                "printed so a thin cross-section reads as thin"
             )
         lines.append("")
     panel = report.get("panel") or {}
@@ -1744,12 +1847,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbols", default=None, help="comma-separated universe")
     parser.add_argument("--symbols-file", default=None, help="one symbol per line")
     parser.add_argument("--cache-dir", default=None, help="default: data_cache_dir")
-    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
-    parser.add_argument("--exchange", default="US",
-                        help=("bulk exchange code (default US; the per-exchange "
-                              f"codes are {', '.join(EXCHANGE_CODES)} - the "
-                              "vendor 404s on the generic US code for the "
-                              "snapshot variant)"))
+    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE,
+                        help=("names per transport call (progress batching only; "
+                              "SEC has no per-request symbol cap)"))
+    parser.add_argument("--rate-limit", type=float, default=SEC_REQUESTS_PER_SECOND,
+                        help=("SEC requests/second to pace to (default 10, the "
+                              "published fair-access ceiling)"))
     parser.add_argument("--holding", type=int, default=5)
     parser.add_argument("--buckets", type=int, default=10)
     parser.add_argument("--train-frac", type=float, default=OOS_TRAIN_FRAC)
@@ -1771,25 +1874,23 @@ def main(argv: list[str] | None = None) -> int:
     universe = _read_list(args.symbols_file, args.symbols)
     if args.cost_only:
         est = estimate_cost(len(universe), chunk_size=args.chunk_size)
-        n_chunks = est["chunks"]
-        whole = exchange_cost(len(EXCHANGE_CODES) if args.exchange.upper() == "US" else 1)
         payload = {
             **est,
-            "whole_exchange_alternative": {
-                "requests": len(EXCHANGE_CODES) if args.exchange.upper() == "US" else 1,
-                "api_calls": whole,
-                "note": (
-                    "a whole-exchange request is a flat 100 calls, so a "
-                    "US-wide panel is 400 calls (NASDAQ/NYSE/AMEX/BATS) against "
-                    "100 x chunks + N for a symbols list - cheaper for a large "
-                    "universe, and it needs the same gated plan"
-                ),
-            },
+            "rate_limit": args.rate_limit,
+            "estimated_minutes": (
+                round(len(universe) / args.rate_limit / 60.0, 1)
+                if args.rate_limit and args.rate_limit > 0 else None
+            ),
+            "note": (
+                "one companyfacts request per filer, fetched once and reused for "
+                "every date, so the cost does not grow with the number of dates; "
+                "a name whose payload fails falls back to one request per tag"
+            ),
         }
         print(json.dumps(payload, indent=2) if args.json else
-              f"{est['symbols']} symbol(s) -> {n_chunks} chunk(s), "
-              f"{est['api_calls']} API call(s) ({est['model']}); "
-              f"whole-exchange alternative: {whole} API call(s)")
+              f"{est['symbols']} symbol(s) -> {est['api_calls']} request(s) "
+              f"({est['model']}); at {args.rate_limit:g}/s that is "
+              f"{payload['estimated_minutes']} min, independent of the date count")
         return 0
     if not dates:
         parser.error("--dates or --dates-file is required")
@@ -1806,8 +1907,7 @@ def main(argv: list[str] | None = None) -> int:
         # component assembly, not the closes.
         build = build_panel(
             dates, universe,
-            transport=eodhd_bulk_transport(exchange=args.exchange,
-                                           chunk_size=args.chunk_size),
+            transport=sec_xbrl_transport(rate_limit=args.rate_limit),
             price_provider=PriceProvider(),
             cache_dir=cache_dir, chunk_size=args.chunk_size,
             technical=not args.no_technical,
@@ -1836,19 +1936,17 @@ if __name__ == "__main__":
 
 __all__ = [
     # the panel
-    "BulkResult",
+    "FetchResult",
     "CHUNK_SIZE",
-    "BULK_REQUEST_CALLS",
-    "EXCHANGE_CODES",
+    "SEC_REQUESTS_PER_SECOND",
     "META_KEY",
     "PANELS_DIRNAME",
     "PriceProvider",
     "build_panel",
     "closes_asof",
     "default_cache_dir",
-    "eodhd_bulk_transport",
+    "sec_xbrl_transport",
     "estimate_cost",
-    "exchange_cost",
     "load_panel_series",
     "panel_path",
     "read_panel",
@@ -1856,11 +1954,11 @@ __all__ = [
     "split_chunks",
     "technical_rows_asof",
     "write_panel",
-    # the vendor mapping
-    "BULK_HIGHLIGHTS",
-    "BULK_YEARLY_STATEMENTS",
-    "canonical_fin_from_bulk",
-    "panel_row_from_bulk",
+    # the source mapping
+    "SEC_DEBT_LABELS",
+    "SEC_FIN_KEYS",
+    "SEC_REFERENCE_LABELS",
+    "canonical_fin_from_sec",
     "panel_row_from_fin",
     # the engines
     "ENGINE_MODULES",

@@ -579,8 +579,8 @@ is part of the seam's history.
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13** — the canonical regime
 path, the two composite names, the per-name/book `RiskScore` split, the moved
 bindings, the sentiment toolset, EventScore's ownership of materiality, the structured event state, the gate order, the coverage sign, score-vs-sizing, the
-daily horizon, and the semivariance measure. The five below are this document's
-own. **The owner's confirmation the same day of two ledger statements - `RiskScore`
+daily horizon, and the semivariance measure. The five below are this document's own; the vendor
+decision of 2026-09-18 follows them as Q6. **The owner's confirmation the same day of two ledger statements - `RiskScore`
 is a `TradeScore` engine and not a risk gate, and the six-engine research
 allocation is a separate object from the four-engine decision composite - is
 recorded in §1.4 and, as binding rules 17-18, in §2.1.** The six items that sit
@@ -591,8 +591,9 @@ sizing - are decided too, and recorded with their evidence in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13.4 and
 [`../design_report_verification_llm.md`](../design_report_verification_llm.md).
 
-The five questions this document opened are answered. Recorded with the
-rationale, because the reasoning is what future changes have to respect.
+The five questions this document opened are answered, and the vendor decision of
+2026-09-18 is appended below them as Q6. Recorded with the rationale, because the
+reasoning is what future changes have to respect.
 
 **Q1 — Does a composite fundamental score ever reach `opportunity_score`?**
 **Decided: (a) never, for now.** It stays a tool-leaf / `run_card` advisory
@@ -626,10 +627,12 @@ weight, rather than punish the company"* — and the design must **not manufactu
 missing metrics from generic factors** (master §2 rule 1).
 
 **Q4 — Evaluation universe?**
-**Decided: the full EODHD US panel** is the official validation universe; the
+**Decided: the full US panel** is the official validation universe; the
 named basket stays a development/test universe and is labelled
 `VALIDATION_STATUS = INSUFFICIENT_CROSS_SECTION` — *"rather than allowing it to
-produce authoritative factor weights"*. IC, ICIR, decile spread and
+produce authoritative factor weights"*. The panel's fundamentals leg sources
+from **SEC EDGAR XBRL** (free, keyless, point-in-time) as of 2026-09-18, not the
+vendor's bulk-fundamentals endpoint. IC, ICIR, decile spread and
 monotonicity only become meaningful with hundreds/thousands of eligible names
 (`IMPLEMENTATION_PLAN.md` §9 Phase C).
 
@@ -641,6 +644,45 @@ monotonicity only become meaningful with hundreds/thousands of eligible names
 after which every verifier/report comparison asks why 84.2 and not 81.7, which
 factor moved it, and whether 84.2 beats 78.4 — turning an **advisory composite
 into a quasi-official measurement** (`IMPLEMENTATION_PLAN.md` §6).
+
+**Q6 — Where do the panel's fundamentals leg and the forward event calendars
+source from?** (owner, 2026-09-18.)
+**Decided: three parts, all binding.** *(a) The panel's fundamentals leg sources
+from **SEC EDGAR XBRL** — free, keyless and point-in-time — not the vendor's
+bulk-fundamentals endpoint.* EODHD's Extended Fundamentals plan is priced "By
+request" on the vendor's own page and is excluded from every published tier (EOD
+$19.99 / EOD+Intraday $29.99 / Fundamentals $59.99 / All-in-One $99.99), so the
+403 on `/api/bulk-fundamentals/NASDAQ` and `/api/fundamentals/AAPL.US` is
+plan-gating, not spend-more; the one publicly priced bulk alternative (FMP's
+Premium/Ultimate tiers) was not needed. The `companyfacts` payload is per-filer
+and date-independent, so one request per filer serves every date (a 30-date
+panel over 464 names = 464 requests, not 13,920), paced to the SEC's published
+10 req/s ceiling; the read is **point-in-time** (only facts filed on or before
+the panel date are eligible) and every leg is aligned to **one fiscal year** — a
+tag with no value at the reference end is ABSENT, never substituted from another
+year. Market cap is the panel's own close × the EDGAR cover-page share count
+(`dei:EntityCommonStockSharesOutstanding`). Coverage limits are named per name in
+`_meta.fundamentals_gaps` — no market cap from the source, no TTM, no
+10-K/20-F/40-F row (pre-XBRL or IFRS), Beneish M unmeasurable for want of a
+consistent marketable-securities concept — and never silently dropped; the
+former `_meta.vendor_gate` is now `_meta.fundamentals_error`. Live 2026-09-18: 7
+names at 17-25 metrics each, one named gap (TSM, an IFRS filer).
+*(b) The forward company-event calendars.* **pdufa.bio** answers the FDA /
+clinical family (free, keyless, 1,000 req/day), which makes `product_clinical`
+**SCORABLE**; **CourtListener** — the owner's pick for the court family —
+**cannot answer**: it is a filing archive, its docket endpoints need a token and
+its anonymous search exposes only `dateArgued` / `dateFiled` / `dateTerminated`,
+all backward-looking (zero future-dated rows across three live result sets), so
+`court` stays **`missing`, not `not_applicable`**; the **investor-day family is
+DROPPED** by owner decision, because no free source exists. Only
+`date_precision == "day"` rows become forward events (pdufa.bio nulls `date` for
+month/quarter/year precision since 2026-09-09), and the undated rows are counted,
+not discarded: `event_calendars.calendar_coverage` prints `rows_held` beside
+`rows_with_announced_day`.
+*(c) The calendars' gate is **`enable_event_calendars`, default False, SEPARATE
+from `enable_event_state`*** — this is the one part of the state that leaves the
+machine, so enabling the engine must not silently acquire a third-party fetch;
+off leaves every family at the answer it had before the adapters existed.
 
 ---
 

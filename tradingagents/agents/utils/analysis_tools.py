@@ -5450,14 +5450,47 @@ def get_trade_score(
         return f"trade score unavailable for {ticker}: render failed ({exc})"
 
 
+def _event_calendar_answers(ticker: str, current_date: str) -> dict:
+    """The forward-calendar answers for a run, when the calendar gate is on.
+
+    Off -> ``{}``, and every company-event family keeps the answer it had before
+    this adapter existed. The gate is separate from ``enable_event_state``
+    because this is the one part of the state that leaves the machine: a reader
+    who enables the engine should not silently acquire a third-party fetch.
+
+    A source failure is never fatal - the interface answers ``missing`` with its
+    own reason, which is the honest outcome and not a run-ending one.
+    """
+    if not _r3_flag("enable_event_calendars"):
+        return {}
+    try:
+        from tradingagents.dataflows.event_calendars import (
+            COURT_REASON,
+            INVESTOR_DAY_REASON,
+            company_event_calendars,
+        )
+        from tradingagents.strategies.event_state import calendar_answers
+
+        rows = company_event_calendars(ticker, current_date)
+        return calendar_answers(
+            rows,
+            trade_date=current_date,
+            reasons={"court": COURT_REASON, "investor_day": INVESTOR_DAY_REASON},
+        )
+    except Exception:  # noqa: BLE001 - an advisory read must never break the tool
+        return {}
+
+
 def _event_state_components(ticker: str, current_date: str) -> dict:
-    """The EventScore components for a ticker: the catalyst snapshot + OPEX.
+    """The EventScore components for a ticker: the catalyst snapshot + OPEX + calendars.
 
     Every value comes from a producer that already ran - `catalyst`'s own
     earnings / macro / Fed blocks and `derivatives_gamma.opex_status` - so the
-    leaf costs one catalyst fetch and no new vendor call. A block that cannot be
-    measured is left out of the dict (it leaves the family's denominator), never
-    sent as 0. The snapshot's own `hard_block` travels through verbatim.
+    leaf costs one catalyst fetch and no new vendor call. The company-event
+    calendars are the exception, and are fetched only under their own gate
+    (`_event_calendar_answers`). A block that cannot be measured is left out of
+    the dict (it leaves the family's denominator), never sent as 0. The
+    snapshot's own `hard_block` travels through verbatim.
     """
     snap = _catalyst_snapshot(ticker, current_date)
     if not snap:
@@ -5473,7 +5506,8 @@ def _event_state_components(ticker: str, current_date: str) -> dict:
         opex = opex_status(day)
     except Exception:  # noqa: BLE001 - OPEX is one extra family, never a blocker
         opex = None
-    return event_components(snap, opex=opex)
+    return event_components(snap, opex=opex,
+                            calendars=_event_calendar_answers(ticker, current_date))
 
 
 def _render_event_state(ticker: str, res: dict) -> str:

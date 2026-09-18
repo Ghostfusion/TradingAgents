@@ -102,19 +102,19 @@ EventScore has no weight table in code; every producer is a multiplier, a day-co
 | --- | --- | --- | --- | --- | --- | --- |
 | Earnings — next print (imminence) | `catalyst.next_earnings` (`tradingagents/strategies/catalyst.py:90`) | entries at/after trade_date, `lookahead_days=60` | dict `{date, days_until:int, eps_estimate, eps_actual}` | no | higher `days_until` = farther = safer | SCORABLE |
 | Earnings — snapshot leg | `catalyst.build_catalyst_snapshot` (`catalyst.py:219`, earnings branch `:265`) | `catalyst_window_days` default 5 (`default_config.py:785`) | multiplies `scale` by `catalyst_risk_penalty` | YES at `:284` | lower scale = risk-increasing | SCORABLE |
-| Earnings — last surprise / side | `catalyst.last_earnings_surprise` (`catalyst.py:70`); `events.surprise_score` (`events.py:17`); `events.drift_side` (`events.py:26`) | most recent report in calendar | `{surprise: ratio, side: 'beat'|'miss', date}`; surprise = (act-est)/|est| | no | beat = favourable | SCORABLE |
+| Earnings — last surprise / side | `catalyst.last_earnings_surprise` (`catalyst.py:70`); `events.surprise_score` (`events.py:17`); `events.drift_side` (`events.py:26`) | most recent report in calendar | `{surprise: ratio, side: 'beat' \| 'miss', date}`; surprise = (act-est)/\|est\| | no | beat = favourable | SCORABLE |
 | Earnings — implied move (exposure) | `catalyst.implied_move_from_history` (`catalyst.py:111`) | latest history row | fraction (`predict_vola_ratio_newest/100`) | no | larger = more risk | SCORABLE |
 | Earnings — risk multiplier | `events.catalyst_risk_penalty` (`events.py:53`) | none (implied vs baseline) | multiplier <=1 (0.5 when unknown; `1/(1+3r)`) | no | lower = more risk | SCORABLE |
 | Earnings — PEAD entry | `events.post_earnings_play` (`events.py:112`); `events.gap_up_qualifies` (`:63`) | print + 4 bars | verdict `setup/consolidating/no-gap/no-data` | no | setup = favourable | SCORABLE |
 | Earnings — position mult by side | `events.position_mult_by_side` (`events.py:37`) | none | 1.0 beat / 0.5 miss / 0.0 flat, cap 1.5 | no | higher = favourable | PARTIAL (catalyst arg inert, see §3 D4) |
-| Macro (CPI/FOMC/payrolls) imminence | `catalyst.macro_imminence` (`catalyst.py:123`) | `window_days=3`; `star=='HIGH'` filter | `{count_high:int, min_days:int|None}` | no | imminent = risk-increasing | SCORABLE |
+| Macro (CPI/FOMC/payrolls) imminence | `catalyst.macro_imminence` (`catalyst.py:123`) | `window_days=3`; `star=='HIGH'` filter | `{count_high:int, min_days:int \| None}` | no | imminent = risk-increasing | SCORABLE |
 | Fed — next FOMC | `catalyst.fed_imminence` (`catalyst.py:142`) | `window_days=14` default; snapshot passes `catalyst_fed_window_days`=10 | `{days_until:int, modal_prob:%, modal_range:str}` | no | modal hike = risk-increasing | SCORABLE |
 | Fed — direction label | `catalyst.fed_direction` (`catalyst.py:184`) | none | `HOLD`/`HIKE`/`CUT`/`n/a` | no | hike = risk-increasing | SCORABLE |
 | Macro backdrop (fallback) | `massive.fetch_macro_backdrop` (`tradingagents/dataflows/massive.py:398`) | 90d look-back; only when both fed+econ calendars absent | 0..1 de-risk mult (0.7 inversion x0.75 breakeven), `verdict` | no | lower = risk-increasing | SCORABLE (constant thresholds `_INVERSION_SCALE=0.7`, `_BREAKEVEN_SCALE=0.75`, `massive.py:392-395`) |
 | OPEX / expiry | `derivatives_gamma.opex_status` (`derivatives_gamma.py:127`); `opex_dates` (`:116`); `opex_note` (`:165`) | third-Friday monthly cycle; `days_to_next`; OPEX week = ISO-week equality; post-OPEX unwind = Mon/Tue within 1-4d of prev expiry | `{next_opex, prev_opex, days_to_next:int, in_opex_week:bool, post_opex_unwind:bool, quarterly:bool}` | no | OPEX-week/unwind = structure risk, not favourable | SCORABLE (booleans, no 0-1) |
-| Product launch / clinical / FDA | — | — | — | — | — | ABSENT |
-| Court decision | — (only LM litigation lexicon, `strategies/text_factors.py:104-109`, news tone) | — | — | — | — | ABSENT |
-| Investor day | — | — | — | — | — | ABSENT |
+| Product launch / clinical / FDA | `event_calendars.fda_calendar_rows` (`tradingagents/dataflows/event_calendars.py`, pdufa.bio `/api/v1/events`, keyless) | the event's own announced day; family horizon `HORIZONS['product_clinical']=90` (declared) | `{date, name, type, status, indication, source, source_url, url}` | no | an imminent decision = risk-increasing | **SCORABLE (built 2026-09-18)**; announced-day rows only |
+| Court decision | `event_calendars.court_calendar_rows` — **returns `None`** | — | — | — | — | **ABSENT**: the chosen source cannot carry a forward date (`COURT_REASON`) |
+| Investor day | — | — | — | — | — | **ABSENT — DROPPED by decision 2026-09-18** (no free source; `INVESTOR_DAY_REASON`) |
 | Gap risk (event-adjacent exposure) | `market_session.gap_type` (`market_session.py:137`); `pre_market.premarket_gap` (`pre_market.py:40`) | last bar / overnight | gap type + fill prob; `{gap_pct, gap_atr, through_stop, vacuum_to_stop}` | `through_stop` -> REJECT at `pre_market.py:255` | gap-through-stop = risk | SCORABLE |
 
 **`build_catalyst_snapshot` return contract** (`catalyst.py:219`; return dict `catalyst.py:350-359`):
@@ -198,26 +198,70 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 
 | Component | Data needed | Engine already fetches? | Smallest honest producer |
 | --- | --- | --- | --- |
-| FDA / clinical decisions | a forward PDUFA / trial-readout calendar | NO — no vendor category in `dataflows/interface.py` `VENDOR_METHODS`; `patents` is a backward metric (`patentsview.py:57`) | new forward-calendar adapter modelled on `moomoo.get_economic_calendar_moomoo` (`dataflows/moomoo.py:1758`) + the chunked window reader `catalyst._calendar_window` (`catalyst.py:394`) |
-| Court decisions | a litigation/docket calendar | NO — only the LM litigation lexicon scoring news tone (`text_factors.py:104-109`) | same forward-calendar pattern; none exists |
-| Investor day / product launch | a company-events calendar | NO — nearest are `get_corporate_actions` (dividends/splits) and `get_ipos` (`moomoo_extra_tools.py:178`) | forward company-events calendar; none exists |
+| FDA / clinical decisions | a forward PDUFA / trial-readout calendar | **YES as of 2026-09-18** — `dataflows/event_calendars.py::fda_calendar_rows` (pdufa.bio `/api/v1/events`, free and keyless) | **BUILT**: `forward_calendar('product' \| 'clinical')`, announced-day rows only |
+| Court decisions | a litigation/docket calendar | **NO — the chosen source cannot answer.** CourtListener is a filing archive: its docket endpoints need a token and its anonymous search exposes only `dateArgued`/`dateFiled`/`dateTerminated`, all backward-looking (`event_calendars.COURT_REASON`) | none; the family answers **MISSING**, never `not_applicable` |
+| Investor day / product launch | a company-events calendar | **NO — DROPPED by owner decision 2026-09-18**: no free source exists, and the one priced source was declined (`event_calendars.INVESTOR_DAY_REASON`) | none; the nearest producers are `get_corporate_actions` (dividends/splits) and `get_ipos` (`moomoo_extra_tools.py:178`) |
 | Earnings imminence > 60d | horizon beyond `next_earnings.lookahead_days=60` (`catalyst.py:90`), fetch window +95d (`catalyst.py:493`) | YES (fetch is wider than the read) | raise `lookahead_days`; no new adapter |
 | Scalar 0-1 imminence | normalization of existing day-counts | YES — raw counts already returned | pure `clamp(1 - days_until/horizon, 0, 1)` over `next_earnings.days_until` / `macro_imminence.min_days` / `fed_imminence.days_until` / `opex_status.days_to_next`; no new fetch |
 | Hard block for macro/Fed/OPEX | a rule to close on imminent non-earnings events | YES (calendar fetched) | extend `build_catalyst_snapshot` (`catalyst.py:280`) to set `hard_block` from `macro_imminence.min_days` / `fed_imminence.days_until` against a configured window |
 | Weights / composite | any EventScore band or weight structure | NO — every producer is a multiplier or gate; no 0-100 score anywhere | needs (a) per-family imminence 0-1, (b) per-family impact/severity, (c) NA!=0 handling; nothing exists to reuse |
 
-**PROBED 2026-09-17 (P0-9) - the moomoo economic calendar does NOT carry them.**
+**PROBED 2026-09-17 (P0-9) — the moomoo economic calendar does NOT carry them.**
 The probe is the answer this row was waiting for: `get_economic_calendar_moomoo`
 over the next 14 days returned **50 rows, every one a MACRO release** (Fed interest-rate
 projections, TIC capital flows, jobless claims, housing starts, bill/TIPS auctions,
 Philly Fed sub-indices, GDPNow, natural-gas storage). **Zero rows matched
 FDA / clinical / trial / phase / court / litigation / ruling / investor day /
-analyst day / drug / approval.** So the three company-level calendars are
-**ABSENT with evidence**, not "unbuilt": the moomoo adapter supplies the *pattern*
-(a windowed reader with a typed no-data error) and **not** the data, and no
-existing adapter is a producer for them. Building them needs a new
-company-events source, which is a vendor decision of its own - it does not ride on
-the economic calendar.
+analyst day / drug / approval.** The moomoo adapter supplies the *pattern*
+(a windowed reader with a typed no-data error) and **not** the data, which is what
+made the sourcing decision below necessary rather than optional.
+
+**RESOLVED 2026-09-18 — the vendor decision, and what it bought.**
+`dataflows/event_calendars.py` is the module. Each family was decided on its own,
+because the cheapest honest answer differs per family:
+
+| Family | Source chosen | Cost | Outcome |
+| --- | --- | --- | --- |
+| FDA / clinical | **pdufa.bio** `/api/v1/events` | **$0**, keyless (1,000 req/day anonymous) | **MEASURABLE.** Live 2026-09-18: 456 catalysts tracked, **120 carrying an announced day** |
+| Court | **CourtListener** (owner's pick) | $0 | **STILL ABSENT** — see below |
+| Investor day | none | — | **DROPPED** — no free source exists |
+
+**Two things the decision did not buy, both recorded rather than papered over.**
+
+1. **CourtListener cannot answer this family's question.** It is a filing archive,
+   not a forward calendar: `/api/rest/v4/dockets/` and `/docket-entries/` require a
+   token even for `OPTIONS`, and the anonymously accessible `/search/?type=r`
+   endpoint exposes exactly three date fields — `dateArgued`, `dateFiled`,
+   `dateTerminated` — **all backward-looking**. Probed live 2026-09-18 across three
+   result sets (144,748 / 4,563 / 61,937,018 matches): **zero rows carried a future
+   date.** The adapter is therefore bound and returns `None`, which makes the family
+   `missing` — **not** `not_applicable`, because "this source cannot carry a forward
+   date" is not the claim "no court event is scheduled", and only the second one
+   would be a false assertion. `event_calendars.court_probe` keeps the finding
+   re-verifiable as a callable rather than as prose that could quietly go stale.
+2. **The investor-day family is dropped by decision, not by omission.** Wall Street
+   Horizon via Interactive Brokers ($49/mo retail) was the only priced source and
+   was declined; EODHD's Corporate Events Calendar ($19.99/mo) does not carry
+   investor days at all — its own page scopes it to earnings, IPOs, splits,
+   dividends and news. The design permits dropping it: the families are independent
+   and coverage prints per family.
+
+**The announced-day rule is load-bearing, not a filter detail.** pdufa.bio changed
+`date` on 2026-09-09 to mean *an announced day, or `null`*: for `month`, `quarter`
+and `year` precision the field is null and only `date_month` holds the granularity,
+because the site used to serve a month midpoint as if a sponsor had announced it
+(~7 rows in 10). **Only `date_precision == "day"` rows become forward events here.**
+A month midpoint turned into a day-count would be exactly the fabrication this set
+refuses, and it would land in a scored imminence. The undated rows are counted, not
+discarded: `event_calendars.calendar_coverage` reports `rows_held` beside
+`rows_with_announced_day`, so a family that measures nothing says *"of 6 rows, 5
+undated"* rather than reading as an absence of catalysts.
+
+**Gate.** `enable_event_calendars` (default **False**, `default_config.py:1088`),
+**separate** from `enable_event_state`: this is the one part of the state that
+leaves the machine, and enabling the engine must not silently acquire a
+third-party fetch. With it off, every family keeps the answer it had before the
+adapters existed.
 
 **Hard-block inventory (every fail-closed-on-an-event site in either repo):**
 

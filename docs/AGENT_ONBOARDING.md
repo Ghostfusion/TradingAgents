@@ -324,6 +324,52 @@ tests/                     # conftest (autouse fixtures), test_* per area
   sub-graph in a thread with isolated messages; default 1.
 - **Analyst concurrency / strategy overlays** are deterministic and tested
   offline; LLMs only argue from the reports.
+- **The validation panel's fundamentals leg is SEC EDGAR XBRL** (owner decision
+  2026-09-18), NOT EODHD's bulk endpoint. Why EODHD could not be bought into
+  reach: Extended Fundamentals is priced **"By request"** on the vendor's own page
+  and is excluded from every published tier, so spending more there could not
+  clear the 403 — it is plan-gating, not spend-more. The SEC leg is one keyless
+  `companyfacts` request per filer, fetched once and reused for every panel date
+  (a 30-date panel over 464 names is 464 requests, not 13,920), paced to SEC's
+  published 10 requests/second ceiling. Two properties are load-bearing and must
+  not be "simplified": the read is **point-in-time** (only facts FILED on or
+  before the panel date are eligible — otherwise a past panel reads the future
+  and every measured IC is inflated), and every leg is aligned to **one fiscal
+  year** (a tag with no value at the reference end is absent, never substituted
+  from another year). `_meta.fundamentals_gaps` names every name the leg could
+  not supply (no CIK, pre-XBRL, IFRS) with its reason — never dropped silently.
+  Market cap is derived from the panel's own close × the EDGAR cover-page share
+  count, because EDGAR carries no price.
+- **The forward company-event calendars** (owner decision 2026-09-18):
+  `dataflows/event_calendars.py`, gated by **`enable_event_calendars`** (default
+  off, and deliberately **separate** from `enable_event_state` — this is the only
+  part of the event state that leaves the machine). Three facts to keep:
+  - **pdufa.bio** answers FDA/clinical (free, keyless) and makes that family
+    `SCORABLE`. **Only rows with `date_precision == "day"` are used**: the source
+    nulls `date` for every month/quarter/year estimate (its own 2026-09-09
+    breaking change, because it used to serve a month midpoint as an announced
+    day), and a day-count built on a month midpoint would be an invented number.
+    Live 2026-09-18: 456 catalysts tracked, **120 carrying an announced day**.
+    `calendar_coverage` prints `rows_held` beside `rows_with_announced_day` so an
+    undated family reads as an absence of *dates*, not of catalysts.
+  - **CourtListener cannot answer the court family.** It is a filing archive, not
+    a forward calendar: its docket endpoints need a token and its anonymous
+    `/search/` exposes only `dateArgued`/`dateFiled`/`dateTerminated`, all
+    backward-looking (probed live: zero future-dated rows across three result
+    sets of 144,748 / 4,563 / 61,937,018 matches). The family reports
+    **`missing`**, never `not_applicable` — "this source cannot carry a forward
+    date" is not the claim "no court event is scheduled", and only the second one
+    would be a false assertion. `event_calendars.court_probe` keeps the finding
+    re-verifiable.
+  - **The investor-day family is DROPPED**, not unbuilt: no free source exists,
+    and the one priced source (Wall Street Horizon via IBKR, $49/mo) was
+    declined. The design permits it — the families are independent and coverage
+    prints per family.
+  - **`None` is never `[]`.** `None` means the question was not answered
+    (`missing`); `[]` means it was answered and holds nothing
+    (`not_applicable`). `event_state.calendar_answers` is the one place that
+    turns adapter rows into the three-status answer, so the leaf and the run card
+    cannot drift into collapsing them.
 
 ## Finnhub (free tier — behavior learned by live probing)
 

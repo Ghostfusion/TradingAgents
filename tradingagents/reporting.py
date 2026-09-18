@@ -1125,6 +1125,38 @@ def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
     }
 
 
+def _card_event_calendars(final_state: dict, cfg: dict, trade_date) -> dict:
+    """The forward-calendar answers for the card, under their own gate.
+
+    ``{}`` when ``enable_event_calendars`` is off, so a card built without it is
+    byte-identical to one built before the adapters existed. The ticker comes
+    from the run's own state (``company_of_interest``), never from a report
+    string, and a missing ticker or date simply leaves the calendars unasked
+    rather than guessed at.
+    """
+    if not (cfg or {}).get("enable_event_calendars"):
+        return {}
+    ticker = (final_state or {}).get("company_of_interest")
+    if not ticker or not trade_date:
+        return {}
+    try:
+        from tradingagents.dataflows.event_calendars import (
+            COURT_REASON,
+            INVESTOR_DAY_REASON,
+            company_event_calendars,
+        )
+        from tradingagents.strategies.event_state import calendar_answers
+
+        rows = company_event_calendars(str(ticker), str(trade_date)[:10])
+        return calendar_answers(
+            rows,
+            trade_date=str(trade_date)[:10],
+            reasons={"court": COURT_REASON, "investor_day": INVESTOR_DAY_REASON},
+        )
+    except Exception:  # noqa: BLE001 - an advisory block must never cost the card
+        return {}
+
+
 def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
     """EventScore block for run_card.json (WP-8 / WP-9).
 
@@ -1135,6 +1167,11 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
     stamps it under ``strategy_overlays.catalyst``); no vendor is re-fetched, and
     a card block never dies on a missing one. Returns ``None`` when the gate is
     off, so a gate-off card is byte-identical to a pre-engine tree.
+
+    The company-event calendars are the one exception to "no vendor is
+    re-fetched": they have no earlier producer in the run, so they are fetched
+    here under their own gate (``enable_event_calendars``). That gate being off
+    leaves every family at the answer it had before the adapters existed.
     """
     if not (cfg or {}).get("enable_event_state"):
         return None
@@ -1144,6 +1181,7 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
         from tradingagents.strategies.derivatives_gamma import opex_status
         from tradingagents.strategies.event_state import (
             FLAG_COMPONENTS,
+            calendar_answers,
             event_components,
             event_state,
         )
@@ -1164,7 +1202,8 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
                 )
             except Exception:  # noqa: BLE001 - OPEX is one extra family
                 opex = None
-        res = event_state(event_components(snap, opex=opex))
+        calendars = _card_event_calendars(final_state, cfg, trade_date)
+        res = event_state(event_components(snap, opex=opex, calendars=calendars))
     except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
         return {
             "status": None,

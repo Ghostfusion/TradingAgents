@@ -22,7 +22,7 @@ them, and every dangling cross-reference in the master and in
 defects are recorded in the master's §3.3 — §14 of this document has the full
 list of what the restructure dropped.
 
-Status: **plan (2026-09-17); implemented 2026-09-18.** WP-0...WP-11 are built and every gate ships **off** by default. §9 carries each phase's **Exit - MET** block. **Measurement is partial**: the price leg is measured, the fundamentals leg is vendor-gated (EODHD 403), so most weights in this set remain hypotheses - `MEASUREMENT_FINDINGS.md` labels each one.
+Status: **plan (2026-09-17); implemented 2026-09-18.** WP-0...WP-11 are built and every gate ships **off** by default. §9 carries each phase's **Exit - MET** block. **Measurement is partial**: the price leg is measured, and the fundamentals leg's source was decided on 2026-09-18 (SEC EDGAR XBRL, §3.2) with the panel build being the remaining step, so most weights in this set remain hypotheses - `MEASUREMENT_FINDINGS.md` labels each one.
 
 ---
 
@@ -184,7 +184,7 @@ outputs.
 | # | Item | Blocks | Size |
 | --: | --- | --- | --- |
 | P0-1 | Structured SEC XBRL series (EPS / EBIT / D&A / equity) | WP-2 CAGR family, G4/G5 | M |
-| P0-2 | The EODHD US panel (the validation universe) | WP-10 | M |
+| P0-2 | The validation panel (fundamentals leg: SEC EDGAR XBRL, decided 2026-09-18) | WP-10 | M |
 | P0-3 | Market-wide breadth from the panel already fetched | WP-4, WP-3 | M |
 | P0-4 | VIX percentile (FRED) | WP-4 | S |
 | P0-5 | VIX9D/VIX3M term structure | WP-4 | S |
@@ -259,36 +259,72 @@ legs stop emitting "5-year ROA series unavailable (n=0)" where the data exists.
 **Gate.** Extending a data adapter is not new behaviour: no gate, but the CAGR
 factors built on it land behind `enable_fundamental_score`.
 
-### 3.2 P0-2 — the EODHD US panel
+### 3.2 P0-2 — the validation panel (fundamentals leg: SEC EDGAR XBRL)
 
-**Why.** Owner decision Q4: the **full EODHD US panel** is the official
-validation universe; the named basket is a development set labelled
+**Why.** Owner decision Q4: a **broad US panel** is the official validation
+universe; the named basket is a development set labelled
 `INSUFFICIENT_CROSS_SECTION` and may never produce authoritative weights
 (`FundamentalScore.md` §0.5, master §7 Q4).
 
-**What the vendor supports, checked 2026-09-17.** The bulk fundamentals endpoint
-is stocks-only and needs the **Extended Fundamentals** plan (support-gated, not
-on the public price list); it costs **100 API calls per whole-exchange request**
-and **100 + N** when a `symbols` list is passed, with a **500-symbol** cap per
-request and **JSON or CSV** output; paid plans are **100,000 calls/day** with a
-**1,000 requests/minute** ceiling; the *snapshot* variant 404s on the generic
-`US` code and needs `NASDAQ`/`NYSE`/`AMEX`/`BATS` individually. A single-ticker
-fundamentals call is **10** calls.
+**The sourcing decision, 2026-09-18.** The original plan named EODHD's bulk
+fundamentals endpoint, and the 2026-09-17 probe found it unreachable:
+`GET /api/bulk-fundamentals/NASDAQ` → **403**, `GET /api/fundamentals/AAPL.US` →
+**403**, on a key that is live (`/api/eod/` → 200). The owner reviewed the
+options and chose **SEC EDGAR XBRL**, which is **free, keyless, and already in the
+tree** (P0-1). The reason EODHD could not be bought into reach is worth recording:
+its Extended Fundamentals plan is priced **"By request"** on the vendor's own page
+and is excluded from every published tier (EOD $19.99 / EOD+Intraday $29.99 /
+Fundamentals $59.99 / All-in-One $99.99), so **spending more there does not fix
+it** — the 403 is a plan-gating decision, not a spend-more decision. FMP was the
+only vendor with a publicly priced bulk tier ($49/mo Premium, $99/mo Ultimate for
+"Bulk and Batch Delivery") and was not needed.
+
+**What the source supports, and what it costs.** One keyless
+`companyfacts` request per filer (SEC fair access: **10 requests/second per IP**,
+which the transport paces to). The payload is per-**filer** and
+date-independent, so it is fetched once and re-read for every date: a 30-date
+panel over 464 names costs **464 requests, not 13,920**. `scripts/score_panel.py`
+records the requests it actually spent, and a name whose payload fails falls back
+to one request per tag (an upper bound the estimate cannot know in advance).
 
 **Deliverable.** `scripts/score_panel.py` (a script, not a strategy module): given
 a date range and a universe, writes `data_cache_dir/panels/<date>.json` of
-`{ticker: {metric: value}}` from the bulk endpoint, chunked to 500 symbols,
-caching per date, never re-fetching a date that exists. It must **not** run in a
-report path.
+`{ticker: {metric: value}}` from SEC XBRL, caching per date, never re-fetching a
+date that exists. It must **not** run in a report path.
+
+**Two properties the SEC leg has that the vendor leg would not have.**
+
+1. **Point-in-time.** Every fact carries the date its annual report was *filed*,
+   and only facts filed on or before the panel date are eligible
+   (`score_panel._eligible`). Using the newest fiscal year regardless of filing
+   date would let a 2026-09-17 panel read a 10-K filed in October — look-ahead
+   bias, and the one error that would make every measured IC in this layer too
+   good to be true.
+2. **One fiscal year for every leg.** The reference year is the newest eligible
+   end carried by the core statement lines; a tag with no value at that end is
+   **absent**, never substituted from another year. Without this, a filer that
+   stopped tagging inventory in 2013 would contribute a 2013 inventory beside a
+   2025 balance sheet — a mixed-vintage row that looks measured and is not.
+
+**Coverage limits, recorded per name rather than hidden.** SEC XBRL carries annual
+*statements* only: there is no market capitalisation (so the panel derives it from
+its own close × the EDGAR cover-page share count) and no TTM (the vendor chain's
+`*_ttm` legs are absent, and the ratio block falls back to the annual figure). A
+filer that files neither a 10-K, a 20-F nor a 40-F — a pre-XBRL filer, or one
+reporting under IFRS — contributes no fundamentals row at all; those names land in
+`_meta.fundamentals_gaps` with their reason and are printed by `render_text`.
+Beneish M is unmeasurable here for the same class of reason: EDGAR has no
+consistent marketable-securities concept, and a partial one would produce a wrong
+number rather than a named gap.
 
 **Acceptance.** A panel for one trading date over the US universe exists on disk,
-carries ≥ a few hundred names, records the call cost and the fetch timestamp, and
-a second invocation makes zero network calls. `INSUFFICIENT_CROSS_SECTION` is the
-label whenever the panel is below the cross-section floors — the label is a
+carries ≥ a few hundred names, records the request cost and the fetch timestamp,
+and a second invocation makes zero network calls. `INSUFFICIENT_CROSS_SECTION` is
+the label whenever the panel is below the cross-section floors — the label is a
 tested output, not a comment.
 
-**Gate.** `enable_score_panel_eval` (WP-10) for the *harness*; the script itself
-is manual.
+**Gate.** `enable_score_eval_rows` (WP-10) for the *harness*; the script itself is
+manual.
 
 ### 3.3 P0-3 — market-wide breadth, computed from data already fetched
 
@@ -494,11 +530,16 @@ evidence".
    (Fed rate projections, TIC capital flows, jobless claims, housing starts,
    bill/TIPS auctions, Philly Fed sub-indices, GDPNow, natural-gas storage), and
    **zero** rows matched FDA / clinical / trial / phase / court / litigation /
-   ruling / investor day / analyst day / drug / approval. The three company-level
-   calendars are **ABSENT with evidence**: the adapter supplies the *pattern*, not
-   the data, and building them needs a company-events source of its own — a
-   vendor decision that does not ride on the economic calendar. `EventScore.md` §4
-   carries the counts.
+   ruling / investor day / analyst day / drug / approval. The moomoo adapter
+   supplies the *pattern*, not the data, and building them needed a
+   company-events source of its own — a vendor decision that does not ride on the
+   economic calendar. **That decision was made 2026-09-18** and is recorded in
+   `EventScore.md` §4: **pdufa.bio** (free, keyless) for FDA / clinical, which
+   makes that family **SCORABLE**; **CourtListener** for court, which turned out
+   to be a filing archive with no forward date and therefore leaves the family
+   `missing`; and the **investor-day family dropped**, because no free source
+   exists. `dataflows/event_calendars.py` is the module; `enable_event_calendars`
+   (default off) is its gate.
 
 ---
 
@@ -966,10 +1007,17 @@ earnings 3 days out with a 5d window sets it, driven through the real
 own (AST-checked) and passes the snapshot's `hard_block` through verbatim. The
 event keys are disjoint from `RiskScore`'s exposure keys. **Live (MSFT,
 2026-09-18):** `opex imminence=1.000` (OPEX week), earnings/macro/Fed `NA` with
-their reasons, and the three company-level calendars printing their
-ABSENT-with-evidence text (the P0-9 probe's 50 macro rows, zero company events).
+their reasons, and the company-level calendars printing their own reasons — at
+that date `product_clinical` and `court` / `investor_day` were still ABSENT (the
+P0-9 probe's 50 macro rows, zero company events). **The calendars landed later
+the same day** (`dataflows/event_calendars.py`, §3.2/`EventScore.md` §4): a live
+re-run on `RARE` 2026-09-18 reads `product_clinical` `available` with a PDUFA the
+next day (`imminence 0.989`, family coverage 2 of 7), `court` `missing` with the
+CourtListener finding, and `investor_day` `missing` by decision.
 
-**Gate.** `enable_event_state`. Note `enable_events` (`:770`) is already **on by
+**Gate.** `enable_event_state` for the engine, and a **separate**
+`enable_event_calendars` for the three company-event calendars — the only part of
+the state that leaves the machine. Note `enable_events` (`:770`) is already **on by
 default** and gates the existing PEAD/catalyst sizing — a different object. **The hard block
 is not extended (Q7):** macro/Fed/OPEX still never set it, and a test pins that.
 
@@ -1125,11 +1173,15 @@ feeling. A phase that cannot state its exit criterion does not start.
   web **149** (the baselines at `0ce42b3`; new tests raise the count and the plan
   records the new number in the same commit).
 
-**Exit - MET 2026-09-17.** All nine prerequisites landed (P0-1, P0-3...P0-9;
-**P0-2 is the one item that cannot close** - the EODHD Extended Fundamentals plan
-is support-gated on the vendor side, so the panel harness has no live fetch to
-verify against; the item stays open with that reason rather than shipping an
-unverifiable script). The five §14 defects are fixed with failing-first tests, the
+**Exit - MET 2026-09-17; P0-2 closed 2026-09-18.** All nine prerequisites landed
+(P0-1, P0-3...P0-9). **P0-2 was the one item that could not close** on its
+original source: the EODHD Extended Fundamentals plan is support-gated on the
+vendor side and priced "By request", so the panel harness had no live fetch to
+verify against, and the item stayed open with that reason rather than shipping an
+unverifiable script. **The owner resolved it on 2026-09-18 by changing the
+source** to SEC EDGAR XBRL (§3.2): the transport is now live, keyless and
+point-in-time, and the remaining step is the wide panel build itself rather than a
+vendor negotiation. The five §14 defects are fixed with failing-first tests, the
 kernel's five acceptance tests pass including the three mutations, and the suite
 counts at this commit are **engine 4454 passed / 5 skipped** (the 4402 baseline
 plus P0-1/P0-3/P0-4/P0-5/P0-6/P0-7/P0-8/WP-1), **executor 1105**, **web 149** -
@@ -1217,8 +1269,9 @@ invalidate a design assumption** — including the possibility that a category
 carries no incremental information and should be dropped.
 
 **Exit criteria.**
-- The EODHD panel exists for the validation window, with its cost and coverage
-  recorded.
+- The validation panel exists for the validation window, with its cost and
+  coverage recorded. *(The fundamentals leg's source is SEC EDGAR XBRL as of
+  2026-09-18, §3.2.)*
 - Per-factor IC / rank IC / ICIR / decile spread / monotonicity / turnover /
   persistence are emitted, with the OOS split and the multiple-testing checks.
 - The redundancy matrix is emitted; the 50% trend+momentum+RS block in
@@ -1229,19 +1282,30 @@ carries no incremental information and should be dropped.
 - **A written finding per engine**: which categories survived, which are
   redundant, which should be dropped, and what the measured weights are.
 
-**Exit - MET 2026-09-18, in the form the vendor gate allows.**
-`scripts/score_panel.py` builds the panel with per-date caching, 500-symbol
-chunking, the vendor's own 100+N cost model and a recorded cost/coverage line;
+**Exit - MET 2026-09-18 for the price leg; the fundamentals leg reopened 2026-09-18
+on a new source.**
+`scripts/score_panel.py` builds the panel with per-date caching, batching, the
+source's own cost model and a recorded cost/coverage line;
 below the floors it labels itself `INSUFFICIENT_CROSS_SECTION` and produces **no
 weight vector**. **A real panel was built and measured**: 30 dates
 (2026-08-06..2026-09-17) under `~/.tradingagents/cache/panels/`, 149 of 150
 NASDAQ common stocks, 154,188 metric cells, with cost and fetch timestamp in each
 file's `_meta` - and a second invocation made **0 network calls** (30 cache hits).
-**The vendor gate is recorded, not hidden**: the configured EODHD key returns 200
-on `/eod` and `/exchange-symbol-list` but **403 on `/bulk-fundamentals` and
-`/fundamentals`** (Extended Fundamentals is support-gated), so the panel records
-`_meta.vendor_gate` and builds on the price leg rather than crashing or caching an
+**The vendor gate was recorded, not hidden**: the configured EODHD key returned
+200 on `/eod` and `/exchange-symbol-list` but **403 on `/bulk-fundamentals` and
+`/fundamentals`** (Extended Fundamentals is support-gated), so the panel recorded
+`_meta.vendor_gate` and built on the price leg rather than crashing or caching an
 empty panel.
+
+**That gate is now closed by a source change, not by a purchase.** On 2026-09-18
+the owner replaced the fundamentals leg with **SEC EDGAR XBRL** (§3.2): the
+transport is live and keyless, the read is point-in-time, and the panel derives
+its market capitalisation from its own close times the EDGAR cover-page share
+count. Live on 2026-09-18 over 7 names the leg produced **17-25 metrics each**
+(including the valuation block, Piotroski F, Altman Z, GP/A, accruals, Ohlson O,
+NOA and Zmijewski), with **one named gap** (TSM, an IFRS filer with no us-gaap
+facts) and Beneish M absent for the documented marketable-securities reason.
+**What remains is the wide panel build**, not a vendor negotiation.
 
 The statistics are measured for **36 of `TechnicalScore`'s 40 components**: rank
 IC, ICIR, decile spread `D10-D1`, monotonicity (ordered adjacent pairs / 9),
@@ -1250,7 +1314,8 @@ mask and the family PBO/White/Hansen checks. The **redundancy matrix** covers 13
 pairs in the 50% trend+momentum+RS block (mean |rho| 0.36, max 1.00, 8 pairs
 >= 0.80, e.g. `rsi|stoch_k` 0.816 and `di_spread|rsi` 0.819 over 4,326 obs; the
 thin-coverage pairs print their `n`); the FCF-yield cluster is reported with all
-five members **MISSING** and 0 pairs, because that leg is behind the same 403.
+five members **MISSING** and 0 pairs, because that leg was behind the same 403 -
+and it is the first thing a wide panel run should move.
 
 `docs/scores/MEASUREMENT_FINDINGS.md` carries the written finding per engine, with
 every line labelled MEASURED / UNMEASURED / DECLARED and an explicit `UNMEASURED`
@@ -1688,7 +1753,7 @@ substitute.
 | P0-5 VIX term structure | Cboe CDN CSVs: `https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv`, `.../VIX3M_History.csv`; FRED `VXVCLS` (3-month, active) | daily levels → slope → contango/backwardation | VIX9D is **not** on FRED; FRED's discontinued 3-month series is `VXOCLS`, not `VXVCLS` |
 | P0-6 short interest | FINRA equity short interest (settlement series, 5 rolling years via the Equity API; historical files back to 2014) and Reg SHO daily short-sale volume | bi-monthly **positions** vs daily **flow** — different measures | reported on the 15th and last business day settlements, published the **7th business day** after; Reg SHO daily files posted by 18:00 ET of the trade date; batch downloads capped at 7 calendar days |
 | P0-9a EODHD `/sentiments` coverage | EODHD | per-name daily sentiment series | unverified in this repo — probe first (P0-9) |
-| P0-9b forward event calendars | moomoo economic-calendar adapter (`dataflows/moomoo.py:1758`) as the pattern | forward calendar rows | no vendor category exists in `dataflows/interface.py` `VENDOR_METHODS:405` for FDA/clinical, court or investor-day events — probe before designing |
+| P0-9b forward event calendars | moomoo economic-calendar adapter (`dataflows/moomoo.py:1758`) as the pattern | forward calendar rows | **DECIDED + BUILT 2026-09-18**: `dataflows/event_calendars.py` — pdufa.bio for FDA/clinical (free, keyless; announced-day rows only), CourtListener for court (**cannot answer**: a filing archive whose only date fields are backward-looking, so the family stays `missing`), investor-day **dropped** (no free source). Gate `enable_event_calendars`, default off |
 | Expected move (EventScore §7 Q3) | practitioner standard: annualized IV ÷ ~16 for one day, or the ATM straddle price | pins which of the two existing producers is canonical | the repo has both (`options_surface.implied_move_pct:42`, `catalyst.implied_move_from_history:111`) under one name |
 
 ---

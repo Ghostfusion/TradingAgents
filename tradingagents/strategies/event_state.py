@@ -58,16 +58,18 @@ from .score_engine import align, band_label, combine, coverage_floor
 # ``catalyst.next_earnings(lookahead_days=60)``, the macro window is
 # ``catalyst_macro_window_days`` (3), the Fed window is
 # ``catalyst_fed_window_days`` (10, what the snapshot passes), and OPEX is its
-# own week (``opex_status.in_opex_week``). The three families with no producer
-# yet carry declared policy values that are only ever used once a calendar
-# answers.
+# own week (``opex_status.in_opex_week``). The three company-calendar families
+# carry declared policy horizons: ``product_clinical`` has a producer as of
+# 2026-09-18 (pdufa.bio) but its 90 days are still declared rather than measured,
+# and ``court`` / ``investor_day`` have no source at all (see ABSENT_REASONS).
 
 HORIZONS: dict[str, float] = {
     "earnings": 60.0,  # catalyst.next_earnings:90 lookahead_days=60
     "macro": 3.0,  # catalyst_macro_window_days default 3
     "fed": 10.0,  # catalyst_fed_window_days default 10
     "opex": 7.0,  # the OPEX week (opex_status:127 in_opex_week)
-    # Declared policy - no producer exists (EventScore.md §4, probed 2026-09-17).
+    # Declared policy: a regulatory decision is announced months ahead, and the
+    # window is not measured from a producer's own consumer.
     "product_clinical": 90.0,
     "court": 90.0,
     "investor_day": 60.0,
@@ -107,32 +109,39 @@ FAMILY_AVAILABILITY: dict[str, str] = {
     "macro": SCORABLE,
     "fed": SCORABLE,
     "opex": SCORABLE,
-    "product_clinical": ABSENT,
+    # SCORABLE as of 2026-09-18: pdufa.bio answers this family's two interfaces.
+    # It is not always MEASURED - the source is optional and gated - which is
+    # exactly what NA_REASONS below is for. Leaving it ABSENT would now be a
+    # false claim: a producer exists.
+    "product_clinical": SCORABLE,
     "court": ABSENT,
     "investor_day": ABSENT,
 }
 
-# The ABSENT reasons carry their evidence: the P0-9 probe (2026-09-17) read the
-# moomoo economic calendar over 14 days and got 50 rows, every one a MACRO
-# release - zero FDA / clinical / trial / court / litigation / investor-day rows.
-# So these families are absent **with evidence**, not unbuilt, and no producer
-# anywhere in the tree carries them.
+# The ABSENT reasons carry their evidence, and they are the *live* vendor
+# findings, not the 2026-09-17 assumption. The P0-9 probe (2026-09-17) read
+# moomoo's economic calendar over 14 days and got 50 rows, every one a MACRO
+# release - zero FDA / clinical / trial / court / litigation / investor-day rows -
+# which is what made the sourcing decision necessary. Two families are still
+# unanswerable after it, and both say why with the source named.
 ABSENT_REASONS: dict[str, str] = {
-    "product_clinical": (
-        "ABSENT with evidence: no forward PDUFA / trial-readout calendar adapter exists. "
-        "The P0-9 probe (2026-09-17) read moomoo's economic calendar over 14 days and got "
-        "50 rows, every one a macro release - zero FDA / clinical / trial / phase rows "
-        "(EventScore.md section 4). The interface (forward_calendar) is declared; the "
-        "adapter is a vendor decision of its own."
-    ),
     "court": (
-        "ABSENT with evidence: no litigation / docket calendar adapter exists. The only "
-        "litigation data in the tree is the LM lexicon scoring news tone "
-        "(text_factors.py:104-109), which is news, not a calendar (EventScore.md section 4)."
+        "ABSENT after the 2026-09-18 sourcing decision: the chosen source cannot "
+        "answer. CourtListener is a filing archive, not a forward calendar - its "
+        "docket endpoints require a token and the anonymous search endpoint exposes "
+        "only dateArgued / dateFiled / dateTerminated, all backward-looking (probed "
+        "live: zero future-dated rows across three result sets of 144,748 / 4,563 / "
+        "61,937,018 matches). The interface (forward_calendar) is bound and answers "
+        "MISSING rather than not_applicable: 'this source cannot carry a forward "
+        "date' is not the claim 'no court event is scheduled'."
     ),
     "investor_day": (
-        "ABSENT with evidence: no company-events calendar adapter exists. The nearest "
-        "producers are get_corporate_actions (dividends / splits) and get_ipos "
+        "ABSENT by owner decision (2026-09-18): DROPPED, because no free source "
+        "exists. Wall Street Horizon via Interactive Brokers is the only priced "
+        "option ($49/mo retail) and was declined; EODHD's Corporate Events Calendar "
+        "($19.99/mo) does not carry investor days at all - its own page scopes it to "
+        "earnings, IPOs, splits, dividends and news. The nearest producers in the "
+        "tree are get_corporate_actions (dividends / splits) and get_ipos "
         "(moomoo_extra_tools.py:178), neither a company-event calendar "
         "(EventScore.md section 4)."
     ),
@@ -151,6 +160,21 @@ NA_REASONS: dict[str, str] = {
     ),
     "fed": "NA: no FOMC meeting inside the producer's own window (fed_watch absent or empty)",
     "opex": "NA: opex_status returned no forward expiry (never 0 days)",
+    "product_clinical": (
+        "NA: no FDA / clinical event with an ANNOUNCED day inside the horizon. The "
+        "source is optional and gated (enable_event_calendars), and pdufa.bio nulls "
+        "`date` for every row whose precision is not 'day' - 336 of its 456 live "
+        "rows - so a tracked catalyst with only a month estimate is NOT a forward "
+        "event here, and is counted by the coverage line instead"
+    ),
+    "court": (
+        "NA: the court family is ABSENT (see ABSENT_REASONS) - no source can carry a "
+        "forward litigation date"
+    ),
+    "investor_day": (
+        "NA: the investor-day family is ABSENT by decision (see ABSENT_REASONS) - no "
+        "free source exists"
+    ),
 }
 
 # --- The component table ----------------------------------------------------
@@ -247,22 +271,27 @@ COMPONENTS: dict[str, Component] = {
             "product_clinical_imminence",
             "product_clinical",
             IMMINENCE,
-            "forward_calendar('product' | 'clinical') - NO ADAPTER (EventScore.md section 4)",
-            "the interface is declared (section 7 Q5); the data source is a vendor decision",
+            "forward_calendar('product' | 'clinical') <- event_calendars.fda_calendar_rows "
+            "(pdufa.bio /api/v1/events, keyless)",
+            "announced-day rows only (date_precision == 'day'): pdufa.bio nulls `date` "
+            "for every month/quarter/year estimate, and a day-count built on a month "
+            "midpoint would be an invented number",
         ),
         _c(
             "court_imminence",
             "court",
             IMMINENCE,
-            "forward_calendar('court') - NO ADAPTER (EventScore.md section 4)",
-            "the interface is declared (section 7 Q5); the data source is a vendor decision",
+            "forward_calendar('court') <- event_calendars.court_calendar_rows (returns None)",
+            "NO SOURCE: CourtListener is a filing archive - its only date fields are "
+            "backward-looking (event_calendars.COURT_REASON)",
         ),
         _c(
             "investor_day_imminence",
             "investor_day",
             IMMINENCE,
-            "forward_calendar('investor_day') - NO ADAPTER (EventScore.md section 4)",
-            "the interface is declared (section 7 Q5); the data source is a vendor decision",
+            "forward_calendar('investor_day') <- no adapter (dropped by decision)",
+            "DROPPED 2026-09-18: no free source exists "
+            "(event_calendars.INVESTOR_DAY_REASON)",
         ),
     )
 }
@@ -340,7 +369,8 @@ def imminence(days_until, horizon) -> float | None:
     return max(0.0, min(1.0, 1.0 - days / h))
 
 
-def forward_calendar(family: str, rows: list | None = None, *, trade_date: str | None = None) -> dict:
+def forward_calendar(family: str, rows: list | None = None, *,
+                     trade_date: str | None = None, reason: str | None = None) -> dict:
     """The forward-company-calendar interface (EventScore.md §7 Q5).
 
     One interface per calendar - ``product``, ``clinical``, ``court``,
@@ -348,30 +378,36 @@ def forward_calendar(family: str, rows: list | None = None, *, trade_date: str |
     and **never a number when it has no data**: a missing calendar is not "no
     event exists" and certainly not "a negative event".
 
-    - ``rows is None`` -> ``missing``: no adapter is bound, and the reason names
-      the probe that established it.
+    - ``rows is None`` -> ``missing``: the question was not answered. ``reason``
+      overrides the family's static ABSENT_REASONS text so a bound adapter can
+      carry its OWN finding (CourtListener's "this source cannot carry a forward
+      date" is not the same claim as "no adapter was ever written").
     - the adapter answered and carries a forward event -> ``available`` with the
       next ``{date, days_until}``.
     - the adapter answered and carries none -> ``not_applicable``.
 
-    Nothing in the tree calls this with rows yet (§4: the adapters are a vendor
-    decision); it is the declared seam a future source plugs into, and
-    ``event_components`` already consumes its ``available`` answer.
+    The three answers are never collapsed. ``dataflows.event_calendars`` binds
+    ``product``/``clinical`` to pdufa.bio and leaves ``court`` at ``None``, and
+    ``event_components`` consumes the ``available`` answer.
     """
     if family not in CALENDAR_INTERFACES:
         raise KeyError(
             f"unknown calendar interface {family!r}; known: {list(CALENDAR_INTERFACES)}"
         )
     fam = INTERFACE_FAMILY[family]
-    reason = ABSENT_REASONS[fam]
     if rows is None:
+        # A family with no producer carries its ABSENT evidence; one that HAS a
+        # producer but was not asked (the calendar gate is off, or the source did
+        # not answer) carries the NA reason instead. Reaching for ABSENT_REASONS
+        # alone would raise for a scorable family - which is a real state now
+        # that pdufa.bio answers product/clinical.
         return {
             "family": family,
             "scope": FAMILY_SCOPE[fam],
             "status": "missing",
             "next": None,
             "events": 0,
-            "reason": reason,
+            "reason": reason or ABSENT_REASONS.get(fam) or NA_REASONS.get(fam),
         }
     td = parse_date(trade_date) if trade_date else None
     best: dict | None = None
@@ -408,6 +444,32 @@ def forward_calendar(family: str, rows: list | None = None, *, trade_date: str |
         "events": events,
         "reason": None,
     }
+
+
+def calendar_answers(rows_by_interface: dict, *, trade_date: str | None = None,
+                     reasons: dict | None = None) -> dict:
+    """``forward_calendar`` answers per interface, from an adapter's rows.
+
+    One place turns "what the source returned" into the three-status answer, so
+    the leaf and the run card cannot drift: a caller that re-implemented this
+    could collapse ``None`` (the question was not answered) into ``[]`` (it was
+    answered and holds nothing), and that single mistake turns a source that
+    cannot carry a forward date into a false claim that no event is scheduled.
+
+    ``reasons`` overrides the static ABSENT_REASONS text per interface, which is
+    how a bound adapter carries its own live finding.
+    """
+    out: dict = {}
+    for interface in CALENDAR_INTERFACES:
+        if interface not in (rows_by_interface or {}):
+            continue
+        out[interface] = forward_calendar(
+            interface,
+            rows_by_interface.get(interface),
+            trade_date=trade_date,
+            reason=(reasons or {}).get(interface),
+        )
+    return out
 
 
 def event_components(
@@ -630,6 +692,7 @@ __all__ = [
     "INTERFACE_FAMILY",
     "imminence",
     "forward_calendar",
+    "calendar_answers",
     "event_components",
     "event_state",
 ]

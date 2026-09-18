@@ -52,10 +52,22 @@ _FORM_LABELS = {
 # 2009-2011 for large filers; later for others) - the report states the actual
 # first/last fiscal years it found, so an early-year 'n/a' is honest
 # (pre-XBRL) rather than an error.
-# label -> candidate us-gaap tags (tried in order; first with FY data wins).
+# label -> candidate us-gaap tags, earliest candidate winning PER PERIOD END
+# (``annual_facts`` merges them by fiscal end, so a filer that switched concepts
+# mid-history keeps both halves of its series).
 # Revenue: most filers report the ASC 606 tag today, legacy ``Revenues`` pre-2018.
 # OCF: the abstract parent carries no value; the concrete tag is
 # ``NetCashProvidedByUsedInOperatingActivities``.
+#
+# The six balance-sheet rows below were added for the WP-10 panel's fundamentals
+# leg (2026-09-18), which needs the current-asset / current-liability / debt legs
+# that ``compute_ratios`` reads. Each was verified against live EDGAR payloads
+# before being mapped (MSFT carried all six; LULU and WDC carry the current-asset
+# pair, and LULU legitimately has no borrowings at all). A filer that does not
+# file one of these tags prints 'n/a' for that row - never a substituted zero.
+# ``D&A`` is the one row with no universal tag: MSFT files ``Depreciation`` and
+# ``AmortizationOfIntangibleAssets`` as separate concepts and no single D&A tag,
+# so its D&A row is honestly n/a here rather than a sum under a new definition.
 _TAG_MAP = {
     "Revenue": ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues"),
     "Net income (loss)": ("NetIncomeLoss",),
@@ -69,7 +81,30 @@ _TAG_MAP = {
     "Total liabilities": ("Liabilities",),
     "Stockholders equity": ("StockholdersEquity",),
     "Cash & equivalents": ("CashAndCashEquivalentsAtCarryingValue",),
+    "Current assets": ("AssetsCurrent",),
+    "Current liabilities": ("LiabilitiesCurrent",),
+    "Inventory": ("InventoryNet",),
+    "Short-term investments": ("ShortTermInvestments", "MarketableSecuritiesCurrent"),
+    "Long-term debt": ("LongTermDebtNoncurrent", "LongTermDebt"),
+    "Long-term debt, current": ("LongTermDebtCurrent", "DebtCurrent"),
+    "Retained earnings": ("RetainedEarningsAccumulatedDeficit",),
+    "Cost of revenue": ("CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"),
+    "Liabilities and equity": ("LiabilitiesAndStockholdersEquity",),
 }
+
+#: The annual-report forms whose XBRL facts are annual statements. ``10-K`` is the
+#: domestic filer; ``20-F`` is the foreign private issuer (SIMO files nothing else
+#: - before this list existed the panel's SEC leg silently saw 0 of 19 tags for
+#: every FPI) and ``40-F`` is the Canadian MJDS filer. Amendments (``10-K/A``)
+#: carry the same facts and are matched on the form before the slash.
+_ANNUAL_FORMS = ("10-K", "20-F", "40-F")
+
+#: The concepts whose newest eligible fiscal end defines a filer's reference year
+#: (see ``annual_facts``). Core statement lines every annual filer tags, so the
+#: newest of them is the filer's latest reported fiscal year rather than one
+#: tag's own stray period end.
+_REFERENCE_TAGS = ("Assets", "RevenueFromContractWithCustomerExcludingAssessedTax",
+                   "Revenues", "NetIncomeLoss")
 
 # Per-share values are reported in USD/shares (and occasionally USD/shares in a
 # separate unit key), not plain USD, so the row reader must accept the units the
@@ -132,46 +167,189 @@ def _cik_for(ticker: str) -> str | None:
     return _ticker_map().get(base)
 
 
-def _us_gaap_facts(cik: int) -> dict | None:
-    """Every us-gaap concept for the filer, in ONE request (``companyfacts``).
+def _company_facts(cik: int) -> dict | None:
+    """The whole ``facts`` block for the filer, in ONE request.
 
-    Returns ``{tag: {"units": {...}}}`` or None on any failure, so the caller
-    falls back to the per-tag concept endpoint rather than losing the table.
+    Carries every namespace the payload has - ``us-gaap`` (the statements) and
+    ``dei`` (the cover-page share count) - so the two readers share one fetch
+    rather than paying a second request for the share count. Returns None on any
+    failure, so the caller falls back to the per-tag concept endpoint rather
+    than losing the table.
     """
     try:
-        payload = _json_get(_COMPANYFACTS_URL.format(cik=cik))
+        payload = _json_get(_COMPANYFACTS_URL.format(cik=int(cik)))
     except Exception as exc:  # noqa: BLE001 - the caller has a fallback path
         logger.warning("EDGAR companyfacts fetch failed for CIK %s: %s", cik, exc)
         return None
     facts = payload.get("facts") if isinstance(payload, dict) else None
-    gaap = (facts or {}).get("us-gaap") if isinstance(facts, dict) else None
+    return facts if isinstance(facts, dict) else None
+
+
+def _us_gaap_facts(cik: int) -> dict | None:
+    """Every us-gaap concept for the filer (``_company_facts``' us-gaap view)."""
+    gaap = (_company_facts(cik) or {}).get("us-gaap")
     return gaap if isinstance(gaap, dict) else None
 
 
-def _annual_rows(rows) -> dict[str, int]:
-    """Annual 10-K FY values from one concept's USD unit list, by period end.
+def _annual_rows(rows) -> dict[str, dict]:
+    """Annual FY values from one concept's unit list, by period end.
 
-    Flow concepts carry ``start`` and must span ~a full year: the SEC often
-    appends a short 90-day partial under the same FY end (restatement), which
-    would otherwise overwrite the annual figure. Instant concepts (assets etc.)
-    carry no ``start`` and are matched on form/fp alone.
+    A row qualifies when its form is an annual report (``_ANNUAL_FORMS``, before
+    any ``/A`` amendment suffix) and its fiscal period is ``FY``. Flow concepts
+    carry ``start`` and must span ~a full year: the SEC often appends a short
+    90-day partial under the same FY end (restatement), which would otherwise
+    overwrite the annual figure. Instant concepts (assets etc.) carry no
+    ``start`` and are matched on form/fp alone.
+
+    Returns ``{fiscal_end: {"val": value, "filed": filing_date}}``. The ``filed``
+    date is what makes a point-in-time read possible: a panel for a past trading
+    date must not see a filing that had not happened yet, or it measures the
+    future. Where a period end carries several filings the latest one wins (a
+    restatement supersedes the original).
     """
-    annual: dict[str, int] = {}
+    annual: dict[str, dict] = {}
     for row in rows or []:
-        if row.get("form") == "10-K" and row.get("fp") == "FY":
-            end = str(row.get("end") or "")[:10]
-            if not end or row.get("val") is None:
+        form = str(row.get("form") or "").split("/")[0]
+        if form not in _ANNUAL_FORMS or row.get("fp") != "FY":
+            continue
+        end = str(row.get("end") or "")[:10]
+        if not end or row.get("val") is None:
+            continue
+        start = str(row.get("start") or "")[:10]
+        if start:
+            try:
+                dur = (date.fromisoformat(end) - date.fromisoformat(start)).days
+            except ValueError:
+                dur = 0
+            if dur < 300:
                 continue
-            start = str(row.get("start") or "")[:10]
-            if start:
-                try:
-                    dur = (date.fromisoformat(end) - date.fromisoformat(start)).days
-                except ValueError:
-                    dur = 0
-                if dur < 300:
-                    continue
-            annual[end] = int(row["val"])
+        filed = str(row.get("filed") or "")[:10]
+        prev = annual.get(end)
+        if prev is None or filed >= prev["filed"]:
+            annual[end] = {"val": row["val"], "filed": filed}
     return annual
+
+
+def _cover_page_shares(rows) -> dict[str, dict]:
+    """Cover-page share counts by period end, from ANY filing form.
+
+    The dei count is not an annual statement line: it is the number printed on
+    the cover of whichever report was filed, so a 10-Q's count is legitimately
+    newer than the last 10-K's. Filtering it through ``_annual_rows`` (10-K/20-F,
+    fp=FY) would throw away every quarterly cover page and leave a market
+    capitalisation up to a year stale for no reason.
+    """
+    out: dict[str, dict] = {}
+    for row in rows or []:
+        end = str(row.get("end") or "")[:10]
+        if not end or row.get("val") is None:
+            continue
+        filed = str(row.get("filed") or "")[:10]
+        prev = out.get(end)
+        if prev is None or filed >= prev["filed"]:
+            out[end] = {"val": row["val"], "filed": filed}
+    return out
+
+
+def annual_facts(ticker: str, years: int = 15) -> dict:
+    """The structured annual facts behind ``get_financial_history``.
+
+    One request per filer, one shape for every reader (ground rule 2): the
+    rendered leaf and ``statement_parsing.sec_annual_series`` both read this, so
+    the table and the series can never disagree about a fiscal year.
+
+    Returns ``{"series": {label: {fiscal_end: {"val", "filed"}}},
+    "shares": {fiscal_end: {"val", "filed"}}, "span": [first, last] | None,
+    "years": years}``. ``shares`` is the dei cover-page count
+    (``EntityCommonStockSharesOutstanding``), which carries its own period ends
+    and is far fresher than the fiscal-year balance - the leg a market
+    capitalisation needs. Raises ``NoMarketDataError`` on an unresolvable ticker
+    (non-US listing, no CIK) or when no tag carries an annual value, exactly as
+    the rendered leaf does, so a caller treating the facts as optional must
+    catch it.
+
+    Args:
+        ticker: Ticker symbol (exchange suffixes stripped for the CIK lookup).
+        years: Max fiscal years to include per row (default 15).
+    """
+    cik = _cik_for(ticker)
+    if cik is None:
+        raise NoMarketDataError(
+            ticker,
+            detail="no CIK found on EDGAR (non-US listing, or ticker not registered)",
+        )
+    facts = _company_facts(int(cik))
+    gaap = (facts or {}).get("us-gaap")
+    # The per-tag fallback exists for ONE failure: the multi-MB companyfacts
+    # payload did not arrive. A payload that arrived and simply carries no
+    # us-gaap namespace (an IFRS filer such as TSM files under ``ifrs-full``) is
+    # NOT that failure - falling back there would spend one request per tag to
+    # collect a page of 404s and still find nothing.
+    per_tag = facts is None
+    by_tag: dict[str, dict[str, dict]] = {}
+    span = None
+    for label, tags in _TAG_MAP.items():
+        # Candidates are merged BY PERIOD END, earliest candidate winning, rather
+        # than "the first tag with any data wins". Filers switch tags mid-history
+        # (revenue moved to the ASC 606 concept in 2018; NVDA's
+        # ``CostOfGoodsAndServicesSold`` stops in 2021 and ``CostOfRevenue``
+        # carries on), so first-tag-wins silently returns a series that ends
+        # years before the filer's latest report - and a point-in-time read then
+        # finds nothing at the reference year while the value sits in the next
+        # candidate all along.
+        merged: dict[str, dict] = {}
+        for tag in tags:
+            rows: dict[str, dict] = {}
+            if isinstance(gaap, dict):
+                units = (gaap.get(tag) or {}).get("units") or {}
+                for unit in _UNIT_KEYS:
+                    rows = _annual_rows(units.get(unit) or [])
+                    if rows:
+                        break
+            elif per_tag:
+                # Fallback: one request per tag (the pre-companyfacts path).
+                try:
+                    payload = _json_get(_COMPANYCONCEPT_URL.format(cik=int(cik), tag=tag))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("EDGAR %s fetch failed for %s: %s", tag, ticker, exc)
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                units = payload.get("units") or {}
+                for unit in _UNIT_KEYS:
+                    rows = _annual_rows(units.get(unit) or [])
+                    if rows:
+                        break
+            else:
+                break
+            for end, entry in rows.items():
+                merged.setdefault(end, entry)
+        if not merged:
+            continue
+        by_tag[label] = merged
+        first, last = min(merged), max(merged)
+        span = [first, last] if span is None else [min(span[0], first), max(span[1], last)]
+    if not by_tag:
+        raise NoMarketDataError(
+            ticker,
+            detail=(
+                "no us-gaap annual facts on EDGAR for this filer "
+                + ("(the companyfacts payload could not be fetched, and no "
+                   "individual tag carried annual data)"
+                   if per_tag else
+                   "(pre-XBRL filer, or a filer reporting outside us-gaap - "
+                   "e.g. an IFRS filer such as TSM)")
+            ),
+        )
+    dei = (facts or {}).get("dei")
+    shares: dict[str, dict] = {}
+    if isinstance(dei, dict):
+        units = (dei.get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}
+        for unit in ("shares", "shares/shares"):
+            shares = _cover_page_shares(units.get(unit) or [])
+            if shares:
+                break
+    return {"series": by_tag, "shares": shares, "span": span, "years": years}
 
 
 def get_sec_filings(ticker: str, limit: int = 10) -> str:
@@ -241,12 +419,14 @@ def get_sec_filings(ticker: str, limit: int = 10) -> str:
 
 
 def financial_history_series(ticker: str, years: int = 15) -> dict:
-    """The STRUCTURED annual 10-K series behind ``get_financial_history``.
+    """The STRUCTURED annual series behind ``get_financial_history``.
 
     One implementation, two readers (ground rule 2): the markdown leaf renders
     from this, and ``statement_parsing.sec_annual_series`` consumes it for the
     multi-year series the G-Score G4/G5 legs and the CAGR family need - which the
-    ~4-5y vendor statements cannot clear.
+    ~4-5y vendor statements cannot clear. Reads ``annual_facts`` (the 10-K / 20-F
+    / 40-F annual facts, with their filing dates) and flattens it to the
+    ``{fiscal_end: value}`` shape both readers index by period.
 
     Returns ``{"series": {label: {fiscal_end: value}}, "span": [first, last] |
     None, "years": years}``. Raises ``NoMarketDataError`` on an unresolvable
@@ -258,65 +438,30 @@ def financial_history_series(ticker: str, years: int = 15) -> dict:
         ticker: Ticker symbol (exchange suffixes stripped for the CIK lookup).
         years: Max fiscal years to include per row (default 15).
     """
-    cik = _cik_for(ticker)
-    if cik is None:
-        raise NoMarketDataError(
-            ticker,
-            detail="no CIK found on EDGAR (non-US listing, or ticker not registered)",
-        )
-    by_tag: dict[str, dict[str, int]] = {}
-    span = None
-    gaap = _us_gaap_facts(int(cik))
-    for label, tags in _TAG_MAP.items():
-        annual: dict[str, int] = {}
-        for tag in tags:
-            if gaap is not None:
-                units = (gaap.get(tag) or {}).get("units") or {}
-                for unit in _UNIT_KEYS:
-                    annual = _annual_rows(units.get(unit) or [])
-                    if annual:
-                        break
-            else:
-                # Fallback: one request per tag (the pre-companyfacts path).
-                try:
-                    payload = _json_get(_COMPANYCONCEPT_URL.format(cik=int(cik), tag=tag))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("EDGAR %s fetch failed for %s: %s", tag, ticker, exc)
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                units = payload.get("units") or {}
-                for unit in _UNIT_KEYS:
-                    annual = _annual_rows(units.get(unit) or [])
-                    if annual:
-                        break
-            if annual:
-                break
-        if not annual:
-            continue
-        by_tag[label] = annual
-        first, last = min(annual), max(annual)
-        span = [first, last] if span is None else [min(span[0], first), max(span[1], last)]
-    if not by_tag:
-        raise NoMarketDataError(
-            ticker,
-            detail="no 10-K XBRL facts found on EDGAR (pre-XBRL filer, or no annual data)",
-        )
-    return {"series": by_tag, "span": span, "years": years}
+    facts = annual_facts(ticker, years=years)
+    return {
+        "series": {
+            label: {end: entry["val"] for end, entry in by_end.items()}
+            for label, by_end in facts["series"].items()
+        },
+        "span": facts["span"],
+        "years": years,
+    }
 
 
 def get_financial_history(ticker: str, years: int = 15) -> str:
-    """Annual 10-K financial history from SEC EDGAR XBRL (free, keyless).
+    """Annual financial history from SEC EDGAR XBRL (free, keyless).
 
     Renders ``financial_history_series`` - the structured producer - so the table
     and any consumer of the series can never disagree. The values come from one
     ``companyfacts`` request per filer (the per-tag concept endpoint is the
-    fallback when the larger payload fails). This is the only free source that
-    goes deeper than the ~4-5y statement history of the vendor APIs; coverage
-    starts when the filer adopted XBRL (mostly ~2009-2011 for large filers),
-    stated honestly as the reported first/last fiscal year per tag-row - early
-    years render n/a only when the tag genuinely has no FY value yet. Raises
-    ``NoMarketDataError`` (consistent with ``get_sec_filings``) on any
+    fallback when the larger payload fails), covering the domestic 10-K and the
+    foreign-private-issuer 20-F / MJDS 40-F annual reports. This is the only free
+    source that goes deeper than the ~4-5y statement history of the vendor APIs;
+    coverage starts when the filer adopted XBRL (mostly ~2009-2011 for large
+    filers), stated honestly as the reported first/last fiscal year per tag-row -
+    early years render n/a only when the tag genuinely has no FY value yet.
+    Raises ``NoMarketDataError`` (consistent with ``get_sec_filings``) on any
     unresolvable ticker/network failure; a missing individual tag degrades to
     'n/a', never invents. EBITDA and FCF have no us-gaap tag and are NOT printed
     here: they are derived by the consumer and labelled derived.
@@ -348,7 +493,7 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
                 row.append(f"{v / 1e9:,.1f}B")
         rows.append(row)
     lines = [
-        f"## EDGAR XBRL financial history — {ticker} (annual 10-K, USD)",
+        f"## EDGAR XBRL financial history — {ticker} (annual 10-K / 20-F, USD)",
         "",
     ]
     lines.append("| " + " | ".join(head) + " |")

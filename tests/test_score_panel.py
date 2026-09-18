@@ -20,8 +20,9 @@ Covers the plan's acceptance list (`docs/scores/IMPLEMENTATION_PLAN.md` section
     correlations;
 (f) the module never touches the sizing path, the risk governor, the gate
     precedence or `decision_guardrail`, and it prints no invented coefficient;
-(g) the transport is injectable - the live EODHD fetch is the one thing that
-    cannot be verified here (the Extended Fundamentals plan is support-gated).
+(g) the transport is injectable - the live SEC EDGAR fetch is the one thing
+    that needs the network, and the mapping from EDGAR's annual facts to the
+    canonical ``fin`` keys is exercised against recorded payload shapes.
 
 Offline and deterministic: every panel, price series and vendor payload is
 synthetic, and every stub records its own call count so "zero network calls"
@@ -39,16 +40,16 @@ from pathlib import Path
 import pytest
 
 from scripts.score_panel import (
-    BULK_REQUEST_CALLS,
     CHUNK_SIZE,
     META_KEY,
     REDUNDANT_ABS_CORR,
+    SEC_REQUESTS_PER_SECOND,
     STATUS_ADVISORY,
     STATUS_RESEARCH_ONLY,
-    BulkResult,
+    FetchResult,
     PriceProvider,
     build_panel,
-    canonical_fin_from_bulk,
+    canonical_fin_from_sec,
     engine_registry,
     engine_weight_vector,
     estimate_cost,
@@ -58,6 +59,7 @@ from scripts.score_panel import (
     panel_path,
     read_panel,
     render_text,
+    sec_xbrl_transport,
     slice_bars,
     split_chunks,
     technical_rows_asof,
@@ -106,37 +108,59 @@ def _planted_panel(truth: dict, *, dates=DATES, noise_seed: int = 11) -> dict:
 
 
 class Transport:
-    """A stub transport: deterministic rows plus its own call counter."""
+    """A stub transport: deterministic canonical financials plus a call counter.
+
+    It returns **canonical ``fin`` dicts, not panel rows**, because that is the
+    transport's contract: the builder assembles the row (``panel_row_from_fin``)
+    once both legs are in hand, so the valuation block can use the close. A stub
+    that handed back finished rows would bypass the very derivation the panel
+    depends on - and would silently stop exercising it.
+    """
 
     def __init__(self, factor_seed: int = 3):
         self.calls = 0
         self.api_calls = 0
         self.requested: list[str] = []
         self._rng = random.Random(factor_seed)
-        self._rows = {
-            t: {"fcf_yield": round(self._rng.gauss(0, 1), 4),
-                "earnings_yield": round(self._rng.gauss(0, 1), 4)}
-            for t in UNIVERSE
-        }
+        self._fins: dict[str, dict] = {}
 
-    def _row(self, ticker: str) -> dict:
-        # any symbol gets a row, so a larger universe is a real fetch, not gaps
-        if ticker not in self._rows:
-            self._rows[ticker] = {
-                "fcf_yield": round(self._rng.gauss(0, 1), 4),
-                "earnings_yield": round(self._rng.gauss(0, 1), 4),
+    def _fin(self, ticker: str) -> dict:
+        # any symbol gets a fin, so a larger universe is a real fetch, not gaps
+        if ticker not in self._fins:
+            r = self._rng
+            scale = 1.0 + 0.25 * r.gauss(0, 1)
+            self._fins[ticker] = {
+                "revenue": {"current": 1000.0 * scale, "prior": 900.0 * scale},
+                "net_income": {"current": 100.0 * scale, "prior": 90.0 * scale},
+                "operating_income": {"current": 150.0 * scale, "prior": 140.0 * scale},
+                "gross_profit": {"current": 400.0 * scale, "prior": 380.0 * scale},
+                "total_assets": {"current": 2000.0 * scale, "prior": 1900.0 * scale},
+                "total_liabilities": {"current": 1200.0 * scale, "prior": 1150.0 * scale},
+                "total_equity": {"current": 800.0 * scale, "prior": 750.0 * scale},
+                "current_assets": {"current": 700.0 * scale, "prior": 650.0 * scale},
+                "current_liabilities": {"current": 400.0 * scale, "prior": 380.0 * scale},
+                "inventory": {"current": 100.0 * scale, "prior": 95.0 * scale},
+                "cash": {"current": 150.0 * scale, "prior": 140.0 * scale},
+                "total_debt": {"current": 500.0 * scale, "prior": 480.0 * scale},
+                "operating_cashflow": {"current": 200.0 * scale, "prior": 180.0 * scale},
+                "capex": {"current": 50.0 * scale, "prior": 45.0 * scale},
+                "depreciation": {"current": 60.0 * scale, "prior": 55.0 * scale},
+                "eps": {"current": 2.0 * scale, "prior": 1.8 * scale},
+                "shares_outstanding": 1e8,
+                "market_cap": 4e9 * scale,
             }
-        return dict(self._rows[ticker])
+        return dict(self._fins[ticker])
 
     def __call__(self, chunk, date):
         self.calls += 1
         self.requested.extend(chunk)
-        self.api_calls += BULK_REQUEST_CALLS + len(chunk)
-        return BulkResult(
-            rows={t: self._row(t) for t in chunk},
+        self.api_calls += len(chunk)
+        return FetchResult(
+            fins={t: self._fin(t) for t in chunk},
             requests=1,
-            api_calls=BULK_REQUEST_CALLS + len(chunk),
+            api_calls=len(chunk),
             symbols_requested=len(chunk),
+            gaps={},
         )
 
 
@@ -171,7 +195,7 @@ def test_a_panel_for_a_trading_date_exists_with_its_cost_and_coverage(tmp_path):
     assert rows, "the panel carries names"
     assert meta["fetched_at"], "the fetch timestamp is recorded"
     assert meta["cost"]["api_calls"] > 0 and meta["cost"]["model"], "the call cost is recorded"
-    assert build["cost"]["api_calls"] == BULK_REQUEST_CALLS * 3 + 1100
+    assert build["cost"]["api_calls"] == 1100, "one request per filer"
     assert build["coverage"]["names_present"] == 1100
     assert build["coverage"]["ratio"] == 1.0
     # every metric cell is a real number, never a 0 standing in for NA
@@ -191,33 +215,89 @@ def test_a_second_invocation_makes_zero_network_calls(tmp_path):
     assert first["coverage"] == second["coverage"]
 
 
-def test_the_universe_is_chunked_to_the_vendor_cap(tmp_path):
+def test_the_universe_is_chunked_for_batching_and_the_estimate_is_what_runs(tmp_path):
     transport = Transport()
     big = [f"T{i:04d}" for i in range(1100)]
-    build_panel([DATES[0]], big, transport=transport, cache_dir=str(tmp_path))
+    build = build_panel([DATES[0]], big, transport=transport, cache_dir=str(tmp_path))
     assert len(transport.requested) == 1100
-    assert transport.calls == 3, "500-symbol cap => 500 + 500 + 100"
+    assert transport.calls == 3, "the batch size is 500 => 500 + 500 + 100"
     est = estimate_cost(1100)
-    assert est == {
-        "source": "bulk fundamentals (EODHD Extended Fundamentals)",
-        "symbols": 1100,
-        "chunk_size": CHUNK_SIZE,
-        "chunks": 3,
-        "api_calls": 100 * 3 + 1100,
-        "model": est["model"],
-    }
+    assert est["source"].startswith("SEC EDGAR XBRL")
+    assert est["chunks"] == 3 and est["api_calls"] == 1100, "one request per filer"
     assert [len(c) for c in split_chunks([f"X{i}" for i in range(1100)])] == [500, 500, 100]
     # the estimate is what the run actually spends
     assert build_panel([DATES[1]], big, transport=Transport(),
                        cache_dir=str(tmp_path))["cost"]["api_calls"] == est["api_calls"]
 
 
+def test_the_cost_does_not_grow_with_the_number_of_dates(monkeypatch):
+    """The companyfacts payload is per-FILER, so a 30-date panel is one request
+    a name, not thirty. That property lives in the transport, and it is what
+    makes a 464-name panel affordable: without it the same multi-MB payload
+    would be re-fetched for every date."""
+    from tradingagents.dataflows import sec_edgar
+
+    calls: list[str] = []
+
+    def _fake(ticker, years=15):
+        calls.append(ticker)
+        return _facts({"Total assets": {"2025-06-30": (2e9, "2025-08-01")},
+                       "Net income (loss)": {"2025-06-30": (1e8, "2025-08-01")}})
+
+    monkeypatch.setattr(sec_edgar, "annual_facts", _fake)
+    transport = sec_xbrl_transport(rate_limit=0)  # no pacing in a test
+    first = transport(["AAPL", "MSFT"], DATES[0])
+    assert calls == ["AAPL", "MSFT"] and first.requests == 2
+    second = transport(["AAPL", "MSFT"], DATES[1])
+    assert calls == ["AAPL", "MSFT"], "the payload is cached across dates"
+    assert second.requests == 0 and second.api_calls == 0
+    assert set(second.fins) == {"AAPL", "MSFT"}, "and the fins still come back"
+
+
+def test_the_transport_records_a_name_it_cannot_supply(monkeypatch):
+    """No CIK, no facts: a named gap, and the rest of the batch is unaffected."""
+    from tradingagents.dataflows import sec_edgar
+
+    def _fake(ticker, years=15):
+        if ticker == "NOPE":
+            raise sec_edgar.NoMarketDataError(ticker, detail="no CIK found on EDGAR")
+        return _facts({"Total assets": {"2025-06-30": (2e9, "2025-08-01")}})
+
+    monkeypatch.setattr(sec_edgar, "annual_facts", _fake)
+    res = sec_xbrl_transport(rate_limit=0)(["AAPL", "NOPE"], DATES[0])
+    assert set(res.fins) == {"AAPL"}
+    assert "no CIK" in res.gaps["NOPE"]
+    assert res.symbols_requested == 2
+
+
+def test_a_name_with_no_facts_is_recorded_as_a_gap_not_dropped(tmp_path):
+    """A filer with no 10-K/20-F/40-F facts (pre-XBRL, IFRS, or no CIK) is a
+    named gap. It must never vanish silently: a panel that loses a third of its
+    universe to a coverage limit has to say so."""
+    class _Gappy(Transport):
+        def __call__(self, chunk, date):
+            res = super().__call__(chunk, date)
+            gaps = {t: "no annual XBRL facts on EDGAR" for t in chunk[:2]}
+            return res._replace(fins={t: f for t, f in res.fins.items()
+                                      if t not in gaps}, gaps=gaps)
+
+    build = build_panel([DATES[0]], UNIVERSE, transport=_Gappy(), cache_dir=str(tmp_path))
+    assert build["gaps"] == 2, "the build reports the count"
+    rows, meta = read_panel(panel_path(str(tmp_path), DATES[0]))
+    assert meta["fundamentals_gaps"] == {
+        UNIVERSE[0]: "no annual XBRL facts on EDGAR",
+        UNIVERSE[1]: "no annual XBRL facts on EDGAR",
+    }, "the panel file carries the reasons, so a thin cross-section reads as thin"
+    assert UNIVERSE[0] not in rows and UNIVERSE[2] in rows
+    assert "fundamentals gaps" in render_text({"panel": {}}, build)
+
+
 def test_an_empty_fetch_is_not_cached_as_a_panel(tmp_path):
     class _Empty(Transport):
         def __call__(self, chunk, date):
             self.calls += 1
-            return BulkResult(rows={}, requests=1, api_calls=BULK_REQUEST_CALLS,
-                              symbols_requested=len(chunk))
+            return FetchResult(fins={}, requests=len(chunk), api_calls=len(chunk),
+                               symbols_requested=len(chunk), gaps={})
 
     empty = _Empty()
 
@@ -581,48 +661,140 @@ def test_a_sibling_engine_module_is_picked_up_by_the_registry(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# (g) the vendor leg: injectable transport, one honest mapping
+# (g) the source leg: injectable transport, one honest mapping
 # --------------------------------------------------------------------------
 
 
-def test_the_vendor_payload_maps_to_canonical_financials_with_no_fabrication():
-    payload = {
-        "General": {"Sector": "Technology"},
-        "Highlights": {"MarketCapitalization": 3_000_000_000, "SharesOutstanding": 100_000_000},
-        "Financials": {
-            "Income_Statement": {"yearly": {
-                "2024-06-30": {"totalRevenue": 900.0, "netIncome": 90.0},
-                "2025-06-30": {"totalRevenue": 1000.0, "netIncome": 100.0},
-            }},
-            "Balance_Sheet": {"yearly": {
-                "0": {"totalAssets": 2000.0, "totalLiabilities": 1200.0,
-                      "totalStockholderEquity": 800.0, "totalCurrentAssets": 700.0,
-                      "totalCurrentLiabilities": 400.0, "inventory": 100.0,
-                      "cashAndEquivalents": 150.0, "longTermDebtTotal": 500.0},
-            }},
-            "Cash_Flow": {"yearly": {
-                "0": {"totalCashFromOperatingActivities": 200.0,
-                      "capitalExpenditures": -50.0},
-            }},
+def _facts(series: dict, shares: dict | None = None) -> dict:
+    """An ``sec_edgar.annual_facts``-shaped payload from ``{label: {end: (val, filed)}}``."""
+    return {
+        "series": {
+            label: {end: {"val": v, "filed": f} for end, (v, f) in by_end.items()}
+            for label, by_end in series.items()
         },
+        "shares": shares or {},
+        "span": None,
+        "years": 15,
     }
-    fin = canonical_fin_from_bulk(payload)
+
+
+def test_the_sec_facts_map_to_canonical_financials_with_no_fabrication():
+    fin = canonical_fin_from_sec(_facts({
+        "Revenue": {"2025-06-30": (1000.0, "2025-08-01"),
+                    "2024-06-30": (900.0, "2024-08-01")},
+        "Net income (loss)": {"2025-06-30": (100.0, "2025-08-01"),
+                              "2024-06-30": (90.0, "2024-08-01")},
+        "Total assets": {"2025-06-30": (2000.0, "2025-08-01"),
+                         "2024-06-30": (1900.0, "2024-08-01")},
+        "Capex (-)": {"2025-06-30": (50.0, "2025-08-01"),
+                      "2024-06-30": (45.0, "2024-08-01")},
+        "Long-term debt": {"2025-06-30": (500.0, "2025-08-01")},
+        "Long-term debt, current": {"2025-06-30": (80.0, "2025-08-01")},
+    }))
     assert fin["revenue"] == {"current": 1000.0, "prior": 900.0}, "current/prior pairs"
     assert fin["net_income"]["current"] == 100.0
-    assert fin["capex"]["current"] == 50.0, "capex is a positive magnitude for compute_ratios"
-    assert fin["free_cash_flow"]["current"] == 150.0, "FCF from OCF - capex, not a proxy"
-    assert fin["market_cap"] == 3_000_000_000
-    assert fin["sector"] == "Technology"
+    assert fin["capex"]["current"] == 50.0, (
+        "the SEC files capex as a positive outflow, which is the sign "
+        "compute_ratios subtracts under abs()")
+    assert fin["total_debt"]["current"] == 580.0, "borrowings = long-term + current portion"
+    assert "market_cap" not in fin, "EDGAR has no price: a market cap is never invented"
     assert "ebitda" not in fin, "an absent field is absent, never 0"
-    assert canonical_fin_from_bulk({}) == {}
+    assert canonical_fin_from_sec({}) == {}
+    assert canonical_fin_from_sec(_facts({})) == {}
 
 
-def test_the_transport_is_injectable_and_only_the_live_one_is_unverified(tmp_path):
-    """The stub proves the pipeline; the EODHD fetch needs the gated vendor plan."""
-    from scripts.score_panel import eodhd_bulk_transport
+def test_the_sec_read_is_point_in_time_so_a_panel_cannot_see_the_future():
+    """A 10-K filed after the panel date is not a fact that date could know.
 
-    live = eodhd_bulk_transport()
+    Using it would be look-ahead bias, and it is the one error that would make
+    every measured IC in this layer too good to be true.
+    """
+    facts = _facts({
+        "Revenue": {"2025-06-30": (1000.0, "2025-08-01"),
+                    "2026-06-30": (1400.0, "2026-08-05")},
+        "Total assets": {"2025-06-30": (2000.0, "2025-08-01"),
+                         "2026-06-30": (2400.0, "2026-08-05")},
+    })
+    before = canonical_fin_from_sec(facts, asof="2026-07-01")
+    assert before["revenue"]["current"] == 1000.0, "the FY2026 report was not filed yet"
+    after = canonical_fin_from_sec(facts, asof="2026-09-17")
+    assert after["revenue"]["current"] == 1400.0, "once filed, it is the current year"
+    assert after["revenue"]["prior"] == 1000.0
+    assert canonical_fin_from_sec(facts, asof="2025-07-01") == {}, (
+        "before the first filing there is nothing to read - empty, not zero")
+
+
+def test_every_leg_is_aligned_to_one_fiscal_year_never_a_stale_substitute():
+    """A tag last filed in 2013 must not sit beside a 2025 balance sheet.
+
+    Mixed-vintage rows look measured and are not, so a label with no value at
+    the reference year end is absent rather than carried over from another year.
+    """
+    fin = canonical_fin_from_sec(_facts({
+        "Total assets": {"2025-06-30": (2000.0, "2025-08-01")},
+        "Net income (loss)": {"2025-06-30": (100.0, "2025-08-01")},
+        "Inventory": {"2013-12-31": (33.0, "2014-02-01")},
+    }))
+    assert fin["total_assets"]["current"] == 2000.0
+    assert "inventory" not in fin, "the 2013 inventory is not the 2025 inventory"
+
+
+def test_the_share_count_is_read_at_its_own_newest_eligible_period():
+    """The cover-page count is far fresher than the fiscal-year balance, and it
+    is the leg a market capitalisation needs - so it is selected on its own
+    period ends, under the same point-in-time rule."""
+    facts = _facts({"Total assets": {"2025-06-30": (2000.0, "2025-08-01")}},
+                   shares={"2026-04-23": {"val": 7.42e9, "filed": "2026-04-25"},
+                           "2026-07-23": {"val": 7.43e9, "filed": "2026-07-25"}})
+    assert canonical_fin_from_sec(facts, asof="2026-05-01")["shares_outstanding"] == 7.42e9
+    assert canonical_fin_from_sec(facts, asof="2026-09-17")["shares_outstanding"] == 7.43e9
+
+
+def test_the_panel_derives_market_cap_from_its_own_close_and_the_sec_share_count(tmp_path):
+    """EDGAR carries no price, so the valuation block would be NA for every name
+    without this join. The panel has both halves - its close and the cover-page
+    count - and the row is assembled once they meet.
+
+    Asserted against a control run with no price leg: the price-based ratios are
+    the observable difference, and they must be ABSENT without the close rather
+    than present-but-invented.
+    """
+    class _NoCap(Transport):
+        def _fin(self, ticker):
+            fin = super()._fin(ticker)
+            fin.pop("market_cap", None)
+            fin["shares_outstanding"] = 2e8
+            return fin
+
+    series = {t: _bars(DATES, drift=0.001, seed=30 + i, noise=0.0)
+              for i, t in enumerate(UNIVERSE)}
+    provider = PriceProvider(loader=lambda t: series.get(t, {}))
+
+    with_price = str(tmp_path / "with")
+    build_panel([DATES[0]], UNIVERSE, transport=_NoCap(), price_provider=provider,
+                technical=False, cache_dir=with_price)
+    rows, _meta = read_panel(panel_path(with_price, DATES[0]))
+    row = rows[UNIVERSE[0]]
+    close = row["close"]
+    assert row["price_to_earnings"] is not None, (
+        "the close joined the SEC share count into a market cap, so the "
+        "price-based ratios are reachable instead of permanently NA")
+    assert row["price_to_book"] is not None
+
+    without_price = str(tmp_path / "without")
+    build_panel([DATES[0]], UNIVERSE, transport=_NoCap(), cache_dir=without_price)
+    bare, _meta = read_panel(panel_path(without_price, DATES[0]))
+    assert "price_to_earnings" not in bare[UNIVERSE[0]], (
+        "no close => no market cap => the ratio is absent, never fabricated")
+    assert "f" in bare[UNIVERSE[0]], "the statement-only metrics still measure"
+    assert close > 0, "the control and the treatment differ only by the price leg"
+
+
+def test_the_transport_is_injectable_and_only_the_live_one_needs_the_network(tmp_path):
+    """The stub proves the pipeline; the live SEC fetch is the networked half."""
+    live = sec_xbrl_transport()
     assert callable(live), "the live transport exists as a callable"
+    assert SEC_REQUESTS_PER_SECOND == 10.0, "paced to SEC's published ceiling"
     stub = Transport()
     build = build_panel(DATES, UNIVERSE, transport=stub, cache_dir=str(tmp_path))
     assert build["coverage"]["names_present"] == len(UNIVERSE)

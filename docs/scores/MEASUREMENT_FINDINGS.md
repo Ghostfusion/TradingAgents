@@ -17,6 +17,12 @@ It never claims a measurement that did not happen. Where a number is
 `UNMEASURED`, the reason is stated; where a number is `MEASURED` on a small
 sample, the `n` travels with it.
 
+**Source change, 2026-09-18.** The fundamentals leg this run recorded as
+vendor-gated (EODHD, 403) was replaced the same day by **SEC EDGAR XBRL** —
+free, keyless and point-in-time (`IMPLEMENTATION_PLAN.md` §3.2). Every line
+below that names EODHD as the fundamentals source is therefore history, kept as
+the evidence for that change.
+
 **Run of record** (2026-09-18, engine at `1b8e82d` + the WP-10 work):
 
 ```
@@ -28,20 +34,22 @@ py -3.12 scripts/score_panel.py --evaluate-only --dates ... --json
 * Panel: `C:\Users\vince\.tradingagents\cache\panels\<date>.json` — one file per
   trading date, 30 files, **MEASURED**.
 * Cross-section: **149 of 150** requested NASDAQ common stocks (a strided
-  sample of the EODHD symbol list), 30 trading dates 2026-08-06 … 2026-09-17,
+  sample of the NASDAQ symbol list), 30 trading dates 2026-08-06 … 2026-09-17,
   **154,188 metric cells**, **MEASURED**.
 * Label: **`OK`** — 30 cross-sections, median 147 eligible names, against the
   floors `min_periods=20` / `min_names=100` / `5` names per bucket.
 * Cost: **0 API calls** on the evaluate-only run (every date was already
   cached); the build that created them recorded **0 counted calls** for the
-  fundamentals leg, because its first request failed with 403 before any payload
-  was read — the count is of calls *spent*, and none were. The vendor's own
-  model (100 + N per request, 500-symbol cap) prices this universe at
-  **100 + 150 = 250 calls per date**, i.e. **7,250** for the 29 dates built,
-  which is what `--cost-only` prints before a run. The panel is cached per date
-  and a second invocation re-fetches nothing — **MEASURED** (29
+  fundamentals leg, because its first request — EODHD, the then-source — failed
+  with 403 before any payload was read; the count is of calls *spent*, and none
+  were. Under that vendor's model (100 + N per request, 500-symbol cap) this
+  universe priced at **100 + 150 = 250 calls per date**, i.e. **7,250** for the
+  29 dates built (the source changed on 2026-09-18 — see the probe paragraph
+  below). The panel is cached per date and a
+  second invocation re-fetches nothing — **MEASURED** (29
   `dates_fetched`, 1 cache hit, `api_calls: 0` on the second run).
-* **The fundamentals leg is vendor-gated, and this is the measured proof:**
+* **The fundamentals leg was EODHD-gated; this is the probe that forced the
+  source change on 2026-09-18:**
 
   | probe | result |
   | --- | --- |
@@ -50,12 +58,16 @@ py -3.12 scripts/score_panel.py --evaluate-only --dates ... --json
   | `GET /api/bulk-fundamentals/NASDAQ` | **403** `VendorNotConfiguredError` |
   | `GET /api/fundamentals/AAPL.US` | **403** |
 
-  The bulk-fundamentals endpoint needs the **Extended Fundamentals** plan
-  (plan §3.2, §15) and this key does not carry it. The panel records the 403 in
-  each date's `_meta.legs.fundamentals` and in `_meta.vendor_gate`; the build
-  does not crash and does not write an empty panel, and every date is retried on
-  the next run. `P0-2` therefore stays open for the reason the plan already
-  gave, now with an HTTP status beside it.
+  These are the **2026-09-17 probe** results — the evidence that forced the
+  change. The bulk-fundamentals endpoint needs the **Extended Fundamentals**
+  plan (plan §3.2, §15), which is priced **"By request"** and excluded from
+  every published tier, so the 403 is plan-gating, not a spend-more decision.
+  The panel recorded the 403 in each date's `_meta.legs.fundamentals` and in
+  `_meta.vendor_gate` (since renamed `_meta.fundamentals_error`); the build did
+  not crash and did not write an empty panel. **On 2026-09-18 the owner replaced
+  the fundamentals leg with SEC EDGAR XBRL** — free, keyless and point-in-time
+  (`IMPLEMENTATION_PLAN.md` §3.2) — so `P0-2` is now closed by a source change,
+  not a purchase, and the remaining step is the wide panel build itself.
 
 ---
 
@@ -205,16 +217,16 @@ does not revise it, and the vector it prints is that table, labelled
 | cluster member | status |
 | --- | --- |
 | `fcf_yield` | **UNMEASURED** — producer is `capex_quality`, which needs the annual series; the factor schema already marks it `NA` on the panel path |
-| `price_to_free_cash_flow` | **UNMEASURED** — the ratio block needs the vendor fundamentals payload (403) |
+| `price_to_free_cash_flow` | **UNMEASURED** — the ratio block needs the fundamentals payload; the leg is live on SEC EDGAR XBRL (2026-09-18) but no wide panel run has been done |
 | `price_to_cash_flow` | **UNMEASURED** — same |
 | `earnings_yield` | **UNMEASURED** — same |
 | `val_z` | **UNMEASURED** — needs the name's own multiple history; the schema marks it `NA` on the panel path |
 
 The matrix reports the block with `n_pairs: 0` and all five members under
 `missing`, so a reader cannot mistake an unmeasured cluster for a measured one.
-**This is the finding the vendor gate creates**: the plan's second named
-redundancy question cannot be answered until the Extended Fundamentals plan is
-granted.
+**This is the finding the missing wide panel run creates**: the plan's second
+named redundancy question cannot be answered until the SEC EDGAR XBRL
+fundamentals leg is run across the wide panel (source changed 2026-09-18).
 
 ---
 
@@ -245,7 +257,7 @@ factor. The reason is the same in each case and is stated rather than implied.
 
 | engine | declared factors | measured | why not |
 | --- | --: | --: | --- |
-| `fundamental_score` | 28 | **0** | the entire engine reads vendor fundamentals: the bulk endpoint 403s (Extended Fundamentals) and the single-ticker endpoint 403s too. The panel's own ratio block comes from the same payload, so nothing substitutes. **The FCF-yield cluster, the valuation category and the growth category are UNMEASURED for this reason alone.** |
+| `fundamental_score` | 28 | **0** | the fundamentals leg now has a live, keyless source — SEC EDGAR XBRL (2026-09-18, `IMPLEMENTATION_PLAN.md` §3.2) — so the engine is no longer vendor-blocked; what remains is the wide panel run, not a negotiation. The leg is **proven live on 7 names at 17-25 metrics each** (MSFT, LULU, WDC, SIMO, TSM, NVDA, AMZN), with Beneish M absent for the documented marketable-securities reason and IFRS filers (TSM) recorded as named `_meta.fundamentals_gaps`. `n_measured` stays **0** because that column is what the panel actually measured and no wide panel run has been done yet — **not** because the engine is still blocked. **The FCF-yield cluster, the valuation category and the growth category are UNMEASURED pending that run.** |
 | `risk_score` | 32 | **0** | its inputs are position/book-level (`book_risk`, drawdown, concentration) or options/vol surfaces — no cross-sectional producer on a per-name price+fundamentals panel |
 | `sentiment_score` | 18 | **0** | news/social/analyst/options/short-interest producers are per-name vendor reads; a bulk panel does not carry them |
 | `news_score` | 11 | **0** | GDELT/EODHD news reads are per-name and per-article; the engine also has no category weight table the registry can read (its vector prints `UNMEASURED` with that reason) |
@@ -314,9 +326,11 @@ revised here):
 **`TechnicalScore` is measurable today and its 50% block is measurably
 redundant** (8 pairs at |ρ| ≥ 0.80, 46 at |ρ| ≥ 0.50, `williams_r` ≡ `stoch_k`);
 **every fundamental factor — including the whole FCF-yield cluster — is
-UNMEASURED because the EODHD Extended Fundamentals plan returns 403 on this
-key**, which the panel now records per date instead of hiding; **the other five
-engines have no cross-sectional producer on this panel and are reported
-UNMEASURED with their reasons**; and **no weight vector is produced anywhere in
-this document** — the vectors printed are the engines' own declared tables,
+UNMEASURED because no wide panel run has been completed yet**; the source that
+blocked it (EODHD's Extended Fundamentals, 403 on 2026-09-17) was replaced on
+2026-09-18 by SEC EDGAR XBRL, so the cause is now the pending run, not the
+vendor; **the other five engines have no cross-sectional producer on this panel
+and are reported UNMEASURED with their reasons**; and **no weight vector is
+produced anywhere in this document** — the vectors printed are the engines'
+own declared tables,
 labelled `RESEARCH_ONLY`, with their measured evidence beside them.

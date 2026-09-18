@@ -140,6 +140,97 @@ def _payload(rows):
     return {"units": {"USD": rows}}
 
 
+def _cfacts(tags: dict, dei: dict | None = None) -> dict:
+    """A companyfacts payload from ``{tag: [rows]}`` (+ optional dei units)."""
+    facts: dict = {"us-gaap": {t: {"units": {"USD": rows}} for t, rows in tags.items()}}
+    if dei is not None:
+        facts["dei"] = {"EntityCommonStockSharesOutstanding": {"units": dei}}
+    return {"facts": facts}
+
+
+def _patch_facts(monkeypatch, payload, cik="1234"):
+    monkeypatch.setattr(sec_edgar, "_json_get", lambda url, *a, **k: payload)
+    monkeypatch.setattr(sec_edgar, "_cik_for", lambda ticker: cik)
+
+
+def test_xbrl_annual_facts_merge_candidate_tags_by_period_end(monkeypatch):
+    """A filer that switches concepts mid-history keeps BOTH halves.
+
+    "The first tag with any data wins" returned a series that stopped the year
+    the filer changed tag - so a point-in-time read found nothing at the
+    reference year while the value sat in the next candidate all along. NVDA is
+    the live case: its ``CostOfGoodsAndServicesSold`` stops in 2021 and
+    ``CostOfRevenue`` carries on, and GP/A was n/a until the candidates merged.
+    """
+    _patch_facts(monkeypatch, _cfacts({
+        "RevenueFromContractWithCustomerExcludingAssessedTax": [
+            _concept("2024-06-30", 200_000_000_000, start="2023-07-01"),
+            _concept("2025-06-30", 300_000_000_000, start="2024-07-01"),
+        ],
+        "Revenues": [_concept("2022-06-30", 100_000_000_000, start="2021-07-01")],
+    }))
+    facts = sec_edgar.annual_facts("X")
+    assert sorted(facts["series"]["Revenue"]) == ["2022-06-30", "2024-06-30", "2025-06-30"]
+    assert facts["series"]["Revenue"]["2022-06-30"]["val"] == 100_000_000_000
+    assert facts["span"] == ["2022-06-30", "2025-06-30"]
+
+
+def test_xbrl_annual_facts_read_foreign_private_issuer_annual_reports(monkeypatch):
+    """20-F is an FPI's annual report; SIMO files nothing else.
+
+    Before the form list existed, every foreign private issuer contributed zero
+    tags - a coverage hole that would have silently thinned the panel's
+    cross-section by however many FPIs the universe holds.
+    """
+    _patch_facts(monkeypatch, _cfacts({"Assets": [
+        _concept("2025-12-31", 1_222_719_000),
+        {"end": "2024-12-31", "val": 900, "form": "10-Q", "fp": "FY"},  # not an annual report
+    ]}))
+    facts = sec_edgar.annual_facts("SIMO")
+    assert list(facts["series"]["Total assets"]) == ["2025-12-31"]
+    assert "2024-12-31" not in facts["series"]["Total assets"]
+
+
+def test_xbrl_annual_facts_carry_the_cover_page_share_count(monkeypatch):
+    """The dei count rides the same single request, and it is read from the
+    cover page of ANY form - a 10-Q's count is newer than the last 10-K's."""
+    _patch_facts(monkeypatch, _cfacts(
+        {"Assets": [_concept("2025-06-30", 1_000_000_000)]},
+        dei={"shares": [
+            {"end": "2026-04-23", "val": 7.42e9, "form": "10-Q", "fp": "Q2",
+             "filed": "2026-04-25"},
+            {"end": "2026-07-23", "val": 7.43e9, "form": "10-K", "fp": "FY",
+             "filed": "2026-07-29"},
+        ]},
+    ))
+    facts = sec_edgar.annual_facts("MSFT")
+    assert facts["shares"]["2026-04-23"]["val"] == 7.42e9, "a quarterly cover page counts"
+    assert facts["shares"]["2026-07-23"]["filed"] == "2026-07-29"
+    # and the rendered leaf still reads the flattened series contract
+    out = sec_edgar.get_financial_history("MSFT", years=3)
+    assert "1.0B" in out and "companyfacts" in out
+
+
+def test_xbrl_annual_facts_do_not_fall_back_for_a_filer_without_us_gaap(monkeypatch):
+    """TSM reports under IFRS: its payload arrives and carries no us-gaap.
+
+    That is NOT the companyfacts-failure the per-tag fallback exists for. Falling
+    back there spent 23 requests collecting 404s and still found nothing.
+    """
+    calls: list[str] = []
+
+    def fake(url):
+        calls.append(url)
+        return {"facts": {"ifrs-full": {"Assets": {"units": {"USD": []}}}}}
+
+    monkeypatch.setattr(sec_edgar, "_json_get", fake)
+    monkeypatch.setattr(sec_edgar, "_cik_for", lambda ticker: "1046179")
+    with pytest.raises(NoMarketDataError) as exc:
+        sec_edgar.annual_facts("TSM")
+    assert len(calls) == 1, "one companyfacts request, no per-tag storm"
+    assert "us-gaap" in str(exc.value)
+
+
 def test_xbrl_annual_filter_drops_partial_and_keeps_instant(monkeypatch):
     def fake_json_get(url):
         tag = url.rsplit("/", 1)[-1]

@@ -300,6 +300,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_NEWS_SCORE": "enable_news_score",
     "TRADINGAGENTS_ENABLE_TRADE_SCORE": "enable_trade_score",
     "TRADINGAGENTS_ENABLE_EVENT_STATE": "enable_event_state",
+    "TRADINGAGENTS_ENABLE_EVENT_CALENDARS": "enable_event_calendars",
     "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
@@ -1077,6 +1078,15 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # producers' window flags, coverage over the seven families, and the
         # earnings hard block passed through verbatim (never computed here).
         "enable_event_state": False,
+        # The forward company-event CALENDARS behind three of EventScore's seven
+        # families (2026-09-18 vendor decision): pdufa.bio for FDA / clinical,
+        # CourtListener for court (which answers MISSING - it is a filing archive
+        # with no forward date), investor-day dropped. Separate from
+        # `enable_event_state` because this is the one part of the state that
+        # leaves the machine: enabling the engine must not silently acquire a
+        # third-party fetch. Off by default, and off leaves every family at the
+        # answer it had before the adapters existed.
+        "enable_event_calendars": False,
         # WP-4 (§5.3): the market-LEVEL RegimeScore (benchmark trend, market-wide
         # breadth, the two VIX legs, choppiness, the benchmark's realized-vol
         # percentile). NOT `enable_regime`, which is INERT and must not be revived.

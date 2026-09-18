@@ -40,6 +40,8 @@ from tradingagents.strategies.event_state import (
     HARD_BLOCK_KEY,
     HORIZONS,
     IMMINENCE_COMPONENTS,
+    NA_REASONS,
+    SCORABLE,
     STATUS_RESEARCH_ONLY,
     event_components,
     event_state,
@@ -513,25 +515,38 @@ def test_the_engine_reads_the_producers_own_windows() -> None:
 
 
 def test_the_absent_families_carry_their_probe_evidence() -> None:
-    for family in ("product_clinical", "court", "investor_day"):
+    """Two families are still ABSENT after the 2026-09-18 sourcing decision, and
+    each names its own reason. ``product_clinical`` is NO LONGER one of them: it
+    has a producer now (pdufa.bio), so claiming it is absent would be false."""
+    for family in ("court", "investor_day"):
         assert FAMILY_AVAILABILITY[family] == ABSENT
-        assert family in ABSENT_REASONS[family] or "ABSENT with evidence" in ABSENT_REASONS[family]
+        assert "ABSENT" in ABSENT_REASONS[family]
         assert "forward_calendar" in MODULE_PATH.read_text(encoding="utf-8")
+    assert FAMILY_AVAILABILITY["product_clinical"] == SCORABLE, (
+        "pdufa.bio answers this family's two interfaces as of 2026-09-18")
+    assert "product_clinical" not in ABSENT_REASONS, (
+        "an absent-reason for a family that has a producer is a dead claim")
     res = event_state(_full_components())
-    for family in ("product_clinical", "court", "investor_day"):
+    for family in ("court", "investor_day"):
         state = res["families"][family]
         assert state["availability"] == ABSENT
         assert state["imminence"] is None and state["score"] is None
         assert state["reason"] and state["reason"] in ABSENT_REASONS.values()
-    assert ABSENT_REASONS["product_clinical"].count("2026-09-17") == 1
-    assert "zero FDA" in ABSENT_REASONS["product_clinical"]
+    # The court reason is the LIVE vendor finding, not the old assumption.
+    assert "CourtListener" in ABSENT_REASONS["court"]
+    assert "backward-looking" in ABSENT_REASONS["court"]
+    assert "DROPPED" in ABSENT_REASONS["investor_day"]
+    # ...and the product_clinical family, when it cannot measure, says why.
+    state = res["families"]["product_clinical"]
+    assert state["availability"] == SCORABLE
+    assert state["imminence"] is None and state["reason"] == NA_REASONS["product_clinical"]
 
 
 def test_the_four_calendar_interfaces_answer_available_missing_or_not_applicable() -> None:
     assert CALENDAR_INTERFACES == ("product", "clinical", "court", "investor_day")
     missing = forward_calendar("court")
     assert missing["status"] == "missing" and missing["next"] is None
-    assert "no litigation" in missing["reason"]
+    assert "CourtListener" in missing["reason"], "the live finding, not a stale assumption"
     rows = [{"date": "2026-09-30"}, {"date": "2026-10-05"}]
     ready = forward_calendar("investor_day", rows, trade_date="2026-09-18")
     assert ready["status"] == "available"
@@ -544,6 +559,21 @@ def test_the_four_calendar_interfaces_answer_available_missing_or_not_applicable
         forward_calendar("nope")
 
 
+def test_a_scorable_family_asked_with_no_rows_states_the_na_reason() -> None:
+    """A family WITH a producer that was not asked (the calendar gate is off, or
+    the source did not answer) is not the same as a family with no producer.
+
+    This crashed on the first run after pdufa.bio landed: ``forward_calendar``
+    reached for ABSENT_REASONS, which no longer carries ``product_clinical``.
+    """
+    answer = forward_calendar("product")
+    assert answer["status"] == "missing"
+    assert answer["reason"] == NA_REASONS["product_clinical"]
+    # ...and an adapter's own finding still wins over both static texts.
+    own = forward_calendar("product", None, reason="the source said so")
+    assert own["reason"] == "the source said so"
+
+
 def test_a_missing_calendar_is_never_converted_to_zero() -> None:
     """§7 Q5: unknown is not "no event exists" and certainly not "negative"."""
     answers = {
@@ -554,13 +584,29 @@ def test_a_missing_calendar_is_never_converted_to_zero() -> None:
     assert not any(k.startswith("product_clinical") for k in comps)
     res = event_state(comps)
     assert res["families"]["product_clinical"]["imminence"] is None
-    assert res["families"]["product_clinical"]["availability"] == ABSENT
+    assert res["families"]["product_clinical"]["availability"] == SCORABLE
     # An available answer fills the slot, and the nearest of the two wins.
     live = {"clinical": forward_calendar("clinical", [{"date": "2026-10-16"}], trade_date="2026-09-18"),
             "product": forward_calendar("product", [{"date": "2026-09-21"}], trade_date="2026-09-18")}
     filled = event_components(_snapshot({}), calendars=live)
     assert filled["product_clinical_imminence"] == 3
     assert event_state(filled)["families"]["product_clinical"]["imminence"] == pytest.approx(1 - 3 / 90)
+
+
+def test_the_calendar_answers_never_collapse_none_into_an_empty_list() -> None:
+    """The one mistake that turns "this source cannot carry a forward date" into
+    the false claim "no event is scheduled"."""
+    from tradingagents.strategies.event_state import calendar_answers
+
+    answers = calendar_answers(
+        {"product": [], "clinical": None, "court": None, "investor_day": None},
+        trade_date="2026-09-18",
+        reasons={"court": "no forward date exists in this source"},
+    )
+    assert answers["product"]["status"] == "not_applicable", "asked and empty"
+    assert answers["clinical"]["status"] == "missing", "NOT asked - a different claim"
+    assert answers["court"]["reason"] == "no forward date exists in this source"
+    assert answers["investor_day"]["status"] == "missing"
 
 
 def test_the_families_declare_their_scope() -> None:
