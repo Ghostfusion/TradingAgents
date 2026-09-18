@@ -26,6 +26,17 @@ Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), execut
 
 ### Added
 
+**P0-6 — the short-interest percentile over a name's own settlement series (2026-09-17).** `SentimentScore.md` §1 marks short interest PARTIAL: the settlement series was already fetched and only the raw level printed, so a number could not be read at all — 12% short is crowded for one name and ordinary for another.
+- **`strategies/short_interest.py::short_interest_percentile(series, *, min_obs=4)`** returns the percentile of the latest settlement within the name's own history, beside the raw value, the prior settlement, the period-over-period change, the series length and the **direction** sentence: *high short interest is bearish positioning with a squeeze RISK, not a bullish signal*. The sign is stated so the percentile cannot be quoted as a squeeze thesis by itself.
+- `min_obs` is counted in **settlements, not days** — FINRA settles twice a month (published on the 7th business day after), so four is about two months of history.
+- Below `min_obs` the percentile is `None` **with the reason** ("1 settlement(s) held, 4 needed"), never a fabricated 0.5; an empty series is `None`, never 0.
+- **Wired into `massive.get_short_interest_massive`**, which carried the series and printed only raw settlements: it now prints `Latest settlement vs its own history: latest of 5 settlements, 100% percentile of this name's own history, +14.3% vs prior settlement` plus the direction line.
+- Four tests: the 6-settlement known percentile and change, the mid-range rank, the single-settlement reason, the empty series, and the wired rendering.
+Tests: engine suite **4431 passed / 5 skipped**, executor **1105**, web **149**.
+**Web impact**: none — an added advisory line inside an existing leaf; no wire field, no gate.
+
+### Added
+
 **P0-3 — market-wide breadth from the panel the run already fetched (2026-09-17).** `RegimeScore.md` §1 marks market-wide advance/decline, new highs/lows and percent-above-MA as ABSENT; this is the smallest honest producer, and it needs **no new vendor**.
 - **`strategies/market_breadth.py::market_breadth(closes_by_name, *, windows=(20, 50, 200), min_n=20)`** returns `{pct_above_<w>, n, coverage, advance_decline, advancers, decliners, new_highs, new_lows, small_sample, basis}` or `None` for an empty panel. The percent-above columns come from the shared `sector_breadth.multi_breadth`; the A/D, high/low and coverage counts are computed from the **same map**, so the numbers cannot describe different panels (one implementation, two scopes).
 - **The denominator-integrity gate is the shared one** (`sector_screener.breadth_with_gate`): below `min_n` the percentages render `None` with the reason, never a noisy rate over a handful of names — while the counts still travel, because a count is not a rate.

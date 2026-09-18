@@ -632,3 +632,28 @@ class MassiveFailoverTests(unittest.TestCase):
         self.assertIn("ipos unavailable", out)
 
 
+
+
+def test_short_interest_ranks_the_latest_settlement_against_its_own_history():
+    """P0-6: the leaf printed raw settlements with no percentile and no change
+    basis, so a level could not be read at all - 12% short is crowded for one name
+    and ordinary for another. The rank is now printed beside the level, with the
+    direction stated (high short interest is NOT a bullish signal)."""
+    rows = [
+        {"settlement_date": f"2026-0{m}-{d}", "short_interest": si,
+         "avg_daily_volume": 1_000_000, "days_to_cover": 3.0}
+        for m, d, si in (
+            (7, "31", 40_000_000),
+            (7, "15", 35_000_000),
+            (6, "30", 30_000_000),
+            (6, "15", 25_000_000),
+            (5, "29", 20_000_000),
+        )
+    ]
+    with mock.patch.object(massive, "_get", return_value=rows):
+        out = massive.get_short_interest_massive("GME")
+    assert "Latest settlement vs its own history:" in out
+    assert "5 settlements" in out
+    assert "Percentile: 100%" in out
+    assert "vs prior settlement" in out
+    assert "not a bullish signal" in out

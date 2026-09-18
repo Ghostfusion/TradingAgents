@@ -516,6 +516,32 @@ def get_short_interest_massive(ticker: str, rows: int = 4) -> str:
         lines.append(f"  - Days to cover: {_fmt_num(dtc)}")
         lines.append(f"  - Avg daily volume: {_fmt_int(adv)}")
 
+    # P0-6: a level is not a signal on its own - rank the latest settlement
+    # against the name's OWN settlement history and state the sign explicitly
+    # (SentimentScore.md 0.2 point 4: high short interest is bearish positioning
+    # with a squeeze RISK, never a bullish signal). The vendor returns
+    # newest-first, so the series is reversed before ranking.
+    try:
+        from tradingagents.strategies.short_interest import short_interest_percentile
+
+        series = [row.get("short_interest") for row in reversed(results)]
+        si = short_interest_percentile(series)
+        if si["latest"] is not None:
+            change = (
+                f", {si['change_pct']:+.1f}% vs prior settlement"
+                if si["change_pct"] is not None
+                else ""
+            )
+            lines.append("")
+            lines.append(
+                f"- Latest settlement vs its own history: {si['basis']}{change}"
+            )
+            if si["percentile"] is not None:
+                lines.append(f"  - Percentile: {si['percentile']:.0%}")
+            lines.append(f"  - {si['direction']}")
+    except Exception:  # noqa: BLE001 - the raw settlements are still the report
+        pass
+
     latest = results[0]
     dtc = latest.get("days_to_cover")
     lines.append("")

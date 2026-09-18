@@ -388,6 +388,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-6 landed: the short-interest percentile.** `strategies/short_interest.py` ranks the
+  latest settlement within the name's OWN series (percentile, raw, prior, change, n, basis) and carries the **direction**
+  sentence - *high short interest is bearish positioning with a squeeze RISK, not a bullish signal* - so the number cannot
+  be quoted as a squeeze thesis alone. `min_obs` counts **settlements, not days** (FINRA settles twice a month): below it
+  the percentile is `None` **with the reason**, never a fabricated 0.5. Wired into `massive.get_short_interest_massive`,
+  which had the series and printed only raw levels. Four tests. Engine **4431 passed / 5 skipped**, executor **1105**,
+  web **149**.
 - 2026-09-17 `(working tree)` - **P0-3 landed: market-wide breadth from the panel the run already fetched.**
   `strategies/market_breadth.py::market_breadth(closes_by_name, *, windows=(20,50,200), min_n=20)` - percent-above-MA from
   the shared `sector_breadth.multi_breadth`, with A/D, new-high/new-low and coverage computed from the **same map** so

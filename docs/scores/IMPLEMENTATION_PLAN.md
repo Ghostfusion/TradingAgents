@@ -395,8 +395,17 @@ settlement series, beside the raw value and the series length. The direction
 column states the sign explicitly: high short interest is **not** bullish
 (`SentimentScore.md` §0.2 point 4).
 
-**Acceptance.** A 6-settlement fixture gives a known percentile; a single
-settlement returns `None` with the reason, not 0.5.
+**Acceptance - MET 2026-09-17.** `strategies/short_interest.py::short_interest_percentile`
+ranks the latest settlement within the name's own series and returns the raw
+value, the prior settlement, the period-over-period change, the series length and
+the **direction** sentence ("high short interest is bearish positioning with a
+squeeze RISK, not a bullish signal"). A 6-settlement fixture gives a known
+percentile (latest at the top -> 1.0; a mid-range settlement -> 4/6); a single
+settlement returns `None` with the reason, not 0.5; an empty series is `None`.
+`min_obs` is counted in **settlements, not days** - FINRA's cadence is
+bi-monthly, so four is about two months. Wired into
+`massive.get_short_interest_massive`, which carried the series and printed only
+raw levels: it now prints the rank, the change and the direction beside them.
 
 ### 3.7 P0-7 — the toolset bindings on the wrong surface
 
