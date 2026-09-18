@@ -388,6 +388,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-5` / D-8 FIXED: one vector, one composite, on both surfaces.** `_trade_score_engines`
+  measured all four engines unconditionally while `_run_card_trade_score` read only the sibling card blocks (present only when
+  that engine's gate is on), so with `enable_trade_score` on and `enable_risk_score` off the leaf applied the owner's `K=0.20` to
+  a risk score the card never saw. **Executed against the pre-`P12-5` assembly reconstructed from git:** leaf **`84.55`** (risk
+  `74.0`, gate off) vs card **`87.19`**; both **`87.19`** after. **The fix is §3.4's rule applied by every reader:** an engine
+  contributes iff its own gate is on, and both readers take their four values from the run's snapshot via the new
+  `quant_scorecard.engine_scores`. The card reads the run's own snapshot from state (`_run_card_trade_score(card, cfg,
+  final_state)`) and falls back to the sibling blocks only for a tree written without one - a fallback, never a second
+  contributor. **Fails-before test:** `test_the_leaf_and_the_card_print_one_composite_when_a_sub_gate_is_off` asserts
+  `leaf["risk"] is None` (it was `74.0`). Three tests that pinned the old gate-ignoring behaviour now enable the gates, so they
+  exercise the exception path instead of passing because nothing was called. 367 passed across `test_trade_score.py`,
+  `test_quant_scorecard.py`, `test_reporting.py` and the engine suites.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-1`-`P12-3` landed: one score snapshot, its state channel, and the block.** All gated by
   the new `enable_quant_scorecard` (**default off**, `default_config.py`, `_ENV_OVERRIDES` row and `.env.example` row added), so
   gate-off stays byte-identical to a pre-scorecard tree. **`P12-1`**: `strategies/quant_scorecard.py::quant_scorecard(ticker,

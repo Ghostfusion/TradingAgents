@@ -640,15 +640,23 @@ def test_the_engine_assembly_never_substitutes_a_number(monkeypatch) -> None:
 
     Every engine is pinned to a failure, so the test is offline and asserts the
     contract rather than the environment: no leg may be filled with a number.
+    The gates are all ON here (P12-5) precisely so each engine IS called and its
+    failure is what produces the ``None`` - with the gates off nothing would be
+    called and the test would pass for the wrong reason.
     """
     import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.dataflows.config as cfgmod
     import tradingagents.strategies.fundamental_score as fs
     import tradingagents.strategies.regime_score as rs
     import tradingagents.strategies.technical_score as ts
+    from tradingagents.strategies.quant_scorecard import ENGINE_GATES
 
     def _boom(*a, **kw):
         raise RuntimeError("nothing to measure")
 
+    monkeypatch.setattr(
+        cfgmod, "get_config", lambda: dict.fromkeys(ENGINE_GATES.values(), True)
+    )
     monkeypatch.setattr(at, "_technical_components", _boom)
     monkeypatch.setattr(at, "_regime_components", _boom)
     monkeypatch.setattr(at, "_risk_components", _boom)
@@ -681,7 +689,9 @@ def test_the_engine_assembly_reads_the_risk_engine(monkeypatch) -> None:
     one, so the number is `RiskScore`'s and not this test's.
     """
     import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.dataflows.config as cfgmod
 
+    monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_risk_score": True})
     monkeypatch.setattr(at, "_risk_components", lambda ticker: dict(_RISK_COMPONENTS))
     scores = at._trade_score_engines("TEST")
     assert scores["risk"] == 74.0
@@ -708,6 +718,7 @@ def test_the_engine_assembly_scores_the_run_date_not_the_wall_clock(monkeypatch)
     is the date the peer panel is built as-of.
     """
     import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.dataflows.config as cfgmod
     import tradingagents.strategies.fundamental_score as fs
 
     seen: dict = {}
@@ -717,10 +728,93 @@ def test_the_engine_assembly_scores_the_run_date_not_the_wall_clock(monkeypatch)
         seen["date"] = current_date
         return {"ticker": ticker, "scores": {ticker: 42.0}}
 
+    monkeypatch.setattr(
+        cfgmod, "get_config", lambda: {"enable_fundamental_score": True}
+    )
     monkeypatch.setattr(fs, "fundamental_score_for_ticker", _spy)
     scores = at._trade_score_engines("TEST", "2026-07-22")
     assert seen == {"ticker": "TEST", "date": "2026-07-22"}
     assert scores["fundamental"] == 42.0
+
+
+def test_the_leaf_and_the_card_print_one_composite_when_a_sub_gate_is_off(
+    monkeypatch,
+) -> None:
+    """D-8: one vector, one number, on both surfaces (P12-5).
+
+    The defect this pins: `_trade_score_engines` measured all four engines
+    unconditionally, while `_run_card_trade_score` read only the sibling card
+    blocks - which exist only when that engine's own gate is on. So with
+    `enable_trade_score` on and `enable_risk_score` off, the leaf applied the
+    owner's `K = 0.20` to a risk score the card never saw, and the two surfaces
+    printed **different composites** for one run.
+
+    Both readers now go through the run's snapshot, so one rule decides for all
+    three surfaces: an engine contributes iff its own gate is on.
+    """
+    import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.dataflows.config as cfgmod
+    import tradingagents.strategies.fundamental_score as fs
+    import tradingagents.strategies.regime_score as rs
+    import tradingagents.strategies.technical_score as ts
+    from tradingagents.reporting import _run_card_trade_score
+    from tradingagents.strategies.quant_scorecard import quant_scorecard
+
+    cfg = {
+        "enable_trade_score": True,
+        "enable_fundamental_score": True,
+        "enable_technical_score": True,
+        "enable_regime_score": True,
+        "enable_risk_score": False,  # the sub-gate that is off
+    }
+    monkeypatch.setattr(cfgmod, "get_config", lambda: dict(cfg))
+    monkeypatch.setattr(at, "_technical_components", lambda ticker: {"rsi": 55.0})
+    monkeypatch.setattr(at, "_regime_components", lambda: {"vix_pct": 0.4})
+    monkeypatch.setattr(at, "_risk_components", lambda ticker: {"realized_vol": 0.25})
+    monkeypatch.setattr(
+        ts,
+        "technical_score",
+        lambda vals: {
+            "status": "advisory",
+            "score": 85.0,
+            "coverage": 0.9,
+            "bands": "favourable",
+        },
+    )
+    monkeypatch.setattr(
+        rs,
+        "regime_score",
+        lambda vals: {
+            "status": "advisory",
+            "score": 78.0,
+            "coverage": 0.8,
+            "band": "neutral",
+        },
+    )
+    monkeypatch.setattr(
+        fs,
+        "fundamental_score_for_ticker",
+        lambda ticker, date=None: {
+            "ticker": ticker,
+            "status": "RESEARCH_ONLY",
+            "scores": {ticker: 92.0},
+            "coverage": {ticker: 1.0},
+        },
+    )
+
+    date = "2026-07-22"
+    # the run's own snapshot, built the way `_run_graph` builds it
+    snapshot = quant_scorecard("TEST", date, cfg)
+    # the tool path (an analyst's LLM calling the leaf)
+    leaf = at._trade_score_engines("TEST", date)
+    # the card path, handed the same snapshot the debate read
+    card_block = _run_card_trade_score({}, dict(cfg), {"quant_scorecard": snapshot})
+
+    assert leaf["risk"] is None  # gated off, and never a substituted 0
+    assert "risk" not in snapshot["present"]
+    assert card_block["engines"] == leaf
+    assert card_block["score"] == trade_score(leaf)["score"]
+    assert card_block["score"] is not None
 
 
 def test_the_leaf_tool_carries_the_trading_date(monkeypatch) -> None:

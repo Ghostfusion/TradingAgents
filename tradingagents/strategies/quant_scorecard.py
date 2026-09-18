@@ -49,6 +49,7 @@ __all__ = [
     "SCORECARD_HEADER",
     "SCORECARD_MAX_CHARS",
     "SCORECARD_PURPOSE",
+    "engine_scores",
     "format_quant_scorecard",
     "quant_scorecard",
     "split_scorecard_block",
@@ -473,6 +474,26 @@ def _pair_line(pairs: list[str], trailing: str | None = None) -> str:
     if trailing:
         line = f"{line} {trailing}" if line else trailing
     return line
+
+
+def engine_scores(snapshot: dict | None) -> dict[str, float | None]:
+    """The four composite engines' scores from a snapshot, as the gates decided.
+
+    **This is the one way a composite reader gets its inputs** (§3.4). The
+    snapshot already applied the rule *an engine entry is present iff its own gate
+    is on*, so a reader that goes through here cannot disagree with the block the
+    debate read or the key the card wrote - which is defect D-8: the leaf
+    assembled its own four values regardless of the gates, so with
+    `enable_trade_score` on and a sub-gate off the leaf and the card printed
+    **different composites** for one vector.
+
+    An engine that is absent comes back as ``None``, which leaves it out of the
+    composite's denominator - never `0` (rule 2).
+    """
+    engines = (snapshot or {}).get("engines") or {}
+    return {
+        name: (engines.get(name) or {}).get("score") for name in COMPOSITE_ENGINES
+    }
 
 
 def split_scorecard_block(context: str) -> tuple[str | None, str]:

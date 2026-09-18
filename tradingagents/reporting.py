@@ -976,32 +976,44 @@ def _run_card_technical_score(ticker: str, cfg: dict) -> dict | None:
     }
 
 
-def _run_card_trade_score(card: dict, cfg: dict) -> dict | None:
+def _run_card_trade_score(
+    card: dict, cfg: dict, final_state: dict | None = None
+) -> dict | None:
     """TradeScore block for run_card.json (WP-11 / WP-9).
 
-    The four-engine decision composite, assembled from the engine blocks already
-    in the card - so it costs no vendor call and cannot disagree with the blocks
-    beside it. Each engine is present only when its own gate is on, and one that
-    is absent enters as ``None`` (never 0), which lowers coverage and withholds
-    the composite below its floor of two. ``status`` is the ladder rung the
-    vector has *evidenced* - `RESEARCH_ONLY` until Phase C measures it.
-    Returns ``None`` when the gate is off, so a gate-off card is byte-identical
-    to a pre-engine tree.
+    The four-engine decision composite. Each engine is present only when its own
+    gate is on, and one that is absent enters as ``None`` (never 0), which lowers
+    coverage and withholds the composite below its floor of two. ``status`` is the
+    ladder rung the vector has *evidenced* - `RESEARCH_ONLY` until Phase C
+    measures it. Returns ``None`` when the gate is off, so a gate-off card is
+    byte-identical to a pre-engine tree.
+
+    **P12-5: it reads the run's own score snapshot when there is one.** That
+    snapshot is the string the debate was handed in `IVa` and the source the leaf
+    reads, so all three surfaces print one number rather than three assemblies
+    (defect D-8). The sibling engine blocks are the fallback for a tree written
+    without the snapshot - a `write_report_tree` call on a legacy state or a
+    markdown-only rebuild.
     """
     if not (cfg or {}).get("enable_trade_score"):
         return None
     try:
+        from tradingagents.strategies.quant_scorecard import engine_scores
         from tradingagents.strategies.trade_score import trade_score
 
-        engines = {
-            name: (card.get(key) or {}).get("score")
-            for name, key in (
-                ("fundamental", "fundamental_score"),
-                ("technical", "technical_score"),
-                ("regime", "regime_score"),
-                ("risk", "risk_score"),
-            )
-        }
+        snapshot = (final_state or {}).get("quant_scorecard")
+        if snapshot:
+            engines = engine_scores(snapshot)
+        else:
+            engines = {
+                name: (card.get(key) or {}).get("score")
+                for name, key in (
+                    ("fundamental", "fundamental_score"),
+                    ("technical", "technical_score"),
+                    ("regime", "regime_score"),
+                    ("risk", "risk_score"),
+                )
+            }
         res = trade_score(engines)
     except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
         return {
@@ -1865,10 +1877,10 @@ def write_report_tree(
         ):
             if _block is not None:
                 card[_key] = _block
-        # WP-11/WP-9: the four-engine decision composite, from the engine blocks
-        # just assembled (so it must come second). Present only when its own gate
-        # is on; additive key.
-        _trade = _run_card_trade_score(card, cfg)
+        # WP-11/WP-9: the four-engine decision composite. P12-5: it reads the
+        # run's score snapshot when there is one, so the debate block, this key
+        # and the leaf all print one number; the sibling blocks are the fallback.
+        _trade = _run_card_trade_score(card, cfg, final_state)
         if _trade is not None:
             card["trade_score"] = _trade
         # WP-8/WP-9: the event state (the earnings hard block travels through as

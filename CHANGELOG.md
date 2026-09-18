@@ -30,6 +30,17 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 ### Fixed
 
+**D-8 — one vector, two composites: the leaf and the card now read the same snapshot (2026-09-18, WP-12 `P12-5`).** The last of the D-6 class, and the one `ResearchLayerWiring.md` §3.4 was written to resolve.
+
+- **The defect.** `_trade_score_engines` measured all four engines **unconditionally**, while `_run_card_trade_score` read each engine from the sibling card block — which exists only when **that engine's own gate** is on. With `enable_trade_score` on and `enable_risk_score` off, the leaf applied the owner's `K = 0.20` to a risk score the card never saw.
+- **Measured, by executing the pre-`P12-5` assembly reconstructed from git:** leaf **`84.55`** (risk `74.0`, measured with its gate off) vs card **`87.19`** (risk absent). Two surfaces, two numbers, one run. After the fix both are **`87.19`**.
+- **Fixed by one rule for all three readers** (§3.4): an engine contributes **iff its own gate is on**. Both readers now take their four values from the run's snapshot through the new `quant_scorecard.engine_scores`; the leaf builds that snapshot through the same producer the debate block and the card use, and the card reads the run's own snapshot from state, falling back to the sibling blocks only for a tree written without one. The fallback is a fallback, never a second contributor (master rule 15).
+- **Fails before, passes after:** `tests/test_trade_score.py::test_the_leaf_and_the_card_print_one_composite_when_a_sub_gate_is_off` asserts `leaf["risk"] is None` (it was `74.0`), and that the card's `engines` map and composite equal the leaf's. Three existing tests in that module pinned the old gate-ignoring behaviour and are updated to enable the gates, so they still exercise the exception path rather than passing because nothing was called.
+
+Tests: 367 passed across `test_trade_score.py`, `test_quant_scorecard.py`, `test_reporting.py`, `test_report_hygiene.py` and the seven engine suites.
+
+**Web impact**: none — the same tool, the same card key, a corrected number. `get_trade_score`'s text and `run_card.json`'s `trade_score` shape are unchanged.
+
 **D-11 — the compiled context's `catalyst_window` can never be `True`; the `2c05701` "FIXED" claim for defect 16 is wrong (2026-09-18).** Found while building WP-12, by executing the path rather than reading the ledger.
 
 - **The defect.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None`, and the context line always prints `catalyst_window=False` — a positive assertion, not an `NA`.

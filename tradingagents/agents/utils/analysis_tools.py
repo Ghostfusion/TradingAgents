@@ -5357,6 +5357,14 @@ def _trade_score_engines(ticker: str, current_date: str | None = None) -> dict:
     withheld with its reason, which is the honest read on a day only one engine
     could measure.
 
+    **P12-5 / D-8: an engine contributes iff its own gate is on.** This function
+    used to measure all four unconditionally while the card's composite read only
+    the sibling blocks that exist when a gate is on - so with `enable_trade_score`
+    on and a sub-gate off, the leaf and the card printed *different composites*
+    for one vector. The assembly now goes through the same snapshot producer the
+    debate block and the card use (`quant_scorecard` + `engine_scores`), so one
+    rule decides for all three readers.
+
     ``current_date`` is the run's trading date, threaded to the one engine that
     scores **as of a date**: ``fundamental_score_for_ticker`` builds its peer
     panel as-of the date it is handed and falls back to the wall clock when
@@ -5364,42 +5372,10 @@ def _trade_score_engines(ticker: str, current_date: str | None = None) -> dict:
     panel - measured on MSFT, a `--date 2026-07-22` run gave the leaf `66.25`
     where the card, which passes ``pm_decision.trade_date``, gave `62.50`.
     """
-    scores: dict = {"fundamental": None, "technical": None, "regime": None, "risk": None}
-    try:
-        from tradingagents.strategies.fundamental_score import (
-            fundamental_score_for_ticker,
-        )
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.strategies.quant_scorecard import engine_scores, quant_scorecard
 
-        res = fundamental_score_for_ticker(ticker, current_date)
-        key = str(res.get("ticker") or ticker).strip().upper()
-        scores["fundamental"] = (res.get("scores") or {}).get(key)
-    except Exception:  # noqa: BLE001 - an advisory read must not break the tool
-        pass
-    try:
-        from tradingagents.strategies.technical_score import technical_score
-
-        vals = _technical_components(ticker)
-        if vals:
-            scores["technical"] = technical_score(vals).get("score")
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        from tradingagents.strategies.regime_score import regime_score
-
-        vals = _regime_components()
-        if vals:
-            scores["regime"] = regime_score(vals).get("score")
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        from tradingagents.strategies.risk_score import risk_score
-
-        vals = _risk_components(ticker)
-        if vals:
-            scores["risk"] = risk_score(vals).get("score")
-    except Exception:  # noqa: BLE001
-        pass
-    return scores
+    return engine_scores(quant_scorecard(ticker, current_date, get_config()))
 
 
 @tool
