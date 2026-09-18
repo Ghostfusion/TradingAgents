@@ -4822,6 +4822,310 @@ def get_fundamental_score(
         return f"fundamental score unavailable for {ticker}: render failed ({exc})"
 
 
+def _technical_components(ticker: str) -> dict:
+    """Assemble the `TechnicalScore` components from the run's own OHLCV.
+
+    Every value comes from a producer that already exists, fed the bars
+    `_ohlcv` already cached for this run - no new fetch, no new formula. A
+    producer that cannot measure returns `None` (or a short dict), which leaves
+    the component out of the denominator rather than scoring it as 0 or 50.
+
+    The bar-count guards are per producer, not global: the oscillators need 30
+    bars, the 200-day structures need 205, `vcp_setup` needs its 90-day window.
+    A producer given too few bars returns its own short dict and the component
+    is simply absent.
+    """
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    volumes = data.get("volumes") or []
+    if len(closes) < 30:
+        return {}
+
+    from tradingagents.strategies.extended_indicators import (
+        chaikin_money_flow,
+        golden_death_cross,
+        ichimoku,
+        roc,
+    )
+    from tradingagents.strategies.mean_reversion import hurst_exponent
+    from tradingagents.strategies.momentum import momentum_12_1, rvol
+    from tradingagents.strategies.relative_strength import relative_strength_report
+    from tradingagents.strategies.size import atr
+    from tradingagents.strategies.swing import (
+        fib_levels,
+        pullback_setup,
+        rsi,
+        trend_architecture,
+        vcp_setup,
+    )
+    from tradingagents.strategies.technical_factors import (
+        adx,
+        aroon,
+        elder_thermometer,
+        keltner_channel,
+        mf_index,
+        obv_divergence,
+        rsi2,
+        stoch_rsi,
+        stochastic_oscillator,
+        williams_r,
+    )
+    from tradingagents.strategies.value_dip import (
+        _macd_hist,
+        bollinger_pct_b,
+        support_structure,
+        trigger_candle,
+        volume_dry_up,
+    )
+    from tradingagents.strategies.volatility_models import semivariance
+
+    last_close = float(closes[-1]) if closes[-1] else None
+    atr_v = atr(highs, lows, closes, window=14) if len(closes) >= 2 else None
+    vals: dict = {}
+
+    # --- trend -------------------------------------------------------------
+    a = adx(highs, lows, closes)
+    if a.get("adx") is not None:
+        vals["adx"] = a["adx"]
+    if a.get("di_plus") is not None and a.get("di_minus") is not None:
+        vals["di_spread"] = float(a["di_plus"]) - float(a["di_minus"])
+    arch = trend_architecture(closes)
+    # `stacked` is the producer's key; `sma_stack` is the component's name
+    for src_key, dst_key in (("above_sma200", "above_sma200"), ("stacked", "sma_stack")):
+        if arch.get(src_key) is not None:
+            vals[dst_key] = arch[src_key]
+    cross = golden_death_cross(closes)
+    if cross.get("golden") or cross.get("death"):
+        vals["golden_cross"] = bool(cross.get("golden"))
+    if len(closes) >= 52:
+        ich = ichimoku(highs, lows, closes)
+        if ich.get("above_cloud") is not None:
+            vals["ichimoku_above_cloud"] = ich["above_cloud"]
+    ar = aroon(highs, lows)
+    if ar.get("aroon_up") is not None and ar.get("aroon_down") is not None:
+        vals["aroon_osc"] = float(ar["aroon_up"]) - float(ar["aroon_down"])
+
+    # --- momentum ----------------------------------------------------------
+    r = rsi(closes)
+    if r is not None:
+        vals["rsi"] = r
+    st = stochastic_oscillator(highs, lows, closes)
+    if st.get("k") is not None:
+        vals["stoch_k"] = st["k"]
+    mf = mf_index(highs, lows, closes, volumes)
+    if mf is not None:
+        vals["mfi"] = mf
+    roc20 = roc(closes, 20)
+    if roc20 is not None:
+        vals["roc20"] = float(roc20) / 100.0  # the producer returns percent
+    m121 = momentum_12_1(closes)
+    if m121 is not None:
+        vals["momentum_12_1"] = m121
+    macd = _macd_hist(closes)
+    if isinstance(macd, tuple) and last_close:
+        hist = macd[2][-1] if macd[2] else None
+        if hist is not None:
+            vals["macd_hist_pct"] = float(hist) / last_close
+
+    # --- relative strength (one benchmark, the configured one) -------------
+    bench = _benchmark_closes()
+    if bench and len(bench) >= 2:
+        rep = relative_strength_report(closes, bench)
+        if rep.get("slope_pct") is not None:
+            vals["rs_slope_pct"] = rep["slope_pct"]  # percent per day
+        if rep.get("above_sma") is not None:
+            vals["rs_above_sma"] = rep["above_sma"]
+        if rep.get("new_high") is not None:
+            vals["rs_new_high"] = rep["new_high"]
+        if rep.get("divergence") is not None:
+            vals["rs_divergence"] = rep["divergence"]
+
+    # --- price structure ---------------------------------------------------
+    bb = bollinger_pct_b(closes)
+    if bb and bb.get("pct_b") is not None:
+        vals["bollinger_pct_b"] = bb["pct_b"]
+    if atr_v is not None:
+        kc = keltner_channel(closes, atr_value=atr_v)
+        if kc.get("pct") is not None:
+            vals["keltner_pct"] = kc["pct"]
+    sup = support_structure(closes, highs, lows, atr_value=atr_v)
+    dist = sup.get("distance_to_sma200_pct")
+    if dist is not None:
+        vals["near_sma200"] = abs(float(dist)) <= 3.0
+    if len(closes) >= 30:
+        hi = max(float(x) for x in highs[-120:]) if highs else None
+        lo = min(float(x) for x in lows[-120:]) if lows else None
+        fib = fib_levels(hi, lo)
+        if fib.get("0.382") is not None and last_close:
+            low_zone = float(fib["0.618"])
+            high_zone = float(fib["0.382"])
+            vals["fib_zone"] = bool(low_zone <= last_close <= high_zone)
+
+    # --- volume ------------------------------------------------------------
+    rv = rvol(volumes)
+    if rv is not None:
+        vals["rvol"] = rv
+    elder = elder_thermometer(volumes)
+    if elder.get("ratio") is not None:
+        vals["elder_ratio"] = elder["ratio"]
+    cmf = chaikin_money_flow(highs, lows, closes, volumes)
+    if cmf is not None:
+        vals["cmf"] = cmf
+    vdu = volume_dry_up(volumes)
+    if vdu.get("dry_up") is not None:
+        vals["volume_dry_up"] = vdu["dry_up"]
+
+    # --- breakout / pullback ----------------------------------------------
+    if len(closes) >= 90:
+        vcp = vcp_setup(closes, highs, lows, volumes)
+        if vcp.get("candidate") is not None:
+            vals["vcp_candidate"] = vcp["candidate"]
+        if vcp.get("near_breakout") is not None:
+            vals["near_breakout"] = vcp["near_breakout"]
+    pb = pullback_setup(closes, lows, volumes)
+    if pb.get("candidate") is not None:
+        vals["pullback_candidate"] = pb["candidate"]
+    tc = trigger_candle(closes, highs, lows, volumes)
+    if tc.get("trigger") is not None:
+        vals["trigger_candle"] = tc["trigger"]
+
+    # --- mean reversion ----------------------------------------------------
+    srsi = stoch_rsi(closes)
+    if srsi.get("stochrsi") is not None:
+        vals["stoch_rsi"] = srsi["stochrsi"]
+    r2 = rsi2(closes)
+    if r2 is not None:
+        vals["rsi2"] = r2
+    wr = williams_r(highs, lows, closes)
+    if wr is not None:
+        vals["williams_r"] = wr
+    rets = _daily_returns(closes)
+    if rets:
+        # the Hurst exponent is a property of the RETURN series, not the price
+        # level (mean_reversion.hurst_exponent:122)
+        h = hurst_exponent(rets)
+        if h is not None:
+            vals["hurst"] = h
+    obv = obv_divergence(closes, volumes)
+    if obv.get("bullish_div") is not None:
+        vals["obv_bullish_div"] = obv["bullish_div"]
+
+    # --- volatility (risk-increasing; the engine inverts it) ---------------
+    if atr_v is not None and last_close:
+        vals["atr_pct"] = float(atr_v) / last_close
+    sem = semivariance(closes)
+    if sem.get("sqrt_rs_minus") is not None:
+        vals["sqrt_rs_minus"] = sem["sqrt_rs_minus"]
+
+    # --- breadth -----------------------------------------------------------
+    # Market-wide breadth needs a {name: closes} PANEL; this call has one
+    # name's bars, and a panel fetched per tool call is not a read this leaf
+    # should pay for. The component stays declared and absent, and the engine
+    # prints the gap (coverage 95/100) rather than a sector proxy standing in
+    # for the market (`strategies/market_breadth.py` is the producer).
+    return vals
+
+
+def _render_technical_score(ticker: str, res: dict) -> str:
+    """Render the score dict: categories, weights, coverage, gap, basis."""
+    lines = [
+        f"## TechnicalScore - {ticker} (advisory; "
+        f"{len(res.get('measured') or [])} of "
+        f"{len(res.get('components') or {})} components measured)",
+        "",
+        "Nine category sub-scores over the run's own bars. Advisory only: never a "
+        "gate, never a size, never a forecast.",
+        "",
+    ]
+    for cat, entry in (res.get("categories") or {}).items():
+        score = entry.get("score")
+        cov = entry.get("coverage")
+        if score is None:
+            lines.append(
+                f"- {cat} (weight {entry.get('weight'):g}): unavailable - "
+                f"{entry.get('withheld')}"
+            )
+            continue
+        lines.append(
+            f"- {cat} (weight {entry.get('weight'):g}): {score:.1f}/100"
+            + (f" ({entry.get('band')})" if entry.get("band") else "")
+            + f" - coverage {cov:.0%} over {len(entry.get('present') or [])} of "
+            f"{len(entry.get('components') or {})} components "
+            f"{(entry.get('present') or [])}"
+        )
+    score = res.get("score")
+    if score is None:
+        lines.append(f"- composite: unavailable - {res.get('withheld')}")
+    else:
+        w = res.get("weights") or {}
+        w_txt = (
+            "owner weights "
+            + ", ".join(f"{k}={v:g}" for k, v in sorted(w.items()))
+            if w
+            else "owner weights (trend 20, momentum 18, RS 12, structure 12, "
+            "volume 10, breakout 10, mean-reversion 8, volatility 5, breadth 5)"
+        )
+        lines.append(
+            f"- composite [{res.get('status')}]: {score:.1f}/100"
+            + (f" ({res.get('bands')})" if res.get("bands") else "")
+            + f" - {w_txt}, renormalised over the categories measured; "
+            f"coverage {res.get('coverage'):.0%}"
+        )
+    absent = res.get("absent") or []
+    if absent:
+        lines.append("")
+        lines.append(
+            f"not measured (NA, never 0): {', '.join(absent)} - "
+            "market-wide breadth needs a panel this call does not fetch "
+            "(strategies/market_breadth.py); the rest depend on history the "
+            "series did not carry"
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_technical_score(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """TechnicalScore: nine advisory 0-100 category sub-scores (trend, momentum,
+    relative strength, price structure, volume, breakout, mean reversion,
+    volatility, breadth) over the run's own price bars, plus their weighted
+    composite.
+
+    Every component is produced by an existing indicator function over the same
+    bars; the non-monotonic inputs (RSI, stochastic, StochRSI, RSI2, Williams
+    %R, Bollinger %b, MFI, the Elder thermometer, Keltner %b) are band-mapped
+    over the bands their own consumers already read, so a `hot` RSI does not
+    score like a `strong` one. Advisory only - it never sets a rating, a
+    position size or a gate. Gated by ``enable_technical_score``.
+    """
+    if not _r3_flag("enable_technical_score"):
+        return (
+            "technical score unavailable: the engine is gated off "
+            "(enable_technical_score)"
+        )
+    try:
+        from tradingagents.strategies.technical_score import technical_score
+
+        vals = _technical_components(ticker)
+        if not vals:
+            return (
+                f"technical score unavailable for {ticker}: fewer than 30 bars "
+                "or no indicator could be measured"
+            )
+        res = technical_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"technical score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_technical_score(ticker, res)
+    except Exception as exc:  # noqa: BLE001
+        return f"technical score unavailable for {ticker}: render failed ({exc})"
+
+
 @tool
 def get_tail_risk(
     ticker: Annotated[str, "ticker symbol"],

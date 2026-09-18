@@ -131,6 +131,10 @@ involved. This is the "compute, don't narrate" core.
 - `fundamental_score.py` — WP-2: `FQS`/`FGS`/`VS`/`FRS` thin wrappers over `factors.category_scores` with their own
   band tables, the `RESEARCH_ONLY` composite (`Σw·s/Σw` over present sub-scores), `dcf_confidence` (four measured
   legs → 0-1, capped at 0.6 when a leg is unreadable) and `dcf_upside_scaled`.
+- `technical_score.py` — WP-3: the nine `TechnicalScore` category sub-scores (`trend` 20 … `breadth` 5) over a flat
+  `{component: raw}` dict, every non-monotonic input band-mapped over its producer's own edges (`BANDS`), every
+  monotone one ramped (`RAMPS`), one advisory band table of its own, and a composite renormalised over the categories
+  that could be measured.
 - `alpha_health.py` — round-3 S8 `score_evaluation_rows` (mean rank IC + IC IR reusing
   `sentiment_research.rolling_information_coefficient`, rank-bucketed forward returns + monotonicity, coverage,
   rank-autocorrelation stability; unavailable below the observation floor; rows are inputs to DSR/PBO, never a

@@ -91,6 +91,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_form4_insider,
     get_fundamentals,
     get_fundamental_score,
+    get_technical_score,
     get_fx_snapshot,
     get_gamma_profile,
     get_gap_type,
@@ -467,6 +468,8 @@ def fundamentals_company_tools() -> list:
             ]
     if _enabled("enable_fundamental_score"):
         tools.append(get_fundamental_score)
+    if _enabled("enable_technical_score"):
+        tools.append(get_technical_score)
     return tools
 
 

@@ -395,6 +395,17 @@ has changed before); never assume an endpoint works — the SDK's
   label="quality composite")` and print the identical basis string. `QUALITY_DIRECTIONS` / `QUALITY_BANDS` /
   `quality_band` / `enable_quality_composite` are untouched. Tests: `test_quality_composite.py` ->
   `test_category_scores.py`, 12 tests re-pointed; 44 passed across it + `test_round3_wiring.py`. Live docs re-pointed.
+- 2026-09-17 `(working tree)` - **WP-3 landed: the `TechnicalScore` engine** (`strategies/technical_score.py`,
+  `volatility_models.semivariance`, leaf `get_technical_score`, run-card block, gate `enable_technical_score`). Nine
+  category sub-scores over 40 components, all from the run's own cached bars; every non-monotonic input band-mapped over
+  its producer's own edges (a first draft had five tables inverted - the smoke test caught it); `NA != 0` throughout; a
+  count floor capped at the category's own size. **Two producer-side corrections:** the RS level is a scale-dependent
+  price ratio and is not a component (the scale-free `rs_trend.above_sma` replaces it), and `regime.vol_percentile`
+  returns `0.5` on failure (a fabricated neutral) so the leaf does not consume it - the defect's home is WP-4.
+  `semivariance` lands with `RS- + RS+ = RV` exact and `None` below the floor. Both card keys are now written only when
+  their own gate is on, so a gate-off run's card is byte-identical. Live MSFT 61.25 / NVDA 55.34 (both neutral,
+  coverage 0.95). `test_technical_score.py` +30; 72 passed across the technical/fundamental/gate suites. **Phase 0 exit
+  recorded in the plan §9** (engine 4454/5 skipped, executor 1105, web 149).
 - 2026-09-17 `(working tree)` - **WP-2 landed: the `FundamentalScore` engine** (`strategies/fundamental_score.py`,
   `strategies/factor_schema.py`, leaf `get_fundamental_score`, run-card block, gate `enable_fundamental_score`). Four
   advisory category sub-scores (FQS/FGS/VS/FRS) as thin wrappers over `factors.category_scores`, each with its own band

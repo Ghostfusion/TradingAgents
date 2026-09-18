@@ -689,6 +689,29 @@ score; (e) `TechnicalScore` never touches `risk/sizing.py`.
 
 **Gate.** `enable_technical_score`.
 
+**Acceptance - MET 2026-09-17.** (a) Every non-monotonic input's favourable end
+scores strictly higher than its unfavourable end, table-driven over the
+producers' own bands - RSI 60 (`strong`) 85 vs RSI 80 (`hot`) 45 is the named
+case; (b) dropping a category lowers coverage by exactly that category's weight
+(20/100 for trend) and the extremes converge toward the mean of what is left;
+(c) all-`None` returns `None` at 0 coverage with the floor in the reason; (d) a
+reader recomputing `Σw·s/Σw` from the printed attribution gets the printed score;
+(e) an AST guard asserts the module imports and touches nothing on the sizing
+path.
+
+**Live (MSFT and NVDA, 2026-09-17, the run's own cached bars):** 35 of 40
+components measured, composite `61.25` (neutral) and `55.34` (neutral) at
+`coverage 0.95`. The absent five are `golden_cross` (the producer reports only a
+*fresh* 50/200 cross, so most days there is no state to read), `vol_percentile`
+(the fabricated-neutral defect above), and the three breadth components (no panel
+in a single-name call - `strategies/market_breadth.py` is the producer and
+`P0-2`'s panel is its run-time source).
+
+**Two producer-side corrections this pass:** the RS **level** (`rs_series`, a
+price ratio) is scale-dependent and is therefore **not** a component - the
+scale-free `rs_trend.above_sma` takes its place; and `regime.vol_percentile`'s
+`0.5`-on-failure is recorded as a defect with its home in WP-4.
+
 ### 5.3 WP-4 — `RegimeScore`
 
 **Objective.** The environment, not the name. **Prerequisites first, and they are
@@ -997,6 +1020,17 @@ feeling. A phase that cannot state its exit criterion does not start.
 - **Suites unchanged:** engine **4402 passed / 5 skipped**, executor **1105**,
   web **149** (the baselines at `0ce42b3`; new tests raise the count and the plan
   records the new number in the same commit).
+
+**Exit - MET 2026-09-17.** All nine prerequisites landed (P0-1, P0-3...P0-9;
+**P0-2 is the one item that cannot close** - the EODHD Extended Fundamentals plan
+is support-gated on the vendor side, so the panel harness has no live fetch to
+verify against; the item stays open with that reason rather than shipping an
+unverifiable script). The five §14 defects are fixed with failing-first tests, the
+kernel's five acceptance tests pass including the three mutations, and the suite
+counts at this commit are **engine 4454 passed / 5 skipped** (the 4402 baseline
+plus P0-1/P0-3/P0-4/P0-5/P0-6/P0-7/P0-8/WP-1), **executor 1105**, **web 149** -
+the last two unchanged from their baselines, which is the point of recording
+them.
 
 ### Phase A — the kernel in production, on one engine (WP-2, WP-3)
 

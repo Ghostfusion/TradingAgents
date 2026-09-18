@@ -326,6 +326,9 @@ quality bands - never `decision_guardrail.SCORE_BANDS`),
 `enable_fundamental_score` (WP-2: the four `FundamentalScore` category
 sub-scores over the peer panel + their `RESEARCH_ONLY` composite; with it off the
 tool is not in any toolset at all),
+`enable_technical_score` (WP-3: the nine `TechnicalScore` category sub-scores
+over the run's own bars + their weighted composite, with the non-monotonic inputs
+band-mapped over their producers' own edges),
 `enable_score_eval_rows` (S8: `alpha_health.score_evaluation_rows`),
 `enable_weighted_sentiment_window` (S7: `weighted_rolling_sentiment`, the
 10-day exponential window plus the `min_history` warm-up guard), and

@@ -80,6 +80,7 @@ def _config_hash() -> str:
             # Score engines (docs/scores/IMPLEMENTATION_PLAN.md §9): each engine
             # gate changes what a run emits, so it must move this hash too.
             "enable_fundamental_score",
+            "enable_technical_score",
         )
         if k in DEFAULT_CONFIG
     }

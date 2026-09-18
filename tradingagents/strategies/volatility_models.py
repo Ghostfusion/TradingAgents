@@ -5,6 +5,9 @@ realized vol in ``regime.py``:
 
 - Parkinson high-low range estimator (intraday range, day-only estimate),
 - Garman-Klass OHLC estimator (range + open-close gap, day-only estimate),
+- upside/downside semivariance over the close-to-close series, whose
+  decomposition ``RS- + RS+ = RV`` is exact (the score consumes ``sqrt`` of the
+  downside leg - `TechnicalScore.md` §4, pinned in `RiskScore.md` §0.3),
 - EWMA volatility (RiskMetrics lambda=0.94) — the standard risk-neutral
   vol forecaster,
 - GARCH(1,1) conditional volatility via pure-NumPy MLE (long-run vol =
@@ -20,6 +23,7 @@ from __future__ import annotations
 import math
 
 __all__ = [
+    "semivariance",
     "parkinson_vol",
     "garman_klass_vol",
     "yang_zhang_vol",
@@ -42,6 +46,93 @@ def _clean(vals) -> list[float]:
             continue
         if math.isfinite(f) and f > 0:
             out.append(f)
+    return out
+
+
+def semivariance(
+    closes: list,
+    window: int | None = None,
+    *,
+    min_obs: int = 20,
+    periods: float = _DAYS,
+) -> dict:
+    """Upside/downside semivariance over the close-to-close return series.
+
+    ``RS- = sum(min(r,0)^2)/n`` and ``RS+ = sum(max(r,0)^2)/n`` over the SAME
+    ``n`` returns (the full sample, not the count of each sign) - which is what
+    makes the decomposition exact:
+
+        ``RS- + RS+ = sum(r^2)/n = RV``
+
+    exactly, not approximately (Patton & Sheppard 2015). A conditional
+    ``sum(r^2)/n_down`` - the other thing "downside variance" often means -
+    does **not** satisfy this and is not what this returns; neither is the
+    ``sigma_up/sigma_down`` ratio, which is confounded with drift and partly
+    re-measures momentum.
+
+    The persistent leg is ``rs_minus``: it is the one that keeps rising through
+    a decline. ``sqrt`` of either leg is a volatility in return units and is
+    what a score consumes; the raw values are squared-return units.
+
+    Returns ``{"rs_minus", "rs_plus", "rv", "sqrt_rs_minus", "sqrt_rs_plus",
+    "asymmetry", "n", "annualized", "basis"}``. Every leg is ``None`` (with the
+    reason in ``basis``) below ``min_obs`` returns - never ``0``, which would
+    read as "no downside risk at all".
+    """
+    rets: list[float] = []
+    cs = [c for c in (closes or []) if c is not None]
+    try:
+        cs = [float(c) for c in cs]
+    except (TypeError, ValueError):
+        cs = []
+    for i in range(1, len(cs)):
+        prev = cs[i - 1]
+        if prev:
+            r = cs[i] / prev - 1.0
+            if math.isfinite(r):
+                rets.append(r)
+    if window:
+        rets = rets[-int(window):]
+    n = len(rets)
+    empty = {
+        "rs_minus": None,
+        "rs_plus": None,
+        "rv": None,
+        "sqrt_rs_minus": None,
+        "sqrt_rs_plus": None,
+        "asymmetry": None,
+        "n": n,
+        "annualized": None,
+        "basis": (
+            f"semivariance unavailable: {n} return(s), needs {int(min_obs)} "
+            f"(None, never 0 - a missing downside leg is not 'no downside')"
+        ),
+    }
+    if n < int(min_obs):
+        return empty
+    down = sum(min(r, 0.0) ** 2 for r in rets) / n
+    up = sum(max(r, 0.0) ** 2 for r in rets) / n
+    rv = sum(r * r for r in rets) / n
+    out = {
+        "rs_minus": down,
+        "rs_plus": up,
+        "rv": rv,
+        "sqrt_rs_minus": math.sqrt(down),
+        "sqrt_rs_plus": math.sqrt(up),
+        "asymmetry": (down / up) if up > 0 else None,
+        "n": n,
+        "annualized": {
+            "sqrt_rs_minus": math.sqrt(down * periods),
+            "sqrt_rs_plus": math.sqrt(up * periods),
+            "rv": math.sqrt(rv * periods),
+        },
+        "basis": (
+            f"semivariance over {n} close-to-close return(s) (window "
+            f"{int(window) if window else 'all'}); RS- + RS+ = RV exactly "
+            f"({down:.6g} + {up:.6g} = {rv:.6g}); asymmetry RS-/RS+ "
+            f"{'n/a' if up <= 0 else f'{down / up:.3f}'}"
+        ),
+    }
     return out
 
 

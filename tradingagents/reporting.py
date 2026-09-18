@@ -921,6 +921,61 @@ def _run_card_fundamental_score(ticker: str, final_state: dict, cfg: dict) -> di
     return out
 
 
+def _run_card_technical_score(ticker: str, cfg: dict) -> dict | None:
+    """TechnicalScore block for run_card.json (WP-3 / WP-9).
+
+    The nine category sub-scores with their weights, bands and coverage, plus
+    the composite and the components it was built from - so the card carries a
+    number a reader can recompute, not a quote of the tool's prose. The
+    components come from the run's own cached bars, so this costs no vendor
+    call. Returns ``None`` when the gate is off (the card is then byte-identical
+    to a pre-engine tree).
+    """
+    if not (cfg or {}).get("enable_technical_score"):
+        return None
+    try:
+        from tradingagents.agents.utils.analysis_tools import _technical_components
+        from tradingagents.strategies.technical_score import technical_score
+
+        vals = _technical_components(ticker)
+        if not vals:
+            return {"status": None, "score": None, "categories": {},
+                    "unavailable": "no component could be measured from the run's bars"}
+        res = technical_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {
+            "status": None,
+            "score": None,
+            "categories": {},
+            "unavailable": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "band": res.get("bands"),
+        "coverage": res.get("coverage"),
+        "weights": res.get("weights") or "owner",
+        "categories": {
+            cat: {
+                "score": entry.get("score"),
+                "band": entry.get("band"),
+                "coverage": entry.get("coverage"),
+                "weight": entry.get("weight"),
+                "components": entry.get("present"),
+                "withheld": entry.get("withheld"),
+            }
+            for cat, entry in (res.get("categories") or {}).items()
+        },
+        "components": {
+            name: entry.get("aligned")
+            for name, entry in (res.get("components") or {}).items()
+            if entry.get("aligned") is not None
+        },
+        "absent": res.get("absent"),
+        "basis": res.get("basis"),
+    }
+
+
 def _run_card_data_absence(save_path) -> dict | None:
     """Chain-end data-absence reason for run_card.json (yfinance P1).
 
@@ -1508,12 +1563,6 @@ def write_report_tree(
             # tool_evidence.json) or the legacy LLM-selected path, which has
             # neither. Advisory; additive key.
             "evidence": _run_card_evidence(final_state, cfg),
-            # WP-2/WP-9: the FundamentalScore engine's advisory block - the four
-            # category sub-scores with their coverage and the RESEARCH_ONLY
-            # composite, so the card carries the numbers and their attribution
-            # rather than a quote of the tool's prose. Absent (null) when the
-            # gate is off. Advisory; additive key.
-            "fundamental_score": _run_card_fundamental_score(ticker, final_state, cfg),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),
@@ -1525,6 +1574,16 @@ def write_report_tree(
             "analyst_consistency": _run_card_analyst_consistency(save_path),
             "sections": [],
         }
+        # Score-engine blocks (WP-2/WP-9, WP-3/WP-9): one additive key per
+        # engine, each present ONLY when its own gate is on - so a run with the
+        # engines off writes a card byte-identical to a pre-engine tree
+        # (docs/scores/IMPLEMENTATION_PLAN.md §6, acceptance (a)). Advisory.
+        for _key, _block in (
+            ("fundamental_score", _run_card_fundamental_score(ticker, final_state, cfg)),
+            ("technical_score", _run_card_technical_score(ticker, cfg)),
+        ):
+            if _block is not None:
+                card[_key] = _block
         if emit_run_artifacts:
             (save_path / "run_card.json").write_text(
                 _json.dumps(card, indent=2, default=str), encoding="utf-8"
