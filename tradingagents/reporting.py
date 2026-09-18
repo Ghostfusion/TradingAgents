@@ -1039,6 +1039,56 @@ def _run_card_trade_score(
     }
 
 
+def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
+    """The run's score snapshot for run_card.json (WP-12 `P12-6`).
+
+    One additive key carrying **the same block the debate read**, so a reader can
+    check that the number in the prompt is the number in the card without
+    recomputing anything, plus the three status axes of §4.6. Returns ``None``
+    when the gate is off, which is what keeps a gate-off card byte-identical to a
+    pre-scorecard tree (the release-level invariant, §9.3).
+    """
+    if not (cfg or {}).get("enable_quant_scorecard"):
+        return None
+    snapshot = (final_state or {}).get("quant_scorecard")
+    if not snapshot:
+        return None
+    try:
+        from tradingagents.strategies.quant_scorecard import (
+            format_quant_scorecard,
+            scorecard_status,
+        )
+
+        status = scorecard_status(snapshot)
+        block = format_quant_scorecard(snapshot)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {"unavailable": f"{type(exc).__name__}: {exc}"}
+    return {
+        "ticker": snapshot.get("ticker"),
+        "trade_date": snapshot.get("trade_date"),
+        "scorecard_status": status["scorecard_status"],
+        "vector_status": status["vector_status"],
+        "movement": status["movement"],
+        "enabled": status["enabled"],
+        "disabled": status["disabled"],
+        "present": snapshot.get("present"),
+        "absent": snapshot.get("absent"),
+        "engines": {
+            name: {
+                "enabled": entry.get("enabled"),
+                "score": entry.get("score"),
+                "coverage": entry.get("coverage"),
+                "band": entry.get("band"),
+                "status": entry.get("status"),
+                "reason": entry.get("reason"),
+            }
+            for name, entry in (snapshot.get("engines") or {}).items()
+        },
+        # the rendered block itself, so "the debate's number" is checkable here
+        "block": block,
+    }
+
+
 def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
     """EventScore block for run_card.json (WP-8 / WP-9).
 
@@ -1898,6 +1948,9 @@ def write_report_tree(
             ("risk_score", _run_card_risk_score(ticker, cfg)),
             ("sentiment_score", _run_card_sentiment_score(ticker, cfg, final_state)),
             ("news_score", _run_card_news_score(ticker, cfg, final_state)),
+            # WP-12/P12-6: the run's own score snapshot - the block the debate
+            # read, plus §4.6's status axes. Present only when its gate is on.
+            ("quant_scorecard", _run_card_quant_scorecard(final_state, cfg)),
         ):
             if _block is not None:
                 card[_key] = _block

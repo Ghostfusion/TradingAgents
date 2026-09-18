@@ -52,6 +52,7 @@ __all__ = [
     "engine_scores",
     "format_quant_scorecard",
     "quant_scorecard",
+    "scorecard_status",
     "split_scorecard_block",
 ]
 
@@ -476,6 +477,46 @@ def _pair_line(pairs: list[str], trailing: str | None = None) -> str:
     return line
 
 
+def scorecard_status(snapshot: dict | None) -> dict:
+    """§4.6's axes: enablement, measurement, movement - printed, never inferred.
+
+    Enablement is `DISABLED` / `PARTIAL` / `COMPLETE` over the engines' **own**
+    gates, and the enabled and disabled names travel with it. A partial scorecard
+    read as a complete one is the same failure as a partial engine printed as a
+    whole one (master rule 3), and D1's whole point is that the partial state is
+    useful during dark launch only if it is **explicit**.
+
+    Measurement is the vector's rung, taken verbatim from the composite the engine
+    produced - never re-derived here, so there is one producer for it too.
+    `trade_score`'s vocabulary is `RESEARCH_ONLY` -> `VALIDATED` -> `PRODUCTION`;
+    §4.6's ladder names the promoted rung `ACTIVE`, and the value printed is the
+    engine's own word for it.
+
+    Movement is `UNAVAILABLE` until a prior observation exists under the **same
+    validated** vector (§4.3/§9 D2). The hard invariant is *no validated vector ->
+    no delta -> no movement*, so this is the honest default rather than a
+    placeholder: `P12-8` adds the store that can make it real.
+    """
+    engines = (snapshot or {}).get("engines") or {}
+    enabled = [name for name, e in engines.items() if e.get("enabled")]
+    disabled = [name for name, e in engines.items() if not e.get("enabled")]
+    measured = [n for n in enabled if (engines.get(n) or {}).get("score") is not None]
+    if not enabled:
+        status = "DISABLED"
+    elif disabled or len(measured) != len(enabled):
+        status = "PARTIAL"
+    else:
+        status = "COMPLETE"
+    composite = engines.get("trade") or {}
+    return {
+        "scorecard_status": status,
+        "enabled": enabled,
+        "disabled": disabled,
+        "vector_status": composite.get("status") or "UNAVAILABLE",
+        "movement": "UNAVAILABLE",
+    }
+
+
 def engine_scores(snapshot: dict | None) -> dict[str, float | None]:
     """The four composite engines' scores from a snapshot, as the gates decided.
 
@@ -581,10 +622,26 @@ def format_quant_scorecard(snapshot: dict | None) -> str:
     ]
     lines.append(f"absent={','.join(missing) if missing else 'none'}")
 
+    # §4.6: enablement, measurement and movement, all printed rather than left to
+    # inference. No digits in any of these lines - see the ordering rule above.
+    status = scorecard_status(snap)
+    lines.append(
+        f"Scorecard status: {status['scorecard_status']} - "
+        f"enabled: {', '.join(status['enabled']) or 'none'}; "
+        f"disabled: {', '.join(status['disabled']) or 'none'}"
+    )
+    lines.append(f"Vector status: {status['vector_status']}")
+    lines.append(f"Movement: {status['movement']}")
+
     text = "\n".join(lines)
     if len(text) > SCORECARD_MAX_CHARS:
         # The bound is on the block itself (§4.4). Only the absent list can grow
         # unboundedly here, and it is the least load-bearing line, so trim it
         # rather than truncate a number.
-        text = "\n".join(lines[:-1] + [f"absent={len(missing)} engines (see the card)"])
+        text = "\n".join(
+            f"absent={len(missing)} engines (see the card)"
+            if line.startswith("absent=")
+            else line
+            for line in lines
+        )
     return text

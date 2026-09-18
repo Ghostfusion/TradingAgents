@@ -388,6 +388,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-6` + `P12-7` landed: the card key and §4.6's explicit status.** `enable_quant_scorecard`
+  (default off) governs the scorecard SURFACE only; the engine gates decide what populates it. With the gate on `run_card.json`
+  gains exactly one key, `quant_scorecard`, carrying **the same rendered block the debate read** plus each engine's
+  `score`/`coverage`/`band`/`enabled`/`reason` - so "the prompt's number is the card's number" is checkable in the artifact. Gate
+  off: the key is absent, not empty. **§4.6's three axes are printed:** `Scorecard status: DISABLED|PARTIAL|COMPLETE - enabled:
+  ...; disabled: ...`, `Vector status:`, `Movement:`. **`COMPLETE` requires every engine gate on AND every engine measured** - a
+  scorecard with three engines switched off is `PARTIAL`, which is what stops a half-configured run reading as a whole one. Vector
+  status is the composite's OWN status word (one producer): `trade_score` emits `RESEARCH_ONLY`/`VALIDATED`/`PRODUCTION`, and
+  §4.6's `ACTIVE` names the promoted rung. `Movement: UNAVAILABLE` is the honest default (no validated vector -> no delta -> no
+  movement); `P12-8` adds the store. The status lines are digit-free by construction, for the same reason the block's ordering
+  rule exists. 90 passed, including §9.3's invariant in its strong form: adding the block leaves everything after it byte-identical
+  to the gate-off context.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-5` / D-8 FIXED: one vector, one composite, on both surfaces.** `_trade_score_engines`
   measured all four engines unconditionally while `_run_card_trade_score` read only the sibling card blocks (present only when
   that engine's gate is on), so with `enable_trade_score` on and `enable_risk_score` off the leaf applied the owner's `K=0.20` to

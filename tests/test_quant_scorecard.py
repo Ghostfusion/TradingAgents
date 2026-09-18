@@ -636,7 +636,7 @@ def test_a_gated_off_engine_is_not_printed_and_not_called_absent():
     text = qs.format_quant_scorecard(snap)
     assert "risk_score" not in text
     assert "technical_score" not in text
-    assert text.strip().endswith("absent=none")
+    assert "absent=none" in text
 
 
 def test_the_block_states_its_purpose_and_stays_within_its_bound():
@@ -748,6 +748,171 @@ def test_splitting_the_block_returns_the_rest_untouched():
     # no block -> nothing is split, which is the gate-off case
     assert qs.split_scorecard_block(rest) == (None, rest)
     assert qs.split_scorecard_block("") == (None, "")
+
+
+def test_the_block_prints_its_three_status_axes_and_names_the_engines():
+    """§4.6: enablement, measurement and movement are printed, not inferred.
+
+    The names come from the snapshot's own engine entries, so `trade` (the
+    composite's own gate) is listed beside the drivers - it is one of the engines
+    whose gate decides what the scorecard is.
+    """
+    snap = _render(
+        scores={"fundamental": 92.0, "technical": 85.0, "risk": 35.0},
+        enabled={"trade", "fundamental", "technical", "risk"},
+        status="RESEARCH_ONLY",
+    )
+    text = qs.format_quant_scorecard(snap)
+    assert (
+        "Scorecard status: PARTIAL - enabled: fundamental, technical, risk, trade; "
+        "disabled: regime, sentiment, news, event" in text
+    )
+    assert "Vector status: RESEARCH_ONLY" in text
+    assert "Movement: UNAVAILABLE" in text
+
+
+def test_a_fully_gated_and_measured_scorecard_reads_complete():
+    """`COMPLETE` needs **every** engine gate on and every engine measured.
+
+    §4.6's definition is deliberately strict: a scorecard with three engines
+    switched off is `PARTIAL`, not complete-with-fewer-parts. That is what stops
+    a half-configured run reading as a whole one (master rule 3).
+    """
+    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every.update(
+        {"fundamental": 92.0, "technical": 85.0, "regime": 78.0, "risk": 35.0}
+    )
+    snap = _render(
+        scores=every, enabled=set(qs.ENGINE_GATES), status="RESEARCH_ONLY"
+    )
+    text = qs.format_quant_scorecard(snap)
+    assert "Scorecard status: COMPLETE" in text
+    assert "disabled: none" in text
+
+
+def test_a_scorecard_with_engines_switched_off_is_partial_not_complete():
+    """The same rule in the other direction - the case dark launch actually hits."""
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        enabled={"trade", "fundamental", "technical", "regime", "risk"},
+        status="RESEARCH_ONLY",
+    )
+    text = qs.format_quant_scorecard(snap)
+    assert "Scorecard status: PARTIAL" in text
+    assert "disabled: sentiment, news, event" in text
+
+
+def test_an_enabled_engine_that_could_not_measure_makes_it_partial():
+    """A half-measured scorecard must not read as a whole one (master rule 3)."""
+    snap = _render(scores={"fundamental": 92.0})
+    text = qs.format_quant_scorecard(snap)
+    assert "Scorecard status: PARTIAL" in text
+
+
+def test_the_status_lines_add_no_spurious_registry_keys():
+    from tradingagents.agents.researchers.structured_debate import (
+        _parse_key_value_lines,
+    )
+
+    snap = _render(
+        scores={"fundamental": 92.0},
+        enabled={"trade", "fundamental"},
+        status="RESEARCH_ONLY",
+    )
+    parsed = _parse_key_value_lines(qs.format_quant_scorecard(snap))
+    assert set(parsed) == {"trade_score", "fundamental_score"}
+
+
+def test_movement_is_unavailable_until_a_validated_vector_exists():
+    """§4.3/§9 D2's hard invariant, as a printed default.
+
+    `no validated vector -> no delta -> no movement`. The store is `P12-8`; until
+    then the honest output is `UNAVAILABLE`, never a manufactured delta.
+    """
+    snap = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    assert qs.scorecard_status(snap)["movement"] == "UNAVAILABLE"
+    assert "trade_delta" not in qs.format_quant_scorecard(snap)
+    assert "trade_prev" not in qs.format_quant_scorecard(snap)
+
+
+def test_the_card_gains_no_scorecard_key_when_the_gate_is_off():
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    snap = _render(scores={"fundamental": 92.0})
+    assert _run_card_quant_scorecard({"quant_scorecard": snap}, {}) is None
+    assert (
+        _run_card_quant_scorecard(
+            {"quant_scorecard": snap}, {"enable_quant_scorecard": False}
+        )
+        is None
+    )
+
+
+def test_the_card_key_carries_the_same_block_the_debate_read():
+    """The gate-on card gains exactly one key, and its block is the prompt's block."""
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every.update(
+        {"fundamental": 92.0, "technical": 85.0, "regime": 78.0, "risk": 35.0}
+    )
+    snap = _render(
+        scores=every,
+        coverage={"trade": 0.95},
+        enabled=set(qs.ENGINE_GATES),
+        status="RESEARCH_ONLY",
+    )
+    block = _run_card_quant_scorecard(
+        {"quant_scorecard": snap}, {"enable_quant_scorecard": True}
+    )
+    assert block is not None
+    assert block["block"] == qs.format_quant_scorecard(snap)
+    assert block["scorecard_status"] == "COMPLETE"
+    assert block["engines"]["risk"]["score"] == 35.0
+    # the same number the rendered block prints
+    assert f"risk_score={block['engines']['risk']['score']}" in block["block"]
+
+
+def test_gate_off_leaves_the_context_and_the_card_unchanged():
+    """§9.3's release-level invariant, on the two surfaces it names.
+
+    Not "the block is short enough" and not a test detail: with the gate off
+    nothing about the existing surfaces may move. The strong form is that adding
+    the block changes **nothing else** in the context, which is what the
+    comparison below asserts.
+    """
+    import types
+
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    stub = types.SimpleNamespace(
+        config={"data_cache_dir": "C:/nonexistent-cache"},
+        _try_fetch_closes=lambda ticker: [],
+    )
+    snapshot = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    gated = TradingAgentsGraph._compiled_decision_context(
+        stub, "MSFT", {"quant_scorecard": snapshot}
+    )
+    ungated = TradingAgentsGraph._compiled_decision_context(stub, "MSFT", {})
+
+    assert gated.startswith(qs.SCORECARD_HEADER)
+    assert not ungated.startswith(qs.SCORECARD_HEADER)
+    # everything after the block is byte-identical to the gate-off context
+    assert gated.split("\n\n", 1)[1] == ungated
+    # and the card gains no key at all (absent, not empty)
+    assert _run_card_quant_scorecard({"quant_scorecard": snapshot}, {}) is None
+    assert (
+        _run_card_quant_scorecard(
+            {"quant_scorecard": snapshot}, {"enable_quant_scorecard": False}
+        )
+        is None
+    )
 
 
 def test_the_block_is_bounded_even_with_every_engine_absent():

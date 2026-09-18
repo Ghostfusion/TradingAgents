@@ -14,6 +14,16 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**WP-12 `P12-6` + `P12-7` — the card key, and the scorecard's status is explicit (2026-09-18).**
+
+- **`P12-6` — the gate and the card key.** `enable_quant_scorecard` (default **off**, added with `P12-2`) governs the scorecard **surface** only; the eight engine gates decide which engines populate it. With the gate on, `run_card.json` gains exactly one key, `quant_scorecard`, carrying **the same rendered block the debate read** plus the engines' `score`/`coverage`/`band`/`enabled`/`reason` — so "the number in the prompt is the number in the card" is checkable in the artifact rather than trusted. With the gate off the key is absent, not empty.
+- **`P12-7` — §4.6's three axes, printed.** `Scorecard status: DISABLED | PARTIAL | COMPLETE - enabled: …; disabled: …`, `Vector status:` and `Movement:`. Enablement is `COMPLETE` only when **every** engine gate is on and **every** engine measured — a scorecard with three engines switched off reads `PARTIAL`, which is what stops a half-configured run reading as a whole one (master rule 3). Measurement is the composite's **own** status word, taken verbatim so there is one producer for it; `trade_score`'s vocabulary is `RESEARCH_ONLY → VALIDATED → PRODUCTION`, and §4.6's `ACTIVE` names that promoted rung. Movement prints `UNAVAILABLE` — the honest default, since *no validated vector → no delta → no movement*; `P12-8` adds the store that can make it real.
+- **The status lines add no registry keys.** They are digit-free by construction, for the same reason the block's ordering rule exists: a digit after a word is a key `_parse_key_value_lines` will invent.
+
+Tests: 90 passed across `tests/test_quant_scorecard.py` (42) and `tests/test_trade_score.py`, including §9.3's release-level invariant asserted in its strong form — adding the block leaves **everything after it byte-identical** to the gate-off context, and the card key stays absent.
+
+**Web impact**: none — one additive `run_card.json` key, off by default.
+
 **WP-12 `P12-1`–`P12-3` — the research layer's one score snapshot, its state channel, and the block (2026-09-18).** The first three items of `docs/scores/ResearchLayerWiring.md` §7, all governed by `enable_quant_scorecard` (**default off**), so with the gate off the context and the card are byte-identical to a pre-scorecard tree.
 
 - **`P12-1` — `strategies/quant_scorecard.py::quant_scorecard(ticker, trade_date, cfg)`.** The single producer of the engines' numbers on the research surface: every engine is read through **its own public entry point**, with the run's date, and its result is returned **verbatim**. No alignment, no re-weighting, no substitution, no derived quantity — the module computes nothing itself. An engine whose gate is off, or which cannot measure, is absent **with its reason** (`NA ≠ 0`), and a legitimate `0.0` stays a measured value — both directions are tested, because treating a real zero as missing is the same defect inverted.
