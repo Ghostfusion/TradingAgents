@@ -388,6 +388,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-9` landed: the quant/LLM risk-disagreement detector (§5's weak form).** New
+  `strategies/score_disagreement.py` - a deterministic POST-debate check over material the run already produced: `RiskScore`'s
+  band from the snapshot against the risk debate's own words. **No new producer.** It **never changes anything** (the flag carries
+  no rating/size/score/gate - asserted). The LLM side is read with **RiskScore's own band vocabulary**, and the counts are
+  returned so the classification is checkable; the **structured path is preferred when it ran** (§5's "or", not both -
+  concatenating two disagreeing transcripts would tie the classifier). **Only opposite stances are a contradiction** (a
+  `moderate` on either side is a difference of degree); an unreadable side produces NO flag with its reason recorded, because a
+  guess would be a manufactured disagreement. Two surfaces: one additive `run_card.json` key `risk_disagreement`, and report
+  section **IVb** emitted only when the flag fires. Both gated by `enable_quant_scorecard`. `tests/test_score_disagreement.py`
+  new (15); 120 passed across it, `test_reporting.py`, `test_quant_scorecard.py`, `test_score_history.py`.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-8` landed: the score-history store and the held deltas.** New
   `strategies/score_history.py` - one JSONL row per scored run date under `<data_cache_dir>/score_history/<TICKER>.jsonl`,
   each row carrying the composite, its coverage and **the weight vector it scored under**. One row per date: re-running a date

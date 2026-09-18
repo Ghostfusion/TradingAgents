@@ -1039,6 +1039,27 @@ def _run_card_trade_score(
     }
 
 
+def _run_card_risk_disagreement(final_state: dict, cfg: dict) -> dict | None:
+    """The quant / LLM risk-disagreement flag (WP-12 `P12-9`).
+
+    §5's weak form: a deterministic post-debate check over material the run
+    already produced, emitted as one additive key. It **never** changes a score, a
+    rating, a size or a gate. Returns ``None`` when the scorecard gate is off, so
+    a gate-off card stays byte-identical.
+    """
+    if not (cfg or {}).get("enable_quant_scorecard"):
+        return None
+    snapshot = (final_state or {}).get("quant_scorecard")
+    if not snapshot:
+        return None
+    try:
+        from tradingagents.strategies.score_disagreement import risk_disagreement
+
+        return risk_disagreement(snapshot, final_state)
+    except Exception as exc:  # noqa: BLE001 - an advisory check must never cost the card
+        return {"flag": False, "unavailable": f"{type(exc).__name__}: {exc}"}
+
+
 def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
     """The run's score snapshot for run_card.json (WP-12 `P12-6`).
 
@@ -1710,6 +1731,25 @@ def write_report_tree(
             cc = final_state.get("computed_decision_context") or ""
             if cc and "Trade plan card" in cc:
                 sections.append(f"## IVa. Computed Decision Context (advisory)\n\n{cc}\n")
+            # WP-12/P12-9: the quant/LLM risk-disagreement flag, surfaced to the
+            # human reviewer (§5). Emitted only when the two sides actually
+            # contradict; a run where they agree gains no section.
+            try:
+                flag = _run_card_risk_disagreement(final_state, cfg) or {}
+            except Exception:  # noqa: BLE001 - advisory; never break the report
+                flag = {}
+            if flag.get("flag"):
+                sections.append(
+                    "## IVb. Quant / LLM risk disagreement (advisory)\n\n"
+                    f"- `RiskScore` band: **{flag.get('quant_band')}** "
+                    f"({flag.get('quant_stance')})\n"
+                    f"- risk debate reads: **{flag.get('llm_stance')}** "
+                    f"(bands named: {flag.get('llm_bands')})\n"
+                    f"- {flag.get('reason')}\n\n"
+                    "Neither side is changed by this flag: the score is not moved "
+                    "toward the debate, and the debate is not suppressed. The "
+                    "reviewer identifies the evidence causing the disagreement.\n"
+                )
 
         # 5. Portfolio Manager (mirrors the risk gate)
         if risk.get("judge_decision"):
@@ -1955,6 +1995,8 @@ def write_report_tree(
             # WP-12/P12-6: the run's own score snapshot - the block the debate
             # read, plus §4.6's status axes. Present only when its gate is on.
             ("quant_scorecard", _run_card_quant_scorecard(final_state, cfg)),
+            # WP-12/P12-9: the quant/LLM risk-disagreement flag (§5's weak form).
+            ("risk_disagreement", _run_card_risk_disagreement(final_state, cfg)),
         ):
             if _block is not None:
                 card[_key] = _block

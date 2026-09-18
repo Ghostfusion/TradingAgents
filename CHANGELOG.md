@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**WP-12 `P12-9` — the quant / LLM risk-disagreement detector (2026-09-18).** §5's proposal, built in **its weak form** — the form the owner asked for.
+
+- **`strategies/score_disagreement.py`.** A deterministic post-debate check over material the run already produced: `RiskScore`'s band from the score snapshot against the risk debate's own words. **No new producer** — both sides already exist.
+- **It never changes anything.** The flag carries both values and the reason; it is asserted to contain no rating, no size, no score and no gate. *"Quant `high risk`, debate reads favourable: identify the evidence causing the disagreement"* is worth more than either number alone; a detector that suppressed the LLM's read or moved the score toward it would destroy the measurement layer it protects.
+- **The LLM side is read with `RiskScore`'s own band vocabulary**, not a second invention, and the counts are returned so the classification is checkable rather than trusted. The structured path is preferred when it ran — §5's *"or"*, not both, because concatenating two disagreeing transcripts would tie the classifier into `undetermined` on a run where one side clearly spoke.
+- **Only opposite stances are a contradiction.** A `moderate` on either side is a difference of degree, so it does not fire. An unreadable side produces **no flag with its reason recorded** — a guess would be a manufactured disagreement, which is worse than none.
+- **Two surfaces:** one additive `run_card.json` key (`risk_disagreement`), and report section `IVb`, emitted **only when the flag fires** so a run where the two agree gains no section. Both are gated by `enable_quant_scorecard`, so gate-off is unchanged.
+
+Tests: `tests/test_score_disagreement.py` new (15), and 120 passed across it, `test_reporting.py`, `test_quant_scorecard.py` and `test_score_history.py` — including the two report-surface cases (the section appears on a contradiction and is absent on agreement, and absent with the gate off).
+
+**Web impact**: none — one additive `run_card.json` key and one conditional report section, both off by default.
+
 **WP-12 `P12-8` — the score-history store, and deltas held until the vector is validated (2026-09-18).** §4.3 calls movement "the highest-value part, and the one with no producer"; the repository had no way to say whether a `TradeScore` had risen `61 → 76` or fallen `91 → 76`.
 
 - **The store.** `strategies/score_history.py` — one JSONL row per scored run date under `<data_cache_dir>/score_history/<TICKER>.jsonl`, each row carrying the composite, its coverage and **the weight vector it scored under**. One row per date: re-running a date does not rewrite history, so an observation is never silently replaced by a later one.
