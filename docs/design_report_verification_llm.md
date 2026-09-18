@@ -380,8 +380,16 @@ limitation found so far; both have a reproducer).**
     mis-bound, the health leaf's value, the true current-assets value from the
     same tree, the fact that no gate outcome changed, and the decision. The tree
     states its own status instead of leaving it to be inferred.
-  - **A fresh tree is generated per affected ticker** (`AMKR AMZN ASML HPE IBM
+    - **A fresh tree is generated per affected ticker** (`AMKR AMZN ASML HPE IBM
     JCI LULU MSFT NFLX NVDA SIMO SMCI TSM VST WDC`, shallow depth, verify on).
+    **Six landed before the run was stopped on the owner's instruction**:
+    `AMKR_20260917_174353`, `AMZN_20260917_172613`, `ASML_20260917_181308`,
+    `HPE_20260917_180506`, `IBM_20260917_184255`, `JCI_20260917_185054` - and
+    **all six verify clean by the same scan** (their health leaf's
+    `current_assets` matches a `Current Assets` row and no non-current one), so
+    the fixed reader is confirmed end to end on a fresh vendor payload rather
+    than only on the corrected reader's unit tests. The remaining nine tickers
+    keep their `POISONED_LEAF.md` markers and are regenerated on demand.
 
 **New from the 2026-09-16 four-symbol round (both are verifier noise on
 correct reports; each has a reproducer).**

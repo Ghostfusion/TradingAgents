@@ -14,6 +14,16 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**The poisoned-tree regeneration landed six fresh trees, all verified clean, before the run was stopped (2026-09-17).** No code change: the corpus half of the previous pass's decision.
+- **Six of the fifteen affected tickers were regenerated** (shallow depth, `--verify`, production env with `TRADINGAGENTS_ANALYST_FORCED_TOOLS` popped): `AMKR_20260917_174353`, `AMZN_20260917_172613`, `ASML_20260917_181308`, `HPE_20260917_180506`, `IBM_20260917_184255`, `JCI_20260917_185054`. The run was stopped on the owner's instruction; the remaining nine tickers keep their `POISONED_LEAF.md` markers and are regenerated on demand.
+- **All six verify clean by the same scan that found the poison** - each fresh tree's `get_balance_sheet_health` leaf reports a `current_assets` that matches a `Current Assets` row of that tree's own `get_balance_sheet` leaf and no non-current row. That is the fixed reader confirmed end to end on a fresh vendor payload, not only on its unit tests. The poison value is visible beside it: the poisoned AMZN leaves read `588,959,000,000` (the 2025-12-31 non-current row) where the fresh tree reads `229,080,000,000` from the current-assets row.
+- **Every fresh tree carries the `evidence` block in `run_card.json`** (`{"mode": "forced", "forced_tools": ["ALL"], "analysts": [...], "rendered_blocks": 3}`), the mechanism added after the legacy-mode trees made their gather-off downgrade invisible - so a tree now states which mode built it.
+- **All six carry `verify_flags.json`** - two from the batch's own `--verify` pass (`ASML`, `HPE`), four generated with `scripts/report_verify.py` in the same shape, so no new tree joins the "without `verify_flags.json`" list.
+Tests: none (corpus only). Engine suite **4404 passed / 5 skipped**, executor **1105**, web **149** - unchanged, no code touched.
+**Web impact**: none.
+
+### Added
+
 **The six items outside the score set are decided, and the one without a document home now has one (2026-09-17).** One code change (the weighting exemption), one corpus regeneration, and the rest documentation.
 
 - **The three legacy-mode trees -> kept as the documented gather-off downgrade example, explicitly labelled.** `MSFT_20260916_174952`, `VTV_20260916_175407` and `IEI_20260916_175246` each carry `LEGACY_GATHER_OFF.md` in the tree root: the leaked `TRADINGAGENTS_ANALYST_FORCED_TOOLS` value, the absent `_rendered_block`/`_model_pool`, the empty digest lines, and the fact that their `run_card.json` has no `evidence` block (it predates the writer at `tradingagents/reporting.py:1445`). Regenerate any tree that is to represent current production verification - their status is no longer ambiguous.

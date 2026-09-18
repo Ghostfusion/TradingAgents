@@ -388,6 +388,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **The poisoned-tree regeneration landed six fresh trees, all verified clean** (no code
+  change). Regenerated with shallow depth + `--verify` and the production env (`TRADINGAGENTS_ANALYST_FORCED_TOOLS`
+  popped): **AMKR, AMZN, ASML, HPE, IBM, JCI** (`*_20260917_*`); the run was then stopped on the owner's instruction and
+  the other nine tickers keep their `POISONED_LEAF.md` markers for regeneration on demand. **All six verify clean by the
+  same scan that found the poison** (health leaf `current_assets` matches a `Current Assets` row, no non-current one) -
+  the fixed reader confirmed end to end on a fresh vendor payload. Poison vs fresh is visible side by side: AMZN's
+  poisoned leaves read `588,959,000,000` (the 2025-12-31 non-current row) where the fresh tree reads `229,080,000,000`.
+  Every fresh tree carries `run_card.evidence` (`mode=forced`, `rendered_blocks=3`), the mechanism added after the
+  legacy-mode trees hid their gather-off downgrade, and all six carry `verify_flags.json`. Suites untouched: engine
+  **4404 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **The six items outside the score set are decided.** One code change, one corpus
   regeneration, the rest documentation. **(1) The three legacy-mode trees** -> kept as the documented gather-off
   downgrade example, **explicitly labelled**: `LEGACY_GATHER_OFF.md` in each tree root records the leaked
