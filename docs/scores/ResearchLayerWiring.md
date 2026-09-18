@@ -626,9 +626,47 @@ document adds to plan §11.3:
 
 - The debate's number and the report's number are **the same number** — asserted
   by comparing the rendered `IVa` block against the card key and the leaf's text
-  in one run.
+  in one run. **Built** (`test_the_debate_block_the_card_key_and_the_leaf_print_one_number`).
 - Gate off is **byte-identical** to a pre-engine tree, for the context and the
-  card.
+  card. **Built**, in its strong form: adding the block leaves everything after it
+  byte-identical to the gate-off context, and the card key stays absent
+  (`test_gate_off_leaves_the_context_and_the_card_unchanged`).
+
+### 7.1 Status — all twelve items built (2026-09-18)
+
+`P12-1` … `P12-12` are implemented, committed and pushed, each with its own
+observable acceptance. The engine suite went `4772 → 4850 passed / 5 skipped`.
+
+| Item | Landed in |
+| --- | --- |
+| `P12-1`, `P12-2`, `P12-3` | `acc33ce` |
+| `P12-4` | `897a8fe` |
+| `P12-5` (resolves **D-8**) | `12752cd` |
+| `P12-6`, `P12-7` | `4becf52` |
+| `P12-8` | `cdf45ae` |
+| `P12-9` | `277c14a` |
+| `P12-10`, `P12-12` | `fdcffc5` |
+| `P12-11` + both verification cases | `9064ef7` |
+
+**Three findings came out of building it, all recorded rather than absorbed:**
+
+1. **D-11** (§6) — the compiled context's `catalyst_window` can never be `True`,
+   and the `2c05701` "FIXED" claim for master defect 16 was wrong. It bounds this
+   design (§6.3) and **still needs an owner decision** on its resolution.
+2. **Three parser traps in this document's own examples** (§4.1, §4.3, and the
+   status token): a non-numeric pair before a numeric one on the same line is
+   swallowed into that pair's key; a leading `+` makes a delta invisible to the
+   registry; and `trade_prev_date=2026-09-11` registers as `2026`. Each was found
+   by running the real parser over the example, and each is now a test.
+3. **`NA` had to be split from `not enabled`** in the snapshot, because a
+   gated-off engine is not part of the scorecard while an enabled engine that
+   cannot measure is absent evidence — the renderer and §4.6 both need the
+   difference.
+
+**What remains outside this workstream:** `Movement` is `UNAVAILABLE` in
+production until the vector is measured, validated and promoted (§4.3/§9 D2) —
+the store and the rule are built, the ladder rung is not. That is the same
+condition the composite's `RESEARCH_ONLY` status already reports.
 
 ---
 
