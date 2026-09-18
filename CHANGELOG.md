@@ -37,6 +37,17 @@ Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), execut
 
 ### Changed
 
+**The composite's purpose is stated, and the verdict attribution corrected (owner, 2026-09-18).** Documentation and a docstring only - no behaviour, no printed output, no wire contract.
+- **What was wrong with the framing.** The set stated only the *negative* constraint (`TradeScore` reaches no gate, no size, no `opportunity_score`) and nowhere stated what the composite is *for*. Worse, master §1.4 and the plan's §8 attributed the acceptance case's verdict to the composite - `F 92 / T 85 / R 78 / K 35 -> NO NEW RISK` read as though the score concluded it. It does not: that is the downstream gate's verdict.
+- **The owner's framing, now recorded at both definition sites.** `TradeScore` is the **highest-level quantitative evidence summary**; its consumer is a human reviewer, not an order path. `RESEARCH_ONLY` does **not** mean "do nothing" - it means the evidence is summarised and the conversion to an action is deliberately not this object's job. `F92/T85/R78/K35` is the system saying *"the quantitative evidence is favourable overall, but the application is not authorised to convert that evidence into a trade automatically"*, and the reviewer's job is to ask why risk is the low leg, inspect the underlying metrics, valuation, catalysts, price action and portfolio context, and decide. "I agree, no trade" and "I disagree, that risk reading is temporary" are both legitimate outcomes - supporting exactly that judgment is what the platform is for.
+- **Coverage travels with the number**, because a human makes the decision: `72` at `coverage 68%` means **72 over 68% of the intended evidence**, with the missing components named - never "the system has reasonably strong evidence". This is why the printed block carries coverage and the absent list beside the score, and why the floor withholds the number rather than reporting a partial one as whole.
+- **Nothing functional changed, and nothing needed to.** The separation is already implemented and correct: no score is pushed into `opportunity_score` (owner Q1 keeps it `null`), position sizing or the risk gate, and the gates operate downstream. This is a **research-only quant system with human-in-the-loop execution**, and that separation is what makes it one - not what makes the score inert.
+- Corrected in `docs/scores/README.md` §1.4 (a new *What the composite is for* beside *What the composite may not do*), `IMPLEMENTATION_PLAN.md` §8 and its R10 mitigation, and `strategies/trade_score.py`'s module docstring.
+
+Tests: engine suite **4770 passed / 5 skipped** (re-run over the touched module's file).
+
+**Web impact**: none.
+
 **Dark launch recorded, both directions (2026-09-18).** Phase A's last clause, with every part the environment allowed and the one it did not named.
 - **Gate off, live:** `reports/MSFT_20260918_005500` carries **no engine key** in `run_card.json` (12 keys, evidence mode `forced`).
 - **Gate on, through the same functions a run uses:** the four toolsets gain **exactly eight tools and remove none**, and the card gains its eight engine keys with live numbers — `fundamental 64.58` (4/4 sub-scores), `technical 61.36`, `regime 72.49`, `risk 79.41`, `sentiment 84.20`, plus `event_state` and `news_score` present with their honest `unavailable` reasons. The composite reads those blocks and **recomputes from its parts**: `0.40(64.58) + 0.25(61.36) + 0.15(72.49) + 0.20(79.41) = 67.92` against the printed `67.93`.

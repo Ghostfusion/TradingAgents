@@ -29,14 +29,16 @@ Five rules this module exists to hold:
    flip cannot promote a vector; a status *request* above the evidence is
    refused and the refusal is printed.
 5. **Never a gate, never a size, never an `opportunity_score`.** The composite
-   is advisory text. The executor's 17 ``GATE_PRECEDENCE`` checks and the two
-   tier ``risk_multiplier`` never read a score, `execution_contract`'s
-   ``opportunity_score()`` stays ``None``, and the sizing contract
-   (`strategies/contract.build_position_contract`) takes no score. A maximal
-   `TradeScore` therefore changes nothing when the gate is ``BLOCK`` — the
-   acceptance case ``F 92 / T 85 / R 78 / K 35`` reads *"high quality, strong
-   setup, favourable regime, high risk -> NO NEW RISK"*, and the "NO NEW RISK"
-   is the gate's answer, not this module's.
+   is advisory text: the **highest-level evidence summary**, whose consumer is a
+   human reviewer, not an order path. The executor's 17 ``GATE_PRECEDENCE``
+   checks and the two tier ``risk_multiplier`` never read a score,
+   `execution_contract`'s ``opportunity_score()`` stays ``None``, and the sizing
+   contract (`strategies/contract.build_position_contract`) takes no score. A
+   maximal `TradeScore` therefore changes nothing when the gate is ``BLOCK``.
+   The acceptance case ``F 92 / T 85 / R 78 / K 35`` reads *"evidence favourable
+   overall, risk conditions unfavourable"* — the reviewer asks why risk is the
+   low leg and decides for themselves; the ``NO NEW RISK`` verdict that follows
+   is the downstream gate's answer, not this module's.
 
 `RiskScore` is a `TradeScore` engine, not a risk gate (master rule 18): it
 contributes the ``K`` component here, and the hard gates operate **downstream**

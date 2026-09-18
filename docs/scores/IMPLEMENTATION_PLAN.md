@@ -1061,12 +1061,23 @@ implements (the verdict feeds `strategies/risk/sizing.py:144`). A gate *after*
 sizing would have to unwind a size it had already authorised, so the staged order
 remains a contract change rather than a diagram edit.
 
+**What the composite is for (owner, 2026-09-18).** It is the **highest-level
+quantitative evidence summary** — *how favourable is the total quantitative
+evidence* — and its consumer is a human reviewer, not a broker API.
+`RESEARCH_ONLY` means the evidence is summarised and the conversion to an action
+is not this object's job; it does not mean "do nothing". `F 92 / T 85 / R 78 /
+K 35` reads *"evidence favourable overall, risk conditions unfavourable"*, and
+the reviewer decides whether that risk reading is temporary. **Coverage travels
+with the number**: `72` at `coverage 68%` is *72 over 68% of the intended
+evidence*, never "reasonably strong evidence".
+
 **What the composite may never do.** It never overrides a hard gate: 17
 fail-closed checks live in `GATE_PRECEDENCE`, the risk governor never reads a
 score, and `risk_multiplier.combine` zeroes the soft product when a hard flag
-fires. The acceptance case is `F 92 / T 85 / R 78 / K 35` → *"high quality, strong
-setup, favourable regime, high risk → NO NEW RISK"* — which the repo already
-implements.
+fires. On the acceptance case `F 92 / T 85 / R 78 / K 35`, the **`NO NEW RISK`
+verdict is the downstream gate's answer, not this module's** — the composite
+neither produces it nor overrides it, and a maximal composite changes nothing on
+a `BLOCK`. That separation is the design, not a limitation of the score.
 
 **Deliverable.** `strategies/trade_score.py` (advisory, printed, gated by
 `enable_trade_score`), plus the promotion ladder for any fitted vector:
@@ -1395,7 +1406,7 @@ naming here because they are the ones a build is most likely to skip:
 | R7 | **A gate is flipped for several engines at once** | the dark-launch protocol exists because gate interactions are not obvious | one gate per commit; one owner per phase; `repro_check --evidence` |
 | R8 | **The plan's own sizes are wrong** | sizes are relative and some are `[INFERENCE]` | sizes order work, they do not schedule it; the exit criteria are what a phase is judged by |
 | R9 | **A fitted weight vector leaks into production** because it improves in-sample | McLean & Pontiff: published predictors decay ~26% out-of-sample, ~58% post-publication | the promotion ladder is enforced by a test; `RESEARCH_ONLY` is not promotable by configuration |
-| R10 | **The composite becomes the thing that decides** | it is the most convenient single number in the set | master rule 4, the `GATE_PRECEDENCE` boundary, and the acceptance case `F92/T85/R78/K35 → NO NEW RISK` |
+| R10 | **The composite becomes the thing that decides** | it is the most convenient single number in the set | master rule 4, the `GATE_PRECEDENCE` boundary, and the **human-in-the-loop step**: the composite is defined as the evidence summary a *reviewer* reads (master §1.4, owner 2026-09-18), so `F92/T85/R78/K35` is a question put to the human — *why is risk the low leg?* — not a verdict. The `NO NEW RISK` is the downstream gate's |
 
 ---
 

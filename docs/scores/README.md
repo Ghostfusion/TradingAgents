@@ -149,13 +149,44 @@ Two conflicts inside the owner's own diagrams were **flagged, not resolved**.
    diagnostics, explanations and *potentially separately authorised sizing
    mechanisms* - but must not silently become a fifth/sixth `TradeScore` factor.
 
+**What the composite is for** (owner, 2026-09-18). `TradeScore` is the
+**highest-level quantitative evidence summary** this system produces: it answers
+*how favourable is the total quantitative evidence*, across the four engines —
+and that is what a human reviewer reads it as. It is **not** an autonomous
+trading command, and `RESEARCH_ONLY` does **not** mean "do nothing". It means the
+evidence has been summarised, and converting that summary into an action is
+deliberately not this object's job.
+
+A high composite with an unfavourable `K` is the clearest case. `F 92 / T 85 /
+R 78 / K 35` is *not* the system saying "no trade"; it is saying **the
+quantitative evidence is favourable overall, but the application is not
+authorised to convert that evidence into a trade automatically**. The reviewer's
+job — and the reason the four engines are reported separately rather than
+averaged away — is to ask *why* risk is the low leg, inspect the underlying
+metrics, valuation, catalysts, price action and portfolio context, and then
+decide. "I agree, no trade" and "I disagree, that risk reading is temporary" are
+both legitimate outcomes, and the platform exists to support exactly that
+judgment. This is a **research-only quant system with human-in-the-loop
+execution**; the separation below is what makes it one, not what makes the score
+inert.
+
+**A number is only as good as its coverage, and the reader must see both.** The
+composite is consumed by a human making a manual decision, so `TradeScore 72` at
+`coverage 68%` must never be read as "the system has reasonably strong
+evidence" — it means **72 over 68% of the intended evidence**, with the missing
+components named. The printed block carries the coverage and the absent list
+beside the score for that reason, and the floor withholds the number entirely
+rather than reporting a partial one as whole.
+
 **What the composite may not do** (unchanged from the earlier pass, and the
 reason the repo already behaves correctly): a composite score **never overrides a
 hard gate**. 17 fail-closed checks live in `GATE_PRECEDENCE`
 (`../TradingExecution/signald/contracts.py:42`); the risk governor never reads a
 score; `risk_multiplier.combine` zeroes the soft product when a hard flag fires.
-The acceptance case is `F 92 / T 85 / R 78 / K 35` → *"high quality, strong
-setup, favourable regime, high risk → NO NEW RISK"*.
+The acceptance case is `F 92 / T 85 / R 78 / K 35`: the composite's own read is
+*"evidence favourable overall, risk conditions unfavourable"*, and the
+**`NO NEW RISK` that follows is the downstream gate's verdict, not this
+module's** — the composite neither produces it nor overrides it.
 
 **Score, scale, state and confidence are four different outputs.** `RegimeScore
 68` (a score), `RegimeScale 0.47x` (a sizing multiplier), `RegimeState

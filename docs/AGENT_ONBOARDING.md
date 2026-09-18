@@ -388,6 +388,20 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The composite's purpose is stated; the verdict attribution corrected (owner).** Docs
+  and a docstring only - no behaviour, no printed output. The set stated only the *negative* constraint (`TradeScore`
+  reaches no gate, no size, no `opportunity_score`) and nowhere said what the composite is *for*; worse, master §1.4
+  and the plan's §8 attributed the acceptance case's verdict to the composite (`F 92 / T 85 / R 78 / K 35 -> NO NEW
+  RISK`), when that verdict is the downstream gate's. **Recorded at both definition sites:** `TradeScore` is the
+  **highest-level quantitative evidence summary**, its consumer is a human reviewer, and `RESEARCH_ONLY` does **not**
+  mean "do nothing" - it means the evidence is summarised and the conversion to an action is deliberately not this
+  object's job. `F92/T85/R78/K35` says *"the quantitative evidence is favourable overall, but the application is not
+  authorised to convert it into a trade automatically"*; the reviewer asks why risk is the low leg and decides, and
+  "I agree, no trade" / "I disagree, that risk reading is temporary" are both legitimate. **Coverage travels with the
+  number** (`72` at `coverage 68%` = 72 over 68% of the intended evidence, missing components named) because a human
+  makes the decision. Nothing functional changed: no score reaches `opportunity_score` (owner Q1 keeps it `null`),
+  sizing or the gate. Edited: `docs/scores/README.md` §1.4, `IMPLEMENTATION_PLAN.md` §8 + R10,
+  `strategies/trade_score.py` docstring. Engine suite **4770 passed / 5 skipped**.
 - 2026-09-18 `(working tree)` - **D-6 found and fixed: the leaf's `TradeScore` never read `RiskScore`** (master §3.4).
   Walking a worked example of the score pipeline end to end - not reading the set - returned `fundamental 66.25`,
   `technical 62.61`, `regime 79.78`, **`risk null`** from `_trade_score_engines`, while `_risk_components('MSFT')`
