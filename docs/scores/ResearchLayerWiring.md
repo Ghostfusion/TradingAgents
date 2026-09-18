@@ -30,7 +30,7 @@ executing the path. This document records them before any code is written.
 | 5 | Should it carry score movement? | Yes — but **held until the vector is validated** (§9 D2). It needs a history store, which does not exist | §4.3 |
 | 6 | Should the LLM be allowed to "improve" a score? | **No.** It interprets; it never recomputes or overrides | §2 rule 5 |
 | 7 | What should happen on disagreement? | A deterministic **flag**, never an override | §5 |
-| 8 | One gate or many, and should the composite's printed block change? | **Decided by the owner, 2026-09-18** — one master gate with independent engine gates and an explicit partial state, plus the printed block corrected to lead with its purpose | **§9**, §3.4, §4.6 |
+| 8 | One gate or many, and does the composite's printed block change? | **Decided by the owner, 2026-09-18** — one master gate with independent engine gates and an explicit partial state; and the printed `basis` is **preserved verbatim**, with the purpose added on the new surface | **§9**, §3.4, §4.6 |
 
 ---
 
@@ -290,15 +290,18 @@ Three properties are non-negotiable:
 - **Coverage is printed per engine and on the composite.** Per rule 2, `72` at
   `coverage 68%` means *72 over 68% of the intended evidence* — with the missing
   components named.
-- **The purpose is stated, not only the constraint.** The engine renderers end
-  *"advisory only — never a gate, never a size, never a forecast"* — the negative
-  constraint only. The owner corrected that framing on 2026-09-18 (master §1.4),
-  and on 2026-09-18 answered the question for the composite's own block (§9 D3,
-  now implemented): `format_trade_score` leads with *"Purpose: the highest-level
-  quantitative evidence summary, for human research review - not an order, not a
-  position size and not a gate"*, and the `basis` field's duplicate restatement
-  was dropped so the constraint is stated once. The scorecard block carries the
-  same purpose line.
+- **The purpose is stated, not only the constraint — on the new surface.** The
+  engine renderers and the composite's `basis` end *"advisory only — never a
+  gate, never a size, never a forecast"* / *"…never an `opportunity_score`"*: the
+  negative constraint only. The owner corrected that *framing* on 2026-09-18
+  (master §1.4) and then decided (§9 D3) that the **shipped string is not
+  rewritten** — the purpose appears in the new block and in the new
+  `scorecard_basis` field, leaving `basis` byte-identical. **Exclusively** there:
+  per §9.1 it must not be inserted, appended, renamed or otherwise encoded into
+  `basis` or into any existing basis field the report contract consumes.
+
+  > `Purpose: the highest-level quantitative evidence summary, for human research`
+  > `review - not an order, not a position size and not a gate.`
 
 ### 4.2 Three levels of visibility
 
@@ -399,15 +402,22 @@ interrogate rather than a fact it must accept.
 Because the design is one master gate with independent engine gates (§9 D1), a
 scorecard can legitimately be **partial**. A partial scorecard read as a complete
 one is the same failure as a partial engine printed as a whole one (master rule
-3), so the state is a **printed output**, never an inference the reader is left to
-make.
+3), so **enablement and measurement are two separate axes** and both are printed.
 
 ```
 DISABLED
-   -> PARTIAL
-   -> COMPLETE
-   -> COMPLETE + VECTOR_VALIDATED
-   -> COMPLETE + MOVEMENT_AVAILABLE
+   | enable_quant_scorecard
+RESEARCH_ONLY
+   | vector measured + validated + promoted
+ACTIVE
+   |
+delta / movement becomes legitimate
+```
+
+```
+  enablement   DISABLED ----|---- PARTIAL ------ COMPLETE
+  measurement  ------------------ RESEARCH_ONLY --|-- ACTIVE
+  movement     UNAVAILABLE ------------------------|-- legitimate
 ```
 
 The block always carries the three status lines, so the LLM is told exactly what
@@ -415,18 +425,22 @@ kind of evidence it is receiving:
 
 ```
 Scorecard status: PARTIAL
-Vector status: NOT_VALIDATED
+Vector status: RESEARCH_ONLY
 Movement: UNAVAILABLE
 ```
 
-- **`Scorecard status`** is `DISABLED` (gate off), `PARTIAL` (an engine's gate is
-  off, or an engine could not measure), or `COMPLETE` (every engine gate on and
-  every engine measured).
-- **`Vector status`** is the rung the composite's vector has *evidenced*, read
-  from `promotion_state` (`strategies/trade_score.py`) — `NOT_VALIDATED` while it
-  is `RESEARCH_ONLY`. This is the field §4.3's movement rule gates on.
-- **`Movement: UNAVAILABLE`** until a prior observation exists under the same
-  **validated** vector.
+- **`Scorecard status`** (enablement) is `DISABLED` (gate off), `PARTIAL` (an
+  engine's gate is off, or an engine could not measure), or `COMPLETE` (every
+  engine gate on and every engine measured).
+- **`Vector status`** (measurement) is `RESEARCH_ONLY` until the vector is
+  measured, validated and promoted, then `ACTIVE`. This is the rung
+  `promotion_state` (`strategies/trade_score.py`) already carries.
+- **`Movement`** is `UNAVAILABLE` at every point except `ACTIVE` with a prior
+  observation under the same vector.
+
+**The hard invariant (owner, 2026-09-18):**
+
+> **No validated vector → no delta → no movement.**
 
 The enabled and disabled engines are named beside the status, which is what stops
 the number being read as more than it is:
@@ -436,7 +450,9 @@ Quant scorecard: PARTIAL - enabled: fundamental, technical, risk; disabled: regi
 ```
 
 This is the owner's own safeguard, and it is what makes D1's partial scorecard
-safe rather than merely convenient.
+safe rather than merely convenient. Research calculations may still be logged
+internally for diagnostics — what is withheld is their **presentation as
+movement**.
 
 ---
 
@@ -515,6 +531,7 @@ Each item is default-off, lands as one commit, and has an observable acceptance.
 | P12-8 | **The history store and the deltas**, held until the vector is validated (§9 D2) | P12-1, P12-7 | first run: no delta keys and `Movement: UNAVAILABLE`. Second run under a validated vector: `trade_delta` against the printed prior date. Vector changed, or not yet validated: still `UNAVAILABLE` |
 | P12-9 | **The disagreement detector** | P12-3 | a fixture where the risk debate reads favourable against `RiskScore` band `unfavourable` produces the flag; a fixture where they agree produces none |
 | P12-10 | **Level 2 in the report** — each engine's category sub-scores beside their measurements | P12-2 | the rendered report shows an engine's categories and its composite, recomputing |
+| P12-11 | **The new fields, never a rewritten one.** `scorecard_basis` (and `basis_constraints` if the constraints need enumerating) — additive, per §9 D3. **`basis` is not touched** | P12-3 | a gate-off tree's `run_card.json` is **byte-identical** to a pre-scorecard tree; the new keys appear only with the gate on |
 
 **Verification (plan §11 applies unchanged).** Every new pure function gets a test
 that fails under a mutation of the code it guards. The two acceptance cases this
@@ -534,64 +551,129 @@ document adds to plan §11.3:
 | --: | --- | --- | --- |
 | W1 | **The scorecard becomes a third producer** | the leaf and the card already disagree (D-8); adding a third is the obvious naive implementation | §3.1 — one snapshot, three readers; P12-5 is the test that proves it |
 | W2 | **The block is silently truncated for the structured debate** | `structured_debate.py:216` bounds the whole context to 3000 chars | §4.4 — first in the output, plus its own bounded field; tested at P12-4 |
-| W3 | **The LLM treats the score as its answer** | it is the most convenient number in the prompt | §2 rule 5, §5; the block states the purpose, not only the constraint |
+| W3 | **The LLM treats the score as its answer** | it is the most convenient number in the prompt | §2 rule 5, §5; the block states the purpose, not only the constraint. **Strengthened by §9.4** — the scorecard explains *what the composite represents* without rewriting the existing `basis` language, which may carry a different operational meaning for its consumers |
 | W4 | **A delta across a changed weight vector reads as signal** | the promotion ladder can move the vector between two observations | §4.3 — the store records the vector; the delta is refused when it differs |
 | W5 | **Coverage is dropped in a compact rendering** | a compact block is tempting to trim to the composite | rule 2; §4.1 requires coverage per engine; plan §11.1 already tests it |
-| W6 | **The block leaks into the executor's contract** | `run_card.json` gains a key | the executor reads only `research_decision.json` (`signald/watch.py:6-8`); P12-6's gate-off byte-identity test is the guard |
+| W6 | **The block leaks into the executor's contract** | `run_card.json` gains a key | the executor reads only `research_decision.json` (`signald/watch.py:6-8`); P12-6's gate-off byte-identity test is the guard. **Strengthened by §9.4** — the scorecard is explicitly an *additive* surface, so there is less pull to repurpose a field downstream consumers already understand |
 | W7 | **A partial scorecard reads as a complete one** | one master gate with independent engine gates means a half-configured run shows a subset (§9 D1) | §4.6 — the status is a **printed output** naming the enabled and disabled engines, never an inference; P12-7 tests both states |
 | W8 | **A movement field is added because the score exists, not because the evidence does** | the delta is the most attractive field in the block and the easiest to manufacture | §4.3/§9 D2 — deltas need a prior row under the **same validated** vector; `Movement: UNAVAILABLE` is the honest default |
+| W9 | **A report-contract change rides along with the scorecard rollout** | the wording of the existing `basis` string is the most tempting thing to "improve" while touching this seam, and changing it re-baselines every generated report | §9 D3 — `basis` is preserved verbatim; the explanation goes in **new** fields. **§9.3 makes `Gate OFF => byte-identical` a release-level invariant**, not a test detail: it catches a change to `basis`, formatting, whitespace or any other existing field made while claiming the scorecard is dark-launched. Enforced at P12-11 |
 
 ---
 
 ## 9. Decisions (owner, 2026-09-18) — the three are answered
 
-The three questions this document opened are answered. Each row keeps the
-**recommendation that was on record**, so the reasoning stays visible.
+**Resolved.** The three questions this document opened are answered and this
+record is closed (§9.5). Each row keeps the **recommendation that was on record**,
+so the reasoning stays visible.
 
 | # | Question | Recommendation on record | **Decision** |
 | --: | --- | --- | --- |
 | D1 | The scorecard's gate, or the composite's? | `enable_quant_scorecard` governing the block, each engine appearing iff its own gate is on | **`enable_quant_scorecard` is the single top-level gate**, and the individual engine gates determine which engine rows are populated. It must **not** imply all eight. The partial behaviour is useful during dark launch, and the safeguard is that the partial state is **explicit** (§4.6) |
 | D2 | Movement before vector validation? | a delta is only meaningful once the vector has been measured | **Hold the deltas until vector validation exists.** `RESEARCH_ONLY` is *not* the reason to suppress them — **vector validity** is. Do not manufacture a movement field merely because the current score exists |
-| D3 | Correct the composite's printed basis string? | correct it, and add the purpose | **Yes — a report-contract change, implemented in this pass.** The block leads with its purpose; the constraints follow as consequences rather than standing as the whole definition |
+| D3 | Correct the composite's printed basis string? | correct it, and add the purpose | **No — preserve the existing contract.** The wording stays as it is. A change that re-baselines **every** generated report must not ride along with the scorecard rollout; the scorecard's own explanation goes in a **new field** (§9.1) |
 
-### 9.1 D3 in detail, because it changed a shipped output
+### 9.1 D3 was decided twice, and the second answer reverses the first
 
-The owner's principle: *"the report should say what the number **is**, not
-primarily what it isn't."* The composite is not useless because it cannot trade —
-it is the quantitative summary the human reviewer and the LLM debate consume
-during research. The negative constraint remains, and remains important, but it
-is no longer the entire semantic definition of the score. The owner's own
-reasoning for treating this as a contract change rather than a documentation
-edit: leaving technically outdated wording in place *"just to avoid changing
-tests"* is the wrong trade.
+This is **recorded rather than quietly corrected**, because the first decision was
+implemented and committed (`02145fe`) before the second one arrived, and the
+reversal is part of this seam's history.
 
-What changed:
+- **First answer — implemented in `02145fe`.** Correct the block: *"the report
+  should say what the number is, not primarily what it isn't"*, treated as a
+  report-contract change. `format_trade_score`'s framing sentence and the `basis`
+  field's tail were both rewritten, and the test that pinned the negative clause
+  was re-pointed at the purpose line.
+- **Second answer — this decision; `02145fe` reverted.** **Do not change it.**
+  *"Changing it alters every generated report"* is precisely why a contract change
+  must not ride along with the scorecard rollout. The existing
+  negative-constraint contract is preserved, and the scorecard's explanatory text
+  goes in a **new field** instead of mutating a shipped one.
 
-| Site | Before | After |
+**The owner's principle, and the durable part of this decision:**
+
+> *Enablement can be incremental; measurement cannot be pretend. And existing
+> report contracts should not be changed merely to introduce the new scorecard.*
+
+So the rule this document carries forward:
+
+| Field | Surface | Status |
 | --- | --- | --- |
-| `strategies/trade_score.py::format_trade_score` (framing sentence) | *"Advisory only: never a gate, never a size, never an `opportunity_score`. The hard gates operate downstream…"* | *"Purpose: the highest-level quantitative evidence summary, for human research review - not an order, not a position size and not a gate. The hard gates operate downstream…"* |
-| `strategies/trade_score.py::trade_score` (the `basis` tail) | *"…the executor's, downstream); advisory only - never a gate, never a size, never an `opportunity_score`"* | *"…the executor's, downstream); evidence summary for human review, not an order"* — the duplicate restatement dropped, so the constraint is stated **once** in the block |
-| `tests/test_trade_score.py::test_the_printed_block_carries_weights_status_and_coverage` | asserted the negative clause only | pins **both halves** — the purpose and the constraints — so removing either fails the test |
+| `basis` | existing | **FROZEN** — the negative-constraint contract, unchanged |
+| `format_trade_score`'s framing sentence | existing | **FROZEN** — do not modify |
+| The seven engine renderers | existing | **FROZEN under D3** — see §9.2 |
+| The engines' own `basis` tails | existing | **FROZEN under D3** — see §9.2 |
+| `scorecard_basis` | **new** | the scorecard's explanation: which engines are active, their coverage, the status of §4.6. Additive |
+| `basis_constraints` | **future** | additive, if the constraints ever need enumerating as a list rather than prose |
 
-The rendered block now reads:
+**The same rule governs §4.1's purpose line:** it is scorecard-specific explanatory
+content and therefore belongs **exclusively** in the new scorecard surface
+(`scorecard_basis`, or the scorecard block itself). It must not be inserted,
+appended, renamed, or otherwise encoded into `basis` — or into any existing basis
+field consumed by the report contract. That clause is what closes the loophole a
+"new name" would otherwise open: **a field that `basis`'s consumer still reads is
+`basis`.**
+
+`02145fe`'s two edits were reverted in the same pass as this decision, so the
+shipped output is byte-identical to `6047071`.
+
+**The architectural rule, in one sentence:**
+
+> The existing string has consumers and a baseline; a new surface gets a new
+> field, not a rewritten old one.
+
+### 9.2 What D3 does *not* say
+
+D3 is deliberately narrower than *"negative-only wording is wrong everywhere"*. It
+says: **the existing `basis` report contract is not to be changed as part of this
+scorecard rollout.**
 
 ```
-## TradeScore - MSFT (advisory; RESEARCH_ONLY)
-
-Four-engine decision composite 0.4F + 0.25T + 0.15R + 0.2K. Purpose: the
-highest-level quantitative evidence summary, for human research review - not an
-order, not a position size and not a gate. The hard gates operate downstream and
-block regardless of this number.
+D3 - freeze the existing report contract
+  |-- format_trade_score's basis        -> unchanged
+  |-- existing basis consumers          -> unchanged
+  |-- the seven engine renderers        -> unchanged
+  |-- the engines' own basis tails      -> unchanged
+  `-- the scorecard's explanatory surface -> new / additive
 ```
 
-**Still open on the same framing, reported not decided.** The seven engine
-renderers (`agents/utils/analysis_tools.py:5053`, `:5261`, `:5849`, `:6008`) and
-the engines' own `basis` tails (`event_state.py:581`, `news_score.py:382`,
-`regime_score.py:308`, `risk_score.py:560`, `sentiment_score.py:534`,
-`technical_score.py:312`) each end with their own negative-only line (*"advisory
-only - never a gate, never a size, never a forecast"*). The reasoning above
-applies to them equally, but the owner's decision named the **composite**;
-changing seven more outputs is a separate call, and is not inferred here.
+So the four `unchanged` rows above are **open future questions, not decisions**.
+The reasoning behind D3 would apply to them equally, but deciding them here would
+be exactly the scope creep D3 exists to prevent.
+
+The concrete sites those two middle rows name, so the open question is actionable
+rather than abstract:
+
+- **the seven engine renderers** — `agents/utils/analysis_tools.py:5053`
+  (technical), `:5261` (risk), `:5849` (sentiment), `:6008` (news), plus the
+  fundamental / regime / event renderers
+- **the engines' own `basis` tails** — `event_state.py:581`, `news_score.py:382`,
+  `regime_score.py:308`, `risk_score.py:560`, `sentiment_score.py:534`,
+  `technical_score.py:312`
+
+### 9.3 `Gate OFF => byte-identical` is a release-level invariant
+
+**Not a test implementation detail.** The gate-off tree must be byte-identical to
+the pre-scorecard baseline (`6047071`), and that invariant is what catches a change
+to `basis`, to formatting, to whitespace, or to any other existing field made
+*while claiming the scorecard is still dark-launched*. It is enforced at P12-11
+and named again in §8 W9; **any commit touching this seam must be able to show
+it.**
+
+### 9.4 What D3 strengthens
+
+- **§8 W6 — the block leaks into the executor's contract.** The scorecard is
+  explicitly an *additive research surface*, so there is far less temptation to
+  repurpose an existing field that downstream consumers already understand.
+- **§8 W3 — the LLM treats the score as its answer.** The scorecard can explain
+  *what the composite represents* without rewriting the `basis` language, which
+  may carry a different operational meaning for its existing consumers.
+
+### 9.5 Status
+
+**Resolved (owner, 2026-09-18).** The three decisions stand as written above. The
+only edits this record took after the owner reviewed it were the wording
+tightenings in §9.1–§9.4.
 
 ---
 

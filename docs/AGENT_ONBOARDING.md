@@ -388,7 +388,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
-- 2026-09-18 `(working tree)` - **The three research-layer questions answered by the owner; D3 implemented.** Decisions in
+- 2026-09-18 `(working tree)` - **D3 REVERSED by the owner: the composite's printed `basis` contract is preserved.** The owner re-answered the
+  third research-layer question in the opposite direction; `02145fe` is **reverted** here. `strategies/trade_score.py` is back to
+  *"Advisory only: never a gate, never a size, never an `opportunity_score`"* in the framing sentence and to the same tail in
+  `basis`; the rendered block is **byte-identical to `6047071`**.
+  `tests/test_trade_score.py::test_the_printed_block_carries_weights_status_and_coverage` again pins the negative clause, with a
+  comment recording that the wording is a *preserved contract*, not an oversight. **Why:** *"changing it alters every generated
+  report"* is exactly why a contract change must not ride along with the scorecard rollout. **The owner's principle:** *"Enablement
+  can be incremental; measurement cannot be pretend. And existing report contracts should not be changed merely to introduce the
+  new scorecard."* **The rule this leaves:** the scorecard's explanation goes in **new** fields (`scorecard_basis`, and
+  `basis_constraints` if the constraints need enumerating) - never a rewrite of a shipped string, so a gate-off `run_card.json`
+  stays byte-identical to a pre-scorecard tree. **D1 and D2 are unchanged** (one `enable_quant_scorecard` block gate with engine
+  gates underneath; deltas held until the vector is measured/validated/promoted). **The state machine is reconciled** to the owner's
+  ladder (`ResearchLayerWiring.md` §4.6): enablement and measurement are now **two printed axes** - `DISABLED / PARTIAL / COMPLETE`
+  and `RESEARCH_ONLY -> ACTIVE` - with the hard invariant **no validated vector -> no delta -> no movement**; research calculations
+  may still be logged internally, but their presentation as movement is withheld. Both answers are recorded in §9.1 rather than
+  quietly corrected, since the first was implemented and pushed before the second arrived. `tests/test_trade_score.py` 50 passed.
+- 2026-09-18 `(working tree)` - **The three research-layer questions answered by the owner; D3 implemented. [D3 REVERSED - see the entry above; `basis` is preserved.]** Decisions in
   `docs/scores/ResearchLayerWiring.md` §9. **D1:** `enable_quant_scorecard` is the single top-level gate and the engine gates
   decide which rows populate - the master gate must NOT imply all eight, and the partial state must be **explicit**
   (state machine in §4.6: `DISABLED -> PARTIAL -> COMPLETE -> COMPLETE+VECTOR_VALIDATED -> COMPLETE+MOVEMENT_AVAILABLE`,

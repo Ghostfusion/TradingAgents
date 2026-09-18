@@ -298,12 +298,11 @@ def test_the_printed_block_carries_weights_status_and_coverage() -> None:
     for name in ENGINE_ORDER:
         assert f"- {name} ({ENGINE_LETTERS[name]}, weight {ENGINE_WEIGHTS[name]:g})" in text
     assert "76.75" in text
-    # The block leads with what the number IS, and keeps the constraints as
-    # consequences of that (owner, 2026-09-18: "the report should say what the
-    # number is, not primarily what it isn't"). Both halves are pinned, so
-    # dropping either the purpose or the constraints fails this test.
-    assert "Purpose: the highest-level quantitative evidence summary" in text
-    assert "not an order, not a position size and not a gate" in text
+    # The negative-constraint wording is a PRESERVED report contract. The owner
+    # decided (2026-09-18) not to mutate it while the scorecard is introduced -
+    # changing it re-baselines every generated report - so the scorecard's own
+    # explanatory text must go in a NEW field, never in this string.
+    assert "never a gate, never a size, never an opportunity_score" in text
 
 
 def test_the_printed_rows_recompute_the_printed_number() -> None:

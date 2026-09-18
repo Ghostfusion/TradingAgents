@@ -555,9 +555,12 @@ and `enable_score_eval_rows` already gates the IC harness
 **The three research-layer decisions of 2026-09-18 are in
 [`ResearchLayerWiring.md`](ResearchLayerWiring.md) §9** — the scorecard's gate
 (one master gate, independent engine gates, partial made explicit), movement held
-until the vector is validated, and the composite's printed block corrected to lead
-with its purpose. **D3 is a report-contract change and is implemented**; the other
-two are design decisions for `WP-12`, which is not yet built.
+until the vector is validated, and the **preservation** of the composite's printed
+`basis` contract, whose purpose line goes on the new surface instead. **All three
+are design decisions for `WP-12`, which is not yet built; none of them changes a
+shipped string.** D3 was answered twice — the first answer was implemented in
+`02145fe` and reverted on the second — and §9.1 records both, because the reversal
+is part of the seam's history.
 
 **The twelve architecture decisions of the same day are in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13** — the canonical regime
