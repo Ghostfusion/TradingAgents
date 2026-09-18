@@ -20,7 +20,7 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 - **The verification case the design adds to plan §11.3 — *the debate's number and the report's number are the same number*.** One run, three surfaces: the rendered block (what section `IVa` prints and the debate reads), the card key, and the leaf's rendered text. All three carry the composite the snapshot holds, and the card's per-engine map is the leaf's input value-for-value. A disagreement here means a reader stopped using the producer.
 - **A fixture bug worth recording, because it is the same class the workstream hunts.** The render-test fixture originally hardcoded a composite (`67.925`) inconsistent with its own four drivers (which imply `76.75`). That is precisely what the real producer never does — `trade_score` *is* the composite's producer — and it made the three-surface test unable to mean anything. The fixture now computes the composite from the drivers unless a test passes one explicitly (the rounding test does, because it is about the printed *form*).
 
-Tests: 154 passed across `tests/test_quant_scorecard.py`, `test_trade_score.py`, `test_reporting.py` and `test_structured_agent_prompts.py`.
+Tests: 154 passed across `tests/test_quant_scorecard.py`, `test_trade_score.py`, `test_reporting.py` and `test_structured_agent_prompts.py`. **Full engine suite at this HEAD: 4814 passed / 5 skipped** (baseline 4772, +42 new across the WP-12 commits).
 
 **Web impact**: none — one additive `run_card.json` field, off by default.
 
