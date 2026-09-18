@@ -174,6 +174,39 @@ def book_correlated_stress(
     return -sum(worst) / len(worst) if worst else None
 
 
+def net_beta(weights: dict, betas: dict) -> float | None:
+    """Book net beta ``sum(w_i * beta_i)`` - the missing producer (RiskScore §3.3).
+
+    ``weights`` is ``{name: weight}`` (the book's own weights, so a sum below
+    1.0 leaves an implicit zero-beta cash sleeve) and ``betas`` is
+    ``{name: beta}`` from a per-name producer such as ``etf_risk._beta:38``.
+    The caller stores the result on the executor's ``BookState.net_beta`` - the
+    field is ``None`` today and the dataclass is frozen, so it cannot be
+    assigned after construction.
+
+    ``NA`` is not ``0``: a name that carries weight but has no measured beta
+    makes the book's beta **unknown**, so this returns ``None`` rather than a
+    partial sum that would read as a flat book. An empty book is ``None`` too.
+    """
+    w = {n: float(v) for n, v in (weights or {}).items() if v is not None}
+    weighted = {n: v for n, v in w.items() if v != 0.0}
+    if not weighted:
+        return None
+    total = 0.0
+    for name, weight in weighted.items():
+        beta = (betas or {}).get(name)
+        if beta is None:
+            return None
+        try:
+            b = float(beta)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(b):
+            return None
+        total += weight * b
+    return round(total, 6)
+
+
 def drawdown_gate(drawdown_pct: float | None, limit_pct: float = 0.10) -> bool:
     """True = new risk blocked while realized drawdown exceeds the limit."""
     if drawdown_pct is None:
@@ -856,6 +889,6 @@ def copula_scenarios(
     }
 
 
-__all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
+__all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "net_beta", "drawdown_gate",
            "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var",
            "min_cvar_weights", "copula_scenarios"]

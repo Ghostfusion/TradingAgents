@@ -57,6 +57,10 @@ LEGACY_WHITELIST = {
     # delivers a per-day IV history (the cboe/chain reads are spot-only), so
     # the percentile has no input and stays a tested helper awaiting source.
     "strategies/options_surface.py:iv_percentile": "needs per-day IV history no vendor delivers (chain is spot-only)",
+    # The factor schema's own self-check: it asserts one identity per measure,
+    # +/-1 directions and that no factor enters two sub-scores. Its consumer is
+    # the schema's test suite (a violation must fail a build, not a run).
+    "strategies/factor_schema.py:validate_schema": "the schema's own self-check (one identity per measure, +/-1 directions, no factor in two sub-scores); its consumer is the schema's test suite, so a violation fails a build rather than a run",
 }
 
 
@@ -165,10 +169,37 @@ def _bound_tool_names() -> set[str]:
     from tradingagents.agents.toolsets import analyst_toolset
     from tradingagents.agents.utils import risk_tool_loop
 
+    # The score-engine gates are toolset MEMBERSHIP switches: with a gate off
+    # the tool is deliberately absent (a gate-off toolset is byte-identical),
+    # and with it on the LLM can call it. This test asks "can an agent reach
+    # this tool at all", so it reads the toolsets with every engine gate forced
+    # on and restores the config afterwards.
+    import contextlib
+
+    import tradingagents.dataflows.config as _cfgmod
+
+    _engine_gates = (
+        "enable_fundamental_score",
+        "enable_technical_score",
+        "enable_regime_score",
+        "enable_risk_score",
+        "enable_sentiment_score",
+        "enable_news_score",
+        "enable_event_state",
+        "enable_trade_score",
+    )
+    _saved = dict(_cfgmod.get_config() or {})
+    with contextlib.suppress(Exception):
+        _cfgmod.set_config({**_saved, **{g: True for g in _engine_gates}})
+
     risk_tool_loop._build_lists()
     names: set[str] = set()
-    for key in ("market", "news", "fundamentals"):
-        names |= {t.name for t in analyst_toolset(key)}
+    try:
+        for key in ("market", "news", "fundamentals", "sentiment"):
+            names |= {t.name for t in analyst_toolset(key)}
+    finally:
+        with contextlib.suppress(Exception):
+            _cfgmod.set_config(_saved)
     names |= {t.name for t in risk_tool_loop.RISK_DEBATOR_TOOLS}
     names |= {t.name for t in risk_tool_loop.TRADER_TOOLS}
     return names

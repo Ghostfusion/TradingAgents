@@ -135,6 +135,21 @@ involved. This is the "compute, don't narrate" core.
   `{component: raw}` dict, every non-monotonic input band-mapped over its producer's own edges (`BANDS`), every
   monotone one ramped (`RAMPS`), one advisory band table of its own, and a composite renormalised over the categories
   that could be measured.
+- `regime_score.py` — WP-4: the market-level `RegimeScore` (benchmark trend, the two VIX legs, chop, the
+  benchmark's realized-vol percentile), `market_trend`, `vix_term_structure`, and `regime_paths` — Path A's label and
+  Path B's four axes printed side by side with a `disagree` flag and **no reconciliation of any kind**.
+- `risk_score.py` — WP-5: the inverted 0-100 `RiskScore` over eight categories. Every component prints raw -> pinned ->
+  aligned with units and sign, because three incompatible conventions ship in the tree (a negative `cvar`, a positive
+  `stress_loss`, an opposite-sign `regime_drawdown`); the alignment happens in the score, never in a producer.
+- `event_state.py` — WP-8: one `imminence(days, horizon)` for seven event families (monotone, bounded, `None` for an
+  absent day-count), `event_components` bridging `catalyst.build_catalyst_snapshot`, and the earnings hard block passed
+  through verbatim — the module holds no block window of its own.
+- `sentiment_score.py` / `news_score.py` — WP-7 / WP-6: the scale is pinned first and printed (EODHD/AV -1..1, GDELT
+  -100..100) and a mixed-source read is refused with the reason; the news engine prints its five unsupplied categories
+  as `NA` with a reason and takes materiality from `EventScore`.
+- `trade_score.py` — WP-11: the four-engine composite (0.40 F / 0.25 T / 0.15 R / 0.20 K, the owner's vector), the
+  promotion ladder as data with one required-evidence record per rung, and `format_trade_score`. It imports no engine,
+  reads no configuration, and reaches no gate, no size and no `opportunity_score`.
 - `alpha_health.py` — round-3 S8 `score_evaluation_rows` (mean rank IC + IC IR reusing
   `sentiment_research.rolling_information_coefficient`, rank-bucketed forward returns + monotonicity, coverage,
   rank-autocorrelation stability; unavailable below the observation floor; rows are inputs to DSR/PBO, never a

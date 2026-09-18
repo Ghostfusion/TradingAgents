@@ -343,11 +343,6 @@ SUBSCORE_FACTORS: dict[str, tuple[str, ...]] = {
 }
 
 
-def specs_for(factors) -> list[FactorSpec]:
-    """The schema records for these factors, in the given order."""
-    return [FACTOR_SCHEMA[f] for f in factors]
-
-
 def directions_for(factors) -> dict[str, int]:
     """``{factor: +1 | -1}`` - the direction table ``category_scores`` consumes."""
     return {f: FACTOR_SCHEMA[f].direction for f in factors}

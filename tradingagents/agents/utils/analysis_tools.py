@@ -310,6 +310,17 @@ def _benchmark_closes() -> list:
     return _ohlcv(bench).get("closes") or []
 
 
+def _benchmark_bars() -> dict:
+    """The benchmark's whole OHLCV block (the market-level producers need bars)."""
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        bench = get_config().get("benchmark_ticker") or "SPY"
+    except Exception:
+        bench = "SPY"
+    return _ohlcv(bench)
+
+
 def _txt_round(v, nd: int = 4) -> str:
     return f"{v:.{nd}f}" if v is not None else "n/a"
 
@@ -2205,7 +2216,11 @@ def get_regime_components(
     except Exception as exc:  # noqa: BLE001
         return f"regime components unavailable for {ticker}: {exc}"
     chop_txt = f"{chop:.2f}" if chop is not None else "n/a (insufficient history)"
-    return f"regime {ticker}: vol_pct={vol_pct:.2f} trend={trend:.4f} chop={chop_txt} label={label}"
+    # vol_pct is None when the series is too short to percentile (a fabricated
+    # 0.5 was the old behaviour and is the defect WP-4 fixed) - the same guard
+    # the chop clause above uses, for the same reason.
+    vol_txt = f"{vol_pct:.2f}" if vol_pct is not None else "n/a (insufficient history)"
+    return f"regime {ticker}: vol_pct={vol_txt} trend={trend:.4f} chop={chop_txt} label={label}"
 
 
 @tool
@@ -5124,6 +5139,917 @@ def get_technical_score(
         return _render_technical_score(ticker, res)
     except Exception as exc:  # noqa: BLE001
         return f"technical score unavailable for {ticker}: render failed ({exc})"
+
+
+def _risk_components(ticker: str) -> dict:
+    """Assemble the `RiskScore` components the repo can honestly measure.
+
+    Name-level legs come from the run's own cached bars (volatility, the
+    semivariance decomposition, liquidity); the book-level legs come from the
+    SAME resolver and the SAME configured basket the governor gates on
+    (`book_context.measured_book_drawdown`, `book_risk.portfolio_cvar` /
+    `stress_loss` / `book_correlated_stress` / `cdar`). Every leg the repo has no
+    producer for stays absent (NA, never 0) and the engine reports it.
+
+    The semivariance triple is passed whole (`rs_minus`/`rs_plus`/`rv` plus the
+    producer's `sqrt_rs_minus`): the engine checks `RS- + RS+ = RV` and refuses a
+    broken decomposition rather than scoring it.
+    """
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.strategies.book_context import (
+        configured_basket,
+        measured_book_drawdown,
+    )
+    from tradingagents.strategies.book_risk import (
+        book_correlated_stress,
+        cdar,
+        normalize_book_weights,
+        portfolio_cvar,
+        portfolio_returns,
+        stress_loss,
+    )
+    from tradingagents.strategies.liquidity_risk import (
+        amihud_illiquidity,
+        kyle_lambda,
+        liquidity_verdict,
+        spread_estimate,
+    )
+    from tradingagents.strategies.regime import realized_vol
+    from tradingagents.strategies.volatility_models import semivariance
+
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    volumes = data.get("volumes") or []
+    if len(closes) < 30:
+        return {}
+    vals: dict = {}
+
+    rv = realized_vol(closes)
+    if rv is not None:
+        vals["realized_vol"] = rv
+    sv = semivariance(closes)
+    if sv.get("rs_minus") is not None:
+        vals["rs_minus"] = sv["rs_minus"]
+        vals["rs_plus"] = sv["rs_plus"]
+        vals["rv"] = sv["rv"]
+        vals["sqrt_rs_minus"] = sv["sqrt_rs_minus"]
+
+    illiq = amihud_illiquidity(closes, volumes)
+    if illiq is not None:
+        vals["amihud_illiquidity"] = illiq
+    se = spread_estimate(closes, highs, lows)
+    if se and se.get("spread") is not None:
+        vals["spread_pct"] = se["spread"]
+    lam = kyle_lambda(closes, volumes)
+    if lam is not None:
+        vals["kyle_lambda"] = lam
+    try:
+        vals["liquidity_verdict"] = liquidity_verdict(illiq, None, None)["verdict"]
+    except Exception:  # noqa: BLE001 - one leg degrades, the rest stand
+        pass
+
+    # --- the book: the same basket and the same resolver the governor uses ---
+    try:
+        cfg = get_config()
+        weights = configured_basket(cfg) or {}
+
+        def closes_for(name: str) -> list:
+            return _ohlcv(name).get("closes") or []
+
+        returns_by_name: dict = {}
+        for name in weights:
+            cs = closes_for(name)
+            rets = [cs[i] / cs[i - 1] - 1.0 for i in range(1, len(cs)) if cs[i - 1]]
+            if len(rets) >= 20:
+                returns_by_name[name] = rets
+        if len(returns_by_name) >= 2:
+            pcv = portfolio_cvar(returns_by_name, weights)
+            if pcv is not None:
+                vals["portfolio_cvar"] = pcv
+            vals["stress_loss"] = stress_loss(weights)
+            cs_loss = book_correlated_stress(returns_by_name, weights)
+            if cs_loss is not None:
+                vals["book_correlated_stress"] = cs_loss
+            norm = normalize_book_weights(returns_by_name, weights)
+            mixed = portfolio_returns(norm, returns_by_name) if norm else []
+            if mixed:
+                eq: list = []
+                acc = 1.0
+                for r in mixed:
+                    acc *= 1.0 + r
+                    eq.append(acc)
+                cd = cdar(eq)
+                if cd and cd.get("cdar") is not None:
+                    vals["cdar"] = cd["cdar"]
+        dd, _dd_meta = measured_book_drawdown(cfg, closes_for, fallback_symbol=ticker)
+        if dd is not None:
+            vals["measured_book_drawdown"] = dd
+    except Exception:  # noqa: BLE001 - the book legs are the ones that may be absent
+        pass
+    return vals
+
+
+def _render_risk_score(ticker: str, res: dict) -> str:
+    """Render the score dict: categories, raw/pinned/aligned rows, gap, basis."""
+    lines = [
+        f"## RiskScore - {ticker} (advisory; INVERTED: 100 = low risk; "
+        f"{len(res.get('measured') or [])} scored component(s) measured)",
+        "",
+        "Eight category sub-scores over the run's own bars and the configured "
+        "book. Advisory only: never a gate, never a size, never a forecast.",
+        "",
+    ]
+    for cat, entry in (res.get("categories") or {}).items():
+        score = entry.get("score")
+        if score is None:
+            lines.append(
+                f"- {cat} (weight {entry.get('weight'):g}): unavailable - "
+                f"{entry.get('withheld')}"
+            )
+            continue
+        lines.append(
+            f"- {cat} (weight {entry.get('weight'):g}): {score:.1f}/100"
+            + (f" ({entry.get('band')})" if entry.get("band") else "")
+            + f" - coverage {entry.get('coverage'):.0%} over "
+            f"{len(entry.get('present') or [])} component(s)"
+        )
+    score = res.get("score")
+    if score is None:
+        lines.append(f"- composite: unavailable - {res.get('withheld')}")
+    else:
+        lines.append(
+            f"- composite [{res.get('status')}]: {score:.1f}/100"
+            + (f" ({res.get('bands')})" if res.get("bands") else "")
+            + f" - owner weights, renormalised over the categories measured; "
+            f"coverage {res.get('coverage'):.0%}; uncertainty "
+            f"{res.get('uncertainty'):.0%}"
+        )
+    lines.append("")
+    lines.append("Components (raw -> pinned -> aligned; units and sign shown):")
+    for name, row in (res.get("components") or {}).items():
+        if row.get("raw") is None:
+            continue
+        aligned = row.get("aligned")
+        lines.append(
+            f"- {name}: raw {row['raw']} {row['units']} -> pinned "
+            f"{row['pinned']} ({row['pin']}) -> aligned "
+            f"{f'{aligned:.1f}' if aligned is not None else 'NA (printed only)'}"
+            f" [{row['producer']}]"
+        )
+        if row.get("identity"):
+            lines.append(f"    {row['identity']}")
+    absent = res.get("absent") or []
+    if absent:
+        lines.append("")
+        lines.append(
+            f"not measured (NA, never 0): {', '.join(absent)} - the book-level "
+            "legs need a configured basket (book_context) and the executor owns "
+            "the cluster/concentration/beta computations (RiskScore.md Q2)"
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_risk_score(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """RiskScore: the eight advisory 0-100 risk category sub-scores (volatility,
+    tail, liquidity, gap, correlation, concentration, portfolio drawdown, event
+    exposure) and their weighted composite. **Inverted: 100 = low risk.**
+
+    Every component prints its raw producer value with units and sign beside the
+    aligned contribution, because three sign/unit conventions ship in the tree
+    (a negative CVaR, a positive stress loss, an opposite-sign regime drawdown)
+    and the alignment is done here, visibly. Advisory only - it never sets a
+    rating, a position size or a gate. Gated by ``enable_risk_score``.
+    """
+    if not _r3_flag("enable_risk_score"):
+        return "risk score unavailable: the engine is gated off (enable_risk_score)"
+    try:
+        from tradingagents.strategies.risk_score import risk_score
+
+        vals = _risk_components(ticker)
+        if not vals:
+            return (
+                f"risk score unavailable for {ticker}: fewer than 30 bars or no "
+                "component could be measured"
+            )
+        res = risk_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"risk score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_risk_score(ticker, res)
+    except Exception as exc:  # noqa: BLE001
+        return f"risk score unavailable for {ticker}: render failed ({exc})"
+
+
+def _trade_score_engines(ticker: str) -> dict:
+    """The four engine scores, each from its own entry point (WP-11).
+
+    Every value is a number an engine produced; nothing is recomputed here and
+    nothing is substituted. An engine that cannot measure contributes ``None``,
+    which leaves it out of the composite's denominator and lowers coverage -
+    never 0, never a neutral 50. Below the floor of two the composite is
+    withheld with its reason, which is the honest read on a day only one engine
+    could measure.
+    """
+    scores: dict = {"fundamental": None, "technical": None, "regime": None, "risk": None}
+    try:
+        from tradingagents.strategies.fundamental_score import (
+            fundamental_score_for_ticker,
+        )
+
+        res = fundamental_score_for_ticker(ticker)
+        key = str(res.get("ticker") or ticker).strip().upper()
+        scores["fundamental"] = (res.get("scores") or {}).get(key)
+    except Exception:  # noqa: BLE001 - an advisory read must not break the tool
+        pass
+    try:
+        from tradingagents.strategies.technical_score import technical_score
+
+        vals = _technical_components(ticker)
+        if vals:
+            scores["technical"] = technical_score(vals).get("score")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from tradingagents.strategies.regime_score import regime_score
+
+        vals = _regime_components()
+        if vals:
+            scores["regime"] = regime_score(vals).get("score")
+    except Exception:  # noqa: BLE001
+        pass
+    # WP-5 fills `risk` in through its own public entry point, never its
+    # internals; until it lands the engine is absent and the composite prints the
+    # gap rather than substituting a number.
+    return scores
+
+
+@tool
+def get_trade_score(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """TradeScore: the four-engine advisory decision composite - fundamental
+    0.40, technical 0.25, regime 0.15, risk 0.20, each on the same 0-100
+    favourable convention (`RiskScore` 100 = low risk).
+
+    The composite renormalises over the engines that could be measured, prints
+    its weights, its status and its coverage, and is withheld with its reason
+    below a floor of two engines. It is **never a gate, never a size and never
+    an `opportunity_score`**: the executor's hard gates run downstream and block
+    regardless of this number. The default vector is the owner's published
+    `0.40/0.25/0.15/0.20`; its status is `RESEARCH_ONLY` until Phase C measures
+    it and each ladder rung is evidenced. Gated by ``enable_trade_score``.
+    """
+    if not _r3_flag("enable_trade_score"):
+        return "trade score unavailable: the engine is gated off (enable_trade_score)"
+    try:
+        from tradingagents.strategies.trade_score import format_trade_score, trade_score
+
+        res = trade_score(_trade_score_engines(ticker))
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"trade score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return format_trade_score(res, ticker=ticker)
+    except Exception as exc:  # noqa: BLE001
+        return f"trade score unavailable for {ticker}: render failed ({exc})"
+
+
+def _event_state_components(ticker: str, current_date: str) -> dict:
+    """The EventScore components for a ticker: the catalyst snapshot + OPEX.
+
+    Every value comes from a producer that already ran - `catalyst`'s own
+    earnings / macro / Fed blocks and `derivatives_gamma.opex_status` - so the
+    leaf costs one catalyst fetch and no new vendor call. A block that cannot be
+    measured is left out of the dict (it leaves the family's denominator), never
+    sent as 0. The snapshot's own `hard_block` travels through verbatim.
+    """
+    snap = _catalyst_snapshot(ticker, current_date)
+    if not snap:
+        return {}
+    from datetime import datetime
+
+    from tradingagents.strategies.derivatives_gamma import opex_status
+    from tradingagents.strategies.event_state import event_components
+
+    opex = None
+    try:
+        day = datetime.strptime(str(current_date)[:10], "%Y-%m-%d").date()
+        opex = opex_status(day)
+    except Exception:  # noqa: BLE001 - OPEX is one extra family, never a blocker
+        opex = None
+    return event_components(snap, opex=opex)
+
+
+def _render_event_state(ticker: str, res: dict) -> str:
+    """The event state as text: families, imminence, flags, the block, the basis."""
+    from tradingagents.strategies.event_state import FLAG_COMPONENTS
+
+    lines = [
+        f"event state {ticker}: intensity={_txt(res.get('score'))} "
+        f"band={_txt(res.get('band'))} [{res.get('status')}] "
+        f"coverage={_txt(res.get('coverage'))}"
+    ]
+    for fam, state in (res.get("families") or {}).items():
+        imm = state.get("imminence")
+        imm_s = f"{float(imm):.3f}" if isinstance(imm, (int, float)) else "NA"
+        flags = {
+            k: v
+            for k, v in (state.get("components") or {}).items()
+            if k in FLAG_COMPONENTS
+        }
+        line = (
+            f"  {fam} [{state.get('scope')}/{state.get('availability')}]: "
+            f"imminence={imm_s} score={_txt(state.get('score'))} flags={flags}"
+        )
+        if state.get("reason"):
+            line += f" | {state['reason']}"
+        lines.append(line)
+    block = res.get("hard_block")
+    lines.append(
+        "  hard block: "
+        + (
+            "none (the earnings block is set by catalyst.build_catalyst_snapshot, "
+            "never by this engine)"
+            if block is None
+            else str(block)
+        )
+    )
+    if res.get("withheld"):
+        lines.append(f"  withheld: {res['withheld']} (never 0, never a neutral 50)")
+    lines.append(f"  {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_event_state(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
+) -> str:
+    """The structured event state: is a high-impact event happening right now?
+
+    Occurrence and imminence, not exposure. One imminence scalar per event family
+    - earnings, macro, Fed, OPEX - all over the same clamp(1 - days/horizon, 0, 1)
+    function, plus the producers' own window flags, the coverage over the seven
+    families, and the earnings hard block **passed through verbatim as the
+    snapshot carries it** (this engine never computes, thresholds or vetoes with
+    it). The scale is inverted relative to the other engines: 100 means an event
+    is on top of us, not that the name is favourable. The status is RESEARCH_ONLY
+    - no weight vector is published for this engine. Advisory only: never a gate,
+    never a size, never a forecast. Gated by ``enable_event_state``.
+    """
+    if not _r3_flag("enable_event_state"):
+        return "event state unavailable: the engine is gated off (enable_event_state)"
+    try:
+        from tradingagents.strategies.event_state import event_state
+
+        comps = _event_state_components(ticker, current_date)
+        if not comps:
+            return (
+                f"event state unavailable for {ticker}: no catalyst snapshot in this "
+                "run (the events overlay is off or its fetch failed)"
+            )
+        res = event_state(comps)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"event state unavailable for {ticker}: {exc}"
+    return _render_event_state(ticker, res)
+
+
+def _regime_components() -> dict:
+    """Assemble the RegimeScore components from MARKET-level sources (WP-4).
+
+    The plan's binding prerequisite order (§5.3): the benchmark's trend, then
+    market-wide breadth, then the two VIX legs, then the chop unit. Every value
+    comes from a producer that already exists - the score measures the
+    ENVIRONMENT, so the trend and the realized-vol percentile are the
+    benchmark's, not the analysed name's.
+
+    `breadth` needs a `{name: closes}` panel; a tool call that fetched the whole
+    S&P universe would pay a network round trip per name for one 5%-weight leg,
+    so it stays ABSENT with its reason (P0-2's panel is the run-time source).
+    """
+    from datetime import datetime
+
+    from tradingagents.strategies.regime import (
+        choppiness as _chop,
+        vol_percentile_read,
+    )
+    from tradingagents.strategies.regime_score import market_trend
+
+    vals: dict = {}
+    bench = _benchmark_closes()
+    if not bench:
+        return {}
+    bars = _benchmark_bars()
+    try:
+        mt = market_trend(bench)
+        if mt.get("trend") is not None:
+            vals["market_trend"] = mt["trend"]
+    except Exception:  # noqa: BLE001 - an advisory leg degrades, it never blocks
+        pass
+    try:
+        ch = _chop(
+            bench,
+            highs=bars.get("highs") or None,
+            lows=bars.get("lows") or None,
+            window=14,
+        )
+        if ch is not None:
+            vals["choppiness"] = ch
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # realized-vol percentile of the BENCHMARK's own history (the
+        # `regime.vol_percentile` defect fix: None, never a fabricated 0.5)
+        window = 21
+        windows = [bench[i - window : i] for i in range(window, len(bench) + 1, window)]
+        vp = vol_percentile_read(windows)
+        if vp.get("percentile") is not None:
+            vals["realized_vol_percentile"] = vp["percentile"]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        vix = _vix_percentile_read(today)
+        if vix.get("percentile") is not None:
+            vals["vix_percentile"] = vix["percentile"]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # P0-5's producer: Cboe's own VIX9D/VIX3M levels. The equity-IV slope is
+        # NOT a substitute, which is why the levels are fetched by name.
+        from tradingagents.dataflows.cboe import vix_term_structure as _cboe_vts
+        from tradingagents.strategies.regime_score import (
+            vix_term_structure as _vts,
+        )
+
+        ts = _cboe_vts()
+        ratio = _vts(ts.get("vix9d"), ts.get("vix3m")).get("ratio")
+        if ratio is not None:
+            vals["vix_term_structure"] = ratio
+    except Exception:  # noqa: BLE001
+        pass
+    return vals
+
+
+def _regime_two_paths() -> dict | None:
+    """The two regime reads, side by side, never reconciled (WP-4).
+
+    Path A is `overlays.build_strategy_overlays` (one label from a close series);
+    Path B is `regime_state.regime_state` (four axes). Both run over the
+    BENCHMARK here, so the two paths are describing the same object - the point
+    is that the two vocabularies still disagree, and `regime_paths` prints both
+    with their own names and a flag instead of merging them.
+    """
+    bench = _benchmark_closes()
+    if not bench or len(bench) < 60:
+        return None
+    try:
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.overlays import build_strategy_overlays
+        from tradingagents.strategies.regime_score import regime_paths
+        from tradingagents.strategies.regime_state import regime_state
+
+        bars = _benchmark_bars()
+        path_a = build_strategy_overlays(
+            {**(get_config() or {}), "enable_strategy_overlays": True}, bench
+        )
+        path_b = regime_state(
+            bench, bars.get("highs"), bars.get("lows"), benchmark=None
+        )
+        if not path_a:
+            return None
+        return regime_paths(path_a, path_b)
+    except Exception:  # noqa: BLE001 - a diagnostic path must not break the leaf
+        return None
+
+
+def _render_regime_score(res: dict, paths: dict | None) -> str:
+    """Render the regime score: components with units, the paths, the basis."""
+    lines = [
+        "## RegimeScore - the market environment (advisory)",
+        "",
+        f"score: {_txt(res.get('score'))}/100 band={_txt(res.get('band'))} "
+        f"[{res.get('status')}] coverage={_txt(res.get('coverage'))}",
+    ]
+    for name, entry in (res.get("components") or {}).items():
+        raw = entry.get("raw")
+        raw_s = f"{float(raw):.4f}" if isinstance(raw, (int, float)) else "NA"
+        lines.append(
+            f"  {name}: raw={raw_s} {entry.get('unit') or ''} -> "
+            f"aligned={_txt(entry.get('aligned'))} "
+            f"[{entry.get('direction')}] ({entry.get('producer')})"
+        )
+    if res.get("withheld"):
+        lines.append(f"  withheld: {res['withheld']}")
+    if paths:
+        lines.append(
+            f"  two paths: disagree={paths.get('disagree')} "
+            f"({paths.get('disagree_reason')})"
+        )
+        lines.append(
+            f"    A {paths['path_a']['name']}: label={paths['path_a']['label']} "
+            f"position_scale={paths['path_a']['position_scale']} (echoed, never "
+            f"multiplied)"
+        )
+        lines.append(
+            f"    B {paths['path_b']['name']}: trend={paths['path_b']['trend']} "
+            f"vol={paths['path_b']['volatility']} "
+            f"relative={paths['path_b']['relative']}"
+        )
+    else:
+        lines.append(
+            "  two paths: unavailable (the benchmark series is too short for one "
+            "of the reads)"
+        )
+    lines.append(f"  {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_regime_score() -> str:
+    """RegimeScore: the market environment as one advisory 0-100, plus the two
+    regime reads side by side.
+
+    Market-level, not name-level: the benchmark's trend, the benchmark's own
+    realized-vol percentile, the VIX percentile and the VIX9D/VIX3M term
+    structure, and the chop unit. Every component prints its raw value with units
+    beside its aligned contribution. The two regime paths (`get_regime_read`'s
+    label and `get_regime_state`'s four axes) are printed with their own names
+    and a `disagree` flag - **never reconciled**. Advisory only: never a gate,
+    never a size, never a direction for a name. Gated by ``enable_regime_score``.
+    """
+    if not _r3_flag("enable_regime_score"):
+        return "regime score unavailable: the engine is gated off (enable_regime_score)"
+    try:
+        from tradingagents.strategies.regime_score import regime_score
+
+        vals = _regime_components()
+        if not vals:
+            return (
+                "regime score unavailable: no market data (the benchmark series "
+                "could not be read)"
+            )
+        res = regime_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"regime score unavailable: {type(exc).__name__}: {exc}"
+    try:
+        return _render_regime_score(res, _regime_two_paths())
+    except Exception as exc:  # noqa: BLE001
+        return f"regime score unavailable: render failed ({exc})"
+
+
+# --- WP-7: SentimentScore --------------------------------------------------
+
+
+def _sentiment_points_with_source(ticker: str, start: str, end: str) -> tuple[list, str]:
+    """Daily sentiment points AND the source that produced them (scale tag).
+
+    The scale must travel with the number (`SentimentScore.md` §5.1): EODHD and
+    Alpha Vantage are -1..1, GDELT is -100..100. This mirrors
+    `_news_sentiment_points` but returns the source name so
+    `sentiment_score(..., source=...)` normalises - or REFUSES to mix - rather
+    than guessing the unit.
+    """
+    try:
+        from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
+
+        points = _sentiment_points_eodhd(ticker, start, end)
+        if points:
+            return points, "eodhd"
+    except Exception:  # noqa: BLE001 - try the next feed
+        pass
+    try:
+        from tradingagents.dataflows.alpha_vantage_news import (
+            _sentiment_points_alpha_vantage,
+        )
+
+        points = _sentiment_points_alpha_vantage(ticker, start, end)
+        if points:
+            return points, "alpha_vantage"
+    except Exception:  # noqa: BLE001 - try the next feed
+        pass
+    try:
+        from tradingagents.dataflows.gdelt import _sentiment_points_gdelt
+
+        return list(_sentiment_points_gdelt(ticker, start, end) or []), "gdelt"
+    except Exception:  # noqa: BLE001
+        return [], "unit"
+
+
+def _sentiment_price_read(ticker: str) -> float | None:
+    """Last-session ABNORMAL return: the name's return minus the benchmark's.
+
+    The price axis of the confirmation quadrant (`SentimentScore.md` §0.3). None
+    when either series is too short - the quadrant then prints n/a rather than a
+    fabricated cell.
+    """
+    closes = _ohlcv(ticker).get("closes") or []
+    bench = _benchmark_closes() or []
+    if len(closes) < 2 or len(bench) < 2:
+        return None
+    name_ret = float(closes[-1]) / float(closes[-2]) - 1.0
+    bench_ret = float(bench[-1]) / float(bench[-2]) - 1.0
+    return name_ret - bench_ret
+
+
+def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 120) -> tuple[dict, str]:
+    """Assemble the SentimentScore components from producers the run already holds.
+
+    Every value comes from an existing producer; one that cannot measure returns
+    nothing and its component is ABSENT (NA), never 0 and never a neutral 50.
+    Returns ``(values, source)``; ``source`` tags the tone legs' scale. The
+    design's own holes (institutional, analyst, options, short interest, mention
+    heat) stay ``None`` and the engine prints them.
+    """
+    from datetime import date, timedelta
+
+    from tradingagents.strategies.sentiment import (
+        aggregate_weighted_sentiment,
+        compute_social_scores,
+        daily_sentiment_sma,
+        sentiment_velocity,
+    )
+
+    end = current_date or date.today().isoformat()
+    try:
+        start = (date.fromisoformat(str(end)[:10]) - timedelta(days=days)).isoformat()
+    except ValueError:
+        return {}, "unit"
+    vals: dict = {}
+    points, source = _sentiment_points_with_source(ticker, start, end)
+    rows = daily_sentiment_sma(points) if points else None
+    if rows:
+        last = rows[-1]
+        if last.get("sma_7d") is not None:
+            vals["sma_7d"] = last["sma_7d"]
+        if last.get("innovation") is not None:
+            vals["tone_innovation"] = last["innovation"]
+        vel = sentiment_velocity([r.get("score") for r in rows])
+        if vel is not None:
+            vals["tone_velocity"] = vel
+    try:
+        articles = _av_news_articles(ticker, start, end)
+    except Exception:  # noqa: BLE001
+        articles = []
+    agg = aggregate_weighted_sentiment(articles, ticker=ticker) if articles else None
+    if agg:
+        if agg[-1].get("weighted") is not None:
+            vals["weighted_tone"] = agg[-1]["weighted"]
+        if agg[-1].get("neutral_share") is not None:
+            vals["neutral_share"] = agg[-1]["neutral_share"]
+        if agg[-1].get("dispersion") is not None:
+            vals["dispersion"] = agg[-1]["dispersion"]
+    social = compute_social_scores(ticker)
+    if social:
+        if social.get("computed_score") is not None:
+            vals["social_score"] = social["computed_score"]
+        if social.get("computed_velocity") is not None:
+            vals["social_velocity"] = social["computed_velocity"]
+        crowd = social.get("crowd_ratio") or {}
+        if crowd.get("ratio") is not None:
+            vals["crowd_ratio"] = crowd["ratio"]
+        disp = social.get("crowd_dispersion") or {}
+        if disp.get("agreement") is not None:
+            vals["dispersion_agreement"] = disp["agreement"]
+    return vals, source
+
+
+def _render_sentiment_score(ticker: str, res: dict) -> str:
+    """Render the engine dict: categories, weights, coverage, quadrant, basis."""
+    lines = [
+        f"## SentimentScore - {ticker} (advisory; "
+        f"{len(res.get('measured') or [])} of "
+        f"{len(res.get('components') or {})} components measured)",
+        "",
+        "How the market is positioned. Advisory only: never a gate, never a size.",
+        f"- confirmation quadrant: {res.get('quadrant') or 'n/a'}",
+    ]
+    for cat, entry in (res.get("categories") or {}).items():
+        score = entry.get("score")
+        if score is None:
+            lines.append(
+                f"- {cat} (weight {entry.get('weight'):g}): unavailable - "
+                f"{entry.get('withheld')}"
+            )
+            continue
+        lines.append(
+            f"- {cat} (weight {entry.get('weight'):g}): {score:.1f}/100"
+            + (f" ({entry.get('band')})" if entry.get("band") else "")
+            + f" - coverage {entry.get('coverage'):.0%}"
+        )
+    if res.get("score") is None:
+        lines.append(f"- composite: unavailable - {res.get('withheld')}")
+    else:
+        lines.append(
+            f"- composite [{res.get('status')}]: {res.get('score'):.1f}/100"
+            + (f" ({res.get('bands')})" if res.get("bands") else "")
+            + f" - coverage {res.get('coverage'):.0%}"
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_sentiment_score(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
+) -> str:
+    """SentimentScore: ten advisory 0-100 category sub-scores over the sentiment
+    pipeline (tone, momentum, breadth, institutional, analyst, retail/social,
+    options, short interest, dispersion, extreme/crowding), their composite, and
+    the confirmation quadrant (confirm-up / confirm-down / diverge-up /
+    diverge-down).
+
+    The tone legs are normalised onto the canonical unit scale (-1..1); a read
+    that mixes a GDELT (-100..100) source with an EODHD/AV one is REFUSED rather
+    than averaged. Attention and tone are separate rows and are never summed.
+    Advisory only - it never sets a rating, a position size or a gate. Gated by
+    ``enable_sentiment_score``.
+    """
+    if not _r3_flag("enable_sentiment_score"):
+        return (
+            "sentiment score unavailable: the engine is gated off "
+            "(enable_sentiment_score)"
+        )
+    try:
+        from tradingagents.strategies.sentiment_score import sentiment_score
+
+        vals, source = _sentiment_components(ticker, current_date)
+        if not vals:
+            return (
+                f"sentiment score unavailable for {ticker}: no sentiment producer "
+                "measured"
+            )
+        res = sentiment_score(
+            vals, source=source, price_read=_sentiment_price_read(ticker)
+        )
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"sentiment score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_sentiment_score(ticker, res)
+    except Exception as exc:  # noqa: BLE001
+        return f"sentiment score unavailable for {ticker}: render failed ({exc})"
+
+
+# --- WP-6: NewsScore -------------------------------------------------------
+
+
+def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -> dict:
+    """Assemble the NewsScore components from the news pipeline.
+
+    Relevance comes from `news_relevance.score_news_article` (the same producer
+    the news analyst's leaf uses), novelty from the article set itself, the
+    surprise leg from `catalyst.last_earnings_surprise`, the analyst leg from
+    `analyst_revisions.revision_ratio` and persistence from the mention volume.
+    **Materiality is deliberately absent here**: `EventScore` owns it (owner Q6),
+    and a second estimate would be the double count the master forbids - the
+    caller supplies it when it has it.
+
+    The five categories with no supplier (fundamental impact, guidance change,
+    regulatory/legal, industry shock, and materiality until the caller supplies
+    it) stay absent and the engine prints `NA` with its reason, never 0.
+    """
+    from datetime import date, timedelta
+
+    from tradingagents.strategies.news_relevance import score_news_article
+
+    end = current_date or date.today().isoformat()
+    try:
+        start = (date.fromisoformat(str(end)[:10]) - timedelta(days=days)).isoformat()
+    except ValueError:
+        return {}
+    vals: dict = {}
+    try:
+        articles = _av_news_articles(ticker, start, end) or []
+    except Exception:  # noqa: BLE001
+        articles = []
+    if articles:
+        scored = []
+        for a in articles[:40]:
+            text = str(a.get("title") or a.get("headline") or "")
+            if not text:
+                continue
+            try:
+                # the producer returns {"score", "reasons"}, not a bare number
+                res = score_news_article(text, ticker=ticker)
+                value = res.get("score") if isinstance(res, dict) else res
+                if value is not None:
+                    scored.append(float(value))
+            except Exception:  # noqa: BLE001 - one bad article is not a failure
+                continue
+        if scored:
+            vals["relevance"] = sum(scored) / len(scored)
+        try:
+            from tradingagents.strategies.news_score import news_novelty
+
+            nov = news_novelty(articles, window=days)
+            if nov.get("novelty") is not None:
+                vals["novelty"] = nov["novelty"]
+        except Exception:  # noqa: BLE001
+            pass
+        # Persistence needs a MENTION HISTORY (a per-day count series); this leaf
+        # holds one window's articles, so the leg stays absent with its reason
+        # rather than being computed from a series that does not exist
+        # (sentiment.mention_volume takes the history, not the articles).
+    try:
+        from tradingagents.strategies.analyst_revisions import revision_ratio
+
+        rev = revision_ratio(ticker)
+        if isinstance(rev, dict) and rev.get("ratio") is not None:
+            vals["analyst_revision"] = rev["ratio"]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from tradingagents.strategies.catalyst import last_earnings_surprise
+
+        sur = last_earnings_surprise(_catalyst_snapshot(ticker, end))
+        if isinstance(sur, dict) and sur.get("score") is not None:
+            vals["earnings_surprise"] = sur["score"]
+    except Exception:  # noqa: BLE001
+        pass
+    return vals
+
+
+def _render_news_score(ticker: str, res: dict) -> str:
+    """Render the engine dict: components, absent categories with reasons, basis."""
+    lines = [
+        f"## NewsScore - {ticker} (advisory; "
+        f"{len(res.get('measured') or [])} of "
+        f"{len(res.get('components') or {})} components measured)",
+        "",
+        "What new information arrived. Advisory only: never a gate, never a size.",
+    ]
+    for cat, entry in (res.get("categories") or {}).items():
+        score = entry.get("score")
+        if score is None:
+            lines.append(
+                f"- {cat} (weight {entry.get('weight'):g}): NA - "
+                f"{entry.get('withheld') or 'no producer on this path'}"
+            )
+            continue
+        lines.append(
+            f"- {cat} (weight {entry.get('weight'):g}): {score:.1f}/100"
+            + (f" ({entry.get('band')})" if entry.get("band") else "")
+            + f" - coverage {entry.get('coverage'):.0%}"
+        )
+    if res.get("score") is None:
+        lines.append(f"- composite: unavailable - {res.get('withheld')}")
+    else:
+        lines.append(
+            f"- composite [{res.get('status')}]: {res.get('score'):.1f}/100"
+            f" - coverage {res.get('coverage'):.0%}"
+        )
+    absent = res.get("absent") or []
+    if absent:
+        lines.append("")
+        lines.append(
+            "absent (NA with a reason, never 0): " + ", ".join(sorted(absent))
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_news_score(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
+) -> str:
+    """NewsScore: how much new, material information arrived about the name.
+
+    Relevance and novelty come from the news pipeline's own producers; the five
+    categories with no supplier (fundamental impact, guidance change,
+    regulatory/legal, industry shock, and materiality - which `EventScore` owns,
+    owner Q6) print `NA` **with a reason**, never 0. Relevance alone cannot raise
+    the composite: the two are independent rows. Advisory only - never a gate,
+    never a size, never a forecast. Gated by ``enable_news_score``.
+    """
+    if not _r3_flag("enable_news_score"):
+        return "news score unavailable: the engine is gated off (enable_news_score)"
+    try:
+        from tradingagents.strategies.news_score import news_score
+
+        vals = _news_components(ticker, current_date)
+        if not vals:
+            return f"news score unavailable for {ticker}: no news producer measured"
+        res = news_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"news score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_news_score(ticker, res)
+    except Exception as exc:  # noqa: BLE001
+        return f"news score unavailable for {ticker}: render failed ({exc})"
 
 
 @tool

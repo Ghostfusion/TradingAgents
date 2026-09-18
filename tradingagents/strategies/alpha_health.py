@@ -437,6 +437,191 @@ def _eval_unavailable(n: int, holding: int, reason: str) -> dict:
     return {"available": False, "n": int(n), "holding": int(holding), "reason": reason}
 
 
+# --------------------------------------------------------------------------
+# WP-10 - the cross-section floors and the panel-level label
+# --------------------------------------------------------------------------
+#
+# `min_names=4` / `min_obs=5` below are SMOKE floors: they keep a row from
+# dividing by zero on a four-name basket. They are NOT the floor at which a
+# *weight* may be produced. Owner Q4 (docs/scores/IMPLEMENTATION_PLAN.md section
+# 9, Phase C) makes the full EODHD US panel the validation universe and states
+# that IC, ICIR, decile spread and monotonicity "only become meaningful with
+# hundreds/thousands of eligible names", so the weight-producing floor is
+# declared separately, once, here - a second caller cannot lower it by passing
+# its own smoke floor.
+
+#: Median eligible scored names in one cross-section (the owner's "hundreds").
+CROSS_SECTION_MIN_NAMES = 100
+#: Cross-sections carrying a forward return.
+CROSS_SECTION_MIN_PERIODS = 20
+#: Eligible names per bucket, so all 10 deciles can populate (`x n_buckets`).
+CROSS_SECTION_MIN_PER_BUCKET = 5
+#: The two labels. `INSUFFICIENT_CROSS_SECTION` is owner Q4's own wording.
+CROSS_SECTION_OK = "OK"
+CROSS_SECTION_INSUFFICIENT = "INSUFFICIENT_CROSS_SECTION"
+
+
+def _median(values) -> float | None:
+    """Median of a numeric sequence; None when empty (never 0)."""
+    vals = sorted(float(v) for v in values if _f(v) is not None)
+    n = len(vals)
+    if not n:
+        return None
+    mid = n // 2
+    return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def cross_section_status(
+    n_names_by_period,
+    *,
+    n_buckets: int = 10,
+    min_names: int = CROSS_SECTION_MIN_NAMES,
+    min_periods: int = CROSS_SECTION_MIN_PERIODS,
+    min_per_bucket: int = CROSS_SECTION_MIN_PER_BUCKET,
+) -> dict:
+    """Label a cross-sectional panel ``OK`` or ``INSUFFICIENT_CROSS_SECTION``.
+
+    ``n_names_by_period`` is the eligible-name count of each cross-section (the
+    names with both a score and a forward return). The label is a *whole-panel*
+    judgement, not a row's: the smoke floors above decide whether a row prints,
+    this decides whether the panel may produce a weight at all (owner Q4).
+
+    The floors are declared policy, printed in ``floors`` with the observed
+    values beside them, so a failing panel names the floor it failed. A panel
+    with no periods, or with a median below the floor, or with too few names per
+    bucket for the deciles to populate, is `INSUFFICIENT_CROSS_SECTION` and the
+    caller must produce **no weight vector**.
+
+    Returns ``{"status", "reason", "floors", "observed"}``.
+    """
+    counts = [int(c) for c in (n_names_by_period or []) if int(c) > 0]
+    periods = len(counts)
+    observed = {
+        "periods": periods,
+        "median_names": _median(counts),
+        "min_names": min(counts) if counts else 0,
+        "max_names": max(counts) if counts else 0,
+    }
+    floors = {
+        "min_names": int(min_names),
+        "min_periods": int(min_periods),
+        "min_names_per_bucket": int(min_per_bucket),
+        "n_buckets": int(n_buckets),
+    }
+    if periods < int(min_periods):
+        reason = (
+            f"{periods} cross-sectional period(s) with a forward return < "
+            f"min_periods={int(min_periods)}"
+        )
+    elif observed["median_names"] is None or observed["median_names"] < int(min_names):
+        reason = (
+            f"median eligible names per cross-section "
+            f"{observed['median_names']} < min_names={int(min_names)}"
+        )
+    elif observed["min_names"] < int(min_per_bucket) * int(n_buckets):
+        reason = (
+            f"the thinnest cross-section carries {observed['min_names']} name(s) < "
+            f"{int(min_per_bucket)} x {int(n_buckets)} buckets - the deciles cannot "
+            "populate"
+        )
+    else:
+        return {
+            "status": CROSS_SECTION_OK,
+            "reason": (
+                f"{periods} cross-sections, median {observed['median_names']:.0f} and "
+                f"at least {observed['min_names']} eligible names, clears "
+                f"min_periods={int(min_periods)} / min_names={int(min_names)} / "
+                f"{int(min_per_bucket)} per bucket"
+            ),
+            "floors": floors,
+            "observed": observed,
+        }
+    return {
+        "status": CROSS_SECTION_INSUFFICIENT,
+        "reason": (
+            f"{reason}; owner Q4: the full EODHD US panel is the validation "
+            "universe and a thinner panel may never produce a weight vector"
+        ),
+        "floors": floors,
+        "observed": observed,
+    }
+
+
+def decile_spread(bucket_means) -> float | None:
+    """``Return(D10) - Return(D1)`` - None unless BOTH ends are populated.
+
+    ``bucket_means`` is the decile row's own ``bucket_means`` (index 0 = lowest
+    score). A missing end is not 0: the spread is withheld rather than computed
+    from a bucket with no observations (master rule 1).
+    """
+    means = list(bucket_means or [])
+    if len(means) < 2:
+        return None
+    top, bottom = _f(means[-1]), _f(means[0])
+    if top is None or bottom is None:
+        return None
+    return top - bottom
+
+
+def decile_ordering(bucket_means) -> dict:
+    """Correctly ordered adjacent decile pairs / (n_buckets - 1).
+
+    The plan's own statistic (section 9 Phase C): 9 of 9 for ten strictly rising
+    deciles. The denominator is **every** adjacent pair, not only the populated
+    ones, so an unpopulated pair counts as *not* ordered and the fraction
+    degrades instead of flattering a sparse panel. ``populated_pairs`` is
+    reported beside it so the reader can see how much of the table was there.
+    """
+    means = [_f(m) for m in (bucket_means or [])]
+    adjacent = max(0, len(means) - 1)
+    if not adjacent:
+        return {
+            "adjacent_pairs": 0,
+            "ordered_pairs": 0,
+            "populated_pairs": 0,
+            "sparse": True,
+            "fraction": None,
+            "monotone": False,
+        }
+    ordered = populated = 0
+    for lo, hi in zip(means, means[1:]):
+        if lo is None or hi is None:
+            continue
+        populated += 1
+        if hi > lo:
+            ordered += 1
+    return {
+        "adjacent_pairs": adjacent,
+        "ordered_pairs": ordered,
+        "populated_pairs": populated,
+        # A sparse table (a tie-collapsed boolean factor fills only a couple of
+        # buckets) has a fraction that says as much about the emptiness as about
+        # the ordering, so the flag travels with it.
+        "sparse": populated < adjacent,
+        "fraction": ordered / adjacent,
+        "monotone": ordered == adjacent,
+    }
+
+
+def _top_bucket_weights(panel: dict, i: int, n_buckets: int) -> dict:
+    """Equal weights over the top score bucket at snapshot ``i`` ({} if thin).
+
+    The unit the turnover row rotates: a factor's implementable portfolio, as
+    the rank bucketing the decile row already uses defines it.
+    """
+    from tradingagents.strategies.sentiment_research import _bucket, _cross_section
+
+    cs = _cross_section(panel, i)
+    if not cs:
+        return {}
+    xs = list(cs.values())
+    members = [t for t, v in cs.items() if _bucket(v, xs, n_buckets) == n_buckets - 1]
+    if not members:
+        return {}
+    w = 1.0 / len(members)
+    return {t: w for t in members}
+
+
 def score_evaluation_rows(
     scores_by_date: dict,
     prices: dict,
@@ -453,7 +638,7 @@ def score_evaluation_rows(
     ``sorted(scores_by_date)`` (a name with no bar at a date carries None).
     Pure and deterministic - no I/O, no network.
 
-    Emits four rows, each stating its ``n`` and the ``holding`` period:
+    Emits five rows, each stating its ``n`` and the ``holding`` period:
 
     * ``ic`` - mean cross-sectional rank IC + IC IR, computed by
       ``sentiment_research.rolling_information_coefficient`` (no second IC
@@ -461,14 +646,28 @@ def score_evaluation_rows(
     * ``deciles`` - mean ``holding``-day forward return per rank bucket (rank
       bucketing, the ``quintile_long_short`` semantics) + a monotonicity flag
       (Spearman of bucket index vs bucket mean), withheld until every bucket
-      is populated;
+      is populated, plus the plan's own two statistics: ``spread``
+      (``Return(D10) - Return(D1)``) and ``ordering`` (correctly ordered
+      adjacent decile pairs / ``n_buckets - 1``);
     * ``coverage`` - scored names / universe, per date and pooled;
-    * ``stability`` - mean rank autocorrelation of consecutive snapshots.
+    * ``stability`` - mean rank autocorrelation of consecutive snapshots, which
+      is also the factor's **persistence** (emitted under that name beside it);
+    * ``turnover`` - mean one-period turnover of the top-bucket portfolio
+      (``evaluate.turnover`` over the equal-weighted top bucket, no second
+      turnover implementation).
 
     A row is emitted only above ``min_obs`` periods; below that it is
     ``available=False`` with the observed count and the reason. These rows are
     inputs to the DSR/PBO multiple-testing check - never a standalone verdict.
+
+    The result also carries the **panel-level** label (``status`` /
+    ``status_reason`` / ``floors`` / ``observed``) from
+    ``cross_section_status``: the smoke floors decide whether a row prints, the
+    cross-section floors decide whether the panel may produce a weight at all
+    (owner Q4). ``INSUFFICIENT_CROSS_SECTION`` there means the caller must emit
+    no weight vector.
     """
+    from tradingagents.strategies.evaluate import turnover
     from tradingagents.strategies.sentiment_research import (
         _bucket,
         _cross_section,
@@ -494,13 +693,16 @@ def score_evaluation_rows(
         "basis": basis,
     }
     if not dates:
+        status = cross_section_status([])
         return {
             **meta,
+            **status,
             "universe_n": 0,
             "ic": _eval_unavailable(0, holding, "no score snapshots"),
             "deciles": _eval_unavailable(0, holding, "no score snapshots"),
             "coverage": _eval_unavailable(0, holding, "no score snapshots"),
             "stability": _eval_unavailable(0, holding, "no score snapshots"),
+            "turnover": _eval_unavailable(0, holding, "no score snapshots"),
         }
 
     def _sc(d, t):
@@ -528,7 +730,8 @@ def score_evaluation_rows(
 
     # --- IC: reuse the sentiment_research implementation ------------------
     usables = {i: _usable(i) for i in range(n_periods)}
-    periods = sum(1 for names in usables.values() if len(names) >= min_names)
+    eligible = [len(names) for i, names in usables.items() if len(names) >= min_names]
+    periods = len(eligible)
     if periods < 2:
         ic = _eval_unavailable(
             periods, holding,
@@ -546,17 +749,29 @@ def score_evaluation_rows(
         except (ZeroDivisionError, ValueError, KeyError):
             res = None
         metrics = (res or {}).get("metrics") or {}
+        mean_rank_ic = _f(metrics.get("mean_rank_ic"))
+        mean_pearson_ic = _f(metrics.get("mean_pearson_ic"))
+        ic_ir = _f(metrics.get("ic_ir"))
         if not metrics:
             ic = _eval_unavailable(periods, holding, "rank IC degenerate on this panel")
+        elif mean_rank_ic is None or mean_pearson_ic is None or ic_ir is None:
+            # A constant cross-section makes the correlation undefined (scipy
+            # returns nan), and a nan averaged over periods would be printed as
+            # the factor's IC. Withheld with the reason instead.
+            ic = _eval_unavailable(
+                periods, holding,
+                "rank IC non-finite on this panel (a cross-section with no "
+                "dispersion, e.g. a tie-collapsed boolean factor)",
+            )
         else:
             ic = {
                 "available": True,
                 "n": int(metrics.get("periods") or periods),
                 "holding": holding,
-                "mean_rank_ic": metrics.get("mean_rank_ic"),
-                "mean_pearson_ic": metrics.get("mean_pearson_ic"),
-                "ic_ir": metrics.get("ic_ir"),
-                "pct_positive": metrics.get("pct_positive"),
+                "mean_rank_ic": mean_rank_ic,
+                "mean_pearson_ic": mean_pearson_ic,
+                "ic_ir": ic_ir,
+                "pct_positive": _f(metrics.get("pct_positive")),
                 "basis": f"cross-sectional Spearman rank IC vs {holding}d forward return",
             }
 
@@ -606,6 +821,8 @@ def score_evaluation_rows(
             "bucket_means": bucket_means,
             "bucket_counts": list(bucket_cnt),
             "buckets_filled": filled,
+            "spread": decile_spread(bucket_means),
+            "ordering": decile_ordering(bucket_means),
             "monotonicity": mono,
             "monotone": monotone,
             "basis": (
@@ -685,17 +902,65 @@ def score_evaluation_rows(
             "n": pairs,
             "holding": holding,
             "mean_rank_autocorr": stab_sum / pairs,
+            # Persistence is the same statistic under the name the WP-10
+            # acceptance list uses (`Persistence`); it is NOT a second
+            # computation - one number, one producer, two required names.
+            "persistence": stab_sum / pairs,
             "per_pair": per_pair,
-            "basis": "mean Spearman rank autocorrelation of consecutive score snapshots",
+            "basis": (
+                "mean Spearman rank autocorrelation of consecutive score "
+                "snapshots (= the persistence statistic)"
+            ),
         }
 
+    # --- turnover: rotation of the top-bucket portfolio -------------------
+    # Uses `evaluate.turnover` (1/2 * sum |w_t - w_{t-1}|) over the equal-
+    # weighted top bucket, so there is no second turnover implementation. No
+    # forward return is needed, so every snapshot pair counts - including the
+    # last `holding` dates the other rows cannot use.
+    top = {i: _top_bucket_weights(panel, i, n_buckets) for i in range(len(dates))}
+    to_pairs = 0
+    to_sum = 0.0
+    to_per_pair = {}
+    for i in range(1, len(dates)):
+        prev, cur = top.get(i - 1) or {}, top.get(i) or {}
+        if not prev or not cur:
+            continue
+        v = turnover(cur, prev)
+        if v is None:
+            continue
+        to_sum += v
+        to_per_pair[dates[i]] = v
+        to_pairs += 1
+    if to_pairs < min_obs:
+        turnover_row = _eval_unavailable(
+            to_pairs, holding,
+            f"{to_pairs} consecutive top-bucket pair(s) < min_obs={min_obs}",
+        )
+    else:
+        turnover_row = {
+            "available": True,
+            "n": to_pairs,
+            "holding": holding,
+            "n_buckets": n_buckets,
+            "mean_turnover": to_sum / to_pairs,
+            "per_pair": to_per_pair,
+            "basis": (
+                "mean one-period turnover of the equal-weighted top score "
+                "bucket (evaluate.turnover: 1/2 * sum_i |w_i,t - w_i,t-1|)"
+            ),
+        }
+
+    status = cross_section_status(eligible, n_buckets=n_buckets)
     return {
         **meta,
+        **status,
         "universe_n": len(universe),
         "ic": ic,
         "deciles": deciles,
         "coverage": coverage,
         "stability": stability,
+        "turnover": turnover_row,
     }
 
 

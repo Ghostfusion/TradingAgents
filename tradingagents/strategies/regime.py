@@ -47,16 +47,60 @@ def realized_vol(
     return math.sqrt(var * periods)
 
 
-def vol_percentile(history: list[list[float]], current_window: int = 21) -> float:
-    """Percentile rank (0-1) of the latest realized vol vs all history windows."""
+def vol_percentile(history: list[list[float]], current_window: int = 21) -> float | None:
+    """Percentile rank (0-1) of the latest realized vol vs all history windows.
+
+    Returns ``None`` when it cannot measure - fewer than two windows to rank
+    against - and **never a fabricated 0.5**. The 0.5 this used to return on
+    failure was a neutral that entered every caller as if volatility had been
+    measured mid-band (master rule 1: `NA` is not `0`, and an absent component
+    must leave the denominator with its reason). The reason is available to the
+    caller without guessing: the rank is unmeasurable exactly when
+    ``len(history) < 2``, and :func:`vol_percentile_read` returns it as a string
+    for display.
+    """
     wins = []
     for close in history:
         wins.append(make_vol_series_of_closes(close, window=current_window))
-    if not wins or len(wins) < 2:
-        return 0.5
+    if len(wins) < 2:
+        return None
     recent = wins[-1]
     below = sum(1 for w in wins if w <= recent)
     return below / len(wins)
+
+
+def vol_percentile_read(history: list[list[float]], current_window: int = 21) -> dict:
+    """``vol_percentile`` plus the reason it could not measure (master rule 1).
+
+    Returns ``{"percentile": 0-1 | None, "windows": int, "reason": str | None,
+    "basis": str}``. One implementation: the rank is :func:`vol_percentile`'s, so
+    a display path can print WHY the leg is absent instead of a value that was
+    never measured.
+    """
+    windows = len(history or ())
+    pct = vol_percentile(history, current_window=current_window)
+    if pct is None:
+        return {
+            "percentile": None,
+            "windows": windows,
+            "reason": (
+                f"{windows} window(s) of history, needs 2 to rank the latest "
+                f"realized vol against its own past"
+            ),
+            "basis": (
+                f"realized-vol percentile unmeasurable: {windows} window(s) of "
+                f"history, needs 2 - never a fabricated 0.5"
+            ),
+        }
+    return {
+        "percentile": pct,
+        "windows": windows,
+        "reason": None,
+        "basis": (
+            f"latest realized vol at the {pct:.0%} percentile of {windows} "
+            f"trailing window(s)"
+        ),
+    }
 
 
 def make_vol_series_of_closes(closes: list[float], window: int = 21) -> float:
@@ -156,10 +200,16 @@ def regime_label(
     the tape is measurably trending (low CHOP) **or** when the volatility
     percentile is in the low band; a ``None`` chop means "not measurable" and
     falls through to ``neutral`` rather than asserting a trend.
+
+    A ``None`` ``vol_pct`` means the volatility percentile could not be measured
+    (:func:`vol_percentile` returns ``None`` rather than a fabricated 0.5): like a
+    ``None`` chop it is **not asserted**, so the volatility leg is skipped and the
+    trend / choppiness legs decide. The label never claims a volatility state the
+    caller did not measure.
     """
-    if vol_pct >= vol_hi:
+    if vol_pct is not None and vol_pct >= vol_hi:
         return "high_vol"
-    if vol_pct <= vol_lo and abs(trend) >= trend_threshold:
+    if vol_pct is not None and vol_pct <= vol_lo and abs(trend) >= trend_threshold:
         return "bull" if trend > 0 else "bear"
     if chop is not None and chop <= chop_threshold:
         return "bull" if trend > 0 else "bear"
@@ -509,6 +559,7 @@ def bocpd(
 __all__ = [
     "realized_vol",
     "vol_percentile",
+    "vol_percentile_read",
     "trend_strength",
     "choppiness",
     "CHOP_TREND_THRESHOLD",

@@ -329,6 +329,18 @@ tool is not in any toolset at all),
 `enable_technical_score` (WP-3: the nine `TechnicalScore` category sub-scores
 over the run's own bars + their weighted composite, with the non-monotonic inputs
 band-mapped over their producers' own edges),
+`enable_regime_score` (WP-4: the market-level `RegimeScore` + the two-path
+disagreement read; NOT `enable_regime`, which is inert),
+`enable_risk_score` (WP-5: the inverted 0-100 `RiskScore`, 100 = low risk, with
+the three shipped sign conventions aligned in the score and printed per row),
+`enable_sentiment_score` (WP-7: the ten `SentimentScore` category sub-scores + the
+confirmation quadrant; two tone sources are refused rather than averaged),
+`enable_news_score` (WP-6: `NewsScore`; the five unsupplied categories print `NA`
+with a reason, and materiality comes from `EventScore`),
+`enable_event_state` (WP-8: the per-family event imminence + the earnings hard
+block passed through verbatim),
+`enable_trade_score` (WP-11: the four-engine decision composite; it reaches no
+gate, no size and no `opportunity_score`),
 `enable_score_eval_rows` (S8: `alpha_health.score_evaluation_rows`),
 `enable_weighted_sentiment_window` (S7: `weighted_rolling_sentiment`, the
 10-day exponential window plus the `min_history` warm-up guard), and

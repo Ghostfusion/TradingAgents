@@ -81,6 +81,12 @@ def _config_hash() -> str:
             # gate changes what a run emits, so it must move this hash too.
             "enable_fundamental_score",
             "enable_technical_score",
+            "enable_sentiment_score",
+            "enable_news_score",
+            "enable_trade_score",
+            "enable_event_state",
+            "enable_regime_score",
+            "enable_risk_score",
         )
         if k in DEFAULT_CONFIG
     }

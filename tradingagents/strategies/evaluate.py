@@ -60,14 +60,25 @@ def total_return(returns: list[float]) -> float:
 
 
 def cagr(returns: list[float], periods_per_year: float = 252.0) -> float:
-    """Annualized compound growth over the return series."""
+    """Annualized compound growth over the return series.
+
+    A compounding base at or below zero has no real growth rate: ``base **
+    (1/years)`` is **complex** for a negative base, and this function promises a
+    float. A total loss (``base == 0``) is exactly -100%/yr; a base below zero is
+    not a return series at all (a decile long-short SPREAD can lose more than
+    100% of notional in one period, which is how a panel's spread series reaches
+    this branch), so it returns ``nan`` rather than a complex number.
+    """
     n = sum(1 for r in returns if r is not None)
     if n <= 0:
         return 0.0
     years = n / periods_per_year
     if years <= 0:
         return 0.0
-    return (1.0 + total_return(returns)) ** (1.0 / years) - 1.0
+    base = 1.0 + total_return(returns)
+    if base <= 0.0:
+        return -1.0 if base == 0.0 else float("nan")
+    return base ** (1.0 / years) - 1.0
 
 
 def volatility(returns: list[float], periods_per_year: float = 252.0) -> float:

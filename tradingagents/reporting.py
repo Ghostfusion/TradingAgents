@@ -976,6 +976,287 @@ def _run_card_technical_score(ticker: str, cfg: dict) -> dict | None:
     }
 
 
+def _run_card_trade_score(card: dict, cfg: dict) -> dict | None:
+    """TradeScore block for run_card.json (WP-11 / WP-9).
+
+    The four-engine decision composite, assembled from the engine blocks already
+    in the card - so it costs no vendor call and cannot disagree with the blocks
+    beside it. Each engine is present only when its own gate is on, and one that
+    is absent enters as ``None`` (never 0), which lowers coverage and withholds
+    the composite below its floor of two. ``status`` is the ladder rung the
+    vector has *evidenced* - `RESEARCH_ONLY` until Phase C measures it.
+    Returns ``None`` when the gate is off, so a gate-off card is byte-identical
+    to a pre-engine tree.
+    """
+    if not (cfg or {}).get("enable_trade_score"):
+        return None
+    try:
+        from tradingagents.strategies.trade_score import trade_score
+
+        engines = {
+            name: (card.get(key) or {}).get("score")
+            for name, key in (
+                ("fundamental", "fundamental_score"),
+                ("technical", "technical_score"),
+                ("regime", "regime_score"),
+                ("risk", "risk_score"),
+            )
+        }
+        res = trade_score(engines)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {
+            "status": None,
+            "score": None,
+            "coverage": None,
+            "unavailable": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "coverage": res.get("coverage"),
+        "weights": res.get("weights"),
+        "weights_source": res.get("weights_source"),
+        "engines": {
+            name: entry.get("value")
+            for name, entry in (res.get("components") or {}).items()
+        },
+        "present": res.get("present"),
+        "absent": res.get("absent"),
+        "withheld": res.get("withheld"),
+        "basis": res.get("basis"),
+    }
+
+
+def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
+    """EventScore block for run_card.json (WP-8 / WP-9).
+
+    The seven families with their imminence, availability and reason, the
+    producers' own window flags, the coverage and the composite intensity - plus
+    the earnings hard block **as the run's own catalyst snapshot carries it**.
+    The snapshot is read from what the run already produced (the catalyst overlay
+    stamps it under ``strategy_overlays.catalyst``); no vendor is re-fetched, and
+    a card block never dies on a missing one. Returns ``None`` when the gate is
+    off, so a gate-off card is byte-identical to a pre-engine tree.
+    """
+    if not (cfg or {}).get("enable_event_state"):
+        return None
+    try:
+        from datetime import datetime
+
+        from tradingagents.strategies.derivatives_gamma import opex_status
+        from tradingagents.strategies.event_state import (
+            FLAG_COMPONENTS,
+            event_components,
+            event_state,
+        )
+
+        snap = ((final_state or {}).get("strategy_overlays") or {}).get("catalyst")
+        if not isinstance(snap, dict):
+            return {
+                "status": None,
+                "score": None,
+                "unavailable": "no catalyst snapshot in this run",
+            }
+        opex = None
+        trade_date = (final_state or {}).get("trade_date")
+        if trade_date:
+            try:
+                opex = opex_status(
+                    datetime.strptime(str(trade_date)[:10], "%Y-%m-%d").date()
+                )
+            except Exception:  # noqa: BLE001 - OPEX is one extra family
+                opex = None
+        res = event_state(event_components(snap, opex=opex))
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {
+            "status": None,
+            "score": None,
+            "unavailable": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "band": res.get("band"),
+        "coverage": res.get("coverage"),
+        "hard_block": res.get("hard_block"),
+        "families": {
+            fam: {
+                "scope": state.get("scope"),
+                "availability": state.get("availability"),
+                "imminence": state.get("imminence"),
+                "score": state.get("score"),
+                "horizon_days": state.get("horizon_days"),
+                "reason": state.get("reason"),
+                "flags": {
+                    k: v
+                    for k, v in (state.get("components") or {}).items()
+                    if k in FLAG_COMPONENTS
+                },
+            }
+            for fam, state in (res.get("families") or {}).items()
+        },
+        "withheld": res.get("withheld"),
+        "basis": res.get("basis"),
+    }
+
+
+def _run_card_regime_score(cfg: dict) -> dict | None:
+    """RegimeScore block for run_card.json (WP-4 / WP-9).
+
+    The market-level components with their raw values and units, the composite
+    and the two-path disagreement - so the card carries both reads and the flag
+    rather than one reconciled label. Returns ``None`` when the gate is off.
+    """
+    if not (cfg or {}).get("enable_regime_score"):
+        return None
+    try:
+        from tradingagents.agents.utils.analysis_tools import (
+            _regime_components,
+            _regime_two_paths,
+        )
+        from tradingagents.strategies.regime_score import regime_score
+
+        vals = _regime_components()
+        if not vals:
+            return {
+                "status": None,
+                "score": None,
+                "unavailable": "no market data for the benchmark",
+            }
+        res = regime_score(vals)
+        paths = _regime_two_paths()
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {
+            "status": None,
+            "score": None,
+            "unavailable": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "band": res.get("band"),
+        "coverage": res.get("coverage"),
+        "components": {
+            name: {"raw": entry.get("raw"), "aligned": entry.get("aligned"),
+                   "unit": entry.get("unit"), "direction": entry.get("direction")}
+            for name, entry in (res.get("components") or {}).items()
+        },
+        "absent": res.get("absent"),
+        "withheld": res.get("withheld"),
+        "two_paths": (
+            {
+                "disagree": paths.get("disagree"),
+                "reason": paths.get("disagree_reason"),
+                "path_a": paths.get("path_a"),
+                "path_b": paths.get("path_b"),
+            }
+            if paths
+            else None
+        ),
+        "basis": res.get("basis"),
+    }
+
+
+def _run_card_risk_score(ticker: str, cfg: dict) -> dict | None:
+    """RiskScore block for run_card.json (WP-5 / WP-9). INVERTED: 100 = low risk."""
+    if not (cfg or {}).get("enable_risk_score"):
+        return None
+    try:
+        from tradingagents.agents.utils.analysis_tools import _risk_components
+        from tradingagents.strategies.risk_score import risk_score
+
+        vals = _risk_components(ticker)
+        if not vals:
+            return {"status": None, "score": None,
+                    "unavailable": "no risk component could be measured"}
+        res = risk_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {"status": None, "score": None, "unavailable": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "band": res.get("bands"),
+        "coverage": res.get("coverage"),
+        "uncertainty": res.get("uncertainty"),
+        "categories": {
+            cat: {"score": e.get("score"), "band": e.get("band"),
+                  "coverage": e.get("coverage"), "weight": e.get("weight"),
+                  "present": e.get("present"), "withheld": e.get("withheld")}
+            for cat, e in (res.get("categories") or {}).items()
+        },
+        "absent": res.get("absent"),
+        "basis": res.get("basis"),
+    }
+
+
+def _run_card_sentiment_score(ticker: str, cfg: dict, final_state: dict) -> dict | None:
+    """SentimentScore block for run_card.json (WP-7 / WP-9)."""
+    if not (cfg or {}).get("enable_sentiment_score"):
+        return None
+    try:
+        from tradingagents.agents.utils.analysis_tools import (
+            _sentiment_components,
+            _sentiment_price_read,
+        )
+        from tradingagents.strategies.sentiment_score import sentiment_score
+
+        date = (final_state.get("pm_decision") or {}).get("trade_date")
+        vals, source = _sentiment_components(ticker, date)
+        if not vals:
+            return {"status": None, "score": None,
+                    "unavailable": "no sentiment producer measured"}
+        res = sentiment_score(vals, source=source, price_read=_sentiment_price_read(ticker))
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {"status": None, "score": None, "unavailable": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "bands": res.get("bands"),
+        "coverage": res.get("coverage"),
+        "quadrant": res.get("quadrant"),
+        "categories": {
+            cat: {"score": e.get("score"), "band": e.get("band"),
+                  "coverage": e.get("coverage"), "weight": e.get("weight")}
+            for cat, e in (res.get("categories") or {}).items()
+        },
+        "absent": res.get("absent"),
+        "basis": res.get("basis"),
+    }
+
+
+def _run_card_news_score(ticker: str, cfg: dict, final_state: dict) -> dict | None:
+    """NewsScore block for run_card.json (WP-6 / WP-9).
+
+    The five categories with no supplier are carried as `NA` **with their
+    reason**, never as 0, so a reader can see what the number is not made of.
+    """
+    if not (cfg or {}).get("enable_news_score"):
+        return None
+    try:
+        from tradingagents.agents.utils.analysis_tools import _news_components
+        from tradingagents.strategies.news_score import news_score
+
+        date = (final_state.get("pm_decision") or {}).get("trade_date")
+        vals = _news_components(ticker, date)
+        if not vals:
+            return {"status": None, "score": None, "unavailable": "no news producer measured"}
+        res = news_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {"status": None, "score": None, "unavailable": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": res.get("status"),
+        "score": res.get("score"),
+        "coverage": res.get("coverage"),
+        "categories": {
+            cat: {"score": e.get("score"), "weight": e.get("weight"),
+                  "withheld": e.get("withheld")}
+            for cat, e in (res.get("categories") or {}).items()
+        },
+        "absent": res.get("absent"),
+        "basis": res.get("basis"),
+    }
+
+
 def _run_card_data_absence(save_path) -> dict | None:
     """Chain-end data-absence reason for run_card.json (yfinance P1).
 
@@ -1581,6 +1862,30 @@ def write_report_tree(
         for _key, _block in (
             ("fundamental_score", _run_card_fundamental_score(ticker, final_state, cfg)),
             ("technical_score", _run_card_technical_score(ticker, cfg)),
+        ):
+            if _block is not None:
+                card[_key] = _block
+        # WP-11/WP-9: the four-engine decision composite, from the engine blocks
+        # just assembled (so it must come second). Present only when its own gate
+        # is on; additive key.
+        _trade = _run_card_trade_score(card, cfg)
+        if _trade is not None:
+            card["trade_score"] = _trade
+        # WP-8/WP-9: the event state (the earnings hard block travels through as
+        # the run's own snapshot carries it). Present only when its gate is on.
+        _event = _run_card_event_state(final_state, cfg)
+        if _event is not None:
+            card["event_state"] = _event
+        # WP-4/WP-9: the market-level regime score and its two-path read.
+        _regime = _run_card_regime_score(cfg)
+        if _regime is not None:
+            card["regime_score"] = _regime
+        # WP-5 / WP-7 / WP-6 / WP-9: the remaining engine blocks. Each is written
+        # only when its own gate is on, so a gate-off card stays byte-identical.
+        for _key, _block in (
+            ("risk_score", _run_card_risk_score(ticker, cfg)),
+            ("sentiment_score", _run_card_sentiment_score(ticker, cfg, final_state)),
+            ("news_score", _run_card_news_score(ticker, cfg, final_state)),
         ):
             if _block is not None:
                 card[_key] = _block

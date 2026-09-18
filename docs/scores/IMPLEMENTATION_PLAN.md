@@ -742,6 +742,32 @@ is not an input to the score and vice versa.
 **Gate.** `enable_regime_score`. Note `enable_regime` (`:766`) is **inert** and
 must not be revived as the gate.
 
+**Acceptance - MET 2026-09-18.** (a) `regime_label` with `vol_pct == 0.5` returns
+`bull` for a strong positive trend and `bear` for a strong negative one (and the
+same clause runs through `overlays.build_strategy_overlays`); (b) no market data
+returns `None` at 0 coverage with the floor in the reason, and dropping a
+below-mean component **raises** the score (the `NA != 0` proof); (c) the top level
+carries no direction/signal/bias key and `REGIME_BANDS` is disjoint from
+`SCORE_BANDS`; (d) an AST guard shows the module touches nothing on the sizing
+path and a `position_scale` input scores `None`.
+
+**Live (2026-09-18, the benchmark's own bars):** 5 of 6 components measured
+(`market_trend 0.0684`, `choppiness 49.13`, `realized_vol_percentile 0.133`,
+`vix_percentile 0.523`, `vix_term_structure 0.722` - Cboe's VIX9D/VIX3M ratio),
+composite **72.49 `constructive`** at `coverage 0.833`; `breadth` absent with its
+reason (it needs a panel). **The two paths disagreed on the day and both were
+printed**: Path A `neutral` vs Path B `BULL/NORMAL/NEUTRAL`, with
+`disagree=True` and the reason - never reconciled.
+
+**Two defects fixed in this pass.** (1) `regime.vol_percentile` returned a
+**fabricated `0.5`** when it could not rank (fewer than 2 windows) - master rule
+1's exact prohibition; it now returns `None` with `vol_percentile_read` carrying
+the reason, and `regime_label` treats a `None` vol_pct as "volatility not
+measured". (2) The caller that would have broken: `get_regime_components` called
+`regime_label(vol_pct, ...)` undefended and printed `f"vol_pct={vol_pct:.2f}"`
+outside its try - a 30-41-bar ticker would have degraded to "unavailable" and then
+raised `TypeError`; the format string is now guarded.
+
 ### 5.4 WP-5 — `RiskScore`
 
 **Objective.** A 0-100 risk composite, **inverted** (100 = low risk), over the
@@ -777,6 +803,26 @@ contributions recompute the printed score; (g) the semivariance leg consumes `�
 
 **Gate.** `enable_risk_score`.
 
+**Acceptance - MET 2026-09-18.** (a) a negative `cvar` (-0.05) and a positive
+`stress_loss` (0.05) both pin to +0.05 and align identically, and a larger loss
+moves both down; (b) a missing correlation input raises `uncertainty` and lowers
+`coverage` while the score stays the renormalised present-only mean - strictly
+above the `NA`-as-0 imputation; (c) no data returns `None` at 0 coverage;
+(d) `GATE_PRECEDENCE` carries no score and no `risk_multiplier` input does;
+(e) the drawdown component reads `book_context.measured_book_drawdown:102` and the
+module imports no `regime_state`; (f) the printed contributions recompute the
+printed score; (g) the semivariance leg consumes `sqrt(RS-)` with the raw sums
+printed, and **a fixture where `RS- + RS+ != RV` raises** - the identity is the
+test. `net_beta(weights, betas) = sum(w_i*beta_i)` lands in `book_risk.py` as the
+producer the executor's book builder calls (it returns the number; a frozen
+dataclass cannot be assigned post-hoc).
+
+**Live (MSFT, 2026-09-18):** 8 scored components, composite **79.4 `contained`**
+at `coverage 0.45` / `uncertainty 0.55`; four categories absent **with their
+reasons** (gap, concentration and event need the executor's book computations;
+liquidity needs two of its three legs). Every row printed raw -> pinned ->
+aligned with units and sign.
+
 ### 5.5 WP-6 — `NewsScore`
 
 **Objective.** *What new information arrived, and how material is it?* — and it
@@ -810,6 +856,19 @@ news path; (d) the five absent categories print `NA` **with a reason**, never 0;
 (e) with the five fed `None` the score is `None` at 0% coverage.
 
 **Gate.** `enable_news_score`.
+
+**Acceptance - MET 2026-09-18 (module `strategies/news_score.py`).** (a) a repeated
+headline inside the window scores lower than a first-seen one (1.0 vs 0.5, and the
+aligned component moves the same way), while a repeat *outside* the window is not
+a repeat; (b) relevance and materiality are independent rows and a
+single-relevance input is withheld below the floor, so relevance alone cannot
+produce a composite; (c) an AST test shows the news path imports no `sentiment.py`
+aggregation and the sentiment path imports no `news_relevance` function; (d) the
+five categories with no supplier (`materiality`, `fundamental_impact`,
+`guidance_change`, `regulatory_legal`, `industry_shock`) each print `NA` with a
+non-empty reason; (e) feeding only those five returns `None` at 0 coverage.
+**Materiality is caller-supplied** (owner Q6: `EventScore` owns it) and the module
+imports no event module.
 
 ### 5.6 WP-7 — `SentimentScore`
 
@@ -852,6 +911,18 @@ the test so a default-off flag cannot hide a broken path; (e) the crowd bands st
 being hardcoded 40/60 and become a percentile of the name's own persisted
 baseline, or stay labelled constants.
 
+**Acceptance - MET 2026-09-18 (module `strategies/sentiment_score.py`).** The
+scale is pinned FIRST and printed (`SCALE_TABLE`: EODHD/AV -1..1, GDELT
+-100..100; `SCALE_CONVENTION` in the docstring and in every basis): GDELT 8.5 and
+EODHD 0.085 normalise to the same value, and a fully-GDELT composite equals the
+EODHD one. **Two tone sources in one read are REFUSED with the reason**, never
+averaged. The confirmation quadrant produces four distinct labels
+(`confirm-up` / `confirm-down` / `diverge-up` / `diverge-down`) and `None` for a
+flat or unreadable read. Attention and tone are separate components in separate
+categories, never summed. **Live (MSFT, 2026-09-18):** 6 of 18 components, 5 of 10
+categories, quadrant `confirm-up`, composite 84.6 at `coverage 0.50`, tone
+normalised from EODHD.
+
 **Gate.** `enable_sentiment_score`. `enable_sentiment_factor` (`:815`) keeps
 gating the existing sizing multiplier and is a **different object**.
 
@@ -885,6 +956,20 @@ itself**.
 (c) with one family absent, coverage drops by that family and the state still
 renders; (d) `EventScore`'s and `RiskScore`'s event components are **disjoint key
 sets**; (e) no event path reaches `GATE_PRECEDENCE` through a score.
+
+**Acceptance - MET 2026-09-18 (module `strategies/event_state.py`, the plan's own
+name).** The imminence scalar is monotone and bounded (0d -> 1, >= horizon -> 0,
+non-increasing, always in [0, 1], `None` for an absent day-count), and four
+mutations each fail it (sign flip -> 8 tests, `None` -> 0.0 -> 1, flags counted as
+imminence -> 2, a macro imminence fabricating a hard block -> 2). The hard block
+still fires **only** on earnings: a macro-only window leaves it `None` while an
+earnings 3 days out with a 5d window sets it, driven through the real
+`catalyst.build_catalyst_snapshot`, and the module holds no block window of its
+own (AST-checked) and passes the snapshot's `hard_block` through verbatim. The
+event keys are disjoint from `RiskScore`'s exposure keys. **Live (MSFT,
+2026-09-18):** `opex imminence=1.000` (OPEX week), earnings/macro/Fed `NA` with
+their reasons, and the three company-level calendars printing their
+ABSENT-with-evidence text (the P0-9 probe's 50 macro rows, zero company events).
 
 **Gate.** `enable_event_state`. Note `enable_events` (`:770`) is already **on by
 default** and gates the existing PEAD/catalyst sizing — a different object. **The hard block
@@ -1052,6 +1137,13 @@ so both can ship a real, coverage-printed score without a single new vendor.
 
 **Entry:** Phase 0 (P0-3/4/5) and Phase A (the kernel proven on two engines).
 
+**Exit - MET 2026-09-18.** `RegimeScore`, `RiskScore` and the `EventScore` state
+landed with their acceptance clauses tested one per clause and their mutations
+verified; the two regime paths disagree on live data and are printed unreconciled;
+the `vol_percentile` fabricated-neutral defect is fixed with its caller; the
+imminence scalars are monotone and bounded and the hard block still fires only on
+earnings.
+
 **Exit criteria.**
 - `RegimeScore` reads **one named producer per component**, prints the two-path
   disagreement rather than reconciling it, and returns `None` with no market data.
@@ -1096,7 +1188,15 @@ scale pinned first.
 - `NewsScore`'s absent categories print `NA` with reasons and the composite
   reports its coverage.
 - No cross-engine number: the news path imports no `sentiment.py` aggregate and
-  the sentiment path imports no `news_relevance` function.
+  the sentiment path imports no `news_relevance` function (both asserted by AST
+  tests in the two engines' own test files).
+
+**Exit - MET 2026-09-18.** All five clauses hold; the GDELT/EODHD clause is
+resolved by the REFUSAL (the engine declines to mix the two scales rather than
+averaging them, with the reason printed). The one live gap is environmental, not
+architectural: `get_news_score` returned "no news producer measured" because the
+article feed returned 0 articles during the pass (Alpha Vantage limits), and the
+leaf says exactly that rather than scoring an empty set.
 
 ### Phase E — the composite (WP-11)
 
@@ -1108,6 +1208,29 @@ scale pinned first.
 - The hard-gate test passes: a maximal composite changes nothing on a `BLOCK`.
 - The promotion ladder is documented and enforced by a test that an unvalidated
   vector cannot be promoted by configuration.
+
+**Exit - MET 2026-09-18 (module `strategies/trade_score.py`).** The composite
+prints every engine row with its letter and weight, the composite line with its
+`[status]`, the `weights_basis` and the coverage. It reaches no gate, no size and
+no `opportunity_score`: an AST guard forbids the sizing path,
+`build_position_contract`, `decision_guardrail`, `execution_contract`,
+`GATE_PRECEDENCE` and the `opportunity_score` name, and the module reads **no
+configuration at all** (so a gate flip cannot promote it). The hard-gate test
+drives `GATE_PRECEDENCE` from `../TradingExecution/signald/contracts.py` - the 17
+checks, none of them a score, and `trade_score` appears nowhere in the executor
+source - and shows the acceptance case `F 92 / T 85 / R 78 / K 35` -> **76.75**
+with the gate at `BLOCK` changing nothing. The ladder is data
+(`PROMOTION_LADDER` + one required-evidence string per rung), a rung needs a
+non-empty record (a boolean is rejected and named), and a `status=` request is
+**clamped down** to the evidenced rung with the refusal printed: configuration is
+not evidence.
+
+**The vector is the owner's, and the earlier conflict is resolved by the master
+itself**: `TradeScore = 0.40F + 0.25T + 0.15R + 0.20K` over Fundamental,
+Technical, **Regime** and Risk (master §1.4/§1.5 and rule 18), with the
+six-engine research allocation kept as a **separate object** that this function
+never reads - News and Sentiment do not become a fifth/sixth factor by adjacency
+(rule 17).
 
 ---
 

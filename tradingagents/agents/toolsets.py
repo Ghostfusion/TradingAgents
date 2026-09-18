@@ -92,6 +92,12 @@ from tradingagents.agents.utils.agent_utils import (
     get_fundamentals,
     get_fundamental_score,
     get_technical_score,
+    get_trade_score,
+    get_event_state,
+    get_regime_score,
+    get_risk_score,
+    get_sentiment_score,
+    get_news_score,
     get_fx_snapshot,
     get_gamma_profile,
     get_gap_type,
@@ -224,8 +230,12 @@ from tradingagents.agents.utils.momentum_tools import (
 
 
 def market_tools() -> list:
-    """Tools bound by the market analyst and executed by its ToolNode."""
-    return     [
+    """Tools bound by the market analyst and executed by its ToolNode.
+
+    Gated engine tools are appended only when their own gate is on, so a
+    gate-off toolset is byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6).
+    """
+    tools =   [
                 get_stock_data,
                 get_indicators,
                 get_verified_market_snapshot,
@@ -349,11 +359,20 @@ def market_tools() -> list:
                 # market-level regime path could not reach the VIX series it ranks.
                 get_macro_indicators,
             ]
+    if _enabled("enable_regime_score"):
+        tools.append(get_regime_score)
+    if _enabled("enable_risk_score"):
+        tools.append(get_risk_score)
+    return tools
 
 
 def news_tools() -> list:
-    """Tools bound by the news analyst and executed by its ToolNode."""
-    return     [
+    """Tools bound by the news analyst and executed by its ToolNode.
+
+    Gated engine tools are appended only when their own gate is on, so a
+    gate-off toolset is byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6).
+    """
+    tools =   [
                 get_news,
                 get_massive_news,
                 get_news_relevance_read,
@@ -385,6 +404,11 @@ def news_tools() -> list:
                 # was bound only to fundamentals_company_tools.
                 get_analyst_revision_index,
             ]
+    if _enabled("enable_event_state"):
+        tools.append(get_event_state)
+    if _enabled("enable_news_score"):
+        tools.append(get_news_score)
+    return tools
 
 
 def _enabled(name: str, default: bool = False) -> bool:
@@ -470,6 +494,8 @@ def fundamentals_company_tools() -> list:
         tools.append(get_fundamental_score)
     if _enabled("enable_technical_score"):
         tools.append(get_technical_score)
+    if _enabled("enable_trade_score"):
+        tools.append(get_trade_score)
     return tools
 
 
@@ -511,7 +537,7 @@ def sentiment_tools() -> list:
     through the market or news analyst and the institutional category had no
     route at all (P0-7a, Q5).
     """
-    return     [
+    tools =   [
             get_news_sentiment,
             get_news_sentiment_series,
             get_sentiment_computed,
@@ -526,6 +552,10 @@ def sentiment_tools() -> list:
             # engine), and this leaf was bound only to fundamentals_company_tools.
             get_institution_holdings,
         ]
+    # WP-7 (§5.6): the SentimentScore engine. Off, the toolset is byte-identical.
+    if _enabled("enable_sentiment_score"):
+        tools.append(get_sentiment_score)
+    return tools
 
 
 def _dedupe(tools: list) -> list:

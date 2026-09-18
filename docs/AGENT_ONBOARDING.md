@@ -395,6 +395,20 @@ has changed before); never assume an endpoint works — the SDK's
   label="quality composite")` and print the identical basis string. `QUALITY_DIRECTIONS` / `QUALITY_BANDS` /
   `quality_band` / `enable_quality_composite` are untouched. Tests: `test_quality_composite.py` ->
   `test_category_scores.py`, 12 tests re-pointed; 44 passed across it + `test_round3_wiring.py`. Live docs re-pointed.
+- 2026-09-18 `(working tree)` - **WP-4 ... WP-11 landed: the remaining six engines, their leaves, the composite and
+  the measurement harness.** `strategies/regime_score.py` (market-level; the two regime paths printed unreconciled - live
+  Path A `neutral` vs Path B `BULL`), `risk_score.py` (inverted, 100 = low risk; the three shipped sign conventions
+  aligned in the score, raw -> pinned -> aligned printed per row; `net_beta` producer in `book_risk`),
+  `event_state.py` (one imminence clamp for seven families, monotone and bounded; the hard block still earnings-only;
+  the company calendars ABSENT with the P0-9 evidence), `sentiment_score.py` (scale pinned first and printed; two tone
+  sources REFUSED, not averaged; four quadrant labels), `news_score.py` (five unsupplied categories print NA with a
+  reason; materiality caller-supplied from EventScore per Q6), `trade_score.py` (prints weights/status/coverage, reaches
+  no gate/size/opportunity_score, reads no config, ladder clamped to evidenced rungs) and `scripts/score_panel.py`.
+  **Eight gates, all default off, all toolset-membership switches**: gate off = byte-identical toolset and card; gate on
+  = exactly one tool and one card block. **Two defects fixed on sight:** `regime.vol_percentile` returned a fabricated
+  `0.5` (now `None` + reason, with `regime_label` None-tolerant) and its caller `get_regime_components` formatted the
+  value outside its try. The `RISK_WEIGHTS` conflict flagged earlier is resolved by the master itself (rule 18: 0.40F +
+  0.25T + 0.15R + 0.20K, Regime inside, the six-engine allocation a separate object).
 - 2026-09-17 `(working tree)` - **WP-3 landed: the `TechnicalScore` engine** (`strategies/technical_score.py`,
   `volatility_models.semivariance`, leaf `get_technical_score`, run-card block, gate `enable_technical_score`). Nine
   category sub-scores over 40 components, all from the run's own cached bars; every non-monotonic input band-mapped over

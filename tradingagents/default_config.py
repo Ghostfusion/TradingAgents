@@ -296,6 +296,12 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY": "enable_evidence_symmetry",
     "TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE": "enable_fundamental_score",
     "TRADINGAGENTS_ENABLE_TECHNICAL_SCORE": "enable_technical_score",
+    "TRADINGAGENTS_ENABLE_SENTIMENT_SCORE": "enable_sentiment_score",
+    "TRADINGAGENTS_ENABLE_NEWS_SCORE": "enable_news_score",
+    "TRADINGAGENTS_ENABLE_TRADE_SCORE": "enable_trade_score",
+    "TRADINGAGENTS_ENABLE_EVENT_STATE": "enable_event_state",
+    "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
+    "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
     # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
     # Empty = the mirror is inert (nothing is ever suppressed).
@@ -1056,6 +1062,27 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_fundamental_score": False,
         # WP-3 (§5.2): the nine TechnicalScore category sub-scores + composite.
         "enable_technical_score": False,
+        # WP-11 (§8): the four-engine TradeScore decision composite, assembled
+        # from the engine blocks (each present only when its own gate is on). Off by
+        # default; with it off no composite tool is bound and no card key is written.
+        # WP-7 (§5.6): the ten SentimentScore category sub-scores + their
+        # composite + the confirmation quadrant. Off by default.
+        "enable_sentiment_score": False,
+        # WP-6 (§5.5): the NewsScore components + composite (five absent
+        # categories print NA with a reason). Off by default.
+        "enable_news_score": False,
+        "enable_trade_score": False,
+        # WP-8 (§5.7): the EventScore state - per-family event imminence, the
+        # producers' window flags, coverage over the seven families, and the
+        # earnings hard block passed through verbatim (never computed here).
+        "enable_event_state": False,
+        # WP-4 (§5.3): the market-LEVEL RegimeScore (benchmark trend, market-wide
+        # breadth, the two VIX legs, choppiness, the benchmark's realized-vol
+        # percentile). NOT `enable_regime`, which is INERT and must not be revived.
+        "enable_regime_score": False,
+        # WP-5 (§5.4): the inverted 0-100 RiskScore over the owner's eight
+        # categories (100 = low risk). Off by default.
+        "enable_risk_score": False,
         # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
         # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
         # to mirror the smallest observed count of the pair instead. Empty (default)
