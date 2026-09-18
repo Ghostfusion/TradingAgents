@@ -87,3 +87,23 @@ def test_post_earnings_play_verdicts():
     assert weak["verdict"] == "no-gap"
     # Missing data -> no-data
     assert post_earnings_play(None, None, [], []) == {"verdict": "no-data"}
+
+
+def test_position_mult_by_side_honours_the_catalyst_scale():
+    """P0-8a: ``event_scale = catalyst if catalyst > 1 else 1.0`` could never
+    fire - the only caller documents 0..1 and ``get_catalyst_scale`` returns <=1
+    with 1.0 meaning NO imminent catalyst - so the argument was inert and a beat
+    sized the same with or without a print in front of it. A nearer catalyst must
+    now size DOWN, and 1.0 must stay the no-catalyst case."""
+    # No imminent catalyst (1.0) is the un-scaled beat.
+    assert position_mult_by_side("beat", catalyst=1.0) == pytest.approx(1.0)
+    # A print 0.25 of the way out sizes the same beat strictly smaller.
+    near = position_mult_by_side("beat", catalyst=0.25)
+    assert near < position_mult_by_side("beat", catalyst=1.0)
+    assert near == pytest.approx(0.25)
+    # The miss side scales the same way, and stays below the beat at equal scale.
+    assert position_mult_by_side("miss", catalyst=0.25) < position_mult_by_side("beat", catalyst=0.25)
+    # Out-of-range input is "no catalyst", never extrapolated past the cap.
+    assert position_mult_by_side("beat", catalyst=0.0) == pytest.approx(1.0)
+    assert position_mult_by_side("beat", catalyst=2.0) == pytest.approx(1.0)
+    assert position_mult_by_side("beat", catalyst=1.0, cap=0.5) == pytest.approx(0.5)

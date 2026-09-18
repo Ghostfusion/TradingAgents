@@ -25,6 +25,37 @@ def cvar(returns: list, alpha: float = 0.05) -> float | None:
     return sum(tail) / len(tail)
 
 
+def normalize_book_weights(returns_by_name: dict, weights: dict | None = None) -> dict | None:
+    """The book's weights under the cash-sleeve convention, or None.
+
+    ONE implementation (ground rule 2): ``portfolio_cvar`` and
+    ``book_correlated_stress`` each carried their own copy of these rules until
+    2026-09-17 (P0-8d), so a change to the cash-sleeve convention could land in
+    one path and silently miss the other. The rules:
+
+    - weights summing to **1.0** -> the normalized relative book.
+    - summing to **< 1.0** -> the RAW weights, so the remainder (1 - total) stays
+      an implicit ZERO-RETURN CASH SLEEVE and dilutes the tail. This is how
+      "include cash as overall portfolio" is honored.
+    - summing to **> 1.0** (config error) -> normalized down to 1.0 to remain a
+      valid portfolio.
+    - no weights / all-zero -> equal weight across the provided names.
+
+    Returns None below two names: a book needs two, and both callers treat that
+    as "cannot be resolved" rather than inventing a sleeve.
+    """
+    names = list(returns_by_name or {})
+    if len(names) < 2:
+        return None
+    w = weights or {}
+    total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
+    if total <= 0:
+        return dict.fromkeys(names, 1.0 / len(names))
+    if total > 1.0:
+        return {n: float(w.get(n, 0.0) or 0.0) / total for n in names}
+    return {n: float(w.get(n, 0.0) or 0.0) for n in names}
+
+
 def portfolio_cvar(
     returns_by_name: dict,
     weights: dict | None = None,
@@ -50,22 +81,9 @@ def portfolio_cvar(
     Returns None when the series cannot be aligned (fewer than two names, or a
     name whose series is missing/short so no common index exists).
     """
-    names = list(returns_by_name or {})
-    if len(names) < 2:
+    norm = normalize_book_weights(returns_by_name, weights)
+    if norm is None:
         return None
-    w = weights or {}
-    total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
-    if total <= 0:
-        # No weights given (or all zero): equal share per name.
-        share = 1.0 / len(names)
-        norm = dict.fromkeys(names, share)
-    elif total > 1.0:
-        # Over-allocated config: clamp to a valid portfolio (normalize down).
-        norm = {n: float(w.get(n, 0.0) or 0.0) / total for n in names}
-    else:
-        # total in (0, 1]: use the raw weights so the remainder (1 - total)
-        # stays as an implicit zero-return cash sleeve (dilutes the tail).
-        norm = {n: float(w.get(n, 0.0) or 0.0) for n in names}
     mixed = portfolio_returns(norm, returns_by_name)
     if not mixed:
         return None
@@ -144,17 +162,9 @@ def book_correlated_stress(
     cash sleeve; all-zero -> equal weight; > 1 -> normalized). Returns None
     when the book cannot be resolved (fewer than two aligned names).
     """
-    names = list(returns_by_name or {})
-    if len(names) < 2:
+    norm = normalize_book_weights(returns_by_name, weights)
+    if norm is None:
         return None
-    w = weights or {}
-    total = sum(float(w.get(n, 0.0) or 0.0) for n in names)
-    if total <= 0:
-        norm = dict.fromkeys(names, 1.0 / len(names))
-    elif total > 1.0:
-        norm = {n: float(w.get(n, 0.0) or 0.0) / total for n in names}
-    else:
-        norm = {n: float(w.get(n, 0.0) or 0.0) for n in names}
     mixed = portfolio_returns(norm, returns_by_name)
     if not mixed:
         return None
@@ -846,6 +856,6 @@ def copula_scenarios(
     }
 
 
-__all__ = ["simple_var", "cvar", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
+__all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "drawdown_gate",
            "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var",
            "min_cvar_weights", "copula_scenarios"]

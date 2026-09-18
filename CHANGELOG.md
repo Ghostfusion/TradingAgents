@@ -24,6 +24,33 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
 **Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
 
+### Fixed
+
+**P0-8 — the five recorded defects, and two of them were real bugs (2026-09-17).**
+- **P0-8a — the catalyst argument was inert, so every event position sized the same.** `position_mult_by_side` tested `catalyst > 1` while the only caller documents `catalyst` as 0..1 and `get_catalyst_scale` floors at `catalyst_scale_floor` and never exceeds 1.0 — so `event_scale` was **always 1.0** and a beat sized identically with or without a print in front of it. It now reads `0 < catalyst <= 1` (1.0 stays the no-catalyst case, anything outside the range is treated as no catalyst rather than extrapolated), so a beat at a 0.25 catalyst scale sizes 0.25.
+- **P0-8b — `get_earnings_calendar`'s `look_back_days` named the opposite direction to the one it queries.** All three vendors query `[curr_date, curr_date + N]`. Renamed to `look_ahead_days` on finnhub, moomoo and yfinance and on the tool; a test asserts the forward `to` date and that a small value truncates the forward window.
+- **P0-8c — `get_tail_risk` fed a close series to a function that wants an equity curve, then printed it as `cdar=`.** The book's CDaR (`book_risk.solve_weights`) is fed the weighted portfolio, so one quantity appeared to have two producers (master rule 15). The proxy stays — it is a legitimate drawdown read on a 1-unit buy-and-hold — but it is **labelled** (`price_path_dd_tail_mean`, `price_path_dd_var`, `price_path_max_dd`, with "not the book CDaR" printed beside it) and the name is refused: no bare `cdar=` token remains.
+- **P0-8d — the cash-sleeve rule had two implementations.** `portfolio_cvar` and `book_correlated_stress` each carried their own copy of the equal-weight / over-allocation / cash-sleeve normalisation, so a change could land in one path and miss the other. Both now read `normalize_book_weights`, and a test replaces that ONE rule and shows both paths move.
+- **P0-8e — `get_macro_regime_read` demanded five caller-supplied markers while the run's own leaves held them.** In practice they arrived empty and the label was almost always `n/a`. `_derive_macro_markers` now fills all five: the 10y-2y slope and HY OAS from FRED, the policy-rate and dollar changes over their own windows from the FRED series, and the vol percentile from the VIX's trailing rank. **A supplied value always wins**, an unmeasurable one stays `None` (never a default), and the leaf prints which markers it derived and which it could not measure.
+
+### Added
+
+**P0-4 — the VIX percentile, and the FRED read on the market surface (2026-09-17).**
+- The VIX existed in this repo only as a raw FRED level on the NEWS surface, never as a regime input. `analysis_tools._vix_percentile_read` now ranks the latest `VIXCLS` close within its own trailing year and prints its basis (`VIXCLS 18.42 at the 62% percentile of its trailing 252d (n=251)`), returning `None` with the reason when the history is too short.
+- It is built on **`fred.get_series_values`** (a new series accessor: time-ordered `(date, value)` observations over a window, never raising, `"."` rows dropped rather than zero-filled) and **`normalized.percentile_hist_or_none`** — the honest-contract sibling of the four rank helpers that returned a neutral 0.5 for an unmeasurable rank. One implementation, and `None` below `min_obs` rather than a fabricated mid-range.
+- The percentile feeds the market-level regime path as `get_macro_regime_read`'s derived `vol_percentile` marker, and `get_macro_indicators` is now bound to `market_tools()` as well as `news_tools()`.
+
+### Changed
+
+**P0-7 — the four mis-homed toolset bindings (2026-09-17).** All in one commit, per the toolsets collision rule.
+- **`sentiment_tools()` exists** (Q5): 11 leaves, registered as the `sentiment` analyst key so `analyst_toolset("sentiment")` stops raising `KeyError`. The sentiment **analyst** still binds no tools — that is its documented design (its data is pre-fetched into the prompt from turn 0), so the surface is addressable for the engine without changing the analyst's contract.
+- **`get_institution_holdings`** (P0-7a) is on the sentiment surface: institutional sentiment is 15% of that engine and the leaf was bound only to `fundamentals_company_tools`.
+- **`get_analyst_revision_index`** (P0-7b) is on `news_tools()`: NewsScore's analyst category (5%) reads it.
+- **`get_market_breadth`** (P0-7c) is on `market_tools()`: it is a market read, and it was reachable only from the news analyst.
+- The market prompt gained the two trigger lines its new leaves require — `test_prompt_trigger_contract` is the gate (a bound tool must be given a "use before any X claim" sentence). Budget pins held: 79 of 95 bullets, well under the 50,000-char ceiling.
+Tests: engine suite **4422 passed / 5 skipped**, executor **1105**, web **149**. Fifteen new tests across the three items; **11 of them fail without the source changes** (verified by stashing the sources), and the twelfth is an import error by construction.
+**Web impact**: none — no wire contract, no report field. `get_macro_regime_read` gains an optional `current_date` and prints a `markers:` clause; the other leaves print the same numbers under honest names.
+
 ### Added
 
 **P0-1 — the structured SEC XBRL series, and the consumer that needed it (2026-09-17).** The first Phase-0 prerequisite: the 5-period legs (Mohanram G4/G5, the CAGR family, Dechow-Dichev's 8-period accrual window) printed "5-year ROA series unavailable (n=0)" wherever the data existed upstream, because the vendor statements carry ~4-5 annual periods and nothing consumed the free source that goes deeper.

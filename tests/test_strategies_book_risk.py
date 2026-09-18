@@ -7,6 +7,7 @@ from tradingagents.strategies.book_risk import (
     book_correlated_stress,
     cvar,
     drawdown_gate,
+    normalize_book_weights,
     portfolio_cvar,
     portfolio_drawdown,
     portfolio_returns,
@@ -150,3 +151,26 @@ def test_portfolio_cvar_over_allocated_weights_clamp_to_unity():
     b = [-0.02] * 20 + [0.001] * 20
     cv = portfolio_cvar({"a": a, "b": b}, weights={"a": 2.0, "b": 2.0})
     assert cv is not None and cv < 0
+
+
+def test_the_cash_sleeve_rule_has_one_implementation(monkeypatch):
+    """P0-8d: ``portfolio_cvar`` and ``book_correlated_stress`` each carried their
+    own copy of the cash-sleeve / equal-weight / over-allocation rules, so a
+    change to the convention could land in one path and miss the other. Both now
+    read ``normalize_book_weights``: replacing that ONE rule moves both paths."""
+    series = {"a": [0.001] * 60, "b": [0.001] * 59 + [-0.10]}
+    weights = {"a": 0.9, "b": 0.1}  # sums to 1.0: the normalized relative book
+
+    # The rule as written: the 0.1 sleeve keeps a 10% weight, so the -10% day
+    # moves the book by 1% and the CVaR tail is small.
+    assert normalize_book_weights(series, weights) == {"a": 0.9, "b": 0.1}
+    baseline_cvar = portfolio_cvar(series, weights=weights)
+    baseline_stress = book_correlated_stress(series, weights=weights)
+
+    # Change the convention in ONE place: equal weight regardless of the book.
+    monkeypatch.setattr(
+        "tradingagents.strategies.book_risk.normalize_book_weights",
+        lambda returns_by_name, weights=None: dict.fromkeys(returns_by_name, 0.5),
+    )
+    assert portfolio_cvar(series, weights=weights) != baseline_cvar
+    assert book_correlated_stress(series, weights=weights) != baseline_stress

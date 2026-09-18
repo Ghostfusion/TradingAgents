@@ -95,7 +95,7 @@ def test_earnings_calendar_queries_the_forward_window(monkeypatch):
     out = finnhub.get_earnings_calendar_finnhub("AAPL", "2026-09-10")
 
     # Next catalyst date => the query must start at the as-of date and look
-    # forward (default look_back_days=30), not backward.
+    # forward (default look_ahead_days=30), not backward.
     assert client.calls == [
         {
             "_from": "2026-09-10",
@@ -248,3 +248,32 @@ def test_earnings_calendar_prints_the_countdown(monkeypatch):
     out = finnhub.get_earnings_calendar_finnhub("AAPL", "2026-09-10")
 
     assert "Days out: 22" in out
+
+
+def test_the_earnings_calendar_window_is_named_for_the_direction_it_queries(monkeypatch):
+    """P0-8b: the parameter was ``look_back_days`` while the query is
+    ``[curr_date, curr_date + N]`` - a name that states the opposite direction to
+    the one it queries, on all three vendors in the category. The name now
+    matches the behaviour, and a small value truncates the FORWARD window."""
+    import inspect
+
+    from tradingagents.agents.utils import analyst_data_tools as adt
+
+    assert "look_ahead_days" in inspect.signature(adt.get_earnings_calendar.func).parameters
+    assert "look_back_days" not in inspect.signature(adt.get_earnings_calendar.func).parameters
+
+    seen = {}
+
+    class _Client:
+        def earnings_calendar(self, **kw):
+            seen.update(kw)
+            return {"earningsCalendar": [
+                {"date": "2026-09-18", "symbol": "AAPL", "epsEstimate": 1.5}
+            ]}
+
+    monkeypatch.setattr(finnhub, "_client", lambda: _Client())
+    out = finnhub.get_earnings_calendar_finnhub("AAPL", "2026-09-10", look_ahead_days=3)
+    # Three days FORWARD from the as-of date - not three days back.
+    assert seen["_from"] == "2026-09-10"
+    assert seen["to"] == "2026-09-13"
+    assert out

@@ -388,6 +388,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-4 + P0-7 + P0-8 landed.** (P0-8a) `position_mult_by_side` tested
+  `catalyst > 1` while every caller supplies 0..1, so `event_scale` was **always 1.0** - a real sizing bug; now
+  `0 < catalyst <= 1`. (P0-8b) `get_earnings_calendar`'s `look_back_days` named the opposite direction to the
+  `[curr_date, curr_date + N]` it queries - renamed `look_ahead_days` on all three vendors + the tool. (P0-8c)
+  `get_tail_risk` printed a single name's price-path drawdown as `cdar=`, the name the BOOK owns; now labelled
+  `price_path_dd_tail_mean` / `price_path_dd_var` / `price_path_max_dd` with "not the book CDaR". (P0-8d) the
+  cash-sleeve normalisation had two copies; `normalize_book_weights` is the one, and a test replaces it and shows
+  BOTH paths move. (P0-8e) `get_macro_regime_read` now **derives** all five markers from the run's own leaves
+  (T10Y2Y, HY OAS, EFFR/DTWEXBGS changes, the VIX percentile) - supplied wins, unmeasurable stays `None`, and the
+  leaf prints which it derived. (P0-4) `_vix_percentile_read` ranks VIXCLS on `fred.get_series_values` +
+  `normalized.percentile_hist_or_none` (None below min_obs, never a fabricated 0.5) and feeds the market-level
+  regime path; `get_macro_indicators` is bound to `market_tools()`. (P0-7) all four bindings in one commit:
+  `sentiment_tools()` (11 leaves) registered as the `sentiment` key - the analyst itself still binds none by design
+  - plus `get_institution_holdings` (sentiment), `get_analyst_revision_index` (news), `get_market_breadth` (market);
+  the market prompt gained the two trigger lines the contract test demands (79/95 bullets, under the ceiling).
+  15 new tests, 11 failing without the sources. Engine **4422 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **P0-1 landed: the structured SEC XBRL series and its consumer.** `sec_edgar.financial_history_series`
   is the structured producer (`get_financial_history` renders from it - one implementation, two readers); `_TAG_MAP` grew 8 -> 12
   rows (diluted EPS, operating income, D&A, gross profit) and the row reader accepts `USD/shares` for per-share concepts;

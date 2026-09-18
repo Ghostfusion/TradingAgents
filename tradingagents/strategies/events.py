@@ -35,11 +35,21 @@ def drift_side(surprise, momentum: float | None = None) -> str:
 
 
 def position_mult_by_side(side: str, catalyst: float = 1.0, cap: float = 1.5) -> float:
-    """Position scale factor by event side (0 stays flat for 'flat')."""
+    """Position scale factor by event side (0 stays flat for 'flat').
+
+    ``catalyst`` is the 0..1 scale ``catalyst.get_catalyst_scale`` returns and
+    ``contract.py:210`` clamps, where **1.0 means no imminent catalyst**: the
+    nearer the print, the smaller the event position. The test used to be
+    ``catalyst > 1``, which no caller can satisfy - ``get_beat_miss_sizing``
+    documents 0..1 and the scale leaf floors at ``catalyst_scale_floor`` and
+    never exceeds 1.0 - so the argument was **inert** and the multiplier was only
+    ever 1.0 (beat) or 0.5 (miss) (P0-8a). A value outside ``(0, 1]`` is treated
+    as "no catalyst" rather than extrapolated.
+    """
     if side == "flat":
         return 0.0
     mult = 1.0 if side == "beat" else 0.5
-    event_scale = catalyst if catalyst > 1 else 1.0
+    event_scale = float(catalyst) if 0.0 < float(catalyst) <= 1.0 else 1.0
     return min(mult * event_scale, cap)
 
 

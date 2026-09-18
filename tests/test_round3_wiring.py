@@ -410,3 +410,38 @@ def test_composite_rank_parses_the_rendered_peer_string(monkeypatch) -> None:
     assert "e" not in ranked.replace("peers_ranked:", "").split(",")[0].strip().lower()
     assert "N" not in seen and "e" not in seen
     assert "NVDA" in seen and "MU" in seen
+
+
+def test_the_market_surface_reaches_its_own_breadth_and_macro_reads():
+    """P0-7c + P0-4: the market-wide breadth read and the FRED macro read were
+    bound only to the NEWS analyst, so the technical/regime engines and the
+    market-level regime path could not reach them."""
+    from tradingagents.agents.toolsets import market_tools
+
+    names = {t.name for t in market_tools()}
+    assert "get_market_breadth" in names
+    assert "get_macro_indicators" in names
+
+
+def test_the_sentiment_surface_exists_and_owns_the_institutional_leaf():
+    """P0-7a + Q5: no sentiment toolset existed - ``sentiment_analyst`` binds no
+    tools by design and ``analyst_toolset`` raised ``KeyError: 'sentiment'`` - so
+    institutional sentiment had no route to its own engine."""
+    import pytest as _pytest
+
+    from tradingagents.agents.toolsets import analyst_toolset, sentiment_tools
+
+    names = {t.name for t in sentiment_tools()}
+    assert "get_institution_holdings" in names
+    assert {"get_news_sentiment_series", "get_sentiment_computed", "get_sentiment_lead_lag"} <= names
+    assert {t.name for t in analyst_toolset("sentiment")} == names
+    with _pytest.raises(KeyError):
+        analyst_toolset("not_an_analyst")
+
+
+def test_the_news_surface_reaches_the_analyst_revision_index():
+    """P0-7b: NewsScore's analyst category (5%) reads this leaf, and it was bound
+    only to fundamentals_company_tools."""
+    from tradingagents.agents.toolsets import news_tools
+
+    assert "get_analyst_revision_index" in {t.name for t in news_tools()}

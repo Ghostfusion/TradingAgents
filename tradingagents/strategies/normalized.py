@@ -34,6 +34,22 @@ def median_norm_ebit(
     return median * current_sales
 
 
+def percentile_hist_or_none(series: list, *, min_obs: int = 20) -> float | None:
+    """Percentile rank (0-1) of the LATEST value within its own history, or None.
+
+    The honest-contract sibling of :func:`percentile_hist`, which returns a
+    neutral 0.5 when the rank is unmeasurable and is kept for the callers that
+    depend on that. Below ``min_obs`` observations a rank is not measurable:
+    three points cannot say where today sits, and 0.5 would read as "mid-range"
+    when the truth is "unknown" (master rule 1). One implementation - this
+    delegates to ``percentile_hist`` for the arithmetic.
+    """
+    vals = [float(v) for v in (series or []) if v is not None]
+    if len(vals) < int(min_obs):
+        return None
+    return percentile_hist(vals[-1], vals)
+
+
 def percentile_hist(value: float | None, series: list) -> float:
     """Percentile rank (0-1) of `value` within its trailing history; 0.5 fallback."""
     vals = [float(v) for v in series if v is not None]

@@ -53,3 +53,21 @@ def test_trap_verdict_high_on_multiple_triggers():
 def test_margin_of_safety():
     assert margin_of_safety(price=80.0, intrinsic=100.0) == pytest.approx(0.2)
     assert margin_of_safety(price=100.0, intrinsic=None) is None
+
+
+def test_the_percentile_rank_is_none_when_it_is_not_measurable():
+    """P0-4: a level says nothing without the rank beside it, and a rank needs a
+    history. A monotone series puts the latest at 1.0 and the earliest at 0.0; a
+    three-point series returns None rather than a fabricated 0.5 that would read
+    as "mid-range" (master rule 1)."""
+    from tradingagents.strategies.normalized import percentile_hist_or_none
+
+    rising = [float(v) for v in range(1, 31)]
+    assert percentile_hist_or_none(rising) == pytest.approx(1.0)
+    assert percentile_hist_or_none(list(reversed(rising))) == pytest.approx(1 / 30)
+    # Below min_obs there is no rank to report.
+    assert percentile_hist_or_none([1.0, 2.0, 3.0]) is None
+    assert percentile_hist_or_none([]) is None
+    # None gaps are dropped, not zero-filled: 20 real points still rank.
+    assert percentile_hist_or_none(rising + [None]) == pytest.approx(1.0)
+    assert percentile_hist_or_none([None] * 25) is None

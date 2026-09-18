@@ -188,21 +188,25 @@ def get_analyst_ratings_finnhub(ticker: str) -> str:
 def get_earnings_calendar_finnhub(
     ticker: str,
     curr_date: str,
-    look_back_days: int | None = None,
+    look_ahead_days: int | None = None,
 ) -> str:
     """Fetch upcoming earnings dates for a ticker (forward-looking window).
 
     ``earnings_calendar`` is queried over ``[curr_date, curr_date +
-    look_back_days]``: the tool's purpose is the next scheduled catalyst, so a
-    backward window could never return it. Any EPS estimate/actual/surprise
-    the vendor reports for those dates is rendered too. Raises
-    ``NoMarketDataError`` when no earnings entry is returned in the window.
+    look_ahead_days]``: the tool's purpose is the next scheduled catalyst, so a
+    backward window could never return it. The parameter was named
+    ``look_back_days`` until 2026-09-17, which named the opposite direction to
+    the one it queries (P0-8b) - every vendor in this category looks forward, so
+    the name moved with the behaviour, not the other way round. Any EPS
+    estimate/actual/surprise the vendor reports for those dates is rendered too.
+    Raises ``NoMarketDataError`` when no earnings entry is returned in the
+    window.
     """
-    if look_back_days is None:
-        look_back_days = 30
+    if look_ahead_days is None:
+        look_ahead_days = 30
 
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    end_date = (curr_dt + timedelta(days=int(look_back_days))).strftime("%Y-%m-%d")
+    end_date = (curr_dt + timedelta(days=int(look_ahead_days))).strftime("%Y-%m-%d")
     finnhub_client = _client()
 
     earnings = finnhub_client.earnings_calendar(

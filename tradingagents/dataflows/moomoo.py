@@ -1326,7 +1326,7 @@ def get_analyst_ratings_moomoo(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_earnings_calendar_moomoo(symbol: str, curr_date: str, look_back_days: int = 30) -> str:
+def get_earnings_calendar_moomoo(symbol: str, curr_date: str, look_ahead_days: int = 30) -> str:
     """Earnings calendar via ``get_earnings_calendar``, filtered by symbol.
 
     The moomoo calendar caps its date window at **7 days** and is anchored on
@@ -1341,7 +1341,7 @@ def get_earnings_calendar_moomoo(symbol: str, curr_date: str, look_back_days: in
     market_key = code.split(".")[0] if "." in code else "US"
     ctx = _ensure_ctx()
     start_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    window_days = min(int(look_back_days or 7), 7)  # API caps the window at 7 days
+    window_days = min(int(look_ahead_days or 7), 7)  # API caps the window at 7 days
     end_dt = start_dt + timedelta(days=window_days)
     ret, data = _sdk_call(
         ctx.get_earnings_calendar,

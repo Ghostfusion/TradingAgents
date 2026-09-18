@@ -764,7 +764,7 @@ def get_insider_transactions(
 def get_earnings_calendar_yfinance(
     ticker: Annotated[str, "ticker symbol of the company"],
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
-    look_back_days: Annotated[int | None, "Days to look back; unused"] = None,
+    look_ahead_days: Annotated[int | None, "Days to look ahead; unused"] = None,
 ) -> str:
     """Earnings dates + last reported EPS surprise from yfinance (keyless).
 

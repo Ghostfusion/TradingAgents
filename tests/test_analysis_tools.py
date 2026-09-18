@@ -3344,3 +3344,102 @@ def test_trade_outcome_entry_is_required_not_blamed_on_the_closes(monkeypatch):
         ), out
     ok = T.get_trade_outcome_metrics.invoke({"ticker": "AAPL", "entry": _uptrend(260)[-1]})
     assert "mae_pct=" in ok and "no valid closes" not in ok, ok
+
+
+def test_tail_risk_refuses_the_name_cdar_for_a_single_names_price_path(monkeypatch):
+    """P0-8c: ``cdar(closes)`` fed a single name's close series to a function that
+    wants an EQUITY curve, then printed it as ``cdar=`` beside the book's own
+    CDaR (``book_risk.solve_weights`` feeds that one the weighted portfolio) - one
+    quantity that appeared to have two producers. The proxy stays (it is a
+    legitimate drawdown read on a 1-unit buy-and-hold) but it is LABELLED and the
+    name is refused."""
+    n = 120
+    closes = [100.0 + 0.5 * i + 20.0 * math.sin(i / 3) for i in range(n)]
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {"closes": closes, "opens": [], "highs": [], "lows": [], "volumes": []})
+    out = T.get_tail_risk.invoke({"ticker": "AAPL", "alpha": 0.05})
+    assert "price_path_max_dd=" in out
+    assert "price_path_dd_tail_mean=" in out
+    assert "not the book CDaR" in out
+    # No bare `cdar=` token: the book owns that name.
+    assert not re.search(r"(?<![_a-z])cdar=", out), out
+
+
+def _macro_fred(monkeypatch, *, series=None, values=None):
+    from tradingagents.dataflows import fred
+
+    monkeypatch.setattr(fred, "get_macro_value", lambda ind, d: (values or {}).get(ind))
+    monkeypatch.setattr(
+        fred,
+        "get_series_values",
+        lambda ind, d, look_back_days=None, **k: (series or {}).get(ind, []),
+    )
+
+
+_ALL_MARKERS = (
+    "rate_change_bps",
+    "yield_curve_slope_bps",
+    "credit_spread_bps",
+    "dollar_index_chg_pct",
+    "vol_percentile",
+)
+
+
+def test_macro_regime_derives_the_markers_it_was_not_given(monkeypatch):
+    """P0-8e: all five markers were caller-supplied only, so they arrived empty
+    and the label was almost always None - while the FRED series and the credit
+    leaf already held every one of them."""
+    _macro_fred(
+        monkeypatch,
+        values={"10y_2y_spread": 0.42, "hy_oas": 3.50},
+        series={
+            "effr": [("2026-08-01", 3.50), ("2026-09-10", 3.75)],
+            "dollar_index": [("2026-08-11", 120.0), ("2026-09-10", 122.4)],
+            "vix": [("2026-09-01", 15.0 + i * 0.1) for i in range(30)],
+        },
+    )
+    markers, sources = T._derive_macro_markers("2026-09-10", dict.fromkeys(_ALL_MARKERS))
+    assert markers["yield_curve_slope_bps"] == pytest.approx(42.0)  # percent -> bps
+    assert markers["credit_spread_bps"] == pytest.approx(350.0)
+    assert markers["rate_change_bps"] == pytest.approx(25.0)
+    assert markers["dollar_index_chg_pct"] == pytest.approx(2.0)
+    assert markers["vol_percentile"] == pytest.approx(1.0)  # the latest VIX is the highest
+    for key in _ALL_MARKERS:
+        assert sources[key] != "supplied"
+
+
+def test_macro_regime_keeps_a_supplied_marker_and_never_invents_a_missing_one(monkeypatch):
+    """A supplied value always WINS, and an unmeasurable one stays None with no
+    invented default - the label is allowed to be n/a."""
+    _macro_fred(monkeypatch, values={}, series={})
+    supplied = dict.fromkeys(_ALL_MARKERS)
+    supplied["credit_spread_bps"] = 275.0
+    markers, sources = T._derive_macro_markers("2026-09-10", supplied)
+    assert markers["credit_spread_bps"] == pytest.approx(275.0)
+    assert sources["credit_spread_bps"] == "supplied"
+    assert all(markers[k] is None for k in _ALL_MARKERS if k != "credit_spread_bps")
+
+
+def test_macro_regime_leaf_prints_which_markers_it_derived(monkeypatch):
+    _macro_fred(
+        monkeypatch,
+        values={"10y_2y_spread": -0.12, "hy_oas": 2.80},
+        series={
+            "effr": [("2026-08-01", 3.75), ("2026-09-10", 3.50)],
+            "dollar_index": [("2026-08-11", 122.0), ("2026-09-10", 121.0)],
+            "vix": [("2026-09-01", 25.0 - i * 0.1) for i in range(30)],
+        },
+    )
+    out = T.get_macro_regime_read.invoke({"current_date": "2026-09-10"})
+    assert out.startswith("macro regime: risk_on")
+    assert "markers: credit_spread_bps <- FRED BAMLH0A0HYM2" in out
+    assert "not measurable: " not in out  # all five resolved
+
+
+def test_the_vix_percentile_reports_why_it_cannot_rank(monkeypatch):
+    """P0-4: a three-point VIX history has no rank to report - the leaf says so
+    instead of printing a neutral 0.5."""
+    _macro_fred(monkeypatch, series={"vix": [("2026-09-08", 15.0), ("2026-09-09", 16.0), ("2026-09-10", 17.0)]})
+    got = T._vix_percentile_read("2026-09-10")
+    assert got["percentile"] is None
+    assert got["n"] == 3
+    assert "unmeasurable" in got["basis"]

@@ -30,8 +30,8 @@ def get_analyst_ratings(
 def get_earnings_calendar(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
-    look_back_days: Annotated[
-        int | None, "Days to look back from curr_date; omit for a 30-day window"
+    look_ahead_days: Annotated[
+        int | None, "Days to look AHEAD from curr_date; omit for a 30-day window"
     ] = None,
 ) -> str:
     """
@@ -42,9 +42,9 @@ def get_earnings_calendar(
     Args:
         ticker (str): Ticker symbol of the company
         curr_date (str): Current date in yyyy-mm-dd format
-        look_back_days (int): Trailing window; omit for a 30-day window
+        look_ahead_days (int): FORWARD window to the next print; omit for 30 days
 
     Returns:
         str: A formatted report of upcoming earnings and EPS surprise
     """
-    return route_to_vendor("get_earnings_calendar", ticker, curr_date, look_back_days)
+    return route_to_vendor("get_earnings_calendar", ticker, curr_date, look_ahead_days)

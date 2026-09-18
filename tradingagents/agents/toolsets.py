@@ -339,6 +339,13 @@ def market_tools() -> list:
                 get_options_iv_read,
                 get_taylor_read,
                 get_factor_profile,
+                # P0-7c: the market-wide breadth read is a MARKET read; it was
+                # reachable only from the news analyst, so the technical and
+                # regime engines could not see it.
+                get_market_breadth,
+                # P0-4: the FRED macro read was bound only to news_tools(), so the
+                # market-level regime path could not reach the VIX series it ranks.
+                get_macro_indicators,
             ]
 
 
@@ -372,6 +379,9 @@ def news_tools() -> list:
                 get_beat_miss_sizing,
                 get_news_sentiment,
                 get_credit_spread_read,
+                # P0-7b: NewsScore's analyst category (5%) reads this leaf, and it
+                # was bound only to fundamentals_company_tools.
+                get_analyst_revision_index,
             ]
 
 
@@ -463,6 +473,33 @@ def fundamentals_tools(is_etf: bool) -> list:
     return fundamentals_etf_tools() if is_etf else fundamentals_company_tools()
 
 
+def sentiment_tools() -> list:
+    """Tools bound by the SENTIMENT surface (SentimentScore.md §2).
+
+    The sentiment engine's own leaves. Until 2026-09-17 no such surface existed:
+    ``sentiment_analyst`` binds no tools by design (its data is pre-fetched into
+    the prompt from turn 0), and ``analyst_toolset`` raised
+    ``KeyError: 'sentiment'``, so every sentiment leaf reached the engine only
+    through the market or news analyst and the institutional category had no
+    route at all (P0-7a, Q5).
+    """
+    return     [
+            get_news_sentiment,
+            get_news_sentiment_series,
+            get_sentiment_computed,
+            get_sentiment_lead_lag,
+            get_gdelt_sentiment,
+            get_orderflow_read,
+            get_order_imbalance,
+            get_short_interest,
+            get_short_sale_volume,
+            get_short_volume,
+            # P0-7a: institutional sentiment is a sentiment category (15% of the
+            # engine), and this leaf was bound only to fundamentals_company_tools.
+            get_institution_holdings,
+        ]
+
+
 def _dedupe(tools: list) -> list:
     """Order-preserving dedupe by tool name (the fundamentals lists overlap)."""
     seen: set[str] = set()
@@ -489,6 +526,8 @@ def analyst_toolset(key: str) -> list:
         return news_tools()
     if key == "fundamentals":
         return _dedupe(fundamentals_company_tools() + fundamentals_etf_tools())
+    if key == "sentiment":
+        return sentiment_tools()
     raise KeyError(f"unknown analyst key: {key!r}")
 
 
@@ -499,4 +538,5 @@ __all__ = [
     "fundamentals_tools",
     "market_tools",
     "news_tools",
+    "sentiment_tools",
 ]

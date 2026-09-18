@@ -4735,20 +4735,31 @@ def get_tail_risk(
         mvar = _mvar(returns, alpha=alpha)
     except Exception:
         mvar = None
-    cdar_line = ""
+    # Drawdown read on THIS NAME's own price path, used as its equity curve.
+    # It is NOT the book's CDaR: ``book_risk.solve_weights`` feeds that one the
+    # weighted portfolio (``book_risk.py:701``), so printing both under "cdar"
+    # made one quantity look like it had two producers (master rule 15) and
+    # invited a comparison between a single security and a book. The proxy is
+    # labelled and the name is refused (P0-8c).
+    dd_line = ""
     try:
         from tradingagents.strategies.book_risk import cdar
 
-        cd = cdar(closes, alpha=alpha)  # close series as the equity proxy
+        cd = cdar(closes, alpha=alpha)
         if cd is not None:
-            cdar_line = f" cdar={cd['cdar']:.2%} dvar={cd['dvar']:.2%}"
+            dd_line = (
+                f" price_path_dd_tail_mean={cd['cdar']:.2%}"
+                f" price_path_dd_var={cd['dvar']:.2%}"
+                f" price_path_max_dd={cd['max_drawdown']:.2%}"
+                " (this name's own price path, not the book CDaR)"
+            )
     except Exception:
         pass
     mvar_line = f" modified_var={abs(mvar):.2%}" if mvar is not None else " modified_var=n/a"
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} "
         f"var={f'{abs(var):.2%}' if var is not None else 'n/a'}"
-        f"{mvar_line}{cdar_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+        f"{mvar_line}{dd_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
     )
 
 
@@ -6549,35 +6560,143 @@ def get_stress_grid_read(
     return "\n".join(lines)
 
 
+def _vix_percentile_read(current_date: str, look_back_days: int = 252) -> dict:
+    """Percentile rank of the latest VIXCLS close within its own trailing year.
+
+    P0-4's producer. The VIX existed in this repo only as a raw FRED level on the
+    NEWS surface (``dataflows/fred.py`` alias ``vix`` -> ``VIXCLS``), never as a
+    regime input; a level says nothing without the rank beside it, and the rank is
+    what ``macro_regime`` and the market regime read actually test (>= 0.7).
+
+    Returns ``{"percentile": 0..1 | None, "latest": float | None, "n": int,
+    "basis": str}``. Below ``min_obs`` observations the rank is ``None`` with the
+    reason printed - never a fabricated 0.5 (master rule 1).
+    """
+    try:
+        from tradingagents.dataflows.fred import get_series_values
+        from tradingagents.strategies.normalized import percentile_hist_or_none
+    except Exception as exc:  # noqa: BLE001 - degrades
+        return {"percentile": None, "latest": None, "n": 0, "basis": f"unavailable: {exc}"}
+    vals = [v for _d, v in get_series_values("vix", current_date, look_back_days=look_back_days)]
+    pct = percentile_hist_or_none(vals)
+    if pct is None:
+        return {
+            "percentile": None,
+            "latest": vals[-1] if vals else None,
+            "n": len(vals),
+            "basis": (
+                f"VIXCLS percentile unmeasurable: {len(vals)} observation(s) in the "
+                f"trailing {look_back_days}d, needs 20"
+            ),
+        }
+    return {
+        "percentile": pct,
+        "latest": vals[-1],
+        "n": len(vals),
+        "basis": f"VIXCLS {vals[-1]:.2f} at the {pct:.0%} percentile of its trailing {look_back_days}d (n={len(vals)})",
+    }
+
+
+def _derive_macro_markers(current_date: str, supplied: dict) -> tuple[dict, dict]:
+    """Fill the macro-regime markers from the run's OWN leaves (P0-8e).
+
+    The five markers were caller-supplied only, so in practice they arrived empty
+    and the label was almost always ``None`` - while the FRED series and the
+    credit-spread leaf already held every one of them. A supplied value always
+    WINS; a derived one prints its source and its window; an unmeasurable one
+    stays ``None`` with no invented default.
+
+    Returns ``(markers, sources)``.
+    """
+    out = dict(supplied)
+    src = {k: "supplied" for k, v in supplied.items() if v is not None}
+    try:
+        from tradingagents.dataflows.fred import get_macro_value, get_series_values
+    except Exception:  # noqa: BLE001 - the label still runs on what was supplied
+        return out, src
+    # Curve slope: T10Y2Y is already 10y - 2y in percent.
+    if out.get("yield_curve_slope_bps") is None:
+        v = get_macro_value("10y_2y_spread", current_date)
+        if v is not None:
+            out["yield_curve_slope_bps"] = float(v) * 100.0
+            src["yield_curve_slope_bps"] = "FRED T10Y2Y (latest)"
+    # Credit: the HY option-adjusted spread in percent -> bps.
+    if out.get("credit_spread_bps") is None:
+        v = get_macro_value("hy_oas", current_date)
+        if v is not None:
+            out["credit_spread_bps"] = float(v) * 100.0
+            src["credit_spread_bps"] = "FRED BAMLH0A0HYM2 HY OAS (latest)"
+    # Policy rate: the change over the window, from two observations.
+    if out.get("rate_change_bps") is None:
+        vals = get_series_values("effr", current_date, look_back_days=60)
+        if len(vals) >= 2:
+            out["rate_change_bps"] = (vals[-1][1] - vals[0][1]) * 100.0
+            src["rate_change_bps"] = f"FRED EFFR change {vals[0][0]} -> {vals[-1][0]}"
+    # Dollar: the broad index change over the window.
+    if out.get("dollar_index_chg_pct") is None:
+        vals = get_series_values("dollar_index", current_date, look_back_days=30)
+        if len(vals) >= 2 and vals[0][1]:
+            out["dollar_index_chg_pct"] = (vals[-1][1] / vals[0][1] - 1.0) * 100.0
+            src["dollar_index_chg_pct"] = f"FRED DTWEXBGS change {vals[0][0]} -> {vals[-1][0]}"
+    # Vol: the VIX percentile (P0-4's producer).
+    if out.get("vol_percentile") is None:
+        vp = _vix_percentile_read(current_date)
+        if vp.get("percentile") is not None:
+            out["vol_percentile"] = vp["percentile"]
+            src["vol_percentile"] = vp["basis"]
+    return out, src
+
+
 @tool
 
 def get_macro_regime_read(
     rate_change_bps: Annotated[float | None, "fed-policy rate change in bps this window, optional"] = None,
     yield_curve_slope_bps: Annotated[float | None, "10y-2y slope in bps, optional"] = None,
-    credit_spread_bps: Annotated[float | None, "credit-spread level in bps (e.g. HY - IG), optional"] = None,
+    credit_spread_bps: Annotated[float | None, "credit-spread level in bps (e.g. HY - OAS), optional"] = None,
     dollar_index_chg_pct: Annotated[float | None, "USD index change in %, optional"] = None,
     vol_percentile: Annotated[float | None, "market vol percentile 0..1, optional"] = None,
+    current_date: Annotated[str | None, "as-of date (yyyy-mm-dd); omit for today"] = None,
 ) -> str:
     """Cross-asset macro regime (W4-6): Risk-On / Liquidity-Contraction /
-    Stagflation from the macro markers you pass (fed-watch / curve / credit /
-    dollar / vol reads). Fail-open: unmeasured inputs leave the label None, a
-    partial set uses what exists - never fabricates. Use before any 'the tape
-    is risk-on / we are in a liquidity crunch' claim. Advisory."""
+    Stagflation from the macro markers.
+
+    **The five markers are derived from the run's own leaves when you do not pass
+    them** (P0-8e): the 10y-2y slope and the HY OAS from FRED, the policy-rate and
+    dollar changes over their own windows from the FRED series, and the vol
+    percentile from the VIX's trailing rank. You no longer have to compute them by
+    hand, and a value you pass always wins. Every derived marker prints its source
+    and its window, so a reader can see which ones were measured. Fail-open:
+    unmeasured inputs leave the label None, a partial set uses what exists - never
+    fabricates. Use before any 'the tape is risk-on / we are in a liquidity
+    crunch' claim. Advisory."""
     try:
         from tradingagents.strategies.regime_performance import macro_regime as _mr
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"macro regime unavailable: {exc}"
-    r = _mr(
-        rate_change_bps=rate_change_bps,
-        yield_curve_slope_bps=yield_curve_slope_bps,
-        credit_spread_bps=credit_spread_bps,
-        dollar_index_chg_pct=dollar_index_chg_pct,
-        vol_percentile=vol_percentile,
+    from datetime import datetime as _dt
+
+    date = current_date or _dt.now().strftime("%Y-%m-%d")
+    markers, sources = _derive_macro_markers(
+        date,
+        {
+            "rate_change_bps": rate_change_bps,
+            "yield_curve_slope_bps": yield_curve_slope_bps,
+            "credit_spread_bps": credit_spread_bps,
+            "dollar_index_chg_pct": dollar_index_chg_pct,
+            "vol_percentile": vol_percentile,
+        },
     )
+    r = _mr(**markers)
     reg = r["regime"]
     base = f"macro regime: {reg if reg is not None else 'n/a (mixed/unknown inputs)'}"
     if r["reasons"]:
         base += " — " + "; ".join(r["reasons"])
+    derived = {k: v for k, v in sources.items() if v != "supplied"}
+    if derived:
+        base += " | markers: " + "; ".join(f"{k} <- {v}" for k, v in sorted(derived.items()))
+    missing = [k for k, v in markers.items() if v is None]
+    if missing:
+        base += " | not measurable: " + ", ".join(sorted(missing))
     return base
 
 

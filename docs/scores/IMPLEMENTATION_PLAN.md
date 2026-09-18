@@ -331,8 +331,15 @@ regime input.
 trailing history, reusing the existing shape (`regime.vol_percentile:49`), inside
 the market-level regime path, plus binding the FRED read to the market surface.
 
-**Acceptance.** A monotone synthetic series gives a percentile of 1.0 at the top
-and 0.0 at the bottom; a 3-point history returns `None` (not a fabricated rank).
+**Acceptance - MET 2026-09-17.** A monotone synthetic series gives a percentile
+of 1.0 at the top and 0.0 at the bottom; a 3-point history returns `None` (not a
+fabricated rank). Built as `analysis_tools._vix_percentile_read` (fetch VIXCLS
+through the new `fred.get_series_values`, rank it with
+`normalized.percentile_hist_or_none` - the honest-contract sibling of the four
+rank helpers that returned a neutral 0.5 for an unmeasurable rank). It feeds the
+market-level regime path through `get_macro_regime_read`'s derived `vol_percentile`
+marker, and the FRED read is now bound to `market_tools()` as well as
+`news_tools()`.
 
 ### 3.5 P0-5 — VIX term structure
 
@@ -395,6 +402,19 @@ raises `KeyError: 'sentiment'` (`toolsets.py:479`), so every sentiment leaf
 reaches the engine only through the market or news analyst. Bind
 `sentiment_analyst` and register `sentiment`.
 
+**DONE 2026-09-17.** All four bindings landed in one commit (the toolsets
+collision rule): `get_institution_holdings` is on the new `sentiment_tools()`,
+`get_analyst_revision_index` is on `news_tools()`, and `get_market_breadth` plus
+`get_macro_indicators` (P0-4's binding) are on `market_tools()`.
+`sentiment_tools()` is 11 leaves, `analyst_toolset("sentiment")` resolves to it,
+and the key no longer raises. The sentiment ANALYST still binds no tools - that
+is its documented design (its data is pre-fetched into the prompt from turn 0),
+so the surface is addressable for the engine and for any future ToolNode without
+changing the analyst's contract. **The market prompt gained the two trigger lines
+its new leaves require** (`test_prompt_trigger_contract` is the gate: a bound tool
+must be given a 'use before any X claim' sentence), and the budget pins held -
+79 of 95 bullets, well under the 50,000-char ceiling.
+
 ### 3.8 P0-8 — the five recorded defects still open
 
 From the master's §3.2 tail. Each is small, each has a named consequence, none is
@@ -402,11 +422,11 @@ a score. Fix on sight (standing order 10); the first is a real sizing bug.
 
 | # | Defect | Evidence | Fix | Acceptance |
 | --: | --- | --- | --- | --- |
-| P0-8a | `events.position_mult_by_side`'s catalyst argument is inert | `strategies/events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, while the only caller documents `catalyst` as `0..1` (`agents/utils/analysis_tools.py:2254`) and `catalyst.get_catalyst_scale` supplies ≤1 — so `event_scale` is **always 1.0** and the multiplier is only ever 1.0 (beat) / 0.5 (miss) | compare against the documented range (`catalyst <= 1`) or take a scale explicitly | a beat with a 0.25 catalyst scale produces a multiplier below the no-catalyst case; fails before the fix |
-| P0-8b | `get_earnings_calendar`'s `look_back_days` names a **forward** window | `agents/utils/analyst_data_tools.py:33` vs `dataflows/finnhub.py:195-196` (`[curr_date, curr_date + look_back_days]`) | rename the parameter (and its callers) to a forward name; keep the value | the leaf's argument name matches the direction it queries; a small value truncates the forward window |
-| P0-8c | `get_tail_risk` passes a **close-price series as an equity curve** to CDaR | `agents/utils/analysis_tools.py:4690` (`cdar(closes, …)`), `strategies/book_risk.py:174` | either feed it the weighted book or label the proxy in the output and refuse the name "CDaR" | the printed block says which series it is; `get_book_tail_risk`'s portfolio number is not confused with it |
-| P0-8d | `book_risk.portfolio_cvar:28` and `book_risk.book_correlated_stress:128` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move |
-| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:4782` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled |
+| P0-8a | `events.position_mult_by_side`'s catalyst argument is inert | `strategies/events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, while the only caller documents `catalyst` as `0..1` (`agents/utils/analysis_tools.py:2254`) and `catalyst.get_catalyst_scale` supplies ≤1 — so `event_scale` is **always 1.0** and the multiplier is only ever 1.0 (beat) / 0.5 (miss) | compare against the documented range (`catalyst <= 1`) or take a scale explicitly | a beat with a 0.25 catalyst scale produces a multiplier below the no-catalyst case; fails before the fix **FIXED 2026-09-17** - `event_scale = catalyst if 0 < catalyst <= 1 else 1.0`; a beat at 0.25 now sizes 0.25, a value outside (0, 1] stays the no-catalyst case. Test fails pre-change. |
+| P0-8b | `get_earnings_calendar`'s `look_back_days` names a **forward** window | `agents/utils/analyst_data_tools.py:33` vs `dataflows/finnhub.py:195-196` (`[curr_date, curr_date + look_back_days]`) | rename the parameter (and its callers) to a forward name; keep the value | the leaf's argument name matches the direction it queries; a small value truncates the forward window **FIXED 2026-09-17** - renamed to `look_ahead_days` on all three vendors (finnhub, moomoo, yfinance) and on the tool; a test pins the forward `to` date. |
+| P0-8c | `get_tail_risk` passes a **close-price series as an equity curve** to CDaR | `agents/utils/analysis_tools.py:4690` (`cdar(closes, …)`), `strategies/book_risk.py:174` | either feed it the weighted book or label the proxy in the output and refuse the name "CDaR" | the printed block says which series it is; `get_book_tail_risk`'s portfolio number is not confused with it **FIXED 2026-09-17** - the proxy is labelled (`price_path_dd_tail_mean`, `price_path_dd_var`, `price_path_max_dd`) and the name 'CDaR' is refused; no bare `cdar=` token remains, so the book's CDaR has one producer. |
+| P0-8d | `book_risk.portfolio_cvar:28` and `book_risk.book_correlated_stress:128` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move **FIXED 2026-09-17** - `normalize_book_weights` is the one implementation; both callers read it, and a test replaces that single rule and shows BOTH paths move. |
+| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:4782` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled **FIXED 2026-09-17** - `_derive_macro_markers` fills all five from the run's own leaves (FRED T10Y2Y, HY OAS, EFFR and DTWEXBGS changes, and the VIX percentile); a supplied value wins, an unmeasurable one stays None, and the leaf prints which markers it derived. |
 
 ### 3.9 P0-9 — vendor-capability probes
 

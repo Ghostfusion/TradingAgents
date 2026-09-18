@@ -205,6 +205,60 @@ def get_macro_value(indicator: str, curr_date: str) -> float | None:
     return None
 
 
+def get_series_values(
+    indicator: str,
+    curr_date: str,
+    look_back_days: int | None = None,
+    *,
+    limit: int = 400,
+) -> list[tuple[str, float]]:
+    """Time-ordered ``(date, value)`` observations for a FRED series, or ``[]``.
+
+    The series-level sibling of :func:`get_macro_value` (which returns only the
+    latest observation): a *change* over a window - a rate move, a dollar move -
+    needs two points, and string-parsing the rendered markdown report to get them
+    is exactly what the value accessor exists to avoid. Observations are trimmed
+    to ``[curr_date - look_back_days, curr_date]`` and returned oldest -> newest,
+    so ``vals[-1]`` is the latest print at or before the as-of date and a past
+    date never leaks future data.
+
+    Never raises: a missing series, a bad alias or a transient FRED failure
+    returns ``[]`` so the caller degrades to ``n/a`` rather than inventing a
+    change. FRED's ``"."`` (no observation) rows are dropped, not zero-filled.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        series_id = _resolve_series_id(indicator)
+        start = None
+        if look_back_days is not None:
+            start = (
+                datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=int(look_back_days))
+            ).strftime("%Y-%m-%d")
+        params = {
+            "series_id": series_id,
+            "observation_end": curr_date,
+            "sort_order": "desc",
+            "limit": max(2, int(limit)),
+        }
+        if start:
+            params["observation_start"] = start
+        rows = _request("series/observations", params).get("observations", [])
+    except Exception:  # noqa: BLE001 - advisory; [] degrades
+        return []
+    out: list[tuple[str, float]] = []
+    for row in rows:
+        value = row.get("value")
+        if value in (".", None, ""):
+            continue
+        try:
+            out.append((str(row.get("date") or ""), float(value)))
+        except (TypeError, ValueError):
+            continue
+    out.reverse()
+    return out
+
+
 def get_macro_data(
     indicator: str,
     curr_date: str,
