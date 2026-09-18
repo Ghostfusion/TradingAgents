@@ -388,6 +388,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **WP-2 step 1 landed: `factors.quality_composite` -> `factors.category_scores`** (the
+  shared cross-sectional core renamed, not forked; the caller owns the metric set, directions, weights and band table, and
+  only `label` reaches the printed `basis`). The old name is gone rather than wrapped - both callers
+  (`scripts/value_screener.py:2367`, `analysis_tools._quality_composite_row:4594`) call `category_scores(...,
+  label="quality composite")` and print the identical basis string. `QUALITY_DIRECTIONS` / `QUALITY_BANDS` /
+  `quality_band` / `enable_quality_composite` are untouched. Tests: `test_quality_composite.py` ->
+  `test_category_scores.py`, 12 tests re-pointed; 44 passed across it + `test_round3_wiring.py`. Live docs re-pointed.
 - 2026-09-17 `(working tree)` - **P0-9 landed: both vendor probes answered** (recorded answers, no code). **(1) EODHD
   `/sentiments` coverage is COMPLETE for this universe** - 26 of 26 names returned a non-empty series (16 large caps at
   73-151 daily points, four ETFs, 0700.HK, SKHY, BRK.B, RIVN, ARM, CART; no empty result, no error), so the hardcoded
@@ -974,7 +981,7 @@ has changed before); never assume an endpoint works — the SDK's
   scan universe - `tickers=`/`financials=` let the screener pass its own scanned cross-section - plus
   `resolve_growth_medians`/`sector_medians_for`, all built on `statement_parsing.screen_ticker` so the columns and
   the medians cannot drift), `strategies/analyst_revisions.py` (weighted coverage-guarded revision ratio;
-  estimate-change leg prints why it is unavailable), `factors.quality_composite` (0-100 winsorised-z percentile,
+  estimate-change leg prints why it is unavailable), `factors.category_scores` (0-100 winsorised-z percentile,
   coverage floor, published quality bands - never `decision_guardrail.SCORE_BANDS`; `QUALITY_DIRECTIONS` is the one
   direction table), `sentiment.aggregate_weighted_sentiment`/`crowd_ratio`/`sentiment_dispersion`/
   `weighted_rolling_sentiment`, `alpha_health.score_evaluation_rows`, and S11 in `evidence_gather` (symmetry

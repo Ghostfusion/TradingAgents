@@ -4583,16 +4583,19 @@ def _quality_composite_row(ticker: str, peers: list, current_date: str | None) -
 
     from tradingagents.strategies.factors import (
         QUALITY_DIRECTIONS,
+        category_scores,
         quality_band,
-        quality_composite,
     )
     from tradingagents.strategies.peer_universe import resolve_peer_universe
 
     date = current_date or datetime.now().strftime("%Y-%m-%d")
     names = sorted({str(p).upper() for p in (peers or []) if p})
     panel = resolve_peer_universe(tickers=names, current_date=date)
-    qc = quality_composite(
-        panel.get("metrics") or {}, directions=QUALITY_DIRECTIONS, min_coverage=3
+    qc = category_scores(
+        panel.get("metrics") or {},
+        directions=QUALITY_DIRECTIONS,
+        min_coverage=3,
+        label="quality composite",
     )
     key = str(ticker).upper()
     score = (qc.get("scores") or {}).get(key)

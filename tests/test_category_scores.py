@@ -16,7 +16,7 @@ from tradingagents.strategies.decision_guardrail import SCORE_BANDS
 from tradingagents.strategies.factors import (
     QUALITY_BANDS,
     quality_band,
-    quality_composite,
+    category_scores,
 )
 
 DIRECTIONS = {"f": 1, "m": -1, "z": 1}
@@ -46,7 +46,7 @@ def _order(result: dict) -> list[float]:
 
 
 def test_best_and_worst_names_rank_100_and_0() -> None:
-    res = quality_composite(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
     assert sorted(res["scores"]) == [f"N{i}" for i in range(10)]
     assert res["scores"]["N0"] == 0.0
     assert res["scores"]["N9"] == 100.0
@@ -55,13 +55,13 @@ def test_best_and_worst_names_rank_100_and_0() -> None:
 
 
 def test_scores_are_monotone_in_the_ordering() -> None:
-    res = quality_composite(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
     scores = _order(res)
     assert all(a < b for a, b in zip(scores, scores[1:], strict=False))
 
 
 def test_peer_set_below_the_floor_is_unavailable() -> None:
-    res = quality_composite(_rise_panel(n=5), directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(_rise_panel(n=5), directions=DIRECTIONS, min_coverage=3)
     assert res["scores"] == {}
     assert "unavailable" in res
     assert res["peer_n"] == 5
@@ -72,7 +72,7 @@ def test_metric_without_a_declared_direction_is_dropped() -> None:
     panel = _rise_panel()
     for i, row in enumerate(panel.values()):
         row["undirected"] = float(i + 1)
-    res = quality_composite(panel, directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(panel, directions=DIRECTIONS, min_coverage=3)
     assert res["metrics_dropped"]["undirected"] == "no declared direction"
     assert "undirected" not in res["metrics_used"]
 
@@ -81,7 +81,7 @@ def test_metric_present_for_too_few_names_is_dropped_with_its_count() -> None:
     panel = _rise_panel()
     panel["N0"]["rare"] = 1.0
     panel["N1"]["rare"] = 2.0
-    res = quality_composite(
+    res = category_scores(
         panel, directions={**DIRECTIONS, "rare": 1}, min_coverage=3
     )
     assert "rare" not in res["metrics_used"]
@@ -91,7 +91,7 @@ def test_metric_present_for_too_few_names_is_dropped_with_its_count() -> None:
 def test_name_below_the_coverage_floor_is_withheld_with_the_count() -> None:
     panel = _rise_panel()
     panel["N5"] = {"f": 6.0}
-    res = quality_composite(panel, directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(panel, directions=DIRECTIONS, min_coverage=3)
     assert "N5" not in res["scores"]
     assert res["coverage"]["N5"] == {"n": 1, "of": 3, "metrics": ["f"]}
     assert "1 of 3" in res["withheld"]["N5"]
@@ -102,7 +102,7 @@ def test_a_missing_metric_is_renormalised_over_the_present_metrics() -> None:
     """A middle name missing one metric keeps its place (2/3 of its z would not)."""
     panel = _rise_panel()
     panel["N5"] = {"f": 6.0, "m": 5.0}
-    res = quality_composite(panel, directions=DIRECTIONS, min_coverage=2)
+    res = category_scores(panel, directions=DIRECTIONS, min_coverage=2)
     assert "N5" in res["scores"]
     assert res["coverage"]["N5"]["n"] == 2
     assert res["coverage"]["N5"]["of"] == 3
@@ -126,7 +126,7 @@ def test_a_missing_metric_is_renormalised_over_the_present_metrics() -> None:
 def test_extreme_outlier_is_winsorised_before_standardising() -> None:
     panel = {f"N{i}": {"f": float(i + 1)} for i in range(12)}
     panel["OUT"] = {"f": 9000.0}
-    res = quality_composite(panel, directions={"f": 1}, min_coverage=1)
+    res = category_scores(panel, directions={"f": 1}, min_coverage=1)
     names = sorted(panel)
     col = [panel[t]["f"] for t in names]
     expected = cross_sectional_z(winsorize(col, 0.01, 0.99))
@@ -139,10 +139,10 @@ def test_extreme_outlier_is_winsorised_before_standardising() -> None:
 
 def test_direction_flips_a_lower_is_better_metric() -> None:
     panel = {f"N{i}": {"m": float(10 - i)} for i in range(10)}
-    lower_better = quality_composite(panel, directions={"m": -1}, min_coverage=1)
+    lower_better = category_scores(panel, directions={"m": -1}, min_coverage=1)
     assert lower_better["scores"]["N9"] == 100.0  # m = 1.0, the lowest
     assert lower_better["scores"]["N0"] == 0.0
-    higher_better = quality_composite(panel, directions={"m": 1}, min_coverage=1)
+    higher_better = category_scores(panel, directions={"m": 1}, min_coverage=1)
     assert higher_better["scores"]["N0"] == 100.0
     assert higher_better["scores"]["N9"] == 0.0
 
@@ -150,8 +150,8 @@ def test_direction_flips_a_lower_is_better_metric() -> None:
 def test_industry_neutral_is_an_opt_in_switch_and_is_printed() -> None:
     panel = _rise_panel()
     sectors = {f"N{i}": ("A" if i < 5 else "B") for i in range(10)}
-    raw = quality_composite(panel, directions=DIRECTIONS, min_coverage=3)
-    neutral = quality_composite(
+    raw = category_scores(panel, directions=DIRECTIONS, min_coverage=3)
+    neutral = category_scores(
         panel,
         directions=DIRECTIONS,
         min_coverage=3,
@@ -165,9 +165,9 @@ def test_industry_neutral_is_an_opt_in_switch_and_is_printed() -> None:
 
 
 def test_equal_weights_are_the_default_and_printed() -> None:
-    res = quality_composite(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
+    res = category_scores(_rise_panel(), directions=DIRECTIONS, min_coverage=3)
     assert "equal weights" in res["basis"]
-    weighted = quality_composite(
+    weighted = category_scores(
         _rise_panel(),
         directions=DIRECTIONS,
         min_coverage=3,
@@ -178,7 +178,7 @@ def test_equal_weights_are_the_default_and_printed() -> None:
 
 
 def test_a_cross_section_that_yields_no_scored_name_withholds_everything() -> None:
-    res = quality_composite(_rise_panel(), directions=DIRECTIONS, min_coverage=4)
+    res = category_scores(_rise_panel(), directions=DIRECTIONS, min_coverage=4)
     assert res["scores"] == {}
     assert len(res["withheld"]) == 10
     assert "3 of 3" in res["withheld"]["N0"]

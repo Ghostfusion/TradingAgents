@@ -2360,14 +2360,15 @@ def main(argv: list[str] | None = None) -> int:
                 if args.quality_score:
                     from tradingagents.strategies.factors import (
                         QUALITY_DIRECTIONS,
+                        category_scores,
                         quality_band,
-                        quality_composite,
                     )
 
-                    qc = quality_composite(
+                    qc = category_scores(
                         panel.get("metrics") or {},
                         directions=QUALITY_DIRECTIONS,
                         min_coverage=3,
+                        label="quality composite",
                     )
                     print(f"[quant-round3] {qc['basis']}")
                     if qc.get("unavailable"):

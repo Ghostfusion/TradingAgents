@@ -122,7 +122,7 @@ involved. This is the "compute, don't narrate" core.
 - `mean_reversion.py` — demeaned AR(1)/OU half-life with an OLS t-test gate
   + `mean_reversion_verdict`.
 - `fixed_income.py` — preferred YTM / duration / DV01 / convexity.
-- `factors.py` — round-3 S3 `quality_composite` (0-100 tie-aware percentile of the winsorised-z mean over a
+- `factors.py` — `category_scores` (the shared cross-sectional core; 0-100 tie-aware percentile of the winsorised-z mean over a
   declared metric set with `QUALITY_DIRECTIONS`; coverage floor, per-metric droplist, `QUALITY_BANDS`) +
   `quality_band`.
 - `alpha_health.py` — round-3 S8 `score_evaluation_rows` (mean rank IC + IC IR reusing

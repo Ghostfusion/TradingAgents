@@ -209,7 +209,7 @@ one master number:
 | --- | --- | --- |
 | 0 — point scores | Self-contained published formulas over canonical statements: Beneish M (with `_M_WEIGHTS`), Altman Z + Z'/Z''/Z''-EM variants and zones, Piotroski F (plain + paper-basis detailed), Ohlson O, Zmijewski X, Sloan accruals, GP/A, NOA, Tobin's Q, earnings yield, Acquirer's multiple, Mohanram G, Montier C, Graham/NCAV/EPV, CapEx-quality 0-100, earnings-quality verdict | `dataflows/quantitative_scores.py`, `strategies/normalized.py`, `strategies/capex_quality.py`, `strategies/earnings_quality.py`, `strategies/fundamental_floors.py` |
 | 1 — normalisation | `winsorize(1/99)` → `cross_sectional_z` / `industry_neutral_z` (winsorise → demean by sector → z) → `centered_rank` / `quantile_split`; plus `group_median(min_n=5)` for sector medians | `strategies/cross_section.py` |
-| 2 — composites over a peer panel | `composite_score` and `value_momentum_score` (percentile-rank means), `z_composite_alpha` (`Σ a_k·z_k`), and `quality_composite` (the round-3 S3 fundamental composite) | `strategies/factors.py` |
+| 2 — composites over a peer panel | `composite_score` and `value_momentum_score` (percentile-rank means), `z_composite_alpha` (`Σ a_k·z_k`), and `category_scores` (the shared winsorised-z core that round-3 S3's quality composite calls) | `strategies/factors.py` |
 | 3 — surface | `get_composite_rank` (peer set = ticker + 8 Finnhub peers), the screener's `--rank composite`, and the gated `quality composite TICKER: NN/100 (band)` row | `agents/utils/analysis_tools.py`, `scripts/value_screener.py` |
 
 Rating/decision flow is a **separate axis**: analyst prose →
@@ -228,7 +228,7 @@ ledger (`alpha_health` + `scripts/alpha_health.py`, reading
 
 | Existing surface | Path:line | Relevance |
 | --- | --- | --- |
-| `quality_composite` — the only fundamental composite | `strategies/factors.py:248` | The exact chain to reuse: winsorise → z → direction sign → coverage-gated weighted mean → tie-aware percentile ×100. Weights are **caller-supplied only**; the basis string prints `"no weight vector published, equal weights used"`. |
+| `category_scores` — the shared category core (round-3 S3's quality composite calls it with `QUALITY_DIRECTIONS`) | `strategies/factors.py:258` | The exact chain to reuse: winsorise → z → direction sign → coverage-gated weighted mean → tie-aware percentile ×100. Weights are **caller-supplied only**; the basis string prints `"no weight vector published, equal weights used"`. |
 | `QUALITY_DIRECTIONS` | `strategies/factors.py:205` | Seven metrics (`f`, `m`, `z`, `o`, `gp_a`, `noa`, `accruals`) with published signs. The seed of any larger factor catalogue. |
 | `QUALITY_BANDS` | `strategies/factors.py:192` | 70 elite / 60 above-average / 50 sector median / 40 below-average / 20 poor. Note the 50 band is labelled "sector median" but the percentile is taken across the whole peer set — a real defect this design must not inherit (§3.4). |
 | `_coverage_floor` + `withheld` | `strategies/factors.py` | The existing honest-missing-data policy: a name below the coverage floor is **withheld with a reason**, never scored. |
@@ -287,7 +287,7 @@ regression tests; no score semantics changed.
 | # | Defect | Fix | Test |
 | --: | --- | --- | --- |
 | 1 | `roa_series` / `revenue_series` had **no producer**, so the G-Score's G4/G5 legs could never compute (always "5-year ROA series unavailable (n=0)") | New `statement_parsing.annual_series` (+ `_period_canonicals`, `_period_token`): stacks one canonical dict per fiscal year through `_flat_canonical` — the same row matcher the merged payload uses — merging a moomoo payload's per-statement tables by year, deriving `roa_series` on **beginning-of-year** assets aligned **by fiscal year** (the convention `growth_metrics` uses for the ROA level), and never splicing one key's values across payloads. `fetch_ticker` attaches the four series (`revenue`, `net_income`, `total_assets`, `operating_cashflow`) with provenance naming the period span and re-using `_period_kind` | 7 in `test_statement_parsing.py`, incl. the moomoo year-merge, the cross-payload year join, the gap rule, and the producer→G-Score integration. **Live 2026-09-17:** MSFT/AAPL carry 5 series keys over 4 annual periods (`roa_series` n=3), all `annual`, no conflicts - so G4/G5 remain excluded on vendor history alone (4 < 5 periods) with an honest `n`; wiring SEC XBRL (15 years) into the producer is the unlock |
-| 2 | `QUALITY_BANDS`' 50 band said **"sector median"** while the percentile is taken across the scored **peer set** | Renamed to "peer median"; the source table's label is quoted in the comment with the reason it does not apply. A within-sector percentile stays a design item (§3.2) | `test_quality_composite.py::test_bands_are_the_quality_bands_not_the_decision_rating_bands` |
+| 2 | `QUALITY_BANDS`' 50 band said **"sector median"** while the percentile is taken across the scored **peer set** | Renamed to "peer median"; the source table's label is quoted in the comment with the reason it does not apply. A within-sector percentile stays a design item (§3.2) | `test_category_scores.py::test_bands_are_the_quality_bands_not_the_decision_rating_bands` |
 | 3 | `scripts/value_screener.py`'s docstring advertised **Return on Capital** and **Shareholder Yield** with no implementing symbol | Docstring now marks both as not implemented, names the missing inputs (`invested_capital`; the `share_buybacks`/`debt_repayment` keys with no reader), and points at §3.6 | docstring only (no code claim left) |
 | 4 | The Dechow-Dichev caller required `operating_cashflow` to be a **dict of ≥6 keys** — a shape the merge never produces — and fed an **all-zero accruals list** when it did fire | Reads the series from #1, accruals on the Sloan proxy `(NI − CFO) / total assets`, with the substitution printed beside the value. `DD_MIN_PERIODS = 8` now states the real bar (6 residual rows need n−2 ≥ 6), used by both the function and the caller, and the n/a text names it | 3 in `test_analysis_tools.py` (a perfect-fit value, the 7-period refusal, and a guard that a multi-key cash-flow dict no longer produces a number) + 1 in `test_quant_p4_accounting.py` |
 
@@ -540,8 +540,8 @@ category_scores(panel, *, weights=None, directions, min_coverage=3, sector_map=N
       metrics_dropped, peer_n, floor, industry_neutral, basis, weights_used}
 ```
 
-Implement it as four thin wrappers over the existing `factors.quality_composite`
-body (rename the shared core, do not fork it — ground rule 2), one per
+Implement it as four thin wrappers over the shared core — `factors.category_scores`,
+the `quality_composite` body renamed in Phase A and not forked (ground rule 2), one per
 category group, with `QUALITY_BANDS`-style band tables per sub-score and a
 `basis` string that names the metric set, the coverage floor, the weight vector
 and whether the weights were equal or published.
@@ -639,7 +639,7 @@ never a code fork:
 **`NA ≠ 0` is a hard rule (Q3).** A missing factor is excluded and the remaining
 weights renormalise — so a bank without a NIM feed is scored on the factors it
 *does* have, rather than penalised for a metric no supplier provides. This is
-the convention the engine already implements (`quality_composite`'s coverage
+the convention the engine already implements (`category_scores`' coverage
 floor and `withheld`, `growth_metrics`' omit-don't-zero, `capex_quality_read`'s
 "renormalizes over measured components", `signal_summary`'s refusal to print a
 partial sum under the full denominator); the design extends it rather than

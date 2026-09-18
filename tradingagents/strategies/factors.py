@@ -255,7 +255,7 @@ def _coverage_floor(min_coverage, n_names: int) -> int:
     return coverage_floor(min_coverage, n_names)
 
 
-def quality_composite(
+def category_scores(
     scores_by_ticker: dict,
     *,
     directions: dict,
@@ -264,8 +264,15 @@ def quality_composite(
     sector_map: dict | None = None,
     industry_neutral: bool = False,
     min_peers: int = 8,
+    label: str = "category",
 ) -> dict:
-    """Equal-weight winsorised-z quality composite, percentile-mapped 0-100.
+    """Equal-weight winsorised-z category composite, percentile-mapped 0-100.
+
+    The shared core of every cross-sectional category score in the repo (round-3
+    S3's quality composite, and the four `FundamentalScore` sub-scores -
+    `docs/scores/IMPLEMENTATION_PLAN.md` §5.1). One body, many callers: the
+    metric set, its directions, its weights and its band table are the caller's,
+    and only `label` reaches the printed `basis`.
 
     Per metric: winsorise (0.01/0.99) -> cross-sectional z -> apply the
     metric's direction sign. Composite Z = mean of the present metrics' z
@@ -302,7 +309,7 @@ def quality_composite(
             "peer_n": peer_n,
             "floor": None,
             "industry_neutral": False,
-            "basis": f"quality composite unavailable: {peer_n} peers < floor {min_peers}",
+            "basis": f"{label} unavailable: {peer_n} peers < floor {min_peers}",
         }
     floor = _coverage_floor(min_coverage, peer_n)
     directions = directions or {}
@@ -377,7 +384,7 @@ def quality_composite(
         scores = _pct_rank(zmap)
     n_used = len(used)
     basis = (
-        f"quality composite: {n_used} metric(s) {used} winsorised 0.01/0.99 -> "
+        f"{label}: {n_used} metric(s) {used} winsorised 0.01/0.99 -> "
         f"cross-sectional z, direction applied ({'/'.join(sorted(directions))} "
         f"declared) -> {'weighted' if w else 'equal-weight'} mean over present "
         f"metrics (coverage floor {floor} of {len(metric_set)} metrics) -> "
@@ -526,7 +533,7 @@ __all__ = [
     "value_momentum_score",
     "composite_score",
     "z_composite_alpha",
-    "quality_composite",
+    "category_scores",
     "quality_band",
     "QUALITY_BANDS",
     "QUALITY_DIRECTIONS",

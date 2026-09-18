@@ -24,6 +24,15 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
 **Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
 
+### Changed
+
+**WP-2 step 1 — the shared cross-sectional core is renamed, not forked (2026-09-17).** `factors.quality_composite` becomes `factors.category_scores`: one body, many callers, and the caller owns the metric set, the directions, the weights and the band table. The only thing that crosses into the printed `basis` is a `label`.
+- **Why the rename is the first step, alone.** The `FundamentalScore` design (`docs/scores/FundamentalScore.md` §3.1) needs four category sub-scores over the same winsorise → z → direction-sign → coverage-gated mean → tie-aware percentile chain. Ground rule 2 says one implementation per computation, so the four sub-scores are thin wrappers over this body rather than four copies of it — and the rename lands before any of them so the diff is unambiguous.
+- **Clean cutover, no alias.** The old name is gone rather than wrapped: the two callers (`scripts/value_screener.py:2367`, `analysis_tools._quality_composite_row:4594`) now call `category_scores(..., label="quality composite")` and print the identical `basis` string they printed before. `QUALITY_DIRECTIONS`, `QUALITY_BANDS`, `quality_band` and the `enable_quality_composite` gate are untouched — they are the quality composite's own, not the core's.
+- **Tests**: `tests/test_quality_composite.py` → `tests/test_category_scores.py`, 12 tests re-pointed, all passing unchanged. Live docs re-pointed (`docs/api_reference.md`, `docs/developer/04-strategies.md`, `docs/AGENT_ONBOARDING.md`, `docs/scores/{FundamentalScore,TechnicalScore,IMPLEMENTATION_PLAN}.md`).
+Tests: 44 passed across `test_category_scores.py` + `test_round3_wiring.py`.
+**Web impact**: none — no tool card, JSON shape, prompt or CLI flag changes; the printed quality-composite row is byte-identical.
+
 ### Added
 
 **P0-9 — both vendor-capability probes answered (2026-09-17).** Recorded answers, not code; a probe that finds nothing is a result.
