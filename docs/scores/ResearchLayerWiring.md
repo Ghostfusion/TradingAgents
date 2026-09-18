@@ -27,9 +27,10 @@ executing the path. This document records them before any code is written.
 | 2 | What is the seam? | `computed_decision_context` — one string, ten consumers, one verifier | §1.2 |
 | 3 | What has to be true before a scorecard is added? | One producer, a bounded block, and a gate | §2, §3 |
 | 4 | What should the block contain? | The composite, its four drivers, coverage, the missing list — never the composite alone | §4 |
-| 5 | Should it carry score movement? | Yes, and it is the highest-value part — but it needs a history store, which does not exist | §4.3 |
+| 5 | Should it carry score movement? | Yes — but **held until the vector is validated** (§9 D2). It needs a history store, which does not exist | §4.3 |
 | 6 | Should the LLM be allowed to "improve" a score? | **No.** It interprets; it never recomputes or overrides | §2 rule 5 |
 | 7 | What should happen on disagreement? | A deterministic **flag**, never an override | §5 |
+| 8 | One gate or many, and should the composite's printed block change? | **Decided by the owner, 2026-09-18** — one master gate with independent engine gates and an explicit partial state, plus the printed block corrected to lead with its purpose | **§9**, §3.4, §4.6 |
 
 ---
 
@@ -253,6 +254,14 @@ composite, and the engine gates govern the engines' own surfaces. A
 recomputable from the card alone — which `_run_card_trade_score` already does via
 its `engines` map. That is what makes the card honest when a sub-gate is off.
 
+**Decided (owner, 2026-09-18 — §9 D1): this shape, confirmed.** The master gate
+must **not** imply all eight engines. The partial behaviour is *useful* during
+dark launch — it shows exactly which pieces are active without silently
+activating every engine — and the safeguard is to make the partial state
+**explicit** rather than to avoid it: the block names the enabled and disabled
+engines and carries a status line, so neither a human nor the LLM reads a
+half-configured scorecard as a complete one. That status vocabulary is §4.6.
+
 ---
 
 ## 4. The scorecard block
@@ -281,10 +290,15 @@ Three properties are non-negotiable:
 - **Coverage is printed per engine and on the composite.** Per rule 2, `72` at
   `coverage 68%` means *72 over 68% of the intended evidence* — with the missing
   components named.
-- **The purpose is stated, not only the constraint.** Every existing printed score
-  block ends *"advisory only — never a gate, never a size, never an
-  `opportunity_score`"* — the negative constraint only. The owner corrected this
-  framing on 2026-09-18 (master §1.4). This block carries the positive statement.
+- **The purpose is stated, not only the constraint.** The engine renderers end
+  *"advisory only — never a gate, never a size, never a forecast"* — the negative
+  constraint only. The owner corrected that framing on 2026-09-18 (master §1.4),
+  and on 2026-09-18 answered the question for the composite's own block (§9 D3,
+  now implemented): `format_trade_score` leads with *"Purpose: the highest-level
+  quantitative evidence summary, for human research review - not an order, not a
+  position size and not a gate"*, and the `basis` field's duplicate restatement
+  was dropped so the constraint is stated once. The scorecard block carries the
+  same purpose line.
 
 ### 4.2 Three levels of visibility
 
@@ -326,6 +340,19 @@ the two observations. **A delta across a weight change is not a delta.** The
 store must record the vector it scored under, and the block must refuse the delta
 when the vector differs.
 
+**Decided (owner, 2026-09-18 — §9 D2): deltas are held until vector validation
+exists.** A delta such as `Δ5D: +4.2` implicitly claims that *both* observations
+are legitimate, and until the vector is measured and promoted that claim is not
+grounded. The reason is **vector validity, not `RESEARCH_ONLY`** — once a vector
+is validated, movement is entirely appropriate in a research-only system and is
+expected to be valuable for both the manual review and the debate. **A movement
+field must not be manufactured merely because the current score exists.**
+
+So the block gains its delta keys only when all three hold: a prior row exists,
+the prior row scored under the **same** vector, and that vector is **validated**.
+Two of the three are enforced by the store; the third is the ladder rung already
+carried by `promotion_state`.
+
 ### 4.4 The bound
 
 Site 10 (`structured_debate.py:216`) bounds the whole context to **3000
@@ -366,6 +393,50 @@ rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band
 their `components` maps, so this is a rendering requirement on levels 2 and 3,
 not a new producer. It is what makes "the score is 85" a claim the debate can
 interrogate rather than a fact it must accept.
+
+### 4.6 The scorecard's status is explicit (owner, 2026-09-18)
+
+Because the design is one master gate with independent engine gates (§9 D1), a
+scorecard can legitimately be **partial**. A partial scorecard read as a complete
+one is the same failure as a partial engine printed as a whole one (master rule
+3), so the state is a **printed output**, never an inference the reader is left to
+make.
+
+```
+DISABLED
+   -> PARTIAL
+   -> COMPLETE
+   -> COMPLETE + VECTOR_VALIDATED
+   -> COMPLETE + MOVEMENT_AVAILABLE
+```
+
+The block always carries the three status lines, so the LLM is told exactly what
+kind of evidence it is receiving:
+
+```
+Scorecard status: PARTIAL
+Vector status: NOT_VALIDATED
+Movement: UNAVAILABLE
+```
+
+- **`Scorecard status`** is `DISABLED` (gate off), `PARTIAL` (an engine's gate is
+  off, or an engine could not measure), or `COMPLETE` (every engine gate on and
+  every engine measured).
+- **`Vector status`** is the rung the composite's vector has *evidenced*, read
+  from `promotion_state` (`strategies/trade_score.py`) — `NOT_VALIDATED` while it
+  is `RESEARCH_ONLY`. This is the field §4.3's movement rule gates on.
+- **`Movement: UNAVAILABLE`** until a prior observation exists under the same
+  **validated** vector.
+
+The enabled and disabled engines are named beside the status, which is what stops
+the number being read as more than it is:
+
+```
+Quant scorecard: PARTIAL - enabled: fundamental, technical, risk; disabled: regime
+```
+
+This is the owner's own safeguard, and it is what makes D1's partial scorecard
+safe rather than merely convenient.
 
 ---
 
@@ -440,9 +511,10 @@ Each item is default-off, lands as one commit, and has an observable acceptance.
 | P12-4 | **The bound.** `build_turn_prompt` renders the scorecard as its own bounded field | P12-3 | a structured-debate turn prompt contains the scorecard even when the rest of the context exceeds 3000 chars |
 | P12-5 | **The card and the leaf read the snapshot** — resolving D-8 by making all three readers use one rule | P12-2 | with `enable_trade_score` on and a sub-gate off, the leaf and the card print the **same** composite; the regression test fails before the change |
 | P12-6 | **The gate.** `enable_quant_scorecard`, default `False` | P12-3 | gate off: context and card byte-identical to today. Gate on: one block, one card key |
-| P12-7 | **The history store and the deltas** | P12-1 | first run: no delta keys. Second run: `trade_delta` against the printed prior date. Vector changed: delta refused |
-| P12-8 | **The disagreement detector** | P12-3 | a fixture where the risk debate reads favourable against `RiskScore` band `unfavourable` produces the flag; a fixture where they agree produces none |
-| P12-9 | **Level 2 in the report** — each engine's category sub-scores beside their measurements | P12-2 | the rendered report shows an engine's categories and its composite, recomputing |
+| P12-7 | **The explicit status.** `Scorecard status` / `Vector status` / `Movement`, plus the enabled and disabled engine names (§4.6) | P12-6 | a partly-gated run's block reads `PARTIAL` and names the disabled engine; a fully-gated run reads `COMPLETE` |
+| P12-8 | **The history store and the deltas**, held until the vector is validated (§9 D2) | P12-1, P12-7 | first run: no delta keys and `Movement: UNAVAILABLE`. Second run under a validated vector: `trade_delta` against the printed prior date. Vector changed, or not yet validated: still `UNAVAILABLE` |
+| P12-9 | **The disagreement detector** | P12-3 | a fixture where the risk debate reads favourable against `RiskScore` band `unfavourable` produces the flag; a fixture where they agree produces none |
+| P12-10 | **Level 2 in the report** — each engine's category sub-scores beside their measurements | P12-2 | the rendered report shows an engine's categories and its composite, recomputing |
 
 **Verification (plan §11 applies unchanged).** Every new pure function gets a test
 that fails under a mutation of the code it guards. The two acceptance cases this
@@ -466,25 +538,60 @@ document adds to plan §11.3:
 | W4 | **A delta across a changed weight vector reads as signal** | the promotion ladder can move the vector between two observations | §4.3 — the store records the vector; the delta is refused when it differs |
 | W5 | **Coverage is dropped in a compact rendering** | a compact block is tempting to trim to the composite | rule 2; §4.1 requires coverage per engine; plan §11.1 already tests it |
 | W6 | **The block leaks into the executor's contract** | `run_card.json` gains a key | the executor reads only `research_decision.json` (`signald/watch.py:6-8`); P12-6's gate-off byte-identity test is the guard |
+| W7 | **A partial scorecard reads as a complete one** | one master gate with independent engine gates means a half-configured run shows a subset (§9 D1) | §4.6 — the status is a **printed output** naming the enabled and disabled engines, never an inference; P12-7 tests both states |
+| W8 | **A movement field is added because the score exists, not because the evidence does** | the delta is the most attractive field in the block and the easiest to manufacture | §4.3/§9 D2 — deltas need a prior row under the **same validated** vector; `Movement: UNAVAILABLE` is the honest default |
 
 ---
 
-## 9. Open questions for the owner
+## 9. Decisions (owner, 2026-09-18) — the three are answered
 
-1. **The scorecard's gate, or the composite's?** §3.4 proposes `enable_quant_scorecard`
-   governing the block, with each engine appearing iff its own gate is on. The
-   alternative is one gate that implies all eight. The proposal keeps the
-   dark-launch discipline (one gate, one observable change) but means a
-   half-configured run shows a partial scorecard.
-2. **Movement before vector validation.** A delta is only meaningful once the
-   vector has been measured (plan WP-10 / Phase C). Should the block ship deltas
-   at all while the status is `RESEARCH_ONLY`, or hold them until a vector is
-   promoted?
-3. **Does the composite's printed `basis` string get corrected too?** Every
-   generated report's `TradeScore` block currently ends with the negative
-   constraint only. §4.1 gives the block a purpose line; the existing printed
-   string is report output and changing it alters every generated report and the
-   tests that pin it. Carried forward from the 2026-09-18 pass, still unanswered.
+The three questions this document opened are answered. Each row keeps the
+**recommendation that was on record**, so the reasoning stays visible.
+
+| # | Question | Recommendation on record | **Decision** |
+| --: | --- | --- | --- |
+| D1 | The scorecard's gate, or the composite's? | `enable_quant_scorecard` governing the block, each engine appearing iff its own gate is on | **`enable_quant_scorecard` is the single top-level gate**, and the individual engine gates determine which engine rows are populated. It must **not** imply all eight. The partial behaviour is useful during dark launch, and the safeguard is that the partial state is **explicit** (§4.6) |
+| D2 | Movement before vector validation? | a delta is only meaningful once the vector has been measured | **Hold the deltas until vector validation exists.** `RESEARCH_ONLY` is *not* the reason to suppress them — **vector validity** is. Do not manufacture a movement field merely because the current score exists |
+| D3 | Correct the composite's printed basis string? | correct it, and add the purpose | **Yes — a report-contract change, implemented in this pass.** The block leads with its purpose; the constraints follow as consequences rather than standing as the whole definition |
+
+### 9.1 D3 in detail, because it changed a shipped output
+
+The owner's principle: *"the report should say what the number **is**, not
+primarily what it isn't."* The composite is not useless because it cannot trade —
+it is the quantitative summary the human reviewer and the LLM debate consume
+during research. The negative constraint remains, and remains important, but it
+is no longer the entire semantic definition of the score. The owner's own
+reasoning for treating this as a contract change rather than a documentation
+edit: leaving technically outdated wording in place *"just to avoid changing
+tests"* is the wrong trade.
+
+What changed:
+
+| Site | Before | After |
+| --- | --- | --- |
+| `strategies/trade_score.py::format_trade_score` (framing sentence) | *"Advisory only: never a gate, never a size, never an `opportunity_score`. The hard gates operate downstream…"* | *"Purpose: the highest-level quantitative evidence summary, for human research review - not an order, not a position size and not a gate. The hard gates operate downstream…"* |
+| `strategies/trade_score.py::trade_score` (the `basis` tail) | *"…the executor's, downstream); advisory only - never a gate, never a size, never an `opportunity_score`"* | *"…the executor's, downstream); evidence summary for human review, not an order"* — the duplicate restatement dropped, so the constraint is stated **once** in the block |
+| `tests/test_trade_score.py::test_the_printed_block_carries_weights_status_and_coverage` | asserted the negative clause only | pins **both halves** — the purpose and the constraints — so removing either fails the test |
+
+The rendered block now reads:
+
+```
+## TradeScore - MSFT (advisory; RESEARCH_ONLY)
+
+Four-engine decision composite 0.4F + 0.25T + 0.15R + 0.2K. Purpose: the
+highest-level quantitative evidence summary, for human research review - not an
+order, not a position size and not a gate. The hard gates operate downstream and
+block regardless of this number.
+```
+
+**Still open on the same framing, reported not decided.** The seven engine
+renderers (`agents/utils/analysis_tools.py:5053`, `:5261`, `:5849`, `:6008`) and
+the engines' own `basis` tails (`event_state.py:581`, `news_score.py:382`,
+`regime_score.py:308`, `risk_score.py:560`, `sentiment_score.py:534`,
+`technical_score.py:312`) each end with their own negative-only line (*"advisory
+only - never a gate, never a size, never a forecast"*). The reasoning above
+applies to them equally, but the owner's decision named the **composite**;
+changing seven more outputs is a separate call, and is not inferred here.
 
 ---
 

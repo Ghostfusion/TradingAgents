@@ -388,6 +388,20 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The three research-layer questions answered by the owner; D3 implemented.** Decisions in
+  `docs/scores/ResearchLayerWiring.md` §9. **D1:** `enable_quant_scorecard` is the single top-level gate and the engine gates
+  decide which rows populate - the master gate must NOT imply all eight, and the partial state must be **explicit**
+  (state machine in §4.6: `DISABLED -> PARTIAL -> COMPLETE -> COMPLETE+VECTOR_VALIDATED -> COMPLETE+MOVEMENT_AVAILABLE`,
+  with `Scorecard status` / `Vector status` / `Movement` printed). **D2:** movement is **held until the vector is
+  validated** - `RESEARCH_ONLY` is not the reason to suppress a delta, *vector validity* is; do not manufacture a
+  movement field because the score exists. **D3 (implemented, a report-contract change):** the composite's printed block
+  now leads with its purpose. `strategies/trade_score.py` - the framing sentence became *"Purpose: the highest-level
+  quantitative evidence summary, for human research review - not an order, not a position size and not a gate"*, and the
+  `basis` field's duplicate restatement was dropped so the constraint is stated once.
+  `tests/test_trade_score.py::test_the_printed_block_carries_weights_status_and_coverage` now pins **both halves** (purpose
+  and constraints), so removing either fails. Reported but **not** inferred: the seven engine renderers
+  (`analysis_tools.py:5053/:5261/:5849/:6008`) and the engines' own basis tails still carry their negative-only line -
+  the owner named the composite, so those are a separate call. `tests/test_trade_score.py` 50 passed.
 - 2026-09-18 `(working tree)` - **D-7 fixed, and the research-layer wiring designed** (`docs/scores/ResearchLayerWiring.md`, a new
   doc in the set). Found by executing both paths to the same number with different dates: `_trade_score_engines` called
   `fundamental_score_for_ticker(ticker)` with no date (`fundamental_score.py:550` falls back to `datetime.now()`) while

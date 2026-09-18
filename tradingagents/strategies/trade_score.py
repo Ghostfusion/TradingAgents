@@ -390,8 +390,8 @@ def trade_score(
     basis_bits.append(
         f"floor {COMPOSITE_MIN_COVERAGE} engines; no band table (a composite "
         "label is a rating - master rule 2, and the ALLOW/REDUCE/BLOCK verdict "
-        "is the executor's, downstream); advisory only - never a gate, never a "
-        "size, never an opportunity_score"
+        "is the executor's, downstream); evidence summary for human review, "
+        "not an order"
     )
     return {
         "score": combined.get("score"),
@@ -448,7 +448,8 @@ def format_trade_score(res: dict, *, ticker: str | None = None) -> str:
             f"{ENGINE_LETTERS[n]}"
             for n in ENGINE_ORDER
         )
-        + ". Advisory only: never a gate, never a size, never an opportunity_score. "
+        + ". Purpose: the highest-level quantitative evidence summary, for human "
+        "research review - not an order, not a position size and not a gate. "
         "The hard gates operate downstream and block regardless of this number.",
         "",
     ]

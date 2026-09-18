@@ -552,6 +552,13 @@ and `enable_score_eval_rows` already gates the IC harness
 
 ## 7. Decision record (owner, 2026-09-17)
 
+**The three research-layer decisions of 2026-09-18 are in
+[`ResearchLayerWiring.md`](ResearchLayerWiring.md) §9** — the scorecard's gate
+(one master gate, independent engine gates, partial made explicit), movement held
+until the vector is validated, and the composite's printed block corrected to lead
+with its purpose. **D3 is a report-contract change and is implemented**; the other
+two are design decisions for `WP-12`, which is not yet built.
+
 **The twelve architecture decisions of the same day are in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §13** — the canonical regime
 path, the two composite names, the per-name/book `RiskScore` split, the moved
