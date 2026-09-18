@@ -388,6 +388,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **WP-1 landed: the shared score kernel.** `strategies/score_engine.py` - three
+  functions and no framework (no registry, no engine import, no weight table): `align` (a `lo`→0/`hi`→100 ramp or a
+  **band table over the producer's own edges**, with `NON_MONOTONIC_INPUTS` naming the eight non-monotone technical
+  inputs so none can be treated as monotone; `None` in → `None` out, **never a neutral 50**; a direction typo RAISES),
+  `combine` (renormalise over the **present** components, `coverage` = the measured weight share, **withhold below the
+  floor with the reason** - `score` is `None`, never 0/50 - and a `basis` naming the weights actually used and the
+  absent components), and `band_label` (the engine's own table, a **required argument** so no default could be the
+  guardrail's contract bands). **The two semantics were extracted, not re-derived**: `factors._coverage_floor` and
+  `factors.quality_band` now delegate to the kernel and the 13 quality-composite tests pass unchanged. Eighteen
+  acceptance tests including the plan's five with their mutations. Engine **4454 passed / 5 skipped**, executor
+  **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **P0-5 landed: the VIX term structure.** `dataflows/cboe.py::vix_term_structure()`
   reads the two Cboe CDN history CSVs (daily-cached, one fetch per day) and returns `{vix9d, vix3m, slope, state,
   as_of, basis, reason}` on the **shared long-minus-short sign**; a flat curve is `contango` (not stress), only a

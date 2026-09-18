@@ -26,6 +26,17 @@ Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), execut
 
 ### Added
 
+**WP-1 — the shared score kernel (2026-09-17).** Seven engines need the same three operations; seven copies would be a defect by construction (ground rule 2, master rule 3). `strategies/score_engine.py` is **three functions and no framework** — no registry, no plugin table, no engine import, no ticker, no I/O, and no weight table (weights are each engine's own, master rule 6).
+- **`align(value, *, direction, band=None, lo=None, hi=None)`** maps a raw value to a 0-100 *favourable* contribution: a `lo`→0 / `hi`→100 ramp (inverted for `lower_better`), or a **band table over the producer's own edges** for the inputs whose relationship is not monotone (`NON_MONOTONIC_INPUTS` names RSI, MFI, stochastic, StochRSI, RSI2, Williams %R, Bollinger %b and the Elder thermometer so an engine cannot quietly treat one as monotone). `None` in → `None` out, and an unusable input is `None` too — **never a neutral 50**, which would enter the denominator as if it had been measured. A direction typo **raises** rather than silently flipping a component.
+- **`combine(components, *, weights, min_coverage=3, bands=None)`** renormalises over the **present** components (`sum(w·v)/sum(w present)`), reports `coverage` as the fraction of the engine's own weight that was measured, and **withholds below the floor with the reason** — `score` is `None`, never 0 and never 50. `basis` names the weight vector actually used and the components that were absent, so the number cannot drift from its own description.
+- **`band_label(score, bands)`** walks the engine's own table top-down; the table is a **required argument**, so there is no default that could be the decision guardrail's contract bands.
+- **The two semantics were extracted, not re-derived**: `factors._coverage_floor` and `factors.quality_band` now delegate to the kernel, and the 13 quality-composite tests pass unchanged.
+- Eighteen acceptance tests, including the plan's five with their mutations: the absent-component case (a zero-fill scores materially lower), nothing-present (never 0/50), every non-monotonic input alignable and **not** monotone, the basis tracking the weights actually used, and the withholding floor from both sides.
+Tests: engine suite **4454 passed / 5 skipped**, executor **1105**, web **149**.
+**Web impact**: none — a pure module with no caller yet; each engine's gate lands with that engine.
+
+### Added
+
 **P0-5 — the VIX term structure, from Cboe's own index levels (2026-09-17).** `RegimeScore.md` §1 and §4 forbid substituting the equity-IV slope (`options_surface.term_structure_slope`, one name's option chain) for a VIX term structure, and VIX9D is not on FRED — FRED carries `VXVCLS` for the 3-month and its discontinued 3-month series is `VXOCLS`.
 - **`dataflows/cboe.py::vix_term_structure()`** returns `{vix9d, vix3m, slope, state, as_of, basis, reason}` from the two Cboe CDN history CSVs, on the **shared slope convention** (long minus short) so the number is comparable with the equity-IV slope while the basis line says which object it is.
 - **The module already existed** as the CBOE delayed options-chain vendor, so the function was **added** to it rather than created beside it — one vendor, one module — and a test pins that the routed `get_options_surface` is untouched.

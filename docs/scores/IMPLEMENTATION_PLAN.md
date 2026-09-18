@@ -503,6 +503,12 @@ engine's own, master rule 6).
 table, imports no engine, knows no ticker, and performs no I/O. Each engine's
 module owns its component list, its directions, its band edges and its weights.
 
+**Delivered 2026-09-17** as `strategies/score_engine.py` (three functions,
+`coverage_floor`, and the `NON_MONOTONIC_INPUTS` list; no registry, no engine
+import, no table). **The two extracted semantics are now shared**: `factors` reads
+the kernel's `coverage_floor` and `band_label` rather than carrying its own copies,
+and its 13 quality-composite tests pass unchanged. Eighteen acceptance tests.
+
 **Acceptance.**
 1. `combine` on a synthetic panel with one component absent scores the mean of
    the present ones and reports `coverage` below 1 — mutation: substituting `0`

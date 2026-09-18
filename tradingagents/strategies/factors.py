@@ -222,13 +222,14 @@ QUALITY_DIRECTIONS: dict = {
 
 
 def quality_band(score) -> str | None:
-    """Published quality band for a 0-100 composite; None when unscored."""
-    if score is None:
-        return None
-    for floor, label in QUALITY_BANDS:
-        if float(score) >= floor:
-            return label
-    return None
+    """Published quality band for a 0-100 composite; None when unscored.
+
+    The table is this module's own (``QUALITY_BANDS``); the lookup is the shared
+    kernel's, so a band table added by another engine uses the same walk.
+    """
+    from tradingagents.strategies.score_engine import band_label
+
+    return band_label(score, QUALITY_BANDS)
 
 
 def _finite(v) -> float | None:
@@ -243,14 +244,15 @@ def _finite(v) -> float | None:
 
 
 def _coverage_floor(min_coverage, n_names: int) -> int:
-    """Resolve the coverage floor: a count, or a fraction of the peer set."""
-    if isinstance(min_coverage, float) and 0.0 < min_coverage <= 1.0:
-        return max(1, math.ceil(min_coverage * n_names))
-    try:
-        k = int(min_coverage)
-    except (TypeError, ValueError):
-        return 1
-    return max(1, k)
+    """Resolve the coverage floor: a count, or a fraction of the peer set.
+
+    One implementation, in the shared kernel (WP-1): this delegates rather than
+    carrying its own copy, so the quality composite and every engine that lands
+    later resolve the floor the same way.
+    """
+    from tradingagents.strategies.score_engine import coverage_floor
+
+    return coverage_floor(min_coverage, n_names)
 
 
 def quality_composite(
