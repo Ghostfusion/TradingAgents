@@ -5347,7 +5347,7 @@ def get_risk_score(
         return f"risk score unavailable for {ticker}: render failed ({exc})"
 
 
-def _trade_score_engines(ticker: str) -> dict:
+def _trade_score_engines(ticker: str, current_date: str | None = None) -> dict:
     """The four engine scores, each from its own entry point (WP-11).
 
     Every value is a number an engine produced; nothing is recomputed here and
@@ -5356,6 +5356,13 @@ def _trade_score_engines(ticker: str) -> dict:
     never 0, never a neutral 50. Below the floor of two the composite is
     withheld with its reason, which is the honest read on a day only one engine
     could measure.
+
+    ``current_date`` is the run's trading date, threaded to the one engine that
+    scores **as of a date**: ``fundamental_score_for_ticker`` builds its peer
+    panel as-of the date it is handed and falls back to the wall clock when
+    handed none. Without it the leaf scored a backdated run against *today's*
+    panel - measured on MSFT, a `--date 2026-07-22` run gave the leaf `66.25`
+    where the card, which passes ``pm_decision.trade_date``, gave `62.50`.
     """
     scores: dict = {"fundamental": None, "technical": None, "regime": None, "risk": None}
     try:
@@ -5363,7 +5370,7 @@ def _trade_score_engines(ticker: str) -> dict:
             fundamental_score_for_ticker,
         )
 
-        res = fundamental_score_for_ticker(ticker)
+        res = fundamental_score_for_ticker(ticker, current_date)
         key = str(res.get("ticker") or ticker).strip().upper()
         scores["fundamental"] = (res.get("scores") or {}).get(key)
     except Exception:  # noqa: BLE001 - an advisory read must not break the tool
@@ -5398,6 +5405,9 @@ def _trade_score_engines(ticker: str) -> dict:
 @tool
 def get_trade_score(
     ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
 ) -> str:
     """TradeScore: the four-engine advisory decision composite - fundamental
     0.40, technical 0.25, regime 0.15, risk 0.20, each on the same 0-100
@@ -5410,13 +5420,17 @@ def get_trade_score(
     regardless of this number. The default vector is the owner's published
     `0.40/0.25/0.15/0.20`; its status is `RESEARCH_ONLY` until Phase C measures
     it and each ladder rung is evidenced. Gated by ``enable_trade_score``.
+
+    Pass the date you are trading at: the fundamental engine scores its peer
+    panel as-of that date, and omitting it scores a backdated run against
+    today's panel.
     """
     if not _r3_flag("enable_trade_score"):
         return "trade score unavailable: the engine is gated off (enable_trade_score)"
     try:
         from tradingagents.strategies.trade_score import format_trade_score, trade_score
 
-        res = trade_score(_trade_score_engines(ticker))
+        res = trade_score(_trade_score_engines(ticker, current_date))
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"trade score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:

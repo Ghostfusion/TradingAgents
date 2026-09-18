@@ -14,7 +14,10 @@
 
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
-and the decisions still open.
+and the decisions still open. Two cross-cutting documents sit beside it:
+[`ResearchLayerWiring.md`](ResearchLayerWiring.md) - how the scores reach the
+research and debate layer, and the defects on that seam (§3.5) - and
+[`MEASUREMENT_FINDINGS.md`](MEASUREMENT_FINDINGS.md), Phase C's live panel.
 
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
@@ -417,6 +420,42 @@ This is the *third* instance of one failure shape in this repo (see
 sets): **a producer exists, a reader exists, and the wire between them was never
 run.** A defect ledger built by reading documents cannot see it; only executing
 the path can.
+
+---
+
+### 3.5 Found while designing the research-layer wiring (2026-09-18)
+
+Found by executing both paths to the same number, again rather than by reading the
+set — and recorded in full in
+[`ResearchLayerWiring.md`](ResearchLayerWiring.md) §6. **The design that follows
+from them is in that document**; this is the ledger.
+
+| # | Defect | Evidence | Consequence | Status |
+| --: | --- | --- | --- | --- |
+| D-7 | **The leaf scores the wall clock, the card scores the run date.** `_trade_score_engines` called `fundamental_score_for_ticker(ticker)` with no date — so `fundamental_score_for_ticker` fell back to `datetime.now()` (`strategies/fundamental_score.py:550`) — while `_run_card_fundamental_score` passes `pm_decision.trade_date` | measured on MSFT for the documented `batch.py --date 2026-07-22` invocation (`batch.py:5`): leaf **`66.25`**, card **`62.50`**, identical basis string and `panel_n=9` | **one vector, two numbers on two surfaces** — and the leaf was the wrong one: it scored a July decision against September's peer panel | **FIXED** (`_trade_score_engines` gained `current_date`, mirrored from the sibling `get_fundamental_score`; two regression tests fail before the fix) |
+| D-8 | **The D-6 class is not closed.** `_trade_score_engines` computes all four engines unconditionally, while `_run_card_trade_score` reads each engine from the sibling card block — which exists only when **that engine's own gate** is on | `agents/utils/analysis_tools.py::_trade_score_engines` vs `reporting.py::_run_card_trade_score` | with `enable_trade_score` on and any sub-gate off, the leaf and the card print **different composites** | **open** — `ResearchLayerWiring.md` §3.4 resolves it by making all readers use one rule |
+| D-9 | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `graph/trading_graph.py:343-345` builds `market, news, fundamentals` only; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `agents/toolsets.py:533-538` records it as deliberate | the sentiment score can be computed and never read — so the scorecard must carry it through the snapshot, not an analyst's tool path | **deliberate, not a defect** — but it bounds the design |
+| D-10 | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books at `docs/implementation_plan_defect_audit.md:51`, whose line references (`:605`, `:2208`) have drifted | the independent-consensus termination contour never fires; debates run to the cap | **pre-existing, open, outside this workstream** |
+
+**Two stale claims on this seam, both corrected in the same pass.** They are the
+D-6 failure mode — a stale line hiding a wire — and both understated what the
+research layer already receives: `agents/utils/agent_states.py` described
+`computed_decision_context` as reaching "the Trader, Portfolio Manager and the 3
+risk debators" when it in fact reaches **ten** prompt sites, the L1 ground-truth
+registry and report section `IVa`; `docs/design_risk_calculations_agent_wiring.md`
+§3 recorded the bull/bear researchers as having *"no computed context"* and the
+Research Manager as *"none (plan from debate)"*, both false.
+
+**The finding that motivates the whole design.** The eight engine scores reach
+exactly two surfaces — a gated tool leaf and `run_card.json` — and
+`run_card.json` has **no reader in the research layer at all**: the executor
+explicitly ignores it (`TradingExecution/signald/watch.py:6-8`), the web UI reads
+only `*.md` (`trading_web/backend/capabilities.py:1699`), and `complete_report.md`
+is built from state keys alone (`reporting.py:1788`). Meanwhile
+`computed_decision_context` — one deterministic string, built once at
+`trading_graph.py:649` — already reaches all ten prompt sites, is parsed into the
+L1 verifiable-claim registry, and is rendered as report section `IVa`. **One
+producer, three readers, already wired**; the scores simply are not in it.
 
 ---
 

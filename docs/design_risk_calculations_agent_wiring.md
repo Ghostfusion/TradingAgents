@@ -235,10 +235,10 @@ vol-cones, paper-ledger track record).
 | **News analyst** | 18 | none | credit-stress / unit-root / macro risk-off read missing |
 | **Fundamentals analyst** | 31 (node 32) | none | fixed-income risk (preferreds), magnitude-alpha missing |
 | **Sentiment (social)** | 0 (pre-fetched blocks) | none | n/a (data, not risk) |
-| **Bull / Bear researchers** | 0 | **no computed context** (only analyst reports) | risk factsheet absent |
+| **Bull / Bear researchers** | 0 | `computed_decision_context` | risk factsheet absent |
 | **Trader** | 0 | `computed_decision_context` | sizing/exits not callable |
 | **Aggressive / Conservative / Neutral** | 0 | `computed_decision_context` | **the risk team has no risk tools** |
-| **Research Manager** | 0 | none (plan from debate) | consensus/allocation absent |
+| **Research Manager** | 0 | `computed_decision_context` + judge evidence + debate matrix | consensus/allocation absent |
 | **Portfolio Manager** | 0 | consensus + CVaR + liquidity lines + computed context | book-level tools absent |
 
 **Market ToolNode ∩ analyst-bound diff (18 tools the LLM cannot call,**

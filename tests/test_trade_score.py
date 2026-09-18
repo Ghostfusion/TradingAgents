@@ -687,3 +687,60 @@ def test_the_engine_assembly_reads_the_risk_engine(monkeypatch) -> None:
     res = trade_score(scores)
     assert "risk" in res["present"]
     assert res["components"]["risk"]["weight"] == ENGINE_WEIGHTS["risk"]
+
+
+def test_the_engine_assembly_scores_the_run_date_not_the_wall_clock(monkeypatch) -> None:
+    """The fundamental leg is built as-of the run's date, not as-of today.
+
+    The defect this pins: the assembler called `fundamental_score_for_ticker`
+    with no date, which falls back to the wall clock, while
+    `_run_card_fundamental_score` passes `pm_decision.trade_date`. On a
+    documented backdated run (`batch.py --date 2026-07-22`) that is one vector
+    printed as two numbers - measured on MSFT, the leaf said `66.25` where the
+    card said `62.50`, and the leaf was the wrong one: it scored a July decision
+    against September's peer panel.
+
+    Only the I/O seam is patched; the assertion is that the date the caller gave
+    is the date the peer panel is built as-of.
+    """
+    import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.strategies.fundamental_score as fs
+
+    seen: dict = {}
+
+    def _spy(ticker, current_date=None, **kw):
+        seen["ticker"] = ticker
+        seen["date"] = current_date
+        return {"ticker": ticker, "scores": {ticker: 42.0}}
+
+    monkeypatch.setattr(fs, "fundamental_score_for_ticker", _spy)
+    scores = at._trade_score_engines("TEST", "2026-07-22")
+    assert seen == {"ticker": "TEST", "date": "2026-07-22"}
+    assert scores["fundamental"] == 42.0
+
+
+def test_the_leaf_tool_carries_the_trading_date(monkeypatch) -> None:
+    """`get_trade_score` accepts the run's date and threads it to the engines.
+
+    The tool is what an analyst's LLM actually calls, so the date has to survive
+    the tool boundary and not just the internal helper. The parameter mirrors the
+    sibling `get_fundamental_score`, which has taken a `current_date` all along.
+    """
+    import tradingagents.agents.utils.analysis_tools as at
+    import tradingagents.dataflows.config as cfgmod
+
+    seen: dict = {}
+
+    def _spy(ticker, current_date=None):
+        seen["date"] = current_date
+        return {"fundamental": 70.0, "technical": 70.0, "regime": 70.0, "risk": 70.0}
+
+    monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_trade_score": True})
+    monkeypatch.setattr(at, "_trade_score_engines", _spy)
+    out = at.get_trade_score.invoke({"ticker": "TEST", "current_date": "2026-07-22"})
+    assert seen["date"] == "2026-07-22"
+    # ...and the date-less call still works, so the tool's schema stays backward
+    # compatible with a caller that omits it.
+    at.get_trade_score.invoke({"ticker": "TEST"})
+    assert seen["date"] is None
+    assert "70" in out

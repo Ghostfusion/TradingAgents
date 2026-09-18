@@ -1701,6 +1701,10 @@ substitute.
   [`TechnicalScore.md`](TechnicalScore.md), [`RegimeScore.md`](RegimeScore.md),
   [`RiskScore.md`](RiskScore.md), [`NewsScore.md`](NewsScore.md),
   [`SentimentScore.md`](SentimentScore.md), [`EventScore.md`](EventScore.md).
+- Cross-cutting: [`ResearchLayerWiring.md`](ResearchLayerWiring.md) — how the
+  scores reach the research and debate layer, its workstream `WP-12`, and the
+  four defects on that seam (master §3.5); [`MEASUREMENT_FINDINGS.md`](MEASUREMENT_FINDINGS.md)
+  — Phase C's live panel and what it could and could not measure.
 - The owner's specification of record, verbatim:
   [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
   [`../ScoreWeight/market.md`](../ScoreWeight/market.md),

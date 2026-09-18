@@ -87,7 +87,15 @@ class AgentState(MessagesState):
     ]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
     risk_context: Annotated[dict, "Deterministic risk snapshot (CVaR/stress) precomputed for the Portfolio Manager prompt before the graph runs"]
-    computed_decision_context: Annotated[str, "Deterministic Phase A-E advisory context (regime gate / trade plan card / risk snapshot / pre-open rows) injected to the Trader, Portfolio Manager and the 3 risk debators"]
+    computed_decision_context: Annotated[
+        str,
+        "Deterministic Phase A-E advisory context (regime gate / trade plan "
+        "card / risk snapshot / pre-open rows), injected into every "
+        "research-layer prompt - bull/bear researchers, research manager, "
+        "trader, the 3 risk debators, portfolio manager, independent vote and "
+        "the structured debate (the last bounded to 3000 chars) - parsed into "
+        "the L1 ground-truth registry, and rendered as report section IVa",
+    ]
     risk_independent_stances: Annotated[
         dict, "Independent pre-debate risk stances (aggressive/conservative/neutral), no cross-talk"
     ]

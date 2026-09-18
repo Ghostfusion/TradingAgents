@@ -388,6 +388,26 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **D-7 fixed, and the research-layer wiring designed** (`docs/scores/ResearchLayerWiring.md`, a new
+  doc in the set). Found by executing both paths to the same number with different dates: `_trade_score_engines` called
+  `fundamental_score_for_ticker(ticker)` with no date (`fundamental_score.py:550` falls back to `datetime.now()`) while
+  `_run_card_fundamental_score` (`reporting.py:881-882`) passes `pm_decision.trade_date`. Measured on MSFT for the
+  documented `batch.py --date 2026-07-22`: leaf **`66.25`** vs card **`62.50`**, same basis, same `panel_n=9` - and the
+  leaf was the wrong one. **Fixed** by threading `current_date` (mirroring the sibling `get_fundamental_score`); two
+  regression tests fail before (`TypeError`; `assert None == '2026-07-22'`) and pass after; `tests/test_trade_score.py`
+  **50 passed**. **The design finding:** the eight scores reach only a gated tool leaf and `run_card.json`, which has **no
+  research-layer reader at all** (executor ignores it, `signald/watch.py:6-8`; web reads only `*.md`), while
+  `computed_decision_context` - one string built at `trading_graph.py:649` - already reaches **ten** prompt sites, the L1
+  ground-truth registry (`structured_debate.py:298`) and report section `IVa` (`reporting.py:1644-1646`). One producer,
+  three readers, already wired. **The design:** one `quant_scorecard` snapshot, pre-graph, read by the context block, the
+  card and the leaf - never a third producer; one new gate, default `False`; the block goes **first** because
+  `structured_debate.py:216` bounds the context to 3000 chars. Also recorded: **D-8** (leaf vs card composites disagree
+  when a sub-gate is off - the D-6 class, not closed), **D-9** (a gate-on `enable_sentiment_score` is unreachable: no
+  sentiment ToolNode, `trading_graph.py:343-345`, pinned by a test - deliberate, but it bounds the design), **D-10**
+  (`independent_agreement` read at `structured_debate.py:644` and never written; pre-existing, on the books at
+  `docs/implementation_plan_defect_audit.md:51` with drifted line numbers). Two stale docs corrected: `agent_states.py`'s
+  channel docstring named 3 of 10 consumers, and `docs/design_risk_calculations_agent_wiring.md` §3 gave the bull/bear
+  researchers "no computed context" and the RM "none" - both false.
 - 2026-09-18 `(working tree)` - **The composite's purpose is stated; the verdict attribution corrected (owner).** Docs
   and a docstring only - no behaviour, no printed output. The set stated only the *negative* constraint (`TradeScore`
   reaches no gate, no size, no `opportunity_score`) and nowhere said what the composite is *for*; worse, master §1.4
