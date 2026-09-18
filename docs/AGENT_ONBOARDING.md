@@ -388,6 +388,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-9 landed: both vendor probes answered** (recorded answers, no code). **(1) EODHD
+  `/sentiments` coverage is COMPLETE for this universe** - 26 of 26 names returned a non-empty series (16 large caps at
+  73-151 daily points, four ETFs, 0700.HK, SKHY, BRK.B, RIVN, ARM, CART; no empty result, no error), so the hardcoded
+  `source="eodhd"` in `_sentiment_factor_read` costs nothing today and the answer is **mirror the leaf's EODHD -> AV ->
+  GDELT chain if a gap appears; change nothing now** (a fallback that never fires is untested code on an unreachable
+  path). **(2) The moomoo economic calendar does NOT carry the company-level calendars** - 50 rows over 14 days, every
+  one macro (Fed projections, TIC flows, jobless claims, housing, auctions, Philly Fed, GDPNow), and **zero** matching
+  FDA/clinical/trial/phase/court/litigation/ruling/investor day/analyst day/drug/approval, so the three calendars are
+  **ABSENT with evidence** and need a company-events source of their own. Recorded in `SentimentScore.md` §3,
+  `EventScore.md` §4 and the plan's §3.9. Engine **4454 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **WP-1 landed: the shared score kernel.** `strategies/score_engine.py` - three
   functions and no framework (no registry, no engine import, no weight table): `align` (a `lo`→0/`hi`→100 ramp or a
   **band table over the producer's own edges**, with `NON_MONOTONIC_INPUTS` naming the eight non-monotone technical

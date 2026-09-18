@@ -208,6 +208,19 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 | Hard block for macro/Fed/OPEX | a rule to close on imminent non-earnings events | YES (calendar fetched) | extend `build_catalyst_snapshot` (`catalyst.py:280`) to set `hard_block` from `macro_imminence.min_days` / `fed_imminence.days_until` against a configured window |
 | Weights / composite | any EventScore band or weight structure | NO — every producer is a multiplier or gate; no 0-100 score anywhere | needs (a) per-family imminence 0-1, (b) per-family impact/severity, (c) NA!=0 handling; nothing exists to reuse |
 
+**PROBED 2026-09-17 (P0-9) - the moomoo economic calendar does NOT carry them.**
+The probe is the answer this row was waiting for: `get_economic_calendar_moomoo`
+over the next 14 days returned **50 rows, every one a MACRO release** (Fed interest-rate
+projections, TIC capital flows, jobless claims, housing starts, bill/TIPS auctions,
+Philly Fed sub-indices, GDPNow, natural-gas storage). **Zero rows matched
+FDA / clinical / trial / phase / court / litigation / ruling / investor day /
+analyst day / drug / approval.** So the three company-level calendars are
+**ABSENT with evidence**, not "unbuilt": the moomoo adapter supplies the *pattern*
+(a windowed reader with a typed no-data error) and **not** the data, and no
+existing adapter is a producer for them. Building them needs a new
+company-events source, which is a vendor decision of its own - it does not ride on
+the economic calendar.
+
 **Hard-block inventory (every fail-closed-on-an-event site in either repo):**
 
 Engine (TradingAgents):

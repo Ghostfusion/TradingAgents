@@ -154,7 +154,22 @@ No sentiment toolset exists: `sentiment_analyst` binds no tools (toolsets.py mod
 
 1. **`sentiment_velocity:25` and `mention_volume:43` have no reader.** Both are exported in `__all__` (sentiment.py:824-825) but the only importers are `tests/test_strategies_sentiment.py:11-12`. The owner's momentum (acceleration) and heat/mention legs have producers but no production consumer. A reader would see the report claim momentum/acceleration is measured while nothing computes it.
 2. **GDELT scale mismatch on the news-sentiment route.** `interface.py:488-492` routes `get_news_sentiment` to `gdelt: get_news_sentiment_gdelt`, whose docstring/body (gdelt.py:278-279) renders tone on **-100..100**, while the category is advertised as `-1..1` (interface.py:187) and `news_data_tools.get_news_sentiment:110` says "scale -1..1 unless noted". `_sentiment_points_gdelt:250` returns -100..100 points that flow straight into `daily_sentiment_sma`/`get_news_sentiment_series` (analysis_tools:6793) unnormalized, so a GDELT-sourced `sma_7d`/`innovation` is ~100x an EODHD/AV one.
-3. **Institutional sentiment is bound to the fundamentals toolset.** `get_institution_holdings` appears only at `toolsets.py:395` (fundamentals_company_tools), never in market_tools/news_tools. Combined with the sentiment analyst binding zero tools (toolsets.py:1-19 docstring), institutional sentiment is unreachable from the sentiment surface — it exists only as a raw holdings table for the fundamentals analyst.
+3. **PROBED 2026-09-17 (P0-9): EODHD `/sentiments` coverage is COMPLETE for this
+universe, so the missing fallback is defensive, not live.**
+`trading_graph._sentiment_factor_read` hardcodes `source="eodhd"` and returns
+`None` when EODHD has no series, while the leaf
+(`analysis_tools.get_sentiment_lead_lag`) falls back. The probe asked how often
+that costs a read: **26 of 26 names returned a non-empty series** - 16 large caps
+(AMZN MSFT NVDA TSM VST WDC LRCX AMKR ASML HPE IBM JCI LULU NFLX SIMO SMCI,
+73-151 daily points each over a 150-day window), four ETFs (SPY 151, QQQ 146,
+IEI 46, VTV 73), a foreign listing (0700.HK 102) and an OTC name (SKHY 83), plus
+BRK.B (43), RIVN (143), ARM (128) and CART (84). **No empty result, no error.**
+The answer to "what the fallback order should be" is therefore: **mirror the
+leaf's existing chain (EODHD -> Alpha Vantage -> GDELT) if a gap ever appears, and
+change nothing now** - a fallback that never fires would be untested code on a
+path that cannot currently be exercised. The gap is recorded, with the probe as
+its evidence, rather than fixed speculatively.
+4. **Institutional sentiment is bound to the fundamentals toolset.** `get_institution_holdings` appears only at `toolsets.py:395` (fundamentals_company_tools), never in market_tools/news_tools. Combined with the sentiment analyst binding zero tools (toolsets.py:1-19 docstring), institutional sentiment is unreachable from the sentiment surface — it exists only as a raw holdings table for the fundamentals analyst.
 4. **Dispersion/crowd producers are gated and mislocated.** `sentiment_dispersion:209` and `crowd_ratio:163` reach a tool only through `get_sentiment_computed` (analysis_tools:6759 → `_render_crowd_row:6661`), bound to **market_tools:325** behind `enable_crowd_ratio_bands` (default False, default_config.py:1045). The sentiment report is produced by the sentiment analyst, which never calls them.
 5. **Weighted aggregation is gated off and off-surface.** `aggregate_weighted_sentiment:616` is reached only via `_sentiment_agg_rows:6735` under `enable_weighted_sentiment_agg` (default False, default_config.py:1044), and only from `get_news_sentiment_series` (market/news), not from the sentiment analyst.
 6. **`_sentiment_factor_read:1178` hardcodes `source="eodhd"`** (trading_graph.py:1235) and, when EODHD returns nothing, returns None rather than falling back to AV/GDELT — while the leaf `get_sentiment_lead_lag` (analysis_tools:6846-6878) does fall back. The wired confirmation fold therefore silently degrades to neutral 1.0 on names where EODHD has no /sentiments coverage.

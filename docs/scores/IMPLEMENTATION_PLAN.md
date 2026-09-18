@@ -479,6 +479,29 @@ and a probe is cheaper than a build that discovers the gap.
 code. A probe that finds nothing is a result — it moves the item to "ABSENT with
 evidence".
 
+**PROBED 2026-09-17 — both answers are recorded.**
+
+1. **EODHD `/sentiments` coverage: complete for this universe.** 26 of 26 names
+   returned a non-empty series — 16 large caps at 73-151 daily points over a
+   150-day window (AMZN MSFT NVDA TSM VST WDC LRCX AMKR ASML HPE IBM JCI LULU NFLX
+   SIMO SMCI), four ETFs (SPY 151, QQQ 146, IEI 46, VTV 73), a foreign listing
+   (0700.HK 102), an OTC name (SKHY 83), plus BRK.B 43, RIVN 143, ARM 128, CART 84.
+   No empty result, no error — so the hardcoded `source="eodhd"` costs nothing
+   today, and the fallback question is answered as **mirror the leaf's
+   EODHD -> Alpha Vantage -> GDELT chain if a gap ever appears; change nothing
+   now** (a fallback that never fires is untested code on a path nothing can
+   currently exercise). `SentimentScore.md` §3 carries the numbers.
+2. **The forward event calendars: the moomoo economic calendar does NOT carry
+   them.** Over the next 14 days it returned **50 rows, every one a macro release**
+   (Fed rate projections, TIC capital flows, jobless claims, housing starts,
+   bill/TIPS auctions, Philly Fed sub-indices, GDPNow, natural-gas storage), and
+   **zero** rows matched FDA / clinical / trial / phase / court / litigation /
+   ruling / investor day / analyst day / drug / approval. The three company-level
+   calendars are **ABSENT with evidence**: the adapter supplies the *pattern*, not
+   the data, and building them needs a company-events source of its own — a
+   vendor decision that does not ride on the economic calendar. `EventScore.md` §4
+   carries the counts.
+
 ---
 
 ## 4. WP-1 — the shared score kernel
