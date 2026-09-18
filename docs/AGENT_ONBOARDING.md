@@ -388,6 +388,16 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-3 landed: market-wide breadth from the panel the run already fetched.**
+  `strategies/market_breadth.py::market_breadth(closes_by_name, *, windows=(20,50,200), min_n=20)` - percent-above-MA from
+  the shared `sector_breadth.multi_breadth`, with A/D, new-high/new-low and coverage computed from the **same map** so
+  the numbers cannot describe different panels. The denominator gate is `sector_screener.breadth_with_gate`: below
+  `min_n` the percentages are `None` **with the reason** while the counts still travel (a count is not a rate); an empty
+  map is `None`, never 0; and the high/low counts are measured against the caller's own window with the basis naming it
+  (a 60-bar panel cannot be quoted as a 52-week figure). **Real run** over 22 names from the in-repo S&P map (315
+  constituents): `n=22, coverage=1.0, pct_above_20d=45.5, 50d=54.5, 200d=40.9, A/D=-2, new_highs=1, new_lows=1` - the
+  panel size prints beside the percentages. Five tests. Engine **4427 passed / 5 skipped**, executor **1105**, web
+  **149**.
 - 2026-09-17 `(working tree)` - **P0-4 + P0-7 + P0-8 landed.** (P0-8a) `position_mult_by_side` tested
   `catalyst > 1` while every caller supplies 0..1, so `event_scale` was **always 1.0** - a real sizing bug; now
   `0 < catalyst <= 1`. (P0-8b) `get_earnings_calendar`'s `look_back_days` named the opposite direction to the

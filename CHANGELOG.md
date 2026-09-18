@@ -24,6 +24,17 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
 **Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
 
+### Added
+
+**P0-3 — market-wide breadth from the panel the run already fetched (2026-09-17).** `RegimeScore.md` §1 marks market-wide advance/decline, new highs/lows and percent-above-MA as ABSENT; this is the smallest honest producer, and it needs **no new vendor**.
+- **`strategies/market_breadth.py::market_breadth(closes_by_name, *, windows=(20, 50, 200), min_n=20)`** returns `{pct_above_<w>, n, coverage, advance_decline, advancers, decliners, new_highs, new_lows, small_sample, basis}` or `None` for an empty panel. The percent-above columns come from the shared `sector_breadth.multi_breadth`; the A/D, high/low and coverage counts are computed from the **same map**, so the numbers cannot describe different panels (one implementation, two scopes).
+- **The denominator-integrity gate is the shared one** (`sector_screener.breadth_with_gate`): below `min_n` the percentages render `None` with the reason, never a noisy rate over a handful of names — while the counts still travel, because a count is not a rate.
+- **The high/low counts are measured against the window the caller supplied, and the basis line says which window that was** — a 60-bar panel cannot be quoted as a 52-week figure. `None` for an absent read, never 0.
+- **Real run:** over 22 names drawn from the in-repo S&P map (315 constituents) it returned `n=22, coverage=1.0, pct_above_20d=45.5, pct_above_50d=54.5, pct_above_200d=40.9, A/D=-2, new_highs=1, new_lows=1, small_sample=False`, with the panel size in the basis line.
+- Five tests: the known-answer panel, the gate at its default, a panel over the floor with its panel size, the empty/unusable cases, and the window-provenance rule.
+Tests: engine suite **4427 passed / 5 skipped**, executor **1105**, web **149**.
+**Web impact**: none — a pure strategy module with no caller yet; the engines that consume it (WP-3, WP-4) land behind their own gates.
+
 ### Fixed
 
 **P0-8 — the five recorded defects, and two of them were real bugs (2026-09-17).**

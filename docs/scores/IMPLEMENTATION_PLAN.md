@@ -309,9 +309,22 @@ from `multi_breadth`, the last three computed from the same map. `n`-gated the
 way the sector path already is (`sector_screener.breadth_with_gate:511`): below
 `n = 20` the row is `n/a`, not zero.
 
-**Acceptance.** Over a synthetic map with known answers (3 of 5 names above the
-200-day, 2 up on the day, 1 at a 52-week high) every key matches; an empty map
-returns `None`, never 0. A real run prints the panel size beside the percentages.
+**Acceptance - MET 2026-09-17.** `strategies/market_breadth.py::market_breadth`
+builds it. Over a synthetic five-name panel with known answers (two above the
+200-day, two advancing, one at its high) every key matches **with the gate set to
+the panel size**; at the default `min_n=20` the same panel withholds the
+percentages with its reason (five names are not a breadth read) while the counts
+still travel. An empty map returns `None`, never 0. **A real run prints the panel
+size beside the percentages**: over 22 names drawn from the in-repo S&P map
+(315 constituents) it returned `n=22, coverage=1.0, pct_above_20d=45.5,
+pct_above_50d=54.5, pct_above_200d=40.9, A/D=-2, new_highs=1, new_lows=1,
+small_sample=False` with the basis line naming the 22-name panel and the bars
+each series carried. The percent-above columns come from the shared
+`sector_breadth.multi_breadth`; the A/D, high/low and coverage counts are computed
+from the same map, so the numbers cannot describe different panels. The
+high/low counts are measured against the window the caller supplied and the basis
+says which window that was, so a 60-bar panel cannot be quoted as a 52-week
+figure.
 
 **Note on the vendor alternative.** There is no free official US-universe breadth
 API; third-party routes exist (Barchart's `getMomentum` exposes
