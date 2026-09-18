@@ -12,6 +12,18 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Fixed
+
+**All five §14 defects are fixed, and two of them turned out to be code (2026-09-17).** The implementation plan's defect section said "none is a code defect; all are documentation or hygiene" - D-3 and D-4 are code, and that claim was wrong until they were repaired.
+- **D-3 - the SEC `User-Agent` carried a non-deliverable placeholder.** `sec_edgar.py` sent `contact: research@example.com` against a published fair-access policy that asks for a reachable contact (10 requests/second per IP; 403s already seen under parallel batch load). `_UA` now carries the owner's real address (`sec_edgar.py:33`). **The same defect class was found next door**: `sp500_universe.py:122` sent `contact@example.com` to the Wikimedia API, which asks for the same thing - replaced with the identical string, and both sites name each other in a comment so a future change is one edit in two known places.
+- **D-4 - 11 requests where one would do.** `get_financial_history` looped `_TAG_MAP` calling `companyconcept` once per tag. It now reads every us-gaap tag from a single `companyfacts` payload (`_us_gaap_facts`, `_COMPANYFACTS_URL:74`), which is what makes the P0-1 tag extension cheap. The per-tag loop is **kept as the fallback**: a multi-MB payload can fail or truncate where a small one would not, and losing every tag at once is a worse failure than losing one. `_annual_rows` holds the shared 10-K FY row filter (full-year flow rows only, instant concepts matched on form/fp) so both paths use one rule. Two tests: `test_xbrl_history_costs_one_request_for_every_tag` asserts a single fetch renders the whole table, `test_xbrl_history_falls_back_to_per_tag_when_the_facts_payload_fails` asserts the fallback - **both fail against the pre-change module**.
+- **D-1 - the master's §4/§5 stubs.** Re-verified: no stub text remains, and §4 names the cheap path (a tool leaf) against the expensive path (a number on the wire).
+- **D-2 - dead cross-references.** Re-verified by a headings-vs-references scan of all nine documents: the dead section names appear only inside the D-2 record row.
+- **D-5 - `enable_factor_model` is not a free name.** `design_qlib_integration.md`, `design_finrl_integration.md` and `implementation_plan_finrl.md` all now state, in the body **and** in the seam-table row, that the flag gates the **learned** advisory model only and is not a generic score switch - naming `scripts/factor_model_train.py:7`, `default_config.py:899` and `.env.example:227`. The deterministic composite's gates are separate names for exactly this reason.
+- The plan's §14 and the master's §3.3 are now **status tables** (a fifth column per defect); the plan's P0-1 text, which described both changes as still to make, is corrected to past tense in the same pass.
+Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
+**Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
+
 ### Added
 
 **The poisoned-tree regeneration landed six fresh trees, all verified clean, before the run was stopped (2026-09-17).** No code change: the corpus half of the previous pass's decision.

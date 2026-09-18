@@ -25,9 +25,12 @@ from .symbol_utils import normalize_symbol
 
 logger = logging.getLogger(__name__)
 
-# SEC fair-access: a descriptive User-Agent with a contact is required; the
-# bare-project-form UA (no contact) is rejected with 403 on www/data.sec.gov.
-_UA = "TradingAgentsResearch/1.0 (TradingAgents analysis; contact: research@example.com)"
+# SEC fair-access: a descriptive User-Agent with a reachable contact is required;
+# the bare-project-form UA (no contact) is rejected with 403 on www/data.sec.gov,
+# and a non-deliverable placeholder (research@example.com, what shipped before
+# 2026-09-17) is what gets an IP throttled under batch load. The contact below is
+# the project owner's. Same string as sp500_universe.py:122 - change both.
+_UA = "TradingAgentsResearch/1.0 (TradingAgents analysis; contact: vincent_liu@msn.com)"
 _TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 _TIMEOUT = 20
@@ -64,6 +67,15 @@ _TAG_MAP = {
     "Cash & equivalents": ("CashAndCashEquivalentsAtCarryingValue",),
 }
 _COMPANYCONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{tag}.json"
+# One call returns EVERY us-gaap tag for the filer, where the per-tag concept
+# endpoint costs one request each (11 for the eight rows below). The SEC's
+# published fair-access ceiling is 10 requests/second per IP, so the single call
+# is what makes extending the tag set affordable. Kept as the primary path with
+# the per-tag loop as the fallback: a multi-MB payload can fail or truncate where
+# a small one would not, and losing every tag at once is a worse failure than
+# losing one.
+_COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
+
 
 _ticker_cik_cache: dict[str, str] | None = None
 
@@ -104,6 +116,48 @@ def _cik_for(ticker: str) -> str | None:
     """Resolve a ticker to its CIK, handling exchange-suffixed symbols."""
     base = normalize_symbol(ticker).split(".")[0].upper()
     return _ticker_map().get(base)
+
+
+def _us_gaap_facts(cik: int) -> dict | None:
+    """Every us-gaap concept for the filer, in ONE request (``companyfacts``).
+
+    Returns ``{tag: {"units": {...}}}`` or None on any failure, so the caller
+    falls back to the per-tag concept endpoint rather than losing the table.
+    """
+    try:
+        payload = _json_get(_COMPANYFACTS_URL.format(cik=cik))
+    except Exception as exc:  # noqa: BLE001 - the caller has a fallback path
+        logger.warning("EDGAR companyfacts fetch failed for CIK %s: %s", cik, exc)
+        return None
+    facts = payload.get("facts") if isinstance(payload, dict) else None
+    gaap = (facts or {}).get("us-gaap") if isinstance(facts, dict) else None
+    return gaap if isinstance(gaap, dict) else None
+
+
+def _annual_rows(rows) -> dict[str, int]:
+    """Annual 10-K FY values from one concept's USD unit list, by period end.
+
+    Flow concepts carry ``start`` and must span ~a full year: the SEC often
+    appends a short 90-day partial under the same FY end (restatement), which
+    would otherwise overwrite the annual figure. Instant concepts (assets etc.)
+    carry no ``start`` and are matched on form/fp alone.
+    """
+    annual: dict[str, int] = {}
+    for row in rows or []:
+        if row.get("form") == "10-K" and row.get("fp") == "FY":
+            end = str(row.get("end") or "")[:10]
+            if not end or row.get("val") is None:
+                continue
+            start = str(row.get("start") or "")[:10]
+            if start:
+                try:
+                    dur = (date.fromisoformat(end) - date.fromisoformat(start)).days
+                except ValueError:
+                    dur = 0
+                if dur < 300:
+                    continue
+            annual[end] = int(row["val"])
+    return annual
 
 
 def get_sec_filings(ticker: str, limit: int = 10) -> str:
@@ -174,9 +228,10 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
     """Annual 10-K financial history from SEC EDGAR XBRL (free, keyless).
 
     Pulls up to ``years`` of annual (10-K, FY) values for the eight core
-    us-gaap tags via the companyconcept API and lays them out as a year-over-
-    year table. This is the only free source that goes deeper than the ~4-5y
-    statement history of the vendor APIs; coverage starts when the filer
+    us-gaap tags via the companyfacts API - one request per filer, where the
+    per-tag concept endpoint would cost one each (the fallback path when the
+    larger payload fails). This is the only free source that goes deeper than the
+    ~4-5y statement history of the vendor APIs; coverage starts when the filer
     adopted XBRL (mostly ~2009-2011 for large filers), stated honestly as the
     reported first/last fiscal year per tag-row - early years render n/a only
     when the tag genuinely has no FY value yet. Raises ``NoMarketDataError``
@@ -199,35 +254,23 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
         )
     by_tag: dict[str, dict[str, int]] = {}
     span = None
+    gaap = _us_gaap_facts(int(cik))
     for label, tags in _TAG_MAP.items():
         annual: dict[str, int] = {}
         for tag in tags:
-            try:
-                payload = _json_get(_COMPANYCONCEPT_URL.format(cik=int(cik), tag=tag))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("EDGAR %s fetch failed for %s: %s", tag, ticker, exc)
-                continue
-            if not isinstance(payload, dict):
-                continue
-            rows = payload.get("units", {}).get("USD") or []
-            # annual 10-K FY rows; instant concepts (assets etc.) carry no
-            # ``start`` - match on form/fp alone, dedupe long-format restatements.
-            for row in rows:
-                if row.get("form") == "10-K" and row.get("fp") == "FY":
-                    end = str(row.get("end") or "")[:10]
-                    if not end or row.get("val") is None:
-                        continue
-                    start = str(row.get("start") or "")[:10]
-                    if start:
-                        try:
-                            dur = (date.fromisoformat(end) - date.fromisoformat(start)).days
-                        except ValueError:
-                            dur = 0
-                        # flow rows must span ~a full year; SEC often appends a
-                        # short 90-day partial under the same FY end (restatement)
-                        if dur < 300:
-                            continue
-                    annual[end] = int(row["val"])
+            if gaap is not None:
+                rows = ((gaap.get(tag) or {}).get("units") or {}).get("USD") or []
+                annual = _annual_rows(rows)
+            else:
+                # Fallback: one request per tag (the pre-companyfacts path).
+                try:
+                    payload = _json_get(_COMPANYCONCEPT_URL.format(cik=int(cik), tag=tag))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("EDGAR %s fetch failed for %s: %s", tag, ticker, exc)
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                annual = _annual_rows((payload.get("units") or {}).get("USD") or [])
             if annual:
                 break
         if not annual:
@@ -263,7 +306,7 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
         lines.append(f"History span: {span[0]} → {span[1]} (XBRL coverage start; "
                      f"pre-{span[0]} years may be n/a).")
     lines.append("")
-    lines.append("Source: SEC EDGAR companyconcept API (free, keyless). "
+    lines.append("Source: SEC EDGAR companyfacts API (free, keyless). "
                  "Advisory — cite it for historical trends; the vendor "
                  "statements (get_income_statement etc.) remain the current-period source.")
     return "\n".join(lines)

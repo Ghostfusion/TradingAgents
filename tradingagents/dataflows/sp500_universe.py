@@ -119,7 +119,9 @@ def fetch_sp500_universe(refresh: bool = False) -> dict | None:
             _API_URL,
             params={"action": "parse", "page": _PAGE, "prop": "wikitext",
                     "format": "json", "formatversion": "2"},
-            headers={"User-Agent": "TradingAgentsResearch/1.0 contact@example.com"},
+            # Wikimedia asks for a descriptive agent with a reachable contact,
+            # same policy as SEC EDGAR. Same string as sec_edgar.py:33.
+            headers={"User-Agent": "TradingAgentsResearch/1.0 (TradingAgents analysis; contact: vincent_liu@msn.com)"},
             timeout=40,
         )
         resp.raise_for_status()

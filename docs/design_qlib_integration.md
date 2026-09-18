@@ -216,6 +216,11 @@ alpha vs regional benchmark, `_RUN_OHLCV_CACHE` is a panel cache, and
   walk-forward+PBO gate (`evaluate_config_gate.py`) passes on OOS data; until
   then it is a research artifact only. Config `enable_factor_model=False`
   default; `.env` mirror.
+- **`enable_factor_model` gates THIS learned model and nothing else.** It is
+  **not** a generic "score" switch: the deterministic composite's per-engine gates
+  are separate names (`scores/IMPLEMENTATION_PLAN.md` §1.1), and reusing this one
+  for them would silently couple two different objects - the flag is consumed by
+  `scripts/factor_model_train.py:7` (`default_config.py:899`, `.env.example:227`).
 - Not in the default chain; a philosophy footnote: the fork's deterministic
   core stays the authority; the model is an extra computed input, never a gate.
 
@@ -283,7 +288,7 @@ alpha vs regional benchmark, `_RUN_OHLCV_CACHE` is a panel cache, and
 | `portfolio_strategy` | PM tools + `scripts/value_screener.py --alloc` (→ `portfolio.allocation_block`) + `action_report` | `enable_topk_drop` / `enable_enhanced_index` (False) | Pipeline alloc strategy |
 | `runfile.py` + ledger | `batch.py`/`pipeline.py` flags front-end; §3.9 recorder rows + status | `--runfile <yaml>` | Jobs screen preset + experiments read view |
 | `pit_registry` | `pre_market_review`, fast path, backtests; §3.1 fitted norm moments + label convention | `enable_pit_registry` (True) | Reports as-of labels |
-| `factor_model_train` | advisory rank only | `enable_factor_model` (False) | none (research) |
+| `factor_model_train` | advisory rank only | `enable_factor_model` (False) - the **learned** model only, never the deterministic composite's gate (§3.6) | none (research) |
 | `factor_proposal_loop` | §3.7 candidate sheet → gated rows into `get_factor_profile` | `enable_factor_proposal_loop` (False) + `factor_proposal_*` | Value Tools (gated rows only) |
 | `market_tradability` | `scripts/backtest_strategy.py` fills + `pre_market_ledger` | `backtest_limit_threshold` / `backtest_volume_participation` / `backtest_deal_price` | Scripts screen row |
 | tuner (optional) | §3.10 search over §3.6 params | `enable_tuner` (False) | none (research) |

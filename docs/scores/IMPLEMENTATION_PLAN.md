@@ -225,18 +225,20 @@ CAGR family needs and that XBRL actually carries:
 `OperatingIncomeLoss + D&A` and FCF is `OCF − capex`, both **derived in the
 caller and labelled derived**, not fetched as a tag that does not exist.
 
-**Two changes worth making in the same pass.** (a) Prefer the
-`companyfacts` endpoint (`https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json`)
-— one request per company instead of one per tag (11 today), same JSON, and it
-carries every tag at once, which is what makes the extension above cheap. The
+**Both changes are already made** (2026-09-17, §14 D-3/D-4). (a) The
+`companyfacts` endpoint
+(`https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json`) is now the fetch path:
+one request per company instead of one per tag (11 before), same JSON, every tag at
+once, which is what makes the extension above cheap — the per-tag loop stays as the
+fallback when the larger payload fails (`_us_gaap_facts`, `sec_edgar.py:118`). The
 SEC's published fair-access ceiling is **10 requests/second** per IP with a
-descriptive `User-Agent`; the current `_UA:30` carries the placeholder contact
-`research@example.com` and should name a real contact (§14 defect D-3).
+descriptive `User-Agent`, and `_UA:33` now carries the owner's reachable contact.
 (b) Keep the existing failure contract: a non-US ticker raises
 `NoMarketDataError` and the caller treats it as `NA` — the series must **not**
 fail a run for a foreign listing.
 
-**Acceptance.** For a US filer, the series returns ≥5 annual periods for revenue,
+**Acceptance (unchanged by the two fixes above).** For a US filer, the series
+returns ≥5 annual periods for revenue,
 net income, EPS, operating income and D&A with the span printed; for a non-US
 ticker it returns `None`/raises the same `NoMarketDataError` the existing leaf
 does and nothing downstream raises. `annual_series` consumes it and the G-Score
@@ -1302,16 +1304,18 @@ policy question attached: **which metric classes may move intraday** versus may 
 
 ## 14. Defects found while writing this plan
 
-Recorded in the master's §3.3. None is a code defect; all are documentation or
-hygiene, and the first is the reason this document exists.
+Recorded in the master's §3.3. **All five are fixed (2026-09-17).** Two of them -
+D-3 and D-4 - are code defects in `dataflows/sec_edgar.py`, not documentation,
+which this section said of none of them until they were repaired; D-1 is the reason
+this document exists.
 
-| # | Defect | Evidence | Consequence |
-| --: | --- | --- | --- |
-| D-1 | **The master's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md:291-304` at `0ce42b3` — §5's paragraph ended at *"…if they land"* and the next line was a `---` | the design set had **no wiring contract and no phase plan**, which is exactly what an implementation plan needs. §3-§8 and §9 of this document are their replacement, and the master's §4/§5 are now pointers to it |
-| D-2 | **Both the master and `FundamentalScore.md` cited sections that no longer exist** (repointed in the same pass). The master's §6 cites §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; its §7 cites §5.2/§5.3 and "§6 Phase C/D"; its §1.4 cites §8.3. `FundamentalScore.md`'s §0.5 cites "§8", its §3.1 cites §6 Phase C/D and §5.2/§5.3 | `README.md` headings end at §7 + appendices; `FundamentalScore.md` headings end at §3.6 + appendices | a reader following a cross-reference lands nowhere. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) had §3.7 (the four-score architecture, ~340 lines), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E), §8 (the decision record + §8.3 open questions) |
-| D-3 | **The SEC `User-Agent` carries a placeholder contact.** `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (…; contact: research@example.com)` | `sec_edgar.py:28-30` — the comment states a descriptive UA with a contact is required; `example.com` is not a deliverable address | the SEC's fair-access policy asks for a reachable contact; a non-deliverable one is the kind of thing that gets an IP throttled, and the ceiling (10 req/s) is published |
-| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:173` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written |
-| D-5 | **`enable_factor_model` is not a free name.** Three documents (`design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109`) describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`, `scripts/factor_model_train.py:7` | a plan that reused it for the deterministic composite would silently couple two different objects; the six engine gates in §1.1 are new names for this reason |
+| # | Defect | Evidence | Consequence | Status |
+| --: | --- | --- | --- | --- |
+| D-1 | **The master's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md:291-304` at `0ce42b3` — §5's paragraph ended at *"…if they land"* and the next line was a `---` | the design set had **no wiring contract and no phase plan**, which is exactly what an implementation plan needs. §3-§8 and §9 of this document are their replacement, and the master's §4/§5 are now pointers to it | **FIXED** - re-verified 2026-09-17: no stub text remains, and §4 names the cheap path (a tool leaf) against the expensive path (a number on the wire) |
+| D-2 | **Both the master and `FundamentalScore.md` cited sections that no longer exist** (repointed in the same pass). The master's §6 cites §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; its §7 cites §5.2/§5.3 and "§6 Phase C/D"; its §1.4 cites §8.3. `FundamentalScore.md`'s §0.5 cites "§8", its §3.1 cites §6 Phase C/D and §5.2/§5.3 | `README.md` headings end at §7 + appendices; `FundamentalScore.md` headings end at §3.6 + appendices | a reader following a cross-reference lands nowhere. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) had §3.7 (the four-score architecture, ~340 lines), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E), §8 (the decision record + §8.3 open questions) | **FIXED** - re-verified 2026-09-17 by a headings-vs-references scan of all nine documents: the dead names appear only inside this row, as the record |
+| D-3 | **The SEC `User-Agent` carries a placeholder contact.** `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (…; contact: research@example.com)` | `sec_edgar.py:28-30` — the comment states a descriptive UA with a contact is required; `example.com` is not a deliverable address | the SEC's fair-access policy asks for a reachable contact; a non-deliverable one is the kind of thing that gets an IP throttled, and the ceiling (10 req/s) is published | **FIXED 2026-09-17** - `_UA` (`sec_edgar.py:33`) carries the owner's reachable contact, and the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` (the same defect class, found while fixing this one) |
+| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:173` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written | **FIXED 2026-09-17** - `_us_gaap_facts` reads every tag from ONE `companyfacts` call (`_COMPANYFACTS_URL:74`); the per-tag loop stays as the **fallback**, because a multi-MB payload can fail or truncate where a small one would not, and losing every tag at once is the worse failure. `_annual_rows` holds the shared row filter. Two tests: one asserts a single fetch for the whole table, one asserts the fallback; both fail against the pre-change module |
+| D-5 | **`enable_factor_model` is not a free name.** Three documents (`design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109`) describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`, `scripts/factor_model_train.py:7` | a plan that reused it for the deterministic composite would silently couple two different objects; the six engine gates in §1.1 are new names for this reason | **FIXED 2026-09-17** - all three documents now state, in the body **and** in the seam-table row, that the flag gates the **learned** model only and is not a generic score switch, naming `factor_model_train.py:7`, `default_config.py:899` and `.env.example:227` |
 
 ---
 

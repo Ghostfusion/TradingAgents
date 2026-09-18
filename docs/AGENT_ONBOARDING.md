@@ -388,6 +388,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **All five §14 defects fixed; two were code.** (D-3) the SEC `User-Agent`'s placeholder
+  contact (`research@example.com`) is replaced with the owner's real address (`sec_edgar.py:33`) - and the same defect
+  class was found next door at `sp500_universe.py:122` (`contact@example.com`, Wikimedia asks for the same thing), fixed
+  with the identical string, both sites cross-referenced in comments. (D-4) `get_financial_history` no longer makes 11
+  `companyconcept` calls: `_us_gaap_facts` reads every us-gaap tag from ONE `companyfacts` payload, with the per-tag loop
+  **kept as the fallback** (a multi-MB payload can fail where a small one would not; losing every tag at once is worse),
+  and `_annual_rows` holds the shared 10-K FY filter so both paths use one rule - two new tests, both **failing against
+  the pre-change module**. (D-1/D-2) re-verified fixed: master §4/§5 are pointers, and a headings-vs-references scan of
+  all nine docs finds the dead section names only inside the D-2 record row. (D-5) the three documents that read
+  `enable_factor_model` as "the score" gate now say, in body and seam table, that it gates the **learned** model only
+  (`factor_model_train.py:7`, `default_config.py:899`, `.env.example:227`). The plan's §14 and the master's §3.3 became
+  **status tables**; the plan's P0-1 text is corrected to past tense. Engine suite **4406 passed / 5 skipped**, executor
+  **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **The poisoned-tree regeneration landed six fresh trees, all verified clean** (no code
   change). Regenerated with shallow depth + `--verify` and the production env (`TRADINGAGENTS_ANALYST_FORCED_TOOLS`
   popped): **AMKR, AMZN, ASML, HPE, IBM, JCI** (`*_20260917_*`); the run was then stopped on the owner's instruction and

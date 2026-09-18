@@ -107,6 +107,11 @@ Phase 5: fast-path alignment doc (T0/T1/T2 ↔ two-layer regime) — partially l
 - **OOS validation selection**: `tuner.search_grid` already ranks alpha candidates by walk-forward OOS Sharpe; selection = best **gated** candidate (gate authority = `evaluate_config_gate.gate_verdict`), **never in-sample argmax**; rolling re-train at rebalance windows (FinRL 9).
 - **Baseline-relative report**: every candidate is reported vs equal-weight / value-ratio / momentum on the same IC + backtest surface (`benchmark_surface` + `signal_analysis` combine to provide the surface).
 - Gate unchanged: score reaches the LLM only after walk-forward+PBO; `enable_factor_model=False` default.
+- **`enable_factor_model` gates THIS learned model and nothing else.** It is
+  **not** a generic "score" switch: the deterministic composite's per-engine gates
+  are separate names (`scores/IMPLEMENTATION_PLAN.md` §1.1), and reusing this one
+  for them would silently couple two different objects - the flag is consumed by
+  `scripts/factor_model_train.py:7` (`default_config.py:899`, `.env.example:227`).
 - Tests `tests/test_ensemble_cadence.py`: planted predictive zoo → the best OOS-validated candidate selected, never the in-sample best when they differ; ungated candidates never advisory; baseline rows present (design §11-7).
 - Acceptance: §11-7. Commit: `feat: finrl phase 4 factor-model ensemble cadence (candidate zoo, OOS selection)`.
 

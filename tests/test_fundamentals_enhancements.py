@@ -185,3 +185,54 @@ def test_xbrl_fetch_logs_and_continues_on_single_tag_failure(monkeypatch, caplog
     out = sec_edgar.get_financial_history("X", years=3)
     assert "100.0B" in out  # other tags still render
     assert any("Assets fetch failed" in r.message for r in caplog.records)
+
+
+def test_xbrl_history_costs_one_request_for_every_tag(monkeypatch):
+    """D-4: the eight rows came from 11 ``companyconcept`` requests; one
+    ``companyfacts`` payload carries every us-gaap tag, and the SEC's published
+    fair-access ceiling is 10 requests/second per IP. The table must therefore
+    render from a SINGLE fetch."""
+    calls: list[str] = []
+
+    def fake_json_get(url):
+        calls.append(url)
+        assert "companyfacts" in url, url
+        return {
+            "facts": {
+                "us-gaap": {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                        "units": {"USD": [_concept("2020-09-26", 274_515_000_000, start="2019-09-28")]}
+                    },
+                    "Assets": {"units": {"USD": [_concept("2020-09-26", 323_888_000_000)]}},
+                }
+            }
+        }
+
+    monkeypatch.setattr(sec_edgar, "_json_get", fake_json_get)
+    monkeypatch.setattr(sec_edgar, "_cik_for", lambda ticker: "320193")
+    out = sec_edgar.get_financial_history("AAPL", years=3)
+    assert len(calls) == 1, calls
+    assert "274.5B" in out and "323.9B" in out
+    assert "companyfacts" in out
+
+
+def test_xbrl_history_falls_back_to_per_tag_when_the_facts_payload_fails(monkeypatch):
+    """The multi-MB payload can fail where a small one would not; losing one tag
+    must never cost the whole table."""
+    urls: list[str] = []
+
+    def fake_json_get(url):
+        urls.append(url)
+        if "companyfacts" in url:
+            raise ConnectionError("payload too large")
+        tag = url.rsplit("/", 1)[-1]
+        if tag == "Assets.json":
+            return _payload([_concept("2020-09-26", 323_888_000_000)])
+        return _payload([])
+
+    monkeypatch.setattr(sec_edgar, "_json_get", fake_json_get)
+    monkeypatch.setattr(sec_edgar, "_cik_for", lambda ticker: "320193")
+    out = sec_edgar.get_financial_history("AAPL", years=3)
+    assert "323.9B" in out
+    assert sum("companyfacts" in u for u in urls) == 1
+    assert sum("companyconcept" in u for u in urls) > 1

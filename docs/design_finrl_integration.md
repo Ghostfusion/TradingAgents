@@ -250,6 +250,11 @@ recorder-style ledger rows — ownership stays shared as in the table above
 - Gate unchanged: score reaches the LLM only after walk-forward+PBO passes;
   `enable_factor_model=False` default. (FinRL-DeepSeek's LLM-infused risk
   shaping stays out: LLM signals already flow via the news/sentiment tools.)
+- **`enable_factor_model` gates THIS learned model and nothing else.** It is
+  **not** a generic "score" switch: the deterministic composite's per-engine gates
+  are separate names (`scores/IMPLEMENTATION_PLAN.md` §1.1), and reusing this one
+  for them would silently couple two different objects - the flag is consumed by
+  `scripts/factor_model_train.py:7` (`default_config.py:899`, `.env.example:227`).
 
 ---
 
@@ -262,7 +267,7 @@ recorder-style ledger rows — ownership stays shared as in the table above
 | `portfolio_contract` | `scripts/value_screener.py --alloc` (→ `portfolio.allocation_block`) + `get_allocation` + `get_allocation_plan` (PM) + `action_report` | `allocation_strategy` (value-ratio default) | Pipeline alloc strategy |
 | `benchmark_surface` | `strategy_quality_report.py` + `evaluate_config_gate` | always-on pure calc | Scripts screen |
 | runfile stages + env registry | `batch.py`/`pipeline.py` flags front-end | `--runfile <yaml>`; registry = named presets | Jobs screen preset |
-| factor-model ensemble cadence | `factor_model_train.py` (advisory rank only) | `enable_factor_model` (False) | none (research) |
+| factor-model ensemble cadence | `factor_model_train.py` (advisory rank only) | `enable_factor_model` (False) - the **learned** model only (§6.6) | none (research) |
 
 Every new tool: hermetic tests with `pytest-timeout`, `agent_utils.__all__`
 re-export, ToolNode + analyst prompt binding, `.env.example` mirror, docs.
