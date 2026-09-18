@@ -367,14 +367,23 @@ publishes both as CSVs on its CDN
 `.../VIX3M_History.csv`). VIX9D therefore needs the Cboe CSV, which is a **new
 vendor-shaped dependency** and is why this item is listed separately from P0-4.
 
-**Deliverable.** `dataflows/cboe.py::vix_term_structure() -> dict` reading the two
-CSVs (cached under `data_cache_dir`, one fetch per day), returning
-`{vix9d, vix3m, slope, state: contango|backwardation}` via the existing
-`term_structure_slope` shape. If the CSVs are unreachable the key is `None` with
-the reason printed — **never** the equity-IV slope under a VIX name.
+**Deliverable - DONE 2026-09-17.** `dataflows/cboe.py::vix_term_structure()` reads
+the two CSVs (cached under `data_cache_dir`, one fetch per day), returning
+`{vix9d, vix3m, slope, state: contango|backwardation, as_of, basis, reason}` on the
+existing `term_structure_slope` sign convention (long minus short). **The module
+already existed** as the CBOE delayed options-chain vendor, so the function was
+ADDED to it rather than created beside it - one vendor, one module, and a test
+pins that the routed `get_options_surface` is untouched. A flat curve is
+`contango` (not stress) and only a negative slope is `backwardation`; an
+unreachable CSV leaves the keys `None` with the reason printed and the basis
+saying the read is unavailable - **never** the equity-IV slope under a VIX name.
 
-**Acceptance.** Contango and backwardation fixtures map to the two states; an
-unreachable source yields `None` and a printed reason.
+**Acceptance - MET 2026-09-17.** Contango and backwardation fixtures map to the two
+states, a zero slope maps to contango, an unreachable source yields `None` and a
+printed reason, and the daily cache serves a second call without a fetch. **Live
+2026-09-17:** `vix9d=13.39, vix3m=18.55, slope=5.16, state=contango`, with
+`as_of=09/17/2026` (Cboe writes `MM/DD/YYYY`, passed through rather than silently
+re-formatted).
 
 ### 3.6 P0-6 — short-interest percentile
 

@@ -24,6 +24,12 @@ from .errors import NoMarketDataError, VendorRateLimitError
 logger = logging.getLogger(__name__)
 
 CBOE_OPTIONS_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
+# P0-5: the index-level history CSVs on the same CDN. VIX9D is NOT on FRED (FRED
+# carries VXVCLS for the 3-month, and its discontinued 3-month series is VXOCLS,
+# not VXVCLS), so the 9-day leg needs this file.
+CBOE_VIX_HISTORY_URL = (
+    "https://cdn.cboe.com/api/global/us_indices/daily_prices/{name}_History.csv"
+)
 REQUEST_TIMEOUT = 30
 
 # Cap the rendered surface so a full chain cannot flood the analyst context.
@@ -173,3 +179,167 @@ def get_options_surface(symbol: str) -> str:
     if total > len(rows):
         lines.append(f"\n_(showing the nearest {len(rows)} of {total} contracts)_")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# P0-5: the VIX term structure (index levels, NOT one name's equity-IV slope)
+# ---------------------------------------------------------------------------
+
+_VIX_SERIES = {"vix9d": "VIX9D", "vix3m": "VIX3M"}
+_VIX_CACHE_TTL = 24 * 3600  # end-of-day files: one fetch per day
+_VIX_CACHE_FILE = "cboe_vix_term_structure.json"
+
+
+def _vix_cache_path() -> str | None:
+    """``data_cache_dir/cboe_vix_term_structure.json``, or None when unset."""
+    import os
+
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        base_dir = (get_config() or {}).get("data_cache_dir") or os.getenv("TRADINGAGENTS_CACHE_DIR")
+    except Exception:  # noqa: BLE001 - advisory
+        base_dir = os.getenv("TRADINGAGENTS_CACHE_DIR")
+    if not base_dir:
+        return None
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, _VIX_CACHE_FILE)
+    except OSError:
+        return None
+
+
+def _vix_cache_read() -> dict | None:
+    import json
+    import os
+    import time
+
+    path = _vix_cache_path()
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            blob = json.load(f)
+        if blob.get("ts") and time.time() - blob["ts"] < _VIX_CACHE_TTL:
+            return blob
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _vix_cache_write(payload: dict) -> None:
+    import json
+    import time
+
+    path = _vix_cache_path()
+    if not path:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({**payload, "ts": time.time()}, f)
+    except OSError:
+        pass
+
+
+def _vix_last_level(name: str) -> tuple[str | None, float | None]:
+    """``(date, close)`` of the last row of one Cboe index-history CSV.
+
+    The CDN files are ``DATE,OPEN,HIGH,LOW,CLOSE``; Cboe writes DATE as
+    ``MM/DD/YYYY`` (verified live 2026-09-17: the last row read ``09/17/2026``), so
+    ``as_of`` is passed through in the vendor's own format rather than silently
+    re-formatted. The last row with a non-empty CLOSE is the latest level. Any failure returns
+    ``(None, None)`` so the caller prints the reason rather than a stale number -
+    this producer is strategy-facing and deliberately does NOT raise the vendor
+    taxonomy the routed methods above use.
+    """
+    import csv
+    import io
+
+    try:
+        resp = requests.get(
+            CBOE_VIX_HISTORY_URL.format(name=name), timeout=REQUEST_TIMEOUT
+        )
+        resp.raise_for_status()
+        text = resp.text
+    except requests.RequestException as exc:
+        logger.warning("Cboe %s history fetch failed: %s", name, exc)
+        return None, None
+    try:
+        rows = list(csv.DictReader(io.StringIO(text)))
+    except (csv.Error, ValueError):
+        return None, None
+    for row in reversed(rows):
+        close = (row.get("CLOSE") or row.get("Close") or "").strip()
+        if not close:
+            continue
+        try:
+            return ((row.get("DATE") or row.get("Date") or "").strip() or None), float(close)
+        except ValueError:
+            continue
+    return None, None
+
+
+def vix_term_structure(*, refresh: bool = False) -> dict:
+    """VIX9D / VIX3M levels, slope and state, or ``None`` keys with the reason.
+
+    ``RegimeScore.md`` §1 and §4 are explicit that the equity-IV slope
+    (``options_surface.term_structure_slope``, from one name's option chain) is
+    **not** a VIX term structure and must never be substituted silently. This is
+    the real thing: the two Cboe index levels, their slope and the
+    contango/backwardation state.
+
+    Returns::
+
+        {"vix9d": float | None, "vix3m": float | None,
+         "slope": float | None,   # vix3m - vix9d, the shared long-minus-short sign
+         "state": "contango" | "backwardation" | None,
+         "as_of": str | None, "basis": str, "reason": str | None}
+
+    The slope uses the **same sign convention** as
+    ``options_surface.term_structure_slope`` so a reader comparing them compares
+    like with like - they remain different objects, and ``basis`` says which one
+    this is. ``state`` is ``contango`` when the 3-month level is at or above the
+    9-day (the normal upward slope; a flat curve is not stress) and
+    ``backwardation`` when it is below (near-term stress priced above the
+    3-month). An unmeasurable pair is ``None``, never a defaulted state, and the
+    equity-IV slope is never returned under a VIX name.
+    """
+    if not refresh:
+        cached = _vix_cache_read()
+        if cached and cached.get("vix9d") is not None:
+            return cached
+    levels: dict = {}
+    dates: list[str] = []
+    for key, name in _VIX_SERIES.items():
+        date, close = _vix_last_level(name)
+        levels[key] = close
+        if date:
+            dates.append(date)
+    vix9d, vix3m = levels.get("vix9d"), levels.get("vix3m")
+    slope = None if (vix9d is None or vix3m is None) else float(vix3m) - float(vix9d)
+    state = None if slope is None else ("contango" if slope >= 0 else "backwardation")
+    reason = None
+    if state is None:
+        missing = sorted(k for k, v in levels.items() if v is None)
+        reason = (
+            "Cboe index-history CSV unreachable or empty for "
+            + ", ".join(missing)
+            + f" ({CBOE_VIX_HISTORY_URL.format(name='VIX9D')} / "
+            f"{CBOE_VIX_HISTORY_URL.format(name='VIX3M')})"
+        )
+    out = {
+        "vix9d": vix9d,
+        "vix3m": vix3m,
+        "slope": slope,
+        "state": state,
+        "as_of": max(dates) if dates else None,
+        "basis": (
+            "Cboe VIX9D/VIX3M index levels (not one name's equity-IV slope)"
+            if state is not None
+            else "Cboe VIX9D/VIX3M unavailable"
+        ),
+        "reason": reason,
+    }
+    if state is not None:
+        _vix_cache_write(out)
+    return out

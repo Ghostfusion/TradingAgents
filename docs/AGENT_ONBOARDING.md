@@ -388,6 +388,14 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-5 landed: the VIX term structure.** `dataflows/cboe.py::vix_term_structure()`
+  reads the two Cboe CDN history CSVs (daily-cached, one fetch per day) and returns `{vix9d, vix3m, slope, state,
+  as_of, basis, reason}` on the **shared long-minus-short sign**; a flat curve is `contango` (not stress), only a
+  negative slope is `backwardation`, and an unreachable CSV leaves `None` + the reason - **never** the equity-IV slope
+  under a VIX name. **`dataflows/cboe.py` already existed** (the CBOE delayed options-chain vendor): the function was
+  ADDED to it, and a test pins that the routed `get_options_surface` is untouched. **Live: `vix9d=13.39, vix3m=18.55,
+  slope=5.16, contango`, `as_of=09/17/2026`** - Cboe writes MM/DD/YYYY, so the docstring's "ISO" claim was corrected
+  against the observed payload. Six tests. Engine **4436 passed / 5 skipped**, executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **P0-6 landed: the short-interest percentile.** `strategies/short_interest.py` ranks the
   latest settlement within the name's OWN series (percentile, raw, prior, change, n, basis) and carries the **direction**
   sentence - *high short interest is bearish positioning with a squeeze RISK, not a bullish signal* - so the number cannot

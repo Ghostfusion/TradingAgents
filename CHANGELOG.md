@@ -26,6 +26,18 @@ Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), execut
 
 ### Added
 
+**P0-5 — the VIX term structure, from Cboe's own index levels (2026-09-17).** `RegimeScore.md` §1 and §4 forbid substituting the equity-IV slope (`options_surface.term_structure_slope`, one name's option chain) for a VIX term structure, and VIX9D is not on FRED — FRED carries `VXVCLS` for the 3-month and its discontinued 3-month series is `VXOCLS`.
+- **`dataflows/cboe.py::vix_term_structure()`** returns `{vix9d, vix3m, slope, state, as_of, basis, reason}` from the two Cboe CDN history CSVs, on the **shared slope convention** (long minus short) so the number is comparable with the equity-IV slope while the basis line says which object it is.
+- **The module already existed** as the CBOE delayed options-chain vendor, so the function was **added** to it rather than created beside it — one vendor, one module — and a test pins that the routed `get_options_surface` is untouched.
+- **A flat curve is `contango`, not stress**; only a negative slope is `backwardation`. An unreachable CSV leaves the keys `None` with the reason printed and the basis saying the read is unavailable — never the equity-IV slope under a VIX name, never a defaulted state.
+- **Cached under `data_cache_dir`, one fetch per day** (the files are end-of-day): a second call is served from disk without touching the network.
+- **Live 2026-09-17:** `vix9d=13.39, vix3m=18.55, slope=5.16, state=contango`, `as_of=09/17/2026`. Cboe writes `MM/DD/YYYY`, passed through rather than silently re-formatted — the first draft of the docstring claimed ISO and was corrected against the observed payload.
+- Six tests: the two state fixtures, the unreachable reason, the zero-slope case, the daily cache, and the untouched options vendor.
+Tests: engine suite **4436 passed / 5 skipped**, executor **1105**, web **149**.
+**Web impact**: none — a strategy-facing producer, not registered in `VENDOR_METHODS`; no wire field, no gate.
+
+### Added
+
 **P0-6 — the short-interest percentile over a name's own settlement series (2026-09-17).** `SentimentScore.md` §1 marks short interest PARTIAL: the settlement series was already fetched and only the raw level printed, so a number could not be read at all — 12% short is crowded for one name and ordinary for another.
 - **`strategies/short_interest.py::short_interest_percentile(series, *, min_obs=4)`** returns the percentile of the latest settlement within the name's own history, beside the raw value, the prior settlement, the period-over-period change, the series length and the **direction** sentence: *high short interest is bearish positioning with a squeeze RISK, not a bullish signal*. The sign is stated so the percentile cannot be quoted as a squeeze thesis by itself.
 - `min_obs` is counted in **settlements, not days** — FINRA settles twice a month (published on the 7th business day after), so four is about two months of history.
