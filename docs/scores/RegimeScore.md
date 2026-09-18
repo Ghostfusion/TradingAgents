@@ -13,8 +13,7 @@ is `TechnicalScore`; how much the position can hurt is `RiskScore`. The owner's
 own illustration of the distinction: *"MSFT's individual short-term tape can
 deteriorate while the broader market regime remains constructive."*
 
-Status: **design (2026-09-17). Not started.** Two independent regime paths exist
-and **no regime score exists** (§0.1).
+Status: **built (2026-09-18); gate off by default.** `strategies/regime_score.py` is the engine, `get_regime_score` its leaf and `enable_regime_score` its membership switch. The two independent regime paths §0.1 describes still exist and still disagree on live data; the score prints both unreconciled rather than choosing between them (plan §9 Phase B exit). **Unmeasured** (vendor gate).
 
 ---
 

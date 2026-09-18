@@ -16,9 +16,7 @@ announcement is *information* (news); analysts turning positive is
 *interpretation* (sentiment); +8% on 3× volume is *price* (technical). **Three
 separate observations.**
 
-Status: **design (2026-09-17). Not started.** Most of the ten categories are
-buildable from existing producers (§1); the engine has **four holes** and one
-missing output shape (the confirmation quadrant, §0.3).
+Status: **built (2026-09-18); gate off by default.** `strategies/sentiment_score.py` is the engine (including the confirmation quadrant §0.3 recorded as missing), `get_sentiment_score` its leaf and `enable_sentiment_score` its membership switch. It participates in the **research allocation only** - never in the decision composite (master rule 17). The four holes §1 records are still holes. **Unmeasured** (vendor gate).
 
 ---
 

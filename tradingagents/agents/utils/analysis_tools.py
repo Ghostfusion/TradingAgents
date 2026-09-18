@@ -5384,9 +5384,14 @@ def _trade_score_engines(ticker: str) -> dict:
             scores["regime"] = regime_score(vals).get("score")
     except Exception:  # noqa: BLE001
         pass
-    # WP-5 fills `risk` in through its own public entry point, never its
-    # internals; until it lands the engine is absent and the composite prints the
-    # gap rather than substituting a number.
+    try:
+        from tradingagents.strategies.risk_score import risk_score
+
+        vals = _risk_components(ticker)
+        if vals:
+            scores["risk"] = risk_score(vals).get("score")
+    except Exception:  # noqa: BLE001
+        pass
     return scores
 
 

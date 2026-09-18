@@ -10,9 +10,7 @@ Siblings: [`FundamentalScore.md`](FundamentalScore.md),
 hurt?"* — from the owner's eight categories in
 [`../ScoreWeight/market.md`](../ScoreWeight/market.md).
 
-Status: **design (2026-09-17). Not started.** Every one of the eight categories
-has at least one real producer, **all of them as components**, and **no 0-100
-risk score exists anywhere** (§0.1). This is a new aggregation, not a rename.
+Status: **built (2026-09-18); gate off by default.** `strategies/risk_score.py` is the engine (eight categories, inverted: 100 = low risk), `get_risk_score` its leaf and `enable_risk_score` its membership switch; it contributes the composite's `K` (master rule 18). The 0-100 aggregation §0.1 said existed nowhere is that module - a new aggregation over the existing components, not a rename. **Unmeasured** (vendor gate).
 
 ---
 

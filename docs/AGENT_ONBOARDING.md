@@ -388,6 +388,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **D-6 found and fixed: the leaf's `TradeScore` never read `RiskScore`** (master §3.4).
+  Walking a worked example of the score pipeline end to end - not reading the set - returned `fundamental 66.25`,
+  `technical 62.61`, `regime 79.78`, **`risk null`** from `_trade_score_engines`, while `_risk_components('MSFT')`
+  returned 13 real components and `strategies/risk_score.risk_score` scored them **79.39**. The assembler carried
+  three engine blocks and returned behind a stale *"WP-5 fills `risk` in ... until it lands the engine is absent"*
+  comment; WP-5 had shipped in `1260329`, and the assembler's own test already patched `_risk_components` as if it
+  were in the path. **Consequence: one vector, two numbers on two surfaces.** The leaf's `K` was `None`
+  unconditionally, so `get_trade_score` never applied the owner's published `K = 0.20` (coverage capped at **80%**)
+  while `_run_card_trade_score` - which reads all four engine blocks - applied all four (MSFT: leaf `67.65` at 80%
+  vs `70.00` at 100%). **Fixed** by mirroring the other three blocks (`_risk_components` -> `risk_score`); the
+  regression test fails before the fix (`assert None == 74.0`) and passes after. **Same pass, the doc set's status
+  lines were corrected**: all seven engine documents and the master still read *"design ... Not started"* and the
+  plan *"Nothing implemented"*, while that same plan's §9 carried **Exit - MET** for every phase - each status line
+  now names the module, the leaf, the gate and the measurement state. **Third instance of one failure shape**
+  (producer exists, reader exists, the wire was never run) after the executor's ingest boundary and the
+  `ba50b5f`/`2c05701` sets: a ledger built by reading documents cannot see it, only executing the path can.
+  Engine suite **4770 passed / 5 skipped** (1 new).
 - 2026-09-17 `(working tree)` - **WP-2 step 1 landed: `factors.quality_composite` -> `factors.category_scores`** (the
   shared cross-sectional core renamed, not forked; the caller owns the metric set, directions, weights and band table, and
   only `label` reaches the printed `basis`). The old name is gone rather than wrapped - both callers

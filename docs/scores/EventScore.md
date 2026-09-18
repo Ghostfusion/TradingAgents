@@ -16,9 +16,7 @@ His reason for adding it is explicit and is this document's governing constraint
 it should exist **before `NewsScore` is allowed to influence
 `opportunity_score`**.
 
-Status: **design (2026-09-17). Not started.** Occurrence producers exist for
-**4 of 7** event families (§1); the hard block exists and is the engine's only
-event-triggered fail-closed path (§0.3).
+Status: **built (2026-09-18); gate off by default.** `strategies/event_state.py` is the engine (`imminence`, `event_components`, `forward_calendar`), `get_event_state` its leaf and `enable_event_state` its membership switch. Occurrence producers exist for **4 of 7** event families (§1); the hard block exists and is the engine's only event-triggered fail-closed path (§0.3). **Unmeasured** (vendor gate).
 
 ---
 

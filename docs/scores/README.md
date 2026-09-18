@@ -24,9 +24,7 @@ document set is what interprets them against the engine**; where the documents
 and the specs disagree, the specs govern the *intent* and the documents govern
 what is *buildable*.
 
-Status: **design (2026-09-17). Not started.** Nothing here is implemented. The
-engine already computes most of the *components*; what does not exist anywhere is
-a composite per engine, and that is what this set designs.
+Status: **built (2026-09-18).** Every engine in this set - the shared kernel, the eight engines, the composite and the measurement layer - is implemented, and every gate ships **off** by default (`default_config.py`), flipped one at a time under the dark-launch protocol (§5). The design below is the contract the code is held to; `IMPLEMENTATION_PLAN.md` §9 carries each phase's **Exit - MET** block, and §3.4 records the one defect found by exercising the path rather than reading it.
 
 Scope of this master: the architecture, the cross-engine rules, the composite and
 its gate rules, the weight reconciliation between the owner's two iterations, the
@@ -365,6 +363,29 @@ of them code" until they were repaired.
 | D-3 | **The SEC `User-Agent` carries a placeholder contact** | `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (... contact: research@example.com)`; the comment at `:28` states a descriptive UA with a contact is required | `example.com` is not a deliverable address; the SEC's published fair-access ceiling is 10 requests/second per IP and a reachable contact is what the policy asks for | **FIXED 2026-09-17** - `sec_edgar.py:33` carries the owner's reachable contact; the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` |
 | D-4 | **The per-tag fetch pattern is 11 requests where 1 would do** | `sec_edgar.get_financial_history:173` loops `_TAG_MAP:56-65` calling `_COMPANYCONCEPT_URL:66` once per tag (`:206-215`) | the `companyfacts` endpoint returns every tag in one payload; 11x the requests against a 10 req/s ceiling for the same data, and it is why extending the tag set is expensive as written | **FIXED 2026-09-17** - one `companyfacts` call for every tag (`_us_gaap_facts`), with the per-tag loop kept as the fallback; two tests, both failing against the pre-change module. Live smoke test 2026-09-17: MSFT rendered 6 annual periods from 2 requests (pre-change: 12), UA accepted |
 | D-5 | **`enable_factor_model` is not a free name.** Three design documents describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`; `design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109` | a plan that reused it for the deterministic composite would silently couple two different objects; the plan's six engine gates are new names for this reason | **FIXED 2026-09-17** - all three documents now name the flag as the **learned** model's gate only, in the body and the seam table |
+
+---
+
+### 3.4 Found while explaining the set (2026-09-18)
+
+One defect, found by walking a live example end to end rather than by reading the
+set: the composite's **leaf** path never read the risk engine, so the number the
+research agents were shown was not the number this design defines.
+
+| # | Defect | Evidence | Consequence | Status |
+| --: | --- | --- | --- | --- |
+| D-6 | **`TradeScore`'s leaf assembler never read `RiskScore`.** `_trade_score_engines` carried three blocks (fundamental, technical, regime) and returned with the comment *"WP-5 fills `risk` in through its own public entry point, never its internals; until it lands the engine is absent"* — but WP-5 had landed (`strategies/risk_score.py`, `1260329`) and the sibling leaf had read it ever since | `agents/utils/analysis_tools.py::_trade_score_engines` vs `strategies/risk_score.py::risk_score`; the sibling leaf `get_risk_score` calls `_risk_components(ticker)` then `risk_score(vals)`, and the assembler's own test already patched `_risk_components` as if it were in the path | the leaf's `K` was **`None` unconditionally**, so `get_trade_score` never applied the owner's published `K = 0.20` and its coverage was capped at **80%**. The run-card path was never affected — `_run_card_trade_score` reads all four engine blocks — so **one vector produced two different numbers on two surfaces**. Measured on MSFT: the leaf printed `67.65` at 80% coverage; with the engine wired it prints `70.00` at 100% | **FIXED 2026-09-18** - the fourth block mirrors the other three (`_risk_components` -> `risk_score`); the regression test fails before the fix (`assert None == 74.0`) and passes after |
+
+**How it was found, and why it matters.** The four engines were called directly
+for a worked example and returned `fundamental 66.25`, `technical 62.61`,
+`regime 79.78`, **`risk null`** — while `_risk_components('MSFT')` returned 13
+real components and `risk_score` scored them **79.39**. Components present, score
+withheld, and the stale comment naming a workstream that had already shipped.
+This is the *third* instance of one failure shape in this repo (see
+`CHANGELOG.md` 2026-09-18 (e) in `TradingExecution` and the `ba50b5f`/`2c05701`
+sets): **a producer exists, a reader exists, and the wire between them was never
+run.** A defect ledger built by reading documents cannot see it; only executing
+the path can.
 
 ---
 

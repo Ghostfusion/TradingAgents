@@ -651,3 +651,39 @@ def test_the_engine_assembly_never_substitutes_a_number(monkeypatch) -> None:
     monkeypatch.setattr(fs, "fundamental_score_for_ticker", _boom)
     scores = at._trade_score_engines("NOPE")
     assert scores == {"fundamental": None, "technical": None, "regime": None, "risk": None}
+
+
+#: A risk component set the real engine can score: two ramps in `volatility`,
+#: the two positive-magnitude tail producers, and the pinned drawdown pair - three
+#: categories, which clears `RiskScore`'s own floor of three. The semivariance
+#: triple is deliberately absent (supplying any of it requires all of it).
+_RISK_COMPONENTS: dict = {
+    "realized_vol": 0.25,
+    "implied_move_pct": 0.04,
+    "stress_loss": 0.03,
+    "es_pct": 0.03,
+    "measured_book_drawdown": 0.05,
+    "cdar": 0.04,
+}
+
+
+def test_the_engine_assembly_reads_the_risk_engine(monkeypatch) -> None:
+    """`risk` is read through `RiskScore`'s own entry point, like the other three.
+
+    The defect this pins: the assembler returned ``risk: None`` unconditionally,
+    behind a stale "until WP-5 lands" comment, so the leaf's composite never
+    applied the owner's ``K=0.20`` and its coverage was capped at 80%. Only the
+    I/O seam is patched here; the engine that scores the components is the real
+    one, so the number is `RiskScore`'s and not this test's.
+    """
+    import tradingagents.agents.utils.analysis_tools as at
+
+    monkeypatch.setattr(at, "_risk_components", lambda ticker: dict(_RISK_COMPONENTS))
+    scores = at._trade_score_engines("TEST")
+    assert scores["risk"] == 74.0
+
+    # ...and the composite then treats it as one of its four engines, not as a
+    # gap: `K` is present and carries its published weight.
+    res = trade_score(scores)
+    assert "risk" in res["present"]
+    assert res["components"]["risk"]["weight"] == ENGINE_WEIGHTS["risk"]

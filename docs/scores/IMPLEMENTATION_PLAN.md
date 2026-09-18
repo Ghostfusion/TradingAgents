@@ -22,9 +22,7 @@ them, and every dangling cross-reference in the master and in
 defects are recorded in the master's §3.3 — §14 of this document has the full
 list of what the restructure dropped.
 
-Status: **plan (2026-09-17). Nothing implemented.** No code has been written for
-any engine, no gate has been added, and no weight in any document has been
-measured.
+Status: **plan (2026-09-17); implemented 2026-09-18.** WP-0...WP-11 are built and every gate ships **off** by default. §9 carries each phase's **Exit - MET** block. **Measurement is partial**: the price leg is measured, the fundamentals leg is vendor-gated (EODHD 403), so most weights in this set remain hypotheses - `MEASUREMENT_FINDINGS.md` labels each one.
 
 ---
 
@@ -1080,6 +1078,16 @@ gate is `BLOCK`; (b) the composite reaches no `SCORE_BANDS`, no
 `opportunity_score`, no sizing input; (c) the printed weights are the weights
 used; (d) an unvalidated vector is labelled `RESEARCH_ONLY` and is not
 promotable by configuration alone.
+
+**The leaf and the run card are two paths to one number, and they must agree.**
+`_run_card_trade_score` assembles the composite from the four engine blocks the
+card already carries; `get_trade_score`'s assembler (`_trade_score_engines`)
+reads the four engines through their own entry points. Defect D-6 (master §3.4)
+was the second path missing its fourth engine — the leaf printed `67.65` at 80%
+coverage where the card printed the four-engine number — and it is fixed
+2026-09-18. **Any change to either path is checked against the other**, because
+an engine wired into one and not the other is a silently different vector on two
+surfaces, which is exactly the double-producer failure rule 15 forbids.
 
 ---
 

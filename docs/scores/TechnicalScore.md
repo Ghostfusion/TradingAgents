@@ -13,8 +13,7 @@ this stock doing?"* — from the owner's nine categories in
 trades in is `RegimeScore`; how much the position can hurt is `RiskScore`. This
 document must not absorb either.
 
-Status: **design (2026-09-17). Not started.** The components largely exist; the
-**composite does not exist anywhere** (§0.1).
+Status: **built (2026-09-18); gate off by default.** `strategies/technical_score.py` is the engine (40 components over 9 categories), `get_technical_score` is its leaf and `enable_technical_score` its membership switch. The composite §0.1 said existed nowhere is `technical_score`, and the price leg is the **one engine whose inputs were measured** - 30 panel dates, `MEASUREMENT_FINDINGS.md`.
 
 ---
 

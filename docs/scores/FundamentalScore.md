@@ -13,10 +13,7 @@ adoption plan against what the engine already computes. The other six engines ar
 specified in their own documents; the composite they feed, the cross-engine
 rules, and the code defects the whole set found are in the master.
 
-Status: **design (2026-09-17), decisions recorded. Not started.** Nothing in
-this document is implemented; it defines what would be built, in what order,
-under which gates, and — more importantly — what is **already** in the engine so
-that no second implementation is created. **All five open questions were answered
+Status: **built (2026-09-18), decisions recorded; gate off by default.** `strategies/fundamental_score.py` is the engine (`quality_subscore`, `growth_subscore`, `valuation_subscore`, `risk_subscore`, `fundamental_score_for_ticker`), `get_fundamental_score` is its leaf and `enable_fundamental_score` its membership switch. What follows is what was built, in what order, under which gates - and what was **already** in the engine, so that no second implementation was created. **Unmeasured**: the WP-10 panel's fundamentals leg is vendor-gated, so every coefficient here is still a hypothesis (`MEASUREMENT_FINDINGS.md`). **All five open questions were answered
 by the owner on 2026-09-17**: §0.5 summarises each decision and where it lands;
 the full record with the rationale is in the master's decision record.
 

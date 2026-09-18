@@ -27,9 +27,7 @@ Stock +8%, volume 3× normal
 numbers, the set collapses into one signal with three labels. The couplings that
 already exist are in §0.3.
 
-Status: **design (2026-09-17). Not started. This engine ships last.** Five of its
-nine categories are **ABSENT** and two more are partial (§1) — a partial engine
-that prints its coverage is the only honest form it can take today.
+Status: **built (2026-09-18); gate off by default.** `strategies/news_score.py` is the engine, `get_news_score` its leaf and `enable_news_score` its membership switch. It participates in the **research allocation only** - never in the decision composite (master rule 17). Five of its nine categories are still **ABSENT** and two more partial (§1): a partial engine that prints its coverage is the only honest form it can take. **Unmeasured** (vendor gate).
 
 ---
 
