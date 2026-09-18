@@ -209,7 +209,7 @@ def test_quality_factors_is_not_flag_gated(monkeypatch):
     """Q4 ships as informational rows: no flag, and no fabricated value."""
     _cfg(monkeypatch)
     monkeypatch.setattr(
-        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: {}
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {}
     )
     out = qft.get_quality_factors.invoke({"ticker": "TEST"})
     assert "DISABLED" not in out
@@ -228,7 +228,7 @@ def test_quality_factors_renders_hand_checked_values(monkeypatch):
         "total_debt": 400.0,
     }
     monkeypatch.setattr(
-        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d: fin
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin
     )
     out = qft.get_quality_factors.invoke({"ticker": "TEST"})
     assert "gp_a=0.2000" in out

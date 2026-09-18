@@ -180,7 +180,9 @@ def get_quality_factors(
         )
         from tradingagents.dataflows.statement_parsing import fetch_ticker
 
-        fin = fetch_ticker(ticker, current_date or "") or {}
+        # The G-Score's G4/G5 legs need a 5-year annual series the vendor
+        # statements do not carry; the SEC XBRL 10-K history does (P0-1).
+        fin = fetch_ticker(ticker, current_date or "", with_sec_series=True) or {}
         gp = gross_profitability(fin) if fin else None
         noa = net_operating_assets(fin) if fin else None
         _extra_gates = (

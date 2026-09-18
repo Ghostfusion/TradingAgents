@@ -214,10 +214,23 @@ called **once per tag** in a nested loop (`:206-215`); the function returns a
 `by_tag` dict. So the CAGR path cannot consume it even though the values are
 already in memory.
 
-**Deliverable.** `sec_edgar.financial_history_series(ticker, years=15) -> dict`
-returning the same `{label: {fiscal_end: value}}` structure the loop already
-builds, plus the span; `get_financial_history` renders from it (one
-implementation, two readers — ground rule 2). Extend `_TAG_MAP` with the tags the
+**Deliverable - DONE 2026-09-17.** `sec_edgar.financial_history_series(ticker,
+years=15) -> dict` returns `{"series": {label: {fiscal_end: value}}, "span":
+[first, last] | None, "years": years}` - the structure the loop already built,
+plus the span - and `get_financial_history` renders from it (one implementation,
+two readers - ground rule 2). The consumer is
+`statement_parsing.sec_annual_series(ticker, years=15) -> dict`, which maps the
+labels to the canonical series keys, keeps only the **longest run of consecutive
+fiscal years** per key (a hole would misalign the positionally-indexed readers),
+derives `ebitda_series` / `fcf_series` and labels them `derived: true`, and calls
+the same `_add_roa` the vendor path calls so the two cannot disagree. The merge
+into `fetch_ticker` is **opt-in** (`with_sec_series=True`, wired at the two leaves
+that need the depth - `quant_formula_tools.get_quality_factors` for G4/G5 and
+`analysis_tools.get_earnings_quality` for Dechow-Dichev's 8-period window):
+one EDGAR request and an as-reported USD basis are a cost the default vendor path
+must not pay, and a hermetic test asserts the default call never touches EDGAR.
+The longer series wins **per key**, never spliced, and the provenance row names
+`source: "sec_xbrl"`. Extend `_TAG_MAP` with the tags the
 CAGR family needs and that XBRL actually carries:
 `EarningsPerShareDiluted`, `OperatingIncomeLoss`,
 `DepreciationDepletionAndAmortization`, `GrossProfit`,
@@ -237,9 +250,10 @@ descriptive `User-Agent`, and `_UA:33` now carries the owner's reachable contact
 `NoMarketDataError` and the caller treats it as `NA` — the series must **not**
 fail a run for a foreign listing.
 
-**Acceptance (unchanged by the two fixes above).** For a US filer, the series
+**Acceptance - MET 2026-09-17.** For a US filer, the series
 returns ≥5 annual periods for revenue,
-net income, EPS, operating income and D&A with the span printed; for a non-US
+net income, EPS, operating income and D&A with the span printed (live: MSFT
+rendered 6 periods over 12 tag columns); for a non-US
 ticker it returns `None`/raises the same `NoMarketDataError` the existing leaf
 does and nothing downstream raises. `annual_series` consumes it and the G-Score
 legs stop emitting "5-year ROA series unavailable (n=0)" where the data exists.

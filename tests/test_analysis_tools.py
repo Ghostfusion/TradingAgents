@@ -1814,7 +1814,7 @@ def test_earnings_quality_reports_accruals(monkeypatch):
 def test_earnings_quality_high_accruals_flagged(monkeypatch):
     from tradingagents.dataflows import statement_parsing as sp
 
-    def fake_fetch(ticker, date):
+    def fake_fetch(ticker, date, **kw):
         fin = _eq_canonical()
         fin["net_income"] = 200e6  # accrual = 155e6 / 1e9 = 0.155 (concerning)
         return fin
@@ -1833,7 +1833,7 @@ def test_earnings_quality_capex_negative_fcf_red_flag(monkeypatch):
     same FCF as the positive magnitude)."""
     from tradingagents.dataflows import statement_parsing as sp
 
-    def fake_fetch(ticker, date):
+    def fake_fetch(ticker, date, **kw):
         fin = _eq_canonical()
         fin["operating_cashflow"] = 20e6
         fin["capex"] = 30e6  # FCF = 20 - 30 = -10e6
@@ -1845,7 +1845,7 @@ def test_earnings_quality_capex_negative_fcf_red_flag(monkeypatch):
     assert "negative FCF with positive NI" in out
 
     # GAAP-outflow sign: capex = -30e6 must give the SAME -10e6 FCF.
-    def fake_fetch_neg(ticker, date):
+    def fake_fetch_neg(ticker, date, **kw):
         fin = _eq_canonical()
         fin["operating_cashflow"] = 20e6
         fin["capex"] = -30e6

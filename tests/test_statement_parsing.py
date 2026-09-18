@@ -599,3 +599,126 @@ def test_fetch_ticker_series_light_up_the_g_score_legs(monkeypatch):
     assert isinstance(read["signals"]["g4"], bool)
     assert isinstance(read["signals"]["g5"], bool)
     assert not [d for d in read["deviations"] if "series unavailable" in d]
+
+
+# ---------------------------------------------------------------------------
+# P0-1: the SEC XBRL 10-K history as a deeper annual series
+# ---------------------------------------------------------------------------
+
+def _sec_rows(years, value_of):
+    """10-K FY rows for the given fiscal years (flow rows span ~a full year)."""
+    out = []
+    for y in years:
+        out.append({
+            "end": f"{y}-06-30",
+            "start": f"{y - 1}-07-01",
+            "val": value_of(y),
+            "form": "10-K",
+            "fp": "FY",
+        })
+    return out
+
+
+def _sec_facts(tags: dict) -> dict:
+    return {"facts": {"us-gaap": {t: {"units": {"USD": rows}} for t, rows in tags.items()}}}
+
+
+def _patch_sec(monkeypatch, facts: dict, cik: str | None = "1234"):
+    from tradingagents.dataflows import sec_edgar
+
+    monkeypatch.setattr(sec_edgar, "_json_get", lambda url, *a, **k: facts)
+    monkeypatch.setattr(sec_edgar, "_cik_for", lambda ticker: cik)
+
+
+_YEARS = (2021, 2022, 2023, 2024, 2025, 2026)
+
+
+@pytest.mark.unit
+def test_sec_annual_series_maps_labels_and_derives_the_untagged_rows(monkeypatch):
+    """EBITDA and FCF have no us-gaap tag, so they are DERIVED here and labelled
+    derived; the tagged rows keep their own keys, and the ROA series is derived
+    on beginning-of-year assets exactly as the vendor path derives it."""
+    _patch_sec(monkeypatch, _sec_facts({
+        "NetIncomeLoss": _sec_rows(_YEARS, lambda y: (y - 2020) * 10e9),
+        "Assets": _sec_rows(_YEARS, lambda y: (y - 2020) * 100e9),
+        "OperatingIncomeLoss": _sec_rows(_YEARS, lambda y: (y - 2020) * 20e9),
+        "DepreciationDepletionAndAmortization": _sec_rows(_YEARS, lambda y: 5e9),
+        "NetCashProvidedByUsedInOperatingActivities": _sec_rows(_YEARS, lambda y: (y - 2020) * 15e9),
+        "PaymentsToAcquirePropertyPlantAndEquipment": _sec_rows(_YEARS, lambda y: 2e9),
+    }))
+    got = sp.sec_annual_series("TST")
+
+    assert got["net_income_series"]["values"] == [v * 10e9 for v in range(1, 7)]
+    assert got["net_income_series"]["years"] == list(_YEARS)
+    assert got["net_income_series"]["periods"][0] == "2021-06-30"
+    # 2022..2026 have a prior-year balance sheet; 2021 has none.
+    assert len(got["roa_series"]["values"]) == 5
+    assert got["roa_series"]["years"] == list(_YEARS[1:])
+    assert got["roa_series"]["values"][0] == pytest.approx(20e9 / 100e9)
+    # Derived, and labelled as such: EBITDA = operating income + D&A.
+    assert got["ebitda_series"]["derived"] is True
+    assert got["ebitda_series"]["values"][0] == pytest.approx(20e9 + 5e9)
+    # FCF = OCF - capex (capex is filed positive).
+    assert got["fcf_series"]["derived"] is True
+    assert got["fcf_series"]["values"][0] == pytest.approx(15e9 - 2e9)
+
+
+@pytest.mark.unit
+def test_sec_annual_series_is_empty_when_edgar_has_no_record(monkeypatch):
+    """A non-US ticker has no CIK: the series is OPTIONAL depth and must return
+    an empty dict rather than raising into a caller that never asked for it."""
+    _patch_sec(monkeypatch, {}, cik=None)
+    assert sp.sec_annual_series("0700.HK") == {}
+
+
+@pytest.mark.unit
+def test_sec_annual_series_keeps_only_the_longest_unbroken_run(monkeypatch):
+    """A tag that skips a year contributes its longest CONSECUTIVE stretch: the
+    readers index these arrays by position, so a hole would misalign them."""
+    holey = _sec_rows([y for y in _YEARS if y != 2024], lambda y: float(y))
+    _patch_sec(monkeypatch, _sec_facts({"NetIncomeLoss": holey}))
+    got = sp.sec_annual_series("TST")
+    assert got["net_income_series"]["years"] == [2021, 2022, 2023]
+
+
+@pytest.mark.unit
+def test_fetch_ticker_asks_edgar_only_when_the_caller_asks_for_the_depth(monkeypatch):
+    """The SEC merge is OPT-IN: it costs a request and carries a different basis
+    (as-reported USD), so the default path must stay exactly the vendor chain it
+    is today - and when asked, the longer series wins PER KEY and names its
+    source."""
+    annual_income = (
+        ",2026-06-30,2025-06-30\n"
+        "Total Revenue,215940000000.0,130500000000.0\n"
+        "Net Income,120070000000.0,72880000000.0\n"
+    )
+
+    def _fake_vendor(method, *args, **kwargs):
+        if method == "get_income_statement":
+            return annual_income
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake_vendor)
+    calls: list[str] = []
+
+    def _fake_sec(ticker, years=15):
+        calls.append(ticker)
+        return {
+            "net_income_series": {
+                "values": [float(v) for v in range(1, 7)],
+                "years": list(_YEARS),
+                "periods": [f"{y}-06-30" for y in _YEARS],
+            }
+        }
+
+    monkeypatch.setattr(sp, "sec_annual_series", _fake_sec)
+
+    plain = sp.fetch_ticker("TST", "2026-09-12")
+    assert calls == []  # the default path never touches EDGAR
+    assert len(plain["net_income_series"]) == 2
+
+    fin, prov = sp.fetch_ticker("TST", "2026-09-12", with_provenance=True, with_sec_series=True)
+    assert calls == ["TST"]
+    assert len(fin["net_income_series"]) == 6  # the longer series won
+    assert prov["net_income_series"]["source"] == "sec_xbrl"
+    assert prov["net_income_series"]["observed_kind"] == "annual"

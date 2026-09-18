@@ -701,6 +701,23 @@ def income_series(payload: str) -> list[dict] | None:
 #: Dechow-Dichev (accruals = (NI - CFO) / total assets).
 SERIES_KEYS: tuple = ("revenue", "net_income", "total_assets", "operating_cashflow")
 
+#: SEC XBRL row label -> canonical series key, for ``sec_annual_series``. The
+#: labels are ``sec_edgar._TAG_MAP``'s, so the two files must move together.
+_SEC_SERIES_KEYS: dict = {
+    "Revenue": "revenue",
+    "Net income (loss)": "net_income",
+    "Total assets": "total_assets",
+    "Operating cash flow": "operating_cashflow",
+    "Diluted EPS": "diluted_eps",
+    "Operating income": "operating_income",
+    "D&A": "d_and_a",
+    "Capex (-)": "capex",
+    "Gross profit": "gross_profit",
+    "Total liabilities": "total_liabilities",
+    "Stockholders equity": "stockholders_equity",
+    "Cash & equivalents": "cash_and_equivalents",
+}
+
 
 def _period_token(label: str) -> str:
     """Short period token from a table header or a CSV date column.
@@ -812,26 +829,137 @@ def annual_series(payloads) -> dict:
         for key, entry in _series_from_payload(payload).items():
             if len(entry["values"]) > len((best.get(key) or {}).get("values") or ()):
                 best[key] = entry
+    _add_roa(best)
+    return best
+
+
+def _add_roa(best: dict) -> None:
+    """Attach ``roa_series`` to a stacked series dict, in place.
+
+    Derived from the chosen net-income and total-asset series, ALIGNED BY FISCAL
+    YEAR and on beginning-of-year assets - the convention ``growth_metrics`` uses
+    for the ROA level (NI / prior-year total assets), so the level and the
+    variance of the series cannot disagree. That join can cross payloads, exactly
+    as the level ROA already does in ``enrich_screen_ratios`` (income and balance
+    arrive as separate payloads on the yfinance path); a year without a prior-year
+    balance sheet is skipped, so the ROA series is shorter than the revenue series
+    and never indexed by position. One implementation: both the vendor path and
+    the SEC XBRL path read this.
+    """
     ni = best.get("net_income_series")
     ta = best.get("total_assets_series")
-    if ni and ta:
-        ta_by_year = dict(zip(ta["years"], ta["values"]))
-        roa_years, roa_vals, roa_labels = [], [], []
-        ni_by_year = dict(zip(ni["years"], ni["values"]))
-        label_by_year = dict(zip(ni["years"], ni["periods"]))
-        for year in sorted(ni_by_year):
-            prior = ta_by_year.get(year - 1)
-            if prior:
-                roa_years.append(year)
-                roa_vals.append(ni_by_year[year] / prior)
-                roa_labels.append(label_by_year.get(year, str(year)))
-        if len(roa_vals) >= 2:
-            best["roa_series"] = {
-                "values": roa_vals,
-                "years": roa_years,
-                "periods": roa_labels,
+    if not (ni and ta):
+        return
+    ta_by_year = dict(zip(ta["years"], ta["values"]))
+    roa_years, roa_vals, roa_labels = [], [], []
+    ni_by_year = dict(zip(ni["years"], ni["values"]))
+    label_by_year = dict(zip(ni["years"], ni["periods"]))
+    for year in sorted(ni_by_year):
+        prior = ta_by_year.get(year - 1)
+        if prior:
+            roa_years.append(year)
+            roa_vals.append(ni_by_year[year] / prior)
+            roa_labels.append(label_by_year.get(year, str(year)))
+    if len(roa_vals) >= 2:
+        best["roa_series"] = {
+            "values": roa_vals,
+            "years": roa_years,
+            "periods": roa_labels,
+        }
+
+
+def sec_annual_series(ticker: str, years: int = 15) -> dict:
+    """``annual_series``-shaped series from the SEC XBRL 10-K history.
+
+    The vendor statements carry ~4-5 annual periods; a filer's XBRL history goes
+    back to its adoption (mostly 2009-2011 for large filers), which is what clears
+    the 5-period bar the Mohanram G4/G5 legs and the CAGR family need - the reason
+    those legs printed "5-year ROA series unavailable (n=0)" wherever the data
+    existed upstream. P0-1's consumer half.
+
+    Values are **as-reported 10-K figures in USD**, a different basis from the
+    vendor's normalised statements, so a caller must not splice the two: the merge
+    in ``fetch_ticker`` takes the LONGER series per key and names the source.
+    ``EBITDA`` and ``FCF`` are derived here (``operating_income + d_and_a`` and
+    ``operating_cashflow - capex``) and labelled derived - neither has a us-gaap
+    tag, and fetching one would be a fabrication.
+
+    Returns ``{}`` for a non-US ticker, a pre-XBRL filer or any failure: the series
+    is additive and must never fail a run (the same contract the rendered leaf's
+    ``NoMarketDataError`` is caught under).
+    """
+    try:
+        from .sec_edgar import financial_history_series
+
+        payload = financial_history_series(ticker, years=years)
+    except Exception as exc:  # noqa: BLE001 - optional depth, never fatal
+        logger.debug("%s SEC XBRL series: %s", ticker, exc)
+        return {}
+    out: dict = {}
+    for label, by_end in (payload.get("series") or {}).items():
+        key = _SEC_SERIES_KEYS.get(label)
+        if key is None:
+            continue
+        # Longest run of CONSECUTIVE fiscal years: a series with a hole is not a
+        # series (the same rule ``_series_from_payload`` applies to a payload's
+        # own periods), so a tag that skips a year contributes only its longest
+        # unbroken stretch rather than a misaligned array.
+        run = _longest_year_run(by_end)
+        if len(run) >= 2:
+            out[f"{key}_series"] = {
+                "values": [float(v) for _y, _e, v in run],
+                "years": [y for y, _e, _v in run],
+                "periods": [e for _y, e, _v in run],
             }
+    _add_derived_series(out)
+    _add_roa(out)
+    return out
+
+
+def _longest_year_run(by_end: dict) -> list:
+    """``[(year, end, value)]`` for the longest run of consecutive fiscal years."""
+    rows = sorted((int(str(end)[:4]), str(end), val) for end, val in (by_end or {}).items())
+    best: list = []
+    run: list = []
+    for row in rows:
+        if run and row[0] == run[-1][0] + 1:
+            run.append(row)
+        else:
+            run = [row]
+        if len(run) > len(best):
+            best = list(run)
     return best
+
+
+def _add_derived_series(out: dict) -> None:
+    """Attach the DERIVED annual series (EBITDA, FCF), labelled as derived.
+
+    Neither has a us-gaap tag: EBITDA is ``operating_income + d_and_a`` and FCF is
+    ``operating_cashflow - capex`` (capex is filed positive). A year missing either
+    operand is dropped, never zero-filled.
+    """
+    oi, da = out.get("operating_income_series"), out.get("d_and_a_series")
+    if oi and da:
+        da_by_year = dict(zip(da["years"], da["values"]))
+        vals, yrs, per = [], [], []
+        for year, value, period in zip(oi["years"], oi["values"], oi["periods"]):
+            if da_by_year.get(year) is not None:
+                vals.append(value + da_by_year[year])
+                yrs.append(year)
+                per.append(period)
+        if len(vals) >= 2:
+            out["ebitda_series"] = {"values": vals, "years": yrs, "periods": per, "derived": True}
+    ocf, capex = out.get("operating_cashflow_series"), out.get("capex_series")
+    if ocf and capex:
+        cx_by_year = dict(zip(capex["years"], capex["values"]))
+        vals, yrs, per = [], [], []
+        for year, value, period in zip(ocf["years"], ocf["values"], ocf["periods"]):
+            if cx_by_year.get(year) is not None:
+                vals.append(value - cx_by_year[year])
+                yrs.append(year)
+                per.append(period)
+        if len(vals) >= 2:
+            out["fcf_series"] = {"values": vals, "years": yrs, "periods": per, "derived": True}
 
 
 def _parse_csv_statement_rows(payload: str) -> dict:
@@ -1196,7 +1324,13 @@ def trailing_twelve_months(ticker: str, curr_date: str, periods: int = 4) -> dic
     return out
 
 
-def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
+def fetch_ticker(
+    ticker: str,
+    curr_date: str,
+    *,
+    with_provenance: bool = False,
+    with_sec_series: bool = False,
+):
     """Pull the canonical line items for one ticker via the vendor chain.
 
     ``with_provenance=True`` returns ``(canonical, provenance)`` where
@@ -1301,6 +1435,34 @@ def fetch_ticker(ticker: str, curr_date: str, *, with_provenance: bool = False):
             "observed_kind": kind,
             "basis_conflict": _basis_conflict("annual", kind),
         }
+    # Deeper annual series from the SEC XBRL 10-K history (P0-1): the vendor
+    # statements carry ~4-5 periods, a filer's XBRL history goes back to its
+    # adoption, and the 5-period legs (G4/G5, the CAGR family, Dechow-Dichev's
+    # 8-period accrual window) need the depth. **Opt-in** (``with_sec_series``):
+    # it costs one EDGAR request and the figures are as-reported USD, so the
+    # leaves that need the depth ask for it and every other caller keeps the
+    # hermetic vendor path it has today.
+    # The LONGER series wins PER KEY and the source is named - the two are
+    # different bases (as-reported vs normalised) and are never spliced. Skipped
+    # for a non-USD filer, because the XBRL figures are USD-only and mixing them
+    # is the hazard the currency guard exists to refuse.
+    if with_sec_series and canonical.get("currency") != "non_usd":
+        for key, entry in sec_annual_series(ticker).items():
+            if len(entry["values"]) <= len(canonical.get(key) or ()):
+                continue
+            labels = entry["periods"]
+            canonical[key] = entry["values"]
+            provenance[key] = {
+                "source": "sec_xbrl",
+                "basis": (
+                    f"SEC XBRL 10-K series, {len(entry['values'])} period(s), "
+                    "oldest -> newest"
+                    + (" (derived)" if entry.get("derived") else "")
+                ),
+                "period": f"{labels[0]} .. {labels[-1]}" if len(labels) > 1 else (labels[0] if labels else None),
+                "observed_kind": "annual",
+                "basis_conflict": False,
+            }
     # Derive working capital when both sides are available (Altman Z needs it).
     if "working_capital" not in canonical:
         ca = _latest(canonical.get("current_assets"))

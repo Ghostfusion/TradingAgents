@@ -5018,7 +5018,9 @@ def get_earnings_quality(
         from tradingagents.dataflows.statement_parsing import fetch_ticker
     except Exception as exc:  # noqa: BLE001
         return f"earnings quality unavailable for {ticker}: {exc}"
-    fin = fetch_ticker(ticker, current_date)
+    # Dechow-Dichev wants 8+ annual periods; the vendor statements carry ~4-5,
+    # so this leaf is the one that asks for the SEC XBRL depth (P0-1).
+    fin = fetch_ticker(ticker, current_date, with_sec_series=True)
     if not fin:
         return (
             f"earnings quality unavailable for {ticker}: no statements from "

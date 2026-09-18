@@ -59,6 +59,10 @@ _FORM_LABELS = {
 _TAG_MAP = {
     "Revenue": ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues"),
     "Net income (loss)": ("NetIncomeLoss",),
+    "Diluted EPS": ("EarningsPerShareDiluted",),
+    "Operating income": ("OperatingIncomeLoss",),
+    "D&A": ("DepreciationDepletionAndAmortization", "DepreciationAmortizationAndAccretionNet"),
+    "Gross profit": ("GrossProfit",),
     "Operating cash flow": ("NetCashProvidedByUsedInOperatingActivities",),
     "Capex (-)": ("PaymentsToAcquirePropertyPlantAndEquipment",),
     "Total assets": ("Assets",),
@@ -66,6 +70,16 @@ _TAG_MAP = {
     "Stockholders equity": ("StockholdersEquity",),
     "Cash & equivalents": ("CashAndCashEquivalentsAtCarryingValue",),
 }
+
+# Per-share values are reported in USD/shares (and occasionally USD/shares in a
+# separate unit key), not plain USD, so the row reader must accept the units the
+# SEC actually files under rather than assume "USD" for every concept.
+_UNIT_KEYS = ("USD", "USD/shares")
+
+# EBITDA and FCF have no us-gaap tag: they are DERIVED in the consumer
+# (``OperatingIncomeLoss + D&A`` and ``OCF - capex``) and labelled derived
+# wherever they are printed. Fetched-as-a-tag would be a fabrication.
+_DERIVED_LABELS = ("EBITDA", "FCF")
 _COMPANYCONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{tag}.json"
 # One call returns EVERY us-gaap tag for the filer, where the per-tag concept
 # endpoint costs one request each (11 for the eight rows below). The SEC's
@@ -224,27 +238,25 @@ def get_sec_filings(ticker: str, limit: int = 10) -> str:
         "(8-K, S-1) above routine periodic reports."
     )
     return "\n".join(lines)
-def get_financial_history(ticker: str, years: int = 15) -> str:
-    """Annual 10-K financial history from SEC EDGAR XBRL (free, keyless).
 
-    Pulls up to ``years`` of annual (10-K, FY) values for the eight core
-    us-gaap tags via the companyfacts API - one request per filer, where the
-    per-tag concept endpoint would cost one each (the fallback path when the
-    larger payload fails). This is the only free source that goes deeper than the
-    ~4-5y statement history of the vendor APIs; coverage starts when the filer
-    adopted XBRL (mostly ~2009-2011 for large filers), stated honestly as the
-    reported first/last fiscal year per tag-row - early years render n/a only
-    when the tag genuinely has no FY value yet. Raises ``NoMarketDataError``
-    (consistent with ``get_sec_filings``) on any unresolvable ticker/network
-    failure; a missing individual tag degrades to 'n/a', never invents.
+
+def financial_history_series(ticker: str, years: int = 15) -> dict:
+    """The STRUCTURED annual 10-K series behind ``get_financial_history``.
+
+    One implementation, two readers (ground rule 2): the markdown leaf renders
+    from this, and ``statement_parsing.sec_annual_series`` consumes it for the
+    multi-year series the G-Score G4/G5 legs and the CAGR family need - which the
+    ~4-5y vendor statements cannot clear.
+
+    Returns ``{"series": {label: {fiscal_end: value}}, "span": [first, last] |
+    None, "years": years}``. Raises ``NoMarketDataError`` on an unresolvable
+    ticker (non-US listing, no CIK) or when no tag carries an annual 10-K FY
+    value, exactly as the rendered leaf does, so a caller that treats the series
+    as optional must catch it.
 
     Args:
-        ticker: Ticker symbol (exchange suffixes stripped for the CIK lookup;
-            non-US tickers typically have no EDGAR record).
-        years: Max fiscal years to include (default 15).
-
-    Returns:
-        A markdown table (fiscal year-end -> eight tag values) + history span.
+        ticker: Ticker symbol (exchange suffixes stripped for the CIK lookup).
+        years: Max fiscal years to include per row (default 15).
     """
     cik = _cik_for(ticker)
     if cik is None:
@@ -259,8 +271,11 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
         annual: dict[str, int] = {}
         for tag in tags:
             if gaap is not None:
-                rows = ((gaap.get(tag) or {}).get("units") or {}).get("USD") or []
-                annual = _annual_rows(rows)
+                units = (gaap.get(tag) or {}).get("units") or {}
+                for unit in _UNIT_KEYS:
+                    annual = _annual_rows(units.get(unit) or [])
+                    if annual:
+                        break
             else:
                 # Fallback: one request per tag (the pre-companyfacts path).
                 try:
@@ -270,7 +285,11 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
                     continue
                 if not isinstance(payload, dict):
                     continue
-                annual = _annual_rows((payload.get("units") or {}).get("USD") or [])
+                units = payload.get("units") or {}
+                for unit in _UNIT_KEYS:
+                    annual = _annual_rows(units.get(unit) or [])
+                    if annual:
+                        break
             if annual:
                 break
         if not annual:
@@ -283,6 +302,36 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
             ticker,
             detail="no 10-K XBRL facts found on EDGAR (pre-XBRL filer, or no annual data)",
         )
+    return {"series": by_tag, "span": span, "years": years}
+
+
+def get_financial_history(ticker: str, years: int = 15) -> str:
+    """Annual 10-K financial history from SEC EDGAR XBRL (free, keyless).
+
+    Renders ``financial_history_series`` - the structured producer - so the table
+    and any consumer of the series can never disagree. The values come from one
+    ``companyfacts`` request per filer (the per-tag concept endpoint is the
+    fallback when the larger payload fails). This is the only free source that
+    goes deeper than the ~4-5y statement history of the vendor APIs; coverage
+    starts when the filer adopted XBRL (mostly ~2009-2011 for large filers),
+    stated honestly as the reported first/last fiscal year per tag-row - early
+    years render n/a only when the tag genuinely has no FY value yet. Raises
+    ``NoMarketDataError`` (consistent with ``get_sec_filings``) on any
+    unresolvable ticker/network failure; a missing individual tag degrades to
+    'n/a', never invents. EBITDA and FCF have no us-gaap tag and are NOT printed
+    here: they are derived by the consumer and labelled derived.
+
+    Args:
+        ticker: Ticker symbol (exchange suffixes stripped for the CIK lookup;
+            non-US tickers typically have no EDGAR record).
+        years: Max fiscal years to include (default 15).
+
+    Returns:
+        A markdown table (fiscal year-end -> one column per tag row) + span.
+    """
+    series = financial_history_series(ticker, years=years)
+    by_tag = series["series"]
+    span = series["span"]
     # desc fiscal-year-ends, capped by ``years`` per tag
     all_ends = sorted({e for ann in by_tag.values() for e in ann}, reverse=True)[: years]
     head = ["fiscal end"] + list(_TAG_MAP)
@@ -291,7 +340,12 @@ def get_financial_history(ticker: str, years: int = 15) -> str:
         row = [end]
         for label in _TAG_MAP:
             v = by_tag.get(label, {}).get(end)
-            row.append(f"{v / 1e9:,.1f}B" if v is not None else "n/a")
+            if v is None:
+                row.append("n/a")
+            elif label == "Diluted EPS":
+                row.append(f"{v:,.2f}")
+            else:
+                row.append(f"{v / 1e9:,.1f}B")
         rows.append(row)
     lines = [
         f"## EDGAR XBRL financial history — {ticker} (annual 10-K, USD)",

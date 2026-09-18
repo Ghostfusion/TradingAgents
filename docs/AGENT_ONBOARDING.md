@@ -388,6 +388,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-17 `(working tree)` - **P0-1 landed: the structured SEC XBRL series and its consumer.** `sec_edgar.financial_history_series`
+  is the structured producer (`get_financial_history` renders from it - one implementation, two readers); `_TAG_MAP` grew 8 -> 12
+  rows (diluted EPS, operating income, D&A, gross profit) and the row reader accepts `USD/shares` for per-share concepts;
+  **EBITDA and FCF are derived and labelled `derived: true`** (no us-gaap tag exists - fetching one would be a fabrication).
+  `statement_parsing.sec_annual_series` maps labels to canonical series keys, keeps only the **longest run of consecutive
+  fiscal years** per key (readers index positionally, so a hole misaligns them), and calls the same `_add_roa` the vendor
+  path calls. The `fetch_ticker` merge is **opt-in** (`with_sec_series=True`) at the two leaves that need depth -
+  `get_quality_factors` (G4/G5) and `get_earnings_quality` (Dechow-Dichev) - because one EDGAR request plus an as-reported
+  USD basis is a cost the default vendor path must not pay; a test asserts the default call never touches EDGAR, the longer
+  series wins **per key** (never spliced across bases), and provenance names `source: "sec_xbrl"`. Four new tests, all
+  failing pre-change; three test doubles gained `**kw` for the new parameter. Engine suite **4410 passed / 5 skipped**,
+  executor **1105**, web **149**.
 - 2026-09-17 `(working tree)` - **All five §14 defects fixed; two were code.** (D-3) the SEC `User-Agent`'s placeholder
   contact (`research@example.com`) is replaced with the owner's real address (`sec_edgar.py:33`) - and the same defect
   class was found next door at `sp500_universe.py:122` (`contact@example.com`, Wikimedia asks for the same thing), fixed
