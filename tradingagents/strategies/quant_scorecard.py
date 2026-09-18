@@ -51,6 +51,7 @@ __all__ = [
     "SCORECARD_PURPOSE",
     "format_quant_scorecard",
     "quant_scorecard",
+    "split_scorecard_block",
 ]
 
 #: The eight engine gates, in the order the surfaces print them. An entry is
@@ -472,6 +473,26 @@ def _pair_line(pairs: list[str], trailing: str | None = None) -> str:
     if trailing:
         line = f"{line} {trailing}" if line else trailing
     return line
+
+
+def split_scorecard_block(context: str) -> tuple[str | None, str]:
+    """``(scorecard_block, rest)`` for a context whose block is **first** (§4.4).
+
+    The block is part of `computed_decision_context` because the report renders
+    that whole string as section `IVa` and the L1 registry parses it for citable
+    ground truth. The structured debate needs it in a field of its own, though,
+    so that its 3000-character bound applies to the *rest* of the context and
+    cannot silently truncate the scorecard away. Splitting here keeps both
+    readers on one string, so neither can drift from the other.
+
+    Returns ``(None, context)`` when there is no block - which is exactly the
+    gate-off case, so the caller changes nothing.
+    """
+    text = str(context or "")
+    if not text.startswith(SCORECARD_HEADER):
+        return None, text
+    block, _, rest = text.partition("\n\n")
+    return block, rest
 
 
 def format_quant_scorecard(snapshot: dict | None) -> str:

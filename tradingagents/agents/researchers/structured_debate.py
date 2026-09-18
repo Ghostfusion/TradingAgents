@@ -14,6 +14,10 @@ from collections.abc import Callable, Sequence
 from tradingagents.agents.schemas import DebaterTurnPayload, RiskDebaterTurnPayload
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
 from tradingagents.agents.utils.structured import bind_structured
+from tradingagents.strategies.quant_scorecard import (
+    SCORECARD_MAX_CHARS,
+    split_scorecard_block,
+)
 from tradingagents.strategies.debate_claim import (
     QUALITATIVE,
     VALID,
@@ -199,6 +203,24 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         for d in disputes
     ]
 
+    # WP-12 P12-4: the scorecard gets a bounded field of its OWN, so the
+    # 3000-character bound applies only to the REST of the context. Appending it
+    # to the context's tail instead would let that bound silently truncate it
+    # away — on the one path in the graph that has deterministic claim
+    # verification (§4.4). With no block on the context (the gate is off), both
+    # `scorecard` is None and `ctx_rest` is the untouched context, so nothing
+    # about this prompt changes.
+    scorecard, ctx_rest = split_scorecard_block(
+        state.get("computed_decision_context") or ""
+    )
+    scorecard_field: list[str] = []
+    if scorecard:
+        scorecard_field = [
+            "**Quant scorecard** (this run's own engine numbers, computed once - cite these keys, never re-derive or round them):",
+            _bounded(scorecard, SCORECARD_MAX_CHARS),
+            "",
+        ]
+
     body = [
         f"Resources: {ctx_or}",
         f"**Proposal Summary** (the trade under review): {_bounded(str((reg or {}).get('proposal_summary') or ''), 1500)}",
@@ -212,8 +234,9 @@ def build_turn_prompt(state: dict, role: str, stance: str) -> str:
         "**Active Dispute Ledger** (unresolved/breached, up to 5):",
         _EOL.join(dispute_lines),
         "",
+        *scorecard_field,
         "**Computed decision context (deterministic, advisory - ground your argument in these numbers, never invent your own):**",
-        f"{_bounded(state.get('computed_decision_context') or '', 3000)}",
+        f"{_bounded(ctx_rest, 3000)}",
         "",
         "**Execution Directives:**",
         "- If challenging an opponent's claim: reference the specific metric from the Preceding Opponent Turn or Active Dispute Ledger and cite the corresponding ground_truth_key demonstrating why their thesis fails.",

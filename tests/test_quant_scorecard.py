@@ -678,6 +678,78 @@ def test_the_block_becomes_citable_ground_truth():
     assert gt["risk_coverage"] == 0.45
 
 
+def test_the_debate_prompt_keeps_the_scorecard_when_the_context_is_truncated():
+    """P12-4's acceptance: the 3000-char bound applies to the REST of the context.
+
+    Without a field of its own, the block would sit inside that bound and could
+    be truncated away — on the one path in the graph with deterministic claim
+    verification.
+    """
+    from tradingagents.agents.researchers.structured_debate import build_turn_prompt
+
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        coverage={"trade": 0.95, "risk": 0.45},
+        status="RESEARCH_ONLY",
+    )
+    block = qs.format_quant_scorecard(snap)
+    filler = "\n\n".join(
+        f"Section {i} of the deterministic context. " + ("y" * 500) for i in range(12)
+    )
+    assert len(filler) > 3000
+    state = {
+        "computed_decision_context": block + "\n\n" + filler,
+        "asset_type": "stock",
+        "trade_date": DATE,
+    }
+
+    prompt = build_turn_prompt(state, "bull", "bullish")
+
+    assert "**Quant scorecard**" in prompt
+    scorecard_field = prompt.split("**Quant scorecard**")[1].split(
+        "**Computed decision context"
+    )[0]
+    assert "trade_score=67.925" in scorecard_field
+    assert "risk_score=35.0" in scorecard_field
+    # the block is NOT left inside the bounded context as well
+    ctx_field = prompt.split("**Computed decision context")[1]
+    assert "trade_score=67.925" not in ctx_field
+    # and the rest is still bounded (the header is followed by the bounded body)
+    ctx_body = ctx_field.splitlines()[1] if len(ctx_field.splitlines()) > 1 else ""
+    assert len(ctx_body) <= 3100, len(ctx_body)
+
+
+def test_the_debate_prompt_is_unchanged_when_there_is_no_scorecard():
+    """Gate off: no block on the context, so no new field and no reformatting."""
+    from tradingagents.agents.researchers.structured_debate import build_turn_prompt
+
+    state = {
+        "computed_decision_context": "Computed regime gate: verdict=tradable pass=True",
+        "asset_type": "stock",
+        "trade_date": DATE,
+    }
+    prompt = build_turn_prompt(state, "bull", "bullish")
+    assert "**Quant scorecard**" not in prompt
+    assert "Computed regime gate: verdict=tradable pass=True" in prompt
+
+
+def test_splitting_the_block_returns_the_rest_untouched():
+    snap = _render(scores={"fundamental": 92.0})
+    block = qs.format_quant_scorecard(snap)
+    rest = "Computed regime gate: verdict=tradable"
+    got_block, got_rest = qs.split_scorecard_block(f"{block}\n\n{rest}")
+    assert got_block == block
+    assert got_rest == rest
+    # no block -> nothing is split, which is the gate-off case
+    assert qs.split_scorecard_block(rest) == (None, rest)
+    assert qs.split_scorecard_block("") == (None, "")
+
+
 def test_the_block_is_bounded_even_with_every_engine_absent():
     """Every engine enabled, none able to measure: `NA` everywhere, nothing numeric."""
     from tradingagents.agents.researchers.structured_debate import (
