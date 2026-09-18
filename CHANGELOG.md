@@ -14,6 +14,17 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**The four findings from building WP-12, resolved by category (2026-09-18).** The owner's framing: they separate **implementation defects, parser-contract defects, semantic-state defects, and test-assumption defects** — and each is closed differently.
+
+- **D-11 — confirmed implementation defect; semantic resolution pending.** Recorded as a **contract decision with a fixed sequence**, not a timing patch: establish *where the authoritative catalyst-window value belongs*, then whether it stays an `EventScore` input/output, and **only then** change the execution ordering or context compilation. The hard constraint is that no step may move the decided `RegimeScore → EventScore` boundary by accident — a naive timing fix would quietly restore the regime gate's event veto. The printed `catalyst_window=False` therefore stays as it is until the decision (`ResearchLayerWiring.md` §6.4).
+- **Parser examples — three confirmed contract/fixture defects; corrected and regression-tested.** `tests/test_scorecard_contracts.py` now freezes the parser's **real** behaviour rather than our formatting: a non-numeric pair before a numeric one is swallowed into that pair's key; a leading `+` registers **no key at all**; an ISO date registers as its **year**. If the parser ever changes, that file fails first and the block formats get revisited deliberately instead of drifting.
+- **Engine state — the semantic distinction between `DISABLED` and `NA` is now named.** `quant_scorecard.engine_state` returns `DISABLED` (gate off — not part of the scorecard), `MEASURED` (enabled and produced evidence) or `NA` (enabled, measurement could not be produced — **missing evidence**). Every entry carries it, the card reports it, and `scorecard_status` returns `measured`/`unmeasured` alongside. Conflating `DISABLED` with `NA` is what would let an engine that *failed to measure* disappear from the count and make a partial scorecard look complete — which is exactly what `PARTIAL` exists to prevent.
+- **MFI — a test-fixture assumption invalidated.** The monotonicity classification is now **demonstrated rather than presumed**: a declared non-monotonic input must show a raw value that aligns *lower* than a smaller raw value, checked against the producer's own ramp. Writing it caught a second assumption of the same kind — the sweep covered `0..100`, but Williams %R lives on `-100..0`, so the test now sweeps both sign conventions and fails loudly on a flat curve instead of quietly passing.
+
+Tests: `tests/test_scorecard_contracts.py` new (9), and 187 passed across it, `test_quant_scorecard.py`, `test_score_disagreement.py`, `test_score_history.py`, `test_trade_score.py` and `test_reporting.py`.
+
+**Web impact**: none — `engine_state` is additive inside `run_card.json`'s `quant_scorecard` block, which is off by default.
+
 **WP-12 `P12-10` + `P12-12` — level 2 in the report, and the non-monotonic mapping as evidence (2026-09-18).**
 
 - **`P12-10` — level 2.** Report section **`V. Engine score detail`**: each engine's categories beside the measurements they came from, with their weights, so the composite can be **recomputed rather than trusted**. It renders the results the run already computed — **no new producer** — and skips gated-off engines entirely (they are not part of the scorecard), reporting an enabled-but-unmeasurable engine as `NA` with its reason.

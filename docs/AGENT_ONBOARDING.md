@@ -388,6 +388,21 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The four WP-12 findings resolved by category** (owner's framing: implementation defects vs
+  parser-contract defects vs semantic-state defects vs test-assumption defects). **(1) D-11 stays OPEN as a contract decision
+  with a fixed sequence** - establish where the authoritative catalyst-window value belongs, then whether it stays an
+  `EventScore` input/output, and ONLY THEN change the ordering/compilation; the hard constraint is that no step may move the
+  decided `RegimeScore -> EventScore` boundary by accident (a naive timing fix would quietly restore the regime veto). The
+  printed `catalyst_window=False` stays until then (`ResearchLayerWiring.md` §6.4). **(2) The three parser traps are frozen as
+  tests** in the new `tests/test_scorecard_contracts.py`, which pins the PARSER's real behaviour rather than our formatting: a
+  non-numeric pair before a numeric one is swallowed; a leading `+` registers no key at all; an ISO date registers as its year.
+  **(3) The three engine states are now NAMED** - `quant_scorecard.engine_state` returns `DISABLED` / `MEASURED` / `NA`, every
+  entry carries it, the card reports it, and `scorecard_status` also returns `measured`/`unmeasured`. Conflating DISABLED with
+  NA is what would let an engine that FAILED TO MEASURE vanish from the count and make a partial scorecard look complete.
+  **(4) Monotonicity is now DEMONSTRATED, not presumed** - a declared non-monotonic input must show a raw value aligning lower
+  than a smaller raw value, checked against the producer's own ramp; writing it caught a second assumption of the same kind
+  (the sweep covered 0..100 but Williams %R lives on -100..0), so it now sweeps both conventions and fails loudly on a flat
+  curve. `tests/test_scorecard_contracts.py` new (9); 187 passed across the WP-12 test files.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-10` + `P12-12` landed: level 2 in the report, and the non-monotonic mapping as
   evidence.** Report section **`V. Engine score detail`** renders each engine's categories beside the measurements they came from,
   with their weights, so the composite can be RECOMPUTED rather than trusted (no new producer; gated-off engines are skipped, an

@@ -471,6 +471,23 @@ Vector status: RESEARCH_ONLY
 Movement: UNAVAILABLE
 ```
 
+**Three engine states, and the distinction is load-bearing** (owner, 2026-09-18).
+`quant_scorecard.engine_state` names them, and `P12-7`'s renderer and the card both
+read them:
+
+| Engine state | Meaning | Scorecard participation |
+| --- | --- | --- |
+| **`DISABLED`** | the gate is off; the engine is intentionally not running | not applicable — no row at all |
+| **`MEASURED`** | enabled, and produced evidence | included |
+| **`NA`** | enabled, but measurement could not be produced | missing evidence — contributes to `PARTIAL` |
+
+Conflating `DISABLED` with `NA` is what would let an engine that **failed to
+measure** disappear from the count and make a partial scorecard look complete —
+which is exactly what `PARTIAL` exists to prevent (master rule 3). A `DISABLED`
+engine still makes the scorecard `PARTIAL` rather than `COMPLETE`, because the
+status describes how much of the **intended** evidence is present, and an engine
+that was never switched on is evidence that is not there.
+
 - **`Scorecard status`** (enablement) is `DISABLED` (gate off), `PARTIAL` (an
   engine's gate is off, or an engine could not measure), or `COMPLETE` (every
   engine gate on and every engine measured).
@@ -585,19 +602,59 @@ never a composite input — and the post-run readers that *do* hold the snapshot
 pass it in and get the engine measured. The one rule that matters is that the
 absence is **named**, which is rule 2.
 
-**What D-11 does not settle, and should not be decided here.** Whether the veto
-in `regime_gate_read` should be revived, removed, or printed as unavailable is a
-separate question about a live advisory surface:
+### 6.4 The D-11 contract decision — a sequence, not a fix (owner, 2026-09-18)
 
-- reviving it re-introduces the event read into `RegimeScore`, which the owner's
-  2026-09-17 decision moved to `EventScore` (*"RegimeScore describes the
-  environment, EventScore describes the catalyst"*);
-- removing the flag changes a shipped context string, which §9 D3 forbids doing
-  as a side effect of this rollout;
-- printing `unavailable` instead of `False` also changes that string.
+**D-11 is a confirmed runtime defect whose resolution is a contract decision.**
+The owner's instruction, recorded here as a constraint on the workstream:
 
-All three are owner decisions. `P12-1` takes none of them, and the design above
-does not depend on any of them.
+> Resolve the implementation bug and the semantic contract **separately**:
+> 1. first establish **where the authoritative catalyst-window value belongs**;
+> 2. then decide whether it remains an `EventScore` input/output;
+> 3. **only then** change the execution ordering or context compilation.
+
+**The hard constraint: no step may alter the decided `RegimeScore → EventScore`
+responsibility boundary by accident.** The 2026-09-17 decision stands —
+*RegimeScore describes the environment, EventScore describes the catalyst* — and
+the fact that a naive timing fix would quietly restore the regime gate's event veto
+is precisely why the ordering is fixed first and the code second. The danger here
+is unlike the parser and fixture findings below: those were contained by a test,
+whereas this one can move an architecture boundary that was already decided.
+
+**Step 1 — the question, whose answers are not equivalent:**
+
+| Where the window belongs | What follows |
+| --- | --- |
+| the overlay snapshot (`catalyst.build_catalyst_snapshot`) | it is an **event** fact: `EventScore` owns it, and the context reads the *event* read rather than feeding the regime veto |
+| `regime_gate_read`'s own `catalyst_window` argument | it is a **regime** input — which reverses the 2026-09-17 decision and therefore needs that reversal recorded the way §9.1 records D3's |
+| nowhere but the printed context | the flag leaves the gate entirely and the context prints the event read instead |
+
+**Steps 2 and 3 are not to be pre-empted.** Whichever row is chosen, the ordering
+change is "compute the catalyst snapshot before the context is compiled and have
+the context read it" — and only under row 2 does that also mean re-feeding the
+regime veto.
+
+**Until then D-11 stays open, and the printed `catalyst_window=False` stays as it
+is.** Changing that line in either direction is a shipped-context-string change,
+which §9 D3's rule forbids doing as a side effect of anything else; it waits for
+the decision rather than riding along.
+
+### 6.5 How the four findings are characterised (owner, 2026-09-18)
+
+> **D-11: confirmed implementation defect; semantic resolution pending.**
+> **Parser examples: three confirmed contract/fixture defects; corrected and
+> regression-tested.**
+> **Engine state: semantic distinction between DISABLED and NA required for
+> scorecard correctness and `PARTIAL`.**
+> **MFI: test-fixture assumption invalidated; fixture corrected, reinforcing that
+> monotonicity must be demonstrated rather than presumed.**
+
+**The common thread, and it is the useful one: this system is increasingly
+discovering its contracts by execution rather than by prose.** Every one of the
+four was found by running something — the graph, the parser, the engine, the ramp —
+and none by reading the design. The three that are closed are closed because a test
+now holds them; the one that is open is open because its fix would move a boundary
+that was decided in prose, and that is the category where execution is not
+sufficient authority.
 
 ---
 

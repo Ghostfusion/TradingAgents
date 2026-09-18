@@ -532,7 +532,7 @@ def _render(scores=None, coverage=None, status=None, enabled=None):
         ).get("score")
     engines = {}
     for name in qs.ENGINE_GATES:
-        engines[name] = {
+        entry = {
             "engine": name,
             "gate": qs.ENGINE_GATES[name],
             "enabled": name in enabled,
@@ -541,6 +541,9 @@ def _render(scores=None, coverage=None, status=None, enabled=None):
             "status": status if name == "trade" else None,
             "result": {"status": status} if name == "trade" else None,
         }
+        # the producer derives this; the fixture mirrors it rather than omitting it
+        entry["state"] = qs.engine_state(entry)
+        engines[name] = entry
     return {"engines": engines, "trade_date": DATE, "ticker": TICKER}
 
 
@@ -1170,6 +1173,56 @@ def test_the_report_shows_level_two_only_when_the_gate_is_on(tmp_path):
     assert "## V. Engine score detail" in on.read_text(encoding="utf-8")
     off = write_report_tree(state, "TST", tmp_path / "off", config={})
     assert "## V. Engine score detail" not in off.read_text(encoding="utf-8")
+
+
+def test_the_three_engine_states_are_named_not_inferred():
+    """`DISABLED` / `MEASURED` / `NA` — the distinction `PARTIAL` rests on.
+
+    Conflating `DISABLED` with `NA` is what would let an engine that **failed to
+    measure** disappear from the count and make a partial scorecard look complete.
+    """
+    snap = _render(
+        scores={"fundamental": 92.0},
+        enabled={"trade", "fundamental", "technical"},
+        status="RESEARCH_ONLY",
+    )
+    engines = snap["engines"]
+    assert engines["fundamental"]["state"] == qs.STATE_MEASURED
+    assert engines["technical"]["state"] == qs.STATE_NA  # enabled, unmeasured
+    assert engines["regime"]["state"] == qs.STATE_DISABLED  # gate off
+    # the state is derivable from the entry alone, for a legacy snapshot
+    assert qs.engine_state({"enabled": False, "score": 10.0}) == qs.STATE_DISABLED
+    assert qs.engine_state({"enabled": True, "score": 0.0}) == qs.STATE_MEASURED
+    assert qs.engine_state({"enabled": True, "score": None}) == qs.STATE_NA
+
+
+def test_a_missing_measurement_makes_it_partial_even_with_no_gate_off():
+    """The case the distinction exists for: everything enabled, one engine NA."""
+    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every["event"] = None  # enabled, but it could not measure
+    snap = _render(scores=every, enabled=set(qs.ENGINE_GATES), status="RESEARCH_ONLY")
+    status = qs.scorecard_status(snap)
+    assert status["scorecard_status"] == "PARTIAL"
+    assert status["unmeasured"] == ["event"]
+    assert status["disabled"] == []
+    assert "event" in status["enabled"]
+
+
+def test_the_card_reports_each_engine_state():
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    snap = _render(
+        scores={"fundamental": 92.0},
+        enabled={"trade", "fundamental", "technical"},
+        status="RESEARCH_ONLY",
+    )
+    block = _run_card_quant_scorecard(
+        {"quant_scorecard": snap}, {"enable_quant_scorecard": True}
+    )
+    assert block["engines"]["fundamental"]["state"] == qs.STATE_MEASURED
+    assert block["engines"]["technical"]["state"] == qs.STATE_NA
+    assert block["engines"]["regime"]["state"] == qs.STATE_DISABLED
+    assert block["scorecard_status"] == "PARTIAL"
 
 
 def test_the_block_is_bounded_even_with_every_engine_absent():

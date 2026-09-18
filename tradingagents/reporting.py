@@ -1111,6 +1111,7 @@ def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
         "engines": {
             name: {
                 "enabled": entry.get("enabled"),
+                "state": entry.get("state"),
                 "score": entry.get("score"),
                 "coverage": entry.get("coverage"),
                 "band": entry.get("band"),

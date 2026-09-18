@@ -89,6 +89,36 @@ EVENT_NO_SNAPSHOT = (
     "it runs - pass catalyst_snapshot to measure this engine"
 )
 
+#: §4.6's engine vocabulary. Three states, and the distinction is load-bearing:
+#: an engine whose gate is **off** is not part of the scorecard at all, while an
+#: engine that is enabled and could not measure is **missing evidence**. Conflating
+#: them would let an engine that failed to measure disappear from the count and
+#: make a partial scorecard look complete - which is exactly what `PARTIAL` exists
+#: to prevent (master rule 3).
+STATE_DISABLED = "DISABLED"  # gate off; intentionally not running
+STATE_MEASURED = "MEASURED"  # enabled, and produced evidence
+STATE_NA = "NA"  # enabled, but measurement could not be produced
+
+
+def engine_state(entry: dict | None) -> str:
+    """`DISABLED` | `MEASURED` | `NA` for one engine entry.
+
+    | state | meaning | scorecard participation |
+    | --- | --- | --- |
+    | `DISABLED` | the gate is off; the engine is intentionally not running | not applicable - no row at all |
+    | `MEASURED` | enabled and produced evidence | included |
+    | `NA` | enabled, but measurement could not be produced | missing evidence - contributes to `PARTIAL` |
+
+    A `DISABLED` engine still makes the scorecard `PARTIAL` rather than `COMPLETE`,
+    because the evidence set is incomplete against the full engine set: the status
+    describes how much of the intended evidence is present, and an engine that was
+    never switched on is evidence that is not there.
+    """
+    e = entry or {}
+    if not e.get("enabled"):
+        return STATE_DISABLED
+    return STATE_MEASURED if e.get("score") is not None else STATE_NA
+
 
 def _cfg_or_ambient(cfg: dict | None) -> dict:
     """The config to read gates from: the caller's, else the ambient one."""
@@ -136,6 +166,8 @@ def _entry(
         "result": result,
     }
     out.update(extra)
+    # Computed last, because `extra` may carry `enabled=False`.
+    out["state"] = engine_state(out)
     return out
 
 
@@ -517,12 +549,16 @@ def scorecard_status(snapshot: dict | None) -> dict:
     placeholder: `P12-8` adds the store that can make it real.
     """
     engines = (snapshot or {}).get("engines") or {}
-    enabled = [name for name, e in engines.items() if e.get("enabled")]
-    disabled = [name for name, e in engines.items() if not e.get("enabled")]
-    measured = [n for n in enabled if (engines.get(n) or {}).get("score") is not None]
-    if not enabled:
+    states = {
+        name: (entry.get("state") or engine_state(entry))
+        for name, entry in engines.items()
+    }
+    disabled = [n for n, s in states.items() if s == STATE_DISABLED]
+    missing = [n for n, s in states.items() if s == STATE_NA]
+    measured = [n for n, s in states.items() if s == STATE_MEASURED]
+    if not measured and not missing:
         status = "DISABLED"
-    elif disabled or len(measured) != len(enabled):
+    elif disabled or missing:
         status = "PARTIAL"
     else:
         status = "COMPLETE"
@@ -530,8 +566,12 @@ def scorecard_status(snapshot: dict | None) -> dict:
     movement = (snapshot or {}).get("movement") or {}
     return {
         "scorecard_status": status,
-        "enabled": enabled,
+        "enabled": [n for n in states if n not in disabled],
         "disabled": disabled,
+        # the engines that were meant to measure and could not - the ones that
+        # make PARTIAL meaningful rather than cosmetic
+        "unmeasured": missing,
+        "measured": measured,
         "vector_status": composite.get("status") or "UNAVAILABLE",
         "movement": movement.get("movement") or "UNAVAILABLE",
         "movement_reason": movement.get("reason"),
