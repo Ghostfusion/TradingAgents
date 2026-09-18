@@ -96,6 +96,15 @@ class AgentState(MessagesState):
         "the structured debate (the last bounded to 3000 chars) - parsed into "
         "the L1 ground-truth registry, and rendered as report section IVa",
     ]
+    quant_scorecard: Annotated[
+        dict,
+        "WP-12: the ONE score snapshot for this run - every engine's own result, "
+        "computed once before the graph and read by the debate block, the report "
+        "card and the leaf tool so all three print the same number. Declared here "
+        "because native LangGraph SILENTLY DROPS undeclared keys (see "
+        "docs/AGENT_ONBOARDING.md, 2026-08-28). Built only when "
+        "`enable_quant_scorecard` is on; absent otherwise",
+    ]
     risk_independent_stances: Annotated[
         dict, "Independent pre-debate risk stances (aggressive/conservative/neutral), no cross-talk"
     ]

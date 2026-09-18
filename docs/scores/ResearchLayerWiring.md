@@ -281,13 +281,29 @@ as verifiable ground truth, (b) human-readable in `IVa`, and (c) **bounded**.
 
 ```
 Quant scorecard (deterministic, advisory - evidence for review, not an order):
-trade_score=76.75 trade_status=RESEARCH_ONLY trade_coverage=0.95
+Purpose: the highest-level quantitative evidence summary, for human research review - not an order, not a position size and not a gate.
+trade_score=76.75 trade_coverage=0.95 trade_status=RESEARCH_ONLY
 fundamental_score=92.0 fundamental_coverage=1.00
 technical_score=85.0 technical_coverage=0.95
 regime_score=78.0 regime_coverage=0.83
 risk_score=35.0 risk_coverage=0.45
 absent=none
 ```
+
+**One ordering rule inside a line, and it is not cosmetic.**
+`_parse_key_value_lines`' key pattern is case-insensitive and admits spaces, so
+on the line `trade_score=… trade_status=RESEARCH_ONLY trade_coverage=…` the key it
+actually recovers is **`research_only_trade_coverage`** — `trade_coverage` never
+exists in the registry, and a key no engine ever published takes its place.
+Verified by running the real parser over the first draft of this very example,
+which produced exactly that. So a non-numeric `key=value` goes **last on its
+line**, prose that must not be parsed stays on its own line, and a name list
+carries no digits. `P12-3` implements the rule and its test parses the rendered
+block with the real parser rather than asserting the text.
+
+An engine whose **gate is off** is not printed at all — it is not part of the
+scorecard — while an enabled engine that could not measure prints `NA` and is
+named in `absent=`.
 
 Three properties are non-negotiable:
 

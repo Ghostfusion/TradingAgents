@@ -12,6 +12,22 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Added
+
+**WP-12 `P12-1`–`P12-3` — the research layer's one score snapshot, its state channel, and the block (2026-09-18).** The first three items of `docs/scores/ResearchLayerWiring.md` §7, all governed by `enable_quant_scorecard` (**default off**), so with the gate off the context and the card are byte-identical to a pre-scorecard tree.
+
+- **`P12-1` — `strategies/quant_scorecard.py::quant_scorecard(ticker, trade_date, cfg)`.** The single producer of the engines' numbers on the research surface: every engine is read through **its own public entry point**, with the run's date, and its result is returned **verbatim**. No alignment, no re-weighting, no substitution, no derived quantity — the module computes nothing itself. An engine whose gate is off, or which cannot measure, is absent **with its reason** (`NA ≠ 0`), and a legitimate `0.0` stays a measured value — both directions are tested, because treating a real zero as missing is the same defect inverted.
+- **`P12-2` — the state channel.** `quant_scorecard` is declared on `AgentState` and built in `_run_graph` **before** `_compiled_decision_context`, so every reader downstream is handed the same numbers. The undeclared-channel trap is **tested, not assumed**: the test writes the snapshot in one node of a real `StateGraph` and reads it back in the next, which is exactly what fails if the declaration is removed.
+- **`P12-3` — the block, first in the output.** `format_quant_scorecard` renders the §4.1 block and `_compiled_decision_context` **prepends** it, because `structured_debate` bounds the whole context to 3000 chars and a tail-appended block can be silently truncated on the one path with deterministic claim verification.
+- **A parser trap found while implementing the block, and fixed.** §4.1's own example line (`trade_score=… trade_status=RESEARCH_ONLY trade_coverage=…`) parses to the key **`research_only_trade_coverage`**: `_parse_key_value_lines`' key pattern is case-insensitive and admits spaces, so `trade_coverage` never registers and a key no engine published takes its place. The doc's example is corrected, the rule (a non-numeric pair goes **last** on its line, digit-free) is encoded in the renderer, and the test parses the rendered block with the **real parser** instead of asserting its text.
+- **The event engine is absent-with-a-reason on this path** (D-11, above): it consumes the catalyst snapshot, which is stamped after the graph finishes. That costs the composite nothing — `trade_score` reads only `{fundamental, technical, regime, risk}` — and post-run readers that hold the snapshot pass it in and get the engine measured.
+
+Verified live: the real `_compiled_decision_context` with a snapshot on state returns the block as its **first** section (460 chars); `ground_truth_from_state` recovers all ten score keys at the engines' exact values (`trade_score=67.925`, not a rounded copy); and the same call with no snapshot on state contains no block at all.
+
+Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
+
+**Web impact**: none — no tool name, CLI flag or JSON shape changed. The gate is off by default, and `run_card.json` is untouched by these three items (the card key is `P12-6`).
+
 ### Fixed
 
 **D-11 — the compiled context's `catalyst_window` can never be `True`; the `2c05701` "FIXED" claim for defect 16 is wrong (2026-09-18).** Found while building WP-12, by executing the path rather than reading the ledger.

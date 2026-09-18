@@ -302,6 +302,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EVENT_STATE": "enable_event_state",
     "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
+    "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
     # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
     # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
     # Empty = the mirror is inert (nothing is ever suppressed).
@@ -1083,6 +1084,16 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # WP-5 (§5.4): the inverted 0-100 RiskScore over the owner's eight
         # categories (100 = low risk). Off by default.
         "enable_risk_score": False,
+        # WP-12 (docs/scores/ResearchLayerWiring.md §3.4): the one score snapshot
+        # the research layer reads - the eight engines computed ONCE and rendered
+        # into `computed_decision_context`, so the debate's number, the card's
+        # number and the leaf's number are provably one number (defects D-6/D-7/D-8).
+        # Off by default, and the release invariant is stronger than "off": with
+        # this gate off the context and the card are BYTE-IDENTICAL to a
+        # pre-scorecard tree (§9.3). It governs the scorecard SURFACE only - the
+        # eight engine gates above decide which engines populate it, and this gate
+        # never implies them (§9 D1).
+        "enable_quant_scorecard": False,
         # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
         # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
         # to mirror the smallest observed count of the pair instead. Empty (default)

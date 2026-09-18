@@ -388,6 +388,22 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-1`-`P12-3` landed: one score snapshot, its state channel, and the block.** All gated by
+  the new `enable_quant_scorecard` (**default off**, `default_config.py`, `_ENV_OVERRIDES` row and `.env.example` row added), so
+  gate-off stays byte-identical to a pre-scorecard tree. **`P12-1`**: `strategies/quant_scorecard.py::quant_scorecard(ticker,
+  trade_date, cfg, *, catalyst_snapshot=None)` - the ONE producer for the engines on the research surface. Every engine is read
+  through its own public entry point with the run's date and its result returned **verbatim**; the module computes nothing
+  (no alignment, no re-weighting, no substitution). Each entry carries `enabled` (gate on?) separately from `score` (did it
+  measure?), because a gated-off engine is NOT part of the scorecard while an enabled engine that cannot measure is ABSENT
+  EVIDENCE - the renderer and §4.6's status both need the distinction. **`P12-2`**: `quant_scorecard` declared on `AgentState`
+  and built in `_run_graph` before `_compiled_decision_context`; the undeclared-channel trap is tested by a real `StateGraph`
+  round trip. **`P12-3`**: `format_quant_scorecard` renders the §4.1 block and `_compiled_decision_context` PREPENDS it
+  (`structured_debate` bounds the context to 3000 chars, so a tail block can be truncated away). **A parser trap found and
+  fixed:** §4.1's own example line parses to the key `research_only_trade_coverage` - `_parse_key_value_lines` is
+  case-insensitive and its key class admits spaces - so `trade_coverage` never registers. Rule now encoded: a non-numeric
+  `key=value` goes LAST on its line, digit-free. Verified live: the real context returns the block first (460 chars),
+  `ground_truth_from_state` recovers all ten keys at exact values (`trade_score=67.925`), and a state with no snapshot contains
+  no block. `tests/test_quant_scorecard.py` new, 27 tests.
 - 2026-09-18 `(working tree)` - **D-11: the compiled context's `catalyst_window` can never be `True` - and the `2c05701` "FIXED"
   claim for defect 16 is wrong.** Found while building WP-12, by executing the path instead of reading the ledger.
   `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`),

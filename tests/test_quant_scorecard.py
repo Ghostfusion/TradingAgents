@@ -1,0 +1,696 @@
+"""`quant_scorecard` (WP-12 `P12-1`) — the one producer for the research layer.
+
+Acceptance (`docs/scores/ResearchLayerWiring.md` §7, verbatim): *a unit test
+scoring a fixed component set returns the engines' own numbers; no arithmetic in
+the module.*
+
+What is actually load-bearing here, and why each assertion exists:
+
+- **The engines' own numbers come back verbatim.** A snapshot that re-derived,
+  rounded or re-weighted anything would be a second producer for a number that
+  already has one (master rule 15) — the defect D-8 the whole workstream exists
+  to remove.
+- **The date-dependent engines are handed the run's date, not the clock.** This
+  is defect D-7 re-guarded on the new path: a test that pins a function's output
+  but not its arguments cannot see that class (§6.2).
+- **`NA` is not `0`.** A gated-off or unmeasurable engine is absent **with its
+  reason** — never a zero, never a neutral 50 — and its absence reaches the
+  composite as `None`.
+- **The composite is `trade_score`'s number over four engines**, never by
+  adjacency (master rule 17): `sentiment`/`news`/`event` are measured but never
+  fed to it.
+
+Offline and deterministic: every component helper and engine entry point is
+patched, so no vendor call and no clock. Each test fails under a mutation of the
+code it guards (plan §11).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tradingagents.strategies import quant_scorecard as qs
+
+TICKER = "MSFT"
+DATE = "2026-07-22"
+
+#: Every engine gate on — the fully-gated case.
+ALL_ON = dict.fromkeys(qs.ENGINE_GATES.values(), True)
+
+#: Distinctive literals so a swapped value cannot pass: each is unique to its
+#: engine, and none is reachable by arithmetic over the others.
+SCORES = {
+    "fundamental": 71.0,
+    "technical": 82.0,
+    "regime": 78.0,
+    "risk": 35.0,
+    "sentiment": 63.0,
+    "news": 55.0,
+    "event": 41.0,
+}
+
+FUNDAMENTAL_RESULT = {
+    "ticker": TICKER,
+    "status": "RESEARCH_ONLY",
+    "scores": {TICKER: SCORES["fundamental"]},
+    "coverage": {TICKER: 0.90},
+    "panel_n": 9,
+    "basis": "peer panel as of the run date",
+}
+TECHNICAL_RESULT = {
+    "status": "advisory",
+    "score": SCORES["technical"],
+    "coverage": 0.95,
+    "bands": "favourable",
+}
+REGIME_RESULT = {
+    "status": "advisory",
+    "score": SCORES["regime"],
+    "coverage": 0.83,
+    "band": "neutral",
+}
+RISK_RESULT = {
+    "status": "advisory",
+    "score": SCORES["risk"],
+    "coverage": 0.45,
+    "bands": "unfavourable",
+    "uncertainty": 0.31,
+}
+SENTIMENT_RESULT = {
+    "status": "advisory",
+    "score": SCORES["sentiment"],
+    "coverage": 0.50,
+    "bands": "favourable",
+    "quadrant": "T1",
+}
+NEWS_RESULT = {"status": "advisory", "score": SCORES["news"], "coverage": 0.40}
+EVENT_RESULT = {
+    "status": "advisory",
+    "score": SCORES["event"],
+    "coverage": 0.70,
+    "band": "neutral",
+    "hard_block": None,
+}
+
+
+class _Calls:
+    """Records every argument the snapshot passes to a producer."""
+
+    def __init__(self) -> None:
+        self.calls: dict[str, list[tuple]] = {}
+
+    def record(self, name: str, *args):
+        self.calls.setdefault(name, []).append(args)
+
+
+@pytest.fixture()
+def wired(monkeypatch):
+    """Patch every producer the snapshot reads, and record its arguments."""
+    calls = _Calls()
+
+    def _fundamental(ticker, date=None):
+        calls.record("fundamental_score_for_ticker", ticker, date)
+        return dict(FUNDAMENTAL_RESULT)
+
+    def _technical_components(ticker):
+        calls.record("_technical_components", ticker)
+        return {"rsi": 61.0, "mfi": 55.0}
+
+    def _risk_components(ticker):
+        calls.record("_risk_components", ticker)
+        return {"beta": 1.1}
+
+    def _regime_components():
+        calls.record("_regime_components")
+        return {"vix_pct": 0.4}
+
+    def _regime_two_paths():
+        return {"disagree": False, "path_a": "neutral", "path_b": "neutral"}
+
+    def _sentiment_components(ticker, date=None, *, days=120):
+        calls.record("_sentiment_components", ticker, date)
+        return {"stocktwits": 0.2}, "eodhd"
+
+    def _news_components(ticker, date=None, *, days=30):
+        calls.record("_news_components", ticker, date)
+        return {"sentiment": 0.1}
+
+    def _sentiment_price_read(ticker):
+        return 0.05
+
+    monkeypatch.setattr(
+        "tradingagents.strategies.fundamental_score.fundamental_score_for_ticker",
+        _fundamental,
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._technical_components",
+        _technical_components,
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.technical_score.technical_score",
+        lambda vals: dict(TECHNICAL_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._risk_components", _risk_components
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.risk_score.risk_score",
+        lambda vals: dict(RISK_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._regime_components",
+        _regime_components,
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._regime_two_paths",
+        _regime_two_paths,
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.regime_score.regime_score",
+        lambda vals: dict(REGIME_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._sentiment_components",
+        _sentiment_components,
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._sentiment_price_read",
+        _sentiment_price_read,
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.sentiment_score.sentiment_score",
+        lambda vals, source=None, price_read=None: dict(SENTIMENT_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._news_components",
+        _news_components,
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.news_score.news_score",
+        lambda vals: dict(NEWS_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.event_state.event_state",
+        lambda vals: dict(EVENT_RESULT),
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.event_state.event_components",
+        lambda snap, opex=None: {"earnings": 1},
+    )
+    monkeypatch.setattr(
+        "tradingagents.strategies.derivatives_gamma.opex_status", lambda d: "opex"
+    )
+    return calls
+
+
+def _snapshot(cfg=None, **kw):
+    return qs.quant_scorecard(
+        TICKER, DATE, cfg if cfg is not None else ALL_ON, **kw
+    )
+
+
+# ---------------------------------------------------------------------------
+# the engines' own numbers, verbatim
+# ---------------------------------------------------------------------------
+
+
+def test_every_engine_returns_its_own_number_and_its_own_result(wired):
+    snap = _snapshot(catalyst_snapshot={"earnings": {"days_until": 3}})
+    for engine, expected in SCORES.items():
+        entry = snap["engines"][engine]
+        assert entry["score"] == expected, engine
+        assert entry["reason"] is None, engine
+    # the result dicts come back untouched, so a reader can recompute
+    assert snap["engines"]["technical"]["result"] == TECHNICAL_RESULT
+    assert snap["engines"]["risk"]["result"] == RISK_RESULT
+    assert snap["engines"]["risk"]["uncertainty"] == 0.31
+    assert snap["engines"]["regime"]["two_paths"]["disagree"] is False
+
+
+def test_the_band_key_each_engine_uses_is_read_correctly(wired):
+    """`technical_score`/`risk_score` return `bands`; the others `band`.
+
+    Getting this wrong prints `band=None` for two engines while their scores
+    look right — the number would read as one without a band at all.
+    """
+    snap = _snapshot(catalyst_snapshot={"earnings": {"days_until": 3}})
+    engines = snap["engines"]
+    assert engines["technical"]["band"] == "favourable"
+    assert engines["risk"]["band"] == "unfavourable"
+    assert engines["regime"]["band"] == "neutral"
+    assert engines["event"]["band"] == "neutral"
+
+
+def test_the_date_dependent_engines_are_read_through_the_runs_date(wired):
+    """D-7 re-guarded on this path: the run's date, never the wall clock."""
+    _snapshot()
+    assert wired.calls["fundamental_score_for_ticker"] == [(TICKER, DATE)]
+    assert wired.calls["_sentiment_components"] == [(TICKER, DATE)]
+    assert wired.calls["_news_components"] == [(TICKER, DATE)]
+    assert wired.calls["_technical_components"] == [(TICKER,)]
+    assert wired.calls["_risk_components"] == [(TICKER,)]
+
+
+def test_the_snapshot_is_keyed_on_the_run_date(wired):
+    snap = _snapshot()
+    assert snap["trade_date"] == DATE
+    assert snap["ticker"] == TICKER
+
+
+# ---------------------------------------------------------------------------
+# NA is not 0
+# ---------------------------------------------------------------------------
+
+
+def test_a_gated_off_engine_is_absent_with_its_gate_named(wired):
+    cfg = dict(ALL_ON)
+    cfg["enable_regime_score"] = False
+    snap = _snapshot(cfg)
+    entry = snap["engines"]["regime"]
+    assert entry["score"] is None
+    assert entry["score"] != 0
+    assert "enable_regime_score" in entry["reason"]
+    assert "regime" not in snap["present"]
+    assert snap["absent"]["regime"] == entry["reason"]
+    # and the other engines still measured
+    assert snap["engines"]["risk"]["score"] == SCORES["risk"]
+
+
+def test_an_engine_that_raises_is_absent_without_costing_the_others(
+    wired, monkeypatch
+):
+    def _boom(vals):
+        raise ValueError("vendor exploded")
+
+    monkeypatch.setattr(
+        "tradingagents.strategies.technical_score.technical_score", _boom
+    )
+    snap = _snapshot()
+    entry = snap["engines"]["technical"]
+    assert entry["score"] is None
+    assert "ValueError" in entry["reason"] and "vendor exploded" in entry["reason"]
+    assert snap["engines"]["fundamental"]["score"] == SCORES["fundamental"]
+    assert snap["engines"]["risk"]["score"] == SCORES["risk"]
+
+
+def test_an_engine_with_no_measurable_components_is_absent_with_a_reason(
+    wired, monkeypatch
+):
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._risk_components",
+        lambda ticker: {},
+    )
+    snap = _snapshot()
+    assert snap["engines"]["risk"]["score"] is None
+    assert "no risk component" in snap["engines"]["risk"]["reason"]
+
+
+def test_a_measured_zero_is_a_number_and_not_an_absence(wired, monkeypatch):
+    """`NA != 0` cuts both ways: a real `0.0` is present and enters the composite.
+
+    `RiskScore` 0 means maximum risk — a legitimate measurement. Treating it as
+    missing would drop a real engine from the denominator, which is the same
+    defect as reporting `NA` as `0`, in the opposite direction.
+    """
+    monkeypatch.setattr(
+        "tradingagents.strategies.risk_score.risk_score",
+        lambda vals: {**RISK_RESULT, "score": 0.0},
+    )
+    seen = {}
+
+    import tradingagents.strategies.trade_score as ts
+
+    original = ts.trade_score
+
+    def _spy(engines):
+        seen.update(engines)
+        return original(engines)
+
+    try:
+        ts.trade_score = _spy
+        snap = _snapshot()
+    finally:
+        ts.trade_score = original
+
+    assert snap["engines"]["risk"]["score"] == 0.0
+    assert "risk" in snap["present"]
+    assert "risk" not in snap["absent"]
+    assert seen["risk"] == 0.0
+
+
+def test_the_missing_engine_reaches_the_composite_as_none_not_zero(wired):
+    """The composite's argument carries `None`, which lowers coverage.
+
+    A `0` here would read as a maximally adverse engine and drag the composite,
+    which is exactly the `NA != 0` rule.
+    """
+    seen = {}
+
+    def _spy(engines):
+        seen.update(engines)
+        return {"status": "RESEARCH_ONLY", "score": 50.0, "coverage": 0.5}
+
+    import tradingagents.strategies.trade_score as ts
+
+    original = ts.trade_score
+    try:
+        ts.trade_score = _spy
+        cfg = dict(ALL_ON)
+        cfg["enable_risk_score"] = False
+        _snapshot(cfg)
+    finally:
+        ts.trade_score = original
+    assert seen["risk"] is None
+    assert seen["fundamental"] == SCORES["fundamental"]
+
+
+# ---------------------------------------------------------------------------
+# the composite is the producer's number, over four engines
+# ---------------------------------------------------------------------------
+
+
+def test_the_composite_is_trade_scores_own_result(wired):
+    seen = {}
+
+    import tradingagents.strategies.trade_score as ts
+
+    original = ts.trade_score
+
+    def _spy(engines):
+        seen["engines"] = dict(engines)
+        return original(engines)
+
+    try:
+        ts.trade_score = _spy
+        snap = _snapshot()
+    finally:
+        ts.trade_score = original
+
+    # exactly the four composite engines - sentiment/news/event never enter
+    assert set(seen["engines"]) == set(qs.COMPOSITE_ENGINES)
+    assert seen["engines"] == {
+        "fundamental": SCORES["fundamental"],
+        "technical": SCORES["technical"],
+        "regime": SCORES["regime"],
+        "risk": SCORES["risk"],
+    }
+    # and the snapshot reports the producer's number, not one of its own
+    assert snap["composite"]["score"] == snap["engines"]["trade"]["score"]
+    assert snap["engines"]["trade"]["result"] == snap["composite"]
+
+
+def test_the_composite_is_absent_when_its_gate_is_off_but_the_engines_are_read(
+    wired,
+):
+    cfg = dict(ALL_ON)
+    cfg["enable_trade_score"] = False
+    snap = _snapshot(cfg)
+    assert snap["engines"]["trade"]["score"] is None
+    assert "enable_trade_score" in snap["engines"]["trade"]["reason"]
+    assert snap["composite"] is None
+    assert snap["engines"]["fundamental"]["score"] == SCORES["fundamental"]
+
+
+# ---------------------------------------------------------------------------
+# the event engine, and the one input that does not exist pre-graph
+# ---------------------------------------------------------------------------
+
+
+def test_the_event_engine_is_absent_before_the_graph_with_its_reason(wired):
+    snap = _snapshot()  # no catalyst_snapshot
+    entry = snap["engines"]["event"]
+    assert entry["score"] is None
+    assert entry["reason"] == qs.EVENT_NO_SNAPSHOT
+    assert "event" in snap["absent"]
+
+
+def test_the_event_engine_measures_when_the_snapshot_is_passed(wired):
+    snap = _snapshot(catalyst_snapshot={"earnings": {"days_until": 3}})
+    assert snap["engines"]["event"]["score"] == SCORES["event"]
+    assert snap["engines"]["event"]["hard_block"] is None
+
+
+# ---------------------------------------------------------------------------
+# the gate map is the one rule all three readers share
+# ---------------------------------------------------------------------------
+
+
+def test_the_gate_map_names_a_real_config_default_for_every_engine():
+    """A gate name that exists nowhere would silently never be on."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    for engine, gate in qs.ENGINE_GATES.items():
+        assert gate in DEFAULT_CONFIG, f"{engine} -> {gate}"
+        assert DEFAULT_CONFIG[gate] is False, f"{gate} must default off"
+
+
+def test_only_the_four_composite_engines_are_allowed_into_the_composite():
+    assert qs.COMPOSITE_ENGINES == ("fundamental", "technical", "regime", "risk")
+    assert set(qs.COMPOSITE_ENGINES) <= set(qs.ENGINE_GATES)
+
+
+# ---------------------------------------------------------------------------
+# P12-2 — the state channel, and the trap that makes declaring it mandatory
+# ---------------------------------------------------------------------------
+
+
+def test_the_snapshot_channel_survives_a_real_graph_round_trip():
+    """The undeclared-channel trap, tested rather than assumed (P12-2).
+
+    Native LangGraph drops keys that are not declared on the state schema: a
+    node never sees them and they are absent from the output. So this builds a
+    real `StateGraph` over `AgentState`, writes the snapshot in one node and
+    reads it back in the next. Remove the declaration and LangGraph silently
+    drops the snapshot here - which is the whole failure mode.
+    """
+    from langgraph.graph import StateGraph
+
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    seen: dict = {}
+
+    def writer(state):
+        return {"quant_scorecard": {"trade_date": DATE, "present": ["risk"]}}
+
+    def probe(state):
+        seen["read"] = state.get("quant_scorecard")
+        return {}
+
+    g = StateGraph(AgentState)
+    g.add_node("writer", writer)
+    g.add_node("probe", probe)
+    g.set_entry_point("writer")
+    g.add_edge("writer", "probe")
+    g.add_edge("probe", "__end__")
+    app = g.compile()
+
+    res = app.invoke({"messages": [], "company_of_interest": TICKER, "trade_date": DATE})
+
+    assert seen["read"] == {"trade_date": DATE, "present": ["risk"]}
+    assert res.get("quant_scorecard") == {"trade_date": DATE, "present": ["risk"]}
+
+
+def test_the_snapshot_channel_is_declared_on_agent_state():
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    assert "quant_scorecard" in AgentState.__annotations__
+
+
+def test_the_scorecard_gate_exists_and_defaults_off():
+    """The master gate is `enable_quant_scorecard`, and it defaults off.
+
+    §9 D1: this gate governs the scorecard **surface**; the eight engine gates
+    above decide which engines populate it. It must never imply them.
+    """
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    assert DEFAULT_CONFIG["enable_quant_scorecard"] is False
+    assert "enable_quant_scorecard" not in qs.ENGINE_GATES.values()
+
+
+# ---------------------------------------------------------------------------
+# P12-3 — the block
+# ---------------------------------------------------------------------------
+
+
+def _render(scores=None, coverage=None, status=None, enabled=None):
+    """A snapshot shaped like the producer's, for render-only tests."""
+    scores = {"trade": 67.925, **(scores or {})}
+    coverage = coverage or {}
+    enabled = enabled if enabled is not None else set(qs.ENGINE_GATES)
+    engines = {}
+    for name in qs.ENGINE_GATES:
+        engines[name] = {
+            "engine": name,
+            "gate": qs.ENGINE_GATES[name],
+            "enabled": name in enabled,
+            "score": scores.get(name) if name in enabled else None,
+            "coverage": coverage.get(name),
+            "status": status if name == "trade" else None,
+            "result": {"status": status} if name == "trade" else None,
+        }
+    return {"engines": engines, "trade_date": DATE, "ticker": TICKER}
+
+
+def test_the_block_parses_to_exactly_the_keys_it_prints():
+    """The block must be citable ground truth, not prose the registry garbles.
+
+    This is not a formatting preference. `_parse_key_value_lines`' key pattern
+    is case-insensitive and admits spaces, so a line ordered
+    `trade_score=… trade_status=RESEARCH_ONLY trade_coverage=…` recovers the key
+    **`research_only_trade_coverage`** and `trade_coverage` never exists in the
+    registry at all. Verified against the real parser: the section 4.1 example
+    produces exactly that bogus key. Reorder the status token and this fails.
+    """
+    from tradingagents.agents.researchers.structured_debate import (
+        _parse_key_value_lines,
+    )
+
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        coverage={
+            "trade": 0.95,
+            "fundamental": 1.0,
+            "technical": 0.95,
+            "regime": 0.83,
+            "risk": 0.45,
+        },
+        status="RESEARCH_ONLY",
+    )
+    parsed = _parse_key_value_lines(qs.format_quant_scorecard(snap))
+    assert set(parsed) == {
+        "trade_score",
+        "trade_coverage",
+        "fundamental_score",
+        "fundamental_coverage",
+        "technical_score",
+        "technical_coverage",
+        "regime_score",
+        "regime_coverage",
+        "risk_score",
+        "risk_coverage",
+    }
+    assert parsed["trade_score"] == 67.925
+    assert parsed["trade_coverage"] == 0.95
+    assert parsed["risk_score"] == 35.0
+    assert parsed["risk_coverage"] == 0.45
+
+
+def test_the_printed_number_is_the_engines_number_not_a_rounded_copy():
+    """`67.925` must not become `67.93`: the block's claim is that these ARE the
+    engines' numbers."""
+    snap = _render(scores={"fundamental": 92.0})
+    text = qs.format_quant_scorecard(snap)
+    assert "trade_score=67.925" in text
+    assert "67.93" not in text
+
+
+def test_the_composite_is_printed_beside_its_four_drivers():
+    """`76` alone is a different story from `76 because F 92 / T 85 / R 78 / K 35`."""
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        }
+    )
+    text = qs.format_quant_scorecard(snap)
+    for name in qs.COMPOSITE_ENGINES:
+        assert f"{name}_score=" in text, name
+    assert "trade_score=" in text
+
+
+def test_coverage_is_printed_per_engine_and_on_the_composite():
+    snap = _render(
+        scores={"fundamental": 92.0, "technical": 85.0, "regime": 78.0, "risk": 35.0},
+        coverage={"trade": 0.95, "fundamental": 1.0, "risk": 0.45},
+    )
+    text = qs.format_quant_scorecard(snap)
+    assert "trade_coverage=0.95" in text
+    assert "fundamental_coverage=1.0" in text
+    assert "risk_coverage=0.45" in text
+
+
+def test_an_unmeasurable_engine_prints_na_never_zero():
+    snap = _render(scores={"fundamental": 92.0}, coverage={"fundamental": 1.0})
+    text = qs.format_quant_scorecard(snap)
+    assert "risk_score=NA" in text
+    assert "risk_score=0" not in text
+    # and it is named as absent
+    assert "absent=" in text and "risk" in text.split("absent=")[-1]
+
+
+def test_a_gated_off_engine_is_not_printed_and_not_called_absent():
+    """A gate-off engine is not part of the scorecard — it is not "missing
+    evidence"."""
+    snap = _render(
+        scores={"fundamental": 92.0},
+        enabled={"trade", "fundamental"},
+    )
+    text = qs.format_quant_scorecard(snap)
+    assert "risk_score" not in text
+    assert "technical_score" not in text
+    assert text.strip().endswith("absent=none")
+
+
+def test_the_block_states_its_purpose_and_stays_within_its_bound():
+    snap = _render(scores={"fundamental": 92.0})
+    text = qs.format_quant_scorecard(snap)
+    assert text.startswith(qs.SCORECARD_HEADER)
+    assert qs.SCORECARD_PURPOSE in text
+    assert "not an order" in text
+    assert len(text) <= qs.SCORECARD_MAX_CHARS
+
+
+def test_the_block_becomes_citable_ground_truth():
+    """P12-3's acceptance: `ground_truth_from_state` returns the score keys.
+
+    A number the debate cannot cite is a number the L1 registry marks
+    unverified, so the block has to survive the real parse.
+    """
+    from tradingagents.agents.researchers.structured_debate import (
+        ground_truth_from_state,
+    )
+
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        coverage={"trade": 0.95, "risk": 0.45},
+        status="RESEARCH_ONLY",
+    )
+    gt = ground_truth_from_state(
+        {"computed_decision_context": qs.format_quant_scorecard(snap)}
+    )
+    assert gt["trade_score"] == 67.925
+    assert gt["trade_coverage"] == 0.95
+    assert gt["fundamental_score"] == 92.0
+    assert gt["risk_score"] == 35.0
+    assert gt["risk_coverage"] == 0.45
+
+
+def test_the_block_is_bounded_even_with_every_engine_absent():
+    """Every engine enabled, none able to measure: `NA` everywhere, nothing numeric."""
+    from tradingagents.agents.researchers.structured_debate import (
+        _parse_key_value_lines,
+    )
+
+    snap = _render(scores={"trade": None}, enabled=set(qs.ENGINE_GATES))
+    text = qs.format_quant_scorecard(snap)
+    assert len(text) <= qs.SCORECARD_MAX_CHARS
+    # every score is NA, so the parser finds no number at all — and no bogus key
+    assert _parse_key_value_lines(text) == {}
+    assert "trade_score=NA" in text
+    assert "risk_score=NA" in text
+    # no absence is ever rendered as a zero
+    assert "=0 " not in text and not text.rstrip().endswith("=0")
+    assert "score=0" not in text

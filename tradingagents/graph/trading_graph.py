@@ -642,6 +642,24 @@ class TradingAgentsGraph:
             rc = self._precompute_risk_context(company_name)
             if rc:
                 init_agent_state["risk_context"] = rc
+        # WP-12 P12-2: build the ONE score snapshot BEFORE the context is
+        # compiled, so every reader downstream is handed the same numbers and
+        # the debate's number cannot drift from the report's. Gated: with
+        # `enable_quant_scorecard` off the context and the card must stay
+        # BYTE-IDENTICAL to a pre-scorecard tree (ResearchLayerWiring.md §9.3),
+        # which is why this block writes nothing at all when it is off.
+        if self.config.get("enable_quant_scorecard"):
+            try:
+                from tradingagents.strategies.quant_scorecard import quant_scorecard
+
+                # No `catalyst_snapshot` here: the catalyst overlay is stamped
+                # AFTER the graph, so the event engine is absent-with-a-reason
+                # on this path rather than silently zero.
+                init_agent_state["quant_scorecard"] = quant_scorecard(
+                    company_name, trade_date, self.config
+                )
+            except Exception as exc:  # noqa: BLE001 - advisory; never break a run
+                logger.warning("quant scorecard skipped: %s", exc)
         # Phase A-E: compile + inject the deterministic decision context (regime
         # gate, re-rating evidence, trade plan card, risk snapshot, drift hint)
         # so the Trader / PM / 3 risk debators get hard computed data, not LLM
@@ -1251,6 +1269,22 @@ class TradingAgentsGraph:
         any hiccup degrades to a short line, never breaks the run.
         """
         out = []
+        # WP-12 P12-3: the scorecard block goes **first**, deliberately. Site 10
+        # (`structured_debate`) bounds the whole context to 3000 chars, so a
+        # block appended to the tail can be silently truncated away on the one
+        # path that has deterministic claim verification - the same failure shape
+        # as the rest of this workstream's defects (§4.4). Prepending means any
+        # truncation consumes something else.
+        try:
+            snapshot = (state or {}).get("quant_scorecard")
+            if snapshot:
+                from tradingagents.strategies.quant_scorecard import (
+                    format_quant_scorecard,
+                )
+
+                out.append(format_quant_scorecard(snapshot))
+        except Exception:  # noqa: BLE001 - advisory; never break a run
+            pass
         closes = []
         try:
             closes = self._try_fetch_closes(ticker)
