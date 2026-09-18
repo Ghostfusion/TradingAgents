@@ -395,6 +395,16 @@ has changed before); never assume an endpoint works — the SDK's
   label="quality composite")` and print the identical basis string. `QUALITY_DIRECTIONS` / `QUALITY_BANDS` /
   `quality_band` / `enable_quality_composite` are untouched. Tests: `test_quality_composite.py` ->
   `test_category_scores.py`, 12 tests re-pointed; 44 passed across it + `test_round3_wiring.py`. Live docs re-pointed.
+- 2026-09-18 `(working tree)` - **WP-10 measured live.** `scripts/score_panel.py` ran for real: 30 dates
+  (2026-08-06...2026-09-17) under `~/.tradingagents/cache/panels/`, 149 of 150 NASDAQ common stocks, 154,188 metric
+  cells, cost + fetch timestamp per file, and a second invocation with **0 network calls** (30 cache hits). The EODHD
+  **bulk-fundamentals leg is 403 (support-gated)** and `_meta.vendor_gate` records it per date rather than caching an
+  empty panel. Statistics measured for 36 of TechnicalScore's 40 components (IC, ICIR, decile spread, monotonicity,
+  turnover, persistence, OOS split, deflated Sharpe, purged-CPCV, family PBO/White/Hansen); the redundancy matrix gives
+  136 pairs in the trend+momentum+RS block (mean |rho| 0.36, 8 pairs >= 0.80). **Two defects fixed failing-first:**
+  `evaluate.cagr` returned a complex number on a <= -100% compounding series, and `alpha_health` printed nan as a rank
+  IC. `docs/scores/MEASUREMENT_FINDINGS.md` labels every line MEASURED/UNMEASURED/DECLARED. **Full engine suite: 4769
+  passed / 5 skipped** (the 4454 baseline plus the six engines' and the panel's tests); executor 1105, web 149.
 - 2026-09-18 `(working tree)` - **WP-4 ... WP-11 landed: the remaining six engines, their leaves, the composite and
   the measurement harness.** `strategies/regime_score.py` (market-level; the two regime paths printed unreconciled - live
   Path A `neutral` vs Path B `BULL`), `risk_score.py` (inverted, 100 = low risk; the three shipped sign conventions

@@ -1176,6 +1176,38 @@ carries no incremental information and should be dropped.
 - **A written finding per engine**: which categories survived, which are
   redundant, which should be dropped, and what the measured weights are.
 
+**Exit - MET 2026-09-18, in the form the vendor gate allows.**
+`scripts/score_panel.py` builds the panel with per-date caching, 500-symbol
+chunking, the vendor's own 100+N cost model and a recorded cost/coverage line;
+below the floors it labels itself `INSUFFICIENT_CROSS_SECTION` and produces **no
+weight vector**. **A real panel was built and measured**: 30 dates
+(2026-08-06..2026-09-17) under `~/.tradingagents/cache/panels/`, 149 of 150
+NASDAQ common stocks, 154,188 metric cells, with cost and fetch timestamp in each
+file's `_meta` - and a second invocation made **0 network calls** (30 cache hits).
+**The vendor gate is recorded, not hidden**: the configured EODHD key returns 200
+on `/eod` and `/exchange-symbol-list` but **403 on `/bulk-fundamentals` and
+`/fundamentals`** (Extended Fundamentals is support-gated), so the panel records
+`_meta.vendor_gate` and builds on the price leg rather than crashing or caching an
+empty panel.
+
+The statistics are measured for **36 of `TechnicalScore`'s 40 components**: rank
+IC, ICIR, decile spread `D10-D1`, monotonicity (ordered adjacent pairs / 9),
+turnover, persistence, the OOS split, deflated Sharpe, the purged-CPCV overfit
+mask and the family PBO/White/Hansen checks. The **redundancy matrix** covers 136
+pairs in the 50% trend+momentum+RS block (mean |rho| 0.36, max 1.00, 8 pairs
+>= 0.80, e.g. `rsi|stoch_k` 0.816 and `di_spread|rsi` 0.819 over 4,326 obs; the
+thin-coverage pairs print their `n`); the FCF-yield cluster is reported with all
+five members **MISSING** and 0 pairs, because that leg is behind the same 403.
+
+`docs/scores/MEASUREMENT_FINDINGS.md` carries the written finding per engine, with
+every line labelled MEASURED / UNMEASURED / DECLARED and an explicit `UNMEASURED`
+section - so the document never claims a measurement the vendor gate prevented.
+
+**Two defects found while measuring, fixed with failing-first tests:** `evaluate.cagr`
+returned a **complex number** when a series compounds to <= -100% (a decile
+long-short spread does exactly that), and `alpha_health` printed `nan` as a
+factor's rank IC instead of withholding it.
+
 ### Phase D — the remaining engines (WP-6, WP-7)
 
 **Entry:** Phase B (EventScore exists) and Phase C (the measurement discipline).

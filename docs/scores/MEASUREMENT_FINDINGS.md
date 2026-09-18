@@ -32,11 +32,15 @@ py -3.12 scripts/score_panel.py --evaluate-only --dates ... --json
   **154,188 metric cells**, **MEASURED**.
 * Label: **`OK`** — 30 cross-sections, median 147 eligible names, against the
   floors `min_periods=20` / `min_names=100` / `5` names per bucket.
-* Cost: **0 API calls** this run (every date was already cached); the first
-  build spent **29 dates × (100 + 150) = 7,250 calls** under the vendor's own
-  model (`100 + N` per request, 500-symbol cap). The panel is cached per date and
-  a second invocation re-fetches nothing — **MEASURED** (29 `dates_fetched`, 1
-  cache hit, `api_calls: 0` on the second run).
+* Cost: **0 API calls** on the evaluate-only run (every date was already
+  cached); the build that created them recorded **0 counted calls** for the
+  fundamentals leg, because its first request failed with 403 before any payload
+  was read — the count is of calls *spent*, and none were. The vendor's own
+  model (100 + N per request, 500-symbol cap) prices this universe at
+  **100 + 150 = 250 calls per date**, i.e. **7,250** for the 29 dates built,
+  which is what `--cost-only` prints before a run. The panel is cached per date
+  and a second invocation re-fetches nothing — **MEASURED** (29
+  `dates_fetched`, 1 cache hit, `api_calls: 0` on the second run).
 * **The fundamentals leg is vendor-gated, and this is the measured proof:**
 
   | probe | result |
@@ -220,16 +224,16 @@ granted.
 
 | check | result | reading |
 | --- | --- | --- |
-| `pbo_flag` | **False** | the factor with the best in-sample spread (`cmf`) also had a positive out-of-sample spread — no family-level overfit signal at the family level |
-| `reality_check` | p = **0.0020** (stat 0.065, 20 candidates × 20 obs, stationary bootstrap, block 5, seed 0) | the best spread beats a zero benchmark more than chance |
+| `pbo_flag` | **False** | the factor with the best in-sample spread (`cmf`: 0.148) also had a positive out-of-sample spread (0.071) — no family-level overfit signal |
+| `reality_check` | p = **0.0020** (stat 0.168, 20 candidates × 12 aligned obs, stationary bootstrap, block 5, seed 0) | the best spread beats a zero benchmark more than chance |
 | `spa` | p = **0.0020** (studentised, 0 recentred) | same conclusion under Hansen's studentised null |
 | per-factor `deflated_sharpe` | 15 of 36 factors produced a value; **21 withheld** | 16 had no spread series at all (tie-collapsed boolean components — see §5); 5 were withheld because their spread series compounds to ≤ −100%, where a growth rate is not a real number |
-| per-factor `purge CPCV` (`purged_cpcv_splits`, 5 folds, no embargo) | **14 of 36 flagged overfit** | the best in-sample fold's out-of-sample spread was negative — the factor family is not stable across period cuts |
+| per-factor purged CPCV (`purged_cpcv_splits`, 5 folds, no embargo) | **13 of 36 flagged overfit** | the best in-sample fold's out-of-sample spread was negative — the factor family is not stable across period cuts |
 
 The family-level checks pass and the per-factor checks mostly do not. Both are
 true and both belong in the finding: with 36 factors measured together, a
 family-level p-value of 0.002 is the weakest form of evidence, and a per-factor
-CPCV overfit mask on 14 of them is the strongest form of warning.
+CPCV overfit mask on 13 of them is the strongest form of warning.
 
 ---
 

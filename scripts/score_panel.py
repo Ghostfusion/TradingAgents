@@ -1655,14 +1655,19 @@ def render_text(report: dict, build: dict | None = None) -> str:
         lines.append(
             f"- {factor} [{row.get('engine')}/{row.get('category')}]: "
             f"n={row.get('n_observations')} "
-            f"rank_ic={ic.get('mean_rank_ic')} ic_ir={ic.get('ic_ir')} "
-            f"({row.get('ic_label')})"
+            + (f"rank_ic={ic.get('mean_rank_ic')} ic_ir={ic.get('ic_ir')} "
+               f"({row.get('ic_label')})" if ic.get("available") else
+               f"IC withheld - {ic.get('reason')}")
         )
         lines.append(
-            f"    decile spread={dec.get('spread')} ordering="
-            f"{(dec.get('ordering') or {}).get('ordered_pairs')}/"
-            f"{(dec.get('ordering') or {}).get('adjacent_pairs')} "
-            f"persistence={stab.get('persistence')} turnover={turn.get('mean_turnover')}"
+            "    decile spread="
+            + (f"{dec.get('spread')} ordering="
+               f"{(dec.get('ordering') or {}).get('ordered_pairs')}/"
+               f"{(dec.get('ordering') or {}).get('adjacent_pairs')}"
+               if dec.get("available") else f"withheld - {dec.get('reason')}")
+            + f" persistence={stab.get('persistence')} "
+            + ("turnover=" + str(turn.get("mean_turnover")) if turn.get("available")
+               else "turnover withheld - " + str(turn.get("reason")))
         )
         lines.append(
             f"    OOS[{oos.get('label')}] train={oos.get('train_mean_rank_ic')} "
@@ -1740,7 +1745,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbols-file", default=None, help="one symbol per line")
     parser.add_argument("--cache-dir", default=None, help="default: data_cache_dir")
     parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
-    parser.add_argument("--exchange", default="US", help="bulk exchange code")
+    parser.add_argument("--exchange", default="US",
+                        help=("bulk exchange code (default US; the per-exchange "
+                              f"codes are {', '.join(EXCHANGE_CODES)} - the "
+                              "vendor 404s on the generic US code for the "
+                              "snapshot variant)"))
     parser.add_argument("--holding", type=int, default=5)
     parser.add_argument("--buckets", type=int, default=10)
     parser.add_argument("--train-frac", type=float, default=OOS_TRAIN_FRAC)
@@ -1762,9 +1771,25 @@ def main(argv: list[str] | None = None) -> int:
     universe = _read_list(args.symbols_file, args.symbols)
     if args.cost_only:
         est = estimate_cost(len(universe), chunk_size=args.chunk_size)
-        print(json.dumps(est, indent=2) if args.json else
-              f"{est['symbols']} symbol(s) -> {est['chunks']} chunk(s), "
-              f"{est['api_calls']} API call(s) ({est['model']})")
+        n_chunks = est["chunks"]
+        whole = exchange_cost(len(EXCHANGE_CODES) if args.exchange.upper() == "US" else 1)
+        payload = {
+            **est,
+            "whole_exchange_alternative": {
+                "requests": len(EXCHANGE_CODES) if args.exchange.upper() == "US" else 1,
+                "api_calls": whole,
+                "note": (
+                    "a whole-exchange request is a flat 100 calls, so a "
+                    "US-wide panel is 400 calls (NASDAQ/NYSE/AMEX/BATS) against "
+                    "100 x chunks + N for a symbols list - cheaper for a large "
+                    "universe, and it needs the same gated plan"
+                ),
+            },
+        }
+        print(json.dumps(payload, indent=2) if args.json else
+              f"{est['symbols']} symbol(s) -> {n_chunks} chunk(s), "
+              f"{est['api_calls']} API call(s) ({est['model']}); "
+              f"whole-exchange alternative: {whole} API call(s)")
         return 0
     if not dates:
         parser.error("--dates or --dates-file is required")
@@ -1776,12 +1801,14 @@ def main(argv: list[str] | None = None) -> int:
         if not panels:
             print(f"no cached panel for {dates} under {panel_path(cache_dir, dates[0])}")
     else:
-        price_provider = None if args.no_technical else PriceProvider()
+        # The price leg is always present: it carries each name's close, which
+        # every forward-return statistic needs. `--no-technical` skips the
+        # component assembly, not the closes.
         build = build_panel(
             dates, universe,
             transport=eodhd_bulk_transport(exchange=args.exchange,
                                            chunk_size=args.chunk_size),
-            price_provider=price_provider,
+            price_provider=PriceProvider(),
             cache_dir=cache_dir, chunk_size=args.chunk_size,
             technical=not args.no_technical,
         )
