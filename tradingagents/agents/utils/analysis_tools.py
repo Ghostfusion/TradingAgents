@@ -5043,6 +5043,33 @@ def _technical_components(ticker: str) -> dict:
     return vals
 
 
+def _non_monotonic_triples(res: dict) -> list[str]:
+    """§4.5's evidence triple, for components whose mapping is producer-defined.
+
+    `score_engine.align` maps the eight non-monotonic inputs through a ramp the
+    producer defines, so a high raw value can align **low**: RSI `82` aligns to
+    `45` because the producer's band says an overbought reading is not a strong
+    one. A reader given only `technical 85` cannot tell a healthy momentum read
+    from an overbought one — the triple is what lets them challenge the
+    interpretation without touching the mathematics. A monotonic component gets
+    no mapping note.
+    """
+    from tradingagents.strategies.score_engine import NON_MONOTONIC_INPUTS
+
+    out: list[str] = []
+    for name, detail in (res.get("components") or {}).items():
+        if name not in NON_MONOTONIC_INPUTS or not isinstance(detail, dict):
+            continue
+        raw, aligned = detail.get("raw"), detail.get("aligned")
+        if raw is None or aligned is None:
+            continue
+        out.append(
+            f"{name}={raw:g} {name}_aligned={aligned:g} "
+            "mapping=producer-defined non-monotonic band"
+        )
+    return out
+
+
 def _render_technical_score(ticker: str, res: dict) -> str:
     """Render the score dict: categories, weights, coverage, gap, basis."""
     lines = [
@@ -5097,6 +5124,14 @@ def _render_technical_score(ticker: str, res: dict) -> str:
             "(strategies/market_breadth.py); the rest depend on history the "
             "series did not carry"
         )
+    non_mono = _non_monotonic_triples(res)
+    if non_mono:
+        lines.append("")
+        lines.append(
+            "non-monotonic inputs (band-mapped, so a high raw value can align low "
+            "- the mapping is the producer's, not a sign flip):"
+        )
+        lines.extend(f"  {line}" for line in non_mono)
     lines.append("")
     lines.append(f"basis: {res.get('basis')}")
     return "\n".join(lines)

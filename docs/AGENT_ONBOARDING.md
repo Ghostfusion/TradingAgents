@@ -388,6 +388,15 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-10` + `P12-12` landed: level 2 in the report, and the non-monotonic mapping as
+  evidence.** Report section **`V. Engine score detail`** renders each engine's categories beside the measurements they came from,
+  with their weights, so the composite can be RECOMPUTED rather than trusted (no new producer; gated-off engines are skipped, an
+  enabled-but-unmeasurable one is `NA` with its reason). **§4.5's triple** now prints at BOTH levels - `rsi=82 rsi_aligned=45
+  mapping=producer-defined non-monotonic band` - because `align` maps eight inputs through a producer-defined ramp and a high raw
+  value can align low; a monotonic component prints `adx=25 -> 40` and no mapping note. Level 3 is the leaf's own text
+  (`_render_technical_score`), so this is a TOOL-CARD change: the web contract tests were re-run explicitly (`test_doc_claims.py` +
+  `test_engine_contract.py` 15 passed; engine doc/claim/render selection 193 passed). `run_card.json`'s `technical_score` block
+  gains the additive `non_monotonic` key. 207 passed across the WP-12 test files.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-9` landed: the quant/LLM risk-disagreement detector (§5's weak form).** New
   `strategies/score_disagreement.py` - a deterministic POST-debate check over material the run already produced: `RiskScore`'s
   band from the snapshot against the risk debate's own words. **No new producer.** It **never changes anything** (the flag carries

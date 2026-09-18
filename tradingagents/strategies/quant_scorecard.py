@@ -42,6 +42,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tradingagents.strategies.score_engine import NON_MONOTONIC_INPUTS
+
 __all__ = [
     "COMPOSITE_ENGINES",
     "ENGINE_GATES",
@@ -51,6 +53,7 @@ __all__ = [
     "SCORECARD_MAX_CHARS",
     "SCORECARD_PURPOSE",
     "engine_scores",
+    "format_engine_detail",
     "format_quant_scorecard",
     "quant_scorecard",
     "scorecard_status",
@@ -573,6 +576,105 @@ def split_scorecard_block(context: str) -> tuple[str | None, str]:
         return None, text
     block, _, rest = text.partition("\n\n")
     return block, rest
+
+
+def _plain(value: Any) -> str | None:
+    """A number for the detail surfaces: exact, but without a bare `.0`.
+
+    `_number` keeps `repr`'s exactness (the block's claim is that its numbers are
+    the engines' numbers). The detail views read better without `85.0`, and they
+    must match the leaf's own triple character for character, so the trailing
+    `.0` is dropped there and nowhere else.
+    """
+    text = _number(value)
+    if text is None:
+        return None
+    return text[:-2] if text.endswith(".0") else text
+
+
+def format_engine_detail(snapshot: dict | None) -> str:
+    """Level 2 (§4.2): each engine's categories beside the measurements they came from.
+
+    *"Level 2 is where the owner's 'research evidence → score → interpretation'
+    chain becomes visible"* — an addition that renders each engine's
+    **already-computed** result and adds no producer. The composite is printed
+    beside the categories and their weights, so a reader can recompute it rather
+    than trust it.
+
+    **Non-monotonic inputs are shown as the triple** (§4.5). `score_engine.align`
+    maps eight inputs through a producer-defined ramp, so a high raw value can
+    align *low* — RSI `82` aligns to `45`. A reader given only `technical 85`
+    cannot tell a healthy momentum read from an overbought one, and the point is
+    that they can **challenge the interpretation without touching the
+    mathematics**. Where a component is monotonic, no mapping note is printed.
+    """
+    snap = snapshot or {}
+    engines = snap.get("engines") or {}
+    lines: list[str] = []
+    for name in ENGINE_GATES:
+        entry = engines.get(name) or {}
+        if not entry.get("enabled"):
+            continue
+        result = entry.get("result")
+        score = _plain(entry.get("score"))
+        head = f"### {name.capitalize()}Score"
+        if score is None:
+            head += f" — NA ({entry.get('reason') or 'not measured'})"
+        else:
+            head += f" — {score}/100"
+            if entry.get("band"):
+                head += f" ({entry['band']})"
+            coverage = _plain(entry.get("coverage"))
+            if coverage is not None:
+                head += f", coverage {coverage}"
+        lines.append(head)
+        if not isinstance(result, dict):
+            lines.append("")
+            continue
+        cats = result.get("categories") or result.get("subscores") or {}
+        if not isinstance(cats, dict) or not cats:
+            lines.append("- no category detail carried by this engine")
+            lines.append("")
+            continue
+        components = result.get("components") or {}
+        for cat, cat_entry in cats.items():
+            if not isinstance(cat_entry, dict):
+                continue
+            c_score = cat_entry.get("score")
+            if c_score is None and isinstance(cat_entry.get("scores"), dict):
+                # fundamental keys its sub-scores by ticker
+                c_score = next(iter(cat_entry["scores"].values()), None)
+            weight = cat_entry.get("weight")
+            head = f"- {cat}"
+            if weight is not None:
+                head += f" (weight {_plain(weight)})"
+            head += f": {'NA' if c_score is None else _plain(c_score)}/100"
+            present = cat_entry.get("present") or cat_entry.get("factors_NA") or []
+            if isinstance(present, (list, tuple)) and present:
+                head += f" over {len(present)} components"
+            lines.append(head)
+            if cat_entry.get("withheld"):
+                lines.append(f"    withheld: {cat_entry['withheld']}")
+            for comp in present if isinstance(present, (list, tuple)) else []:
+                detail = components.get(comp) if isinstance(components, dict) else None
+                if not isinstance(detail, dict):
+                    continue
+                raw = _plain(detail.get("raw"))
+                aligned = _plain(detail.get("aligned"))
+                if raw is None or aligned is None:
+                    continue
+                if comp in NON_MONOTONIC_INPUTS:
+                    # §4.5's triple: the value, the aligned value, and why they
+                    # differ — so "the score is 85" is a claim the reader can
+                    # interrogate rather than a fact they must accept.
+                    lines.append(
+                        f"    {comp}={raw} {comp}_aligned={aligned} "
+                        "mapping=producer-defined non-monotonic band"
+                    )
+                else:
+                    lines.append(f"    {comp}={raw} -> {aligned}")
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def format_quant_scorecard(snapshot: dict | None) -> str:

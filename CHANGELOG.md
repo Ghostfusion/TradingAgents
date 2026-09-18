@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**WP-12 `P12-10` + `P12-12` — level 2 in the report, and the non-monotonic mapping as evidence (2026-09-18).**
+
+- **`P12-10` — level 2.** Report section **`V. Engine score detail`**: each engine's categories beside the measurements they came from, with their weights, so the composite can be **recomputed rather than trusted**. It renders the results the run already computed — **no new producer** — and skips gated-off engines entirely (they are not part of the scorecard), reporting an enabled-but-unmeasurable engine as `NA` with its reason.
+- **`P12-12` — §4.5's evidence triple.** `score_engine.align` maps eight inputs through a producer-defined ramp, so a high raw value can align **low**: RSI `82` aligns to `45`. A reader given only `technical 85` cannot tell a healthy momentum read from an overbought one, and the owner's point is that they must be able to **challenge the interpretation without touching the mathematics**. So a non-monotonic component now prints
+  `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`
+  at **both levels** — the report's level 2 and the leaf's level 3 — while a monotonic component prints `adx=25 -> 40` and no mapping note. The card's `technical_score` block gains a `non_monotonic` map carrying the same pairs (additive: `components` keeps its shape).
+- **The level-3 change is a tool-card text change**, so the web contract tests were re-run explicitly: `test_doc_claims.py` + `test_engine_contract.py` **15 passed**, and the engine's doc/claim/render selection **193 passed**.
+
+Tests: 207 passed across `test_quant_scorecard.py`, `test_score_disagreement.py`, `test_reporting.py`, `test_technical_score.py`, `test_trade_score.py` and `test_score_history.py`; plus the two contract selections above.
+
+**Web impact**: the `get_technical_score` tool card gains a short non-monotonic mapping block (additive lines at the end of the card, before `basis`), and `run_card.json`'s `technical_score` block gains the additive `non_monotonic` key. No tool name, CLI flag or existing JSON shape changed — verified by the app's own contract tests.
+
 **WP-12 `P12-9` — the quant / LLM risk-disagreement detector (2026-09-18).** §5's proposal, built in **its weak form** — the form the owner asked for.
 
 - **`strategies/score_disagreement.py`.** A deterministic post-debate check over material the run already produced: `RiskScore`'s band from the score snapshot against the risk debate's own words. **No new producer** — both sides already exist.

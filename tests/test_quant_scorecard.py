@@ -1082,6 +1082,96 @@ def test_an_unavailable_movement_prints_no_delta_keys_at_all():
     assert "Movement: UNAVAILABLE" in text
 
 
+def test_level_two_renders_categories_beside_their_measurements():
+    """P12-10: the report shows an engine's categories and its composite.
+
+    Renders what the engine already computed; adds no producer. The weights are
+    printed so the composite can be recomputed rather than trusted.
+    """
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        enabled={"trade", "fundamental", "technical", "regime", "risk"},
+        status="RESEARCH_ONLY",
+    )
+    snap["engines"]["technical"]["result"] = {
+        "status": "advisory",
+        "score": 85.0,
+        "categories": {
+            "momentum": {
+                "score": 72.0,
+                "weight": 0.18,
+                "coverage": 0.5,
+                "present": ["rsi", "adx"],
+            }
+        },
+        "components": {
+            "rsi": {"raw": 82.0, "aligned": 45.0},
+            "adx": {"raw": 25.0, "aligned": 40.0},
+        },
+    }
+    text = qs.format_engine_detail(snap)
+    assert "### TechnicalScore — 85/100" in text
+    assert "- momentum (weight 0.18): 72/100 over 2 components" in text
+    # the non-monotonic component shows the triple; the monotonic one does not
+    assert "rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band" in text
+    assert "adx=25 -> 40" in text
+    assert "adx_aligned" not in text
+
+
+def test_level_two_skips_gated_off_engines_and_reports_na_with_its_reason():
+    snap = _render(
+        scores={"trade": 70.0, "fundamental": 92.0},
+        enabled={"trade", "fundamental"},
+        status="RESEARCH_ONLY",
+    )
+    text = qs.format_engine_detail(snap)
+    assert "FundamentalScore" in text
+    assert "TechnicalScore" not in text  # gated off: not part of the scorecard
+    assert "RegimeScore" not in text
+
+
+def test_level_two_names_an_unmeasurable_engine_as_na():
+    snap = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    snap["engines"]["regime"]["reason"] = "no market data for the benchmark"
+    text = qs.format_engine_detail(snap)
+    assert "RegimeScore — NA (no market data for the benchmark)" in text
+
+
+def test_level_two_never_invents_a_component_it_does_not_have():
+    """An engine result with no detail is reported as such, not filled in."""
+    snap = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    snap["engines"]["fundamental"]["result"] = {"status": "RESEARCH_ONLY"}
+    text = qs.format_engine_detail(snap)
+    assert "no category detail carried by this engine" in text
+
+
+def test_the_report_shows_level_two_only_when_the_gate_is_on(tmp_path):
+    from tradingagents.reporting import write_report_tree
+
+    state = {
+        "risk_debate_state": {
+            "aggressive_history": "high risk\n",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": "**Rating**: Hold\n",
+        },
+        "quant_scorecard": _render(
+            scores={"fundamental": 92.0}, status="RESEARCH_ONLY"
+        ),
+    }
+    on = write_report_tree(
+        state, "TST", tmp_path / "on", config={"enable_quant_scorecard": True}
+    )
+    assert "## V. Engine score detail" in on.read_text(encoding="utf-8")
+    off = write_report_tree(state, "TST", tmp_path / "off", config={})
+    assert "## V. Engine score detail" not in off.read_text(encoding="utf-8")
+
+
 def test_the_block_is_bounded_even_with_every_engine_absent():
     """Every engine enabled, none able to measure: `NA` everywhere, nothing numeric."""
     from tradingagents.agents.researchers.structured_debate import (

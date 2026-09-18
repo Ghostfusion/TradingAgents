@@ -935,8 +935,10 @@ def _run_card_technical_score(ticker: str, cfg: dict) -> dict | None:
         return None
     try:
         from tradingagents.agents.utils.analysis_tools import _technical_components
+        from tradingagents.strategies.score_engine import NON_MONOTONIC_INPUTS
         from tradingagents.strategies.technical_score import technical_score
 
+        _NON_MONOTONIC_INPUTS = NON_MONOTONIC_INPUTS
         vals = _technical_components(ticker)
         if not vals:
             return {"status": None, "score": None, "categories": {},
@@ -970,6 +972,14 @@ def _run_card_technical_score(ticker: str, cfg: dict) -> dict | None:
             name: entry.get("aligned")
             for name, entry in (res.get("components") or {}).items()
             if entry.get("aligned") is not None
+        },
+        # §4.5/P12-12: the raw/aligned pair for the components whose mapping is
+        # producer-defined, so the card carries the same triple the leaf prints
+        # and the report's level 2 shows. Additive: `components` keeps its shape.
+        "non_monotonic": {
+            name: {"raw": entry.get("raw"), "aligned": entry.get("aligned")}
+            for name, entry in (res.get("components") or {}).items()
+            if name in _NON_MONOTONIC_INPUTS and entry.get("raw") is not None
         },
         "absent": res.get("absent"),
         "basis": res.get("basis"),
@@ -1750,6 +1760,32 @@ def write_report_tree(
                     "toward the debate, and the debate is not suppressed. The "
                     "reviewer identifies the evidence causing the disagreement.\n"
                 )
+            # WP-12/P12-10 + P12-12: level 2 - each engine's categories beside the
+            # measurements they came from, with the non-monotonic triple where the
+            # mapping is producer-defined (§4.2, §4.5). Renders the engine results
+            # the run already computed; adds no producer.
+            try:
+                from tradingagents.strategies.quant_scorecard import (
+                    format_engine_detail,
+                )
+
+                snapshot = final_state.get("quant_scorecard")
+                if snapshot and cfg.get("enable_quant_scorecard"):
+                    detail = format_engine_detail(snapshot)
+                    if detail:
+                        sections.append(
+                            "## V. Engine score detail (advisory)\n\n"
+                            "Each engine's categories beside the measurements they "
+                            "came from, so the composite can be recomputed rather "
+                            "than trusted. Where a component is **non-monotonic** "
+                            "(RSI, stochastic, StochRSI, RSI2, Williams %R, "
+                            "Bollinger %b, MFI, the Elder thermometer) the raw and "
+                            "aligned values are shown with the mapping note: a high "
+                            "raw value can align low because the producer's band "
+                            "says so.\n\n" + detail + "\n"
+                        )
+            except Exception:  # noqa: BLE001 - advisory; never break the report
+                pass
 
         # 5. Portfolio Manager (mirrors the risk gate)
         if risk.get("judge_decision"):
