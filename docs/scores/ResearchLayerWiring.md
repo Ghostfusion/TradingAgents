@@ -311,10 +311,17 @@ Three properties are non-negotiable:
 | **2 — Research sections** | each engine's own section in `complete_report.md` | that engine's category sub-scores beside the raw measurements they came from |
 | **3 — Quant diagnostics** | the card and the leaf tool text (unchanged) | the full component → category → engine chain, e.g. the 40 technical components into 9 categories |
 
-Level 3 already exists and needs no work. Level 2 is where the owner's
-"research evidence → score → interpretation" chain becomes visible; it is an
-addition to `write_report_tree` (`reporting.py:1392`) that renders each engine's
-already-computed result, and adds no producer.
+**Level 3's surface exists; its §4.5 content does not.** The renderers are
+written (`_render_technical_score` at `agents/utils/analysis_tools.py:5046`, and
+its siblings) but they print the category → composite chain — names, bands,
+weights, coverage — and not the per-component `raw`/`aligned` pair §4.5 requires.
+The producer already carries that pair (`strategies/technical_score.py:319-327`
+returns `{raw, aligned, direction, category, producer}` per component), so the
+work is **rendering only**; it is `P12-12`. That is why this table's level-3 row
+is worded *"needs no new producer"* rather than *"needs no work"*. Level 2 is where
+the owner's "research evidence → score → interpretation" chain becomes visible; it
+is an addition to `write_report_tree` (`reporting.py:1392`) that renders each
+engine's already-computed result, and adds no producer.
 
 ### 4.3 Score movement — the highest-value part, and the one with no producer
 
@@ -491,10 +498,18 @@ Found by executing the path, not by reading the set. Recorded in the master's
 | **D-9** | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `trading_graph.py:343-345` builds `market, news, fundamentals`; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `toolsets.py:533-538` records it as deliberate | **deliberate, not a defect — but it bounds the design (§1.3)** |
 | **D-10** | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books: `docs/implementation_plan_defect_audit.md:51` (its line references, `:605` and `:2208`, have drifted) | **pre-existing, open, not this workstream's** |
 
-### 6.1 Two stale documents on this seam
+### 6.1 Three stale claims on this seam
 
-Both are the D-6 failure mode — a stale claim hiding a wire — and both are
-corrected in the same pass as this document:
+All three are the D-6 failure mode — a stale claim hiding a wire — and all three
+are corrected in the same pass as this document:
+
+- **§4.2 of this document itself** claimed *"Level 3 already exists and needs no
+  work"*. The level-3 renderer does exist, but it prints categories, bands,
+  weights and coverage — not the per-component `raw`/`aligned` pair §4.5 requires
+  (`agents/utils/analysis_tools.py:5046`). The producer carries the pair
+  (`strategies/technical_score.py:319-327`), so §4.5 is render-only; it simply had
+  **no build item**. Found while enumerating §7 into a work list, corrected in
+  §4.2, and given the row it was missing: `P12-12`.
 
 - `agents/utils/agent_states.py:90` describes `computed_decision_context` as
   injected "to the Trader, Portfolio Manager and the 3 risk debators". It reaches
@@ -532,6 +547,7 @@ Each item is default-off, lands as one commit, and has an observable acceptance.
 | P12-9 | **The disagreement detector** | P12-3 | a fixture where the risk debate reads favourable against `RiskScore` band `unfavourable` produces the flag; a fixture where they agree produces none |
 | P12-10 | **Level 2 in the report** — each engine's category sub-scores beside their measurements | P12-2 | the rendered report shows an engine's categories and its composite, recomputing |
 | P12-11 | **The new fields, never a rewritten one.** `scorecard_basis` (and `basis_constraints` if the constraints need enumerating) — additive, per §9 D3. **`basis` is not touched** | P12-3 | a gate-off tree's `run_card.json` is **byte-identical** to a pre-scorecard tree; the new keys appear only with the gate on |
+| P12-12 | **The mapping triple, at levels 2 and 3** (§4.5). Where a cited driver is non-monotonic, print the `raw`/`aligned` pair the engine already carries, plus a `mapping=` note | P12-10 | a level-3 line for a non-monotonic component reads `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note |
 
 **Verification (plan §11 applies unchanged).** Every new pure function gets a test
 that fails under a mutation of the code it guards. The two acceptance cases this

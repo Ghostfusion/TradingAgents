@@ -47,6 +47,14 @@ Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), execut
 
 ### Changed
 
+**`WP-12` enumerated into a work list — which found a third stale claim on this seam (2026-09-18, docs only).** The build order in `docs/scores/ResearchLayerWiring.md` §7 is now the tracked work list: `P12-1` … `P12-11` verbatim, plus the two acceptance cases §7's Verification paragraph adds.
+- **The finding.** Enumerating that table exposed a requirement with **no build item**: §4.2 claimed *"Level 3 already exists and needs no work"*, while §4.5 requires the non-monotonic `raw`/`aligned` evidence triple at **levels 2 and 3**. The level-3 renderer does exist (`_render_technical_score` at `agents/utils/analysis_tools.py:5046`) but prints categories, bands, weights and coverage only — not the pair. The producer already carries it (`strategies/technical_score.py:319-327` returns `{raw, aligned, direction, category, producer}` per component), so the work is **rendering only**; it had simply never been given a row.
+- **Fixed** by correcting §4.2 with those anchors, recording the claim as the third entry in §6.1 (the same D-6 failure shape — a stale claim hiding a wire), and adding the missing row **`P12-12`** with its own observable acceptance: a level-3 line for a non-monotonic component reads `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`, and a monotonic component prints no mapping note.
+
+Docs only — no code, no test and no package structure changed. `ResearchLayerWiring.md` §4.2/§6.1/§7 only; the tables were re-validated (113 table rows, one cell count per group, no dead links).
+
+**Web impact**: none — a design document's build order.
+
 **D3 reversed: the composite's printed `basis` contract is preserved, not rewritten (owner, 2026-09-18).** The owner re-answered the third research-layer question in the opposite direction, and the first answer's implementation (`02145fe`) is **reverted** in this pass.
 - **What was reverted.** `strategies/trade_score.py` — the framing sentence is back to *"Advisory only: never a gate, never a size, never an `opportunity_score`. The hard gates operate downstream and block regardless of this number."*, and the `basis` field's tail is back to *"…; advisory only - never a gate, never a size, never an `opportunity_score`"*. The rendered block is **byte-identical to `6047071`**. `tests/test_trade_score.py::test_the_printed_block_carries_weights_status_and_coverage` again pins the negative clause, now with a comment recording that the wording is a *preserved contract* rather than an oversight.
 - **Why.** *"Changing it alters every generated report"* is precisely why a contract change must not ride along with the scorecard rollout. The owner's principle: *"Enablement can be incremental; measurement cannot be pretend. And existing report contracts should not be changed merely to introduce the new scorecard."*

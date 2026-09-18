@@ -388,6 +388,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **`WP-12` enumerated into a work list, which found a third stale claim on this seam.** The build order in
+  `docs/scores/ResearchLayerWiring.md` §7 is now the tracked work list (14 open, 2 blocked): `P12-1` .. `P12-11` verbatim, plus the two
+  acceptance cases §7's Verification paragraph adds. Enumerating it exposed a requirement with **no build item**: **§4.2 claimed *"Level 3
+  already exists and needs no work"***, while §4.5 requires the non-monotonic `raw`/`aligned` evidence triple at **levels 2 and 3**. The
+  level-3 renderer does exist (`_render_technical_score` at `agents/utils/analysis_tools.py:5046`) but prints categories, bands, weights
+  and coverage only; the producer already carries the pair (`strategies/technical_score.py:319-327` returns
+  `{raw, aligned, direction, category, producer}` per component), so the work is **rendering only** - it had simply never been given a
+  row. Corrected in §4.2 with the anchors, recorded as the third entry in §6.1 (the same D-6 failure shape: a stale claim hiding a
+  wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
+  `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
+  code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
 - 2026-09-18 `(working tree)` - **D3 REVERSED by the owner: the composite's printed `basis` contract is preserved.** The owner re-answered the
   third research-layer question in the opposite direction; `02145fe` is **reverted** here. `strategies/trade_score.py` is back to
   *"Advisory only: never a gate, never a size, never an `opportunity_score`"* in the framing sentence and to the same tail in
