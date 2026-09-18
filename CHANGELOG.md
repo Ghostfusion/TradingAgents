@@ -24,6 +24,16 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
 **Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
 
+### Changed
+
+**Dark launch recorded, both directions (2026-09-18).** Phase A's last clause, with every part the environment allowed and the one it did not named.
+- **Gate off, live:** `reports/MSFT_20260918_005500` carries **no engine key** in `run_card.json` (12 keys, evidence mode `forced`).
+- **Gate on, through the same functions a run uses:** the four toolsets gain **exactly eight tools and remove none**, and the card gains its eight engine keys with live numbers — `fundamental 64.58` (4/4 sub-scores), `technical 61.36`, `regime 72.49`, `risk 79.41`, `sentiment 84.20`, plus `event_state` and `news_score` present with their honest `unavailable` reasons. The composite reads those blocks and **recomputes from its parts**: `0.40(64.58) + 0.25(61.36) + 0.15(72.49) + 0.20(79.41) = 67.92` against the printed `67.93`.
+- **Each of the eight gates individually moves `repro_check`'s config hash** (off `42b9a914a36f` → on `e6f00bd36202`) — a dark-launch flip is provably same-input-different-config.
+- **The clause not met:** `report_verify.py` / `verify_sweep.py` exiting 0 on `CONFIRMED` — the sweep returned 1 CONFIRMED and 1 SUSPECT, and the CONFIRMED one was a **real defect** (`rvol` at two windows under one name), fixed in the previous commit. A fresh tree is needed to show the sweep clean; the gate-on run producing one was still crawling after 70 minutes under today's vendor conditions, and the `report_verify` LLM pass itself timed out at 600 s.
+Tests: none (a measurement record).
+**Web impact**: none.
+
 ### Fixed
 
 **One metric, one label: `rvol` now carries its window (2026-09-18).** `verify_sweep.py` on a fresh tree (`reports/MSFT_20260918_005500`) returned a **CONFIRMED** internal conflict — *"'rvol' cited at conflicting values: 0.61; 0.8830"* — and the cause is two producers of one name with no label: `momentum.rvol(volumes, window=50)` and `value_dip.trigger_candle`'s own `rvol` at `window=20`, both printed as a bare `rvol=`. The reader (and the model) had no way to tell which window it was looking at. Both print sites now name their window (`rvol(50d)=`, `rvol(20d)=`), and the leaf-shape assertion is re-pointed at the label, since the label *is* the change.

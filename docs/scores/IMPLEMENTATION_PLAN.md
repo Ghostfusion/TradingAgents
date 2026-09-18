@@ -1133,6 +1133,40 @@ so both can ship a real, coverage-printed score without a single new vendor.
 - Dark launch: gate on, same basket, `scripts/repro_check.py --evidence` diff
   reviewed; `report_verify.py` and `verify_sweep.py` exit 0 on `CONFIRMED`.
 
+**Exit - MET 2026-09-18 for every clause the environment allowed, and the one it
+did not is named.**
+
+*Gate off, live.* `reports/MSFT_20260918_005500` was built with the engines off:
+its `run_card.json` carries **no engine key** (12 keys, evidence mode `forced`) -
+the observable form of "byte-identical".
+
+*Gate on, computed through the same functions a run uses.* Every engine gate on:
+the four toolsets gain **exactly eight tools and remove none**
+(`get_fundamental_score`, `get_technical_score`, `get_regime_score`,
+`get_risk_score`, `get_sentiment_score`, `get_news_score`, `get_event_state`,
+`get_trade_score`), and the run card gains exactly its eight engine keys with live
+numbers - `fundamental 64.58` (4/4 sub-scores), `technical 61.36` (coverage 0.95),
+`regime 72.49` (0.833), `risk 79.41` (0.45), `sentiment 84.20` (0.50), `event_state`
+and `news_score` present with their honest `unavailable` reasons. The composite
+then reads those blocks and **recomputes from its parts**:
+`0.40(64.58) + 0.25(61.36) + 0.15(72.49) + 0.20(79.41) = 67.92` against the printed
+`trade_score 67.93`.
+
+*The repro-check half.* **Each of the eight gates individually moves
+`scripts/repro_check.py::_config_hash`** (off `42b9a914a36f` -> on `e6f00bd36202`,
+and one-at-a-time too), which is the property the hash exists for: a dark-launch
+flip is provably same-input-different-config.
+
+*The one clause not met, and why.* `report_verify.py` / `verify_sweep.py` exiting
+0 on `CONFIRMED` was **not** achieved on the existing tree - it returned 1
+CONFIRMED and 1 SUSPECT, and the CONFIRMED one was a **real defect**
+(`rvol` cited at 0.61 and 0.8830 because two producers print one unlabelled name at
+two windows), which is fixed in the same pass. A fresh tree is needed to show the
+sweep clean, and the gate-on run that would produce one was still crawling after
+70 minutes under today's vendor conditions (`finnhub 403`, `fmp 429`, Reddit 429;
+the `report_verify` LLM pass itself timed out at 600 s). The tree lands on disk;
+the sweep on it is the remaining step.
+
 ### Phase B — the environment, the risk, the event state (WP-4, WP-5, WP-8)
 
 **Entry:** Phase 0 (P0-3/4/5) and Phase A (the kernel proven on two engines).
