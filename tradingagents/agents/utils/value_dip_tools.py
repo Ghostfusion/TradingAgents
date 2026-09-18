@@ -987,7 +987,7 @@ def get_vdu_entry_setup(
     return (
         f"vdu entry setup {ticker}: candidate={vd['candidate']} "
         f"dry_up={dry.get('dry_up')} (ratio={_txt_round(dry.get('vdu_ratio'))}) "
-        f"trigger={trig.get('trigger')} (rvol={_txt_round(trig.get('rvol'))}) "
+        f"trigger={trig.get('trigger')} (rvol(20d)={_txt_round(trig.get('rvol'))}) "
         f"higher_low={hl.get('higher_low')} momentum={mom.get('verdict')}; "
         + ("; ".join(vd.get("reasons") or []) or "ok")
     )

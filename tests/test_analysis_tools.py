@@ -815,7 +815,10 @@ def test_momentum_detail_uses_ohlcv(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
     out = T.get_momentum_detail.invoke({"ticker": "AAPL"})
     assert "momentum detail AAPL" in out
-    assert "rvol=" in out
+    # the window is part of the label: the same name is produced at 20d by
+    # value_dip.trigger_candle, and an unlabelled `rvol=` is what let one report
+    # cite two different values for one metric (verify_sweep, MSFT 2026-09-18)
+    assert "rvol(50d)=" in out
 
 
 def test_momentum_detail_empty_history_degrades(monkeypatch):

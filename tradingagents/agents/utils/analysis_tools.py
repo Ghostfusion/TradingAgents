@@ -2283,7 +2283,7 @@ def get_momentum_detail(
         return f"momentum detail unavailable for {ticker}: {exc}"
     parts = [f"momentum detail {ticker}:"]
     if rv is not None:
-        parts.append(f"  rvol={rv:.2f}")
+        parts.append(f"  rvol(50d)={rv:.2f}")
     if vw is not None:
         parts.append(f"  vwap={vw:.2f}")
     if ema is not None:

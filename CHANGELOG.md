@@ -24,6 +24,12 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 Tests: engine suite **4406 passed / 5 skipped** (the two new XBRL tests), executor **1105**, web **149**.
 **Web impact**: none - no wire contract, no report field, no score output. The SEC/Wikimedia UA is a request header only.
 
+### Fixed
+
+**One metric, one label: `rvol` now carries its window (2026-09-18).** `verify_sweep.py` on a fresh tree (`reports/MSFT_20260918_005500`) returned a **CONFIRMED** internal conflict — *"'rvol' cited at conflicting values: 0.61; 0.8830"* — and the cause is two producers of one name with no label: `momentum.rvol(volumes, window=50)` and `value_dip.trigger_candle`'s own `rvol` at `window=20`, both printed as a bare `rvol=`. The reader (and the model) had no way to tell which window it was looking at. Both print sites now name their window (`rvol(50d)=`, `rvol(20d)=`), and the leaf-shape assertion is re-pointed at the label, since the label *is* the change.
+Tests: 31 passed across the rvol/vdu/trigger/momentum-detail selection.
+**Web impact**: tool-card text only — two rendered labels gain their window; no JSON shape, prompt, flag or report row changes.
+
 ### Added
 
 **WP-10 measured live — the panel, the statistics and the written findings (2026-09-18).** Phase C's harness was not just built, it was **run**: 30 dates (2026-08-06…2026-09-17) under `~/.tradingagents/cache/panels/`, 149 of 150 NASDAQ common stocks, 154,188 metric cells, cost and fetch timestamp recorded per file, and a second invocation that made **0 network calls** (30 cache hits).
