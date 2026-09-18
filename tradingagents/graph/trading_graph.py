@@ -655,9 +655,30 @@ class TradingAgentsGraph:
                 # No `catalyst_snapshot` here: the catalyst overlay is stamped
                 # AFTER the graph, so the event engine is absent-with-a-reason
                 # on this path rather than silently zero.
-                init_agent_state["quant_scorecard"] = quant_scorecard(
-                    company_name, trade_date, self.config
-                )
+                snapshot = quant_scorecard(company_name, trade_date, self.config)
+                # P12-8: the delta is computed against the PRIOR observation and
+                # only when the vector is validated (§9 D2), then this run's own
+                # observation is recorded. Order matters: read first, then write,
+                # so a run can never be its own prior.
+                try:
+                    from tradingagents.strategies.score_history import (
+                        record_score,
+                        score_movement,
+                    )
+
+                    cache_dir = self.config.get("data_cache_dir")
+                    snapshot["movement"] = score_movement(
+                        company_name,
+                        trade_date,
+                        snapshot.get("composite"),
+                        cache_dir,
+                    )
+                    record_score(
+                        company_name, trade_date, snapshot.get("composite"), cache_dir
+                    )
+                except Exception as exc:  # noqa: BLE001 - advisory store
+                    logger.warning("score history skipped: %s", exc)
+                init_agent_state["quant_scorecard"] = snapshot
             except Exception as exc:  # noqa: BLE001 - advisory; never break a run
                 logger.warning("quant scorecard skipped: %s", exc)
         # Phase A-E: compile + inject the deterministic decision context (regime

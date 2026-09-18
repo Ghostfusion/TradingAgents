@@ -1003,6 +1003,85 @@ def test_the_scorecard_explanation_is_a_new_field_and_basis_is_untouched():
     assert "never a gate, never a size" not in card_key["scorecard_basis"]
 
 
+def test_the_delta_is_printed_with_its_prior_date_and_adds_no_bogus_keys():
+    """§4.3's delta, parse-safely.
+
+    Two traps in the doc's own §4.3 example, both verified against the real
+    parser: `trade_delta=+3.55` **never registers at all** (the number pattern is
+    `-?\\d+`, so a leading `+` fails the match), and `trade_prev_date=2026-09-11`
+    registers as **`trade_prev_date = 2026`** — a year under a name that reads
+    like a metric. The sign is therefore carried by the absence of `-`, and the
+    date is parenthesised so it yields no key.
+    """
+    from tradingagents.agents.researchers.structured_debate import (
+        _parse_key_value_lines,
+    )
+
+    snap = _render(
+        scores={
+            "fundamental": 92.0,
+            "technical": 85.0,
+            "regime": 78.0,
+            "risk": 35.0,
+        },
+        status="VALIDATED",
+    )
+    snap["movement"] = {
+        "movement": "AVAILABLE",
+        "reason": None,
+        "prev": 73.20,
+        "prev_date": "2026-09-11",
+        "delta": 3.55,
+    }
+    text = qs.format_quant_scorecard(snap)
+
+    assert "trade_prev=73.2" in text
+    assert "trade_delta=3.55" in text
+    assert "prior observation (2026-09-11)" in text
+    assert "Movement: AVAILABLE" in text
+
+    parsed = _parse_key_value_lines(text)
+    assert parsed["trade_delta"] == 3.55
+    assert parsed["trade_prev"] == 73.2
+    # the two traps this format exists to avoid
+    assert "trade_prev_date" not in parsed
+    assert "prior_observation" not in parsed
+
+
+def test_a_falling_delta_keeps_its_sign():
+    snap = _render(scores={"trade": 76.75, "fundamental": 92.0}, status="VALIDATED")
+    snap["movement"] = {
+        "movement": "AVAILABLE",
+        "reason": None,
+        "prev": 91.0,
+        "prev_date": "2026-09-11",
+        "delta": -14.25,
+    }
+    text = qs.format_quant_scorecard(snap)
+    assert "trade_delta=-14.25" in text
+    from tradingagents.agents.researchers.structured_debate import (
+        _parse_key_value_lines,
+    )
+
+    assert _parse_key_value_lines(text)["trade_delta"] == -14.25
+
+
+def test_an_unavailable_movement_prints_no_delta_keys_at_all():
+    """`NA` rules: no prior row means no keys, never a zero."""
+    snap = _render(scores={"fundamental": 92.0}, status="RESEARCH_ONLY")
+    snap["movement"] = {
+        "movement": "UNAVAILABLE",
+        "reason": "the weight vector is not validated yet",
+        "prev": None,
+        "prev_date": None,
+        "delta": None,
+    }
+    text = qs.format_quant_scorecard(snap)
+    assert "trade_delta" not in text
+    assert "trade_prev" not in text
+    assert "Movement: UNAVAILABLE" in text
+
+
 def test_the_block_is_bounded_even_with_every_engine_absent():
     """Every engine enabled, none able to measure: `NA` everywhere, nothing numeric."""
     from tradingagents.agents.researchers.structured_debate import (

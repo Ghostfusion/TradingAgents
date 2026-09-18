@@ -388,6 +388,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **WP-12 `P12-8` landed: the score-history store and the held deltas.** New
+  `strategies/score_history.py` - one JSONL row per scored run date under `<data_cache_dir>/score_history/<TICKER>.jsonl`,
+  each row carrying the composite, its coverage and **the weight vector it scored under**. One row per date: re-running a date
+  does not rewrite history. **The rule is enforced, not documented** (§9 D2): *no validated vector -> no delta -> no movement* -
+  a prior row must exist, under the **same** vector, and the vector must be **validated**; the reason is vector validity, not
+  `RESEARCH_ONLY`. Every withheld case names its reason. `NA` rules: no prior row means **no delta keys at all**, never a zero.
+  **Wiring:** the graph reads the prior row THEN records this run's observation (read-then-write, so a run can never be its own
+  prior); the producer stays pure and the whole block is inside the `enable_quant_scorecard` gate. **A third parser trap found in
+  §4.3's own example:** `trade_delta=+3.55` **never registers** (the number pattern is `-?\d+`, so `+` fails the match) and
+  `trade_prev_date=2026-09-11` registers as `trade_prev_date = 2026` - a year under a name that reads like a metric. The example
+  is corrected; the sign is carried by the absence of `-`, and the date is parenthesised so it yields no key. `tests/test_score_history.py`
+  new (20); 156 passed across it, `test_quant_scorecard.py`, `test_trade_score.py`, `test_reporting.py`.
 - 2026-09-18 `(working tree)` - **WP-12 `P12-11` + the three-surface verification case landed.** `scorecard_basis` is an ADDITIVE
   field on the card's `quant_scorecard` key (§9 D3: a field `basis`'s consumer still reads is `basis`, so the scorecard's
   explanation gets its own name and home; `trade_score`'s shipped `basis` and its rendered text are untouched, and the test

@@ -14,6 +14,19 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**WP-12 `P12-8` — the score-history store, and deltas held until the vector is validated (2026-09-18).** §4.3 calls movement "the highest-value part, and the one with no producer"; the repository had no way to say whether a `TradeScore` had risen `61 → 76` or fallen `91 → 76`.
+
+- **The store.** `strategies/score_history.py` — one JSONL row per scored run date under `<data_cache_dir>/score_history/<TICKER>.jsonl`, each row carrying the composite, its coverage and **the weight vector it scored under**. One row per date: re-running a date does not rewrite history, so an observation is never silently replaced by a later one.
+- **The rule, enforced rather than documented** (§9 D2): *no validated vector → no delta → no movement*. Three conditions must hold — a prior row exists, it scored under the **same** vector, and the vector is **validated**. The reason is vector validity, not `RESEARCH_ONLY`: a delta implicitly claims both observations are legitimate. Every withheld case names its reason, so *"nothing to compare"* is distinguishable from *"the vector is not validated yet"*.
+- **`NA` rules:** no prior row means **no delta keys at all**, never a zero, and the delta is always printed against the date of the previous observation — a delta against an unstated date is a disguised fabrication.
+- **Wiring:** the graph computes the movement from the prior row *then* records this run's observation (read-then-write, so a run can never be its own prior). The producer stays pure — the store's I/O lives at the one call site — and the whole block sits behind `enable_quant_scorecard`, so gate-off still writes nothing.
+
+**A third parser trap, in §4.3's own example, found by running the real parser over it.** `trade_delta=+3.55` **never registers** — the number pattern is `-?\d+…`, so the leading `+` fails the match and the delta is silently absent from the registry. And `trade_prev_date=2026-09-11` registers as **`trade_prev_date = 2026`**, a year under a name that reads like a metric and could be cited as verified. The doc's example is corrected; the sign is carried by the absence of `-`, and the date is parenthesised so it yields no key.
+
+Tests: `tests/test_score_history.py` new (20), and 156 passed across it, `test_quant_scorecard.py`, `test_trade_score.py` and `test_reporting.py`.
+
+**Web impact**: none — a local cache file under the existing `data_cache_dir`, written only when the scorecard gate is on.
+
 **WP-12 `P12-11` — the scorecard's explanation is a new field, and the three-surface verification case (2026-09-18).**
 
 - **`P12-11` — `scorecard_basis`, additive.** §9 D3's rule is that the scorecard's explanation goes in a **new** field, never as a rewrite of the composite's shipped `basis` string: *a field that `basis`'s consumer still reads is `basis`*. So `run_card.json`'s `quant_scorecard` key carries `scorecard_basis` — what the snapshot is, and the difference between enablement, measurement and movement — while `trade_score`'s `basis` and its rendered text are untouched. The test asserts the frozen negative-constraint wording is smuggled into **neither** the new field nor the new block, and that the purpose line lives on the block while the field name lives on the card.

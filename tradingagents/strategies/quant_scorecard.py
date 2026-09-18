@@ -524,12 +524,14 @@ def scorecard_status(snapshot: dict | None) -> dict:
     else:
         status = "COMPLETE"
     composite = engines.get("trade") or {}
+    movement = (snapshot or {}).get("movement") or {}
     return {
         "scorecard_status": status,
         "enabled": enabled,
         "disabled": disabled,
         "vector_status": composite.get("status") or "UNAVAILABLE",
-        "movement": "UNAVAILABLE",
+        "movement": movement.get("movement") or "UNAVAILABLE",
+        "movement_reason": movement.get("reason"),
     }
 
 
@@ -599,6 +601,12 @@ def format_quant_scorecard(snapshot: dict | None) -> str:
 
     comp = engines.get("trade") or {}
     status = comp.get("status")
+    move = snap.get("movement") or {}
+    has_delta = (
+        move.get("movement") == "AVAILABLE"
+        and move.get("delta") is not None
+        and move.get("prev") is not None
+    )
     pairs: list[str] = []
     score = _number(comp.get("score"))
     if score is None:
@@ -608,7 +616,21 @@ def format_quant_scorecard(snapshot: dict | None) -> str:
         coverage = _number(comp.get("coverage"))
         if coverage is not None:
             pairs.append(f"trade_coverage={coverage}")
+        if has_delta:
+            # §4.3's delta, printed UNSIGNED. The doc's example writes `+3.55`,
+            # and the ground-truth parser's number pattern is `-?\d+...` - a
+            # leading `+` is not matched, so `trade_delta` never registers at
+            # all. Verified by running the real parser over that example. The
+            # sign still reads for a human (a fall carries `-`).
+            pairs.append(f"trade_prev={_number(move.get('prev'))}")
+            pairs.append(f"trade_delta={_number(move.get('delta'))}")
     lines.append(_pair_line(pairs, trailing=f"trade_status={status}" if status else None))
+    if has_delta:
+        # The date is mandatory - a delta against an unstated date is a disguised
+        # fabrication - and it is printed in parentheses so it adds NO registry
+        # key. `trade_prev_date=2026-09-11` would register as `trade_prev_date =
+        # 2026`, a year under a name that reads like a metric.
+        lines.append(f"prior observation ({move.get('prev_date')})")
 
     for name in COMPOSITE_ENGINES:
         entry = engines.get(name) or {}

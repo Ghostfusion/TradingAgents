@@ -361,8 +361,19 @@ Design: `<data_cache_dir>/score_history/<TICKER>.jsonl`, one row per scored run
 date, written by the snapshot producer. The block then carries:
 
 ```
-trade_score=76.75 trade_prev=73.20 trade_delta=+3.55 trade_prev_date=2026-09-11
+trade_score=76.75 trade_coverage=0.95 trade_prev=73.20 trade_delta=3.55 trade_status=RESEARCH_ONLY
+prior observation (2026-09-11)
 ```
+
+**Two traps in the first draft of that example, both found by running the real
+parser over it.** `trade_delta=+3.55` does not register **at all** — the number
+pattern is `-?\d+…`, so a leading `+` fails the match and the delta is silently
+absent from the registry. And `trade_prev_date=2026-09-11` registers as
+**`trade_prev_date = 2026`**: a year under a name that reads like a metric, which
+a debater could then cite as verified. So the sign is carried by the absence of
+`-`, and the date is parenthesised — a bare `(2026-09-11)` has no letter-led key
+before it, so it yields no key at all. `P12-8` implements this and its test parses
+the rendered block with the real parser.
 
 **`NA` rules, per rule 2:** no prior row → no delta keys at all, never `0`. The
 delta is against the **previous scored observation**, and its date is always
