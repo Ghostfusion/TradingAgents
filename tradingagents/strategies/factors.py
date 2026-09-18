@@ -352,6 +352,15 @@ def category_scores(
         for m in used
         if weights and _finite(weights.get(m)) not in (None, 0.0)
     }
+    if weights and len(w) < len(used):
+        # A PARTIAL weight vector: a metric the caller did not weight is dropped
+        # from the weighted mean with its reason, rather than entering at 0 (a
+        # punitive score for a metric nobody weighted) or raising KeyError in the
+        # renormalisation below - which is what any partial vector used to do.
+        for m in used:
+            if m not in w:
+                dropped[m] = "no weight supplied for this metric"
+        used = [m for m in used if m in w]
     zmap: dict[str, float] = {}
     coverage: dict[str, dict] = {}
     withheld: dict[str, str] = {}

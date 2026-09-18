@@ -323,6 +323,9 @@ dispersion, display-only bands), `enable_analyst_revision_index` (S6:
 `analyst_revisions.revision_ratio` and the `get_analyst_revision_index` tool),
 `enable_quality_composite` (S3: `factors.category_scores` 0-100 with the
 quality bands - never `decision_guardrail.SCORE_BANDS`),
+`enable_fundamental_score` (WP-2: the four `FundamentalScore` category
+sub-scores over the peer panel + their `RESEARCH_ONLY` composite; with it off the
+tool is not in any toolset at all),
 `enable_score_eval_rows` (S8: `alpha_health.score_evaluation_rows`),
 `enable_weighted_sentiment_window` (S7: `weighted_rolling_sentiment`, the
 10-day exponential window plus the `min_history` warm-up guard), and

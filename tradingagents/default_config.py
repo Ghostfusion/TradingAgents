@@ -294,6 +294,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS": "enable_score_eval_rows",
     "TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_WINDOW": "enable_weighted_sentiment_window",
     "TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY": "enable_evidence_symmetry",
+    "TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE": "enable_fundamental_score",
     # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
     # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
     # Empty = the mirror is inert (nothing is ever suppressed).
@@ -1048,6 +1049,10 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_score_eval_rows": False,  # S8: score IC / decile / coverage / stability rows
         "enable_weighted_sentiment_window": False,  # S7: exponentially weighted rolling window
         "enable_evidence_symmetry": False,  # S11: paired-role symmetry report + mirrored budget
+        # WP-2 (docs/scores/IMPLEMENTATION_PLAN.md §5.1): the four FundamentalScore
+        # category sub-scores + their RESEARCH_ONLY composite. Off by default;
+        # with it off no engine tool is in any toolset and a run is byte-identical.
+        "enable_fundamental_score": False,
         # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
         # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
         # to mirror the smallest observed count of the pair instead. Empty (default)

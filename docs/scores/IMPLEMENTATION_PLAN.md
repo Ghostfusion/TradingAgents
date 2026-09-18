@@ -617,6 +617,24 @@ nothing writes `opportunity_score`, and the reason string is present and stable.
 **Gate.** `enable_fundamental_score` (new). The existing `enable_quality_composite`
 continues to gate the pre-existing `quality composite` row and is not reused.
 
+**Acceptance - MET 2026-09-17 (the four sub-scores and the composite; the ten
+ranked factors below are the next pass, not this one).** (a) A name with 3 of
+FQS's 7 factors present scores on those 3 and prints `coverage 3/7 factors`
+(unit: `test_three_of_seven_factors_present_scores_on_those_three`); (b) `basis`
+names the metric set, the floor **over the sub-score's own factors**, the weight
+vector and the equal-weight fallback; (c) the printed sub-scores recompute the
+printed composite (`Σw·s/Σw`, tested); (d) `dcf_confidence` scales the DCF upside
+before it enters VS, so a soft DCF contributes less - tested at the mechanism and
+at the VS score; (e) nothing writes `opportunity_score` (tested), and the
+composite ships `RESEARCH_ONLY` with no band table.
+
+**Live (MSFT, 2026-09-17, peer panel of 9 names MSFT + its 8 Finnhub peers):**
+`FQS 75.0 (7/7 factors)`, `FGS 33.3 (2/2)`, `VS 62.5 (9/10)`, `FRS 87.5 (6/6)`,
+composite `64.6` over 4/4 present sub-scores - 0 names withheld. The extended
+panel produced every `ratios.compute_ratios` valuation key for all 9 names; the
+`NA` factors (`rev_cagr5`, `fcf_yield`, `val_z`) are named in the output rather
+than proxied.
+
 ### 5.2 WP-3 — `TechnicalScore`
 
 **Objective.** Nine category sub-scores and the composite over components that

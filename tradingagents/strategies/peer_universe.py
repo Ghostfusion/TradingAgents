@@ -41,7 +41,34 @@ def _fnum(v):
         return None
 
 
-def _panel_from_fin(ticker: str, fin: dict) -> dict:
+# The metric keys the score engine's sub-scores read that the round-3 quality
+# panel does not carry. Opt-in (`include_score_metrics`), because adding them to
+# the default panel would change the quality composite's own `coverage["of"]`
+# and its droplist - a published row that must stay byte-identical.
+SCORE_METRIC_RATIO_KEYS: tuple[str, ...] = (
+    "ev_ebitda",
+    "ev_ebit",
+    "ev_sales",
+    "price_to_earnings",
+    "price_to_book",
+    "price_to_sales",
+    "price_to_cash_flow",
+    "price_to_free_cash_flow",
+    "return_on_equity",
+    "return_on_assets",
+    "debt_to_equity",
+    "current",
+    "quick",
+)
+
+SCORE_METRIC_SCREEN_KEYS: tuple[str, ...] = (
+    "earnings_yield",
+    "eps_yoy",
+    "revenue_yoy",
+)
+
+
+def _panel_from_fin(ticker: str, fin: dict, *, include_score_metrics: bool = False) -> dict:
     """The canonical metric panel for one name, from an already-fetched ``fin``.
 
     F / M / Z / GP-A / NOA come from ``screen_ticker`` (values as it returns
@@ -50,6 +77,14 @@ def _panel_from_fin(ticker: str, fin: dict) -> dict:
     name is simply absent from its dict. ``capex_quality`` is not computed here
     because it needs the annual series the single statement fetch does not
     carry.
+
+    ``include_score_metrics`` adds the factors the `FundamentalScore` sub-scores
+    consume and the quality panel does not carry - the valuation/profitability
+    ratio block (`strategies/ratios.compute_ratios`, the one producer of those
+    keys), ``screen_ticker``'s own earnings yield and growth legs, and the
+    Zmijewski X. It is **opt-in** because the quality composite's published
+    coverage and droplist are computed over the panel's key set: adding keys to
+    the default panel would change a row that must not move.
     """
     from tradingagents.dataflows.statement_parsing import screen_ticker
     from tradingagents.strategies.normalized import accruals_ratio, ohlson_o_score
@@ -70,16 +105,38 @@ def _panel_from_fin(ticker: str, fin: dict) -> dict:
     ni = _fnum(_latest(fin.get("net_income")))
     cfo = _fnum(_latest(fin.get("operating_cashflow")))
     ta = _fnum(_latest(fin.get("total_assets")))
+    ca = _fnum(_latest(fin.get("current_assets")))
+    cl = _fnum(_latest(fin.get("current_liabilities")))
+    tl = _fnum(_latest(fin.get("total_liabilities")))
     acc = accruals_ratio(ni, cfo, ta)
     if acc is not None:
         out["accruals"] = acc
 
+    if include_score_metrics:
+        # `screen_ticker` runs `enrich_screen_ratios(fin)` first, so `fin` is
+        # already the enriched dict the ratio block expects.
+        from tradingagents.strategies.normalized import zmijewski_score
+        from tradingagents.strategies.ratios import compute_ratios
+
+        for key in SCORE_METRIC_SCREEN_KEYS:
+            v = row.get(key)
+            if v is not None:
+                out[key] = v
+        ratios = compute_ratios(fin)
+        for key in SCORE_METRIC_RATIO_KEYS:
+            v = ratios.get(key)
+            if v is not None:
+                out[key] = v
+        zx = zmijewski_score(ni, ta, tl, ca, cl).get("score")
+        if zx is not None:
+            out["zmijewski_x"] = zx
+
     o = ohlson_o_score(
         total_assets=ta,
-        total_liabilities=_fnum(_latest(fin.get("total_liabilities"))),
+        total_liabilities=tl,
         working_capital=_fnum(_latest(fin.get("working_capital"))),
-        current_assets=_fnum(_latest(fin.get("current_assets"))),
-        current_liabilities=_fnum(_latest(fin.get("current_liabilities"))),
+        current_assets=ca,
+        current_liabilities=cl,
         net_income=ni,
         funds_from_ops=cfo,
         ni_prev=_fnum(_prior(fin.get("net_income"))),
@@ -88,6 +145,30 @@ def _panel_from_fin(ticker: str, fin: dict) -> dict:
     if o.get("score") is not None:
         out["o"] = o["score"]
     return out
+
+
+def resolved_peer_names(ticker: str, *, limit: int = 8) -> list[str]:
+    """``[ticker] + its vendor peers[:limit]`` - the tool-level peer set.
+
+    One implementation for every leaf that scores against a peer set
+    (`get_composite_rank`, `get_fundamental_score`): the vendor returns a
+    rendered ``"Peers: A, B, ..."`` string, which is why this parses it through
+    ``peer_symbols`` rather than iterating it (iterating gave the peer set the
+    sentence's characters). Never raises: a peer fetch that fails leaves the
+    ticker alone, and the caller's peer floor then reports the reason.
+    """
+    key = str(ticker or "").strip().upper()
+    if not key:
+        return []
+    try:
+        from tradingagents.dataflows.finnhub import get_company_peers_finnhub, peer_symbols
+
+        peer_list = [
+            p for p in peer_symbols(get_company_peers_finnhub(key)) if p and p != key
+        ]
+    except Exception:  # noqa: BLE001 - a peer fetch must never break a scoring leaf
+        peer_list = []
+    return [key] + peer_list[: int(limit)]
 
 
 def resolve_peer_universe(
@@ -99,6 +180,7 @@ def resolve_peer_universe(
     require_nyse_nasdaq: bool = True,
     tickers: list[str] | None = None,
     financials: dict[str, dict] | None = None,
+    include_score_metrics: bool = False,
 ) -> dict:
     """Resolve the peer universe to a metrics panel + sector labels.
 
@@ -111,6 +193,10 @@ def resolve_peer_universe(
         tickers: when given, THIS is the universe - the EODHD symbol-list fetch
             is skipped entirely (no exchange filter, no ``max_names`` cap) and
             metrics/sectors are resolved for exactly these names.
+        include_score_metrics: add the ratio / earnings-yield / growth / Zmijewski
+            factors the `FundamentalScore` sub-scores consume. Default ``False``:
+            the round-3 quality composite's coverage and droplist are computed
+            over the panel's key set, so its published row must not move.
         financials: ``{ticker: canonical fin}`` already fetched by the caller;
             those names skip the statement fetch and only run ``screen_ticker``.
 
@@ -170,7 +256,9 @@ def resolve_peer_universe(
         if not fin:
             return name, None, None, "no_statement"
         try:
-            panel = _panel_from_fin(name, fin)
+            panel = _panel_from_fin(
+                name, fin, include_score_metrics=include_score_metrics
+            )
         except Exception:  # noqa: BLE001
             return name, None, None, "panel_error"
         if not panel:

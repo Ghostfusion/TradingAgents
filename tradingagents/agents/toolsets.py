@@ -90,6 +90,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_fixed_income_risk,
     get_form4_insider,
     get_fundamentals,
+    get_fundamental_score,
     get_fx_snapshot,
     get_gamma_profile,
     get_gap_type,
@@ -385,9 +386,30 @@ def news_tools() -> list:
             ]
 
 
+def _enabled(name: str, default: bool = False) -> bool:
+    """Read an ``enable_*`` gate for toolset membership (never raises).
+
+    A gate that is off must leave the toolset **byte-identical**, so a gated
+    engine tool is not merely inert inside its body - it is absent from the list
+    the analyst can bind and the ToolNode can execute
+    (docs/scores/IMPLEMENTATION_PLAN.md §6, acceptance (a)).
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        return bool((get_config() or {}).get(name, default))
+    except Exception:  # noqa: BLE001 - an unreadable config means off
+        return default
+
+
 def fundamentals_company_tools() -> list:
-    """Company-path tools for the fundamentals analyst (statements, DCF, ...)."""
-    return     [
+    """Company-path tools for the fundamentals analyst (statements, DCF, ...).
+
+    Score-engine tools are appended only when their own gate is on
+    (docs/scores/IMPLEMENTATION_PLAN.md §9); with every engine gate off this
+    list is exactly what it was before the engines existed.
+    """
+    tools = [
                 get_fundamentals,
                 get_balance_sheet,
                 get_cashflow,
@@ -443,6 +465,9 @@ def fundamentals_company_tools() -> list:
                 get_allocation_black_litterman,
                 get_position_risk_multiplier,
             ]
+    if _enabled("enable_fundamental_score"):
+        tools.append(get_fundamental_score)
+    return tools
 
 
 def fundamentals_etf_tools() -> list:

@@ -77,6 +77,9 @@ def _config_hash() -> str:
             "enable_score_eval_rows",
             "enable_weighted_sentiment_window",
             "enable_evidence_symmetry",
+            # Score engines (docs/scores/IMPLEMENTATION_PLAN.md §9): each engine
+            # gate changes what a run emits, so it must move this hash too.
+            "enable_fundamental_score",
         )
         if k in DEFAULT_CONFIG
     }

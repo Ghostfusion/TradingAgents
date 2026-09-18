@@ -125,6 +125,12 @@ involved. This is the "compute, don't narrate" core.
 - `factors.py` — `category_scores` (the shared cross-sectional core; 0-100 tie-aware percentile of the winsorised-z mean over a
   declared metric set with `QUALITY_DIRECTIONS`; coverage floor, per-metric droplist, `QUALITY_BANDS`) +
   `quality_band`.
+- `factor_schema.py` — the Q3 schema record (`factor / category / formula / direction / base_weight /
+  sector_scope / normalization_method / supplier / availability`) for every factor a score engine consumes;
+  `validate_schema()` asserts one identity per measure, ±1 directions and that no factor enters two sub-scores.
+- `fundamental_score.py` — WP-2: `FQS`/`FGS`/`VS`/`FRS` thin wrappers over `factors.category_scores` with their own
+  band tables, the `RESEARCH_ONLY` composite (`Σw·s/Σw` over present sub-scores), `dcf_confidence` (four measured
+  legs → 0-1, capped at 0.6 when a leg is unreadable) and `dcf_upside_scaled`.
 - `alpha_health.py` — round-3 S8 `score_evaluation_rows` (mean rank IC + IC IR reusing
   `sentiment_research.rolling_information_coefficient`, rank-bucketed forward returns + monotonicity, coverage,
   rank-autocorrelation stability; unavailable below the observation floor; rows are inputs to DSR/PBO, never a

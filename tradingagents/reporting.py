@@ -856,6 +856,71 @@ def _run_card_llm_cost_est() -> dict:
         return {}
 
 
+def _run_card_fundamental_score(ticker: str, final_state: dict, cfg: dict) -> dict | None:
+    """FundamentalScore block for run_card.json (WP-2 / WP-9).
+
+    One additive key per engine: the four category sub-scores with their bands
+    and coverage, the RESEARCH_ONLY composite with its weights, and the status /
+    basis, so a reader can **recompute the number from the card alone** rather
+    than trusting it. Nothing here gates, sizes or reaches a rating.
+
+    The score is recomputed deterministically at write time from the same peer
+    panel the leaf uses (one producer: `fundamental_score_for_ticker`), because a
+    tool's rendered text is not a data source - the card must carry the numbers,
+    not a quote of them. Returns ``None`` when the gate is off, so a tree built
+    with the engine disabled is byte-identical to a pre-engine tree.
+    """
+    if not (cfg or {}).get("enable_fundamental_score"):
+        return None
+    try:
+        from tradingagents.strategies.fundamental_score import (
+            fundamental_score_for_ticker,
+        )
+
+        pm = final_state.get("pm_decision") or {}
+        date = pm.get("trade_date")
+        res = fundamental_score_for_ticker(ticker, date)
+    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+        return {
+            "status": None,
+            "score": None,
+            "coverage": None,
+            "components": None,
+            "weights": None,
+            "withheld": None,
+            "subscores": {},
+            "panel_n": None,
+            "basis": None,
+            "unavailable": f"{type(exc).__name__}: {exc}",
+        }
+    subs = res.get("subscores") or {}
+    key = res.get("ticker") or str(ticker).upper()
+    out: dict = {
+        "status": res.get("status"),
+        "score": (res.get("scores") or {}).get(key),
+        "coverage": (res.get("coverage") or {}).get(key),
+        "components": (res.get("components") or {}).get(key),
+        "weights": res.get("weights"),
+        "withheld": (res.get("withheld") or {}).get(key),
+        "subscores": {
+            sub: {
+                "score": (entry.get("scores") or {}).get(key),
+                "band": (entry.get("bands") or {}).get(key),
+                "coverage": (entry.get("coverage") or {}).get(key),
+                "status": entry.get("status"),
+                "withheld": (entry.get("withheld") or {}).get(key),
+                "factors_NA": entry.get("factors_NA"),
+                "basis": entry.get("basis"),
+            }
+            for sub, entry in subs.items()
+        },
+        "panel_n": res.get("panel_n"),
+        "basis": res.get("basis"),
+        "unavailable": res.get("unavailable"),
+    }
+    return out
+
+
 def _run_card_data_absence(save_path) -> dict | None:
     """Chain-end data-absence reason for run_card.json (yfinance P1).
 
@@ -1443,6 +1508,12 @@ def write_report_tree(
             # tool_evidence.json) or the legacy LLM-selected path, which has
             # neither. Advisory; additive key.
             "evidence": _run_card_evidence(final_state, cfg),
+            # WP-2/WP-9: the FundamentalScore engine's advisory block - the four
+            # category sub-scores with their coverage and the RESEARCH_ONLY
+            # composite, so the card carries the numbers and their attribution
+            # rather than a quote of the tool's prose. Absent (null) when the
+            # gate is off. Advisory; additive key.
+            "fundamental_score": _run_card_fundamental_score(ticker, final_state, cfg),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),

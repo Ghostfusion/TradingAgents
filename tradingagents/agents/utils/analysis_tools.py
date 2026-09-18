@@ -4704,6 +4704,124 @@ def get_composite_rank(
 # ---------------------------------------------------------------------------
 
 
+def _render_fundamental_score(res: dict) -> str:
+    """Render the score dict to the advisory block (one reader, one shape).
+
+    Every number is printed beside what it is made of: the sub-score, its band,
+    its coverage over **its own** factor set, the composite with its weights and
+    the gap (which declared factors have no supplier on this path). No prose
+    asks the reader to trust a score - the attribution is the argument.
+    """
+    ticker = res.get("ticker") or "?"
+    lines = [
+        f"## FundamentalScore - {ticker} (advisory; peer panel of "
+        f"{res.get('panel_n')} name(s))",
+        "",
+        "Four deterministic category sub-scores over the peer set. They are "
+        "diagnostics, not a rating: nothing here feeds a gate, a size or "
+        "`decision_guardrail.SCORE_BANDS`.",
+        "",
+    ]
+    subs = res.get("subscores") or {}
+    for sub in ("FQS", "FGS", "VS", "FRS"):
+        entry = subs.get(sub)
+        if not entry:
+            continue
+        score = (entry.get("scores") or {}).get(ticker)
+        band = (entry.get("bands") or {}).get(ticker)
+        cov = (entry.get("coverage") or {}).get(ticker) or {}
+        if score is None:
+            why = (
+                (entry.get("withheld") or {}).get(ticker)
+                or entry.get("unavailable")
+                or "no score for this name"
+            )
+            lines.append(
+                f"- {sub} {entry.get('title') or ''}: unavailable - {why} "
+                f"(factors {entry.get('factors_declared')})"
+            )
+            continue
+        lines.append(
+            f"- {sub}: {score:.1f}/100"
+            + (f" ({band})" if band else "")
+            + f" - coverage {cov.get('n')}/{cov.get('of')} factors "
+            f"{cov.get('metrics')}; "
+            f"{len(entry.get('scores') or {})} of {entry.get('peer_n')} peers scored"
+        )
+    composite = (res.get("scores") or {}).get(ticker)
+    cov = (res.get("coverage") or {}).get(ticker) or {}
+    if composite is None:
+        lines.append(
+            f"- composite [{res.get('status')}]: unavailable - "
+            f"{(res.get('withheld') or {}).get(ticker) or res.get('unavailable')}"
+        )
+    else:
+        weights = res.get("weights")
+        w_txt = (
+            "equal weights (1/4 each)"
+            if not weights
+            else ", ".join(f"{k}={float(v):g}" for k, v in sorted(weights.items()))
+        )
+        comps = (res.get("components") or {}).get(ticker) or {}
+        present = ", ".join(f"{k}={v:.1f}" for k, v in sorted(comps.items()) if v is not None)
+        lines.append(
+            f"- composite [{res.get('status')}]: {composite:.1f}/100 - {w_txt} over "
+            f"{cov.get('n')}/{cov.get('of')} present sub-scores ({present}); "
+            f"RESEARCH_ONLY: the combination is unvalidated, the four sub-scores are "
+            f"the advisory output"
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    for sub, entry in subs.items():
+        if entry.get("basis"):
+            lines.append(f"  - {sub}: {entry['basis']}")
+    gaps = {sub: (entry.get("factors_NA") or []) for sub, entry in subs.items()}
+    gaps = {sub: names for sub, names in gaps.items() if names}
+    if gaps:
+        lines.append(
+            "no supplier on this path (NA, never scored as 0): "
+            + "; ".join(f"{sub}: {', '.join(names)}" for sub, names in sorted(gaps.items()))
+        )
+    if res.get("panel_basis"):
+        lines.append(f"panel: {res['panel_basis']}")
+    return "\n".join(lines)
+
+
+@tool
+def get_fundamental_score(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
+) -> str:
+    """FundamentalScore: four advisory 0-100 category sub-scores (quality /
+    profitability, growth, valuation, financial risk) over the ticker's peer
+    set, plus a RESEARCH_ONLY composite.
+
+    Each sub-score prints its coverage over its own factor set and the band it
+    falls in; a name below the coverage floor is withheld with the reason rather
+    than scored on the factors it lacks. Advisory only - it never sets a rating,
+    a position size or a gate. Gated by ``enable_fundamental_score``.
+    """
+    if not _r3_flag("enable_fundamental_score"):
+        return (
+            "fundamental score unavailable: the engine is gated off "
+            "(enable_fundamental_score)"
+        )
+    try:
+        from tradingagents.strategies.fundamental_score import (
+            fundamental_score_for_ticker,
+        )
+
+        res = fundamental_score_for_ticker(ticker, current_date)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"fundamental score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_fundamental_score(res)
+    except Exception as exc:  # noqa: BLE001
+        return f"fundamental score unavailable for {ticker}: render failed ({exc})"
+
+
 @tool
 def get_tail_risk(
     ticker: Annotated[str, "ticker symbol"],

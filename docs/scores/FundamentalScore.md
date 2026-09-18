@@ -556,6 +556,17 @@ Phase A can ship something real:
 | VS (valuation) | `pe`, `ev_ebit`, `ev_ebitda`, `ev_sales`, `ps`, `pb`, `pcf`, `p_fcf`, `ey`, `fcf_yield`, `val_z` (historical percentile), `dcf`-family upside (`price/fv`, MoS bases) | 13.25 of 21.25 — **the most complete category; ship it first** |
 | FRS (financial risk) | `z` (+ variants/zones), `o`, `zmijewski_x`, `d_e`, `current`, `quick`, `trap_verdict`, `altman_zone`, capex quality `DISTRESS` regime | 2.25 + 0.90 — small weights, fully covered |
 
+**Two corrections the build made to this table (2026-09-17).** (1) **`o` belongs
+to FRS alone.** The table above listed the Ohlson O in FQS *and* FRS, which would
+put one distress probability into two categories of the same composite - the
+double count master rule 15 forbids. FRS owns it; FQS reads seven factors without
+it. A test asserts no factor enters two sub-scores.
+(2) **A count floor is capped at the sub-score's own factor count.** FGS has two
+factors with a supplier on the single-statement path (`rev_cagr5` needs the annual
+series), so the design's default floor of 3 withheld every name from FGS forever -
+an off switch wearing a floor's name. `min_coverage` is now capped at the declared
+count (FQS's 7 leaves a floor of 3 alone) and the cap is printed.
+
 The composite is then `Σ w_c · S_c` over **present** sub-scores, renormalised,
 with the weights printed. Ground rule 6 applies: this composite never reaches
 `SCORE_BANDS`.

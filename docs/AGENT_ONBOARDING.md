@@ -395,6 +395,19 @@ has changed before); never assume an endpoint works — the SDK's
   label="quality composite")` and print the identical basis string. `QUALITY_DIRECTIONS` / `QUALITY_BANDS` /
   `quality_band` / `enable_quality_composite` are untouched. Tests: `test_quality_composite.py` ->
   `test_category_scores.py`, 12 tests re-pointed; 44 passed across it + `test_round3_wiring.py`. Live docs re-pointed.
+- 2026-09-17 `(working tree)` - **WP-2 landed: the `FundamentalScore` engine** (`strategies/fundamental_score.py`,
+  `strategies/factor_schema.py`, leaf `get_fundamental_score`, run-card block, gate `enable_fundamental_score`). Four
+  advisory category sub-scores (FQS/FGS/VS/FRS) as thin wrappers over `factors.category_scores`, each with its own band
+  table, factor set and floor; the composite ships `RESEARCH_ONLY` with equal weights printed. `NA != 0`: an unsupplied
+  factor is named (`rev_cagr5`, `fcf_yield`, `val_z`) and dropped, a name below the floor is withheld with its reason,
+  and coverage is stated over the sub-score's own factor set. `dcf_confidence` (four measured legs, capped at 0.6 when
+  one is unreadable) scales the DCF upside before it enters VS. **Two defects fixed on sight:** `category_scores`
+  raised `KeyError` on any partial weight vector, and the design's floor of 3 withheld every name from FGS forever (it
+  has two factors with a supplier) - a count floor is now capped at the sub-score's own factor count. Also recorded:
+  the design listed the Ohlson O in both FQS and FRS (a master-rule-15 double count); FRS owns it. The peer panel
+  gained an opt-in score-metric extension so the round-3 quality row does not move. Live MSFT: FQS 75.0 (7/7),
+  FGS 33.3 (2/2), VS 62.5 (9/10), FRS 87.5 (6/6), composite 64.6 over 4/4, 0 withheld. `test_fundamental_score.py`
+  +36; 93 passed across the score/schema/wiring suites.
 - 2026-09-17 `(working tree)` - **P0-9 landed: both vendor probes answered** (recorded answers, no code). **(1) EODHD
   `/sentiments` coverage is COMPLETE for this universe** - 26 of 26 names returned a non-empty series (16 large caps at
   73-151 daily points, four ETFs, 0700.HK, SKHY, BRK.B, RIVN, ARM, CART; no empty result, no error), so the hardcoded
