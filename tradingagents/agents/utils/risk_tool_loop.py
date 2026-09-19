@@ -35,6 +35,7 @@ rounds; prose similarity cannot see it, because the text is new every time.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -47,6 +48,8 @@ from tradingagents.agents.utils.tool_call_markup import (
 )
 from tradingagents.graph.conditional_logic import MAX_TOOL_ROUNDS
 from tradingagents.llm_clients.base_client import content_to_text
+
+logger = logging.getLogger(__name__)
 
 # A markup-only answer is returned as MARKUP_UNAVAILABLE (imported above from
 # ``tool_call_markup``): the caller must never write a claim of a deterministic

@@ -643,6 +643,22 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **Two real defects were hiding inside a lint count reported as "pre-existing, not mine".** The
+  23 tree-wide `ruff check tradingagents/` findings were dismissed without ever being enumerated - and the extraction command
+  used to justify that was itself broken (ruff prints absolute Windows paths, and the filename regex had no `:` in its class,
+  so it died at the drive letter and printed nothing). **The `grep -c` count of 0 was valid evidence; the conclusion drawn from
+  a command that produced no output was not.** Two of the 23 were not style. **Rule this leaves: enumerate a dismissed finding
+  set before calling it pre-existing, and never report a conclusion from a command whose output was empty.** **Defect 1 -
+  `risk_tool_loop._final_prose` raised `NameError` in the handler commented *"degrade, never raise mid-loop"***: `logger` was
+  never bound anywhere in the file (one occurrence, no import, no `getLogger`), so a transient provider failure during the
+  prose retry - the exact case the handler exists for - raised `NameError` out of the node, **and replaced the original
+  exception, so the log never showed the real cause.** Fixed with the house binding. **Defect 2 - `report_verifier._period_tag`
+  put a backslash inside an f-string expression (PEP 701, 3.12+)** while `pyproject.toml` declares `requires-python = ">=3.10"`,
+  so the module could not be *parsed* on 3.10/3.11. It was the **only** such site repo-wide (`ruff --target-version py310`: 1
+  `invalid-syntax` -> 0), so the honest fix is the code, not the declared floor. **The rule: when a declared compatibility
+  floor and a single syntax site disagree, fix the site - do not raise the floor to match a line nobody needs.** Both proven
+  failing-first by mutation (removing the binding, not stashing the file): `NameError: name 'logger' is not defined`, then
+  green. Engine suite **4923 passed / 6 skipped**.
 - 2026-09-18 `(working tree)` - **D3 REVERSED by the owner: the composite's printed `basis` contract is preserved.** The owner re-answered the
   third research-layer question in the opposite direction; `02145fe` is **reverted** here. `strategies/trade_score.py` is back to
   *"Advisory only: never a gate, never a size, never an `opportunity_score`"* in the framing sentence and to the same tail in

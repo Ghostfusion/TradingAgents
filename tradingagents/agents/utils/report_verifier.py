@@ -1628,7 +1628,12 @@ def _period_tag(line: str) -> str | None:
     for regex, kind in _PERIOD_TAG_RES:
         m = regex.search(line)
         if m:
-            return f"{kind}:{re.sub(r'\s+', '', m.group(0)).lower()}"
+            # The substitution is hoisted out of the f-string: a backslash
+            # inside an f-string expression is PEP 701 syntax (3.12+), and
+            # pyproject declares requires-python >=3.10 - inlined, this line
+            # made the whole module unparseable below 3.12.
+            token = re.sub(r"\s+", "", m.group(0)).lower()
+            return f"{kind}:{token}"
     return None
 
 

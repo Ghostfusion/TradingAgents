@@ -185,6 +185,25 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 ### Fixed
 
+**Two defects found by asking what the tree-wide lint count actually was - one a broken guard, one a module that could not be parsed below 3.12 (2026-09-19).** Both surfaced from the 23 pre-existing `ruff check tradingagents/` findings, which had been reported as "pre-existing, not mine" without ever being enumerated. Two of the 23 were not style.
+
+**`risk_tool_loop._final_prose` raised `NameError` in the handler that promises never to raise.**
+- The `except` on the prose-retry LLM call is commented *"degrade, never raise mid-loop"*, and the module docstring promises *"it never raises and never fabricates"*. Its body called `logger.warning(...)` - and `logger` was **never bound**: the name appeared exactly once in the entire file, with no import and no module-level `getLogger`.
+- **So a transient provider failure during the retry raised `NameError` out of the node.** That is precisely the condition the handler exists for: a 503, a timeout, a rate limit on the second ask. And because the `NameError` **replaced** the original exception, the log never showed the real cause either - the operator saw `name 'logger' is not defined` instead of `provider 503`.
+- Reproduced live before fixing, with a chain whose `invoke` raises: `NameError: name 'logger' is not defined` at `:286`. Fixed by binding `logger = logging.getLogger(__name__)`, the house convention (`agent_utils.py:470`, `report_verifier.py:40`). It now logs the provider's own words and degrades to `MARKUP_UNAVAILABLE`, as documented.
+- Failing-first proof by mutation (removing the binding, not stashing the file): both new tests fail with that exact `NameError` and pass once it is restored.
+
+**`report_verifier._period_tag` used PEP 701 syntax, making the whole module unparseable below Python 3.12.**
+- `f"{kind}:{re.sub(r'\s+', '', m.group(0)).lower()}"` puts a **backslash inside an f-string expression**, which is 3.12+ syntax. `pyproject.toml` declares `requires-python = ">=3.10"`, so on a 3.10 or 3.11 install `import tradingagents.agents.utils.report_verifier` raises `SyntaxError` - the verifier and everything importing it are simply dead there.
+- **This was the only such site in the repo**: `ruff check --target-version py310` over the whole tree reported exactly one `invalid-syntax`, and it reported zero afterwards. The declared floor is honest everywhere else, so the conservative fix is the code, not the declaration - the substitution is hoisted to a local (`token = ...`) and the f-string is plain. Behaviour is identical: `period:quarterly`, `period:annual`, `fq:fq2`, `None` for a line with no period token.
+- Not caught by the suite because everything here runs `py -3.12`, where the line parses fine.
+
+Tests: `tests/test_tool_round_cap.py` +2 (a failing prose retry degrades to `MARKUP_UNAVAILABLE` instead of raising, and the underlying cause reaches the log). The `_period_tag` fix is proven by `ruff --target-version py310` going from 1 `invalid-syntax` to 0, not by a behavioural test - a behavioural test cannot fail on 3.12, where the old line parsed.
+
+Engine suite **4923 passed / 6 skipped** (from 4921 / 6).
+
+**Web impact**: none. No key, CLI flag, JSON shape, prompt or rendered output changed. The `_final_prose` fix changes behaviour only on a path that previously crashed, and the `_period_tag` fix is byte-identical on the interpreter this project runs.
+
 **The Heat List is not unavailable - and the repo said it was, in five places (2026-09-18).** Found by asking whether moomoo could actually supply the attention legs a screener factor would need, rather than trusting the claim the tree already carried.
 
 - **The claim was false.** `tradingagents/dataflows/moomoo.py::get_hot_movers_moomoo`'s docstring, `scripts/value_screener.py`'s `--universe` help and its `heat-proxy` comment, `README.md`'s value-screener section and this file's own 2026-08 `heat-proxy` entry all asserted the in-app Heat List *"is not exposed by any moomoo API"* / *"is app-only"*. It is exposed: `OpenQuoteContext.get_hot_list` (`Qot_GetHotList`) returns `search_heat`, `trade_heat`, `news_heat` and their `average_heat`, each with a `*_heat_change` delta, plus `news_type` / `news_title` / `news_url`.

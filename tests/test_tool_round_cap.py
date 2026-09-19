@@ -949,3 +949,42 @@ def test_notice_names_the_reported_cause(monkeypatch):
         _empty("length"), _msgs(MAX_TOOL_ROUNDS - 1, tail="tools"), _tool_ai(),
     )
     assert "burned its output budget" in length_out
+
+
+# --- _final_prose: a failing retry degrades, it never raises ------------------
+#
+# The handler says "degrade, never raise mid-loop", and the module docstring
+# promises "it never raises". It called an unbound ``logger``, so a transient
+# provider failure during the retry raised NameError out of the node - and
+# because the NameError replaced the original exception, the log never showed
+# the real cause either.
+
+_MARKUP = (
+    "Some preamble prose.\n"
+    '<invoke name="get_fundamentals">\n'
+    '<parameter name="ticker" string="true">MSFT</parameter>\n'
+    "</invoke>\n"
+)
+
+
+class _FailingChain:
+    """An LLM chain whose retry raises - the exact case the handler exists for."""
+
+    def invoke(self, messages):  # noqa: ARG002 - chain contract
+        raise RuntimeError("provider 503 during prose retry")
+
+
+def test_a_failing_prose_retry_degrades_instead_of_raising():
+    from tradingagents.agents.utils import risk_tool_loop as R
+
+    assert R.has_tool_call_markup(_MARKUP)
+    assert R._final_prose(_FailingChain(), [], _MARKUP) == R.MARKUP_UNAVAILABLE
+
+
+def test_a_failing_prose_retry_logs_the_underlying_cause(caplog):
+    from tradingagents.agents.utils import risk_tool_loop as R
+
+    with caplog.at_level("WARNING"):
+        R._final_prose(_FailingChain(), [], _MARKUP)
+    # The provider's own words, so an operator can tell a 503 from a bad key.
+    assert "provider 503 during prose retry" in caplog.text
