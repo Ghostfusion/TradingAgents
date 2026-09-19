@@ -434,6 +434,19 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The unused moomoo surface is enumerated (103 data methods), and four are worth taking.** New doc
+  `docs/design_moomoo_unused_api_surface.md`. `OpenQuoteContext` exposes 166 public callables; this repo calls 31; 32 are lifecycle. The used set was
+  extracted from the tree (every `ctx.<name>` across the 78 files mentioning moomoo), not from memory. **Headline: `get_market_snapshot(code_list)`
+  returns 142 columns for a whole batch in one call** - valuation block, pre/after/overnight session families, short-interest fields, ETF NAV/premium,
+  option greeks - verified live at 50 and 120 symbols. **The deciding constraint is that the batch call is all-or-nothing**: one unknown/renamed/OTC
+  symbol fails the whole call naming only the first offender (hit live: `Unknown stock. SQ`; `US OTC market quote is not available for SSLZY`).
+  **Analytical find: batch IV rank / IV percentile / HV** (`get_option_underlying_overview`, live AAPL `iv_rank 33.837`) plus a 251-row IV/HV series -
+  the variance risk premium recorded as "asserted, not quantified". **Also**: `get_valuation_detail` (valuation percentile + peer distribution),
+  `get_research_morningstar_report` (independent fair value 290.0 vs AAPL 336.13), `get_rating_change` (replaces the yfinance proxy),
+  `get_history_kl_quota` (the K-line bottleneck read). **Tier 2 is gated, not absent**: `get_order_book`/`get_rt_ticker`/`get_rt_data` need a
+  `subscribe` call. **`get_corporate_actions_buybacks` is HK/A-share only** - confirms the existing correct claim at `moomoo.py:1911`. Plan is P0-P5
+  behind a new `enable_moomoo_snapshot`, gate off byte-identical. **One open question blocks the valuation fields**: they overlap `statement_parsing`
+  and the SEC XBRL leg, and master rule 15 forbids two contributors - measure the disagreement on 20 names before choosing.
 - 2026-09-18 `(working tree)` - **The Heat List IS available - `get_hot_list` (`Qot_GetHotList`) - and the repo's "not exposed by any moomoo API"
   claim was false in five places.** Found by asking whether moomoo could supply the attention legs a screener factor would need, instead of trusting the
   tree's own claim. `OpenQuoteContext.get_hot_list(market, sort_field, sort_dir, count, offset, filter_list)` returns per name `search_heat`, `trade_heat`,

@@ -1047,6 +1047,16 @@ so a tree carries its own consistency record instead of depending on the opt-in
   OpenAPI mapped onto `data_vendors` - a US-only bars + fundamentals vendor whose
   statements are natively basis-tagged (`fiscal_year`/`fiscal_period`/`end_date`/
   `publish_date`), the entitlement and 2FA-token constraints, and a phased plan.
+- `docs/design_moomoo_unused_api_surface.md` - provider study (2026-09-18, design
+  only): the **unused** moomoo OpenAPI surface enumerated - 103 unused data
+  methods of `OpenQuoteContext`'s 166 public callables, every one read and ~35
+  live-probed against OpenD. `get_market_snapshot` returns **142 columns for a
+  whole batch** in one call (valuation block, pre/after/overnight sessions,
+  short interest, ETF NAV/premium); batch IV rank/percentile/HV plus a 251-row
+  IV-HV series; a valuation percentile and peer distribution; an independent fair
+  value. Records the all-or-nothing batch constraint, the rule-15 overlap to
+  settle before adopting the valuation fields, and a P0-P5 plan behind the new
+  `enable_moomoo_snapshot`.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product

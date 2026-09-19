@@ -14,6 +14,22 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Added
 
+**The unused moomoo surface is enumerated, and four methods are worth taking (2026-09-18; `docs/design_moomoo_unused_api_surface.md`, new).** Documentation only - no code, no gate, no test.
+
+- **The scan.** `OpenQuoteContext` exposes **166 public callables**; this repo calls **31**; **32** are lifecycle/infra. That leaves **103 unused data methods**, every one read (signature + docstring) and ~35 live-probed against OpenD. The used set was extracted from the tree - every `ctx.<name>` reference across the 78 files that mention moomoo - not from memory. The three trade contexts are out of scope: this project is analysis-only with an external executor.
+- **The headline: `get_market_snapshot(code_list)` returns 142 columns for a whole batch in one call** - the valuation block (`pe_ttm_ratio`, `pb_ratio`, `ey_ratio`), the **pre/after/overnight** session families, `short_sell_rate`, the ETF `trust_netAssetValue`/`trust_premium`, and option greeks when the code is an option. Verified live: 50 and 120 distinct symbols returned in one call each. The repo assembles this from four-plus vendors, one symbol at a time.
+- **The constraint that decides adoption: the batch call is all-or-nothing.** One unknown, renamed or OTC symbol fails the entire call and the error names only the first offender - both hit live (`Unknown stock. SQ`, Block renamed to XYZ; `US OTC market quote is not available for SSLZY`). A caller must pre-validate and chunk, and the doc specifies a `_batched_snapshot` helper that bisects and records dropped symbols rather than losing them silently.
+- **The analytical find: `get_option_underlying_overview` gives batch IV rank / IV percentile / HV** (live: AAPL `iv 24.466`, `iv_rank 33.837`, `hv_30d 22.447`), and `get_option_underlying_his_volatility` gives a **251-row IV-and-HV time series**. `iv - hv_30d` is the variance risk premium that `Quant_Formulas_Implementation_Plan.md` item 10 records as *"currently asserted, not quantified"*.
+- **Two more gap-fillers**: `get_valuation_detail` supplies a **valuation percentile** plus a peer/industry distribution - the "no peer-multiple table" gap this changelog records; and `get_research_morningstar_report` supplies an **independent fair value** (AAPL 290.0 against a 336.13 price) to anchor the repo's own DCF.
+- **`get_corporate_actions_buybacks` is HK/A-share only** - recorded so the `share_buybacks` gap is not re-probed against moomoo for US names. **This confirms an existing correct claim**, not a new defect: `moomoo.py:1911` already says so.
+- **Tier 2 is gated, not absent**: `get_order_book`, `get_rt_ticker` and `get_rt_data` each returned *"please subscribe to ... first"* - plumbing, not an entitlement wall.
+- **The plan is P0-P5**, each phase gated behind the new `enable_moomoo_snapshot` (verified absent from the tree), gate off => byte-identical. **P0 is `get_history_kl_quota`** - the live read behind the K-line quota the screener is documented to exhaust.
+- **One open question blocks adoption of the valuation fields**: `get_market_snapshot`'s `pe_ttm_ratio`/`pb_ratio`/`total_market_val` overlap `statement_parsing` and the SEC XBRL leg, and master rule 15 forbids two contributors to one quantity. The doc says to measure the disagreement on 20 names before choosing - not to choose by preference.
+
+Tests: none (documentation only). Every one of the doc's 24 code citations was verified at the definition site, and its tables validate.
+
+**Web impact**: none - no key, CLI flag, tool, JSON shape or prompt changed. The doc names the surfaces that *would* be gated if any phase lands.
+
 **The vendor decision: SEC XBRL for the validation panel, pdufa.bio for the FDA calendar, and two gaps named rather than filled (2026-09-18).** The owner reviewed the two open vendor gaps and chose the sources; this is the build.
 
 **The validation panel's fundamentals leg is SEC EDGAR XBRL, not EODHD bulk.**
