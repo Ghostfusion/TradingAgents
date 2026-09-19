@@ -36,7 +36,6 @@ produced elsewhere and assembled by the caller/leaf.
 
 from __future__ import annotations
 
-import math
 from typing import NamedTuple
 
 from .score_engine import align, band_label, combine, coverage_floor

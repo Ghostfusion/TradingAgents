@@ -584,7 +584,9 @@ def decile_ordering(bucket_means) -> dict:
             "monotone": False,
         }
     ordered = populated = 0
-    for lo, hi in zip(means, means[1:]):
+    # Adjacent pairs: the two lists differ by one BY CONSTRUCTION, so this is
+    # deliberately non-strict - `strict=True` would raise on every call.
+    for lo, hi in zip(means, means[1:], strict=False):
         if lo is None or hi is None:
             continue
         populated += 1
@@ -619,7 +621,7 @@ def _top_bucket_weights(panel: dict, i: int, n_buckets: int) -> dict:
     if not members:
         return {}
     w = 1.0 / len(members)
-    return {t: w for t in members}
+    return dict.fromkeys(members, w)
 
 
 def score_evaluation_rows(

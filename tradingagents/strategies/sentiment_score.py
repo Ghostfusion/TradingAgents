@@ -380,7 +380,7 @@ def _resolve_sources(components: dict, source) -> tuple[dict, str | None]:
         }
     else:
         s = str(source if source is not None else SCALE_UNIT).strip().lower()
-        srcs = {n: s for n in present}
+        srcs = dict.fromkeys(present, s)
     distinct = sorted(set(srcs.values()))
     if len(distinct) > 1:
         return srcs, (

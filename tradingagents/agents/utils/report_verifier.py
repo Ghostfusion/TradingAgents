@@ -1512,7 +1512,7 @@ def _extract_metric_values(
         # ``lines_out`` runs parallel to ``out``: every append above records
         # its source line, so the pairing is positional for both the two-value
         # returns (cell/slash pairs count as ONE entry in each list).
-        return [(*pair, source) for pair, source in zip(out, lines_out)]
+        return [(*pair, source) for pair, source in zip(out, lines_out, strict=False)]
     return out
 
 

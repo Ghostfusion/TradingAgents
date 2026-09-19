@@ -2585,8 +2585,8 @@ def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
     bridge at all. Returns ``{"error": <message>}`` when no usable series or
     share basis exists; the message text is part of the analyst-facing contract.
     """
-    from tradingagents.dataflows.statement_parsing import fetch_ticker
     from tradingagents.agents.utils.value_dip_tools import _ttm_fcf_from_quarterly
+    from tradingagents.dataflows.statement_parsing import fetch_ticker
 
     # Prefer the trailing-12M FCF (sum of the newest 4 quarterly FCFs) so the
     # DCF anchors on the CURRENT run rate, not the last fiscal year (annual
@@ -2840,11 +2840,10 @@ def get_normalized_fcf_dcf(
     None-safe.
     """
     try:
+        from tradingagents.strategies.dcf import terminal_value_gordon
         from tradingagents.strategies.normalized_fcf import (
-            maintenance_fcf,
             normalized_fcf_dcf,
         )
-        from tradingagents.strategies.dcf import terminal_value_gordon
     except Exception as exc:  # noqa: BLE001
         return f"normalized fcf dcf unavailable for {ticker}: {exc}"
     try:
@@ -5240,10 +5239,9 @@ def _risk_components(ticker: str) -> dict:
     lam = kyle_lambda(closes, volumes)
     if lam is not None:
         vals["kyle_lambda"] = lam
-    try:
+    # one leg degrades, the rest stand
+    with contextlib.suppress(Exception):
         vals["liquidity_verdict"] = liquidity_verdict(illiq, None, None)["verdict"]
-    except Exception:  # noqa: BLE001 - one leg degrades, the rest stand
-        pass
 
     # --- the book: the same basket and the same resolver the governor uses ---
     try:

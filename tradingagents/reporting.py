@@ -1181,7 +1181,6 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
         from tradingagents.strategies.derivatives_gamma import opex_status
         from tradingagents.strategies.event_state import (
             FLAG_COMPONENTS,
-            calendar_answers,
             event_components,
             event_state,
         )

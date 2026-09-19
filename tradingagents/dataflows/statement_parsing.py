@@ -858,10 +858,10 @@ def _add_roa(best: dict) -> None:
     ta = best.get("total_assets_series")
     if not (ni and ta):
         return
-    ta_by_year = dict(zip(ta["years"], ta["values"]))
+    ta_by_year = dict(zip(ta["years"], ta["values"], strict=False))
     roa_years, roa_vals, roa_labels = [], [], []
-    ni_by_year = dict(zip(ni["years"], ni["values"]))
-    label_by_year = dict(zip(ni["years"], ni["periods"]))
+    ni_by_year = dict(zip(ni["years"], ni["values"], strict=False))
+    label_by_year = dict(zip(ni["years"], ni["periods"], strict=False))
     for year in sorted(ni_by_year):
         prior = ta_by_year.get(year - 1)
         if prior:
@@ -948,9 +948,9 @@ def _add_derived_series(out: dict) -> None:
     """
     oi, da = out.get("operating_income_series"), out.get("d_and_a_series")
     if oi and da:
-        da_by_year = dict(zip(da["years"], da["values"]))
+        da_by_year = dict(zip(da["years"], da["values"], strict=False))
         vals, yrs, per = [], [], []
-        for year, value, period in zip(oi["years"], oi["values"], oi["periods"]):
+        for year, value, period in zip(oi["years"], oi["values"], oi["periods"], strict=False):
             if da_by_year.get(year) is not None:
                 vals.append(value + da_by_year[year])
                 yrs.append(year)
@@ -959,9 +959,9 @@ def _add_derived_series(out: dict) -> None:
             out["ebitda_series"] = {"values": vals, "years": yrs, "periods": per, "derived": True}
     ocf, capex = out.get("operating_cashflow_series"), out.get("capex_series")
     if ocf and capex:
-        cx_by_year = dict(zip(capex["years"], capex["values"]))
+        cx_by_year = dict(zip(capex["years"], capex["values"], strict=False))
         vals, yrs, per = [], [], []
-        for year, value, period in zip(ocf["years"], ocf["values"], ocf["periods"]):
+        for year, value, period in zip(ocf["years"], ocf["values"], ocf["periods"], strict=False):
             if cx_by_year.get(year) is not None:
                 vals.append(value - cx_by_year[year])
                 yrs.append(year)

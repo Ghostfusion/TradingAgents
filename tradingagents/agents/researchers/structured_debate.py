@@ -14,10 +14,6 @@ from collections.abc import Callable, Sequence
 from tradingagents.agents.schemas import DebaterTurnPayload, RiskDebaterTurnPayload
 from tradingagents.agents.utils.debate_structured import invoke_structured_turn
 from tradingagents.agents.utils.structured import bind_structured
-from tradingagents.strategies.quant_scorecard import (
-    SCORECARD_MAX_CHARS,
-    split_scorecard_block,
-)
 from tradingagents.strategies.debate_claim import (
     QUALITATIVE,
     VALID,
@@ -31,6 +27,10 @@ from tradingagents.strategies.debate_score import (
     classify_severity,
     debate_score,
     termination_check,
+)
+from tradingagents.strategies.quant_scorecard import (
+    SCORECARD_MAX_CHARS,
+    split_scorecard_block,
 )
 
 logger = logging.getLogger(__name__)

@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from datetime import datetime
 from typing import Annotated
@@ -546,10 +547,8 @@ def _row_values(csv_string: str) -> dict[str, float]:
             cell = cell.strip()
             if not cell:
                 continue
-            try:
+            with contextlib.suppress(ValueError):
                 out[label.lower()] = float(cell)
-            except ValueError:
-                pass
             break
     return out
 
