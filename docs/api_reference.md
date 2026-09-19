@@ -1057,6 +1057,15 @@ so a tree carries its own consistency record instead of depending on the opt-in
   value. Records the all-or-nothing batch constraint, the rule-15 overlap to
   settle before adopting the valuation fields, and a P0-P5 plan behind the new
   `enable_moomoo_snapshot`.
+- `docs/design_finnhub_yfinance_unused_surface.md` - provider study (2026-09-18,
+  design only): the **unused** finnhub and yfinance surfaces - 108 of
+  `finnhub.Client`'s 117 methods and ~31 `yfinance.Ticker` properties, both diffed
+  against the tree and live-probed (61 + 32 calls). **The headline:**
+  `Ticker.eps_trend` supplies the five-level estimate series that
+  `analyst_revisions.estimate_change_index` documents itself as never having, and
+  which no production caller ever supplies. Records the finnhub free-tier wall (12
+  of 61 work, 48 return 403, all listed), the two rule-15 overlaps that block the
+  tempting adoptions, and a P0-P5 plan behind the new `enable_analyst_estimates`.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product

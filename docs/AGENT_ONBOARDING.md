@@ -434,6 +434,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The unused finnhub and yfinance surfaces are enumerated, and one finding closes a leg that could never fire.** New doc
+  `docs/design_finnhub_yfinance_unused_surface.md`. `finnhub.Client` has 117 methods (repo calls 9); `yfinance.Ticker` has 54 properties + 44 methods (~23 attrs
+  used). Live-probed: 61 finnhub calls, 32 yfinance calls. **Headline: `yfinance.Ticker.eps_trend` supplies the five-level estimate series
+  `analyst_revisions.estimate_change_index` documents itself as never having** - it needs `len(weights)+1 = 5` levels (`DEFAULT_ESTIMATE_WEIGHTS=(9,7,5,3)`,
+  `analyst_revisions.py:43`), and `revision_index(history, levels=None, ...)` (`:279`) defaults `levels=None` with **the only caller passing a value being a
+  test**, so the leg is structurally `unavailable` in production. `eps_trend` returns `current`/`7daysAgo`/`30daysAgo`/`60daysAgo`/`90daysAgo`;
+  `eps_revisions` gives the direct up/down counts behind the `upgrades_downgrades` proxy. **finnhub free tier: 12 of 61 work, 48 return 403** (all listed in
+  Appendix A) - working ones include `financials_reported`, `filings`, `fda_calendar`, `company_earnings`, `market_holiday` (`tradingHour 09:30-13:00` on
+  half-days), `country` (249 with `equityRiskPremium`). **Caveats**: `fda_calendar` is advisory-committee meetings, NOT PDUFA dates (complements pdufa.bio);
+  and `company_earnings` WORKS while the recorded note names `earnings-surprises` as 403 - different routes. **Rule 15 blocks two adoptions**:
+  `trailing_twelve_months` (`statement_parsing.py:1270`) says *"One producer for a trailing-twelve-month total"* so yfinance `ttm_*` is cross-check only, and
+  finnhub `financials_reported` must not sit beside `sec_edgar`. Plan P0-P5 behind the new `enable_analyst_estimates`, gate off byte-identical.
 - 2026-09-18 `(working tree)` - **The unused moomoo surface is enumerated (103 data methods), and four are worth taking.** New doc
   `docs/design_moomoo_unused_api_surface.md`. `OpenQuoteContext` exposes 166 public callables; this repo calls 31; 32 are lifecycle. The used set was
   extracted from the tree (every `ctx.<name>` across the 78 files mentioning moomoo), not from memory. **Headline: `get_market_snapshot(code_list)`
