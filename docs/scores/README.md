@@ -14,9 +14,12 @@
 
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
-and the decisions still open. Two cross-cutting documents sit beside it:
+and the decisions still open. Three cross-cutting documents sit beside it:
 [`ResearchLayerWiring.md`](ResearchLayerWiring.md) - how the scores reach the
-research and debate layer, and the defects on that seam (§3.5) - and
+research and debate layer, and the defects on that seam (§3.5) -
+[`ScoreContextContract.md`](ScoreContextContract.md) - how the engines become
+mandatory and how their score, coverage and supporting measurements are supplied
+into the LLM context rather than left to tool-calling discretion - and
 [`MEASUREMENT_FINDINGS.md`](MEASUREMENT_FINDINGS.md), Phase C's live panel.
 
 The owner's own specification of record is preserved verbatim, unedited, in
