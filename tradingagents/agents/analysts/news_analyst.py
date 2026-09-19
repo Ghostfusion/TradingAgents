@@ -6,7 +6,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
-from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
+from tradingagents.agents.utils.report_hygiene import (
+    REPORT_HYGIENE_RULES,
+    engine_score_block,
+)
 
 
 def create_news_analyst(llm, backup_llm=None, config=None):
@@ -155,6 +158,11 @@ def create_news_analyst(llm, backup_llm=None, config=None):
                   "  conflicting macro reads into one unexplained 'risk-on' or 'risk-off' framing."
 
                 + get_language_instruction() + get_output_budget("analyst")
+                # NewsScore AND EventState both belong to THIS report (the
+                # ownership map: news -> news, event -> news).
+                + engine_score_block(
+                    "news", state["company_of_interest"], current_date, config
+                )
         )
 
         prompt = ChatPromptTemplate.from_messages(

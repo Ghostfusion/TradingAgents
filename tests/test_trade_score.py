@@ -579,16 +579,23 @@ def test_the_module_names_its_gate_and_the_leaf_is_where_it_is_read() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_off_keeps_the_composite_tool_out_of_every_toolset(monkeypatch) -> None:
+def test_the_composite_is_report_level_and_bound_to_no_analyst(monkeypatch) -> None:
+    """TradeScore is the downstream composite - report-level BY DECISION.
+
+    It is not an analyst perspective, so no analyst owns it and none is handed
+    its leaf (2026-09-19: it was bound to the fundamentals analyst, which
+    implied the valuation analyst owned the decision composite).
+    """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
+    from tradingagents.strategies.quant_scorecard import ENGINE_SECTIONS
 
-    monkeypatch.setattr(cfgmod, "get_config", lambda: {})
-    names_off = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert "get_trade_score" not in names_off
+    assert ENGINE_SECTIONS["trade"] is None
+
     monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_trade_score": True})
-    names_on = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert set(names_on) - set(names_off) == {"get_trade_score"}
+    for analyst in ("market", "sentiment", "news", "fundamentals"):
+        names = [t.name for t in toolsets.analyst_toolset(analyst)]
+        assert "get_trade_score" not in names, analyst
 
 
 def test_gate_off_writes_no_card_key() -> None:

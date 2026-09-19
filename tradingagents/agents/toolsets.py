@@ -227,6 +227,11 @@ from tradingagents.agents.utils.financial_trends import get_financial_trends
 from tradingagents.agents.utils.momentum_tools import (
     get_momentum_scan,
 )
+from tradingagents.strategies.quant_scorecard import (
+    ENGINE_GATES,
+    ENGINE_TOOLS,
+    engines_for_analyst,
+)
 
 
 def market_tools() -> list:
@@ -359,10 +364,12 @@ def market_tools() -> list:
                 # market-level regime path could not reach the VIX series it ranks.
                 get_macro_indicators,
             ]
-    if _enabled("enable_regime_score"):
-        tools.append(get_regime_score)
-    if _enabled("enable_risk_score"):
-        tools.append(get_risk_score)
+    # The engine scores this analyst OWNS, from the one ownership map
+    # (`quant_scorecard.ENGINE_SECTIONS`). The market analyst owns the TECHNICAL
+    # engine - it is the price/trend/momentum domain. Regime and risk are
+    # report-level, so they are no longer bound here: an analyst is never handed
+    # a tool for a domain it does not own.
+    tools.extend(engine_score_tools("market"))
     return tools
 
 
@@ -404,10 +411,10 @@ def news_tools() -> list:
                 # was bound only to fundamentals_company_tools.
                 get_analyst_revision_index,
             ]
-    if _enabled("enable_event_state"):
-        tools.append(get_event_state)
-    if _enabled("enable_news_score"):
-        tools.append(get_news_score)
+    # The news analyst owns TWO engines from the ownership map: `news` and
+    # `event` (the catalyst/event engine is an event-driven news read, so it
+    # shares this section rather than getting an analyst of its own).
+    tools.extend(engine_score_tools("news"))
     return tools
 
 
@@ -425,6 +432,44 @@ def _enabled(name: str, default: bool = False) -> bool:
         return bool((get_config() or {}).get(name, default))
     except Exception:  # noqa: BLE001 - an unreadable config means off
         return default
+
+
+#: `ENGINE_TOOLS` name -> the imported `@tool` object, built once.
+_SCORE_TOOL_BY_NAME: dict[str, object] = {
+    "get_event_state": get_event_state,
+    "get_fundamental_score": get_fundamental_score,
+    "get_news_score": get_news_score,
+    "get_regime_score": get_regime_score,
+    "get_risk_score": get_risk_score,
+    "get_sentiment_score": get_sentiment_score,
+    "get_technical_score": get_technical_score,
+    "get_trade_score": get_trade_score,
+}
+
+
+def engine_score_tools(analyst_key: str) -> list:
+    """The score leaves this analyst OWNS, each gated by its own engine gate.
+
+    **Derived from `quant_scorecard.ENGINE_SECTIONS` - the one ownership map -
+    so an analyst can never be handed a tool for a domain it does not own.**
+    That table is what fixes the `get_technical_score`-on-the-fundamentals-
+    analyst defect: the technical engine's owner is the market analyst, so the
+    leaf binds there and nowhere else.
+
+    `regime`, `risk` and `trade` are report-level by decision, so no analyst
+    owns them and no analyst is handed their leaves.
+
+    A gate that is off appends nothing, so a gate-off toolset stays
+    byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6, acceptance (a)).
+    """
+    out: list = []
+    for engine in engines_for_analyst(analyst_key):
+        if not _enabled(ENGINE_GATES[engine]):
+            continue
+        tool = _SCORE_TOOL_BY_NAME.get(ENGINE_TOOLS[engine])
+        if tool is not None:
+            out.append(tool)
+    return out
 
 
 def fundamentals_company_tools() -> list:
@@ -490,12 +535,12 @@ def fundamentals_company_tools() -> list:
                 get_allocation_black_litterman,
                 get_position_risk_multiplier,
             ]
-    if _enabled("enable_fundamental_score"):
-        tools.append(get_fundamental_score)
-    if _enabled("enable_technical_score"):
-        tools.append(get_technical_score)
-    if _enabled("enable_trade_score"):
-        tools.append(get_trade_score)
+    # The fundamentals analyst owns exactly ONE engine: `fundamental`. The
+    # technical engine's owner is the MARKET analyst (it is the price/trend
+    # domain, not a valuation one) and `trade` is the downstream composite,
+    # which is report-level. Binding either here was the domain-ownership
+    # defect this map fixes.
+    tools.extend(engine_score_tools("fundamentals"))
     return tools
 
 
@@ -552,9 +597,12 @@ def sentiment_tools() -> list:
             # engine), and this leaf was bound only to fundamentals_company_tools.
             get_institution_holdings,
         ]
-    # WP-7 (§5.6): the SentimentScore engine. Off, the toolset is byte-identical.
-    if _enabled("enable_sentiment_score"):
-        tools.append(get_sentiment_score)
+    # The sentiment engine's own leaf, from the one ownership map. NOTE: the
+    # sentiment ANALYST binds no tools at all - it pre-fetches its data into the
+    # prompt - so this list is the surface for callers that do bind it, and the
+    # score reaches the sentiment REPORT through the pre-fetched block instead
+    # (`analysts/sentiment_analyst.py`).
+    tools.extend(engine_score_tools("sentiment"))
     return tools
 
 

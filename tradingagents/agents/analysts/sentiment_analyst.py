@@ -37,7 +37,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_output_budget,
 )
-from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
+from tradingagents.agents.utils.report_hygiene import (
+    REPORT_HYGIENE_RULES,
+    engine_score_block,
+)
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -152,6 +155,11 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             reddit_block=reddit_block,
             computed_line=computed_line,
             macro_block=macro_block,
+            # This analyst binds NO tools, so the SentimentScore engine's result
+            # reaches this report only by being supplied here. A "call
+            # get_sentiment_score" instruction would be a hallucinated call
+            # (the prompt carries NO_EXTERNAL_TOOLS).
+            engine_block=engine_score_block("sentiment", ticker, end_date, cfg),
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -298,6 +306,7 @@ def _build_system_message(
     reddit_block: str,
     computed_line: str = "",
     macro_block: str = "",
+    engine_block: str = "",
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     macro_section = (
@@ -388,7 +397,7 @@ Fill the following fields:
 
 You also have `get_news(ticker, start_date, end_date)` - the headline feed for the ticker; anchor your sentiment claims in specific headlines and adjustment dates rather than raw scores.
 
-{get_language_instruction()}{get_output_budget("analyst")}{REPORT_HYGIENE_RULES}"""
+{get_language_instruction()}{get_output_budget("analyst")}{REPORT_HYGIENE_RULES}{engine_block}"""
 
 
 

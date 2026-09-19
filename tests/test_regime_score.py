@@ -728,16 +728,25 @@ def test_the_paths_are_not_a_score_and_hold_no_composite_number() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_off_keeps_the_regime_tool_out_of_every_toolset(monkeypatch) -> None:
+def test_the_regime_engine_is_report_level_and_bound_to_no_analyst(monkeypatch) -> None:
+    """Regime is report-level BY DECISION (`ENGINE_SECTIONS["regime"] is None`).
+
+    It describes the operating environment rather than an independent analyst
+    opinion, so it gets no analyst section - and therefore no analyst is handed
+    its leaf. Its result reaches the report through the quant scorecard and the
+    computed decision context. Binding it to the market analyst (2026-09-19)
+    implied an ownership that does not exist.
+    """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
+    from tradingagents.strategies.quant_scorecard import ENGINE_SECTIONS
 
-    monkeypatch.setattr(cfgmod, "get_config", lambda: {})
-    off = [t.name for t in toolsets.market_tools()]
-    assert "get_regime_score" not in off
+    assert ENGINE_SECTIONS["regime"] is None
+
     monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_regime_score": True})
-    on = [t.name for t in toolsets.market_tools()]
-    assert set(on) - set(off) == {"get_regime_score"}
+    for analyst in ("market", "sentiment", "news", "fundamentals"):
+        names = [t.name for t in toolsets.analyst_toolset(analyst)]
+        assert "get_regime_score" not in names, analyst
 
 
 def test_gate_off_writes_no_card_key() -> None:

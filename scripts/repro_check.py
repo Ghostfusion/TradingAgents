@@ -87,6 +87,13 @@ def _config_hash() -> str:
             "enable_event_state",
             "enable_regime_score",
             "enable_risk_score",
+            # The MASTER surface gate. It was omitted, so the hash claimed
+            # "same hash => same effective inputs" while flipping it alone
+            # changed what the run emitted (the scorecard block, the eight
+            # engine blocks, the per-analyst prompt fragment and the score tool
+            # bindings) without moving the hash. Every engine gate was in the
+            # list and the gate governing whether any of them renders was not.
+            "enable_quant_scorecard",
         )
         if k in DEFAULT_CONFIG
     }

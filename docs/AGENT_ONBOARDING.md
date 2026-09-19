@@ -643,6 +643,27 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **The engine ownership map: one table decides where a score appears.**
+  Two defects, found by inspecting a live batch, closed together. (1) **`get_technical_score` was bound to the
+  FUNDAMENTALS analyst** - the market analyst is the price/trend/momentum domain, so the agent receiving the tool
+  did not own the domain it represents, and the TechnicalScore landed in the wrong report. Regime and risk were
+  bound to market and `trade` to fundamentals, though all three are report-level. (2)
+  **`repro_check._config_hash` listed all eight engine gates but not `enable_quant_scorecard`**, so flipping the
+  master gate changed what a run emitted without moving the hash - the claim `same hash => same effective inputs`
+  did not hold for the gate governing whether anything renders. **The fix is one table**:
+  `quant_scorecard.ENGINE_SECTIONS` maps engine -> analyst section (`fundamental`->fundamentals,
+  `technical`->market, `sentiment`->sentiment, `news`->news, `event`->news, `regime`/`risk`/`trade`->`None` =
+  report-level **by decision, not omission**), and **two surfaces are derived from it rather than restated**: the
+  tool binding (`toolsets.engine_score_tools`) and the prompt fragment (`report_hygiene.engine_score_block`).
+  **The prompt gap was the real one**: the leaves were bound but **no analyst prompt named any of them** - zero
+  mentions across all four files - so a score reaching a report was pure model discretion. **The result is now
+  SUPPLIED, not offered**: `engine_score_block` pre-computes the owned engines and inlines them, because *"the
+  model may interpret an engine result, but does not decide whether or where the authoritative engine result
+  appears"* - and because the **sentiment analyst binds no tools at all** (its prompt carries
+  `NO_EXTERNAL_TOOLS`), supplying the text is the ONLY route that reaches that report; a "call
+  `get_sentiment_score`" instruction there would invite a hallucinated call. Gate-off prompts stay byte-identical
+  (empty block) and gate-off toolsets bind zero score leaves. 11 tests; **five mutations, all failing-first**,
+  then byte-identical restore across three source files.
 - 2026-09-19 `(working tree)` - **The yfinance analyst-ratings leg raised on every call - three defects in one
   function.** Same live batch. `get_analyst_ratings` failed on **both** vendors and the yfinance failure was an
   `AttributeError`, not an entitlement error - the tell. (1) **`analyst_price_targets` is a dict and the code read

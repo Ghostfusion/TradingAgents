@@ -216,6 +216,17 @@ TOOL_LEGACY_BINDING = {
     "get_kelly_alloc": "covered: get_allocation_black_litterman / get_position_sizing / get_hrp_alloc are the bound allocation reads",
     "get_kyle_lambda": "covered: get_liquidity_risk returns ILLIQ / float-turnover / IWF / verdict; the tool docstring forbids per-ticker use",
     "get_no_trade_guard_band": "rebalance guard; needs a current book weight no agent surface carries (README documents it)",
+    # The three REPORT-LEVEL engines. `quant_scorecard.ENGINE_SECTIONS` assigns
+    # them `None` - by decision, not omission: regime describes the operating
+    # environment, risk is a cross-cutting constraint and trade is the
+    # downstream decision layer, so none is an independent analytical opinion
+    # and none gets an analyst section. Their results reach the report through
+    # the quant scorecard, the run card and the computed decision context, so
+    # no analyst is handed the leaf (they were bound to market/fundamentals
+    # until 2026-09-19, which implied an ownership that does not exist).
+    "get_regime_score": "report-level engine (ENGINE_SECTIONS['regime'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
+    "get_risk_score": "report-level engine (ENGINE_SECTIONS['risk'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
+    "get_trade_score": "report-level composite (ENGINE_SECTIONS['trade'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
     "get_prediction_ledger_score": "covered: get_ledger_risk_state is the bound win-rate read; the stops/targets half is get_trade_outcome_metrics (bound to the debators)",
     "get_prompt_injection_read": "ingestion-layer guard: by the time an LLM can call it the text is already in context, so the scan belongs to the loader, not a tool",
     "get_stress_grid_read": "covered: get_scenario_dcf is the modelled version; the grid never receives its sensitivity axis and says so",

@@ -6,7 +6,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
-from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
+from tradingagents.agents.utils.report_hygiene import (
+    REPORT_HYGIENE_RULES,
+    engine_score_block,
+)
 
 _ETF_SYSTEM_TAIL = (
     " SECURITY-TYPE: ETF/FUND. This is an index or exchange-traded fund "
@@ -319,6 +322,11 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 + " You also have quant-engine v2 reads (ground your 'quality / value / accounting risk' claims in them; all advisory): `get_dupont_read(ticker, curr_date)` derives ROE's margin/turnover/leverage legs from ONE payload (period-consistent, basis stated in its output) and tells you whether the ROE is margin-led (quality) or leverage-led (lower quality); the raw-number form `get_dupont_read(net_margin, asset_turnover, equity_multiplier, ..., period=...)` is for when you already hold all three legs, and it labels them caller-supplied/unverified unless you pass `period=`; `get_scenario_dcf(fcf, wacc, shares?, cash?, debt?, g_base?, g_bear?, g_bull?, margin_shock_bear?, margin_shock_bull?, market_price?)` gives the bear/base/bull intrinsic range and, when you pass the market price, the band it sits in (below bear / bear-base / base-bull / above bull) plus the base-case margin of safety - cite it before any 'undervalued/overvalued on intrinsic value' framing; `get_earnings_quality(ticker, current_date)` is the provider-fed earnings-quality read - it fetches the statements itself and returns the consensus concern level (LOW/MEDIUM/HIGH = concern; HIGH means most concern, lowest quality) with the cash-conversion / accrual / FCF evidence plus the forensic Beneish/Altman/F-Score trap - cite it before any 'earnings quality' claim; `get_earnings_quality_verdict(net_income, ocf, total_assets, ...)` is the raw-number variant when you already hold the three figures." + " Regime / sizing context: `get_regime_state(ticker, current_date)` returns the Kalman-filtered trend regime (level/slope + spread) - cite it before any 'trend regime / structural break' claim and pair it with `get_kalman_spread` for the regime-spread read; `get_position_risk_multiplier(ticker, position_pct)` returns the position risk multiplier (size x vol x correlation) - use it before any 'this size is too risky / overweight' claim on a book; `get_allocation_black_litterman(returns, expected_excess_returns, ...)` returns the Black-Litterman posterior weights (the shrink-toward-prior tilt of get_allocation) - offer it as the prior-informed variant when proposing the allocation. Ownership extras: `get_dividends(ticker)` returns the dividend schedule and yield history (consistent payouts reinforce the corporate-actions return-discipline read) - cite it before any 'dividend/yield history' claim; `get_form4_insider(ticker, start_date, end_date)` returns SEC Form 4 open-market net insider $-flow over the window (purchases minus sales, option rows excluded) - cite it (or its explicit 'unavailable') before any 'insider accumulation/selling this window' claim, as the windowed complement to `get_insider_activity`'s 12-month net."
                 + get_language_instruction()
                 + get_output_budget("analyst")
+                # The FundamentalScore engine belongs to THIS report (the
+                # ownership map: fundamental -> fundamentals).
+                + engine_score_block(
+                    "fundamentals", state["company_of_interest"], current_date, config
+                )
 
         )
 

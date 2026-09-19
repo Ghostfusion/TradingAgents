@@ -12,6 +12,28 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Changed
+
+**The engine ownership map — one table decides where a score appears (2026-09-19).** Fixes two defects found by inspecting a live batch: `get_technical_score` was bound to an analyst that does not own the price/trend domain, and the master scorecard gate was absent from the repro config hash.
+
+- **`quant_scorecard.ENGINE_SECTIONS` is the ownership map**, and two surfaces are now derived from it rather than restated: the **tool binding** (`agents/toolsets.py::engine_score_tools`) and the **per-analyst prompt fragment** (`report_hygiene.engine_score_block`). Three readings of one table cannot drift.
+
+| Engine | Analyst report |
+| --- | --- |
+| fundamental | Fundamentals |
+| technical | **Market** (was: Fundamentals) |
+| sentiment | Sentiment |
+| news | News |
+| event | News |
+| regime, risk, trade | **report-level — no analyst owns them** |
+
+- **The binding defect.** The market analyst is the price/trend/momentum domain, so `get_technical_score` belongs there; it was bound to the **fundamentals** analyst instead, so the TechnicalScore landed in the wrong report and the agent receiving the tool did not own the domain it represents. Regime and risk were bound to the market analyst and `trade` to the fundamentals analyst, though all three are report-level — an analyst is now never handed a tool for a domain it does not own. Gate-off toolsets stay byte-identical (all four analysts bind zero score leaves).
+- **The prompt gap.** The score leaves were bound but **no analyst prompt named any of them** — zero mentions across all four files — so whether a score ever reached a report was pure model discretion. Each analyst prompt now carries an instruction naming the engine it owns and requiring the score, its **coverage** and its band be reported verbatim under a named subsection.
+- **The result is SUPPLIED, not merely offered.** `engine_score_block` pre-computes the analyst's owned engines and inlines them. A tool the model may or may not call does not satisfy *"the model may interpret an engine result, but does not decide whether or where the authoritative engine result appears"*. This is also the only route that reaches the **sentiment** report, whose analyst binds no tools at all (a "call `get_sentiment_score`" instruction there would invite a hallucinated call — that prompt carries `NO_EXTERNAL_TOOLS`).
+- **Reproducibility.** `repro_check._config_hash` listed all eight engine gates but **not** `enable_quant_scorecard`, so flipping the master gate changed what a run emitted — the scorecard block, the eight engine blocks, the prompt fragment and the bindings — without moving the hash. The hash's claim `same hash ⇒ same effective inputs` did not hold for the gate that governs whether any of it renders.
+
+**Web impact**: with `enable_quant_scorecard` on (it is on in `.env`), each analyst report now carries its own engine score with coverage and band, and each analyst's toolset exposes only the engines it owns. A run's `run_card.json` and `complete_report.md` are unchanged in shape; `repro_check` hashes move for every configuration, so any recorded hash from before this change is stale.
+
 ### Fixed
 
 **The yfinance analyst-ratings leg raised on every call — three defects in one function (2026-09-19).** Also found by the live 4-symbol batch: `get_analyst_ratings` failed on **both** vendors, and the yfinance failure was an `AttributeError`, not an entitlement error.

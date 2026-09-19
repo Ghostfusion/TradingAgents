@@ -6,7 +6,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
-from tradingagents.agents.utils.report_hygiene import REPORT_HYGIENE_RULES
+from tradingagents.agents.utils.report_hygiene import (
+    REPORT_HYGIENE_RULES,
+    engine_score_block,
+)
 
 # These two live in their own tool modules (not re-exported by agent_utils),
 # matching how graph/trading_graph.py imports them for the market ToolNode.
@@ -302,6 +305,11 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
                 + get_language_instruction()
                 + get_output_budget("analyst")
+                # The TechnicalScore engine belongs to THIS report (the
+                # ownership map: technical -> market). Supplied, not offered.
+                + engine_score_block(
+                    "market", state["company_of_interest"], current_date, config
+                )
         )
 
         prompt = ChatPromptTemplate.from_messages(

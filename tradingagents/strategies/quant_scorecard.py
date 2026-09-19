@@ -45,14 +45,18 @@ from typing import Any
 from tradingagents.strategies.score_engine import NON_MONOTONIC_INPUTS
 
 __all__ = [
+    "ANALYST_SECTIONS",
     "COMPOSITE_ENGINES",
     "ENGINE_GATES",
+    "ENGINE_SECTIONS",
+    "ENGINE_TOOLS",
     "EVENT_NO_SNAPSHOT",
     "SCORECARD_BASIS",
     "SCORECARD_HEADER",
     "SCORECARD_MAX_CHARS",
     "SCORECARD_PURPOSE",
     "engine_scores",
+    "engines_for_analyst",
     "format_engine_detail",
     "format_quant_scorecard",
     "quant_scorecard",
@@ -80,6 +84,63 @@ ENGINE_GATES: dict[str, str] = {
 #: composite by adjacency** (master rule 17), which is why `sentiment`, `news`
 #: and `event` are reported by this snapshot but never fed to `trade_score`.
 COMPOSITE_ENGINES: tuple[str, ...] = ("fundamental", "technical", "regime", "risk")
+
+#: The score tool that publishes each engine to an analyst's LLM.
+ENGINE_TOOLS: dict[str, str] = {
+    "fundamental": "get_fundamental_score",
+    "technical": "get_technical_score",
+    "regime": "get_regime_score",
+    "risk": "get_risk_score",
+    "sentiment": "get_sentiment_score",
+    "news": "get_news_score",
+    "event": "get_event_state",
+    "trade": "get_trade_score",
+}
+
+#: The analyst report each engine's AUTHORITATIVE result belongs to, or ``None``
+#: for report-level. **This is the ownership map: one place decides where an
+#: engine's result appears, so the model never chooses.**
+#:
+#: Two surfaces derive from it and therefore cannot drift from each other or
+#: from this table:
+#:
+#: * the tool binding - `agents/toolsets.py` gives each analyst exactly the
+#:   leaves of the engines it owns, so an analyst can never be handed a tool for
+#:   a domain it does not own (the `get_technical_score`-on-the-fundamentals-
+#:   analyst defect this table fixes);
+#: * the prompt fragment - `agents/utils/report_hygiene.engine_score_rules`
+#:   tells each analyst which of its own scores to call and cite.
+#:
+#: `regime`, `risk` and `trade` are report-level **by decision, not omission**:
+#: regime describes the operating environment, risk is a cross-cutting
+#: constraint and trade is the downstream decision layer - none is an
+#: independent analytical opinion, so none gets an analyst section. They stay in
+#: the quant scorecard and the computed decision context.
+ENGINE_SECTIONS: dict[str, str | None] = {
+    "fundamental": "fundamentals",
+    "technical": "market",
+    "sentiment": "sentiment",
+    "news": "news",
+    "event": "news",
+    "regime": None,
+    "risk": None,
+    "trade": None,
+}
+
+#: The analyst keys the map above assigns to, in report order.
+ANALYST_SECTIONS: tuple[str, ...] = ("market", "sentiment", "news", "fundamentals")
+
+
+def engines_for_analyst(analyst_key: str) -> tuple[str, ...]:
+    """The engines whose authoritative result belongs to ``analyst_key``.
+
+    The inverse of `ENGINE_SECTIONS`, derived rather than restated, so the tool
+    binding and the prompt fragment are two readings of one table.
+    """
+    return tuple(
+        name for name, section in ENGINE_SECTIONS.items() if section == analyst_key
+    )
+
 
 #: Why the event engine is absent on a pre-graph snapshot, stated once so every
 #: reader prints the same reason.

@@ -357,19 +357,27 @@ def test_semivariance_uses_the_full_sample_not_the_count_of_each_sign() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_off_keeps_the_engine_tool_out_of_every_toolset(monkeypatch) -> None:
+def test_gate_on_binds_the_engine_to_the_MARKET_analyst_only(monkeypatch) -> None:
+    """The ownership map (`quant_scorecard.ENGINE_SECTIONS`) puts the technical
+    engine on the market analyst - it is the price/trend/momentum domain.
+
+    It was bound to the FUNDAMENTALS analyst, which does not own that domain,
+    so the TechnicalScore landed in a valuation report (2026-09-19 defect).
+    """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
 
     monkeypatch.setattr(cfgmod, "get_config", lambda: {})
-    names_off = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert "get_technical_score" not in names_off
-    assert "get_fundamental_score" not in names_off
-    monkeypatch.setattr(
-        cfgmod, "get_config", lambda: {"enable_technical_score": True}
-    )
-    names_on = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert set(names_on) - set(names_off) == {"get_technical_score"}
+    market_off = [t.name for t in toolsets.market_tools()]
+    fund_off = [t.name for t in toolsets.fundamentals_company_tools()]
+    assert "get_technical_score" not in market_off
+    assert "get_technical_score" not in fund_off
+
+    monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_technical_score": True})
+    market_on = [t.name for t in toolsets.market_tools()]
+    fund_on = [t.name for t in toolsets.fundamentals_company_tools()]
+    assert "get_technical_score" in market_on
+    assert "get_technical_score" not in fund_on
 
 
 def test_gate_off_makes_the_leaf_say_so(monkeypatch) -> None:
