@@ -211,6 +211,32 @@ def test_xbrl_annual_facts_carry_the_cover_page_share_count(monkeypatch):
     assert "1.0B" in out and "companyfacts" in out
 
 
+def test_xbrl_annual_facts_flag_a_foreign_private_issuer_cover_page(monkeypatch):
+    """The flag exists because an FPI's US-listed line may be an ADS.
+
+    The cover-page count is **ordinary** shares while a US-listed price is per
+    **ADS**, and EDGAR does not carry the ratio - so a reader deriving a market
+    capitalisation from the two has to be able to see which case it is in.
+    SIMO 2026-09-17 is the live one: 1 ADS = 4 ordinary shares, and the
+    unguarded product overstated its market cap fourfold.
+    """
+    _patch_facts(monkeypatch, _cfacts(
+        {"Assets": [_concept("2025-12-31", 1_222_719_000)]},
+        dei={"shares": [{"end": "2025-12-31", "val": 134_244_840, "form": "20-F",
+                         "fp": "FY", "filed": "2026-04-30"}]},
+    ))
+    fpi = sec_edgar.annual_facts("SIMO")
+    assert fpi["foreign_private_issuer"] is True
+    assert fpi["shares"]["2025-12-31"]["val"] == 134_244_840
+
+    _patch_facts(monkeypatch, _cfacts(
+        {"Assets": [_concept("2025-06-30", 1_000_000_000)]},
+        dei={"shares": [{"end": "2026-07-23", "val": 7.43e9, "form": "10-K",
+                         "fp": "FY", "filed": "2026-07-29"}]},
+    ))
+    assert sec_edgar.annual_facts("MSFT")["foreign_private_issuer"] is False
+
+
 def test_xbrl_annual_facts_do_not_fall_back_for_a_filer_without_us_gaap(monkeypatch):
     """TSM reports under IFRS: its payload arrives and carries no us-gaap.
 

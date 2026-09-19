@@ -271,6 +271,19 @@ SEC_REFERENCE_LABELS: tuple[str, ...] = (
     "Total assets", "Revenue", "Net income (loss)",
 )
 
+#: The named gap for a derived market cap that cannot be derived **honestly**.
+#: A 20-F/40-F filer's US-listed line may be an ADS whose ratio EDGAR does not
+#: carry, so the traded close is per-ADS while the cover-page count is per
+#: ORDINARY share - and the product is wrong by that ratio. Measured on SIMO
+#: 2026-09-17 (1 ADS = 4 ordinary shares): $34.0B derived against a real
+#: $8.1-8.6B, P/E 277.28 against ~69, P/B 40.93 against ~10, and Altman Z's X4
+#: inflated with them. Recorded, never guessed - the leg's own rule.
+GAP_FPI_MARKET_CAP = (
+    "market cap withheld: 20-F/40-F filer - its US-listed line may be an ADS "
+    "whose ratio EDGAR does not carry, so the traded close and the cover-page "
+    "(ordinary) share count are not in the same unit"
+)
+
 
 class FetchResult(NamedTuple):
     """One transport call's outcome: the financials, the cost, and the gaps.
@@ -408,6 +421,10 @@ def canonical_fin_from_sec(facts: dict, *, asof: str | None = None) -> dict:
     if shares:
         newest = max(shares)
         fin["shares_outstanding"] = _num((shares[newest] or {}).get("val"))
+    # Carried, not consumed, here: the market-cap join is where the unit mismatch
+    # bites, and it must be able to see the flag. See ``sec_edgar._FOREIGN_FORMS``.
+    if (facts or {}).get("foreign_private_issuer"):
+        fin["foreign_private_issuer"] = True
     return fin
 
 
@@ -728,7 +745,16 @@ def build_panel(
             shares = _num(fin.get("shares_outstanding"))
             if (close is not None and shares is not None
                     and _num(fin.get("market_cap")) is None):
-                fin["market_cap"] = close * shares
+                if fin.get("foreign_private_issuer"):
+                    # A 20-F/40-F filer's US line may be an ADS: the traded close
+                    # is per ADS, the cover-page count is per ORDINARY share, and
+                    # EDGAR does not carry the ratio. The product is wrong by that
+                    # ratio, so it is withheld and the reason named - a wrong
+                    # market cap poisons every price-based ratio AND Altman Z's
+                    # X4, which is worse than an honest gap.
+                    gaps.setdefault(code, GAP_FPI_MARKET_CAP)
+                else:
+                    fin["market_cap"] = close * shares
             try:
                 row = panel_row_from_fin(code, fin)
             except Exception as exc:  # noqa: BLE001 - a per-name derivation failure is a gap

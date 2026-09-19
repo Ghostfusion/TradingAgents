@@ -308,7 +308,9 @@ date that exists. It must **not** run in a report path.
 
 **Coverage limits, recorded per name rather than hidden.** SEC XBRL carries annual
 *statements* only: there is no market capitalisation (so the panel derives it from
-its own close × the EDGAR cover-page share count) and no TTM (the vendor chain's
+its own close × the EDGAR cover-page share count, **withholding it and naming the
+gap for a 20-F/40-F filer, whose cover-page count is ordinary shares while its US
+price may be per ADS - EDGAR does not carry the ratio**) and no TTM (the vendor chain's
 `*_ttm` legs are absent, and the ratio block falls back to the annual figure). A
 filer that files neither a 10-K, a 20-F nor a 40-F — a pre-XBRL filer, or one
 reporting under IFRS — contributes no fundamentals row at all; those names land in
@@ -1301,7 +1303,10 @@ empty panel.
 the owner replaced the fundamentals leg with **SEC EDGAR XBRL** (§3.2): the
 transport is live and keyless, the read is point-in-time, and the panel derives
 its market capitalisation from its own close times the EDGAR cover-page share
-count. Live on 2026-09-18 over 7 names the leg produced **17-25 metrics each**
+count - **except for a 20-F/40-F filer**, whose count is ordinary shares while its
+US price may be per ADS: there the market cap is **withheld and the reason named**,
+because EDGAR does not carry the ratio (SIMO 2026-09-17: 1 ADS = 4 ordinary shares,
+and the unguarded product overstated it fourfold - $34.0B against a real $8.1-8.6B). Live on 2026-09-18 over 7 names the leg produced **17-25 metrics each**
 (including the valuation block, Piotroski F, Altman Z, GP/A, accruals, Ohlson O,
 NOA and Zmijewski), with **one named gap** (TSM, an IFRS filer with no us-gaap
 facts) and Beneish M absent for the documented marketable-securities reason.

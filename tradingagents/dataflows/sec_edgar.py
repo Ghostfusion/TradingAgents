@@ -99,6 +99,17 @@ _TAG_MAP = {
 #: carry the same facts and are matched on the form before the slash.
 _ANNUAL_FORMS = ("10-K", "20-F", "40-F")
 
+#: The subset of ``_ANNUAL_FORMS`` that marks a **foreign private issuer**. It
+#: matters for exactly one derived quantity: an FPI's US-listed line may be an
+#: **ADS** whose ratio EDGAR does not carry, so the traded price is per-ADS while
+#: the cover-page count below is per **ordinary** share. Multiplying the two
+#: overstates a market capitalisation by that ratio - measured on SIMO
+#: 2026-09-17 (1 ADS = 4 ordinary shares): the panel derived **$34.0B** against a
+#: real **$8.1-8.6B**, making P/E 277.28 instead of ~69 and P/B 40.93 instead of
+#: ~10. The flag exists so the market-cap join can refuse rather than produce a
+#: wrong number.
+_FOREIGN_FORMS = ("20-F", "40-F")
+
 # The reference-year rule - "the newest eligible fiscal end carried by the core
 # statement lines, so a tag with no value there is absent rather than substituted
 # from another year" - belongs to the CANONICAL ASSEMBLY, not here: it reads
@@ -260,10 +271,15 @@ def annual_facts(ticker: str, years: int = 15) -> dict:
 
     Returns ``{"series": {label: {fiscal_end: {"val", "filed"}}},
     "shares": {fiscal_end: {"val", "filed"}}, "span": [first, last] | None,
-    "years": years}``. ``shares`` is the dei cover-page count
+    "foreign_private_issuer": bool, "years": years}``. ``shares`` is the dei
+    cover-page count
     (``EntityCommonStockSharesOutstanding``), which carries its own period ends
     and is far fresher than the fiscal-year balance - the leg a market
-    capitalisation needs. Raises ``NoMarketDataError`` on an unresolvable ticker
+    capitalisation needs. ``foreign_private_issuer`` is True when that cover page
+    came from a 20-F/40-F: the count is then **ordinary** shares while a
+    US-listed price may be per **ADS**, and EDGAR does not carry the ratio, so a
+    reader deriving a market cap from the two must refuse rather than guess (see
+    ``_FOREIGN_FORMS``). Raises ``NoMarketDataError`` on an unresolvable ticker
     (non-US listing, no CIK) or when no tag carries an annual value, exactly as
     the rendered leaf does, so a caller treating the facts as optional must
     catch it.
@@ -343,13 +359,29 @@ def annual_facts(ticker: str, years: int = 15) -> dict:
         )
     dei = (facts or {}).get("dei")
     shares: dict[str, dict] = {}
+    # Whether the cover-page count belongs to a 20-F/40-F filer, whose US-listed
+    # line may be an ADS. Detected on the dei rows themselves: the cover page is
+    # where the count comes from, so the form that printed it is the form that
+    # decides the unit.
+    foreign_private_issuer = False
     if isinstance(dei, dict):
         units = (dei.get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}
         for unit in ("shares", "shares/shares"):
-            shares = _cover_page_shares(units.get(unit) or [])
+            rows = units.get(unit) or []
+            for row in rows:
+                if str(row.get("form") or "").split("/")[0] in _FOREIGN_FORMS:
+                    foreign_private_issuer = True
+                    break
+            shares = _cover_page_shares(rows)
             if shares:
                 break
-    return {"series": by_tag, "shares": shares, "span": span, "years": years}
+    return {
+        "series": by_tag,
+        "shares": shares,
+        "span": span,
+        "foreign_private_issuer": foreign_private_issuer,
+        "years": years,
+    }
 
 
 def get_sec_filings(ticker: str, limit: int = 10) -> str:

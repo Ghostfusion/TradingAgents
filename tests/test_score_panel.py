@@ -41,6 +41,7 @@ import pytest
 
 from scripts.score_panel import (
     CHUNK_SIZE,
+    GAP_FPI_MARKET_CAP,
     META_KEY,
     REDUNDANT_ABS_CORR,
     SEC_REQUESTS_PER_SECOND,
@@ -788,6 +789,52 @@ def test_the_panel_derives_market_cap_from_its_own_close_and_the_sec_share_count
         "no close => no market cap => the ratio is absent, never fabricated")
     assert "f" in bare[UNIVERSE[0]], "the statement-only metrics still measure"
     assert close > 0, "the control and the treatment differ only by the price leg"
+
+
+def test_a_foreign_private_issuers_market_cap_is_withheld_never_guessed(tmp_path):
+    """SIMO 2026-09-17, reproduced as a contract.
+
+    A 20-F/40-F filer's US-listed line may be an ADS whose ratio EDGAR does not
+    carry, so the traded close is per-ADS while the cover-page count is per
+    **ordinary** share - and the product is wrong by that ratio. Measured live:
+    1 ADS = 4 ordinary shares, so the panel derived **$34.0B** against a real
+    **$8.1-8.6B**, P/E **277.28** against ~69 and P/B **40.93** against ~10, with
+    Altman Z's X4 inflated alongside them. A wrong market cap poisons every
+    price-based ratio, so it is withheld and the reason named.
+
+    The domestic name in the same run is the control: the rule is scoped to the
+    foreign filer, not a blanket removal of the valuation block.
+    """
+    fpi = UNIVERSE[0]
+
+    class _Mixed(Transport):
+        def _fin(self, ticker):
+            fin = super()._fin(ticker)
+            fin.pop("market_cap", None)
+            fin["shares_outstanding"] = 2e8
+            if ticker == fpi:
+                fin["foreign_private_issuer"] = True
+            return fin
+
+    series = {t: _bars(DATES, drift=0.001, seed=60 + i, noise=0.0)
+              for i, t in enumerate(UNIVERSE)}
+    provider = PriceProvider(loader=lambda t: series.get(t, {}))
+    out = str(tmp_path / "fpi")
+    build_panel([DATES[0]], UNIVERSE, transport=_Mixed(), price_provider=provider,
+                technical=False, cache_dir=out)
+    rows, meta = read_panel(panel_path(out, DATES[0]))
+
+    foreign = rows[fpi]
+    assert foreign.get("close") is not None, "the price leg still ran for this name"
+    assert "market_cap" not in foreign
+    assert foreign.get("price_to_earnings") is None, (
+        "the ratio needs a market cap, and no honest one exists here")
+    assert foreign.get("price_to_book") is None
+    assert meta["fundamentals_gaps"][fpi] == GAP_FPI_MARKET_CAP
+
+    domestic = next(t for t in UNIVERSE if t != fpi)
+    assert rows[domestic]["price_to_earnings"] is not None, (
+        "the domestic control keeps its valuation block - the rule is scoped")
 
 
 def test_the_transport_is_injectable_and_only_the_live_one_needs_the_network(tmp_path):

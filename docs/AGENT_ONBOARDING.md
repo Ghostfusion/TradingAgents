@@ -434,6 +434,17 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **SIMO's panel market cap was 4x too high: an ADS price multiplied by an ordinary share count.** Found by
+  checking a number that looked wrong instead of trusting it. The live panel read `price_to_earnings=277.28`, `price_to_book=40.93`,
+  `altman_z=54.15`. Both legs are individually correct - the price leg supplies a real close of `253.30` (2026-09-17, from a continuous
+  series back to 65.88 in 2021), and the SEC leg's net income $122.635M / EPS $0.91 / 134,244,840 cover-page shares are internally
+  consistent. The **join** is the defect: `market_cap = close x shares_outstanding` multiplies a per-**ADS** price by an **ordinary** share
+  count. SIMO files 20-F and its ADS represents **4 ordinary shares**, so the panel derived **$34.0B** against a real **$8.1-8.6B**.
+  **Fixed by refusing to guess:** `sec_edgar.annual_facts` now returns `foreign_private_issuer` (True when the cover page came from a
+  20-F/40-F), `canonical_fin_from_sec` carries it, and `build_panel` withholds the derived market cap and records `GAP_FPI_MARKET_CAP`.
+  EDGAR does not carry the ADS ratio, so no honest derivation exists, and a wrong market cap poisons P/E, P/B, EV/EBIT, earnings yield,
+  FCF yield and Altman Z's X4. **Fails before, passes after:** the panel test failed pre-fix with `price_to_earnings=97687062.49`; the
+  reader test with the flag `False`. **A named gap, not a permanent loss** - an ADS-ratio source would let the derivation resume.
 - 2026-09-18 `(working tree)` - **D-11 FIXED: the owner decided it the same day, and the resolution went the other way from the
   sequence the design set had on record.** The owner chose **§6.4 row 2 - the gate reads its own explicit argument** - and was
   explicit that this is **not** a licence to move the snapshot or to make the printed context the sole consumer: the distinction

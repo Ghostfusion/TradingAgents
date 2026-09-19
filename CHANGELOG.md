@@ -132,6 +132,18 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 ### Fixed
 
+**SIMO's panel row implied a $252 close - and the cause was a unit mismatch, not the price leg (2026-09-18).** Found by checking a number that looked wrong instead of trusting it: the live panel gave SIMO `price_to_earnings = 277.28`, `price_to_book = 40.93`, `altman_z = 54.15`.
+
+- **Both legs are individually right.** The price leg supplies a real close of `253.30` for 2026-09-17, from a continuous series (2021-09-20: `65.88`). The SEC leg is right too: net income $122.635M, diluted EPS $0.91 and a cover-page count of 134,244,840 - internally consistent at $0.913 per share.
+- **The defect is the join.** `market_cap = close × shares_outstanding` multiplies a **per-ADS** price by an **ordinary** share count. SIMO is a 20-F filer whose ADS represents **4 ordinary shares**, so the panel derived **$34.0B** against a real **$8.1-8.6B** - every price-based ratio four times high, and Altman Z's X4 with them.
+- **Fixed by refusing to guess.** `sec_edgar.annual_facts` now reports `foreign_private_issuer` (True when the cover page came from a 20-F/40-F), `canonical_fin_from_sec` carries it, and `build_panel` **withholds** the derived market cap for such a filer, recording `GAP_FPI_MARKET_CAP` in `_meta.fundamentals_gaps`. EDGAR does not carry the ADS ratio, so no honest derivation exists, and a wrong market cap poisons P/E, P/B, EV/EBIT, earnings yield, FCF yield **and** Altman Z's X4 - worse than a named gap. The domestic case is unchanged and is the test's control.
+- **Fails before, passes after.** `tests/test_score_panel.py::test_a_foreign_private_issuers_market_cap_is_withheld_never_guessed` fails pre-fix with `price_to_earnings = 97687062.49` - a nonsense number, which is the point - and `tests/test_fundamentals_enhancements.py::test_xbrl_annual_facts_flag_a_foreign_private_issuer_cover_page` fails with the flag `False`.
+- **A named gap, not a permanent loss.** If an ADS-ratio source is ever added, the derivation can resume correctly for these names; until then the panel says so rather than printing a wrong number.
+
+Tests: `tests/test_score_panel.py` +1, `tests/test_fundamentals_enhancements.py` +1.
+
+**Web impact**: none - `scripts/score_panel.py` is a manual validation script with no web consumer, and no tool, CLI flag or card shape changed.
+
 **D-11 — RESOLVED: the owner decided it the same day, and the pre-graph context no longer asserts a catalyst measurement it never made (2026-09-18).** The finding below is kept as written; this is the close.
 
 - **The owner's decision (recorded verbatim in `ResearchLayerWiring.md` §6.6): §6.4 row 2 — the gate reads its own explicit argument.** *"Do not move the snapshot earlier, and do not make the printed context the sole consumer. The key distinction is decision semantics vs. observability."* `_compiled_decision_context` runs **before** `graph.invoke`, so it cannot legitimately consume `strategy_overlays` as though those overlays existed. Moving the snapshot earlier would mean moving the production of the event information earlier too — a graph-ordering change — and making the context the only consumer would turn an observability artifact into the source of truth.

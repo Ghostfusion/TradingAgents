@@ -663,7 +663,13 @@ panel over 464 names = 464 requests, not 13,920), paced to the SEC's published
 the panel date are eligible) and every leg is aligned to **one fiscal year** — a
 tag with no value at the reference end is ABSENT, never substituted from another
 year. Market cap is the panel's own close × the EDGAR cover-page share count
-(`dei:EntityCommonStockSharesOutstanding`). Coverage limits are named per name in
+(`dei:EntityCommonStockSharesOutstanding`) — **except for a 20-F/40-F filer**,
+whose US-listed line may be an ADS: the cover-page count is then *ordinary* shares
+while the traded price is per *ADS*, and EDGAR does not carry the ratio, so the
+market cap is **withheld and the reason named** rather than derived. Measured on
+SIMO 2026-09-17 (1 ADS = 4 ordinary shares): the unguarded product read **$34.0B**
+against a real **$8.1–8.6B**, P/E **277.28** against ~69 and P/B **40.93** against
+~10, with Altman Z's X4 inflated alongside them. Coverage limits are named per name in
 `_meta.fundamentals_gaps` — no market cap from the source, no TTM, no
 10-K/20-F/40-F row (pre-XBRL or IFRS), Beneish M unmeasurable for want of a
 consistent marketable-securities concept — and never silently dropped; the
