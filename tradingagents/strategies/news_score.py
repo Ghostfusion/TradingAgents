@@ -383,6 +383,7 @@ def news_score(components: dict, *, weights: dict | None = None,
     return {
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
+        "floor": combined.get("floor"),
         "components": {
             name: {
                 "raw": comps.get(name),

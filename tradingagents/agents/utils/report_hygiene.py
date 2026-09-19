@@ -27,6 +27,8 @@ repair or replace it. This text is what keeps the model from writing one.
 
 from __future__ import annotations
 
+from typing import Any
+
 REPORT_HYGIENE_RULES = (
     " NO SELF-CORRECTION ARTIFACTS: never leave a value in the report with an"
     " inline (corrected: / correction -) caveat, and never label a bullet"
@@ -46,7 +48,12 @@ REPORT_HYGIENE_RULES = (
     " copy - the stem had to be discarded)."
 )
 
-__all__ = ["REPORT_HYGIENE_RULES", "engine_score_block"]
+__all__ = [
+    "MANDATORY_ENGINE_RULES",
+    "REPORT_HYGIENE_RULES",
+    "engine_score_block",
+    "scorecard_context_block",
+]
 
 
 def _engine_label(engine: str) -> str:
@@ -151,4 +158,142 @@ def engine_score_block(
         "--- engine evidence (authoritative) ---\n"
         f"{body}\n"
         "--- end engine evidence ---"
+    )
+
+
+#: The mandatory-manifest instruction (ScoreContextContract.md §6). One constant,
+#: read by every analyst, so the wording cannot drift between them.
+MANDATORY_ENGINE_RULES = (
+    "MANDATORY ENGINE MANIFEST. For every security, evaluate all 8 registered "
+    "scoring engines: FundamentalScore, TechnicalScore, RegimeScore, RiskScore, "
+    "SentimentScore, NewsScore, EventScore, TradeScore. Do not selectively "
+    "consider engines based on discretion.\n"
+    "The engines are computed by the application, not chosen by you: the results "
+    "below are already measured. Do not invent missing measurements. Do not "
+    "substitute 0 for a missing measurement - an engine reported NA was not "
+    "measured, which is NOT the same as measuring it at 0. Do not omit an "
+    "enabled engine merely because another engine appears more informative.\n"
+    "An engine is not fully measured unless its required coverage floor is "
+    "satisfied; where the floor is not met the score is WITHHELD and printed as "
+    "NA with the floor that was required. Coverage travels with the number: "
+    "'72 at coverage 68%' means 72 over 68% of the intended evidence."
+)
+
+
+def _coverage_text(coverage: Any, ticker: str | None = None) -> str:
+    """Render an engine's coverage, which is a float or a panel dict.
+
+    The engines disagree on this shape by design: the seven single-name engines
+    report a weight FRACTION, while `fundamental_score` is a PANEL engine and
+    reports per-name counts. Both are printed as what they are.
+    """
+    if coverage is None:
+        return "unavailable"
+    if isinstance(coverage, dict):
+        if not coverage:
+            return "unavailable"
+        # Three shapes reach here: the panel engine's per-name map
+        # (`{name: {n, of, ...}}`), that same entry on its own (`{n, of, ...}`),
+        # and a sub-score's own coverage dict. Take whichever carries the counts.
+        entry: Any = None
+        if "n" in coverage and "of" in coverage:
+            entry = coverage
+        else:
+            candidate = coverage.get(ticker) if ticker else None
+            if not isinstance(candidate, dict):
+                candidate = next(
+                    (v for v in coverage.values() if isinstance(v, dict)), None
+                )
+            entry = candidate
+        if not isinstance(entry, dict):
+            return "unavailable"
+        n, of = entry.get("n"), entry.get("of")
+        if n is None or of is None:
+            return "unavailable"
+        pct = entry.get("coverage")
+        suffix = f" ({_plain_float(pct)})" if pct is not None else ""
+        return f"{n} of {of} sub-scores{suffix}"
+    return _plain_float(coverage)
+
+
+def _plain_float(value: Any) -> str:
+    """A number for printing, without a trailing `.0` on an integer."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def scorecard_context_block(
+    ticker: str,
+    trade_date: str | None = None,
+    cfg: dict | None = None,
+    snapshot: dict | None = None,
+) -> str:
+    """The FULL scorecard for every analyst, read from the run's one snapshot.
+
+    **Every analyst receives all eight engines, not only the one it owns**
+    (ScoreContextContract.md §13.1). Each analyst still receives its own
+    `engine_score_block` for the section it is responsible for; this block is the
+    complete quantitative picture beside it, so an analyst does not have to infer
+    the relative weight of regime and risk from an owned score alone.
+
+    **Read, never recomputed.** The snapshot is built once at graph setup
+    (`trading_graph.py:651`) and handed down, so every reader is looking at the
+    same numbers and the prompt cannot drift from the report.
+
+    Ordering is deliberate (§13.2): the eight engines first, `TradeScore` last and
+    labelled downstream, so the composite is a reference point rather than an
+    anchor. `ENGINE_GATES` already carries `trade` last.
+
+    Returns ``""`` when the master gate is off or no snapshot was handed down, so
+    a gate-off prompt stays byte-identical to a pre-scorecard one.
+    """
+    config = cfg or {}
+    if not config.get("enable_quant_scorecard"):
+        return ""
+    snap = snapshot if isinstance(snapshot, dict) else None
+    if not snap:
+        return ""
+    try:
+        from tradingagents.strategies.quant_scorecard import ENGINE_GATES
+    except Exception:  # noqa: BLE001 - no map means no block
+        return ""
+
+    engines = snap.get("engines") or {}
+    lines: list[str] = []
+    for name in ENGINE_GATES:
+        entry = engines.get(name) or {}
+        if not entry.get("enabled"):
+            continue
+        label = _engine_label(name)
+        score = entry.get("score")
+        if score is None:
+            reason = entry.get("reason") or "not measured"
+            lines.append(f"{label}: NA - {reason}")
+            continue
+        head = f"{label}: {_plain_float(score)}/100"
+        if entry.get("band"):
+            head += f" ({entry['band']})"
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        head += f" | coverage {_coverage_text(entry.get('coverage'), ticker)}"
+        floor = result.get("floor")
+        if floor is not None:
+            head += f" | required floor {_plain_float(floor)}"
+        head += " | ABOVE FLOOR"
+        lines.append(head)
+
+    if not lines:
+        return ""
+    body = "\n".join(lines)
+    return (
+        f"\n\n{MANDATORY_ENGINE_RULES}\n\n"
+        "--- engine scorecard (authoritative; already computed for this run) ---\n"
+        f"{body}\n"
+        "TradeScore is the DOWNSTREAM composite / research allocation, printed "
+        "last for that reason. It is NOT a trading instruction, NOT a position "
+        "size and NOT a gate. The engines above are the evidence; interpret them "
+        "and say what they support and what they argue against.\n"
+        "--- end scorecard ---"
     )

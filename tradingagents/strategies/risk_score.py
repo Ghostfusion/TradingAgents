@@ -562,6 +562,7 @@ def risk_score(
     return {
         "score": combined.get("score"),
         "coverage": coverage,
+        "floor": combined.get("floor"),
         "uncertainty": uncertainty,
         "categories": cats,
         "components": rows,

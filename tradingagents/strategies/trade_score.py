@@ -396,6 +396,7 @@ def trade_score(
     return {
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
+        "floor": combined.get("floor"),
         "components": {
             name: {
                 "letter": ENGINE_LETTERS[name],

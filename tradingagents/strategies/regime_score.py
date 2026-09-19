@@ -164,7 +164,7 @@ COMPONENTS: dict[str, Component] = {
             "market_trend",
             "market_trend",
             "higher_better",
-            "strategies/regime_score.py::market_trend:343",
+            "strategies/regime_score.py::market_trend:344",
             "P/SMA - 1 (signed)",
             "prerequisite 1; over the benchmark's closes, not the name's",
         ),
@@ -180,7 +180,7 @@ COMPONENTS: dict[str, Component] = {
             "vix_percentile",
             "volatility",
             "lower_better",
-            "agents/utils/analysis_tools.py::_vix_percentile_read:6988",
+            "agents/utils/analysis_tools.py::_vix_percentile_read:7976",
             "0-1 rank of VIXCLS",
             "prerequisite 3 (P0-4); a level is not a regime input, the rank is",
         ),
@@ -188,7 +188,7 @@ COMPONENTS: dict[str, Component] = {
             "vix_term_structure",
             "volatility",
             "lower_better",
-            "strategies/regime_score.py::vix_term_structure:400",
+            "strategies/regime_score.py::vix_term_structure:401",
             "VIX9D / VIX3M ratio",
             "prerequisite 4 (P0-5); ABSENT data source - see VIX9D_SERIES",
         ),
@@ -311,6 +311,7 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
     return {
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
+        "floor": combined.get("floor"),
         "components": {
             name: {
                 "raw": (components or {}).get(name),

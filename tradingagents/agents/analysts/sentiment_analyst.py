@@ -40,6 +40,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
+    scorecard_context_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -159,7 +160,11 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             # reaches this report only by being supplied here. A "call
             # get_sentiment_score" instruction would be a hallucinated call
             # (the prompt carries NO_EXTERNAL_TOOLS).
-            engine_block=engine_score_block("sentiment", ticker, end_date, cfg),
+            # §13.1: the full scorecard rides beside the owned engine - it is
+            # supplied text either way, which is the only route into a prompt
+            # that binds no tools.
+            engine_block=engine_score_block("sentiment", ticker, end_date, cfg)
+            + scorecard_context_block(ticker, end_date, cfg, state.get("quant_scorecard")),
         )
 
         prompt = ChatPromptTemplate.from_messages(

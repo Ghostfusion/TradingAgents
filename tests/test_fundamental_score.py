@@ -449,8 +449,13 @@ def test_panel_extension_is_opt_in_and_leaves_the_quality_panel_alone() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_off_keeps_the_engine_tool_out_of_every_toolset(monkeypatch) -> None:
-    """§6 acceptance (a): a gate that is off leaves the toolset byte-identical."""
+def test_the_fundamental_leaf_is_in_no_toolset_whatever_the_gate(monkeypatch) -> None:
+    """§6 acceptance (a) and §13.3, in one statement.
+
+    The leaf was bound to the fundamentals analyst when its gate was on. Engine
+    leaves are application-internal calculation mechanisms, not LLM-facing
+    tools, so the toolset is byte-identical whether the gate is on or off.
+    """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
 
@@ -458,13 +463,13 @@ def test_gate_off_keeps_the_engine_tool_out_of_every_toolset(monkeypatch) -> Non
         cfgmod, "get_config", lambda: {"enable_fundamental_score": False}
     )
     names_off = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert "get_fundamental_score" not in names_off
     monkeypatch.setattr(
         cfgmod, "get_config", lambda: {"enable_fundamental_score": True}
     )
     names_on = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert "get_fundamental_score" in names_on
-    assert set(names_on) - set(names_off) == {"get_fundamental_score"}
+    assert "get_fundamental_score" not in names_off
+    assert "get_fundamental_score" not in names_on
+    assert names_on == names_off
 
 
 def test_gate_off_makes_the_leaf_say_so(monkeypatch) -> None:

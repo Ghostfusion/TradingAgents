@@ -646,6 +646,7 @@ def event_state(components: dict, *, weights: dict | None = None) -> dict:
         "score": combined.get("score"),
         "band": band_label(combined.get("score"), EVENT_BANDS),
         "coverage": combined.get("coverage"),
+        "floor": combined.get("floor"),
         "families": families,
         "families_present": present,
         "families_unmeasured": unmeasured,

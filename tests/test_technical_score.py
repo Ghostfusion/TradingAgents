@@ -357,12 +357,16 @@ def test_semivariance_uses_the_full_sample_not_the_count_of_each_sign() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_on_binds_the_engine_to_the_MARKET_analyst_only(monkeypatch) -> None:
-    """The ownership map (`quant_scorecard.ENGINE_SECTIONS`) puts the technical
-    engine on the market analyst - it is the price/trend/momentum domain.
+def test_the_engine_is_bound_to_no_analyst_whatever_the_gate(monkeypatch) -> None:
+    """§13.3, and the close of the 2026-09-19 ownership defect.
 
-    It was bound to the FUNDAMENTALS analyst, which does not own that domain,
-    so the TechnicalScore landed in a valuation report (2026-09-19 defect).
+    The defect was `get_technical_score` on the FUNDAMENTALS analyst - an
+    analyst that does not own the price/trend domain. The first fix moved it to
+    the market analyst (its owner in `quant_scorecard.ENGINE_SECTIONS`). Engine
+    leaves are now application-internal calculation mechanisms, not LLM-facing
+    tools, so the correct binding is NONE: the map still decides where the
+    RESULT appears, and the result reaches both reports through the supplied
+    scorecard (`report_hygiene.scorecard_context_block`).
     """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
@@ -376,8 +380,10 @@ def test_gate_on_binds_the_engine_to_the_MARKET_analyst_only(monkeypatch) -> Non
     monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_technical_score": True})
     market_on = [t.name for t in toolsets.market_tools()]
     fund_on = [t.name for t in toolsets.fundamentals_company_tools()]
-    assert "get_technical_score" in market_on
+    assert "get_technical_score" not in market_on
     assert "get_technical_score" not in fund_on
+    assert market_on == market_off
+    assert fund_on == fund_off
 
 
 def test_gate_off_makes_the_leaf_say_so(monkeypatch) -> None:

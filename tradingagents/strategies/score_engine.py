@@ -157,9 +157,12 @@ def combine(
       never 50.
     - ``bands`` supplies the advisory label; the kernel holds no table.
 
-    Returns ``{"score", "coverage", "components", "present", "withheld", "label",
-    "basis"}``. ``basis`` names the weight vector actually used and the components
-    that were present, so a reader can see what the number is made of.
+    Returns ``{"score", "coverage", "floor", "components", "present",
+    "withheld", "label", "basis"}``. ``floor`` is the resolved coverage floor as
+    a component COUNT (``coverage_floor``), to be read beside ``coverage``, which
+    is a weight FRACTION - the two are different units. ``basis`` names the weight
+    vector actually used and the components that were present, so a reader can see
+    what the number is made of.
     """
     comps = dict(components or {})
     if not comps:
@@ -168,6 +171,10 @@ def combine(
             "coverage": 0.0,
             "components": {},
             "present": [],
+            # No components declared means no floor applies: there is nothing a
+            # count could be required against. `0` here, not `coverage_floor`'s
+            # `max(1, ...)` - that floor guards a real component set.
+            "floor": 0,
             "withheld": "no components declared",
             "label": None,
             "basis": "no components declared",
@@ -197,6 +204,12 @@ def combine(
     out = {
         "score": None,
         "coverage": round(coverage, 4),
+        # The resolved floor, exposed so a reader can print "required" beside
+        # the coverage instead of parsing it back out of `withheld`/`basis`.
+        # It is a COMPONENT COUNT (`len(present) < floor`), while `coverage` is
+        # a weight FRACTION - the two are different units and must be rendered
+        # as such. Resolved by `coverage_floor`, the one implementation.
+        "floor": floor,
         "components": {k: comps[k] for k in sorted(comps)},
         "present": sorted(present),
         "withheld": None,

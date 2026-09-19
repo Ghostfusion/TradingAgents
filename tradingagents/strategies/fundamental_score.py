@@ -317,6 +317,9 @@ def fundamental_score(
     return {
         "scores": out_scores,
         "coverage": out_cov,
+        # Fundamental is a PANEL engine: `coverage` is per-name, so the floor is
+        # the sub-score count each name must present, not a per-name value.
+        "floor": min_coverage,
         "components": out_comp,
         "withheld": out_withheld,
         "subscores": subs,

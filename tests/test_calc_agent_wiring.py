@@ -216,17 +216,26 @@ TOOL_LEGACY_BINDING = {
     "get_kelly_alloc": "covered: get_allocation_black_litterman / get_position_sizing / get_hrp_alloc are the bound allocation reads",
     "get_kyle_lambda": "covered: get_liquidity_risk returns ILLIQ / float-turnover / IWF / verdict; the tool docstring forbids per-ticker use",
     "get_no_trade_guard_band": "rebalance guard; needs a current book weight no agent surface carries (README documents it)",
-    # The three REPORT-LEVEL engines. `quant_scorecard.ENGINE_SECTIONS` assigns
-    # them `None` - by decision, not omission: regime describes the operating
-    # environment, risk is a cross-cutting constraint and trade is the
-    # downstream decision layer, so none is an independent analytical opinion
-    # and none gets an analyst section. Their results reach the report through
-    # the quant scorecard, the run card and the computed decision context, so
-    # no analyst is handed the leaf (they were bound to market/fundamentals
-    # until 2026-09-19, which implied an ownership that does not exist).
-    "get_regime_score": "report-level engine (ENGINE_SECTIONS['regime'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
-    "get_risk_score": "report-level engine (ENGINE_SECTIONS['risk'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
-    "get_trade_score": "report-level composite (ENGINE_SECTIONS['trade'] is None); consumer is the quant scorecard / run card / computed decision context, not an analyst tool loop",
+    # ALL EIGHT ENGINE LEAVES. These are application-internal calculation
+    # mechanisms, NOT LLM-facing analytical tools (ScoreContextContract.md
+    # §13.3): the engines are computed by the application and their results are
+    # SUPPLIED to every analyst prompt by `report_hygiene.scorecard_context_block`
+    # (the full scorecard) and `report_hygiene.engine_score_block` (the owned
+    # engine). A second discretionary route to a number the prompt already
+    # carries is the ambiguity the contract removes, so no analyst binds one.
+    #
+    # `regime`, `risk` and `trade` were already report-level by decision
+    # (`ENGINE_SECTIONS` gives them `None`); the other five were bound to their
+    # owning analyst until 2026-09-19 and are dropped here. The readers
+    # themselves stay - they are what the block calls.
+    "get_fundamental_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
+    "get_technical_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
+    "get_sentiment_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block - the ONLY route into the sentiment report, whose analyst binds no tools (ScoreContextContract.md §13.3)",
+    "get_news_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
+    "get_event_state": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
+    "get_regime_score": "report-level engine leaf (ENGINE_SECTIONS['regime'] is None); consumer is the supplied scorecard / run card / computed decision context, not an analyst tool loop (ScoreContextContract.md §13.3)",
+    "get_risk_score": "report-level engine leaf (ENGINE_SECTIONS['risk'] is None); consumer is the supplied scorecard / run card / computed decision context, not an analyst tool loop (ScoreContextContract.md §13.3)",
+    "get_trade_score": "report-level composite leaf (ENGINE_SECTIONS['trade'] is None); consumer is the supplied scorecard / run card / computed decision context, not an analyst tool loop (ScoreContextContract.md §13.3)",
     "get_prediction_ledger_score": "covered: get_ledger_risk_state is the bound win-rate read; the stops/targets half is get_trade_outcome_metrics (bound to the debators)",
     "get_prompt_injection_read": "ingestion-layer guard: by the time an LLM can call it the text is already in context, so the scan belongs to the loader, not a tool",
     "get_stress_grid_read": "covered: get_scenario_dcf is the modelled version; the grid never receives its sensitivity axis and says so",

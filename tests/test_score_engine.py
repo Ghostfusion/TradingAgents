@@ -143,3 +143,32 @@ def test_the_band_label_uses_the_engines_own_table():
     # (master rule 2).
     with pytest.raises(TypeError):
         band_label(85.0)
+
+
+def test_combine_exposes_the_floor_it_enforced():
+    """`floor` is returned beside `coverage`, so a reader prints "required"
+    without parsing it back out of `withheld`/`basis` (ScoreContextContract.md
+    §13.4). It is a component COUNT while `coverage` is a weight FRACTION."""
+    res = combine({"a": 80.0, "b": 60.0, "c": None, "d": 70.0}, min_coverage=3)
+    assert res["floor"] == 3
+    assert res["score"] is not None
+    assert len(res["present"]) == 3
+
+    # Below the floor the score is WITHHELD - never 0, never 50 - and the floor
+    # is still reported so the reader can say what was required.
+    thin = combine({"a": 80.0, "b": None, "c": None, "d": None}, min_coverage=3)
+    assert thin["score"] is None
+    assert thin["floor"] == 3
+    assert "floor is 3" in thin["withheld"]
+
+    # No components declared means no floor applies.
+    assert combine({})["floor"] == 0
+
+
+def test_the_floor_agrees_with_coverage_floor():
+    """One implementation: `combine` resolves the floor through
+    `coverage_floor`, so the two can never disagree."""
+    comps = {"a": 1.0, "b": 1.0, "c": 1.0, "d": 1.0}
+    for min_coverage in (1, 2, 3, 0.5):
+        res = combine(dict(comps), min_coverage=min_coverage)
+        assert res["floor"] == coverage_floor(min_coverage, len(res["present"]))

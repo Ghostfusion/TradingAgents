@@ -437,6 +437,10 @@ def test_the_state_carries_no_gate_or_size_key() -> None:
         "score",
         "band",
         "coverage",
+        # The resolved coverage floor, exposed 2026-09-19 so a reader can print
+        # "required" beside the coverage (ScoreContextContract.md §13.4). Not a
+        # gate and not a size - the token check below still governs.
+        "floor",
         "families",
         "families_present",
         "families_unmeasured",
@@ -631,16 +635,24 @@ def test_the_every_family_has_one_imminence_slot() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_gate_off_keeps_the_event_tool_out_of_every_toolset(monkeypatch) -> None:
+def test_the_event_leaf_is_in_no_toolset_whatever_the_gate(monkeypatch) -> None:
+    """§13.3 + §6 acceptance (a), now one stronger statement.
+
+    The leaf was bound to the news analyst when its gate was on. Engine leaves
+    are application-internal calculation mechanisms, not LLM-facing tools, so
+    the toolset is byte-identical whether the gate is on or off - which is
+    acceptance (a) satisfied by construction rather than by a branch.
+    """
     import tradingagents.dataflows.config as cfgmod
     from tradingagents.agents import toolsets
 
     monkeypatch.setattr(cfgmod, "get_config", lambda: {})
     off = [t.name for t in toolsets.news_tools()]
-    assert "get_event_state" not in off
     monkeypatch.setattr(cfgmod, "get_config", lambda: {"enable_event_state": True})
     on = [t.name for t in toolsets.news_tools()]
-    assert set(on) - set(off) == {"get_event_state"}
+    assert "get_event_state" not in off
+    assert "get_event_state" not in on
+    assert on == off
 
 
 def test_gate_off_writes_no_card_key() -> None:

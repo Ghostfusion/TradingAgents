@@ -22,6 +22,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.strategies.quant_scorecard import (
     ENGINE_GATES,
     ENGINE_SECTIONS,
+    ENGINE_TOOLS,
     engines_for_analyst,
 )
 
@@ -47,7 +48,7 @@ def _bound_score_leaves(analyst: str) -> set[str]:
         getattr(t, "name", getattr(t, "__name__", str(t)))
         for t in toolsets.analyst_toolset(analyst)
     }
-    return names & set(toolsets.ENGINE_TOOLS.values())
+    return names & set(ENGINE_TOOLS.values())
 
 
 @pytest.fixture(autouse=True)
@@ -56,37 +57,48 @@ def _restore_config():
     set_config(dict(DEFAULT_CONFIG))
 
 
-def test_binding_is_the_inverse_of_the_ownership_map():
-    """Every analyst binds exactly the leaves of the engines it owns."""
+def test_no_engine_leaf_is_bound_to_any_analyst():
+    """§13.3: engine leaves are application-internal, not LLM-facing tools.
+
+    The engines are computed by the application and their results are SUPPLIED
+    to the prompt, so a second discretionary route to a number the prompt
+    already carries is exactly the ambiguity the contract removes. This
+    supersedes the earlier "bindings are the inverse of the ownership map"
+    contract: the map now drives the SUPPLIED BLOCK, not a tool binding.
+    """
     set_config(_cfg())
     for analyst in ANALYSTS:
-        owned = {
-            toolsets.ENGINE_TOOLS[e]
-            for e in engines_for_analyst(analyst)
-        }
-        assert _bound_score_leaves(analyst) == owned, analyst
+        assert _bound_score_leaves(analyst) == set(), analyst
 
 
-def test_technical_score_belongs_to_the_market_analyst():
-    """The defect: the price/trend domain's engine was on the valuation analyst."""
+def test_technical_score_is_bound_to_no_analyst():
+    """The 2026-09-19 defect was `get_technical_score` on the FUNDAMENTALS
+    analyst. The fix then was to move it to the market analyst; the contract now
+    is that it is bound to neither - the map places its RESULT, and the result
+    reaches both reports through the supplied scorecard."""
     set_config(_cfg())
-    assert "get_technical_score" in _bound_score_leaves("market")
-    assert "get_technical_score" not in _bound_score_leaves("fundamentals")
+    for analyst in ANALYSTS:
+        assert "get_technical_score" not in _bound_score_leaves(analyst), analyst
 
 
-def test_fundamentals_analyst_binds_only_the_fundamental_engine():
+def test_fundamentals_analyst_binds_no_engine_leaf():
     set_config(_cfg())
-    assert _bound_score_leaves("fundamentals") == {"get_fundamental_score"}
+    assert _bound_score_leaves("fundamentals") == set()
 
 
-def test_report_level_engines_are_bound_to_no_analyst():
-    """Regime, risk and trade are report-level by decision, not by omission."""
+def test_report_level_engines_get_no_analyst_block():
+    """Regime, risk and trade are report-level by decision, not by omission.
+
+    They are in the SUPPLIED scorecard like every other engine, but no analyst
+    owns their section, so none is asked to report them.
+    """
     set_config(_cfg())
     report_level = {e for e, section in ENGINE_SECTIONS.items() if section is None}
     assert report_level == {"regime", "risk", "trade"}
-    bound = set().union(*(_bound_score_leaves(a) for a in ANALYSTS))
-    for engine in report_level:
-        assert toolsets.ENGINE_TOOLS[engine] not in bound, engine
+    for analyst in ANALYSTS:
+        owned = engines_for_analyst(analyst)
+        for engine in report_level:
+            assert engine not in owned, (analyst, engine)
 
 
 def test_every_engine_is_placed_exactly_once():
@@ -100,6 +112,108 @@ def test_gate_off_binds_no_score_leaf_at_all():
     set_config(_cfg(engines=False, master=False))
     for analyst in ANALYSTS:
         assert _bound_score_leaves(analyst) == set(), analyst
+
+
+# --- the supplied full scorecard (§13.1, §13.2) -----------------------------
+
+
+def _fake_snapshot(**over):
+    """A snapshot shaped like `quant_scorecard`'s, with every engine measured."""
+    engines = {}
+    for name in ENGINES:
+        engines[name] = {
+            "engine": name,
+            "enabled": True,
+            "score": 60.0,
+            "coverage": 1.0,
+            "band": None,
+            "reason": None,
+            "result": {"floor": 2},
+        }
+    engines["news"] = {
+        "engine": "news",
+        "enabled": True,
+        "score": None,
+        "coverage": None,
+        "band": None,
+        "reason": "no news producer measured",
+        "result": None,
+    }
+    engines.update(over)
+    return {"ticker": "MSFT", "trade_date": "2026-09-19", "engines": engines}
+
+
+def test_every_analyst_receives_the_full_scorecard():
+    """§13.1: not only the engine the analyst owns - all eight."""
+    snap = _fake_snapshot()
+    for analyst in ANALYSTS:
+        block = report_hygiene.scorecard_context_block(
+            "MSFT", "2026-09-19", _cfg(), snap
+        )
+        for engine in ENGINES:
+            assert report_hygiene._engine_label(engine) in block, (analyst, engine)
+
+
+def test_scorecard_prints_tradescore_last_and_labelled_downstream():
+    """§13.2: the composite is a reference point, not an anchor."""
+    block = report_hygiene.scorecard_context_block(
+        "MSFT", "2026-09-19", _cfg(), _fake_snapshot()
+    )
+    body = block.split("--- engine scorecard", 1)[1]
+    assert body.index("TradeScore") > body.index("RiskScore")
+    assert "NOT a trading instruction" in block
+
+
+def test_scorecard_prints_score_coverage_floor_and_status():
+    """§13.4: the floor is exposed beside the coverage."""
+    block = report_hygiene.scorecard_context_block(
+        "MSFT", "2026-09-19", _cfg(), _fake_snapshot()
+    )
+    assert "coverage 1" in block
+    assert "required floor 2" in block
+    assert "ABOVE FLOOR" in block
+
+
+def test_scorecard_names_an_unmeasurable_engine_as_na_not_zero():
+    """`NA != 0` (master rule 1) must survive into the LLM context."""
+    block = report_hygiene.scorecard_context_block(
+        "MSFT", "2026-09-19", _cfg(), _fake_snapshot()
+    )
+    assert "NewsScore: NA - no news producer measured" in block
+    assert "NewsScore: 0" not in block
+
+
+def test_scorecard_block_is_empty_when_the_master_gate_is_off():
+    """The master gate governs the surface: no block, and no snapshot read."""
+    assert (
+        report_hygiene.scorecard_context_block(
+            "MSFT", "2026-09-19", _cfg(master=False), _fake_snapshot()
+        )
+        == ""
+    )
+
+
+def test_scorecard_block_is_empty_without_a_snapshot():
+    """No snapshot means no numbers - never a recompute, never a guess."""
+    assert (
+        report_hygiene.scorecard_context_block("MSFT", "2026-09-19", _cfg(), None) == ""
+    )
+
+
+def test_gate_off_engines_are_omitted_from_the_scorecard():
+    """A gated-off engine is not part of the scorecard at all.
+
+    The manifest sentence names all eight engines by design, so the check is on
+    the rendered rows, not the whole block.
+    """
+    snap = _fake_snapshot()
+    snap["engines"]["risk"]["enabled"] = False
+    block = report_hygiene.scorecard_context_block(
+        "MSFT", "2026-09-19", _cfg(), snap
+    )
+    rows = block.split("--- engine scorecard", 1)[1].split("--- end scorecard", 1)[0]
+    assert not [ln for ln in rows.splitlines() if ln.startswith("RiskScore:")]
+    assert [ln for ln in rows.splitlines() if ln.startswith("TechnicalScore:")]
 
 
 def test_master_gate_off_makes_the_prompt_block_empty():

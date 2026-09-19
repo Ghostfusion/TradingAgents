@@ -1,7 +1,46 @@
 # Design: The Score Context Contract — mandatory engine evaluation, supplied results
 
-**Status: design only — no code changed (2026-09-19). All four open questions were
-closed by the owner on 2026-09-19 — see §13.**
+**Status: BUILT (2026-09-19) — all four phases of §11 are implemented, under the
+owner's four decisions (§13). All four open questions were closed by the owner on
+2026-09-19.**
+
+**Build record (2026-09-19).**
+
+- **Phase 1** — `report_hygiene.scorecard_context_block` renders the **full
+  scorecard** from the run's one snapshot, wired into all four analysts. Read,
+  never recomputed: the snapshot is built once at `trading_graph.py:651` and
+  passed down through `state["quant_scorecard"]`.
+- **Phase 2** — all eight engine-score tool bindings dropped
+  (`toolsets.engine_score_tools`, `_SCORE_TOOL_BY_NAME` and `_enabled` deleted),
+  and all eight leaves declared in `TOOL_LEGACY_BINDING` with their real
+  consumer. The exploratory tools are untouched.
+- **Phase 3** — `combine` exposes `"floor"` beside `"coverage"` and the eight
+  engines propagate it; the block prints score, coverage, required floor and
+  status. The **mapping** half was already built: `format_engine_detail` renders
+  the non-monotonic triple (`RSI raw 53.26 -> aligned 85`).
+- **Phase 4** — the canonical text is `report_hygiene.MANDATORY_ENGINE_RULES`,
+  one constant read by every analyst.
+
+**Two corrections the build forced, both from running rather than reading.**
+
+1. **The floor is a component COUNT, `coverage` is a weight FRACTION.** §13.4's
+   illustrative `Coverage: 45% / Required: 50%` mixed the two units. A *printed*
+   score always meets its floor — `combine` withholds below it (`:206`), and the
+   withheld score is `None`, never `0` and never `50` — so the honest rendering is
+   the count form the kernel already emits (`"5 of 10 components present, floor is
+   6"`).
+2. **`floor` was not reachable from an engine's top level.** The engines assemble
+   their own returns by picking fields off `combine`'s output, so the floor was
+   dropped at every one of the eight. Exposing it meant propagating it from each
+   engine's own top-level `combine` call, not only adding it to the kernel.
+
+**Verified:** six behaviour mutations each turn their test red, with
+byte-identical restore across all three source files. Engine suite **4973 passed /
+6 skipped**.
+
+**Still open (not part of §11).** `format_engine_detail`'s Level 2 deterministic
+render into `write_report_tree` (`ResearchLayerWiring.md` §4.2) remains unbuilt;
+the prompt route is landed, that is its deterministic twin.
 
 Specifies how the eight score engines become **mandatory and deterministic**, and
 how their results — score, coverage, and supporting measurements — are **supplied

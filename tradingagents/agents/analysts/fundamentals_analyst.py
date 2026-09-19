@@ -9,6 +9,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
+    scorecard_context_block,
 )
 
 _ETF_SYSTEM_TAIL = (
@@ -326,6 +327,13 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 # ownership map: fundamental -> fundamentals).
                 + engine_score_block(
                     "fundamentals", state["company_of_interest"], current_date, config
+                )
+                # §13.1: the full scorecard beside the owned engine.
+                + scorecard_context_block(
+                    state["company_of_interest"],
+                    current_date,
+                    config,
+                    state.get("quant_scorecard"),
                 )
 
         )

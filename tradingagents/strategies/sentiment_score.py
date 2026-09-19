@@ -536,6 +536,7 @@ def sentiment_score(
     return {
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
+        "floor": combined.get("floor"),
         "categories": cats,
         "components": {
             name: {

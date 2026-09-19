@@ -384,7 +384,7 @@ def test_the_component_order_is_the_plans_prerequisite_order() -> None:
         "realized_vol_percentile",
     )
     assert COMPONENTS["market_trend"].producer.endswith(
-        "strategies/regime_score.py::market_trend:343"
+        "strategies/regime_score.py::market_trend:344"
     )
 
 

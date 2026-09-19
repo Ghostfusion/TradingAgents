@@ -76,7 +76,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_etf_risk,
     get_etf_valuation,
     get_event_pnl_response,
-    get_event_state,
     get_execution_schedule,
     get_exit_check,
     get_exit_plan,
@@ -88,7 +87,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_financial_history,
     get_fixed_income_risk,
     get_form4_insider,
-    get_fundamental_score,
     get_fundamentals,
     get_fx_snapshot,
     get_gamma_profile,
@@ -124,7 +122,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_momentum_detail,
     get_news,
     get_news_relevance_read,
-    get_news_score,
     get_news_sentiment,
     get_news_sentiment_series,
     get_normality,
@@ -155,7 +152,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_ratios,
     get_regime_components,
     get_regime_read,
-    get_regime_score,
     get_regime_state,
     get_relative_rotation,
     get_relative_strength,
@@ -165,7 +161,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_risk_gate,
     get_risk_overlay,
     get_risk_parity_alloc,
-    get_risk_score,
     get_scaleout_plan,
     get_scenario_dcf,
     get_sec_filings,
@@ -173,7 +168,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_rotation_screen,
     get_sentiment_computed,
     get_sentiment_lead_lag,
-    get_sentiment_score,
     get_session_discipline,
     get_share_buyback_authorization,
     get_shift_detection,
@@ -194,11 +188,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_tail_risk,
     get_taylor_read,
     get_technical_factors,
-    get_technical_score,
     get_tga_balance,
     get_top_movers,
     get_trade_expectancy,
-    get_trade_score,
     get_trailing_exit,
     get_tranche_plan,
     get_treasury_curve,
@@ -226,11 +218,6 @@ from tradingagents.agents.utils.analyst_revision_tools import (
 from tradingagents.agents.utils.financial_trends import get_financial_trends
 from tradingagents.agents.utils.momentum_tools import (
     get_momentum_scan,
-)
-from tradingagents.strategies.quant_scorecard import (
-    ENGINE_GATES,
-    ENGINE_TOOLS,
-    engines_for_analyst,
 )
 
 
@@ -364,12 +351,6 @@ def market_tools() -> list:
                 # market-level regime path could not reach the VIX series it ranks.
                 get_macro_indicators,
             ]
-    # The engine scores this analyst OWNS, from the one ownership map
-    # (`quant_scorecard.ENGINE_SECTIONS`). The market analyst owns the TECHNICAL
-    # engine - it is the price/trend/momentum domain. Regime and risk are
-    # report-level, so they are no longer bound here: an analyst is never handed
-    # a tool for a domain it does not own.
-    tools.extend(engine_score_tools("market"))
     return tools
 
 
@@ -411,65 +392,7 @@ def news_tools() -> list:
                 # was bound only to fundamentals_company_tools.
                 get_analyst_revision_index,
             ]
-    # The news analyst owns TWO engines from the ownership map: `news` and
-    # `event` (the catalyst/event engine is an event-driven news read, so it
-    # shares this section rather than getting an analyst of its own).
-    tools.extend(engine_score_tools("news"))
     return tools
-
-
-def _enabled(name: str, default: bool = False) -> bool:
-    """Read an ``enable_*`` gate for toolset membership (never raises).
-
-    A gate that is off must leave the toolset **byte-identical**, so a gated
-    engine tool is not merely inert inside its body - it is absent from the list
-    the analyst can bind and the ToolNode can execute
-    (docs/scores/IMPLEMENTATION_PLAN.md §6, acceptance (a)).
-    """
-    try:
-        from tradingagents.dataflows.config import get_config
-
-        return bool((get_config() or {}).get(name, default))
-    except Exception:  # noqa: BLE001 - an unreadable config means off
-        return default
-
-
-#: `ENGINE_TOOLS` name -> the imported `@tool` object, built once.
-_SCORE_TOOL_BY_NAME: dict[str, object] = {
-    "get_event_state": get_event_state,
-    "get_fundamental_score": get_fundamental_score,
-    "get_news_score": get_news_score,
-    "get_regime_score": get_regime_score,
-    "get_risk_score": get_risk_score,
-    "get_sentiment_score": get_sentiment_score,
-    "get_technical_score": get_technical_score,
-    "get_trade_score": get_trade_score,
-}
-
-
-def engine_score_tools(analyst_key: str) -> list:
-    """The score leaves this analyst OWNS, each gated by its own engine gate.
-
-    **Derived from `quant_scorecard.ENGINE_SECTIONS` - the one ownership map -
-    so an analyst can never be handed a tool for a domain it does not own.**
-    That table is what fixes the `get_technical_score`-on-the-fundamentals-
-    analyst defect: the technical engine's owner is the market analyst, so the
-    leaf binds there and nowhere else.
-
-    `regime`, `risk` and `trade` are report-level by decision, so no analyst
-    owns them and no analyst is handed their leaves.
-
-    A gate that is off appends nothing, so a gate-off toolset stays
-    byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6, acceptance (a)).
-    """
-    out: list = []
-    for engine in engines_for_analyst(analyst_key):
-        if not _enabled(ENGINE_GATES[engine]):
-            continue
-        tool = _SCORE_TOOL_BY_NAME.get(ENGINE_TOOLS[engine])
-        if tool is not None:
-            out.append(tool)
-    return out
 
 
 def fundamentals_company_tools() -> list:
@@ -535,12 +458,6 @@ def fundamentals_company_tools() -> list:
                 get_allocation_black_litterman,
                 get_position_risk_multiplier,
             ]
-    # The fundamentals analyst owns exactly ONE engine: `fundamental`. The
-    # technical engine's owner is the MARKET analyst (it is the price/trend
-    # domain, not a valuation one) and `trade` is the downstream composite,
-    # which is report-level. Binding either here was the domain-ownership
-    # defect this map fixes.
-    tools.extend(engine_score_tools("fundamentals"))
     return tools
 
 
@@ -597,12 +514,6 @@ def sentiment_tools() -> list:
             # engine), and this leaf was bound only to fundamentals_company_tools.
             get_institution_holdings,
         ]
-    # The sentiment engine's own leaf, from the one ownership map. NOTE: the
-    # sentiment ANALYST binds no tools at all - it pre-fetches its data into the
-    # prompt - so this list is the surface for callers that do bind it, and the
-    # score reaches the sentiment REPORT through the pre-fetched block instead
-    # (`analysts/sentiment_analyst.py`).
-    tools.extend(engine_score_tools("sentiment"))
     return tools
 
 

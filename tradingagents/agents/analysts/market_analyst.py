@@ -9,6 +9,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
+    scorecard_context_block,
 )
 
 # These two live in their own tool modules (not re-exported by agent_utils),
@@ -309,6 +310,16 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 # ownership map: technical -> market). Supplied, not offered.
                 + engine_score_block(
                     "market", state["company_of_interest"], current_date, config
+                )
+                # §13.1: every analyst receives the FULL scorecard, not only the
+                # engine it owns, so it never infers the weight of regime and
+                # risk from an owned score alone. Read from the run's one
+                # snapshot - never recomputed here.
+                + scorecard_context_block(
+                    state["company_of_interest"],
+                    current_date,
+                    config,
+                    state.get("quant_scorecard"),
                 )
         )
 
