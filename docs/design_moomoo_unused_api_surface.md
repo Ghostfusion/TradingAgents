@@ -351,8 +351,8 @@ Per the house convention, every number travels with its basis:
 
 | Phase | Work | Acceptance |
 |---|---|---|
-| **P0** | `get_kl_quota_moomoo()` + a pre-flight warning in the screener's universe fetch | The screener prints remaining quota before a run and refuses cleanly at zero; gate off ⇒ byte-identical |
-| **P1** | `get_market_snapshot_moomoo` + `_batched_snapshot` | A 100-symbol batch returns 100 rows in one call; an injected bad symbol is dropped, named in the coverage line, and the batch still succeeds; gate off ⇒ byte-identical |
+| **P0** **BUILT 2026-09-18** | `get_kl_quota_moomoo()` + a pre-flight warning in the screener's universe fetch | The screener prints remaining quota before a run and refuses cleanly at zero; gate off ⇒ byte-identical |
+| **P1** **BUILT 2026-09-18** | `get_market_snapshot_moomoo` + `_batched_snapshot` | A 100-symbol batch returns 100 rows in one call; an injected bad symbol is dropped, named in the coverage line, and the batch still succeeds; gate off ⇒ byte-identical |
 | **P2** | `get_option_iv_overview_moomoo` + `get_option_iv_history_moomoo` | Live `iv_rank` matches the vendor for 3 names; the IV history feeds `options_surface.volatility_risk_premium` with a real series; gate off ⇒ byte-identical |
 | **P3** | `get_valuation_detail_moomoo` + the Morningstar anchor | A rendered valuation percentile and plate distribution; the Morningstar fair value is printed **as a third-party figure with its own attribution**, never merged into the repo's DCF |
 | **P4** | `get_rating_changes_moomoo` as an alternative leg in `analyst_revisions` | Same rendered shape as today's proxy path; the source is named in the basis line |

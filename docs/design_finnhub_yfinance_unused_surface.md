@@ -245,8 +245,8 @@ Per the house convention, and because this leg exists to replace an `unavailable
 
 | Phase | Work | Acceptance |
 |---|---|---|
-| **P0** | `fetch_estimate_trend` + `fetch_eps_revisions` in `yfinance_sector.py`, behind `enable_analyst_estimates` | Live: a five-level series for a large cap; `estimate_change_index` returns an index instead of `unavailable`; gate off ⇒ byte-identical |
-| **P1** | `_fetch_revision_guarded` supplies `levels` when the gate is on | The `RevIdx` column carries both legs; a run with the source down still prints the old `unavailable` with its reason |
+| **P0** **BUILT 2026-09-18** | `fetch_estimate_trend` + `fetch_eps_revisions` in `yfinance_sector.py`, behind `enable_analyst_estimates` | Live: a five-level series for a large cap; `estimate_change_index` returns an index instead of `unavailable`; gate off ⇒ byte-identical |
+| **P1** **BUILT 2026-09-18** | `_fetch_revision_guarded` supplies `levels` when the gate is on | The `RevIdx` column carries both legs; a run with the source down still prints the old `unavailable` with its reason |
 | **P2** | finnhub `market_holiday` reader + a holiday/half-day basis in the session read | Thanksgiving renders `09:30-13:00` as a half-day, not a full session; a missing holiday table degrades to today's behaviour |
 | **P3** | `shares_full` as a **diagnostic** on the panel's market-cap join | A share-count change between two periods is named, not silently multiplied through — the SIMO defect class, detected mechanically |
 | **P4** | finnhub `country` as an ERP source for the DCF's discount rate | The ERP prints its country and its source, or stays the current override with the reason |

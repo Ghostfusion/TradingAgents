@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import math
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -140,6 +141,7 @@ _WATCHLIST_LEGEND = (
     ("Sent7", "7-day news-sentiment SMA (EODHD /sentiments, -1..1)"),
     ("SentZ", "latest news-sentiment innovation (score - 7d SMA)"),
     ("RevIdx", "weighted analyst revision ratio (MSCI weights 3/2/1 over the periods supplied; denominator up+down - a printed deviation from analyst coverage; coverage-guarded, needs >=2 actions)"),
+    ("RevEC", "estimate-change leg (MSCI EC form: weighted symmetric-percent change over the level series). Measured only with `enable_analyst_estimates` on; the series is the vendor's 90-day estimate trend, NOT four quarters, and the basis line names it"),
     ("G", "Mohanram G-Score (0-8 growth quality; 6-8 good / 0-2 poor) vs this run's sector medians; a median leg the feed lacks is excluded, never scored 0"),
     ("C", "Montier C-Score (0-6 overpricing / fragile-accounting RISK screen; 0-2 good / 5-6 poor)"),
     ("Qual", "composite quality score 0-100: tie-aware percentile of the winsorised-z mean over F / M / Z / O / GP-A / NOA / accruals in this run's scan universe (quality bands - never the decision rating bands)"),
@@ -166,6 +168,9 @@ _WATCHLIST_LEGEND = (
     ("Supertrend", "ATR-based trailing line (up/down direction)"),
     ("POC", "Volume-profile point of control (price level with most volume)"),
     ("DayChg", "intraday change % (from the movers rank)"),
+    ("Pre", "pre-market change % (moomoo live snapshot; needs enable_moomoo_snapshot)"),
+    ("Aft", "after-hours change % (moomoo live snapshot; needs enable_moomoo_snapshot)"),
+    ("Ovn", "overnight change % (moomoo live snapshot; needs enable_moomoo_snapshot)"),
 )
 
 
@@ -293,7 +298,7 @@ def _watchlist_markdown(results: list) -> str:
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
-        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Sent7", "SentZ", "RevIdx", "G", "C", "Qual",
+        "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Pre", "Aft", "Ovn", "Sent7", "SentZ", "RevIdx", "RevEC", "G", "C", "Qual",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -325,7 +330,7 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("revenue_yoy"), "{:.1%}"),
             cell(r.get("roe"), "{:.1%}"),
             cell(r.get("sector")), sec_rank,
-            cell(r.get("rev_net"), "%+d"), cell(r.get("inst_latest_pp"), "%+.1f"),
+            cell(r.get("rev_net"), "{:+d}"), cell(r.get("inst_latest_pp"), "{:+.1f}"),
             flag(r.get("scan_c")), cell(r.get("swing_rs") or "n/a"),
             cell(r.get("swing_stop_pct"), "{:.1%}"), cell(r.get("swing_t2_pct"), "{:.1%}"),
             flag(r.get("vcp_flag")), cell(r.get("vcp_brk"), "{:.1%}"),
@@ -356,9 +361,13 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("supertrend_dir")),
             cell(r.get("poc")),
             cell(r.get("day_change"), "{:+.2%}"),
+            cell(r.get("pre_chg"), "{:+.2f}"),
+            cell(r.get("aft_chg"), "{:+.2f}"),
+            cell(r.get("ovn_chg"), "{:+.2f}"),
             cell(r.get("sent7"), "{:+.2f}"),
             cell(r.get("sentz"), "{:+.2f}"),
             cell(r.get("rev_index"), "{:+.4f}"),
+            cell(r.get("rev_ec"), "{:+.4f}"),
             cell(r.get("g_disp")), cell(r.get("c_disp")), cell(r.get("qual_disp")),
         ]
         rows.append(dict(zip(heads, cells, strict=True)))
@@ -985,6 +994,19 @@ def _fetch_sector_guarded(ticker: str) -> str | None:
         return None
 
 
+def _as_float(v) -> float | None:
+    """Float a vendor cell; None when absent, unparseable or non-finite.
+
+    The snapshot's session cells are `NaN` for an ETF or a name with no
+    pre-market print, so a bare `float()` would carry a NaN into the table.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def _fetch_revision_guarded(ticker: str) -> dict | None:
     try:
         from tradingagents.dataflows.yfinance_sector import fetch_revision_actions
@@ -1364,6 +1386,8 @@ def main(argv: list[str] | None = None) -> int:
         help="add the RevIdx column: weighted analyst revision ratio "
         "(strategies/analyst_revisions.revision_ratio; MSCI weights 3/2/1, "
         "denominator up+down printed as a deviation, coverage-guarded). "
+        "With enable_analyst_estimates on, RevIdx also gains the estimate-change "
+        "leg (RevEC) measured from the vendor estimate trend. "
         "Advisory: it never gates a row.",
     )
     parser.add_argument(
@@ -1505,6 +1529,41 @@ def main(argv: list[str] | None = None) -> int:
     # explicit symbol source is given (no positional tickers, no --file).
     if tickers:
         args.universe = "tickers"
+    # P0 of docs/design_moomoo_unused_api_surface.md: read the historical-K-line
+    # quota BEFORE the scan. The window is 100 requests / 7 days and is this
+    # screener's documented bottleneck - discovering it mid-run leaves a partial
+    # watchlist with no explanation. Gated: with `enable_moomoo_snapshot` off
+    # nothing is read and the run is byte-identical to before.
+    try:
+        from tradingagents.dataflows.config import get_config as _gc_kl
+
+        _kl_gate = bool(_gc_kl().get("enable_moomoo_snapshot"))
+    except Exception:  # noqa: BLE001 - config absence degrades to off
+        _kl_gate = False
+    if _kl_gate:
+        try:
+            from tradingagents.dataflows.moomoo import kl_quota_remaining_moomoo
+
+            _remaining = kl_quota_remaining_moomoo()
+        except Exception:  # noqa: BLE001 - a pre-flight never aborts a run
+            _remaining = None
+        if _remaining is None:
+            logger.info(
+                "moomoo K-line quota: unreadable (OpenD down, not logged in, or "
+                "the SDK absent) - the OHLCV chain will fall through as usual"
+            )
+        elif _remaining == 0:
+            parser.error(
+                "moomoo K-line quota exhausted (0 of 100 remaining in this 7-day "
+                "window). The OHLCV chain falls back to the next vendor, so this "
+                "run would be partial. Wait for the window to roll, or unset "
+                "TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT to skip this check."
+            )
+        else:
+            logger.info(
+                "moomoo K-line quota: %d of 100 remaining in this 7-day window",
+                _remaining,
+            )
     if args.universe == "eodhd-us":
         # EODHD full US symbol list (51k symbols on the EOD plan) is the
         # default universe: it never hits the moomoo K-line quota and covers
@@ -1936,6 +1995,35 @@ def main(argv: list[str] | None = None) -> int:
             "eodhd-us/top-losers/eodhd-losers)"
         )
 
+    # P1 of docs/design_moomoo_unused_api_surface.md: ONE batched snapshot for the
+    # whole scan, so the per-name session reads cost one call instead of N. The
+    # pre-market / after-hours / overnight families have no other source here -
+    # the OHLCV chain carries regular-session bars only - so these columns are
+    # additive, not a second producer for a number that already exists. Gate off
+    # => no call, no columns, byte-identical.
+    if _kl_gate and tickers:
+        try:
+            from tradingagents.dataflows.moomoo import get_market_snapshot_moomoo
+
+            _snap = get_market_snapshot_moomoo(list(tickers[: args.limit]))
+        except Exception as exc:  # noqa: BLE001 - an enrichment never aborts a scan
+            logger.info("session snapshot unavailable: %s", exc)
+            _snap = None
+        if _snap and not _snap.get("disabled") and _snap["rows"]:
+            for _r in _snap["rows"]:
+                _sym = str(_r.get("code") or "").rsplit(".", 1)[-1].upper()
+                if not _sym:
+                    continue
+                _meta = mover_meta.setdefault(_sym, {})
+                _meta["pre_chg"] = _as_float(_r.get("pre_change_rate"))
+                _meta["aft_chg"] = _as_float(_r.get("after_change_rate"))
+                _meta["ovn_chg"] = _as_float(_r.get("overnight_change_rate"))
+            logger.info(
+                "session snapshot: %d of %d symbols (dropped %d, failed %d)",
+                _snap["returned"], _snap["requested"],
+                len(_snap["dropped"]), len(_snap["failed"]),
+            )
+
     results = []
     fmp_use = False
     try:
@@ -2117,7 +2205,30 @@ def main(argv: list[str] | None = None) -> int:
                 from tradingagents.strategies.analyst_revisions import revision_ratio
 
                 rev = _fetch_revision_guarded(ticker)
-                read = revision_ratio([rev] if rev else [])
+                # P1 of docs/design_finnhub_yfinance_unused_surface.md: with
+                # `enable_analyst_estimates` on, the estimate-change leg is fed
+                # the vendor's estimate trend, so it is MEASURED rather than
+                # permanently `unavailable`. The series is a 90-day lag window
+                # over one quarter's consensus, NOT four quarters, so the leg is
+                # given `level_basis` and its basis line says which series it
+                # used. Gate off => `revision_ratio` alone, exactly as before.
+                if get_config().get("enable_analyst_estimates"):
+                    from tradingagents.dataflows.yfinance_sector import (
+                        ESTIMATE_LEVEL_BASIS,
+                        fetch_estimate_trend,
+                    )
+                    from tradingagents.strategies.analyst_revisions import revision_index
+
+                    levels = fetch_estimate_trend(ticker)
+                    read = revision_index(
+                        [rev] if rev else [],
+                        levels=levels,
+                        level_basis=ESTIMATE_LEVEL_BASIS,
+                    )
+                    row["rev_ec"] = read["legs"].get("estimate_change")
+                    row["rev_levels"] = read.get("level_basis")
+                else:
+                    read = revision_ratio([rev] if rev else [])
                 row["rev_index"] = read.get("index")
                 row["rev_index_basis"] = read.get("basis")
             if args.enrich_inst:
@@ -2168,6 +2279,12 @@ def main(argv: list[str] | None = None) -> int:
                 name_fill = fin.get("name") or fin.get("company_name") or fin.get("long_name")
             row["name"] = name_fill
             row["day_change"] = meta.get("day_change")
+            # Session reads from the batched snapshot (P1 of
+            # docs/design_moomoo_unused_api_surface.md). `None` when the gate is
+            # off or the snapshot did not cover this name -> `n/a`, never 0.
+            row["pre_chg"] = meta.get("pre_chg")
+            row["aft_chg"] = meta.get("aft_chg")
+            row["ovn_chg"] = meta.get("ovn_chg")
             # risk2.md liquidity columns (pure-calculable from OHLCV + float +
             # shares; n/a when the inputs are missing - never fabricated).
             try:

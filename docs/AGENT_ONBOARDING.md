@@ -434,6 +434,20 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **P0+P1 of both vendor-surface designs are built**, behind two new default-off gates. **`enable_moomoo_snapshot`**:
+  `moomoo.get_kl_quota_moomoo` / `kl_quota_remaining_moomoo` (the live K-line quota, read as a screener pre-flight that warns and refuses cleanly at
+  zero) and `moomoo.get_market_snapshot_moomoo` / `_batched_snapshot` (142 columns for a whole symbol list in one call; live 122 requested -> 120
+  returned, 2 dropped, 0 failed). **The all-or-nothing endpoint is survived by a bisect** - `_batched_snapshot` chunks, drops the symbol the refusal
+  NAMES, and retries; bounded, so an all-bad chunk terminates. **The design's per-symbol pre-validation is deliberately NOT built**: it is one
+  `get_stock_basicinfo` call per name, i.e. N calls to save N calls - the bisect finds the same symbols for one retry each and names every one.
+  `None` is not `0` for the quota (unreadable != exhausted). **`enable_analyst_estimates`**: `yfinance_sector.fetch_estimate_trend` supplies the
+  five levels `eps_trend` carries, so `analyst_revisions.estimate_change_index` - which documented itself as permanently `unavailable` because
+  "the engine has ... never a 3-4 quarter estimate history" and whose only `levels=` caller was a test - is now MEASURED. **The 90-day window is
+  NOT four quarters**: `estimate_change_index`/`revision_index` gained an optional `level_basis` so the basis line cannot claim MSCI's series;
+  the default is unchanged (byte-identical for existing callers) and a test asserts the index is independent of the label. New `RevEC` watchlist
+  column. **Also fixed on sight**: `cell(v, fmt)` uses `fmt.format(v)`, so the printf specs `"%+d"`/`"%+.1f"` on the watchlist row rendered as
+  LITERAL TEXT - and because that literal is non-empty the column survived the empty-column pruning, so an unmeasured column looked measured. Both
+  are now `{:+d}`/`{:+.1f}`. Tests: `test_moomoo_snapshot.py` (14), `test_analyst_estimates_wiring.py` (12), `test_value_screener.py` +2.
 - 2026-09-18 `(working tree)` - **The unused finnhub and yfinance surfaces are enumerated, and one finding closes a leg that could never fire.** New doc
   `docs/design_finnhub_yfinance_unused_surface.md`. `finnhub.Client` has 117 methods (repo calls 9); `yfinance.Ticker` has 54 properties + 44 methods (~23 attrs
   used). Live-probed: 61 finnhub calls, 32 yfinance calls. **Headline: `yfinance.Ticker.eps_trend` supplies the five-level estimate series

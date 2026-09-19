@@ -157,7 +157,18 @@ Not flippable by design — they are integrity checks, not policy:
   `data_quality` / `sources_*` / `invalidations` from the tool evidence
   (`test_book_context.py`, `test_research_decision_emission.py`).
 
-## 6. Adding a gate — the rule
+## 6. Data-surface gates — these add a source, never a decision
+
+Neither gate can change a rating, a size or a verdict. They decide whether a run
+*reads* a data surface at all, and each is off by default, so a gate-off run is
+byte-identical to the run before it existed.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_moomoo_snapshot` | `TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT` | reads the live historical-K-line quota before a screener run (warns, and refuses at zero) and enables the batched market-snapshot reader | `scripts/value_screener.py` (pre-flight), `tradingagents/dataflows/moomoo.py::get_market_snapshot_moomoo`, `tradingagents/dataflows/moomoo.py::get_kl_quota_moomoo` | `test_moomoo_snapshot.py` | wired |
+| `enable_analyst_estimates` | `TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES` | supplies the estimate-change leg (`RevEC`) from the vendor's 90-day estimate trend, so a leg that was permanently `unavailable` becomes measured | `scripts/value_screener.py` (`--revision-index`), `tradingagents/dataflows/yfinance_sector.py::fetch_estimate_trend` | `test_analyst_estimates_wiring.py` | wired |
+
+## 7. Adding a gate — the rule
 
 A new gate is not done until: (1) it has a key in `DEFAULT_CONFIG`, (2) an
 `_ENV_OVERRIDES` row so it is flippable from `.env`, (3) a row in this file with

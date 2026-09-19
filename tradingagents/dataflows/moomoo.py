@@ -42,6 +42,7 @@ import atexit
 import contextlib
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -2670,4 +2671,297 @@ def get_expected_move_moomoo(ticker: str, curr_date: str = None) -> str:
             lines.append(f"- Last close {spot:.2f}; band [{lo:.2f}, {hi:.2f}] (±{current_move:.1%})")
     except Exception:
         pass
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# P0/P1 of docs/design_moomoo_unused_api_surface.md: the live historical-K-line
+# quota read and the batched market snapshot. Both are gated by
+# `enable_moomoo_snapshot` (default off), so a gate-off run is byte-identical.
+# ---------------------------------------------------------------------------
+
+#: The historical-K-line window: 100 requests per 7 days.
+_KL_QUOTA_WINDOW = 100
+
+#: Symbols per `get_market_snapshot` call. The chunk exists so one bad symbol
+#: costs one chunk's retry rather than the whole scan.
+_SNAPSHOT_CHUNK = 100
+
+#: The columns worth rendering out of the snapshot's 142. The rest are warrant,
+#: futures and trust fields that no consumer in this repo reads.
+_SNAPSHOT_COLUMNS = (
+    ("last_price", "Last"),
+    ("pre_price", "Pre"),
+    ("pre_change_rate", "PreChg%"),
+    ("after_price", "Aft"),
+    ("after_change_rate", "AftChg%"),
+    ("overnight_price", "Ovn"),
+    ("overnight_change_rate", "OvnChg%"),
+    ("pe_ttm_ratio", "PE"),
+    ("pb_ratio", "PB"),
+    ("ey_ratio", "EY%"),
+    ("dividend_ratio_ttm", "Div%"),
+    ("total_market_val", "MktCap"),
+    ("turnover_rate", "Turn%"),
+    ("volume_ratio", "VolR"),
+    ("highest52weeks_price", "52wHi"),
+    ("lowest52weeks_price", "52wLo"),
+)
+
+#: `get_market_snapshot` names the first offender it refuses. Two shapes are
+#: measured live: "Unknown stock. SQ" and "US OTC market quote is not available
+#: for SSLZY." Both end in the bare ticker.
+_SNAPSHOT_OFFENDER_RE = re.compile(
+    r"(?:Unknown stock|not available for)\.?\s*([A-Za-z0-9][A-Za-z0-9._-]*)"
+)
+
+
+def _snapshot_offender(message: str, batch) -> str | None:
+    """The batch code the endpoint refused, or None when the message names none.
+
+    The endpoint reports a bare ticker (``SQ``) while the caller holds a moomoo
+    code (``US.SQ``), so a match is accepted on either form.
+    """
+    m = _SNAPSHOT_OFFENDER_RE.search(str(message or ""))
+    if not m:
+        return None
+    name = m.group(1).rstrip(".")
+    for code in batch:
+        if code == name or code.rsplit(".", 1)[-1] == name:
+            return code
+    return None
+
+
+def _snapshot_call(ctx, codes):
+    """One ``get_market_snapshot`` call. ``(records, None)`` or ``(None, message)``."""
+    try:
+        ret, df = _sdk_call(ctx.get_market_snapshot, list(codes))
+    except Exception as exc:  # noqa: BLE001 - the caller records the reason
+        return None, str(exc)
+    if ret != _RET_OK:
+        return None, str(df)
+    if df is None or getattr(df, "empty", True):
+        return None, "empty snapshot frame"
+    return df.to_dict("records"), None
+
+
+def _batched_snapshot(codes, *, chunk: int = _SNAPSHOT_CHUNK) -> dict:
+    """A market snapshot for many codes, surviving a bad symbol.
+
+    ``get_market_snapshot`` is ALL-OR-NOTHING: one unknown, renamed or OTC symbol
+    fails the whole call and the error names only the first offender (measured
+    live 2026-09-18: ``Unknown stock. SQ`` - Block renamed to XYZ - and ``US OTC
+    market quote is not available for SSLZY``). So this chunks the request and,
+    on that error, drops the named symbol and retries the chunk. The retry is
+    bounded by the chunk size, so a chunk of entirely bad symbols terminates.
+
+    **No per-symbol pre-validation.** The design doc's sketch pre-validated each
+    symbol through ``get_exchange_moomoo``, which is one ``get_stock_basicinfo``
+    call per name - that costs N calls to save N calls, destroying the point of
+    batching. The bisect discovers the same bad symbols for one retry each, and
+    every one is named in ``dropped`` rather than silently lost.
+
+    Returns ``{rows, requested, returned, dropped, failed, reason}``. A chunk
+    that still fails for a reason naming no symbol contributes no rows and is
+    recorded in ``failed`` with its reason - never a fabricated row.
+    """
+    ctx = _ensure_ctx()
+    step = max(1, int(chunk))
+    pending = list(dict.fromkeys(str(c) for c in (codes or []) if c))
+    rows: list = []
+    dropped: list[str] = []
+    failed: list[dict] = []
+
+    for start in range(0, len(pending), step):
+        batch = pending[start : start + step]
+        while batch:
+            records, message = _snapshot_call(ctx, batch)
+            if records is not None:
+                rows.extend(records)
+                break
+            offender = _snapshot_offender(message, batch)
+            if offender is None:
+                failed.append({"first": batch[0], "size": len(batch), "reason": message})
+                break
+            batch = [c for c in batch if c != offender]
+            dropped.append(offender)
+
+    return {
+        "rows": rows,
+        "requested": len(pending),
+        "returned": len(rows),
+        "dropped": dropped,
+        "failed": failed,
+        "reason": (failed[0]["reason"] if failed else None),
+    }
+
+
+def _fmt_snapshot_cell(key: str, value) -> str:
+    """Render one snapshot cell; an absent value is `n/a`, never a zero."""
+    v = _num_or_none(value)
+    if v is None:
+        return "n/a"
+    if key == "total_market_val":
+        return f"{v / 1e9:,.1f}B"
+    return f"{v:,.2f}"
+
+
+def get_market_snapshot_moomoo(symbols, *, as_text: bool = False):
+    """Batched live market snapshot for a symbol list (``get_market_snapshot``).
+
+    One call returns 142 columns per name - the valuation block, the
+    pre/after/overnight session families, short-interest fields, ETF
+    NAV/premium and option greeks. Verified live 2026-09-18 at 50 and 120
+    symbols in a single call each.
+
+    Returns the **structured** result (``{rows, requested, returned, dropped,
+    failed, reason}``) for a programmatic consumer, or the rendered text when
+    ``as_text=True`` for an LLM-facing surface. One entry point, because the two
+    consumers differ only in presentation and a second public function would be
+    a second producer for the same read.
+
+    These are LIVE SNAPSHOTS, not dated closes: the rendered form states the read
+    time and which session each price belongs to, because a snapshot taken after
+    the close is an after-hours read and quoting it as a close would be wrong.
+    Coverage travels with the number - the chunking outcome is returned in every
+    case, never a silent loss.
+
+    Gate off => nothing is read. The structured form returns ``disabled`` with
+    its reason and empty rows; the text form returns the sentinel string.
+    """
+    if not get_config().get("enable_moomoo_snapshot"):
+        if as_text:
+            return "moomoo snapshot disabled (enable_moomoo_snapshot)"
+        return {
+            "rows": [],
+            "requested": 0,
+            "returned": 0,
+            "dropped": [],
+            "failed": [],
+            "reason": None,
+            "disabled": "enable_moomoo_snapshot is off",
+        }
+
+    codes = [_moomoo_code(s) for s in (symbols or [])]
+    try:
+        res = _batched_snapshot(codes)
+    except MoomooNotConfiguredError as exc:
+        if as_text:
+            return f"moomoo snapshot unavailable: {exc}"
+        return {
+            "rows": [],
+            "requested": len(codes),
+            "returned": 0,
+            "dropped": [],
+            "failed": [],
+            "reason": str(exc),
+            "disabled": None,
+        }
+    if as_text:
+        return _render_market_snapshot(res)
+    return res
+
+
+def _render_market_snapshot(res: dict) -> str:
+    """Render a `get_market_snapshot_moomoo` result for an LLM-facing surface.
+
+    Prints the read time, the session each column belongs to, and the coverage
+    line (requested / returned / dropped / failed) - a partial read is stated,
+    never implied.
+    """
+    read_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        f"## Market Snapshot - {res['requested']} symbols (moomoo)",
+        "",
+        f"- **Live snapshot read at {read_at}** - not a dated close. `Pre` / `Aft` / "
+        "`Ovn` are the pre-market, after-hours and overnight sessions; the other "
+        "columns are the regular session.",
+        f"- Coverage: requested {res['requested']}, returned {res['returned']}, "
+        f"dropped {len(res['dropped'])}, failed chunks {len(res['failed'])}",
+    ]
+    if res["dropped"]:
+        lines.append(f"- Dropped by the endpoint: {', '.join(res['dropped'])}")
+    for f in res["failed"]:
+        lines.append(f"- Failed chunk from {f['first']} ({f['size']} symbols): {f['reason']}")
+    if not res["rows"]:
+        lines += ["", "No rows returned."]
+        return "\n".join(lines)
+
+    header = ["Symbol", "Name"] + [lbl for _k, lbl in _SNAPSHOT_COLUMNS]
+    lines += ["", "| " + " | ".join(header) + " |"]
+    lines.append("| " + " | ".join("---" for _ in header) + " |")
+    for r in res["rows"]:
+        cells = [str(r.get("code") or ""), str(r.get("name") or "")]
+        cells += [_fmt_snapshot_cell(k, r.get(k)) for k, _lbl in _SNAPSHOT_COLUMNS]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def kl_quota_remaining_moomoo() -> int | None:
+    """Remaining historical-K-line requests, or None when unreadable.
+
+    The numeric form of :func:`get_kl_quota_moomoo`, for a caller that needs to
+    decide (warn / refuse) rather than render. ``None`` means the quota could
+    not be read - which is NOT zero, and must not be treated as exhausted.
+    """
+    if not get_config().get("enable_moomoo_snapshot"):
+        return None
+    try:
+        ctx = _ensure_ctx()
+        ret, data = _sdk_call(ctx.get_history_kl_quota)
+    except Exception:  # noqa: BLE001 - advisory read, never fatal
+        return None
+    if ret != _RET_OK:
+        return None
+    try:
+        _used, remaining, _requests = data
+        return int(remaining)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_kl_quota_moomoo() -> str:
+    """Live historical-K-line quota: used / remaining, plus the recent requests.
+
+    ``get_history_kl_quota`` returns ``(used, remaining, [requests])``; the
+    window is 100 requests per 7 days, which this repo documents as the value
+    screener's bottleneck. The request log is populated only with
+    ``get_detail=True``, so the call asks for it.
+
+    Read-only and advisory: this exists so a caller can warn or refuse BEFORE a
+    scan exhausts the window, rather than discovering it mid-run.
+    """
+    if not get_config().get("enable_moomoo_snapshot"):
+        return "moomoo K-line quota disabled (enable_moomoo_snapshot)"
+
+    try:
+        ctx = _ensure_ctx()
+        ret, data = _sdk_call(ctx.get_history_kl_quota, get_detail=True)
+    except MoomooNotConfiguredError as exc:
+        return f"moomoo K-line quota unavailable: {exc}"
+    if ret != _RET_OK:
+        return f"moomoo K-line quota unavailable: {data}"
+    try:
+        used, remaining, requests = data
+        used, remaining = int(used), int(remaining)
+    except (TypeError, ValueError):
+        return f"moomoo K-line quota unavailable: unexpected shape {type(data).__name__}"
+
+    total = used + remaining
+    lines = ["## Historical K-line quota (moomoo)", ""]
+    if total:
+        lines.append(
+            f"- **Used {used} of {total} - {remaining} remaining "
+            f"({remaining / total:.0%})**; window is 7 days"
+        )
+    else:
+        lines.append(f"- Used {used}, remaining {remaining} (window size unknown)")
+    lines.append(
+        "- This is the value screener's documented bottleneck; read it before a "
+        "scan rather than discovering it mid-run."
+    )
+    if requests:
+        lines += ["", f"Recent requests ({len(requests)}):"]
+        for r in list(requests)[:10]:
+            lines.append(f"- {r.get('code')} ({r.get('name')}) at {r.get('request_time')}")
     return "\n".join(lines)

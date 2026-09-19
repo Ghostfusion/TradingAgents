@@ -301,6 +301,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_TRADE_SCORE": "enable_trade_score",
     "TRADINGAGENTS_ENABLE_EVENT_STATE": "enable_event_state",
     "TRADINGAGENTS_ENABLE_EVENT_CALENDARS": "enable_event_calendars",
+    "TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT": "enable_moomoo_snapshot",
+    "TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES": "enable_analyst_estimates",
     "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
@@ -1058,6 +1060,16 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_score_eval_rows": False,  # S8: score IC / decile / coverage / stability rows
         "enable_weighted_sentiment_window": False,  # S7: exponentially weighted rolling window
         "enable_evidence_symmetry": False,  # S11: paired-role symmetry report + mirrored budget
+        # `docs/design_moomoo_unused_api_surface.md` P0+P1: the live K-line quota
+        # read and the batched market snapshot (`get_market_snapshot`, 142 columns
+        # for a whole symbol list in one call). Off by default: with it off no
+        # quota read happens, no snapshot call is made, and a run is byte-identical.
+        "enable_moomoo_snapshot": False,
+        # `docs/design_finnhub_yfinance_unused_surface.md` P0+P1: the five-level
+        # EPS estimate series (`yfinance.Ticker.eps_trend`) that
+        # `strategies/analyst_revisions.estimate_change_index` documents itself as
+        # never having, plus the direct up/down revision counts. Off by default.
+        "enable_analyst_estimates": False,
         # WP-2 (docs/scores/IMPLEMENTATION_PLAN.md §5.1): the four FundamentalScore
         # category sub-scores + their RESEARCH_ONLY composite. Off by default;
         # with it off no engine tool is in any toolset and a run is byte-identical.

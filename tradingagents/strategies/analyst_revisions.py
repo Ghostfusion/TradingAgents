@@ -173,7 +173,7 @@ def revision_ratio(
     }
 
 
-def estimate_change_index(levels, weights=DEFAULT_ESTIMATE_WEIGHTS) -> dict:
+def estimate_change_index(levels, weights=DEFAULT_ESTIMATE_WEIGHTS, *, level_basis=None) -> dict:
     """Weighted quarterly estimate-level change (MSCI EC leg).
 
     ``levels`` is a most-recent-first quarterly estimate series. The MSCI form
@@ -183,7 +183,16 @@ def estimate_change_index(levels, weights=DEFAULT_ESTIMATE_WEIGHTS) -> dict:
     percentage change); all levels are used as given, never imputed. A level
     that is not a finite number, or a zero denominator at any lag, degrades the
     leg to ``unavailable`` with the reason rather than a value.
+
+    ``level_basis`` names WHAT the levels are, and defaults to ``"quarterly"``
+    (MSCI's own series). A caller whose levels are not quarterly MUST pass it:
+    the vendor estimate-trend series is a 90-day lag window over one quarter's
+    consensus, not four quarters, and the basis line would otherwise claim a
+    series the numbers do not come from. The arithmetic is unchanged - only the
+    label moves - because the same lagged-change form is meaningful on either
+    series and it is the caller's job to say which one it supplied.
     """
+    series = str(level_basis or "quarterly")
     ws = _weights(weights, DEFAULT_ESTIMATE_WEIGHTS)
     needed = len(ws) + 1
     raw = list(levels or [])
@@ -232,9 +241,10 @@ def estimate_change_index(levels, weights=DEFAULT_ESTIMATE_WEIGHTS) -> dict:
         "weights": ws,
         "n_levels": needed,
         "n_supplied": len(raw),
+        "level_basis": series,
         "basis": (
             f"estimate change index: weighted={weighted:.4f} on weights={list(ws)} "
-            f"over {len(ws)} quarterly change(s) from {needed} level(s) "
+            f"over {len(ws)} {series} change(s) from {needed} level(s) "
             "(symmetric-percent change per lag); levels used as given"
         ),
     }
@@ -282,6 +292,8 @@ def revision_index(
     weights=DEFAULT_REVISION_WEIGHTS,
     estimate_weights=DEFAULT_ESTIMATE_WEIGHTS,
     period: int = 21,
+    *,
+    level_basis=None,
 ) -> dict:
     """Assemble the MSCI analyst-sentiment index from its available legs.
 
@@ -294,6 +306,10 @@ def revision_index(
     z-scored. The basis prints the weights, the denominator convention, the
     coverage count, which legs are available, and the fact that the index
     informs and never gates.
+
+    ``level_basis`` names the series ``levels`` came from and is forwarded to
+    :func:`estimate_change_index`; a caller supplying a non-quarterly series
+    must pass it so the printed basis does not claim MSCI's.
     """
     rr = revision_ratio(history, weights=weights, period=period)
     if levels is None:
@@ -306,7 +322,7 @@ def revision_index(
             ),
         }
     else:
-        ec = estimate_change_index(levels, weights=estimate_weights)
+        ec = estimate_change_index(levels, weights=estimate_weights, level_basis=level_basis)
 
     legs = {"revision_ratio": rr.get("index"), "estimate_change": ec.get("index")}
     available = [name for name, value in legs.items() if value is not None]

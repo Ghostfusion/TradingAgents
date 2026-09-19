@@ -421,6 +421,37 @@ def test_help_renders(capsys):
     assert "--inst-accum" in out and "--scan" in out
 
 
+def test_a_number_cell_never_renders_its_format_string(capsys):
+    """`cell()` uses `str.format`, so a printf spec renders as literal text.
+
+    `%+d` / `%+.1f` passed to `cell()` produced the literal `%+d` in every row -
+    and because that literal is non-empty, the column then SURVIVED the
+    empty-column pruning, so a column with no data looked measured. A format
+    spec that `str.format` does not understand must never reach the table.
+    """
+    results = [{
+        "ticker": "MOG-A", "earnings_yield": 0.08, "ev_ebit": 12.0, "ev": 1e10,
+        "f_score": 6, "beneish_m": -2.0, "altman_z": 4.0,
+        "rev_net": 7, "inst_latest_pp": 1.25,
+    }]
+    md = vs._watchlist_markdown(results)
+
+    assert "%+d" not in md and "%+.1f" not in md
+    assert "| +7 |" in md          # the value, formatted
+    assert "| +1.2 |" in md or "| +1.3 |" in md  # rounded, never the spec
+
+
+def test_an_unmeasured_number_column_is_pruned_not_rendered_as_a_spec(capsys):
+    """The other half: with no value the column must vanish, not show `%+d`."""
+    results = [{
+        "ticker": "MOG-A", "earnings_yield": 0.08, "ev_ebit": 12.0, "ev": 1e10,
+        "f_score": 6, "beneish_m": -2.0, "altman_z": 4.0,
+    }]
+    md = vs._watchlist_markdown(results)
+    assert "%+" not in md
+    assert "RevUp" not in md       # all-None -> pruned
+
+
 def test_report_headers_renamed_and_legend_added(capsys):
     """ScanA/ScanB are renamed TrendPB/Breakout and every report gets a column legend."""
     # Build a minimal result with a scan flag so the scan columns appear.

@@ -77,6 +77,9 @@ REGISTRY: dict[str, str] = {
     "catalyst_hard_block_days": "wired",
     "market_stress_vol_cap": "wired",
     "value_dip_regime_vol_cap": "wired",
+    # data-surface gates (add a source, never a decision)
+    "enable_moomoo_snapshot": "wired",
+    "enable_analyst_estimates": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

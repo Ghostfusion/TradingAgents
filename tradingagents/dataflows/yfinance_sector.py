@@ -14,6 +14,7 @@ reports n/a rather than fabricating a number.
 
 from __future__ import annotations
 
+import math
 import threading
 
 
@@ -149,4 +150,134 @@ def fetch_revision_actions(ticker: str, days: int = 60, timeout: float = 12.0) -
     return result if "net" in result else None
 
 
-__all__ = ["fetch_sector", "fetch_revision_actions"]
+#: The vendor's estimate-trend level columns, most-recent-first. The window is a
+#: 90-day LAG over one quarter's consensus - NOT four quarters.
+_ESTIMATE_LEVEL_COLUMNS = ("current", "7daysAgo", "30daysAgo", "60daysAgo", "90daysAgo")
+
+#: The period row the levels are read from: the current quarter.
+_ESTIMATE_PERIOD = "0q"
+
+#: What the estimate-trend levels ARE, for `analyst_revisions.estimate_change_index`.
+#: Passed as `level_basis` so the printed basis cannot claim MSCI's quarterly
+#: series when the numbers came from a 90-day lag window.
+ESTIMATE_LEVEL_BASIS = "vendor 90-day estimate-trend"
+
+
+def fetch_estimate_trend(
+    ticker: str, period: str = _ESTIMATE_PERIOD, timeout: float = 8.0
+) -> list | None:
+    """Most-recent-first EPS estimate LEVELS, or None when unavailable.
+
+    ``yfinance.Ticker.eps_trend`` returns a frame whose columns are the level
+    observations (``current``, ``7daysAgo``, ``30daysAgo``, ``60daysAgo``,
+    ``90daysAgo``) and whose rows are periods (``0q``, ``+1q``, ``0y``, ``+1y``).
+    This returns the requested period's row as a five-element most-recent-first
+    list - the shape ``strategies/analyst_revisions.estimate_change_index``
+    requires (``len(weights) + 1`` levels; ``DEFAULT_ESTIMATE_WEIGHTS`` is
+    ``(9, 7, 5, 3)``, so five).
+
+    **The window is 90 days, not four quarters.** These are four lagged reads of
+    ONE quarter's consensus, so a caller feeding them MUST pass
+    ``level_basis=ESTIMATE_LEVEL_BASIS`` - otherwise the leg's basis line would
+    claim MSCI's quarterly series. The arithmetic is identical either way; the
+    label is what keeps it honest.
+
+    Levels are returned AS GIVEN. A missing or non-finite observation returns
+    ``None`` rather than a shorter series: a short series silently changes what
+    the index means, and ``estimate_change_index`` already refuses one with a
+    printed reason.
+    """
+    result: dict = {}
+
+    def _work() -> None:
+        try:
+            import yfinance as yf
+
+            df = yf.Ticker(ticker).eps_trend
+            if df is None or df.empty:
+                return
+            if period not in list(getattr(df, "index", [])):
+                return
+            if any(c not in df.columns for c in _ESTIMATE_LEVEL_COLUMNS):
+                return
+            row = df.loc[period]
+            levels: list[float] = []
+            for col in _ESTIMATE_LEVEL_COLUMNS:
+                try:
+                    v = float(row.get(col))
+                except (TypeError, ValueError):
+                    return
+                if not math.isfinite(v):
+                    return
+                levels.append(v)
+            result["levels"] = levels
+        except Exception:  # noqa: BLE001 - enrichment must never raise
+            pass
+
+    t = threading.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result.get("levels")
+
+
+def fetch_eps_revisions(
+    ticker: str, period: str = _ESTIMATE_PERIOD, timeout: float = 8.0
+) -> dict | None:
+    """The vendor's own analyst up/down revision COUNTS, or None.
+
+    ``yfinance.Ticker.eps_revisions`` carries ``upLast7days`` / ``upLast30days``
+    / ``downLast7Days`` / ``downLast30days`` per period row. Returns
+    ``{"up", "down", "net", "up_7d", "down_7d", "period"}`` or ``None``.
+
+    This is NOT the same object as :func:`fetch_revision_actions`, which grades
+    ``upgrades_downgrades`` *actions* by string-matching the grade. The two have
+    different denominators - a graded-action history versus the vendor's own
+    tally - so both are kept and the caller names which one it used.
+    """
+    result: dict = {}
+
+    def _work() -> None:
+        try:
+            import yfinance as yf
+
+            df = yf.Ticker(ticker).eps_revisions
+            if df is None or df.empty:
+                return
+            if period not in list(getattr(df, "index", [])):
+                return
+            row = df.loc[period]
+
+            def _i(col: str) -> int | None:
+                try:
+                    v = float(row.get(col))
+                except (TypeError, ValueError):
+                    return None
+                return int(v) if math.isfinite(v) else None
+
+            up, down = _i("upLast30days"), _i("downLast30days")
+            if up is None or down is None:
+                return
+            result.update(
+                up=up,
+                down=down,
+                net=up - down,
+                up_7d=_i("upLast7days"),
+                down_7d=_i("downLast7Days"),
+                period=period,
+            )
+        except Exception:  # noqa: BLE001 - enrichment must never raise
+            pass
+
+    t = threading.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result if "net" in result else None
+
+
+__all__ = [
+    "fetch_sector",
+    "fetch_revision_actions",
+    "fetch_estimate_trend",
+    "fetch_eps_revisions",
+    "ESTIMATE_LEVEL_BASIS",
+]
