@@ -249,7 +249,7 @@ def _sma(series: list, n: int) -> float | None:
 def regime_gate_read(
     closes: list,
     cfg: dict | None = None,
-    catalyst_window: bool = False,
+    catalyst_window: bool | None = None,
     index_closes: list | None = None,
 ) -> dict:
     """Deterministic tradability regime for MEAN-REVERSION entries (advisory).
@@ -264,13 +264,20 @@ def regime_gate_read(
     * ``fast_downtrend`` - price >= ``value_dip_regime_downtrend_band`` (default
       8%) below the 200-SMA while the 50-SMA is under the 200-SMA (falling
       knife guard).
-    * ``catalyst_window`` - caller-supplied (events/catalyst overlay).
+    * ``catalyst_window`` - the caller's **explicit event fact**, tri-state.
+      ``True``/``False`` are the caller's measured answer; ``None`` means the
+      caller supplied none, and the axis is then reported **unmeasured** rather
+      than assumed clear - the gate neither vetoes nor claims "no catalyst".
+      It is never coerced to ``False``, because that asserts a measurement
+      nobody made (D-11: the pre-graph context holds no event fact).
     * ``pass`` - False when high-vol (``value_dip_regime_vol_cap``, default
       0.8) OR fast_downtrend OR catalyst_window. ADVISORY: this function never
       blocks anything; hard-gating is opt-in at the caller via ``require_regime``
       so existing scans keep their behaviour.
     """
     cfg = cfg or {}
+    # D-11: the tri-state, computed once so both returns and the veto agree.
+    cat_flag: bool | None = None if catalyst_window is None else bool(catalyst_window)
     vol_cap = float(cfg.get("value_dip_regime_vol_cap", 0.8))
     band = float(cfg.get("value_dip_regime_downtrend_band", 0.08))
     if not closes or len(closes) < 60:
@@ -278,7 +285,7 @@ def regime_gate_read(
             "pass": None, "verdict": "unknown", "vol_pct": None,
             "fast_downtrend": None, "above_sma200": None, "sma50_rising": None,
             "index_vol_pct": None, "market_stress": None,
-            "catalyst_window": bool(catalyst_window), "reasons": ["insufficient history"],
+            "catalyst_window": cat_flag, "reasons": ["insufficient history"],
         }
     price = float(closes[-1])
     sma200 = _sma(closes, 200)
@@ -329,11 +336,11 @@ def regime_gate_read(
         hist = vols[:-1] or [recent]
         vol_pct = round(sum(1 for v in hist if v <= recent) / len(hist), 4)
     high_vol = bool(vol_pct is not None and vol_pct > vol_cap)
-    blocked = bool(high_vol or fast_downtrend or market_stress or catalyst_window)
+    blocked = bool(high_vol or fast_downtrend or market_stress or cat_flag)
     verdict = (
         "high-vol"
         if high_vol
-        else ("fast-downtrend" if fast_downtrend else ("catalyst-window" if catalyst_window else "tradable"))
+        else ("fast-downtrend" if fast_downtrend else ("catalyst-window" if cat_flag else "tradable"))
     )
     reasons = []
     if high_vol:
@@ -342,10 +349,18 @@ def regime_gate_read(
         reasons.append(f"price {band:.0%}+ below falling 200-SMA (knife guard)")
     if market_stress:
         reasons.append(f"market stress: index_vol_pct {index_vol_pct:.2f} > cap {market_vol_cap:.2f}")
-    if catalyst_window:
+    if cat_flag:
         reasons.append("catalyst window open")
     if not blocked:
-        reasons.append("volatility contained + no fast downtrend + no catalyst")
+        # D-11: "no catalyst" is a CLAIM, and it may only be made when the caller
+        # actually supplied the fact. With no fact the axis is named as
+        # unmeasured instead - this false trailer is what the model repeated back
+        # as measured ("...no catalyst", AMKR 2026-09-17).
+        reasons.append(
+            "volatility contained + no fast downtrend (catalyst window not measured)"
+            if cat_flag is None
+            else "volatility contained + no fast downtrend + no catalyst"
+        )
     return {
         "pass": not blocked,
         "verdict": verdict,
@@ -357,7 +372,7 @@ def regime_gate_read(
 
         "above_sma200": above_200,
         "sma50_rising": sma50_rising,
-        "catalyst_window": bool(catalyst_window),
+        "catalyst_window": cat_flag,
         "thresholds": {"vol_cap": vol_cap, "downtrend_band": band},
         "reasons": reasons,
     }

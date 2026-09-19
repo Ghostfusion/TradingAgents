@@ -99,12 +99,12 @@ _TAG_MAP = {
 #: carry the same facts and are matched on the form before the slash.
 _ANNUAL_FORMS = ("10-K", "20-F", "40-F")
 
-#: The concepts whose newest eligible fiscal end defines a filer's reference year
-#: (see ``annual_facts``). Core statement lines every annual filer tags, so the
-#: newest of them is the filer's latest reported fiscal year rather than one
-#: tag's own stray period end.
-_REFERENCE_TAGS = ("Assets", "RevenueFromContractWithCustomerExcludingAssessedTax",
-                   "Revenues", "NetIncomeLoss")
+# The reference-year rule - "the newest eligible fiscal end carried by the core
+# statement lines, so a tag with no value there is absent rather than substituted
+# from another year" - belongs to the CANONICAL ASSEMBLY, not here: it reads
+# assembled statement labels rather than raw tags. It lives at
+# ``scripts/score_panel.py::SEC_REFERENCE_LABELS``. A reference-tag tuple was
+# declared here once and read by nothing; do not re-add one.
 
 # Per-share values are reported in USD/shares (and occasionally USD/shares in a
 # separate unit key), not plain USD, so the row reader must accept the units the

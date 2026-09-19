@@ -734,8 +734,12 @@ def get_value_dip_setup(
                 _idx_closes = _ohlcv(_idx_sym).get("closes") or []
             except Exception:  # noqa: BLE001
                 _idx_closes = []
+        # D-11: this leaf measures no event fact, so the catalyst axis is left
+        # UNSupplied and the gate reports it unmeasured. It used to pass an
+        # explicit `False`, asserting a measurement nobody made. The veto is not
+        # reinstated here - event authority is `EventScore`'s.
         regime_row = regime_gate_read(
-            closes, cfg=None, catalyst_window=False,
+            closes, cfg=None,
             index_closes=_idx_closes or None,
         ) or None
     except Exception:  # noqa: BLE001 - advisory row degrades to None
@@ -828,10 +832,11 @@ def get_value_dip_setup(
         )
     rg = rows.get("regime_gate") or {}
     if rg.get("verdict"):
+        _cw = rg.get("catalyst_window")
         lines.append(
             f"  regime_gate: {rg.get('verdict')} pass={rg.get('pass')} "
             f"vol_pct={_txt_round(rg.get('vol_pct'), 3)} fast_downtrend={rg.get('fast_downtrend')} "
-            f"catalyst_window={rg.get('catalyst_window')}"
+            f"catalyst_window={'unavailable' if _cw is None else _cw}"
         )
     rr = rows.get("re_rating") or {}
     if rr.get("measured"):

@@ -147,3 +147,76 @@ def test_regime_market_stress_index_returns_fields():
     rg = regime_gate_read(calm, cfg={}, index_closes=calm)
     assert "index_vol_pct" in rg and "index_fast_downtrend" in rg
     assert "market_stress" in rg
+
+
+def test_regime_gate_reports_an_unsupplied_catalyst_axis_as_unmeasured():
+    """D-11: `catalyst_window` is tri-state, and `None` is not `False`.
+
+    `None` means the caller supplied no event fact, so the axis must be reported
+    **unmeasured** - never coerced to `False`, which asserts a measurement nobody
+    made. That coercion is what the compiled context did, and the model then
+    quoted `catalyst_window=False` back as fact (AMKR 2026-09-17).
+    """
+    from tradingagents.strategies.regime import regime_gate_read
+    calm = _trend_closes()
+
+    unsupplied = regime_gate_read(calm, cfg={})
+    assert unsupplied["catalyst_window"] is None
+    assert unsupplied["pass"] is True  # no fact -> no veto either
+    assert not any("no catalyst" in r for r in unsupplied["reasons"])
+    assert any("not measured" in r for r in unsupplied["reasons"])
+
+    # an explicit measured answer still reports itself, both ways
+    measured_clear = regime_gate_read(calm, cfg={}, catalyst_window=False)
+    assert measured_clear["catalyst_window"] is False
+    assert any("no catalyst" in r for r in measured_clear["reasons"])
+
+    measured_open = regime_gate_read(calm, cfg={}, catalyst_window=True)
+    assert measured_open["catalyst_window"] is True
+    assert measured_open["pass"] is False
+    assert measured_open["verdict"] == "catalyst-window"
+    assert any("catalyst window open" in r for r in measured_open["reasons"])
+
+
+def test_the_compiled_context_never_asserts_a_catalyst_measurement():
+    """D-11 regression, at the defect site.
+
+    `_compiled_decision_context` is compiled BEFORE `graph.invoke`, so it holds
+    no event fact. It used to derive one from `strategy_overlays.catalyst`, which
+    the overlay only stamps AFTER the graph (`trading_graph.py:686`) - so the read
+    was always `None` and the line asserted `catalyst_window=False`. The axis must
+    be named unmeasured, and the overlay artifact must not be consulted even when
+    the state happens to carry it.
+    """
+    import types
+
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    closes = _trend_closes(n=320)
+    stub = types.SimpleNamespace(
+        config={"data_cache_dir": "C:/nonexistent-cache"},
+        _try_fetch_closes=lambda ticker, days=320: closes,
+    )
+
+    def _gate_line(state):
+        ctx = TradingAgentsGraph._compiled_decision_context(stub, "AAPL", state)
+        return next(
+            ln for ln in ctx.splitlines() if ln.startswith("Computed regime gate")
+        )
+
+    # the production shape: the pre-graph state carries no overlay at all
+    production = _gate_line({})
+    assert "catalyst_window=unavailable_pre_graph" in production
+    assert "catalyst_window=False" not in production
+    assert "no catalyst" not in production
+
+    # a post-graph overlay snapshot must not be consumed even when present
+    with_overlay = _gate_line(
+        {
+            "strategy_overlays": {
+                "catalyst": {"verdict": "earnings-window", "scale": 0.5}
+            }
+        }
+    )
+    assert "catalyst_window=unavailable_pre_graph" in with_overlay
+    assert "catalyst_window=True" not in with_overlay

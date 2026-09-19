@@ -50,7 +50,7 @@ carry both meanings today.
 | `catalyst.implied_move_from_history:111` → `implied_move` | event sizing context | intended `contract.build_position_contract`'s `implied_move_pct` (`contract.py:118`, `:262-267`) — **never populated** (§3 D1) |
 | `events.position_mult_by_side:37` | the side label via `drift_side:26` | `get_beat_miss_sizing:2252`'s position multiplier |
 | `book_risk.book_correlated_stress:128` | — | macro-event correlated tail loss |
-| `regime.regime_gate_read:178`'s `catalyst_window` | an event-regime veto input | an entry veto — **never fed** (§3 D3) |
+| `regime.regime_gate_read:178`'s `catalyst_window` | an event-regime veto input | an entry veto — **deliberately not fed** (owner decision 2026-09-18; §3 D3, closed) |
 
 **The design rule**: `EventScore`'s components are the **occurrence** measures
 (imminence day-counts, window flags, the hard block); `RiskScore`'s event leg
@@ -70,7 +70,7 @@ through three places:
 2. `pre_market.catalyst_window_read:103` → `{hard_block: True, scale: 0.0}`;
    `review_decision:198` (branch `:240-245`) → REJECT — **unreachable from its
    own leaf** (§3 D2).
-3. `regime.regime_gate_read:261` — advisory, and inert (§3 D3).
+3. `regime.regime_gate_read:261` — advisory, and deliberately unfed (§3 D3, closed 2026-09-18).
 
 The executor's 17 fail-closed checks (`../TradingExecution/signald/contracts.py:42`)
 contain **no event check at all** — so the engine's `hard_block` is the
@@ -147,7 +147,7 @@ EventScore has no weight table in code; every producer is a multiplier, a day-co
 | `catalyst.implied_move_from_history` (`catalyst.py:111`) -> `implied_move` | event sizing context | intended `contract.build_position_contract` `implied_move_pct` (`contract.py:118`, `:262-267`) — **never populated** (see §3 D1) |
 | `events.position_mult_by_side` (`events.py:37`) | side label via `drift_side` | `get_beat_miss_sizing` (`analysis_tools.py:2252`) position multiplier |
 | `book_risk.book_correlated_stress` (`book_risk.py:128`) | — | macro-event correlated tail loss ("a macro event moves every position at once") |
-| `regime.regime_gate_read` `catalyst_window` (`regime.py:178`) | event-regime veto input | entry veto; **never fed** (see §3 D3) |
+| `regime.regime_gate_read` `catalyst_window` (`regime.py:178`) | event-regime veto input | entry veto; **deliberately not fed** (see §3 D3, closed 2026-09-18) |
 
 No single function currently separates occurrence from exposure: `scale` and `catalyst_risk_penalty` each carry both meanings.
 
@@ -170,7 +170,7 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 | `get_derivatives_flow` (`analysis_tools.py:3142`) | market `:240` | gamma + OPEX + IV combined | YES |
 | `get_premarket_review` (`analysis_tools.py:6561`) | market `:303` | CONFIRM/REVISE/REJECT from gap + re-anchor | PARTIAL — no catalyst_snapshot passed (§3 D2) |
 | `get_beat_miss_sizing` (`analysis_tools.py:2252`) | news `:372` | position multiplier by side | YES |
-| `get_regime_gate_read` (`analysis_tools.py:8467`) | market (via `market_tools()`), leaf arg `catalyst_window` default False | knife-guard verdict | PARTIAL — caller-supplied bool, no producer (`:8496`) |
+| `get_regime_gate_read` (`analysis_tools.py:10074`) | market (via `market_tools()`), leaf arg `catalyst_window` default `None` = measured from the ticker's catalyst snapshot | knife-guard verdict | YES — measures the snapshot when the caller supplies none |
 | `get_ipos` (`moomoo_extra_tools.py:178`) | news `:363` | pending IPOs | YES (universe/event input) |
 | `get_earnings_surprise_history` (`moomoo_extra_tools.py:246`) | fundamentals `:394` | historical surprises + implied moves | YES |
 | `get_earnings_surprise` (`analysis_tools.py:1474`) | fundamentals `:392` | computed surprise | YES |
@@ -186,7 +186,7 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 
 - **D1 — dead `implied_move_pct` key (exposure never scaled) — **FIXED 2026-09-17, `2c05701`**.** `graph/trading_graph.py:966` reads `(catalyst_snapshot or {}).get("implied_move_pct")`, but the producer emits `"implied_move"` (`strategies/catalyst.py:352`) and never `implied_move_pct`. So `contract.build_position_contract`'s `(1 - implied_move_pct)` de-risk (`strategies/contract.py:262-267`) is unreachable. Reader sees a report whose implied-move sizing is documented but never applied; only the `scale` fold moves size.
 - **D2 — premarket hard block unreachable from its leaf — **FIXED 2026-09-17, `2c05701`**.** `analysis_tools.py:6586-6593` calls `pre_market.review_decision(...)` without `catalyst_snapshot=`, while `strategies/pre_market.py:239` reads it to raise the earnings-window REJECT (and `:246` the REVISE). The leaf therefore can only REJECT/REVISE on gap and re-anchor caps, never on an open earnings window.
-- **D3 — `regime_gate_read.catalyst_window` always False — **NOT FIXED: the `2c05701` change did not take; re-confirmed dead by execution 2026-09-18 (master §3.5 D-11)**.** `strategies/regime.py:261` blocks when `catalyst_window` is set; callers pass `False` (`trading_graph.py:1267`; `value_dip_tools.py:738`) or a caller-defaulted param never fed from the snapshot (`value_dip.py:1005/1137`). No producer maps `build_catalyst_snapshot` imminence -> `True`. The RegimeScore "event regime" veto and the `catalyst-window` verdict are dead in the live graph. **Why the fix failed:** it fed the flag from `state["strategy_overlays"]["catalyst"]` inside `_compiled_decision_context`, but that function is called with `init_agent_state` *before* `graph.invoke` (`graph/trading_graph.py:645-647`) while the overlay is stamped *after* the graph (`:686`) — so the key is always absent and the derived flag is always `False`. `regime.py:252` still declares `catalyst_window: bool = False`, not the `bool | None = None` the onboarding entry describes. This is the same "producer exists, reader exists, wire never run" shape as the rest of the ledger.
+- **D3 — `regime_gate_read.catalyst_window` always False — **FIXED 2026-09-18 (owner decision; master §3.5 D-11, `ResearchLayerWiring.md` §6.6)**.** `strategies/regime.py:261` blocks when `catalyst_window` is set. The `2c05701` change fed it from `state["strategy_overlays"]["catalyst"]` inside `_compiled_decision_context`, but that function is called with `init_agent_state` *before* `graph.invoke` (`graph/trading_graph.py:645-647`) while the overlay is stamped *after* the graph (`:686`) — so the key was always absent and the derived flag always `False`. **Resolved as row 2 of §6.4, NOT by feeding the flag:** the axis is now **tri-state** (`catalyst_window: bool | None = None`) — `None` means the caller supplied no event fact and is reported **unmeasured** rather than coerced to `False`; the gate neither vetoes nor claims "no catalyst", and its trailer reads "volatility contained + no fast downtrend (catalyst window not measured)". `_compiled_decision_context` supplies **none** and prints `catalyst_window=unavailable_pre_graph`; `value_dip_tools.get_value_dip_setup`, which passed an explicit `False` it never measured, now supplies none too. The veto is **deliberately not fed** — event authority is `EventScore`'s — so this is now a *recorded decision* rather than a dead wire, and the axis can no longer read as a measured clear. Failing-first: both new tests in `tests/test_strategies_regime.py` reproduce the exact false string against the pre-fix code.
 - **D4 — `events.position_mult_by_side` catalyst arg inert.** `events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, but the only caller documents `catalyst` as `0..1` (`analysis_tools.py:2254` "catalyst scale 0..1") and `get_catalyst_scale` supplies <=1. `event_scale` is therefore always 1.0; the multiplier is only 1.0 (beat) / 0.5 (miss).
 - **D5 — `get_earnings_calendar` param named backward for a forward query.** The leaf arg is `look_back_days` "Days to look back" (`analyst_data_tools.py:33`), but the finnhub adapter queries `[curr_date, curr_date + look_back_days]` forward (`dataflows/finnhub.py:195-196`). A caller setting it small truncates the forward window.
 

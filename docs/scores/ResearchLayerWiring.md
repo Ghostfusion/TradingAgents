@@ -633,10 +633,19 @@ change is "compute the catalyst snapshot before the context is compiled and have
 the context read it" — and only under row 2 does that also mean re-feeding the
 regime veto.
 
+**[CORRECTED 2026-09-18 — the decision below arrived, and it declined the ordering
+change this paragraph anticipated. The paragraph is kept because it states what was
+on record, not because it governs. It is not a reversal of the owner: it is the
+doc's own prediction, corrected. See §6.6.]**
+
 **Until then D-11 stays open, and the printed `catalyst_window=False` stays as it
 is.** Changing that line in either direction is a shipped-context-string change,
 which §9 D3's rule forbids doing as a side effect of anything else; it waits for
 the decision rather than riding along.
+
+**[SUPERSEDED 2026-09-18 — the decision arrived and the line moved. The rule above
+is why it waited for that decision rather than riding along with the scorecard
+rollout; it moved *as* the decision, not as a side effect. See §6.6.]**
 
 ### 6.5 How the four findings are characterised (owner, 2026-09-18)
 
@@ -655,6 +664,76 @@ and none by reading the design. The three that are closed are closed because a t
 now holds them; the one that is open is open because its fix would move a boundary
 that was decided in prose, and that is the category where execution is not
 sufficient authority.
+
+**[UPDATED 2026-09-18 — D-11 is no longer open: the owner decided it the same day
+(§6.6), and the resolution went the other way from this paragraph's expectation. The
+boundary was NOT moved: the fix corrects the reporting and stops the pre-graph
+context reaching into a post-graph artifact, which is exactly what the owner
+required before any code changed. The characterisation above stands as given.]**
+
+### 6.6 The D-11 resolution — row 2, with the reporting fixed separately (owner, 2026-09-18)
+
+**Decided: row 2 — the gate consumes its own explicit event argument. The snapshot
+is NOT moved earlier, and the printed context is NOT the sole consumer.** In the
+owner's terms:
+
+> §6.4 candidate #2 — have the gate read its own argument. Do not move the snapshot
+> earlier, and do not make the printed context the sole consumer. The key
+> distinction is **decision semantics vs. observability**.
+
+**Why row 2, and why its stated consequence was too strong.** The table above says
+row 2 "reverses the 2026-09-17 decision". That is only true if the argument is
+*fed* from a pre-graph event producer, and the owner explicitly declined to build
+one: `_compiled_decision_context` runs **before** `graph.invoke()`, so it cannot
+legitimately consume `strategy_overlays` as though those overlays already existed.
+Moving the snapshot earlier would require moving the production of the
+event/catalyst information earlier too — a graph-ordering change that risks
+resurrecting the coupling behind the 2026-09-17 `RegimeScore → EventScore`
+reversal. Making the printed context the only consumer is worse: it turns an
+observability artifact into the source of truth. So the gate **keeps** its explicit
+argument, the pre-graph context supplies **none**, and no event read returns to
+`RegimeScore`.
+
+**The reporting defect is separate, and it is real.** `catalyst_window=False` is a
+**false assertion**, not an `NA` — 160 persisted runs carry `strategy_overlays`, 15
+hold a snapshot whose own reader says the window is active, and all 19 printed
+occurrences read `False`. The corrected contract:
+
+| surface | value |
+| --- | --- |
+| pre-graph compiled context | the value actually available pre-graph, or `unavailable_pre_graph` when there is none |
+| post-graph | `strategy_overlays.catalyst` — an output/observation, unchanged |
+
+**Recorded as the owner gave it:**
+
+> **D-11 is a stale/incorrect context assertion caused by lifecycle ordering. Fix
+> the consumer boundary, not the `RegimeScore → EventScore` architecture. The regime
+> gate must consume its explicit event input; `strategy_overlays` remains a
+> post-graph output/observation. Correct the pre/post context reporting separately
+> without reinstating the regime gate's event veto.**
+
+**Built 2026-09-18.**
+
+- `strategies/regime.py::regime_gate_read` — `catalyst_window` is **tri-state**,
+  `bool | None = None`. `None` means the caller supplied no event fact, so the axis
+  is reported **unmeasured**: the gate neither vetoes nor claims "no catalyst", and
+  the value is never coerced to `False`. The trailer becomes *"volatility contained
+  + no fast downtrend (catalyst window not measured)"*.
+- `graph/trading_graph.py::_compiled_decision_context` — stops reading
+  `strategy_overlays` altogether, supplies no event fact, and prints
+  `catalyst_window=unavailable_pre_graph`.
+- `agents/utils/value_dip_tools.py::get_value_dip_setup` — the same defect one layer
+  down: it passed an explicit `catalyst_window=False` it never measured. It now
+  supplies none and prints `catalyst_window=unavailable`.
+- **The veto is not reinstated anywhere**, and the axis is deliberately not measured
+  on the pre-graph path — that is what keeps the 2026-09-17 boundary intact.
+
+**Verified failing-first** (`tests/test_strategies_regime.py`). Against the pre-fix
+code the two new tests fail with the exact false string the corpus carried:
+`catalyst_window=False reasons=volatility contained + no fast downtrend + no
+catalyst`. The ground-truth parser is unaffected —
+`structured_debate._KEY_VALUE_RE` requires a **numeric** value, so
+`unavailable_pre_graph` registers no key, exactly as `False` did not.
 
 ---
 

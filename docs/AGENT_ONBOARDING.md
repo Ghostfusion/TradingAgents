@@ -434,12 +434,37 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **D-11 FIXED: the owner decided it the same day, and the resolution went the other way from the
+  sequence the design set had on record.** The owner chose **§6.4 row 2 - the gate reads its own explicit argument** - and was
+  explicit that this is **not** a licence to move the snapshot or to make the printed context the sole consumer: the distinction
+  is **decision semantics vs observability**. `_compiled_decision_context` runs *before* `graph.invoke`, so it cannot consume
+  `strategy_overlays` as though those overlays existed; moving the snapshot earlier would mean moving the production of the event
+  information earlier too (a graph-ordering change), and making the context the only consumer would turn an observability
+  artifact into the source of truth. **The reporting defect is separate and real** - `catalyst_window=False` was a false
+  assertion, not an NA. **Built:** `regime.regime_gate_read`'s axis is now **tri-state** (`bool | None = None`); `None` = the
+  caller supplied no event fact, reported **unmeasured**, never coerced to `False`, with the trailer now reading "volatility
+  contained + no fast downtrend (catalyst window not measured)". The context supplies none and prints
+  `catalyst_window=unavailable_pre_graph`; `value_dip_tools.get_value_dip_setup` - the same defect one layer down, passing an
+  explicit `False` it never measured - now supplies none too. **The veto is not reinstated anywhere**, so the 2026-09-17
+  `RegimeScore -> EventScore` boundary stands. **Failing-first:** against the pre-fix code both new tests
+  (`tests/test_strategies_regime.py`) reproduce the exact false string from the corpus -
+  `catalyst_window=False reasons=volatility contained + no fast downtrend + no catalyst`. The ground-truth parser is unaffected
+  (`structured_debate._KEY_VALUE_RE` requires a numeric value, so `unavailable_pre_graph` registers no key, as `False` did not).
+  Recorded in `ResearchLayerWiring.md` §6.4/§6.6, master §3.5 D-11, `EventScore.md` D3.
+- 2026-09-18 `(working tree)` - **Closed on sight in the same pass: a dead constant, a stale docstring, and the second caller
+  asserting the same false catalyst measurement.** (1) `sec_edgar._REFERENCE_TAGS` was declared with a docstring pointing at
+  `annual_facts` and read by **nothing** - the reference-year rule lives with the canonical assembly at
+  `scripts/score_panel.py::SEC_REFERENCE_LABELS`, which reads assembled labels rather than raw tags. Removed, with a note
+  recording where the rule actually lives and not to re-add a tuple. (2) `statement_parsing.annual_series`'s docstring described
+  only the vendor stacking path; it now names its SEC XBRL sibling `sec_annual_series`, the per-key longest-series merge rule
+  (never a splice), and why a non-USD filer skips the SEC leg. (3) `value_dip_tools.get_value_dip_setup` passed
+  `catalyst_window=False` explicitly - the D-11 defect one layer down; see the entry above.
 - 2026-09-18 `(working tree)` - **The four WP-12 findings resolved by category** (owner's framing: implementation defects vs
   parser-contract defects vs semantic-state defects vs test-assumption defects). **(1) D-11 stays OPEN as a contract decision
   with a fixed sequence** - establish where the authoritative catalyst-window value belongs, then whether it stays an
   `EventScore` input/output, and ONLY THEN change the ordering/compilation; the hard constraint is that no step may move the
   decided `RegimeScore -> EventScore` boundary by accident (a naive timing fix would quietly restore the regime veto). The
-  printed `catalyst_window=False` stays until then (`ResearchLayerWiring.md` §6.4). **(2) The three parser traps are frozen as
+  printed `catalyst_window=False` stays until then (`ResearchLayerWiring.md` §6.4). **[SUPERSEDED 2026-09-18 - the owner decided it the same day and the line moved *as* that decision, not as a side effect; see the D-11 FIXED entry above.]** **(2) The three parser traps are frozen as
   tests** in the new `tests/test_scorecard_contracts.py`, which pins the PARSER's real behaviour rather than our formatting: a
   non-numeric pair before a numeric one is swallowed; a leading `+` registers no key at all; an ISO date registers as its year.
   **(3) The three engine states are now NAMED** - `quant_scorecard.engine_state` returns `DISABLED` / `MEASURED` / `NA`, every
@@ -540,7 +565,7 @@ has changed before); never assume an endpoint works — the SDK's
   (`pre_market.catalyst_window_read`) says the window is **active** (`scale` 0.25/0.6); all **19** printed
   `catalyst_window=` occurrences read `False`; on NFLX 2026-09-15 the context printed `verdict=tradable pass=True
   reasons=['...no catalyst']` where the snapshot implies `verdict=catalyst-window pass=False reasons=['catalyst window open']`.
-  **Recorded, not unilaterally fixed:** reviving the veto re-introduces the event read into `RegimeScore`, which the owner's
+  **[SUPERSEDED 2026-09-18 - the owner decided it the same day; see the D-11 FIXED entry above.]** **Recorded, not unilaterally fixed:** reviving the veto re-introduces the event read into `RegimeScore`, which the owner's
   2026-09-17 decision moved to `EventScore`; removing the flag or printing `unavailable` both change a shipped context
   string (forbidden as a side effect by §9 D3). Corrected in the same pass: master ledger §3.2 framing + defect 16's row,
   `EventScore.md` D3, and the entry (16) below - which also claimed `regime.py` declares `catalyst_window: bool | None =

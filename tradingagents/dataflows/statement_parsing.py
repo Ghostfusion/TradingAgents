@@ -823,6 +823,14 @@ def annual_series(payloads) -> dict:
 
     Returns ``{key_series: {"values": [...], "years": [...], "periods": [...]}}``;
     empty when no payload carries two complete periods.
+
+    This is the **vendor** path. ``sec_annual_series`` is its SEC XBRL sibling -
+    the same shape, built from the filer's 10-K history, which reaches back
+    further than a vendor statement does (those carry ~4-5 annual periods). The
+    caller merges the two **per key by keeping whichever series is longer** and
+    never splices them, the same one-series-per-key rule this function applies
+    across payloads; the SEC leg is skipped for a non-USD filer, whose XBRL
+    facts are not on the canonical scale.
     """
     best: dict = {}
     for payload in payloads or ():

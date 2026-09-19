@@ -1320,25 +1320,26 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001
             pass
         try:
-            from tradingagents.strategies.pre_market import catalyst_window_read
             from tradingagents.strategies.regime import regime_gate_read
 
-            # The catalyst window is derived from the snapshot the overlay
-            # already carries (fold_catalyst_into_overlay stamps it under
-            # "catalyst"). It used to be hardcoded False, so the veto the gate
-            # advertises could never fire.
-            cat_snap = ((state or {}).get("strategy_overlays") or {}).get("catalyst")
-            try:
-                cat = catalyst_window_read(cat_snap, self.config)
-                cat_window = bool(cat.get("hard_block") or cat.get("tightened"))
-            except Exception:  # noqa: BLE001 - no snapshot -> no veto
-                cat_window = False
-            rg = regime_gate_read(closes, cfg=self.config, catalyst_window=cat_window) or {}
+            # D-11 (owner decision 2026-09-18, candidate #2 - the gate consumes
+            # its own explicit event input). This context is compiled BEFORE
+            # `graph.invoke`, so it holds no event fact and supplies NONE. It used
+            # to derive one from `state["strategy_overlays"]["catalyst"]`, which
+            # the overlay only stamps AFTER the graph (`:686`) - so that read was
+            # always None and the line asserted `catalyst_window=False`, a
+            # measurement nobody made, which the model then quoted back as fact
+            # (AMKR 2026-09-17: "...catalyst_window=False", reasons "...no
+            # catalyst"). Supplying no fact is also what keeps the regime gate's
+            # event veto off, so the 2026-09-17 RegimeScore -> EventScore boundary
+            # stands; the axis is named as unmeasured rather than assumed clear.
+            rg = regime_gate_read(closes, cfg=self.config) or {}
+            cat = rg.get("catalyst_window")
             out.append(
                 "Computed regime gate (mean-reversion entry): "
                 f"verdict={rg.get('verdict')} pass={rg.get('pass')} "
                 f"vol_pct={rg.get('vol_pct')} fast_downtrend={rg.get('fast_downtrend')} "
-                f"catalyst_window={rg.get('catalyst_window')} "
+                f"catalyst_window={'unavailable_pre_graph' if cat is None else cat} "
                 f"reasons={'; '.join(rg.get('reasons') or [])}"
             )
         except Exception:  # noqa: BLE001
