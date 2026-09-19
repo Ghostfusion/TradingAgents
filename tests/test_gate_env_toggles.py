@@ -80,6 +80,7 @@ REGISTRY: dict[str, str] = {
     # data-surface gates (add a source, never a decision)
     "enable_moomoo_snapshot": "wired",
     "enable_analyst_estimates": "wired",
+    "enable_eodhd_rates": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

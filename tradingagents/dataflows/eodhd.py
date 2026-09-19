@@ -443,3 +443,272 @@ def get_top_movers_symbols_eodhd(
         )
     rows.sort(key=lambda r: r["change_p"], reverse=(direction == "gainers"))
     return rows[:count]
+
+
+# ---------------------------------------------------------------------------
+# Treasury real yields (TIPS) — /ust/real-yield-rates
+#
+# Nothing else in the tree reads TIPS. Paired with the nominal par curve that
+# ``federal_reserve.treasury_curve_points`` already owns, this converts the
+# market's inflation expectation from a constant someone assumed into a number
+# someone read: ``strategies/dcf.py::wacc_from_beta:28`` is
+# ``wacc_from_beta(rf, beta, erp: float = 0.05)`` and its own docstring calls
+# 0.05 "the assumed equity risk premium". This endpoint is the missing half.
+#
+# The vendor IGNORES every query parameter on this path. Probed live
+# 2026-09-19: ``year=2026``, ``filter[date]``, ``filter[tenor]`` and
+# ``from``/``to`` each returned the identical 895-row body. So the read is
+# whole-history and the filtering is CLIENT-SIDE — which is also why no ``year``
+# argument is offered: it would silently do nothing.
+# ---------------------------------------------------------------------------
+
+_REAL_YIELD_PATH = "ust/real-yield-rates"
+
+# The tenors the vendor actually publishes. TIPS start at 5Y — there is no
+# bill-end real yield, and a caller asking for "3M" must be told that rather
+# than handed an interpolated number.
+REAL_YIELD_TENORS = ("5Y", "7Y", "10Y", "20Y", "30Y")
+
+
+def _tenor_norm(label: str | None) -> str:
+    """Normalise a maturity label to the vendor's tenor form.
+
+    ``"10 Yr"`` (Treasury CSV) and ``"10y"`` (caller input) both become
+    ``"10Y"``, so the two legs of the inflation pairing can be joined on one
+    key without a hardcoded label table.
+    """
+    if not label:
+        return ""
+    return str(label).strip().upper().replace(" YR", "Y").replace(" ", "")
+
+
+def real_yield_points_eodhd(tenor: str | None = None) -> list[dict]:
+    """TIPS real yields from ``/ust/real-yield-rates`` as structured points.
+
+    The single read behind both presentations: ``get_real_yield_rates_eodhd``
+    renders these rows for an LLM surface, and ``inflation_expectation_eodhd``
+    subtracts against the nominal curve. Returns ``[{date, tenor, rate}]``,
+    **oldest-first**, optionally filtered to one ``tenor``.
+
+    The vendor returns the whole history in one call and ignores every filter
+    parameter (verified live), so the tenor filter is applied here. A tenor the
+    vendor does not publish raises ``NoMarketDataError`` naming it — a missing
+    tenor is never interpolated (master rule 1).
+
+    ``rate`` is a **percent** (``2.61`` = 2.61%), matching the vendor's own
+    field, and is always a float: a row whose rate will not parse is dropped
+    rather than carried as ``0.0``.
+    """
+    data = _eodhd_get(_REAL_YIELD_PATH, {"fmt": "json"})
+    rows = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError("real-yield-rates", "real-yield-rates",
+                                detail="no real-yield rows")
+
+    want = _tenor_norm(tenor)
+    points: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_tenor = _tenor_norm(row.get("tenor"))
+        if want and row_tenor != want:
+            continue
+        try:
+            rate = float(row.get("rate"))
+        except (TypeError, ValueError):
+            continue
+        points.append({"date": row.get("date"), "tenor": row_tenor, "rate": rate})
+
+    if not points:
+        if want:
+            raise NoMarketDataError(
+                "real-yield-rates", "real-yield-rates",
+                detail=f"no rows for tenor '{want}' (published tenors: "
+                       f"{', '.join(REAL_YIELD_TENORS)})",
+            )
+        raise NoMarketDataError("real-yield-rates", "real-yield-rates",
+                                detail="no parseable real-yield rows")
+
+    points.sort(key=lambda r: (r.get("date") or "", r.get("tenor") or ""))
+    return points
+
+
+def get_real_yield_rates_eodhd(tenor: str | None = None, *, tail: int | None = None) -> str:
+    """Rendered TIPS real-yield curve (EODHD ``/ust/real-yield-rates``).
+
+    The string presentation of ``real_yield_points_eodhd``. Prints the read
+    date and the tenor with every row, because **a rate without either is not a
+    rate**, plus the coverage it actually achieved.
+
+    ``tail`` bounds the rows rendered without hiding the coverage: the header
+    still states the full row count and date span, and a note names how many
+    were withheld. A year of daily rows is 179 lines, which is right for a file
+    and wrong for a report head — this is the parameter that separates the two
+    without giving the caller a second producer.
+    """
+    points = real_yield_points_eodhd(tenor)
+
+    dates = sorted({p["date"] for p in points if p.get("date")})
+    tenors = sorted({p["tenor"] for p in points})
+    want = _tenor_norm(tenor)
+
+    lines = [
+        "## US Treasury real yields (TIPS) — EODHD /ust/real-yield-rates",
+        f"Tenor(s): {', '.join(tenors)} | Rows: {len(points)} | "
+        f"Coverage: {dates[0]} to {dates[-1]}" if dates else f"Rows: {len(points)}",
+        "",
+    ]
+    shown = points
+    withheld = 0
+    if tail is not None and tail > 0 and len(points) > tail:
+        shown = points[-tail:]
+        withheld = len(points) - tail
+
+    if want:
+        # One tenor: the (possibly bounded) series reads as a table.
+        lines += ["| Date | Real yield % |", "| --- | --- |"]
+        for p in shown:
+            lines.append(f"| {p['date']} | {p['rate']} |")
+        if withheld:
+            lines.append("")
+            lines.append(
+                f"_(showing the most recent {tail} of {len(points)} rows; "
+                f"{withheld} withheld — the header's coverage is the full read)_"
+            )
+    else:
+        # Every tenor: the most recent date reads as a curve, and the rest is a
+        # tail so the block stays bounded.
+        latest = dates[-1] if dates else None
+        lines.append(f"| Tenor | Real yield % | (as of {latest}) |")
+        lines.append("| --- | --- | --- |")
+        for p in points:
+            if p["date"] == latest:
+                lines.append(f"| {p['tenor']} | {p['rate']} | |")
+        lines.append("")
+        lines.append(f"_(most recent date shown; {len(dates)} dates in the returned series)_")
+
+    lines.append("")
+    lines.append(
+        "Interpretation: a TIPS real yield is the risk-free return net of "
+        "expected inflation. It is not comparable to a nominal par yield "
+        "without stating which is which — the two differ by the market's "
+        "inflation compensation."
+    )
+    return "\n".join(lines)
+
+
+def inflation_expectation_eodhd(
+    tenor: str = "10Y",
+    current_date: str | None = None,
+    *,
+    real_points: list[dict] | None = None,
+    nominal_curve: dict | None = None,
+) -> dict:
+    """The market's inflation expectation: nominal par yield − TIPS real yield.
+
+    **The single producer of this difference.** Both legs are reads the tree
+    already owns — the nominal curve from
+    ``federal_reserve.treasury_curve_points`` and the real curve from
+    ``real_yield_points_eodhd`` — and the subtraction happens here and nowhere
+    else (master rule 15: no derived quantity with two authoritative
+    producers). A consumer that needs the premium calls this; it does not
+    re-subtract the two series itself.
+
+    ``real_points`` / ``nominal_curve`` accept legs the caller has **already
+    fetched**. Both legs are whole-surface reads — one call returns every tenor
+    — so a caller pairing five tenors would otherwise re-read the same two
+    series five times. Passing them in changes nothing about where the
+    subtraction happens; it only stops the caller paying for the same read
+    repeatedly.
+
+    Returns a dict that always carries **both legs' dates and the basis**, so a
+    reader can tell whether the two were measured on the same day::
+
+        {"tenor", "nominal", "nominal_date", "real", "real_date",
+         "expectation", "aligned", "gap_days", "basis", "unavailable"}
+
+    ``aligned`` is False when the legs are from different dates, and
+    ``gap_days`` says by how much — the difference is still computed, but it is
+    **never returned silently**: a nominal/real subtraction across a stale leg
+    is a different number from one across an aligned pair, and the caller has
+    to be able to see which it got.
+
+    ``unavailable`` is the reason string when a leg is missing; in that case
+    the numeric fields are ``None``. A missing leg is never ``0.0``.
+    """
+    want = _tenor_norm(tenor)
+    basis = (
+        f"nominal {want} par yield (home.treasury.gov) - TIPS {want} real "
+        f"yield (EODHD {_REAL_YIELD_PATH})"
+    )
+    result: dict = {
+        "tenor": want,
+        "nominal": None,
+        "nominal_date": None,
+        "real": None,
+        "real_date": None,
+        "expectation": None,
+        "aligned": None,
+        "gap_days": None,
+        "basis": basis,
+        "unavailable": None,
+    }
+
+    # --- the real leg -----------------------------------------------------
+    try:
+        if real_points is None:
+            real_points = real_yield_points_eodhd(want)
+        else:
+            real_points = [
+                p for p in real_points if _tenor_norm(p.get("tenor")) == want
+            ]
+        if not real_points:
+            raise NoMarketDataError(
+                "real-yield-rates", "real-yield-rates",
+                detail=f"no supplied rows for tenor '{want}'",
+            )
+    except Exception as exc:  # noqa: BLE001 - a missing leg is a named gap
+        result["unavailable"] = f"real leg unavailable: {exc}"
+        return result
+    latest_real = real_points[-1]
+    result["real"] = latest_real["rate"]
+    result["real_date"] = latest_real.get("date")
+
+    # --- the nominal leg --------------------------------------------------
+    try:
+        if nominal_curve is None:
+            from .federal_reserve import treasury_curve_points
+
+            nominal_curve = treasury_curve_points(current_date)
+    except Exception as exc:  # noqa: BLE001 - a missing leg is a named gap
+        result["unavailable"] = f"nominal leg unavailable: {exc}"
+        return result
+    result["nominal_date"] = nominal_curve.get("date")
+
+    nominal = None
+    for label, value in (nominal_curve.get("points") or {}).items():
+        if _tenor_norm(label) == want:
+            nominal = value
+            break
+    if nominal is None:
+        result["unavailable"] = (
+            f"nominal leg has no {want} maturity "
+            f"(published: {', '.join(sorted(nominal_curve.get('points') or {}))})"
+        )
+        return result
+    result["nominal"] = nominal
+
+    # --- the one subtraction ---------------------------------------------
+    result["expectation"] = round(nominal - latest_real["rate"], 4)
+
+    nd, rd = result["nominal_date"], result["real_date"]
+    if nd and rd:
+        try:
+            from datetime import date as _date
+
+            gap = abs((_date.fromisoformat(nd) - _date.fromisoformat(rd)).days)
+        except ValueError:
+            gap = None
+        result["gap_days"] = gap
+        result["aligned"] = gap == 0
+    return result

@@ -643,6 +643,27 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **EODHD P0 built: TIPS real yields + the single producer of the inflation
+  expectation.** Gate `enable_eodhd_rates`, default off. `dataflows/eodhd.real_yield_points_eodhd` /
+  `::get_real_yield_rates_eodhd` (895 rows / 179 dates, tenors 5Y-30Y) and `::inflation_expectation_eodhd`
+  (the ONE producer of `nominal - real`, carrying both legs' dates, the gap and the basis). **Nothing read a
+  real yield before this**, while `dcf.wacc_from_beta:28` already consumed a nominal 10y and *assumed*
+  `erp = 0.05`; measured live at 2026-09-17: 5Y 2.32 / 7Y 2.34 / 10Y 2.33 / 20Y 2.45 / 30Y 2.25.
+  **Three corrections the build forced, each measured:** (1) **`year` is not a parameter this endpoint has** -
+  the vendor ignores *every* query param (`year`, `filter[date]`, `filter[tenor]`, `from`/`to` all returned the
+  identical 895-row body), so the design's `(tenor=None, year=None)` sketch would have shipped a parameter that
+  **silently did nothing**; dropped, filtering is client-side. (2) The pairing needed a **structured** nominal
+  leg, so `federal_reserve.treasury_curve_points` now performs the parse and `get_treasury_curve` renders **from
+  it** - one producer, two presentations, byte-identical output (a second parser would have been a second
+  producer for the same read). (3) **The first consumer was wrong twice and only running it showed that** - the
+  screener called the pairing six times, each re-reading both whole-surface legs (twelve reads where two
+  suffice, 158 s), and printed the whole 179-row series into the report head. Fixed via pre-fetched legs
+  (`real_points=` / `nominal_curve=`, so the subtraction still happens in exactly one place) and
+  `tail=N` on the renderer (60 s, 10 rows). **The legs are date-matched in production only because the
+  screener passes `--date`**; with no date, nominal reads 2026-09-18 against real 2026-09-17 and `aligned=False`
+  says so. **`dcf.wacc_from_beta` still carries `erp = 0.05`** - P0 makes the premium measurable; promoting it
+  into the valuation is a decision contract, not a defect. 20 tests; **seven behaviour mutations each turn their
+  test red**, then byte-identical restore.
 - 2026-09-19 `(working tree)` - **The unused EODHD surface is enumerated, and the supplied 68-endpoint catalog was
   corrected against the live key.** `docs/design_eodhd_unused_surface.md` (new; docs index updated). **Two premise
   corrections first: EODHD is NOT a removed vendor** - the repo calls 8 of its paths today, all returning 200 (the

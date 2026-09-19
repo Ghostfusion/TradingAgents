@@ -237,13 +237,80 @@ A second public function returning the same rows would be a second producer, and
 
 | Phase | Work | Gate |
 |---|---|---|
-| **P0** | `real_yield_points_eodhd` + `get_real_yield_rates_eodhd`; the nominal/real pairing as a single derived read | `enable_eodhd_rates` |
+| **P0** | `real_yield_points_eodhd` + `get_real_yield_rates_eodhd`; the nominal/real pairing as a single derived read — **BUILT 2026-09-19** (see below) | `enable_eodhd_rates` |
 | **P1** | `get_bill_auction_rates_eodhd` | same |
 | **P2** | `map_identifiers_eodhd`, FIGI/LEI/CUSIP only; CIK as a named fallback behind `sec_edgar._cik_for` | same |
 | **P3** | `/eod-bulk-last-day` as a **batched transport** for the existing price producer — only if the per-symbol path ever becomes the bottleneck | same |
 
 Each phase needs: the gate row in all four places, a failing-first test **by mutation**, and a
 `CHANGELOG.md` entry with a `**Web impact**:` line.
+
+---
+
+## P0 — build record (2026-09-19)
+
+Built as designed, with **three corrections the build forced**, each measured rather than
+assumed.
+
+**1. `year` is not a parameter this endpoint has.** The design's signature sketch was
+`real_yield_points_eodhd(tenor=None, year=None)`. Probed live, the vendor **ignores every query
+parameter** on this path — `year=2026`, `filter[date]`, `filter[tenor]` and `from`/`to` each
+returned the identical 895-row body. The read is whole-history and the filtering is
+client-side, so a `year` argument would have been a parameter that **silently did nothing** —
+the exact class of defect this repo treats as worse than a named gap. The parameter was
+dropped, and the reason is recorded in the module.
+
+**2. The nominal leg needed a structured form, and getting one without a second producer meant
+refactoring the existing reader.** `federal_reserve.get_treasury_curve` rendered markdown
+straight from the CSV, so the pairing had no structured nominal to subtract against.
+`federal_reserve.treasury_curve_points(current_date)` now performs the parse and returns
+`{as_of, date, points, rows}`; `get_treasury_curve` renders **from it**. One producer, two
+presentations — the `moomoo.get_market_snapshot_moomoo` shape. The rendered output is
+byte-identical (the existing `tests/test_federal_reserve.py` assertions pass unchanged).
+
+**3. The first consumer was wrong twice, and only running it showed that.** The `--rates` block
+initially called `inflation_expectation_eodhd` once per tenor — six times — and each call
+re-read *both* whole-surface legs: twelve network reads where two suffice, and a 158-second
+screener run. It also printed the **entire 179-row** 10Y series into the report head. Both are
+fixed: the pairing accepts pre-fetched legs (`real_points=` / `nominal_curve=`) so the
+subtraction still happens in exactly one place while the caller pays for each read once, and
+`get_real_yield_rates_eodhd(tenor, tail=N)` bounds the rows rendered while the header still
+states the full coverage and the withheld count. Re-run: **60 s, 10 rendered rows**.
+
+**The legs are date-matched in production, and that is worth stating.** Called with no date,
+the pairing reads nominal `2026-09-18` against real `2026-09-17` — `aligned=False`, `gap_days=1`,
+because Treasury publishes same-day and EODHD's TIPS series lags a day. The screener passes its
+own `--date`, which aligns them. Both cases are labelled: a nominal/real difference across a
+stale leg is a different number from one across an aligned pair, and the reader can see which
+they got.
+
+**Measured live (2026-09-19), 10Y, aligned at 2026-09-17:**
+
+| Tenor | Nominal % | Real % | Expectation (nominal − real) % |
+|---|---|---|---|
+| 5Y | 4.78 | 2.46 | 2.32 |
+| 7Y | 4.86 | 2.52 | 2.34 |
+| 10Y | 4.94 | 2.61 | 2.33 |
+| 20Y | 5.32 | 2.87 | 2.45 |
+| 30Y | 5.29 | 3.04 | 2.25 |
+
+**Open question 1 is answered: the expectation is computed, with its basis printed.** The repo's
+precedent (`analyst_revisions.level_basis`) favours measuring with an honest label over leaving a
+leg dead, and the pairing carries both legs' dates and the basis string on every call. The
+subtraction exists in exactly one place (`inflation_expectation_eodhd`), which is what constraint
+6 required.
+
+**What P0 deliberately did NOT do.** `dcf.wacc_from_beta` still carries `erp: float = 0.05`.
+Changing that default would silently rewrite every DCF the tree produces — a decision contract,
+not a defect. P0 makes the premium **measurable**; promoting the measurement into the valuation
+is a separate decision for the owner.
+
+**Verification.** `tests/test_eodhd_rates.py`, 20 tests. Seven behaviour mutations each turn
+their test red (aligned-flag forced true; unparseable rate carried as `0.0`; unpublished tenor
+returning every row; a dead leg becoming `0.0`; the lookahead guard removed; the tail bound
+ignored; supplied legs ignored) — then byte-identical restore. Gate off: the block prints
+`unavailable` with its reason and makes **no** call. Live: 895 rows, 179 dates, tenors
+5Y/7Y/10Y/20Y/30Y; `3M` raises naming the published set.
 
 ---
 
@@ -254,6 +321,10 @@ Each phase needs: the gate row in all four places, a failing-first test **by mut
    exposing the legs keeps the arithmetic in the consumer. The repo's precedent (the
    `level_basis` decision in `analyst_revisions`) favours measuring with an honest label over
    leaving a leg dead — but that is a call about a *new* number, not a dead one.
+   **ANSWERED 2026-09-19 by the P0 build: computed, with the basis printed.** The subtraction
+   lives in exactly one function (`inflation_expectation_eodhd`) and every result carries both
+   legs' dates, the gap between them and the basis string, so "computed" did not become "computed
+   silently".
 2. **Is the EOD plan expected to change?** Twenty endpoints are one upgrade away
    (`fundamentals`, `screener`, `calendar/*`, `technical`). If an upgrade is planned, the
    plan's phase order should be revisited before P1 is built — several 403 endpoints would

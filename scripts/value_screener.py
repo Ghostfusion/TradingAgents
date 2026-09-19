@@ -1391,6 +1391,16 @@ def main(argv: list[str] | None = None) -> int:
         "Advisory: it never gates a row.",
     )
     parser.add_argument(
+        "--rates",
+        action="store_true",
+        help="print the US real-yield (TIPS) curve and the measured inflation "
+        "expectation (nominal par yield - TIPS real yield) at the head of the "
+        "report. Requires enable_eodhd_rates; with the gate off the block "
+        "prints unavailable and its reason. Advisory: it never gates a row and "
+        "never changes a valuation - dcf.wacc_from_beta keeps its own assumed "
+        "premium.",
+    )
+    parser.add_argument(
         "--growth-scores",
         action="store_true",
         help="add the G/C columns: Mohanram G-Score and Montier C-Score, "
@@ -2540,6 +2550,90 @@ def main(argv: list[str] | None = None) -> int:
         if sector_table:
             markdown = markdown.rstrip() + "\n\n" + sector_table
             print(sector_table)
+    # Real-yield / inflation-expectation block (--rates). Advisory only: it
+    # prints a rate read and never touches a valuation. dcf.wacc_from_beta keeps
+    # its own assumed premium - the point of printing this is that the reader can
+    # now see the measured counterpart of that assumption rather than only the
+    # constant. Gate: enable_eodhd_rates (docs/gate_registry.md §6).
+    if args.rates:
+        rate_lines: list[str] = ["\n## US real yields and the inflation expectation"]
+        try:
+            from tradingagents.dataflows.config import get_config as _gc_rates
+
+            _rates_on = bool(_gc_rates().get("enable_eodhd_rates"))
+        except Exception:  # noqa: BLE001 - config absence degrades to off
+            _rates_on = False
+        if not _rates_on:
+            rate_lines += [
+                "",
+                "unavailable - `enable_eodhd_rates` is off, so no rate read was "
+                "made. Set it (or `TRADINGAGENTS_ENABLE_EODHD_RATES=true`) to "
+                "measure this block.",
+            ]
+        else:
+            try:
+                from tradingagents.dataflows.eodhd import (
+                    get_real_yield_rates_eodhd,
+                    inflation_expectation_eodhd,
+                    real_yield_points_eodhd,
+                )
+                from tradingagents.dataflows.federal_reserve import treasury_curve_points
+
+                # Both legs are WHOLE-SURFACE reads: one call returns every
+                # tenor / every maturity. Fetch each once and hand them to the
+                # pairing, so five tenors cost two reads rather than ten. The
+                # subtraction still happens only in inflation_expectation_eodhd.
+                _real_leg = real_yield_points_eodhd()
+                _nominal_leg = treasury_curve_points(args.date)
+
+                # Bounded for a report head: the header states the full
+                # coverage, the table shows the recent tail.
+                rate_lines += ["", get_real_yield_rates_eodhd("10Y", tail=10)]
+                rate_lines += [
+                    "",
+                    "| Tenor | Nominal % | Real % | Expectation (nominal - real) % |",
+                    "| --- | --- | --- | --- |",
+                ]
+                for _tenor in ("5Y", "7Y", "10Y", "20Y", "30Y"):
+                    _pair = inflation_expectation_eodhd(
+                        _tenor,
+                        real_points=_real_leg,
+                        nominal_curve=_nominal_leg,
+                    )
+                    if _pair.get("unavailable"):
+                        rate_lines.append(f"| {_tenor} | - | - | unavailable |")
+                        continue
+                    rate_lines.append(
+                        f"| {_tenor} | {_pair['nominal']} | {_pair['real']} | "
+                        f"{_pair['expectation']} |"
+                    )
+                _p10 = inflation_expectation_eodhd(
+                    "10Y", real_points=_real_leg, nominal_curve=_nominal_leg
+                )
+                if _p10.get("unavailable"):
+                    rate_lines += ["", f"10Y unavailable: {_p10['unavailable']}"]
+                else:
+                    rate_lines += [
+                        "",
+                        f"Basis: {_p10['basis']}. Nominal leg {_p10['nominal_date']}, "
+                        f"real leg {_p10['real_date']}"
+                        + (
+                            f" - **not the same date** ({_p10['gap_days']} day gap), so "
+                            "this difference mixes a fresher nominal with a staler real."
+                            if _p10["aligned"] is False
+                            else " (aligned)."
+                        ),
+                        "",
+                        "Note: this is the market's inflation compensation, not the "
+                        "equity risk premium `dcf.wacc_from_beta` assumes "
+                        "(`erp=0.05`). It measures the *rate* half of the input; the "
+                        "premium itself is unchanged.",
+                    ]
+            except Exception as exc:  # noqa: BLE001 - a failed read is reported, not raised
+                rate_lines += ["", f"unavailable - rate read failed: {exc}"]
+        rates_block = "\n".join(rate_lines)
+        markdown = markdown.rstrip() + "\n\n" + rates_block + "\n"
+        print(rates_block)
     # Value-dip loose gate: ranked near-miss table (up to 50) — the names
     # that passed the relaxed entry but missed another gate, honest about
     # which gate each failed.

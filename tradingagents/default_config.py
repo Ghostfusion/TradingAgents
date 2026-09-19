@@ -303,6 +303,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EVENT_CALENDARS": "enable_event_calendars",
     "TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT": "enable_moomoo_snapshot",
     "TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES": "enable_analyst_estimates",
+    "TRADINGAGENTS_ENABLE_EODHD_RATES": "enable_eodhd_rates",
     "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
@@ -1070,6 +1071,14 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # `strategies/analyst_revisions.estimate_change_index` documents itself as
         # never having, plus the direct up/down revision counts. Off by default.
         "enable_analyst_estimates": False,
+        # `docs/design_eodhd_unused_surface.md` P0: TIPS real yields from EODHD's
+        # `/ust/real-yield-rates`, and the ONE producer of the nominal-minus-real
+        # inflation expectation (`dataflows/eodhd.inflation_expectation_eodhd`).
+        # Nothing in the tree read TIPS before this, while
+        # `strategies/dcf.py::wacc_from_beta` already consumes a nominal 10y and
+        # *assumes* the equity risk premium. Off by default: with it off no rate
+        # call is made and a run is byte-identical.
+        "enable_eodhd_rates": False,
         # WP-2 (docs/scores/IMPLEMENTATION_PLAN.md §5.1): the four FundamentalScore
         # category sub-scores + their RESEARCH_ONLY composite. Off by default;
         # with it off no engine tool is in any toolset and a run is byte-identical.

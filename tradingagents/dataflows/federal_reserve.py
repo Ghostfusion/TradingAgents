@@ -113,12 +113,24 @@ def get_sofr_curve(current_date: str | None = None) -> str:
     return "\n".join(lines) + note
 
 
-def get_treasury_curve(current_date: str | None = None) -> str:
-    """Daily nominal Treasury par yield curve from home.treasury.gov (CSV).
+def treasury_curve_points(current_date: str | None = None) -> dict:
+    """The nominal Treasury par yield curve as **structured** points.
 
-    Returns ``{maturity, rate}`` for the most recent trading day at or before
-    ``current_date`` as markdown. Raises ``NoMarketDataError`` when the feed
-    has no usable yield-curve rows.
+    The single producer behind both presentations: ``get_treasury_curve``
+    renders these rows for an LLM surface, and the EODHD real-yield pairing
+    subtracts against them. A second parser would be a second producer for the
+    same read (master rule 15), so the parse lives here only.
+
+    Returns ``{"as_of": <the CSV's own date label>, "date": <ISO date or None>,
+    "points": {maturity_label: float}, "rows": [(label, raw_str), ...]}`` for
+    the most recent trading day at or before ``current_date``.
+
+    ``points`` carries **only** maturities whose cell parsed as a float - a
+    blank or ``n/a`` cell is *absent* from the mapping rather than present as
+    ``0.0``, because a 0% risk-free rate silently inflates every DCF it
+    touches (master rule 1: missing is never zero).
+
+    Raises ``NoMarketDataError`` when the feed has no usable yield-curve rows.
     """
     ref = _as_of(current_date)
     resp = _get(TREASURY_CSV_URL.format(year=ref.year))
@@ -146,16 +158,43 @@ def get_treasury_curve(current_date: str | None = None) -> str:
     if not target:
         raise NoMarketDataError("treasury", "treasury", detail="no yield-curve row")
 
-    lines = [
-        "## US Treasury par yield curve (home.treasury.gov, free no-key feed)",
-        f"As of: {target[0]}",
-        "| Maturity | Yield % |",
-        "| --- | --- |",
-    ]
+    labelled: list[tuple[str, str]] = []
     for i, label in enumerate(header[1:], start=1):
         label = (label or "").strip()
         if not label:
             continue
         rate = target[i].strip() if i < len(target) else ""
+        labelled.append((label, rate))
+
+    points: dict[str, float] = {}
+    for label, rate in labelled:
+        try:
+            points[label] = float(rate)
+        except (TypeError, ValueError):
+            continue
+
+    return {
+        "as_of": target[0],
+        "date": (_parse_us_date(target[0]).isoformat() if _parse_us_date(target[0]) else None),
+        "points": points,
+        "rows": labelled,
+    }
+
+
+def get_treasury_curve(current_date: str | None = None) -> str:
+    """Daily nominal Treasury par yield curve from home.treasury.gov (CSV).
+
+    Returns ``{maturity, rate}`` for the most recent trading day at or before
+    ``current_date`` as markdown. Raises ``NoMarketDataError`` when the feed
+    has no usable yield-curve rows.
+    """
+    curve = treasury_curve_points(current_date)
+    lines = [
+        "## US Treasury par yield curve (home.treasury.gov, free no-key feed)",
+        f"As of: {curve['as_of']}",
+        "| Maturity | Yield % |",
+        "| --- | --- |",
+    ]
+    for label, rate in curve["rows"]:
         lines.append(f"| {label} | {rate if rate else 'n/a'} |")
     return "\n".join(lines)

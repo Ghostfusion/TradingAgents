@@ -167,6 +167,7 @@ byte-identical to the run before it existed.
 | --- | --- | --- | --- | --- | --- |
 | `enable_moomoo_snapshot` | `TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT` | reads the live historical-K-line quota before a screener run (warns, and refuses at zero) and enables the batched market-snapshot reader | `scripts/value_screener.py` (pre-flight), `tradingagents/dataflows/moomoo.py::get_market_snapshot_moomoo`, `tradingagents/dataflows/moomoo.py::get_kl_quota_moomoo` | `test_moomoo_snapshot.py` | wired |
 | `enable_analyst_estimates` | `TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES` | supplies the estimate-change leg (`RevEC`) from the vendor's 90-day estimate trend, so a leg that was permanently `unavailable` becomes measured | `scripts/value_screener.py` (`--revision-index`), `tradingagents/dataflows/yfinance_sector.py::fetch_estimate_trend` | `test_analyst_estimates_wiring.py` | wired |
+| `enable_eodhd_rates` | `TRADINGAGENTS_ENABLE_EODHD_RATES` | reads TIPS real yields and the nominal-minus-real inflation expectation, so the equity risk premium `dcf.wacc_from_beta` assumes becomes measurable | `scripts/value_screener.py` (`--rates`), `tradingagents/dataflows/eodhd.py::get_real_yield_rates_eodhd`, `tradingagents/dataflows/eodhd.py::inflation_expectation_eodhd` | `test_eodhd_rates.py` | wired |
 
 ## 7. Adding a gate — the rule
 

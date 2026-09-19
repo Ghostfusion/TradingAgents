@@ -1077,7 +1077,12 @@ so a tree carries its own consistency record instead of depending on the opt-in
   and the rule-15 analysis that **rejects six of the nine reachable endpoints**
   as second producers. A P0-P3 plan behind the new `enable_eodhd_rates`; **P0 is
   `/ust/real-yield-rates`**, the one endpoint that changes what an existing
-  number means.
+  number means. **P0 is BUILT (2026-09-19)**: `eodhd.real_yield_points_eodhd` /
+  `::get_real_yield_rates_eodhd` (TIPS real yields) and
+  `::inflation_expectation_eodhd` (the single producer of nominal − real, both
+  legs' dates and the basis printed), with `federal_reserve.treasury_curve_points`
+  refactored to a structured read the existing renderer now draws from. Gate off
+  by default.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product
