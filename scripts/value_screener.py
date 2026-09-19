@@ -1234,7 +1234,8 @@ def main(argv: list[str] | None = None) -> int:
         "'tickers' (positional/file), "
         "'top-losers' (moomoo intraday decliners; refreshes daily), "
         "'heat-proxy' (same as top-losers, US-only - the official "
-        "trade-rank proxy for the proprietary in-app Heat List), "
+        "intraday trade rank, which is NOT the in-app Heat List; moomoo "
+        "serves that one directly via get_hot_list), "
         "or 'eodhd-losers' (EODHD bulk US real-time feed, one call; the "
         "biggest intraday decliners seed a loss-ordered scan for "
         "value-dip/momentum candidates - OpenD-independent, no moomoo quota)",
@@ -1465,9 +1466,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # The proprietary Heat List (search/news/trade telemetry) is app-only and
-    # not exposed by any moomoo API; 'heat-proxy' is the sanctioned stand-in
-    # (top-movers rank) so the daily losers-of-the-moment list keeps rotating.
+    # 'heat-proxy' is a misnomer kept for CLI compatibility: it is the
+    # top-movers rank (price movement), NOT the Heat List. The Heat List IS
+    # exposed - OpenQuoteContext.get_hot_list (Qot_GetHotList) returns each
+    # name's search_heat/trade_heat/news_heat and their equal-weighted
+    # average_heat - so this universe is a separate signal, not a stand-in for
+    # an unavailable one. It stays because the daily losers-of-the-moment list
+    # is what this universe is for.
     if args.universe == "heat-proxy":
         args.market = "US"
 

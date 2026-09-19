@@ -434,6 +434,18 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-18 `(working tree)` - **The Heat List IS available - `get_hot_list` (`Qot_GetHotList`) - and the repo's "not exposed by any moomoo API"
+  claim was false in five places.** Found by asking whether moomoo could supply the attention legs a screener factor would need, instead of trusting the
+  tree's own claim. `OpenQuoteContext.get_hot_list(market, sort_field, sort_dir, count, offset, filter_list)` returns per name `search_heat`, `trade_heat`,
+  `news_heat` and `average_heat`, each with a `*_heat_change` delta, plus `news_type`/`news_title`/`news_url`. **Verified live against OpenD 2026-09-18:** US
+  `all_count` 9,072, HK 3,030; 200 rows per call with `offset` paging; `sort_field` re-orders by any of the four; `HotListFilter(HotListIndicatorType.
+  MARKET_CAP, interval_min=...)` is a server-side cap filter (9,072 -> 1,259 at >= $10B); raw scale 0-10,000,000, so the app's 0-100 display is that /
+  100,000. **`average_heat` is the equal-weighted mean of the three** - verified over 400 rows to within integer rounding (max |delta| = 2/3) - so there is
+  **no proprietary weight vector to reverse-engineer**, and **no decay parameter exists**: the request carries exactly `market`, `sortField`, `sortDir`,
+  `offset`, `count`, `filterList`. **Corrected in five places** (`moomoo.py::get_hot_movers_moomoo`'s docstring, `value_screener.py`'s `--universe` help and
+  its `heat-proxy` comment, `README.md`, the 2026-08 CHANGELOG entry - amended in place with a `[CORRECTED 2026-09-18]` tag, never rewritten - and
+  `trading_web/frontend/src/screenerSources.js`). **No behaviour changed**: `heat-proxy` is a *separate signal* (price movement), not a stand-in for an
+  unavailable one, and wiring the Heat List into a screener factor is a separate decision not taken here.
 - 2026-09-18 `(working tree)` - **SIMO's panel market cap was 4x too high: an ADS price multiplied by an ordinary share count.** Found by
   checking a number that looked wrong instead of trusting it. The live panel read `price_to_earnings=277.28`, `price_to_book=40.93`,
   `altman_z=54.15`. Both legs are individually correct - the price leg supplies a real close of `253.30` (2026-09-17, from a continuous

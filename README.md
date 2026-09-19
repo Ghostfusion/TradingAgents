@@ -1281,11 +1281,15 @@ then gates to **price ≥ $15, 0 < P/E (TTM) ≤ 40, market cap ≥ $10B**
 **ATR(14) ≥ 2% of price** (`--min-atr-pct`)
 and **market cap ≥ $100B** (`--min-mcap`, default; float cap NEVER exceeds total
 cap, so the total-cap floor covers the “cap or float cap ≥ $100B” rule) before
-the value screens run. It uses moomoo's official trade rank as the stand-in
-for the proprietary in-app **Heat List** (the composite Trade/Search/News
-telemetry isn't exposed by any moomoo API — the web endpoint is signed and
-undocumented). To use the literal app Heat List, save its top symbols to a
-file and pass `-f list.txt`. Output includes the day's change, name, and a
+the value screens run. It uses moomoo's official intraday **trade rank** (price
+movement), which is **not** the in-app **Heat List** — and the Heat List is
+**not** unavailable: `OpenQuoteContext.get_hot_list` (`Qot_GetHotList`, the
+hot-discussion rank) returns each name's `search_heat`, `trade_heat` and
+`news_heat` plus their equal-weighted `average_heat` (verified live 2026-09-18 —
+US `all_count` 9,072, HK 3,030). The two measure different things — attention
+vs. price — so `heat-proxy` is a misnomer kept for CLI compatibility, not a
+stand-in for a missing endpoint. To use the literal app Heat List today, save
+its top symbols to a file and pass `-f list.txt`. Output includes the day's change, name, and a
 screen-per-column table; pick from the ranked rows. Each run also saves
 the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_180415.md`,
 same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).

@@ -2053,10 +2053,17 @@ def get_hot_movers_moomoo(
 ) -> list[dict]:
     """The intraday 'hot' master list: gainers + losers, merged and deduped.
 
-    The in-app Heat List (search/trade/news telemetry) is not exposed by any
-    moomoo API, so this is its sanctioned stand-in: both sides of the official
-    intraday movers rank, sorted by absolute change (hottest first). Callers
-    pick the losers subset with change_ratio < 0.
+    Both sides of the official intraday movers rank, sorted by absolute change
+    (hottest first). Callers pick the losers subset with change_ratio < 0.
+
+    This is NOT the Heat List - and the Heat List is NOT unavailable. moomoo
+    serves it directly: ``OpenQuoteContext.get_hot_list`` (``Qot_GetHotList``,
+    the hot-discussion rank) returns each name's ``search_heat``, ``trade_heat``
+    and ``news_heat`` alongside their equal-weighted ``average_heat``. That
+    measures *attention*; this function ranks by *price movement*, which is a
+    different signal. The "heat-proxy" name is kept only because it is a
+    published CLI choice value - read the Heat List itself when attention is
+    what you want.
     """
     seen: set = set()
     merged: list[dict] = []

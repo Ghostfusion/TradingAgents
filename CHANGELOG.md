@@ -132,6 +132,18 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 ### Fixed
 
+**The Heat List is not unavailable - and the repo said it was, in five places (2026-09-18).** Found by asking whether moomoo could actually supply the attention legs a screener factor would need, rather than trusting the claim the tree already carried.
+
+- **The claim was false.** `tradingagents/dataflows/moomoo.py::get_hot_movers_moomoo`'s docstring, `scripts/value_screener.py`'s `--universe` help and its `heat-proxy` comment, `README.md`'s value-screener section and this file's own 2026-08 `heat-proxy` entry all asserted the in-app Heat List *"is not exposed by any moomoo API"* / *"is app-only"*. It is exposed: `OpenQuoteContext.get_hot_list` (`Qot_GetHotList`) returns `search_heat`, `trade_heat`, `news_heat` and their `average_heat`, each with a `*_heat_change` delta, plus `news_type` / `news_title` / `news_url`.
+- **Verified live against OpenD, 2026-09-18**, not read from a doc: US `all_count` **9,072**, HK **3,030**; `count` caps at 200 with `offset` paging; `sort_field` re-orders by any of the four; `HotListFilter(HotListIndicatorType.MARKET_CAP, interval_min=...)` is a server-side cap filter (US 9,072 -> **1,259** at >= $10B). Raw scale is 0-10,000,000 (max observed 9,999,977 US / 9,999,645 HK) - the app's 0-100 display is that / 100,000.
+- **`average_heat` is the equal-weighted mean of the three**, not a proprietary weighting: over 200 US + 200 HK rows `max|average_heat - mean(search, trade, news)| = 0.6667`, i.e. exact to within per-field integer rounding. There is **no decay parameter** anywhere in the request - `C2S` carries exactly `market`, `sortField`, `sortDir`, `offset`, `count`, `filterList`, and the only time-shaped fields are the change deltas.
+- **What was corrected.** The false parenthetical is removed from all five sites; each now states that `get_hot_list` serves the Heat List, that it measures *attention* while `heat-proxy` ranks by *price movement*, and that `heat-proxy` is a misnomer kept only because it is a published CLI choice value. The 2026-08 entry is **amended in place with a `[CORRECTED 2026-09-18]` tag**, not rewritten - it is a dated record of what was believed then.
+- **No behaviour changed.** `heat-proxy` still builds its universe from the movers rank; no tool, gate, flag or JSON shape was added, removed or reshaped. Wiring the Heat List into a screener factor is a separate decision and is **not** taken here.
+
+Tests: none (comments, a docstring and prose only) - the engine suite and the doc-claim / engine-contract tests were re-run unchanged.
+
+**Web impact**: `trading_web/frontend/src/screenerSources.js` carried the same false claim in the `heat-proxy` source's `what` text and is corrected in the same pass. No key, CLI flag, JSON shape or prompt changed.
+
 **SIMO's panel row implied a $252 close - and the cause was a unit mismatch, not the price leg (2026-09-18).** Found by checking a number that looked wrong instead of trusting it: the live panel gave SIMO `price_to_earnings = 277.28`, `price_to_book = 40.93`, `altman_z = 54.15`.
 
 - **Both legs are individually right.** The price leg supplies a real close of `253.30` for 2026-09-17, from a continuous series (2021-09-20: `65.88`). The SEC leg is right too: net income $122.635M, diluted EPS $0.91 and a cover-page count of 134,244,840 - internally consistent at $0.913 per share.
@@ -5019,6 +5031,12 @@ tool list/prompt, re-exported from `agent_utils`, and hermetic-tested in
   (composite Trade/Search/News telemetry is not exposed by any moomoo API;
   the web endpoint's signed token is undocumented). Pass the literal app Heat
   List via ``-f list.txt`` to use it directly.
+  **[CORRECTED 2026-09-18 — the parenthetical is FALSE.** The composite
+  telemetry *is* exposed: `OpenQuoteContext.get_hot_list` (`Qot_GetHotList`)
+  returns `search_heat` / `trade_heat` / `news_heat` and their equal-weighted
+  `average_heat`, verified live against OpenD. `heat-proxy` is therefore a
+  *separate signal* (price movement), not a stand-in for an unavailable one.
+  See the 2026-09-18 entry at the head of this section.**]**
 - **Value watchlist screener** — `scripts/value_screener.py` builds a master
   value watchlist by screening tickers through the configured vendor chain
   (`fundamental_data`: `moomoo,yfinance` by default). It normalizes yfinance
