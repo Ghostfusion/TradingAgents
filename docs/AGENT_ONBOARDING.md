@@ -643,6 +643,24 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **The yfinance analyst-ratings leg raised on every call - three defects in one
+  function.** Same live batch. `get_analyst_ratings` failed on **both** vendors and the yfinance failure was an
+  `AttributeError`, not an entitlement error - the tell. (1) **`analyst_price_targets` is a dict and the code read
+  it as a DataFrame**; the vendor's own signature is `def get_analyst_price_targets(self) -> dict:` with the
+  docstring *"Keys: current low high mean median"* (`yfinance/base.py:317`), so `.empty`/`.iloc[-1]` raised
+  `'dict' object has no attribute 'empty'` **on every call** - the leg was dead, and with Finnhub 403 on this tool
+  the whole leaf had **no working vendor**. (2) **The recommendation columns were wrong**: 1.5.2 uses
+  `strongBuy/buy/hold/sell/strongSell`, there is no `underperform`, so the **strong-sell count was silently
+  dropped**; a `numberOfAnalystOpinions` lookup read a key the vendor does not publish. (3)
+  **`recommendations_summary` is newest-first** (`0m,-1m,-2m,-3m`) so `iloc[-1]` read the **three-month-old**
+  consensus and labelled it *"latest period"*; it now selects `0m` and prints the period used. **The test mocked
+  shapes the vendor never produces** - a one-row `_recs_df` with an invented `underperform` column and no `period`,
+  and a `_targets_df` **DataFrame** where the vendor returns a dict - which is why all three survived; the
+  fixtures now carry the measured shapes and the test asserts the `0m` row (`hold: 3`, not the `-3m` `6`). Three
+  mutations, all failing-first with the exact expected errors, then byte-identical restore. Live: QCOM 0m
+  strongBuy 2 / buy 9 / hold 23 / sell 1 / strongSell 2, mean PT 194.13; NVDA mean PT 327.70; APP mean PT 501.94.
+  **Class: a parser-contract defect plus a test-assumption defect** - the test agreed with the code and neither
+  agreed with the vendor.
 - 2026-09-19 `(working tree)` - **The net-debt identity check read a correct report as a 35% contradiction.**
   Found by running a live 4-symbol batch (NVDA QCOM SMCI APP, shallow, 4 workers) and reading the resulting
   `run_card.json` - QCOM carried an `analyst_consistency` `INTERNAL_CONFLICT` that no amount of reading the

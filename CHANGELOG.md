@@ -14,6 +14,17 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Fixed
 
+**The yfinance analyst-ratings leg raised on every call — three defects in one function (2026-09-19).** Also found by the live 4-symbol batch: `get_analyst_ratings` failed on **both** vendors, and the yfinance failure was an `AttributeError`, not an entitlement error.
+
+- **`analyst_price_targets` is a dict, and the code read it as a DataFrame.** The vendor's own signature is `def get_analyst_price_targets(self) -> dict:` with the docstring *"Keys: current low high mean median"* (`yfinance/base.py:317`). The old `.empty` / `.iloc[-1]` reads therefore raised `AttributeError: 'dict' object has no attribute 'empty'` **on every call** — the leg was dead, and with Finnhub returning 403 for this tool the whole `get_analyst_ratings` leaf had **no working vendor**.
+- **The recommendation columns were wrong.** The 1.5.2 columns are `strongBuy/buy/hold/sell/strongSell`; there is no `underperform`, so the **strong-sell count was silently dropped** from every report this leg ever produced. And a `numberOfAnalystOpinions` lookup was reading a key the vendor does not publish.
+- **`recommendations_summary` is newest-first and the code read the oldest row.** Rows are `0m, -1m, -2m, -3m`, so `iloc[-1]` read the **three-month-old** consensus and labelled it *"latest period"*. It now selects the `0m` row and prints the period it used.
+- **The test mocked shapes the vendor never produces**, which is why all three survived: a one-row `_recs_df` with an invented `underperform` column and no `period`, and a `_targets_df` **DataFrame** where the vendor returns a dict. The fixtures now carry the measured shapes, and the test asserts the `0m` row (`hold: 3`, not the `-3m` `6`), the recovered `strongSell`, and the absence of `underperform`.
+- Three regression mutations, all proven failing-first: reading targets as a DataFrame (`AttributeError: 'dict' object has no attribute 'empty'`), renaming `strongSell` back to `underperform`, and reading `iloc[-1]`.
+- Live after the fix: QCOM `0m` strongBuy 2 / buy 9 / hold 23 / sell 1 / strongSell 2, mean PT 194.13; NVDA mean PT 327.70; APP mean PT 501.94.
+
+**Web impact**: `get_analyst_ratings` now returns a payload where it previously returned `NO_DATA` whenever Finnhub was unavailable — so sell-side consensus claims in the fundamentals report have a real source again. The rendered shape gains a `(latest period 0m)` stamp and a `strongSell:` row, and drops the `n_analysts:` row the vendor never supplied.
+
 **The net-debt identity check read a correct report as a 35% contradiction (2026-09-19).** Found by running a live 4-symbol batch; `report_verifier._net_debt_identity` paired a report's quoted net figure against **cash + short-term investments** and nothing else.
 
 - **A vendor's "Net Debt" row is normally on the OTHER basis — cash and cash equivalents alone.** QCOM 2026-06-30 fundamentals.md prints both on one line, and the arithmetic is exact: `Total Debt 15,270,000,000 − Cash And Cash Equivalents 4,533,000,000 = Net Debt 10,737,000,000`. The checker used `Cash + ST Investments 8,304,000,000` instead, got 6,966, and flagged a **true** report as an `INTERNAL_CONFLICT` at 35% — while the report itself was busy *disclosing* the basis difference, which is what the fundamentals prompt explicitly asks it to do.

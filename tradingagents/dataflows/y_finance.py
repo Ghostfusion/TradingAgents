@@ -881,10 +881,9 @@ def get_analyst_ratings_yfinance(
 ) -> str:
     """Analyst recommendation summary + price-target consensus (keyless).
 
-    Keyless sell-side read: yfinance ``recommendations_summary`` (strong
-    buy/buy/hold/underperform/sell counts) + ``analyst_price_targets`` (mean/
-    median/high/low + number of analysts). Complements the Finnhub ratings
-    chain without a key.
+    Keyless sell-side read: yfinance ``recommendations_summary`` (strongBuy/
+    buy/hold/sell/strongSell counts) + ``analyst_price_targets`` (current/low/
+    high/mean/median). Complements the Finnhub ratings chain without a key.
     """
     canonical = require_symbol(ticker)
     try:
@@ -893,24 +892,31 @@ def get_analyst_ratings_yfinance(
         targets = yf_retry(lambda: ticker_obj.analyst_price_targets)
         lines = []
         if recs is not None and not recs.empty:
-            lines.append("Recommendation summary (latest period):")
-            last = recs.iloc[-1]
-            for col in ("strongBuy", "buy", "hold", "underperform", "sell"):
-                val = last.get(col)
+            # recommendations_summary is NEWEST-FIRST (0m, -1m, -2m, -3m), so
+            # iloc[-1] read the three-month-old row and labelled it "latest".
+            row = recs.iloc[0]
+            if "period" in recs.columns:
+                current = recs[recs["period"].astype(str) == "0m"]
+                if not current.empty:
+                    row = current.iloc[0]
+            period = row.get("period")
+            stamp = "" if period is None or pd.isna(period) else f" {period}"
+            lines.append(f"Recommendation summary (latest period{stamp}):")
+            # The 1.5.2 columns are strongBuy/buy/hold/sell/strongSell. There is
+            # no "underperform" column, so the strong-sell count was silently
+            # dropped from every report this leg ever produced.
+            for col in ("strongBuy", "buy", "hold", "sell", "strongSell"):
+                val = row.get(col)
                 if val is not None and not pd.isna(val):
                     lines.append(f"  {col}: {int(val)}")
-        if targets is not None and not targets.empty:
+        # yfinance declares this a dict, not a DataFrame
+        # (base.py::get_analyst_price_targets -> "Keys: current low high mean
+        # median"), so the old .empty / .iloc[-1] reads raised AttributeError on
+        # every call and killed the whole leg.
+        if isinstance(targets, dict) and targets:
             lines.append("Analyst price-target consensus:")
-            t = targets.iloc[-1]
-            for label, col in (
-                ("current", "current"),
-                ("low", "low"),
-                ("high", "high"),
-                ("mean", "mean"),
-                ("median", "median"),
-                ("n_analysts", "numberOfAnalystOpinions"),
-            ):
-                val = t.get(col)
+            for label in ("current", "low", "high", "mean", "median"):
+                val = targets.get(label)
                 if val is not None and not pd.isna(val):
                     lines.append(
                         f"  {label}: {val:.2f}" if isinstance(val, float) else f"  {label}: {val}"

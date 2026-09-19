@@ -45,13 +45,25 @@ def _major_df():
 
 
 def _recs_df():
-    return pd.DataFrame({"strongBuy": [5], "buy": [12], "hold": [3], "underperform": [0], "sell": [1]})
-
-
-def _targets_df():
+    # The real 1.5.2 shape: NEWEST-FIRST rows and a strongSell column (there is
+    # no "underperform"). The old fixture had one row, no period, and an
+    # invented column, so it could not catch either defect.
     return pd.DataFrame(
-        {"current": [180.0], "low": [150.0], "high": [200.0], "mean": [178.0], "median": [179.0]}
+        {
+            "period": ["0m", "-1m", "-2m", "-3m"],
+            "strongBuy": [5, 4, 4, 3],
+            "buy": [12, 11, 10, 10],
+            "hold": [3, 4, 5, 6],
+            "sell": [1, 1, 1, 1],
+            "strongSell": [2, 2, 2, 1],
+        }
     )
+
+
+def _targets_dict():
+    # yfinance declares analyst_price_targets a dict (base.py:317), and its
+    # keys are exactly current/low/high/mean/median.
+    return {"current": 180.0, "low": 150.0, "high": 200.0, "mean": 178.0, "median": 179.0}
 
 
 class _Ticker:
@@ -72,7 +84,7 @@ class _Ticker:
 
     @property
     def analyst_price_targets(self):
-        return _targets_df()
+        return _targets_dict()
 
 
 class KeylessYFinanceTests(unittest.TestCase):
@@ -101,8 +113,17 @@ class KeylessYFinanceTests(unittest.TestCase):
         mock_yf.Ticker.return_value = _Ticker()
         out = y_finance.get_analyst_ratings_yfinance("AAPL")
         self.assertIn("Analyst ratings for AAPL", out)
+        # The 0m row, not the -3m one: buy is 12 at 0m and 10 at -3m.
         self.assertIn("buy: 12", out)
+        self.assertIn("hold: 3", out)
+        self.assertNotIn("hold: 6", out)
+        # The strong-sell count the old column list dropped.
+        self.assertIn("strongSell: 2", out)
+        self.assertNotIn("underperform", out)
+        # The dict payload the old .empty/.iloc reads could not read at all.
         self.assertIn("mean: 178.00", out)
+        self.assertIn("median: 179.00", out)
+        self.assertIn("high: 200.00", out)
 
 
 class TestFundamentalsFormattingGuards(unittest.TestCase):
