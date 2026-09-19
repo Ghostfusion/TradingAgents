@@ -1,6 +1,7 @@
 # Design: The Score Context Contract — mandatory engine evaluation, supplied results
 
-**Status: design only — no code changed (2026-09-19).**
+**Status: design only — no code changed (2026-09-19). All four open questions were
+closed by the owner on 2026-09-19 — see §13.**
 
 Specifies how the eight score engines become **mandatory and deterministic**, and
 how their results — score, coverage, and supporting measurements — are **supplied
@@ -165,6 +166,10 @@ off'}` rather than omitting the key.
 are evaluated and delivered for interpretation. Only the four in
 `COMPOSITE_ENGINES` (`quant_scorecard.py:86`) contribute to `TradeScore` — see §9.
 
+**The manifest is delivered to all four analysts** (§13.1), each also receiving
+its normal owned research and evidence. The engine evidence comes first and
+`TradeScore` last, labelled downstream and non-instructional (§13.2).
+
 ---
 
 ## 5. Two classes of tool use
@@ -276,10 +281,14 @@ requires only that the mapping be **surfaced**, not that it be re-derived here.
 
 ### 7.2 Target shape
 
+Per §13.4 each engine prints its score, coverage, required floor and status:
+
 ```text
 TECHNICAL SCORE
 Score: 62.29
 Coverage: 95%
+Required: 8 of 9 components present
+Status: ABOVE FLOOR
 
 Trend: 75.13   Momentum: 50.87   Relative Strength: 68.75
 Price Structure: 65.00   Volume: 52.72   Breakout: 56.25
@@ -291,12 +300,16 @@ RSI   = 53.26  -> aligned 85
 ROC20 = 2.62%  -> 63.1
 ```
 
+**Ordering is part of the contract** (§13.2): the engines first, `TradeScore`
+last, labelled downstream and non-instructional — so the composite is a reference
+point rather than an anchor.
+
 `format_engine_detail` (`quant_scorecard.py:696`) already renders the
 per-category weights, scores, bands and coverage for a snapshot; the live market
 block measured 2026-09-19 is 4207 characters and carries the full
 `## TechnicalScore - QCOM (advisory; 35 of 40 components measured)` body. The
-delta this design specifies is **the supporting-measurement and mapping rows**,
-not the category table.
+delta this design specifies is **the supporting-measurement, mapping and
+floor/status rows**, not the category table.
 
 ---
 
@@ -327,9 +340,15 @@ model say so. The observed consequence is already visible in production: the
 verifier's engine cross-check fired on `SentimentScore composite 78.6/100
 (constructive) at coverage 50%`.
 
-**An engine is not "fully measured" below its coverage floor.** Below the floor
-the engine's own document governs whether it reports a score, a withheld value,
-or `absent`.
+**An engine below its coverage floor has its score WITHHELD — not degraded.**
+This is implemented, not aspirational: `combine`
+(`tradingagents/strategies/score_engine.py:134`) withholds when
+`len(present) < floor` (`:206`), and the withheld `score` is `None` — **never `0`
+and never `50`** (`:141-157`). The `withheld` string already names both the count
+and the floor (`"5 of 10 components present, floor is 6"`, `:208`).
+
+Per §13.4 the floor is printed beside the coverage, read from the one
+implementation `coverage_floor` (`score_engine.py:45`) rather than restated.
 
 ---
 
@@ -417,29 +436,50 @@ this changes *reading*, not *rendering* (see §9.5).
 - **Exit:** each analyst report carries the full scorecard; the ownership map's
   placement assertions are unchanged.
 
-### Phase 2 — the manifest drives execution, and the duplicate route is removed
+### Phase 2 — the manifest drives execution, and every engine binding is dropped
 
-Make the manifest explicit in code (a derived tuple, not a literal list) and drop
-the engine tool binding where the block already supplies that engine.
+Make the manifest explicit in code (a derived tuple, not a literal list) and
+**drop all eight LLM-facing engine-score tool bindings** (§13.3).
+
+> **Superseded (2026-09-19):** this phase as first written dropped the binding
+> only where the supplied block already covered that engine. The owner's decision
+> is broader — *engine-score tools are application-internal calculation
+> mechanisms, not LLM-facing analytical tools*, so **all eight** bindings go. The
+> earlier scope is retained here as the record; the wider rule supersedes it.
 
 - **Touches:** `toolsets.engine_score_tools` (`toolsets.py:450`),
   `quant_scorecard.engines_for_analyst` (`quant_scorecard.py:134`).
+- **Scope:** all eight — `get_fundamental_score`, `get_technical_score`,
+  `get_regime_score`, `get_risk_score`, `get_sentiment_score`, `get_news_score`,
+  `get_event_state`, `get_trade_score`. The underlying **exploratory** tools stay
+  bound (§5).
 - **Watch:** `tests/test_calc_agent_wiring.py::test_tool_bound_to_agent_surface`
   requires every public `@tool` be bound **or** declared in `TOOL_LEGACY_BINDING`
   with its real consumer and a reason — and *"nothing uses it" is not an
-  acceptable reason*. Any leaf removed from a toolset must be re-declared with its
-  actual consumer (the supplied block) before the suite will pass.
-- **Exit:** no engine reaches one report by two routes.
+  acceptable reason*. All eight must be declared with their actual consumer, **the
+  supplied scorecard**, before the suite will pass.
+- **Exit:** no engine reaches one report by two routes; no engine-score tool is
+  LLM-facing.
 
-### Phase 3 — evidence and mapping rows
+### Phase 3 — evidence, mapping and floor rows
 
 Add the supporting-measurement rows (§7) to the delivered block, including the
-explicit mapping where the producer's band table is non-monotonic.
+explicit mapping where the producer's band table is non-monotonic, and the
+coverage floor with its status (§13.4).
 
 - **Touches:** `quant_scorecard.format_engine_detail` (`quant_scorecard.py:696`)
-  and the block builder.
-- **Exit:** a reader can see, for a named measurement, both the raw value and the
-  aligned value.
+  and the block builder; and `score_engine.combine`
+  (`tradingagents/strategies/score_engine.py:134`) to expose the floor it already
+  computes at `:190` as a structured field beside `coverage`.
+- **Do not duplicate the floor.** It is resolved by the one implementation,
+  `coverage_floor` (`score_engine.py:45`). A second hand-maintained constant is
+  forbidden by the same rule as any other two-producer quantity (master rule 15).
+- **Units:** the floor is a component **count** (`len(present) < floor`, `:206`);
+  `coverage` is a weight **fraction**. Print them as the units they are — the
+  implemented count form (`"5 of 10 components present, floor is 6"`) is
+  unambiguous and already exists in `withheld` (`:208`).
+- **Exit:** a reader can see, for a named measurement, both the raw and aligned
+  values; and for each engine, its score, coverage, required floor and status.
 
 ### Phase 4 — the prompt contract text
 
@@ -470,6 +510,15 @@ phrasing that implies the engines are optional.
 7. **Ownership placement is unchanged.** `ENGINE_SECTIONS` assertions in
    `tests/test_engine_ownership_map.py` continue to hold.
 8. **No engine reaches one report twice** (Phase 2 exit).
+9. **All four analysts receive the full scorecard** (§13.1) — not only the engine
+   they own.
+10. **`TradeScore` is present, labelled downstream and non-instructional, and
+    printed after the underlying engines** (§13.2).
+11. **No engine-score tool is LLM-facing** (§13.3) — all eight bindings dropped,
+    the exploratory tools retained.
+12. **Every engine prints score, coverage, required floor and status** (§13.4),
+    with the floor read from `coverage_floor` (`score_engine.py:45`) rather than a
+    second constant.
 
 **Method note.** Every behavioural claim above must be proven by **mutating
 behaviour, not by stashing the source** — stashing a file whose new symbols the
@@ -477,23 +526,184 @@ test imports produces an `ImportError`, which is not a proof.
 
 ---
 
-## 13. Open questions for the owner
+## 13. Decision record (owner, 2026-09-19)
 
-1. **Full scorecard to every analyst, or to the decision layer only?** This design
-   delivers all eight engines to all four analysts. The alternative is to deliver
-   the full scorecard only to the researchers / trader / PM (the decision layer)
-   and keep the analyst blocks owned-engine-only. The former widens each analyst's
-   context; the latter keeps analyst context narrow and puts the whole picture
-   where the decision is made.
-2. **Does `TradeScore` itself belong in the analyst context?** It is the
-   downstream decision summary (master rule: a `TradeScore` is a *research
-   allocation*, not an instruction). Supplying it to an analyst may invite the
-   analyst to reason from the composite rather than from the evidence.
-3. **Retain or drop the engine tool bindings entirely?** Phase 2 drops the binding
-   only where the block already supplies that engine. An alternative is to drop
-   every engine tool binding outright, on the grounds that a supplied number never
-   needs a discretionary route.
-4. **Coverage floor disclosure.** The prompt says an engine "must not be treated
-   as fully measured unless its required coverage floor is satisfied". Each
-   engine's floor is defined in its own document. Whether the *floor value* should
-   be printed alongside the coverage in the context is not yet specified.
+All four questions below were **closed by the owner on 2026-09-19**. The questions
+are retained verbatim as the record; each resolution states the consequence for
+the phases and acceptance in §11 and §12.
+
+### 13.1 Full scorecard to **all four analysts** — CLOSED
+
+**Question (as put):** deliver the full scorecard to every analyst, or to the
+decision layer only?
+
+**Decision: deliver it to all four analysts.**
+
+The reason is this design's own objective. If each analyst sees only its owned
+engine, each still forms a thesis from an incomplete quantitative picture:
+
+```text
+market        -> Technical
+fundamentals  -> Fundamental
+news          -> News + Event
+sentiment     -> Sentiment
+```
+
+The market analyst would see `Technical = 62` without seeing `Regime = 81` or
+`Risk = 79`, and would therefore still *implicitly* decide how much technical
+condition matters relative to regime and risk — the exact failure this contract
+exists to remove (§3.3).
+
+```text
+all analysts:
+    full 8-engine scorecard
+  + their normal owned research/evidence
+```
+
+**Ownership and rendering are unchanged.** The §9.5 distinction stands: who *owns*
+a section and what the model can *read* are different questions.
+
+### 13.2 `TradeScore` — **included, labelled downstream, ordered last** — CLOSED
+
+**Question (as put):** does `TradeScore` belong in the analyst context?
+
+**Decision: include it, but present it as downstream and non-instructional, and
+place it after the underlying engines.**
+
+```text
+TradeScore: 68.53
+Role: downstream composite / research allocation
+Do not treat as a trading instruction.
+```
+
+The rationale is that an analyst shown seven or eight engines but *not* the
+system's own composite would form yet another interpretation layer. The composite
+is a **reference point**; the engines remain the evidence.
+
+**Ordering is deliberate and part of the contract** — evidence first, composite
+last, to reduce anchoring:
+
+```text
+ENGINE EVIDENCE
+    Fundamental   Technical   Regime   Risk   Sentiment   News   Event
+        |
+        v
+    TradeScore
+```
+
+This is consistent with master rule 17: `TradeScore` is a *research allocation*,
+not an instruction.
+
+### 13.3 Engine tool bindings — **drop all eight** — CLOSED
+
+**Question (as put):** retain or drop the engine tool bindings entirely? Phase 2
+as first written dropped the binding only where the supplied block already covered
+that engine.
+
+**Decision: drop every LLM-facing engine-score tool binding.**
+
+> **Engine-score tools are application-internal calculation mechanisms, not
+> LLM-facing analytical tools.**
+
+Once the scorecard is computed deterministically and supplied, an engine score
+does not need a second discretionary access path. Keeping both invites the
+ambiguity *"is the supplied score authoritative, or should I call the tool and
+obtain it again?"* — and is the duplicate route §10 identifies.
+
+**The underlying exploratory tools stay.** Only the eight engine-score bindings
+are removed. This preserves the §5 split: mandatory score calculation is the
+application's; exploratory investigation remains the LLM's.
+
+**Consequence for Phase 2 (§11):** the scope widens from "where the block already
+supplies" to **all eight** — `get_fundamental_score`, `get_technical_score`,
+`get_regime_score`, `get_risk_score`, `get_sentiment_score`, `get_news_score`,
+`get_event_state`, `get_trade_score`. Three of those (`regime`, `risk`, `trade`)
+are already bound to no analyst, so the change is five live bindings plus the
+consolidation of all eight under one rule. Every one must be declared in
+`TOOL_LEGACY_BINDING` with its real consumer — the supplied scorecard — because
+that list refuses *"nothing uses it"* as a reason.
+
+### 13.4 Coverage floor — **print coverage, required floor and status** — CLOSED
+
+**Question (as put):** should the floor value be printed beside the coverage?
+
+**Decision: yes — print `score / coverage / required floor / status`.**
+
+```text
+RiskScore
+Score:       79.35
+Coverage:    45%
+Required:    50%
+Status:      BELOW FLOOR
+```
+
+`Coverage = 45%` tells the model the evidence is incomplete but not **whether 45%
+is acceptable**. The model must not have to know the floor from another document.
+
+**Grounding — the floor already exists and must not be duplicated.** It is
+resolved by `coverage_floor(min_coverage, n_components)`
+(`tradingagents/strategies/score_engine.py:45`), the one implementation, read by
+`risk_score.py:489`, `news_score.py:362`, `event_state.py:546` and
+`factors.py:314`. `combine` (`score_engine.py:134`) computes it at `:190` and
+**enforces** it at `:206` — below the floor the score is withheld, never `0` and
+never `50`:
+
+```python
+floor = coverage_floor(min_coverage, len(present))          # :190
+if len(present) < floor or present_w <= 0:                  # :206
+    out["withheld"] = f"{len(present)} of {len(comps)} components present, floor is {floor}"
+```
+
+**Two precision points this decision must respect.**
+
+1. **The floor is already printed, in prose, but not as a field.** It appears in
+   `withheld` (`:208`) and in `basis` (`:216`, `"score over N present
+   component(s), floor M"`). The returned dict is `{"score", "coverage",
+   "components", "present", "withheld", "label", "basis"}` — there is **no
+   structured `floor` key**. Printing `Required:` therefore means **exposing an
+   existing value as a field**, not inventing one. This is the preferred route:
+   the alternative — parsing the prose — is exactly the fragile coupling the
+   contract exists to avoid.
+2. **The floor is a component COUNT; `coverage` is a weight FRACTION.** The
+   comparison at `:206` is `len(present) < floor`, a count. Rendering the floor as
+   a percentage requires choosing a base — fraction of the declared set, or of the
+   present set (`coverage_floor` uses `len(present)`, which is circular for a
+   fraction reading). **The two must not be printed as if they were the same
+   unit**; the count form (`"5 of 10 components present, floor is 6"`) is
+   unambiguous and already implemented.
+
+### 13.5 The resulting contract
+
+```text
+              APPLICATION
+                  |
+                  v
+        Mandatory 8-engine execution
+                  |
+                  v
+        Full scorecard: score, coverage, required floor, status,
+        category breakdown, supporting measurements, mappings
+                  |
+                  v
+           ALL FOUR ANALYSTS
+                  |
+                  v
+              LLM THESIS
+                  |
+                  v
+            DECISION LAYER
+             /            \
+        Composite       Hard gates
+             \            /
+                  v
+              POSITION
+```
+
+**Separation of responsibilities:**
+
+| Layer | Decides |
+|---|---|
+| Application | what is measured |
+| Scoring engines | how measurements are weighted |
+| LLM | how the resulting evidence is interpreted |
+| Risk/decision layer | what risk is permitted |
