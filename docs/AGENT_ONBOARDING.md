@@ -643,6 +643,26 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **The unused EODHD surface is enumerated, and the supplied 68-endpoint catalog was
+  corrected against the live key.** `docs/design_eodhd_unused_surface.md` (new; docs index updated). **Two premise
+  corrections first: EODHD is NOT a removed vendor** - the repo calls 8 of its paths today, all returning 200 (the
+  earlier "EODHD leg removed" note referred only to `score_panel.py --exchange`); and **the catalog is materially wrong
+  about reachability** - probed live across five rounds (~100 URLs incl. path variants), the 68 split into **9
+  reachable-and-unused, 20 plan-gated (403), ~9 not found**. **The `/ust/*` Treasury family is not in the catalog as a
+  family and is fully open** (found by guessing paths: real-yield 895 rows, bill 1,253, long-term 537, yield 2,506),
+  while the catalog's own `GBOND` and `MONEY` are **both 403**. **The rule this leaves: probe path variants, and treat a
+  422 as proof the route is authorized** - `/calendar/dividends` returned 422 *"filter.date eq field is required"*
+  without params and 403 with them, which is how a plan-gated endpoint was separated from a mistyped URL; a 404 is not
+  evidence of absence either. **Six of the nine reachable endpoints are REJECTED under master rule 15** - reachability
+  is not a reason to adopt: `/ust/yield-rates` and `/ust/long-term-rates` duplicate
+  `federal_reserve.get_treasury_curve:116`, `/us-quote-delayed` duplicates `yfinance_sector.fetch_sector:64` plus the
+  already-used `/real-time`, `/id-mapping`'s `cik` duplicates `sec_edgar._cik_for:175`, and `/eod-bulk-last-day`
+  (45,009 rows / 6.6 MB in ONE call) is the same producer batched - transport, not a source. **The adopted set is three
+  endpoints**: P0 `/ust/real-yield-rates` - nothing in the tree reads TIPS, while `strategies/dcf.py::wacc_from_beta:28`
+  already consumes a *nominal* 10y as `rf` and **assumes** the premium (`erp: float = 0.05`), so a real yield is the
+  missing half that turns an assumption into a reading; P1 `/ust/bill-rates`; P2 `/id-mapping`'s **FIGI / LEI /
+  CUSIP** with **CIK demoted to a fallback** (SEC is the authority for its own identifier). Behind one new gate,
+  `enable_eodhd_rates`, default off. **Design only - no code, no gate, no test.**
 - 2026-09-19 `(working tree)` - **Two real defects were hiding inside a lint count reported as "pre-existing, not mine".** The
   23 tree-wide `ruff check tradingagents/` findings were dismissed without ever being enumerated - and the extraction command
   used to justify that was itself broken (ruff prints absolute Windows paths, and the filename regex had no `:` in its class,

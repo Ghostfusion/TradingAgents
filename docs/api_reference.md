@@ -1066,6 +1066,18 @@ so a tree carries its own consistency record instead of depending on the opt-in
   which no production caller ever supplies. Records the finnhub free-tier wall (12
   of 61 work, 48 return 403, all listed), the two rule-15 overlaps that block the
   tempting adoptions, and a P0-P5 plan behind the new `enable_analyst_estimates`.
+- `docs/design_eodhd_unused_surface.md` - provider study (2026-09-19, design
+  only): the **unused** EODHD surface, probed live against the repo's own key
+  across five rounds (~100 URLs). The supplied 68-endpoint catalog is
+  **materially wrong about reachability**: 8 paths are already called by the
+  tree, **9 are reachable and unused**, **20 are plan-gated (403)** and ~9 are
+  not found at any probed path. Records the `/ust/*` Treasury family found by
+  guessing a path the catalog did not list, the **422-vs-403** probe that
+  separated `/calendar/dividends` (authorized but plan-gated) from a wrong path,
+  and the rule-15 analysis that **rejects six of the nine reachable endpoints**
+  as second producers. A P0-P3 plan behind the new `enable_eodhd_rates`; **P0 is
+  `/ust/real-yield-rates`**, the one endpoint that changes what an existing
+  number means.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product
