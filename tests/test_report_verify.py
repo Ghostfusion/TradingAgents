@@ -1537,6 +1537,34 @@ def test_net_debt_identity_ignores_a_vendor_row_the_report_rejects():
     assert len(cs) == 1 and "19.36" in cs[0].claim
 
 
+def test_net_debt_identity_accepts_either_cash_basis_the_report_prints():
+    # QCOM 2026-06-30 fundamentals.md prints BOTH bases on one line, and the
+    # vendor's Net Debt row is on the cash-only one:
+    #   15,270,000,000 - 4,533,000,000 = 10,737,000,000 exactly.
+    # Pairing it against cash+ST investments (8,304 => 6,966) read a correct
+    # report as a 35% contradiction.
+    text = (
+        "Total Debt **15,270,000,000**; Net Debt **10,737,000,000**; "
+        "Cash And Cash Equivalents **4,533,000,000**; "
+        "Cash + ST Investments **8,304,000,000**."
+    )
+    assert rv._net_debt_identity(text) == []
+
+
+def test_net_debt_identity_still_flags_when_neither_cash_basis_resolves():
+    # The two-basis exemption must not become a blanket one: a net line that
+    # resolves from NEITHER printed basis is still the defect the check pins.
+    text = (
+        "Total Debt **15,270,000,000**; Net Debt **99,000,000,000**; "
+        "Cash And Cash Equivalents **4,533,000,000**; "
+        "Cash + ST Investments **8,304,000,000**."
+    )
+    cs = rv._net_debt_identity(text)
+    assert len(cs) == 1 and cs[0].status == "INTERNAL_CONFLICT"
+    assert "8.30" in cs[0].claim and "99.00" in cs[0].claim
+    assert "cash and cash equivalents $4.53B" in cs[0].reason
+
+
 def test_current_ratio_identity_flags_r1_cr_vs_pair():
     # Verbatim R1: CA/CL $197.41B / $43.02B (= 4.588) against quoted CR 4.6808.
     text = (

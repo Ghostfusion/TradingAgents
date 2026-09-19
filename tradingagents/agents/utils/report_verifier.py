@@ -1920,6 +1920,18 @@ _CASH_STI_RE = re.compile(
     # the cash leg (the same class as the stripped-unit captures).
     r"[\s|:*=]{0,4}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
+# The OTHER cash basis, and the one a vendor's "Net Debt" row is usually on.
+# QCOM 2026-06-30 fundamentals.md prints BOTH on one line —
+#   Total Debt 15,270,000,000; Net Debt 10,737,000,000;
+#   Cash And Cash Equivalents 4,533,000,000; Cash + ST Investments 8,304,000,000
+# — and 15,270 - 4,533 = 10,737 EXACTLY. Pairing that correct vendor row
+# against cash+ST investments (8,304 => 6,966) read a true report as a 35%
+# contradiction. The net line must resolve from EITHER basis the report
+# prints, not from one the checker prefers.
+_CASH_CE_RE = re.compile(
+    r"(?i)cash\s*(?:and|&)\s*(?:cash\s+)?equivalents?"
+    r"[\s|:*=]{0,4}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
+)
 # "total debt ... = $38.35B" (R1 spells the current + long-term legs first) or
 # the plain table row "Total Debt | $38.35B" (R2).
 _TOTAL_DEBT_EQ_RE = re.compile(
@@ -1962,7 +1974,6 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
     """
     if not report_text:
         return []
-    cash_m = _CASH_STI_RE.search(report_text)
     debt_m = _TOTAL_DEBT_EQ_RE.search(report_text) or _TOTAL_DEBT_RE.search(report_text)
     # A slash-list label cell pairs its values by ORDINAL: the row
     # "| Total Debt / Net Debt | 14,309,306,000 / 5,210,074,000 |" (NFLX
@@ -1987,37 +1998,55 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
         return []
     debts = [x for x in net_matches if x[0].group(1).lower() == "debt"]
     net_m, net_raw, net_value = (debts or net_matches)[-1]
-    if not (cash_m and debt_m):
+    if not debt_m:
         return []
-    cash = _money_billions(cash_m.group(1), cash_m.group(2))
     debt = _money_billions(debt_m.group(1), debt_m.group(2))
     quoted = (
         net_value
         if net_value is not None
         else _money_billions(net_raw, net_m.group(3))
     )
-    if cash is None or debt is None or quoted is None:
+    if debt is None or quoted is None:
         return []
     is_debt = net_m.group(1).lower() == "debt"
     if not is_debt:
         quoted = -quoted
-    expected = debt - cash
-    if abs(quoted - expected) / max(abs(quoted), abs(expected), 1e-9) <= 0.05:
+    # Every cash basis this report prints is a legitimate basis for its own net
+    # line; the check may not pick one and call the other a contradiction.
+    bases: list[tuple[str, float]] = []
+    for label, rx in (
+        ("cash+ST investments", _CASH_STI_RE),
+        ("cash and cash equivalents", _CASH_CE_RE),
+    ):
+        m = rx.search(report_text)
+        if not m:
+            continue
+        value = _money_billions(m.group(1), m.group(2))
+        if value is not None:
+            bases.append((label, value))
+    if not bases:
         return []
+    for _basis, cash in bases:
+        expected = debt - cash
+        if abs(quoted - expected) / max(abs(quoted), abs(expected), 1e-9) <= 0.05:
+            return []
+    basis, cash = bases[0]
+    expected = debt - cash
     implied_word = "net cash" if expected < 0 else "net debt"
+    tried = " or ".join(f"{b} ${v:.2f}B" for b, v in bases)
     return [
         VerifierClaim(
             claim=(
-                f"cash+ST investments ${cash:.2f}B - total debt ${debt:.2f}B = "
+                f"{basis} ${cash:.2f}B - total debt ${debt:.2f}B = "
                 f"{implied_word} ${abs(expected):.2f}B, but report quotes "
                 f"{'net debt' if is_debt else 'net cash'} ${abs(quoted):.2f}B"
             ),
             status="INTERNAL_CONFLICT",
             reason=(
-                "The quoted net debt / net cash figure does not resolve from the "
-                "same report's cash+ST investments and total debt rows. Reconcile "
-                "the net line to those legs (rule pinned by the NVDA 2026-09-12 "
-                "review loop)."
+                "The quoted net debt / net cash figure does not resolve from "
+                f"either cash basis the same report prints ({tried}) against its "
+                "total debt row. Reconcile the net line to those legs (rule "
+                "pinned by the NVDA 2026-09-12 review loop)."
             ),
         )
     ]

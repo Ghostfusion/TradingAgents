@@ -643,6 +643,22 @@ has changed before); never assume an endpoint works — the SDK's
   wire), and given the row it was missing - **`P12-12`**, acceptance *a level-3 line for a non-monotonic component reads
   `rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band`; a monotonic component prints no mapping note*. Docs only; no
   code or test changed, so the engine suite was not re-run for this pass (the doc-claim and engine-contract tests were).
+- 2026-09-19 `(working tree)` - **The net-debt identity check read a correct report as a 35% contradiction.**
+  Found by running a live 4-symbol batch (NVDA QCOM SMCI APP, shallow, 4 workers) and reading the resulting
+  `run_card.json` - QCOM carried an `analyst_consistency` `INTERNAL_CONFLICT` that no amount of reading the
+  verifier would have surfaced. `report_verifier._net_debt_identity` paired a report's quoted net figure against
+  **cash + short-term investments** and nothing else, but **a vendor's "Net Debt" row is normally on the OTHER
+  basis - cash and cash equivalents alone**. QCOM 2026-06-30 fundamentals.md prints both on one line and the
+  arithmetic is exact: `15,270,000,000 - 4,533,000,000 = 10,737,000,000`; the checker used
+  `Cash + ST Investments 8,304,000,000`, got 6,966, and flagged a **true** report at 35% - while the report was
+  itself *disclosing* the basis difference, which is what the fundamentals prompt explicitly asks it to do
+  (`fundamentals_analyst.py:255` NET-DEBT BASIS). **The check now resolves the net line against every cash basis
+  the report prints and flags only when it resolves from none**, naming the bases tried in the claim and reason.
+  **The pinned NVDA 2026-09-12 defect is untouched** - that report prints only cash+ST investments, so it has one
+  basis and still flags (its own test, unchanged). Two regression tests, **both proven failing-first by mutation**
+  (dropping the second basis; accepting a net line that resolves from neither). 203 passed in
+  `tests/test_report_verify.py`. **Class: a test-assumption defect in a checker, not a producer defect** - the
+  numbers were right on both sides; the checker assumed one basis was the only one.
 - 2026-09-19 `(working tree)` - **EODHD P0 built: TIPS real yields + the single producer of the inflation
   expectation.** Gate `enable_eodhd_rates`, default off. `dataflows/eodhd.real_yield_points_eodhd` /
   `::get_real_yield_rates_eodhd` (895 rows / 179 dates, tenors 5Y-30Y) and `::inflation_expectation_eodhd`

@@ -12,6 +12,17 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Fixed
+
+**The net-debt identity check read a correct report as a 35% contradiction (2026-09-19).** Found by running a live 4-symbol batch; `report_verifier._net_debt_identity` paired a report's quoted net figure against **cash + short-term investments** and nothing else.
+
+- **A vendor's "Net Debt" row is normally on the OTHER basis — cash and cash equivalents alone.** QCOM 2026-06-30 fundamentals.md prints both on one line, and the arithmetic is exact: `Total Debt 15,270,000,000 − Cash And Cash Equivalents 4,533,000,000 = Net Debt 10,737,000,000`. The checker used `Cash + ST Investments 8,304,000,000` instead, got 6,966, and flagged a **true** report as an `INTERNAL_CONFLICT` at 35% — while the report itself was busy *disclosing* the basis difference, which is what the fundamentals prompt explicitly asks it to do.
+- **The check now resolves the net line against every cash basis the report prints**, and flags only when it resolves from **none** of them. The claim and reason name the bases that were tried, so a genuine break tells the analyst which legs to reconcile.
+- **The pinned NVDA 2026-09-12 defect is untouched**: that report prints only `Cash + ST Investments`, so it has one basis and still flags — verified by its own test, unchanged.
+- Two regression tests, both proven failing-first **by mutation**: dropping the second basis (the original defect) and accepting a net line that resolves from neither.
+
+**Web impact**: fewer false `INTERNAL_CONFLICT` rows in `verify_flags.json` and the `analyst_consistency` block of `run_card.json` — for any report whose vendor net-debt row is on the cash-only basis, which is the common shape. A report that genuinely misstates its net line still flags, and now says which bases it checked.
+
 ### Added
 
 **EODHD P0 — TIPS real yields, and the single producer of the inflation expectation (2026-09-19).** `enable_eodhd_rates`, default **off**. Builds P0 of `docs/design_eodhd_unused_surface.md`.
