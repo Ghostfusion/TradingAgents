@@ -85,6 +85,30 @@ def _soften_one_tier(strength: int) -> int:
     return strength - 1 if strength > 0 else strength + 1
 
 
+def downgrade_toward_hold(rating: str) -> str | None:
+    """Clamp a rating to Hold, or ``None`` when the rating is unknown.
+
+    **The challenge pass's only permitted move** (design doc §10, rule 3: *"it can
+    only downgrade - the same shape as ``stabilize_decision``"*). §10 states the
+    legitimate outcome as ``BUY -> HOLD`` on a breached falsifier or a
+    materially-relied-upon unresolved contradiction.
+
+    **It clamps from BOTH sides, which is where it differs from
+    ``_clamp_toward_hold``.** That helper exists for the risk-cap rule, whose job
+    is to stop a BULLISH call being made against high-severity risk without
+    inventing a bearish one - so it leaves ``Sell``/``Underweight`` alone. A
+    challenge that has MET one of §10's three grounds has found the decision's own
+    reasoning mechanically compromised, and that reduces conviction on either
+    side: a ``Sell`` resting on a figure the packet does not carry is no better
+    founded than a ``Buy``. Clamping to Hold is still downgrade-only - it never
+    increases a rating's distance from neutral - so §10 rule 3 holds.
+    """
+    strength = _STRENGTH.get(str(rating).strip())
+    if strength is None:
+        return None
+    return RATING_ORDER[2]  # Hold
+
+
 # Risk-cap tier: the debate's severity vocabulary is LOW < MEDIUM < HIGH <
 # CRITICAL, so the documented ">= high" threshold is exactly this set.
 _HIGH_RISK_SEVERITIES = frozenset({"high", "critical"})

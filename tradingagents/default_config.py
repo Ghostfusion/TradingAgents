@@ -308,6 +308,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
     "TRADINGAGENTS_ENABLE_DECISION_PACKET": "enable_decision_packet",
+    "TRADINGAGENTS_ENABLE_CONTEXT_EXPANSION": "enable_context_expansion",
+    "TRADINGAGENTS_ENABLE_DECISION_CHALLENGE": "enable_decision_challenge",
     # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
     # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
     # Empty = the mirror is inert (nothing is ever suppressed).
@@ -1133,6 +1135,21 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # receives `computed_decision_context` byte-for-byte as before, so a
         # gate-off run is identical to the run before the packet existed.
         "enable_decision_packet": False,
+        # Phase 4 of docs/design_decision_context.md §11: conditional expansion -
+        # attach the analyst reports, named and bounded, when the evidence is
+        # DIVIDED (independent reads disagree, the weighted stance is below
+        # threshold, or the §9 ledger holds an unresolved contradiction). Off:
+        # no expansion channel is written and `context_mode` stays "packet".
+        # Separate from the packet's gate: expansion is a decision about how much
+        # research to attach, not about whether the bounded packet exists.
+        "enable_context_expansion": False,
+        # Phase 5 of docs/design_decision_context.md §10: the closed-vocabulary
+        # challenge pass - ONE call after the decision that may only DOWNGRADE,
+        # and only on one of three closed grounds, each re-checked mechanically.
+        # Off: no extra call, no `pm_challenge` key, byte-identical decision path.
+        # It is deliberately the last gate to switch on: §13 requires the
+        # experiment before the pass, because the pass adds a fresh route to HOLD.
+        "enable_decision_challenge": False,
         # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
         # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
         # to mirror the smallest observed count of the pair instead. Empty (default)

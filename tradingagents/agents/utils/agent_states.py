@@ -112,10 +112,28 @@ class AgentState(MessagesState):
         "Phase 2 of docs/design_decision_context.md: the bounded, deterministic "
         "Decision Packet - the decision channel the trader, the 3 risk debators "
         "and the portfolio manager read in place of `computed_decision_context` "
-        "when `enable_decision_packet` is on. Rendered ONCE before the graph so "
-        "there is one producer of the string and one `packet_chars` measurement. "
-        "Declared here because native LangGraph SILENTLY DROPS undeclared keys; "
-        "written only when the gate is on, so a gate-off run gains no key",
+        "when `enable_decision_packet` is on. Rendered ONCE, in the `Decision "
+        "Packet` graph node just after the analysts, so there is one producer of "
+        "the string and one `packet_chars` measurement. Declared here because "
+        "native LangGraph SILENTLY DROPS undeclared keys; written only when the "
+        "gate is on, so a gate-off run gains no key",
+    ]
+    decision_packet_closes: Annotated[
+        list,
+        "The ONE close series this run fetched, handed to the packet node so its "
+        "regime and plan rows render from the same series the compiled decision "
+        "context used - never a second vendor read of the same series. Declared "
+        "here because native LangGraph SILENTLY DROPS undeclared keys; written "
+        "only when `enable_decision_packet` is on",
+    ]
+    decision_expansion: Annotated[
+        str,
+        "Phase 4 of docs/design_decision_context.md §11: the conditional "
+        "expansion - the analyst reports attached, named and bounded, when the "
+        "evidence is divided. A SEPARATE channel from `decision_packet` so "
+        "`packet_chars` keeps measuring the bounded decision channel alone. "
+        "Written only when `enable_context_expansion` is on and the trigger "
+        "fires; absent otherwise, and the run then records `context_mode: packet`",
     ]
     risk_independent_stances: Annotated[
         dict, "Independent pre-debate risk stances (aggressive/conservative/neutral), no cross-talk"
@@ -142,6 +160,15 @@ class AgentState(MessagesState):
         "Phase 0: the PM model's structured output BEFORE any deterministic "
         "postprocess. NOT the same as pm_decision, which is captured after the "
         "guardrail has already rewritten rating/confidence in place",
+    ]
+    pm_challenge: Annotated[
+        dict | None,
+        "Phase 5 (docs/design_decision_context.md §10): the closed-vocabulary "
+        "challenge pass's outcome - what the model proposed and what the "
+        "mechanical adjudication did with it (invalidated / ground / discarded / "
+        "recorded_contradictions). Recorded even when nothing was invalidated, so "
+        "a reader can see the pass ran. Absent when `enable_decision_challenge` "
+        "is off",
     ]
     tool_evidence: Annotated[
         dict, "Analyst-key → list of ToolEvidenceLeaf dicts (deterministic gather)"

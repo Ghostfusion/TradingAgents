@@ -83,6 +83,8 @@ REGISTRY: dict[str, str] = {
     "enable_eodhd_rates": "wired",
     # context gates (change what the decision model reads, never a decision)
     "enable_decision_packet": "wired",
+    "enable_context_expansion": "wired",
+    "enable_decision_challenge": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

@@ -31,20 +31,34 @@ tri-state (D-11: the pre-graph context holds no event fact, so it says so).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "CATEGORY_EVIDENCE",
     "CATEGORY_RISK_CONSTRAINTS",
     "CATEGORY_SYNTHESIS",
+    "CONFLICT_CLASS_ORDER",
+    "CONTEXT_EXPANSION_BUDGET",
+    "DECISION_EXPANSION_KEY",
     "DECISION_PACKET_BUDGET",
+    "DECISION_PACKET_CLOSES_KEY",
     "DECISION_PACKET_KEY",
+    "DECISION_PACKET_NODE",
+    "EXPANSION_AGREEMENT_FLOOR",
+    "EXPANSION_HEADER",
     "PACKET_MAX_CHARS",
     "PACKET_TRUNCATION_PREFIX",
     "PACKET_VERSION",
+    "create_decision_packet_node",
     "decision_packet_or_context",
+    "expansion_decision",
+    "expansion_facts",
     "packet_facts",
     "render_decision_packet",
+    "render_expansion",
     "stage_gap",
     "uncertainty_read",
 ]
@@ -66,9 +80,16 @@ DECISION_PACKET_BUDGET: dict[str, int] = {
     "packet_max_chars": 12_000,  # ~3,000 tokens
     "engine_row_max_chars": 160,
     "conflict_max_rows": 12,
+    "conflict_row_max_chars": 200,
     "falsifier_max_rows": 8,
 }
 PACKET_MAX_CHARS: int = DECISION_PACKET_BUDGET["packet_max_chars"]
+
+#: The conflict classes, most actionable first. §10 may act on ``unresolved``
+#: alone and §9 calls ``defect`` the ledger's signal-to-noise, so the ledger
+#: prints in this order and truncates from the tail: a run whose twelve rows were
+#: twelve `basis_difference`s would hide the one row that matters.
+CONFLICT_CLASS_ORDER = ("unresolved", "defect", "basis_difference")
 
 #: The marker appended when rows are dropped. Visible and counted, never silent
 #: (§7, and the risk table's "the budget silently truncates a decisive row").
@@ -111,6 +132,15 @@ _CATEGORY_NOTE = {
 #: §6 rule 4: the packet carries no ``DECISION`` line. Asserted by test, so a
 #: later edit cannot quietly add one.
 FORBIDDEN_LINE_PREFIXES = ("DECISION",)
+
+#: Every block heading the packet can print, in the order
+#: ``render_decision_packet`` emits them. ``_CATEGORY_NOTE`` is the same registry
+#: (``_assemble`` indexes it for every block), so a new block cannot be added
+#: without appearing here - and a reader that needs to know where one block ENDS
+#: has one list to read rather than a guess about indentation. The packet's rows
+#: are NOT indented (``conditions  1 declared`` sits at column zero); only the
+#: sub-rows of a row are, which is why "indented means a row" is wrong.
+PACKET_BLOCK_HEADINGS: tuple[str, ...] = tuple(_CATEGORY_NOTE)
 
 
 def stage_gap(stage: str, reason: str | None = None) -> str:
@@ -416,6 +446,110 @@ def _distribution_rows() -> list[str]:
     ]
 
 
+def _conflict_rows(state: dict) -> list[str]:
+    """§9's CONFLICT ledger - the same-metric disagreements, machine-classified.
+
+    The rows come from ``report_verifier.report_ledger``, which applies the
+    verifier's own ``_basis_registry`` + ``basis_conflicts`` to the four analyst
+    reports **in run state**. That is the same producer the post-hoc tree pass
+    uses, applied while the documents are still in state, so the packet the model
+    read and the tree's ``conflicts`` key cannot disagree (rule 15).
+
+    **Every class is printed, and the actionable ones print first.** §9's rule is
+    that nothing is suppressed: a ``basis_difference`` is visible and inert, and
+    only ``unresolved`` may participate in a challenge invalidation (§10). But
+    the ledger is bounded, and the measured distribution is dominated by
+    ``basis_difference`` (199 of 284 rows over 53 trees) - so truncating from the
+    tail in metric order would routinely hide the single ``unresolved`` row
+    behind twelve rows the model cannot act on. ``CONFLICT_CLASS_ORDER`` is that
+    correction, and the count line states the full distribution regardless.
+
+    Three states are distinguished, never conflated:
+
+    * **no reports read** - the packet is being rendered before the analysts ran
+      (or a caller invoked the render directly). ``unavailable_pre_reports``.
+    * **reports read, nothing disagreed** - a real measurement, printed as zero.
+    * **reports read, disagreements found** - the count line and the rows.
+    """
+    from tradingagents.agents.utils.report_verifier import report_ledger
+
+    rows, stems_read = report_ledger(state)
+    if not stems_read:
+        return [
+            _row(
+                "CONFLICT",
+                [],
+                stage_gap(
+                    "reports",
+                    "no analyst report in state yet - the ledger is a property of "
+                    "the reports (design doc §9)",
+                ),
+            )
+        ]
+
+    counts = dict.fromkeys(CONFLICT_CLASS_ORDER, 0)
+    for r in rows:
+        counts[r.classification] = counts.get(r.classification, 0) + 1
+    summary = _row(
+        "CONFLICT",
+        [f"{counts['unresolved']} unresolved"],
+        f"{counts['defect']} defect  {counts['basis_difference']} basis_difference "
+        f"of {len(rows)} same-metric disagreements across {stems_read} reports",
+    )
+    if not rows:
+        return [_row("CONFLICT", ["0 unresolved"], "no same-metric disagreement found")]
+
+    limit_rows = int(DECISION_PACKET_BUDGET["conflict_max_rows"])
+    limit_chars = int(DECISION_PACKET_BUDGET["conflict_row_max_chars"])
+    ordered = sorted(
+        rows,
+        key=lambda r: (
+            CONFLICT_CLASS_ORDER.index(r.classification)
+            if r.classification in CONFLICT_CLASS_ORDER
+            else len(CONFLICT_CLASS_ORDER),
+            r.metric,
+        ),
+    )
+    shown = ordered[:limit_rows]
+    detail = [_conflict_detail(r, limit_chars) for r in shown]
+    if len(ordered) > limit_rows:
+        detail.append(
+            f"  ... {len(ordered) - limit_rows} more disagreements not shown "
+            "- ledger row budget"
+        )
+    return [summary, *detail]
+
+
+def _conflict_detail(row, limit_chars: int) -> str:
+    """One ledger row: ``metric  a vs b  [class]  producers  bases  section``.
+
+    Built longest-first and **trimmed by dropping whole trailing clauses**, never
+    by cutting a value from its label: the metric, both values and the class are
+    the row's irreducible content, and the producer/basis/section clauses are
+    dropped in that order when the bound binds. The same rule as
+    ``engine_row_max_chars`` - a bound met by cutting a cell in half produces a
+    number with no label, which is what the bound exists to prevent.
+    """
+    values = sorted({round(s.value, 6) for s in row.sides}, reverse=True)
+    head = f"{row.metric}  " + " vs ".join(_num(v) or "?" for v in values)
+    cls = f"[{row.classification}]"
+
+    producers = sorted({s.producer for s in row.sides if s.producer})
+    bases = sorted({s.basis for s in row.sides if s.basis})
+    clauses = [
+        f"producers: {' vs '.join(producers)}" if producers else "",
+        f"bases: {' vs '.join(bases)}" if bases else "",
+        f"section: {row.section}" if row.section else "",
+    ]
+    bits = [head, cls]
+    for clause in clauses:
+        if not clause:
+            continue
+        if len("  ".join([*bits, clause])) <= limit_chars:
+            bits.append(clause)
+    return "  " + "  ".join(bits)
+
+
 def _evidence_rows(state: dict) -> list[str]:
     snapshot = state.get("quant_scorecard")
     rows = _engine_rows(snapshot)
@@ -445,16 +579,12 @@ def _evidence_rows(state: dict) -> list[str]:
             )
         )
 
-    # §9's conflict ledger is Phase 3. Named as absent rather than defaulted to
-    # zero: the same-metric pairs are resolved post-hoc over the report tree by
-    # the verifier, and are not in run state.
-    rows.append(
-        _row(
-            "CONFLICT",
-            [],
-            stage_gap("ledger", "same-metric pairs are resolved post-hoc (design doc §9, Phase 3)"),
-        )
-    )
+    # §9's conflict ledger (Phase 3). It replaces the named gap that stood here
+    # while the ledger had no producer: the same-metric pairs are computed from
+    # the analyst reports by `report_verifier.report_ledger`, the same function
+    # the post-hoc tree pass uses. Rendering before the analysts ran still
+    # degrades to `unavailable_pre_reports` rather than to a zero.
+    rows.extend(_conflict_rows(state))
     return rows
 
 
@@ -612,6 +742,219 @@ def _falsifier_rows(state: dict, pieces: dict, cfg: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# CONDITIONAL EXPANSION (§11, Phase 4)
+# ---------------------------------------------------------------------------
+
+#: §11's budget for the expansion. **Separate from the packet's**, because the
+#: packet's bound (§7) is the decision channel's and must stay measurable and
+#: small; the expansion is the escape hatch that attaches research, and giving it
+#: the packet's bound would either blow the packet's or silently shrink it.
+CONTEXT_EXPANSION_BUDGET: dict[str, int] = {
+    "expansion_max_chars": 24_000,
+    "expansion_section_max_chars": 6_000,
+}
+
+#: The state key the expansion renders into. A SECOND key rather than a longer
+#: packet: `packet_chars` must keep measuring the bounded decision channel, or
+#: §7's bound stops meaning anything the moment a run expands.
+DECISION_EXPANSION_KEY = "decision_expansion"
+
+#: The header the expanded block opens with, so a reader can always tell which
+#: context mode produced the text in front of them.
+EXPANSION_HEADER = "EXPANDED RESEARCH CONTEXT"
+
+#: §11's agreement floor. Below this the independent reads disagree, which is
+#: the "agreement low" branch of §11's diagram.
+EXPANSION_AGREEMENT_FLOOR = 0.5
+
+
+def expansion_decision(state: dict | None, cfg: dict | None = None) -> dict:
+    """§11's trigger: **expand when the evidence is divided.**
+
+    §11 names its inputs and requires they be read as *diagnostics*, not as
+    evidence: `independent_agreement` (`independent_vote.py`),
+    `weighted_consensus` / `should_hold` (`consensus.py`), and the §9 conflict
+    count. This reads those same producers rather than deriving its own
+    agreement number, so the trigger and the consensus line the model already
+    receives cannot disagree (rule 15).
+
+    **Three ways in, and each is a measured state, not a guess:**
+
+    * ``independent_agreement`` below the floor - the independently sampled risk
+      reads disagree;
+    * ``should_hold`` on the weighted stance - a divided book, which `consensus`
+      already defines as "not a directional call";
+    * any **unresolved** same-metric contradiction in the §9 ledger - two
+      incompatible values for one metric, the sharpest form of disagreement.
+
+    A missing input contributes **nothing**. "No stance was sampled" is not
+    "everyone agreed", so it cannot count toward agreement OR toward expansion;
+    with no measurable input at all the decision is ``expand=False`` and the
+    reason says why.
+
+    §11's caution - *"expansion adds information; it must not add caution"* - is
+    structural here: this returns a decision to ATTACH DOCUMENTS. It cannot
+    change a rating, and the only pass that can (§10) is closed-vocabulary.
+    """
+    st = state or {}
+    reasons: list[str] = []
+    agreement: float | None = None
+    stance: float | None = None
+    hold: bool | None = None
+
+    try:
+        from tradingagents.agents.utils.independent_vote import independent_agreement
+
+        agreement = independent_agreement(st.get("risk_independent_stances") or {})
+    except Exception:  # noqa: BLE001 - a missing producer is not agreement
+        agreement = None
+    if agreement is not None and agreement < EXPANSION_AGREEMENT_FLOOR:
+        reasons.append(
+            f"independent reads disagree (agreement {agreement:.2f} < {EXPANSION_AGREEMENT_FLOOR:.2f})"
+        )
+
+    try:
+        from tradingagents.strategies.consensus import should_hold, weighted_consensus
+
+        stances = st.get("risk_independent_stances") or {}
+        ratings = [
+            str(p["rating"])
+            for p in stances.values()
+            if isinstance(p, dict) and p.get("rating")
+        ]
+        if ratings:
+            stance, _w = weighted_consensus([(r, 1.0) for r in ratings])
+            hold = should_hold(stance)
+            if hold:
+                reasons.append(
+                    "the weighted stance is below threshold - a divided book is not "
+                    "a directional call"
+                )
+    except Exception:  # noqa: BLE001 - advisory
+        stance, hold = None, None
+
+    unresolved = 0
+    try:
+        from tradingagents.agents.utils.report_verifier import report_ledger
+
+        ledger, _stems = report_ledger(st)
+        unresolved = sum(1 for r in ledger if r.classification == "unresolved")
+    except Exception:  # noqa: BLE001 - advisory
+        unresolved = 0
+    if unresolved:
+        reasons.append(
+            f"{unresolved} unresolved same-metric contradiction(s) in the §9 ledger"
+        )
+
+    measured = agreement is not None or stance is not None
+    return {
+        "expand": bool(reasons),
+        "reasons": reasons,
+        "independent_agreement": agreement,
+        "weighted_stance": stance,
+        "should_hold": hold,
+        "unresolved_conflicts": unresolved,
+        "measured": measured,
+        "reason": (
+            "; ".join(reasons)
+            if reasons
+            else (
+                "no division measured"
+                if measured
+                else "nothing measured the division - no independent stance sampled"
+            )
+        ),
+    }
+
+
+def _expansion_section(stem: str, text: str, limit: int) -> str:
+    """One named section of the expansion, bounded at a LINE boundary.
+
+    Truncation is at a whole line, with a visible marker, for the packet's
+    reason (§7): a paragraph cut mid-sentence reads as the report's own prose and
+    the reader cannot tell. The marker names how much was dropped so the bound is
+    auditable rather than silent.
+    """
+    body = str(text or "").rstrip()
+    if len(body) <= limit:
+        return f"## {stem}\n{body}"
+    lines = body.splitlines()
+    kept: list[str] = []
+    used = len(stem) + 4
+    for line in lines:
+        if used + len(line) + 1 > limit:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    dropped = len(lines) - len(kept)
+    return (
+        f"## {stem}\n"
+        + "\n".join(kept)
+        + f"\n[{dropped} further lines of this section not shown - expansion budget]"
+    )
+
+
+def render_expansion(state: dict | None, cfg: dict | None = None) -> str | None:
+    """§11's expansion: the analyst reports, attached and named. ``None`` if not triggered.
+
+    **Additive and bounded** (§11). The base packet is untouched and separately
+    bounded; this attaches whole named sections, each bounded, until the
+    expansion's own bound is reached. A section that does not fit is dropped
+    WHOLE rather than half-attached, and the drop is stated.
+
+    Only the four analyst reports are attached. They are the research the packet
+    summarizes, and §1.1's invariant is about the DECISION context being large by
+    accident - a triggered expansion is large on purpose, which is why it is
+    recorded as a distinct `context_mode` and measured separately.
+    """
+    st = state or {}
+    decision = expansion_decision(st, cfg)
+    if not decision["expand"]:
+        return None
+    limit = int(CONTEXT_EXPANSION_BUDGET["expansion_max_chars"])
+    section_limit = int(CONTEXT_EXPANSION_BUDGET["expansion_section_max_chars"])
+    parts = [
+        EXPANSION_HEADER,
+        "Attached because the evidence is divided: "
+        + "; ".join(decision["reasons"])
+        + ". This is INFORMATION - it is not a reason to be more cautious, and "
+        "no pass may turn it into one (design doc §10, §11).",
+        "=" * 44,
+    ]
+    used = sum(len(p) + 1 for p in parts)
+    attached = 0
+    # The stem list has ONE producer (`report_verifier.REPORT_STEMS`), so the
+    # expansion attaches the same four sections the ledger and the tree pass read.
+    from tradingagents.agents.utils.report_verifier import REPORT_STEMS
+
+    for stem in REPORT_STEMS:
+        text = st.get(f"{stem}_report")
+        if not text or not isinstance(text, str):
+            continue
+        section = _expansion_section(stem, text, section_limit)
+        if used + len(section) + 1 > limit:
+            parts.append(
+                f"## {stem}\n[section not attached - expansion budget exhausted]"
+            )
+            continue
+        parts.append(section)
+        used += len(section) + 1
+        attached += 1
+    if not attached:
+        parts.append("[no analyst report available to attach]")
+    return "\n".join(parts).rstrip()
+
+
+def expansion_facts(text: str | None) -> dict:
+    """``{context_mode, expansion_chars}`` for the run card."""
+    body = str(text or "")
+    return {
+        "context_mode": "packet+expanded" if body else "packet",
+        "expansion_chars": len(body) if body else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Assembly, budget and measurement
 # ---------------------------------------------------------------------------
 
@@ -714,6 +1057,54 @@ def packet_facts(text: str | None) -> dict:
     }
 
 
+#: The state channel carrying the ONE close series this run fetched, so the
+#: packet node renders the same series the compiled context did. §13.4:
+#: *"the close series is fetched ONCE here and handed to both the compiled
+#: context and the packet, so the packet's regime and plan rows cannot come from
+#: a second vendor read of the same series."* Declared in ``agent_states``
+#: because native LangGraph SILENTLY DROPS undeclared keys.
+DECISION_PACKET_CLOSES_KEY = "decision_packet_closes"
+
+#: The graph node that renders the packet. **Phase 3 moved the render here from
+#: the pre-graph block.** §9's ledger is a property of the analyst reports, which
+#: do not exist before the analysts run, and §9 makes the ledger part of the
+#: packet - so a packet compiled before the graph could only ever carry a named
+#: gap where its CONFLICT row belongs. One node, one render, one
+#: ``packet_chars`` measurement: the property §13.4 established is preserved, and
+#: the render now happens where its inputs exist.
+DECISION_PACKET_NODE = "Decision Packet"
+
+
+def create_decision_packet_node(cfg: dict | None):
+    """The graph node that renders the packet into state. Never raises.
+
+    It returns only ``DECISION_PACKET_KEY``, so it cannot disturb any other
+    channel. A render failure leaves the key unwritten, and
+    ``decision_packet_or_context`` then reports a wiring defect rather than
+    silently falling back to the compiled context - a broken packet must not
+    look like a working gate-off run.
+    """
+
+    def _node(state: dict) -> dict:
+        try:
+            closes = list((state or {}).get(DECISION_PACKET_CLOSES_KEY) or [])
+            out = {DECISION_PACKET_KEY: render_decision_packet(state, cfg, closes=closes)}
+            # §11 (Phase 4): the conditional expansion. A separate channel with
+            # its own bound, so `packet_chars` keeps measuring the decision
+            # channel. Gated independently: with `enable_context_expansion` off
+            # this writes nothing and `context_mode` stays "packet".
+            if bool((cfg or {}).get("enable_context_expansion")):
+                expansion = render_expansion(state, cfg)
+                if expansion:
+                    out[DECISION_EXPANSION_KEY] = expansion
+            return out
+        except Exception as exc:  # noqa: BLE001 - advisory; never break a run
+            logger.warning("decision packet render failed: %s", exc)
+            return {}
+
+    return _node
+
+
 def decision_packet_or_context(state: dict | None, cfg: dict | None = None) -> str:
     """The decision context for one consumer site: the packet, or the legacy string.
 
@@ -732,6 +1123,13 @@ def decision_packet_or_context(state: dict | None, cfg: dict | None = None) -> s
         return st.get("computed_decision_context") or ""
     packet = st.get(DECISION_PACKET_KEY)
     if packet:
+        # §11: the expansion is additive and separately bounded. Appending it
+        # here - the ONE read site - keeps a single string for the consumer and a
+        # single `packet_chars` for the card, which still measures the bounded
+        # decision channel alone.
+        expansion = st.get(DECISION_EXPANSION_KEY)
+        if expansion:
+            return f"{packet}\n\n{expansion}"
         return str(packet)
     # The gate is on but nothing rendered: a wiring defect, not a silent
     # fallback. Returning the compiled context here would make a broken packet

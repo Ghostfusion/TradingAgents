@@ -434,6 +434,39 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Phases 3-5 of `docs/design_decision_context.md` built: the conflict ledger renders, the context can expand, the
+  challenge pass is closed-vocabulary.** Three gates, all default `False`. **PHASE 3 (§9) - the render had to MOVE.** §9 promotes the
+  same-metric disagreements "into the packet", and §13.4 rendered the packet **pre-graph**; but the ledger is a property of the ANALYST
+  REPORTS (which do not exist yet) and the verifier that resolves the pairs is a POST-HOC tree pass (`batch --verify`,
+  `scripts/report_verify.py`) that never runs inside a run. So the `CONFLICT` row could only ever be a gap. Fix: a `Decision Packet` graph
+  NODE at the head of the post-analyst chain; `propagate` keeps only the handoff of the ONE close series onto the declared
+  `decision_packet_closes` channel. One node, one render, one `packet_chars`. `report_verifier.report_ledger(state)` applies the verifier's
+  own `_basis_registry` + `basis_conflicts` to the reports **in state**, so the packet's ledger and the tree's `conflicts` key agree **by
+  construction** (rule 15; a test pins it row for row). `ConflictRow` gained `section`. **Rows print most-actionable-first** - the ledger
+  is bounded at 12 and the measured distribution is 199 `basis_difference` / 63 `defect` / 22 `unresolved`, so metric-order truncation
+  would routinely hide the one row §10 can act on. **Three states, never conflated:** `unavailable_pre_reports` / a real `0 unresolved` /
+  the count line. **`conflict_count` in the card is now real** - Phase 0's `null` reason ("resolved post-hoc ... not in run state") is now
+  FALSE, so it reads the same producer, with the per-class breakdown, and stays `null` with a stated reason when the packet gate is off.
+  **PHASE 4 (§11) - a CHANNEL, not a longer packet.** `expansion_decision` reads §11's own producers (`independent_agreement`,
+  `weighted_consensus`/`should_hold`, the ledger's `unresolved`) rather than deriving its own agreement number. **A missing input is not
+  agreement**: no stance sampled counts toward neither. The separate `decision_expansion` key with its own bound (24,000 / 6,000 per
+  section) is load-bearing - appending to the packet would make `packet_chars` grow with the research and §7's bound would stop being a
+  bound. `context_mode` = `packet` / `packet+expanded` makes the expansion RATE measurable. **PHASE 5 (§10) - the model proposes, the code
+  decides.** `strategies/decision_challenge.py`; the site is `portfolio_manager._challenge_hook`, BEFORE `_guardrail_hook` (§16's order).
+  All four rules enforced by code, not prompt wording: closed vocabulary; evidence must be a packet row; downgrade-only
+  (`decision_guardrail.downgrade_toward_hold`); an UNCERTAINTY row is rejected and only `unresolved` carries ground (b). **Ground (b) is
+  material** - an `unresolved` contradiction AND reliance, checked against the decision's own PROSE; a contradiction the decision never
+  mentions is RECORDED, not acted on. `ground` is a plain `str`, NOT a `Literal`: a `Literal` makes an invented ground a pydantic
+  validation error, which the runner catches as "the call failed" - indistinguishable from an outage, losing the record of what was
+  proposed. A failure is NEVER an invalidation, in the SAME key set as an adjudicated outcome. **TWO DEFECTS, both found by running it,
+  both proven failing-first by mutation (sha256 `ae775cf4…` restored):** (1) the block scan assumed a block's rows are the INDENTED lines -
+  they are not (`conditions  1 declared` prints at column zero), so `_falsifier_rows` returned `[]` for every packet and **ground (a)
+  could never be met**; a check that always fails looks strict and is simply broken. (2) ground (c) compared figures as TEXT, so the
+  packet's `4.4` vs the decision's `4.40` fired (c) on a decision that invented nothing - the repo had already fixed this class once
+  (`_cluster_value_tokens`); now NUMERIC at the same 0.5% tolerance, and scoped to the PROSE (`confidence`/`stop_loss` are the decision's
+  own proposals, and checking them would fire (c) on almost every decision). Tests: `test_decision_packet.py` 28 -> 39,
+  `test_decision_challenge.py` 21 new; suite 5059 -> **5091 passed / 6 skipped**, 0 failures; `tradingagents/` ruff clean.
+
 - 2026-09-20 `(working tree)` - **Phase 3 UNBLOCKED: the conflict ledger gets a mechanical, provenance-carrying producer.** §9 needed each row
   to carry a `classification`; §13.5 left Phase 3 blocked because the detector's flags were dominated by its own extraction defects. **THE MOVE:
   classify from the typed basis registry, not from the prose scan.** `_basis_registry` already produced a deduped `list[BasisAssertion]` of

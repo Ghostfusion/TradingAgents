@@ -373,6 +373,58 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 
         _pm_capture: dict = {}
 
+        def _challenge_hook(result):
+            """The closed-vocabulary challenge pass (design doc §10, Phase 5).
+
+            §16's order is ``RAW DECISION -> CLOSED CHALLENGE -> DETERMINISTIC
+            GATES -> ACTION``, so this runs BEFORE `_guardrail_hook`. It may only
+            downgrade, and only on one of §10's three closed grounds, each
+            re-checked mechanically by `adjudicate_challenge` - the model
+            proposes, the module decides. Never raises; never invalidates on a
+            provider failure.
+            """
+            try:
+                from tradingagents.agents.utils.structured import bind_structured
+                from tradingagents.dataflows.config import get_config
+                from tradingagents.strategies.decision_challenge import (
+                    ChallengeVerdict,
+                    run_challenge,
+                )
+                from tradingagents.strategies.decision_guardrail import (
+                    downgrade_toward_hold,
+                )
+
+                cfg = get_config()
+                if not cfg.get("enable_decision_challenge"):
+                    return
+                outcome = run_challenge(
+                    bind_structured(llm, ChallengeVerdict, "challenge"),
+                    packet=computed_context,
+                    decision_text=render_pm_decision(result),
+                    # §10's checks run against what the decision ASSERTS, not
+                    # against its own parameters: `confidence`, `position_size`
+                    # and `stop_loss` are proposals, and ground (c) against them
+                    # would fire on almost every decision.
+                    decision_prose=(
+                        f"{result.executive_summary}\n{result.investment_thesis}"
+                    ),
+                    cfg=cfg,
+                )
+                _pm_capture["challenge"] = outcome
+                if not outcome.get("invalidated"):
+                    return
+                target = downgrade_toward_hold(result.rating.value)
+                if target is None or target == result.rating.value:
+                    return
+                result.rating = type(result.rating)(target)
+                result.challenge_ground = outcome.get("ground")
+                result.challenge_reason = str(outcome.get("reason") or "")[:400]
+            except Exception as exc:  # noqa: BLE001 - advisory; never breaks a run
+                _pm_capture["challenge"] = {
+                    "invalidated": False,
+                    "discarded": f"challenge hook failed: {type(exc).__name__}",
+                }
+
         def _result_hook(result):
             # Phase 0 (docs/design_decision_context.md §12.4): dump the model's
             # structured emit BEFORE the guardrail touches it. _guardrail_hook
@@ -385,6 +437,9 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
                 _pm_capture["llm_output"] = result.model_dump(mode="json")
             except Exception:  # noqa: BLE001 - telemetry is advisory
                 _pm_capture["llm_output"] = None
+            # §16: the closed challenge sits between the raw decision and the
+            # deterministic gates.
+            _challenge_hook(result)
             _guardrail_hook(result)
             try:
                 _pm_capture["obj"] = result.model_dump(mode="json")
@@ -422,6 +477,10 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             # Phase 0: the PM model's structured emit before any deterministic
             # transformation, plus this stage's prompt size.
             "pm_llm_output": _pm_capture.get("llm_output"),
+            # Phase 5 (§10): what the challenge pass proposed and what the
+            # mechanical adjudication did with it. Recorded even when it did not
+            # invalidate, so a reader can see the pass ran and why nothing landed.
+            "pm_challenge": _pm_capture.get("challenge"),
             **record_stage("pm", prompt),
         }
 

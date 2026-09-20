@@ -395,11 +395,17 @@ def test_packet_facts_measures_the_text_it_is_given():
 
 
 def test_the_declared_budget_keys_are_the_ones_the_doc_specifies():
-    """§7's budget is a contract, so a silent edit to it is a contract change."""
+    """§7's budget is a contract, so a silent edit to it is a contract change.
+
+    `conflict_row_max_chars` (Phase 3) bounds one ledger row the same way
+    `engine_row_max_chars` bounds the engines row: a declared bound that does
+    nothing is the defect class `engine_row_max_chars` itself was caught by.
+    """
     assert DECISION_PACKET_BUDGET == {
         "packet_max_chars": 12_000,
         "engine_row_max_chars": 160,
         "conflict_max_rows": 12,
+        "conflict_row_max_chars": 200,
         "falsifier_max_rows": 8,
     }
 
@@ -494,3 +500,260 @@ def test_the_packet_state_key_is_declared_in_agent_state():
     from tradingagents.agents.utils.agent_states import AgentState
 
     assert DECISION_PACKET_KEY in AgentState.__annotations__
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 (§9) - the conflict ledger
+# ---------------------------------------------------------------------------
+
+#: A report that asserts ONE metric at two values where one side states its
+#: basis and the other does not - §9's `unresolved`, the only class §10 may act
+#: on, and therefore the row the ledger exists to surface.
+_UNRESOLVED_REPORT = (
+    "## Ratios\n"
+    "get_ratios reports EV/EBIT 5.50 on the ratios table (ttm:ttm basis).\n"
+    "## Analyst verdict\n"
+    "EV/EBIT of 4.40 implies the name is cheap.\n"
+)
+
+
+def test_the_ledger_renders_the_in_run_reports():
+    """§9's CONFLICT row carries the metric, both values, the class and the section."""
+    text = render_decision_packet(
+        _state(fundamentals_report=_UNRESOLVED_REPORT), {}, closes=[]
+    )
+    assert "unavailable_pre_ledger" not in text
+    assert "unavailable_pre_reports" not in text
+    assert "[unresolved]" in text
+    assert "ev/ebit" in text
+    assert "5.5" in text and "4.4" in text
+    assert "section: fundamentals" in text
+    assert "1 unresolved" in text
+
+
+def test_no_reports_yet_is_a_named_gap_and_never_a_zero():
+    """A render before the analysts ran must not claim zero disagreements.
+
+    `0 unresolved` reads as a measurement nobody made - the D-11 failure. The
+    packet distinguishes "no report in state" from "reports read, nothing
+    disagreed", which are different facts.
+    """
+    text = render_decision_packet(_state(), {}, closes=[])
+    assert "unavailable_pre_reports" in text
+    assert "0 unresolved" not in text
+
+
+def test_reports_that_agree_render_a_real_zero():
+    """The other half of the pair: a measured zero IS printed as a zero."""
+    text = render_decision_packet(
+        _state(fundamentals_report="## Ratios\nget_ratios reports EV/EBIT 5.50.\n"),
+        {},
+        closes=[],
+    )
+    assert "0 unresolved" in text
+    assert "no same-metric disagreement found" in text
+
+
+def test_the_ledger_prints_the_actionable_class_first_and_truncates_its_tail():
+    """A bounded ledger must not hide the one row the model can act on.
+
+    The measured distribution is dominated by `basis_difference` (199 of 284 rows
+    over 53 trees), so truncating in metric order would routinely drop the single
+    `unresolved` row behind twelve inert ones. The unresolved row survives.
+    """
+    # Thirteen real registry metrics, each a basis_difference (two producers),
+    # plus one unresolved pair. `conflict_max_rows` is 12, so a tail must drop.
+    pairs = [
+        ("market cap", "market cap $87.8B", "market cap 91.4"),
+        ("roe", "ROE 53.92%", "ROE 59.77%"),
+        ("debt/equity", "debt/equity 0.41", "debt/equity 0.63"),
+        ("book value", "book value 12.10", "book value 14.80"),
+        ("dividend yield", "dividend yield 1.10%", "dividend yield 2.40%"),
+        ("eps ttm", "EPS TTM 7.04", "EPS TTM 8.11"),
+        ("diluted eps", "diluted EPS 3.10", "diluted EPS 4.55"),
+        ("eps actual", "EPS actual 7.04", "EPS actual 7.90"),
+        ("earnings power value", "earnings power value 14.20", "earnings power value 19.60"),
+        ("insider net", "insider net $1.2M", "insider net $9.4M"),
+        ("200-day sma", "200-day SMA 101.20", "200-day SMA 118.60"),
+        ("ema20", "EMA 20 trail 54.66", "EMA 20 trail 61.90"),
+        ("dcf fair value", "DCF fair value 25.92", "DCF fair value 34.59"),
+    ]
+    lines: list[str] = []
+    for _, a, b in pairs:
+        lines.append(f"get_ratios reports {a}.")
+        lines.append(f"get_fundamentals reports {b}.")
+    lines.append("get_ratios reports EV/EBIT 5.50 on the ratios table (ttm:ttm basis).")
+    lines.append("EV/EBIT of 4.40 implies the name is cheap.")
+    text = render_decision_packet(
+        _state(fundamentals_report="\n".join(lines)), {}, closes=[]
+    )
+    assert "1 unresolved" in text
+    assert "[unresolved]" in text
+    assert "ev/ebit" in text
+    assert "more disagreements not shown" in text
+
+
+def test_the_in_run_ledger_and_the_tree_pass_are_one_producer():
+    """Rule 15: the same functions produce both, so the two cannot disagree.
+
+    `verify_report_dir` runs post-hoc over the saved tree; the packet's ledger is
+    built in-run from the same report text. They must agree row for row, or a
+    reader would see two different conflict lists for one run.
+    """
+    from tradingagents.agents.utils.report_verifier import (
+        _basis_registry,
+        basis_conflicts,
+        report_ledger,
+    )
+
+    state = _state(fundamentals_report=_UNRESOLVED_REPORT)
+    in_run, stems = report_ledger(state)
+    tree = basis_conflicts(_basis_registry(_UNRESOLVED_REPORT, set()), section="fundamentals")
+    assert stems == 1
+    assert [(r.metric, r.classification, r.section) for r in in_run] == [
+        (r.metric, r.classification, r.section) for r in tree
+    ]
+
+
+def test_the_card_counts_the_ledger_only_when_the_packet_is_on():
+    """The count is real when the ledger ran, and null-with-a-reason when it did not.
+
+    `0` for a gate-off run would read as "no conflicts were found" when the truth
+    is "nothing counted them".
+    """
+    from tradingagents.reporting import _run_card_evidence_counts
+
+    state = _state(fundamentals_report=_UNRESOLVED_REPORT)
+    on = _run_card_evidence_counts(state, {"enable_decision_packet": True})
+    assert on["conflict_count"] == 1
+    assert on["conflict_counts"]["unresolved"] == 1
+    assert on["conflict_reports_read"] == 1
+
+    off = _run_card_evidence_counts(state, {"enable_decision_packet": False})
+    assert off["conflict_count"] is None
+    assert "enable_decision_packet" in off["conflict_count_reason"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (§11) - conditional expansion
+# ---------------------------------------------------------------------------
+
+
+def _divided_state(**over):
+    """A state whose independent reads disagree - §11's "agreement low" branch."""
+    state = _state(
+        risk_independent_stances={
+            "aggressive": {"rating": "Buy"},
+            "conservative": {"rating": "Sell"},
+            "neutral": {"rating": "Hold"},
+        },
+    )
+    state.setdefault("fundamentals_report", _UNRESOLVED_REPORT)
+    state.update(over)
+    return state
+
+
+def test_a_divided_book_triggers_expansion_and_a_missing_input_does_not():
+    """§11's trigger, and the rule that absence is not agreement."""
+    from tradingagents.strategies.decision_packet import expansion_decision
+
+    divided = expansion_decision(_divided_state(), {})
+    assert divided["expand"] is True
+    assert divided["independent_agreement"] == 0.0
+    assert divided["should_hold"] is True
+    assert divided["unresolved_conflicts"] == 1
+
+    # No stance sampled and nothing conflicting: nothing measured the division,
+    # so it cannot count toward agreement OR toward expansion.
+    empty = expansion_decision(
+        _state(fundamentals_report="## Ratios\nget_ratios reports EV/EBIT 5.50.\n"), {}
+    )
+    assert empty["expand"] is False
+    assert empty["measured"] is False
+    assert "no independent stance sampled" in empty["reason"]
+
+
+def test_an_agreed_book_does_not_expand():
+    """The other branch of §11's diagram, so the trigger is not always-on."""
+    from tradingagents.strategies.decision_packet import expansion_decision
+
+    agreed = expansion_decision(
+        _state(
+            risk_independent_stances={
+                "aggressive": {"rating": "Buy"},
+                "conservative": {"rating": "Buy"},
+                "neutral": {"rating": "Buy"},
+            },
+            fundamentals_report="## Ratios\nget_ratios reports EV/EBIT 5.50.\n",
+        ),
+        {},
+    )
+    assert agreed["expand"] is False
+    assert agreed["independent_agreement"] == 1.0
+
+
+def test_expansion_attaches_named_sections_and_is_bounded():
+    """§11: additive and bounded - whole named sections, never a half-attached one."""
+    from tradingagents.strategies.decision_packet import (
+        CONTEXT_EXPANSION_BUDGET,
+        EXPANSION_HEADER,
+        render_expansion,
+    )
+
+    long_report = "\n".join(f"line {i} of the report" for i in range(4000))
+    text = render_expansion(_divided_state(fundamentals_report=long_report), {})
+    assert text.startswith(EXPANSION_HEADER)
+    assert "## fundamentals" in text
+    assert "expansion budget" in text
+    assert len(text) <= CONTEXT_EXPANSION_BUDGET["expansion_max_chars"]
+
+
+def test_the_expansion_is_a_separate_channel_so_packet_chars_still_measures_the_packet():
+    """§7's bound must keep meaning the DECISION channel, not the expansion.
+
+    Appending the research to the packet's own string would make `packet_chars`
+    grow with the research, and §7's bound would stop being a bound.
+    """
+    from tradingagents.strategies.decision_packet import (
+        DECISION_EXPANSION_KEY,
+        create_decision_packet_node,
+    )
+
+    state = _divided_state()
+    cfg = {"enable_decision_packet": True, "enable_context_expansion": True}
+    out = create_decision_packet_node(cfg)(state)
+    assert DECISION_EXPANSION_KEY in out
+    facts = packet_facts(out[DECISION_PACKET_KEY])
+    assert facts["packet_chars"] == len(out[DECISION_PACKET_KEY])
+    assert facts["packet_chars"] <= PACKET_MAX_CHARS
+    # the consumer still reads ONE string
+    context = decision_packet_or_context({**state, **out}, cfg)
+    assert context.startswith(out[DECISION_PACKET_KEY])
+    assert out[DECISION_EXPANSION_KEY] in context
+
+
+def test_context_mode_is_packet_when_the_expansion_gate_is_off():
+    """§11 records the mode, so the expansion rate is measurable."""
+    from tradingagents.reporting import _run_card_decision_context
+    from tradingagents.strategies.decision_packet import create_decision_packet_node
+
+    state = _divided_state()
+    packet = create_decision_packet_node({"enable_decision_packet": True})(state)[
+        DECISION_PACKET_KEY
+    ]
+    off = _run_card_decision_context(
+        {**state, DECISION_PACKET_KEY: packet},
+        {"enable_decision_packet": True, "enable_context_expansion": False},
+    )
+    assert off["context"]["context_mode"] == "packet"
+    assert "expansion_chars" not in off
+
+    on_state = create_decision_packet_node(
+        {"enable_decision_packet": True, "enable_context_expansion": True}
+    )(state)
+    on = _run_card_decision_context(
+        {**state, **on_state},
+        {"enable_decision_packet": True, "enable_context_expansion": True},
+    )
+    assert on["context"]["context_mode"] == "packet+expanded"
+    assert on["expansion_chars"] > 0

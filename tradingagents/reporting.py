@@ -824,7 +824,7 @@ def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict 
     return p
 
 
-def _run_card_evidence_counts(final_state: dict) -> dict:
+def _run_card_evidence_counts(final_state: dict, cfg: dict | None = None) -> dict:
     """Directional evidence counts for the Phase 0 telemetry block.
 
     The three directional counts come from ``prompt_metrics.stance_direction_counts``
@@ -870,11 +870,39 @@ def _run_card_evidence_counts(final_state: dict) -> dict:
     else:
         out["uncertainty_count_reason"] = "every enabled engine measured; no gap declared"
     out["uncertainty_gaps"] = unc["gaps"] if snapshot is not None else None
-    # The conflict count needs the same-metric pairs the verifier resolves; those
-    # are not in run state (the verifier runs post-hoc over the tree). Named as
-    # absent rather than guessed. Phase 3 owns the ledger (§9).
-    out["conflict_count"] = None
-    out["conflict_count_reason"] = "resolved post-hoc by the report verifier, not in run state"
+    # The conflict count is now a real in-run measurement (Phase 3, §9). The
+    # ledger is compiled with the packet, so it exists exactly when the packet
+    # gate is on - and `None` with a reason otherwise, because "the packet was
+    # off" is not "no conflicts were found". Before Phase 3 this was `None`
+    # unconditionally: the same-metric pairs were resolved post-hoc over the
+    # report tree and were genuinely not in run state.
+    packet_on = bool((cfg or {}).get("enable_decision_packet"))
+    if packet_on:
+        try:
+            from tradingagents.agents.utils.report_verifier import report_ledger
+
+            ledger, stems_read = report_ledger(state)
+            counts_by_class = {"unresolved": 0, "defect": 0, "basis_difference": 0}
+            for row in ledger:
+                counts_by_class[row.classification] = (
+                    counts_by_class.get(row.classification, 0) + 1
+                )
+            out["conflict_count"] = len(ledger)
+            out["conflict_counts"] = counts_by_class
+            out["conflict_reports_read"] = stems_read
+            out["conflict_count_reason"] = (
+                "in-run ledger over the analyst reports (design doc §9, Phase 3); "
+                "only `unresolved` may participate in a challenge invalidation"
+            )
+        except Exception as exc:  # noqa: BLE001 - telemetry is advisory
+            out["conflict_count"] = None
+            out["conflict_count_reason"] = f"ledger unavailable: {type(exc).__name__}"
+    else:
+        out["conflict_count"] = None
+        out["conflict_count_reason"] = (
+            "the §9 ledger is compiled with the Decision Packet; with "
+            "`enable_decision_packet` off nothing counted the pairs"
+        )
     out["counted_sources"] = counts["sources"]
     out["unreadable_stances"] = counts["unreadable"]
     return out
@@ -894,6 +922,7 @@ def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
             decision_telemetry_block,
         )
         from tradingagents.strategies.decision_packet import (
+            DECISION_EXPANSION_KEY,
             DECISION_PACKET_KEY,
             packet_facts,
         )
@@ -910,10 +939,18 @@ def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
         # prompt is unchanged".
         packet_on = bool((cfg or {}).get("enable_decision_packet"))
         if packet_on:
+            from tradingagents.strategies.decision_packet import expansion_facts
+
             facts = packet_facts((final_state or {}).get(DECISION_PACKET_KEY))
-            context_mode = "packet"
+            # §11 (Phase 4): the expansion is recorded, so the expansion RATE is
+            # measurable - §12 makes that a precondition for any later
+            # experiment. `context_mode` is the vocabulary §11 defines; with the
+            # expansion gate off, or the trigger unfired, it stays "packet".
+            exp = expansion_facts((final_state or {}).get(DECISION_EXPANSION_KEY))
+            context_mode = exp["context_mode"]
         else:
             facts = None
+            exp = None
             context_mode = None
         block = decision_telemetry_block(
             cfg,
@@ -921,11 +958,19 @@ def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
             context_mode=context_mode,
             packet_version=facts["packet_version"] if facts else None,
             packet_truncated=facts["packet_truncated"] if facts else None,
-            evidence_counts=_run_card_evidence_counts(final_state),
+            evidence_counts=_run_card_evidence_counts(final_state, cfg),
         )
         block["prompt_metrics"] = dict((final_state or {}).get(PROMPT_METRICS_KEY) or {})
         if facts:
             block["packet_chars"] = facts["packet_chars"]
+        if exp and exp["expansion_chars"]:
+            block["expansion_chars"] = exp["expansion_chars"]
+        # Phase 5 (§10): the challenge pass's outcome, recorded whenever it ran -
+        # including a discard, so a reader can tell "the pass ran and found
+        # nothing" from "the pass did not run". Absent when the gate is off.
+        challenge = (final_state or {}).get("pm_challenge")
+        if isinstance(challenge, dict):
+            block["challenge"] = challenge
         block["recorded"] = True
         return block
     except Exception as exc:  # noqa: BLE001 - telemetry never breaks the card

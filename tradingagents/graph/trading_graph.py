@@ -696,23 +696,22 @@ class TradingAgentsGraph:
         init_agent_state["computed_decision_context"] = self._compiled_decision_context(
             company_name, init_agent_state, closes=closes
         )
-        # Phase 2 (§6-§8): the bounded Decision Packet, rendered ONCE here so
-        # there is one producer of the string and one `packet_chars`
-        # measurement. Gated: with `enable_decision_packet` off this block writes
-        # NOTHING, so the state, the prompts and run_card.json are byte-identical
-        # to the run before the packet existed.
+        # Phase 3 (§9): the Decision Packet is now rendered by the `Decision
+        # Packet` graph NODE, just after the analysts - because §9's conflict
+        # ledger is a property of the analyst reports, which do not exist before
+        # the graph runs. What happens here is only the handoff: the ONE close
+        # series this run fetched is placed on the declared channel the node
+        # reads, so the packet's regime and plan rows render from the same series
+        # the compiled context used (never a second vendor read). Gated: with
+        # `enable_decision_packet` off this block writes NOTHING, so the state,
+        # the prompts and run_card.json are byte-identical to the run before the
+        # packet existed.
         if self.config.get("enable_decision_packet"):
-            try:
-                from tradingagents.strategies.decision_packet import (
-                    DECISION_PACKET_KEY,
-                    render_decision_packet,
-                )
+            from tradingagents.strategies.decision_packet import (
+                DECISION_PACKET_CLOSES_KEY,
+            )
 
-                init_agent_state[DECISION_PACKET_KEY] = render_decision_packet(
-                    init_agent_state, self.config, closes=closes
-                )
-            except Exception as exc:  # noqa: BLE001 - advisory; never break a run
-                logger.warning("decision packet skipped: %s", exc)
+            init_agent_state[DECISION_PACKET_CLOSES_KEY] = list(closes)
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date+graph-shape+run resumes; a

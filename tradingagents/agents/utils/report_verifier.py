@@ -223,6 +223,15 @@ class ConflictRow(BaseModel):
     sides: list[ConflictSide]
     classification: Literal["unresolved", "basis_difference", "defect"]
     reason: str
+    section: str = Field(
+        default="",
+        description=(
+            "The analyst section this disagreement was found in (the report "
+            "stem: `fundamentals`/`market`/`news`/`sentiment`). §9's ledger "
+            "names where each side came from; the stem is the section the "
+            "registry can prove, and it is the one the model can go and read."
+        ),
+    )
 
 
 #: The unit classes `_basis_of` falls back to when a value states no period.
@@ -311,7 +320,7 @@ def classify_conflict(metric: str, sides: list[ConflictSide]) -> tuple[str, str]
     )
 
 
-def basis_conflicts(registry: list[BasisAssertion]) -> list[ConflictRow]:
+def basis_conflicts(registry: list[BasisAssertion], section: str = "") -> list[ConflictRow]:
     """§9's ledger rows, from the typed basis registry - **the one producer**.
 
     The registry is already the machine-readable half of the report's figures
@@ -324,6 +333,11 @@ def basis_conflicts(registry: list[BasisAssertion]) -> list[ConflictRow]:
     A metric is a row only when its values differ materially at the metric's own
     tolerance - the same `_INTERNAL_CONFLICT_METRICS` table, so the two cannot
     disagree about what "materially" means.
+
+    ``section`` is the analyst report this registry came from. It is applied to
+    every row rather than to the sides, because a same-metric disagreement is
+    found *within one document*: `_basis_registry` reads one report's prose, so
+    two sides of a row are always two places in that same section.
     """
     by_metric: dict[str, list[ConflictSide]] = {}
     for b in registry:
@@ -354,9 +368,47 @@ def basis_conflicts(registry: list[BasisAssertion]) -> list[ConflictRow]:
                 sides=sides,
                 classification=classification,  # type: ignore[arg-type]
                 reason=reason,
+                section=section,
             )
         )
     return rows
+
+
+def report_ledger(state: dict | None) -> tuple[list[ConflictRow], int]:
+    """§9's ledger over the IN-RUN reports - **the same producer** as the tree pass.
+
+    `verify_report_dir` runs post-hoc, after the run has ended and the four
+    analyst reports are on disk. §9's ledger must reach the DECISION, which is
+    made during the run, so the same two functions (`_basis_registry` +
+    `basis_conflicts`) are applied to the same four documents while they are
+    still in state. That is one producer applied at two points, not two
+    producers: the registry is built by `_basis_registry` in both, so the in-run
+    ledger and the tree's `conflicts` key agree by construction (rule 15).
+
+    Returns ``(rows, stems_read)``. ``stems_read`` is carried separately because
+    "no reports were read" and "reports were read and agreed" are different
+    facts, and a consumer that conflated them would print `0 conflicts` for a run
+    that had not produced a report yet - the default-that-reads-as-a-measurement
+    failure (D-11).
+
+    A stem that is absent, blank, or a replaced-generation note contributes
+    nothing: it has no figures to assert, and a row invented from it would be the
+    opposite of a named gap.
+    """
+    st = state or {}
+    evidence = st.get("tool_evidence") or {}
+    rows: list[ConflictRow] = []
+    stems_read = 0
+    for stem in REPORT_STEMS:
+        text = st.get(f"{stem}_report")
+        if not text or not isinstance(text, str):
+            continue
+        if _unusable_note(text):
+            continue
+        stems_read += 1
+        registry = _basis_registry(text, _evidence_decimals(evidence, stem))
+        rows.extend(basis_conflicts(registry, section=stem))
+    return rows, stems_read
 
 
 class ReportVerification(BaseModel):
@@ -1491,7 +1543,7 @@ def _table_legs(cell: str) -> list[str]:
     LULU 2026-09-15. When no spaced separator exists the cell is cut on the bare
     ``/`` (``bear/base/bull``), which is the other shape these rows use.
     """
-    parts = [p for p in re.split(r"\s+/\s+", cell)]
+    parts = list(re.split(r"\s+/\s+", cell))
     if len(parts) < 2:
         parts = cell.split("/")
     return [p.strip() for p in parts]

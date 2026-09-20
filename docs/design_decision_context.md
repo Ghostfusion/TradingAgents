@@ -675,6 +675,57 @@ cannot be expected to catch — `AMZN 'current ratio' 249.26` (a price), `NVDA '
 value' 14`, `NVDA 'rsi' 4.14e37` (masked digits). None of these is hidden: each is a row in the
 payload with its sides printed, so the next pass has somewhere to start.
 
+**§9 AS BUILT (Phase 3), and the render had to move.** The ledger renders as the packet's
+`CONFLICT` row — a count line and up to `conflict_max_rows` detail rows, each naming the metric,
+both values, the class, the producers, the bases and the section:
+
+```
+CONFLICT  1 unresolved  3 defect  9 basis_difference of 13 same-metric disagreements across 1 reports
+  ev/ebit  5.5 vs 4.4  [unresolved]  producers: get_ratios  bases: ratio vs ttm:ttm  section: fundamentals
+```
+
+**Three states are distinguished, never conflated** — the discipline D-11 established. *No report
+in state yet* is `unavailable_pre_reports`; *reports read, nothing disagreed* is a real `0
+unresolved`; *disagreements found* is the count line and the rows. A `0` printed for a run whose
+analysts had not yet produced a report would be a measurement nobody made.
+
+**The rows print most-actionable-first, and that is a correction.** §9 says nothing is
+suppressed, so every class is printed — but the ledger is bounded, and the measured distribution
+is 199 `basis_difference` to 63 `defect` to 22 `unresolved`. Truncating in metric order would
+routinely drop the single `unresolved` row behind twelve the model cannot act on, so
+`CONFLICT_CLASS_ORDER` puts `unresolved` first, then `defect`, then `basis_difference`, and the
+tail is what truncates. The count line states the full distribution regardless.
+
+**FINDING — §9's ledger could not be a PRE-GRAPH packet row, so the packet's render moved.** §9
+promotes the conflicts "into the packet", and §13.4 rendered the packet once **before the graph**.
+But the ledger is a property of the *analyst reports*, which do not exist before the analysts run,
+and the verifier is a **post-hoc tree pass** (`batch --verify`, `scripts/report_verify.py`) that
+never runs during a run. So at the pre-graph compile point the `CONFLICT` row could only ever be
+a named gap — which is exactly what it was.
+
+The fix is a move, not a second renderer: the packet is now rendered by a `Decision Packet` graph
+**node** placed at the head of the post-analyst chain, where the reports exist. One node, one
+render, one `packet_chars` measurement — the property §13.4 established is preserved, and the
+render now happens where its inputs exist. The pre-graph block keeps only the handoff: the ONE
+close series this run fetched goes onto the declared `decision_packet_closes` channel, so the
+packet's regime and plan rows still render from the same series the compiled context used rather
+than triggering a second vendor read.
+
+**The in-run ledger and the tree pass are ONE producer** (rule 15). `report_ledger(state)` applies
+the verifier's own `_basis_registry` + `basis_conflicts` to the four reports **in state**;
+`verify_report_dir` applies the same two functions to the same four documents on disk. Same
+functions, same documents, so the packet's ledger and the tree's `conflicts` key agree by
+construction — a test pins that agreement row for row. The `ConflictRow` gained a `section` field
+(the report stem) because §9 wants each row to name where its sides came from, and the stem is the
+section the registry can actually prove.
+
+**`conflict_count` in the run card is now a real measurement.** Phase 0 recorded it as `null` with
+the reason *"resolved post-hoc by the report verifier, not in run state"*. That reason is now
+false, so the card takes the count from the same `report_ledger`, with the per-class breakdown and
+the number of reports read. With the packet gate off it stays `null`, and the reason says so:
+*"the §9 ledger is compiled with the Decision Packet; with `enable_decision_packet` off nothing
+counted the pairs."* "The packet was off" is not "no conflicts were found".
+
 ---
 
 ## 10. Design: the challenge pass
@@ -744,6 +795,72 @@ failure mode is documented (§2.3): conformity, consensus collapse, and a persua
 dragging the group. A closed-vocabulary pass with a materiality test has no room for that - it
 either finds a mechanical breach or it does not.
 
+**§10 AS BUILT (Phase 5), and the model proposes while the code decides.**
+`tradingagents/strategies/decision_challenge.py` owns the pass;
+`portfolio_manager._challenge_hook` is the site, and it sits **before** `_guardrail_hook`
+because §16's order is `RAW DECISION → CLOSED CHALLENGE → DETERMINISTIC GATES → ACTION`.
+
+**Every one of §10's four rules is enforced by code, not by prompt wording.** The prompt states
+the grounds and the non-grounds, but nothing in it is load-bearing:
+
+| §10 rule | enforced by |
+|---|---|
+| 1. Closed vocabulary | `adjudicate_challenge` discards a `ground` outside `(a)`/`(b)`/`(c)` |
+| 2. Evidence must be a packet row | `_row_in_packet` — whitespace-normalised, ≥4 chars |
+| 3. Downgrade only | `decision_guardrail.downgrade_toward_hold` is the sole mutation |
+| 4. No new caution rationale | an `UNCERTAINTY` row is rejected; only `unresolved` carries (b) |
+
+**`ground` is a plain `str`, not a `Literal`, and that is deliberate.** A `Literal` makes an
+invented ground a **pydantic validation error**, which `run_challenge` catches as *"the call
+failed"* — indistinguishable from an outage, and the record of *what the model proposed* is lost.
+As a `str`, the invented ground reaches the adjudicator, which discards it and names it. The
+vocabulary is steered by the field description and **enforced where the discard is auditable**.
+
+**The materiality test is where the pass is checked rather than trusted.** Ground (b) requires all
+three legs: the metric has an `unresolved` contradiction in the packet's own ledger rows, **and**
+the decision relied on it. The second is checked against the decision's own **prose** — the
+executive summary and the investment thesis, the only in-run evidence of reliance. A contradiction
+the decision never mentions is **recorded, not acted on** (§10's *"Otherwise: contradiction exists
+→ record the contradiction → do NOT invalidate"*), and `recorded_contradictions` carries it.
+
+**Ground (c) is checked, not trusted, and the check must be NUMERIC.** The first version compared
+figures as text, so the packet's `4.4` and the decision's `4.40` read as different numbers and (c)
+fired on a decision that had invented nothing — found by running it, not by reading it. The repo
+had already fixed this exact class once (`report_verifier._cluster_value_tokens`, LRCX
+2026-09-14), so the check now parses both sides and compares within the same 0.5% relative
+tolerance the verifier's anchor uses.
+
+**Ground (c) is also scoped to the prose.** `confidence`, `position_size` and `stop_loss` are the
+decision's own proposals, not assertions about the world; checking them would make (c) fire on
+almost every decision — a fresh route to HOLD arriving through the check rather than through the
+model.
+
+**A failure is never an invalidation.** A provider error, an unparsable verdict, a missing packet
+or a missing LLM all return a non-invalidating outcome with a named reason. Treating a failure as
+an invalidation would let an outage silently downgrade every decision, which is the conservatism
+this whole document exists to remove arriving through the back door.
+
+**`downgrade_toward_hold` clamps from BOTH sides, and that is where it differs from
+`_clamp_toward_hold`.** The guardrail's helper serves the risk-cap rule, whose job is to stop a
+BULLISH call being made against high-severity risk without inventing a bearish one, so it leaves
+`Sell`/`Underweight` alone. A challenge that has MET one of the three grounds has found the
+decision's own reasoning mechanically compromised, and that reduces conviction on either side — a
+`Sell` resting on a figure the packet does not carry is no better founded than a `Buy`. Clamping
+to Hold never increases a rating's distance from neutral, so rule 3 still holds.
+
+**The two checks that were broken and are now proven failing-first by mutation.** The block scan
+first assumed a packet block's rows are the INDENTED lines. They are not — a row prints at column
+zero (`conditions  1 declared`) and only a row's sub-rows are indented — so it returned `[]` for
+every packet and ground (a) could never be met. *A check that always fails looks strict and is
+simply broken.* Both defects were reverted by mutation and the targeted tests failed; the file was
+restored byte-identically (sha256-verified).
+
+**Recorded on the decision.** A downgrade writes `challenge_ground` and `challenge_reason` onto
+`PortfolioDecision` and renders a `**Challenge**: downgraded on closed ground (b)` footer, because
+a lowered rating with no stated ground IS the new caution rationale. The outcome — including a
+discard — lands in `state["pm_challenge"]` and in the card's `decision_context.challenge`, so a
+reader can tell *"the pass ran and found nothing"* from *"the pass did not run"*.
+
 ---
 
 ## 11. Design: conditional expansion
@@ -767,6 +884,41 @@ sections, and the run records `context_mode: "packet" | "packet+expanded"` in
 call"*. Conditional expansion must not become a second, weaker route to the same
 conclusion. Expansion adds *information*; it must not add *caution*. The distinction is
 enforced by keeping the challenge pass (§10) closed-vocabulary.
+
+**§11 AS BUILT (Phase 4): three ways in, and a missing input is not agreement.**
+`expansion_decision(state, cfg)` reads §11's own named producers rather than deriving its own
+agreement number — `independent_vote.independent_agreement`, `consensus.weighted_consensus` /
+`should_hold`, and the §9 ledger's `unresolved` count — so the trigger and the consensus line the
+model already receives cannot disagree (rule 15). It expands when **any** of:
+
+* `independent_agreement` is below `EXPANSION_AGREEMENT_FLOOR` (0.50) — the independently sampled
+  risk reads disagree;
+* `should_hold` is true on the weighted stance — `consensus` already defines a divided book as
+  *"not a directional call"*;
+* the ledger holds an `unresolved` same-metric contradiction — two incompatible values for one
+  metric, the sharpest form of disagreement.
+
+**A missing input contributes nothing.** "No stance was sampled" is not "everyone agreed", so it
+counts toward neither agreement nor expansion; with no measurable input at all the decision is
+`expand=False` and the reason says *"nothing measured the division"*.
+
+**The expansion is a SEPARATE channel with its own bound, and that is load-bearing.** Appending
+the research to the packet's own string would make `packet_chars` grow with the research, and
+§7's bound would stop being a bound the moment a run expanded. So `decision_expansion` is its own
+state key, bounded by `CONTEXT_EXPANSION_BUDGET` (24,000 chars total, 6,000 per section);
+`decision_packet_or_context` — the ONE read site — concatenates the two, so the consumer still
+receives a single string while the card measures the bounded decision channel alone. Truncation is
+at a whole line with a visible marker, and a section that does not fit is dropped WHOLE with the
+drop stated.
+
+**`context_mode` is §11's vocabulary, and it is recorded.** `packet` or `packet+expanded`, taken
+from whether the expansion channel exists — with the expansion gate off, or the trigger unfired,
+it stays `packet` and `expansion_chars` is absent. That makes the expansion RATE measurable, which
+§12 names as a precondition for any later experiment.
+
+**§11's caution is structural here.** `expansion_decision` returns a decision to ATTACH
+DOCUMENTS. It cannot change a rating, and the only pass that can (§10) is closed-vocabulary — so
+the expansion cannot become the second, weaker route to the same conclusion §11 warns about.
 
 ---
 
@@ -1028,9 +1180,9 @@ pass is LAST, not first.
 | **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. **BUILT** (see §13.1). | the §3 numbers become a per-run series |
 | **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. **BUILT** (see §13.2). | the §12.2 distribution + grounding per arm, confounds stated |
 | **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1. **BUILT** (see §13.4). | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
-| **3** | Conflict ledger (§9), after the open verifier pairs are classified. **UNBLOCKED** - the pairs are triaged (§13.5) and the mechanical classification is built (§13.6). | conflicts named with both sections + a mechanical classification |
-| **4** | Conditional expansion (§11) | `context_mode` recorded; expansion rate measurable |
-| **5** | Closed-vocabulary challenge pass (§10) | cannot raise caution from an uncertainty entry; materiality test enforced |
+| **3** | Conflict ledger (§9), after the open verifier pairs are classified. **BUILT** - the pairs are triaged (§13.5), the mechanical classification is built (§13.6), and the ledger renders (§13.7). | conflicts named with both sections + a mechanical classification |
+| **4** | Conditional expansion (§11). **BUILT** (see §13.8). | `context_mode` recorded; expansion rate measurable |
+| **5** | Closed-vocabulary challenge pass (§10). **BUILT** (see §13.9). | cannot raise caution from an uncertainty entry; materiality test enforced |
 
 **Do not implement Phase 5 before Phase 1.** The challenge pass adds an LLM call and another
 possible source of HOLD bias while the fundamental question - whether the large-context
@@ -1303,10 +1455,11 @@ assuming a bounded packet is an improvement.
 ### 13.4 Phase 2 as built, and the four rows it could not fill
 
 **Where the code lives.** `tradingagents/strategies/decision_packet.py` (new) owns the
-render; `tradingagents/graph/trading_graph.py` renders it **once** before the graph and stores
-it under `DECISION_PACKET_KEY`; `decision_packet_or_context` is the gate, and the five
-consumers named in §6 read the decision channel through it. `reporting` records
-`packet_chars` / `packet_version` / `packet_truncated` / `context_mode` in the card's
+render; `tradingagents/graph/trading_graph.py` hands the run's ONE close series to the packet
+node and no longer renders the packet itself; the `Decision Packet` graph node renders it
+**once**, after the analysts (moved there by Phase 3 - see §13.7); `decision_packet_or_context` is
+the gate, and the five consumers named in §6 read the decision channel through it. `reporting`
+records `packet_chars` / `packet_version` / `packet_truncated` / `context_mode` in the card's
 `decision_context` block.
 
 **The packet is a pure function of state** - no model call, no vendor call, no state mutation.
@@ -1389,14 +1542,15 @@ declared bound that does nothing is the same defect class as a parameter that si
 nothing. It is now enforced by dropping **whole cells**, never by cutting a cell in half.
 
 **What the packet deliberately does not do.** No `DECISION` line (§6 rule 4, asserted). The
-`CONFLICT` row is a named gap, because §9's ledger is Phase 3 and the same-metric pairs are
-resolved post-hoc over the report tree. The consensus line sits under `SYNTHESIS` and is
-labelled a **diagnostic over independent reads**, not evidence - it is the line the PM already
-received, and §11 classifies `weighted_consensus` as a diagnostic. `reporting`'s section IVa
-still renders `computed_decision_context`, because the researchers keep the unbounded channel
-(§1.1: research can be large) and IVa is the report's research-side advisory block; **the
-packet's own text is not rendered into the report**, which is a gap worth closing when the
-packet is dark-launched for real.
+`CONFLICT` row was a named gap when Phase 2 shipped, because §9's ledger is Phase 3 and the
+same-metric pairs are resolved post-hoc over the report tree; **Phase 3 closed it** (§13.7) by
+moving the render to a post-analyst node and building the ledger from the reports in state. The
+consensus line sits under `SYNTHESIS` and is labelled a **diagnostic over independent reads**,
+not evidence - it is the line the PM already received, and §11 classifies `weighted_consensus` as
+a diagnostic. `reporting`'s section IVa still renders `computed_decision_context`, because the
+researchers keep the unbounded channel (§1.1: research can be large) and IVa is the report's
+research-side advisory block; **the packet's own text is not rendered into the report**, which is
+a gap worth closing when the packet is dark-launched for real.
 
 ### 13.5 The §9 dependency: the verifier's flags, triaged and three defects fixed
 
@@ -1532,6 +1686,98 @@ fraction of them false.
 
 ---
 
+### 13.7 Phase 3 as built: the ledger renders, and the render moved
+
+**Where the code lives.** `report_verifier.report_ledger(state)` is the in-run producer (the
+verifier's own `_basis_registry` + `basis_conflicts`, applied to the four reports in state);
+`decision_packet._conflict_rows` / `_conflict_detail` render it as the packet's `CONFLICT` row;
+`decision_packet.create_decision_packet_node` is the graph node; `graph/setup.py` inserts it at the
+head of the post-analyst chain when `enable_decision_packet` is on. `reporting._run_card_evidence_counts`
+takes the count from the same producer.
+
+**FINDING — §9's ledger is a property of the REPORTS, so the packet could not be compiled before
+them.** §13.4 rendered the packet once, pre-graph, and recorded the `CONFLICT` row as a named gap
+*"because §9's ledger is Phase 3 and the same-metric pairs are resolved post-hoc over the report
+tree"*. Both halves of that sentence are true and together they are decisive: the ledger needs the
+reports, and the verifier that resolves the pairs runs **after the run has ended**
+(`batch --verify`, `scripts/report_verify.py` — never inside the graph). A pre-graph packet could
+therefore only ever carry a gap where its ledger belongs.
+
+The fix is a move, not a second renderer. `trading_graph.propagate` no longer renders the packet;
+it puts the ONE close series onto the declared `decision_packet_closes` channel and the
+`Decision Packet` node renders once, post-analyst, where the reports exist. One node, one render,
+one `packet_chars` measurement — §13.4's property is preserved, and the render now happens where
+its inputs exist. The pre-graph close fetch is unchanged, so the packet's regime and plan rows
+still render from the same series the compiled context used.
+
+**The rows print most-actionable-first.** §9 suppresses nothing, but the ledger is bounded
+(`conflict_max_rows` = 12) and the measured distribution is 199 `basis_difference` / 63 `defect` /
+22 `unresolved`. Truncating in metric order would routinely drop the one row §10 can act on behind
+twelve it cannot, so `CONFLICT_CLASS_ORDER` orders the rows and the TAIL truncates.
+
+**Three states, never conflated:** no report in state (`unavailable_pre_reports`), reports read
+and agreeing (a real `0 unresolved`), disagreements found (the count line + rows).
+
+**Verified.** 6 tests in `tests/test_decision_packet.py`, including the row-for-row agreement
+between the in-run ledger and the tree pass (rule 15), the actionable-first truncation, and the
+three-state distinction. A live probe rendered
+`CONFLICT  1 unresolved  3 defect  9 basis_difference of 13 same-metric disagreements across 1 reports`
+from a synthetic report.
+
+### 13.8 Phase 4 as built: the expansion is a channel, not a longer packet
+
+**Where the code lives.** `decision_packet.expansion_decision` (the trigger), `render_expansion`
+(the render), `CONTEXT_EXPANSION_BUDGET` (its own bound), `DECISION_EXPANSION_KEY` (its own state
+channel), and `create_decision_packet_node` (the write, gated independently by
+`enable_context_expansion`). `reporting._run_card_decision_context` records `context_mode` and
+`expansion_chars`.
+
+**The separate channel is the load-bearing decision.** Appending the research to the packet's own
+string would make `packet_chars` grow with the research, and §7's bound would stop being a bound
+the moment a run expanded. `decision_packet_or_context` — the ONE read site — concatenates, so the
+consumer still receives one string while the card measures the bounded decision channel alone.
+
+**Verified.** 5 tests, including the missing-input case (absence is not agreement), the agreed-book
+case (the trigger is not always-on), the bound, and `context_mode` with the gate on and off.
+
+### 13.9 Phase 5 as built: the model proposes, the code decides
+
+**Where the code lives.** `tradingagents/strategies/decision_challenge.py` owns the pass and its
+adjudicator; `portfolio_manager._challenge_hook` is the site, before `_guardrail_hook` because
+§16's order is `RAW DECISION → CLOSED CHALLENGE → DETERMINISTIC GATES → ACTION`;
+`decision_guardrail.downgrade_toward_hold` is the only mutation; `PortfolioDecision` gained
+`challenge_ground` / `challenge_reason` and the render gained a `**Challenge**` footer.
+
+**All four of §10's rules are enforced by code.** The prompt states the grounds and the
+non-grounds, and nothing in it is load-bearing — a model that invents a ground, cites nothing,
+cites an `UNCERTAINTY` row, or claims (c) on figures the packet carries is discarded and the
+discard is named.
+
+**Two defects were found by RUNNING it, and both are now proven failing-first by mutation.**
+
+1. **The block scan assumed rows are the indented lines.** They are not: a packet row prints at
+   column zero (`conditions  1 declared`) and only a row's sub-rows are indented. So
+   `_falsifier_rows` returned `[]` for every packet and ground (a) could never be met — *a check
+   that always fails looks strict and is simply broken.* Fixed by ending a block at the next
+   HEADING (`PACKET_BLOCK_HEADINGS`, which `_CATEGORY_NOTE` already registers).
+2. **Ground (c) compared figures as TEXT.** The packet prints `4.4` and the decision writes
+   `4.40`, so every figure at a different precision read as *"not carried"* and (c) fired on a
+   decision that had invented nothing. The repo had already fixed this exact class once
+   (`report_verifier._cluster_value_tokens`, LRCX 2026-09-14). Fixed by comparing NUMERICALLY at
+   the same 0.5% relative tolerance the verifier's anchor uses.
+
+Both were reverted by mutation, the targeted tests failed, and the file was restored
+byte-identically (sha256 `ae775cf4…`). **A third correction, not a defect:** `ground` is a plain
+`str`, not a `Literal` — a `Literal` turns an invented ground into a pydantic validation error,
+which the runner catches as *"the call failed"* and which is indistinguishable from an outage. The
+vocabulary is steered in the field description and ENFORCED where the discard is auditable.
+
+**Verified.** 21 tests in `tests/test_decision_challenge.py`: every ground landing, every ground
+discarded, the materiality test's record-don't-act branch, the uncertainty exclusion, the
+symmetric downgrade, the provider-failure path, the gate-off path, and the uniform outcome shape.
+
+---
+
 ## 14. Acceptance criteria
 
 1. **Byte-identical when off.** Every phase behind a gate defaulting `False`; gate off ⇒
@@ -1630,6 +1876,45 @@ fraction of them false.
 38. **A value the prose scan would reject never enters the registry.** A registry entry is what
     the classifier sees, so admitting an artefact there is how a ledger acquires a row nobody
     can act on.
+
+**Phase 3 as built (§13.7).**
+
+39. **The ledger renders, and it is built from the reports in state.** No report in state is
+    `unavailable_pre_reports`; reports read and agreeing is a real `0 unresolved`; the two are
+    never conflated.
+40. **The in-run ledger and the tree pass agree row for row**, because both are the same two
+    functions applied to the same four documents. A test pins it.
+41. **The ledger's rows print most-actionable-first**, so a bounded ledger cannot hide the one
+    `unresolved` row behind twelve inert ones, and the count line states the full distribution.
+42. **The render happens where its inputs exist.** The packet is rendered ONCE, by a graph node
+    placed after the analysts, and the pre-graph block carries only the ONE close series it
+    fetched - never a second vendor read of the same series.
+
+**Phase 4 as built (§13.8).**
+
+43. **The expansion is a separate channel with its own bound**, so `packet_chars` keeps measuring
+    the bounded decision channel and §7's bound stays a bound. `context_mode` is `packet` or
+    `packet+expanded`, and the expansion rate is therefore measurable.
+44. **A missing input is not agreement.** No stance sampled counts toward neither agreement nor
+    expansion; with nothing measurable the decision is `expand=False` with the reason stated.
+45. **The expansion cannot change a rating.** It attaches documents; the only pass that can
+    downgrade is closed-vocabulary (§10).
+
+**Phase 5 as built (§13.9).**
+
+46. **All four of §10's rules are enforced by code**, not by prompt wording: the vocabulary, the
+    packet-row citation, downgrade-only, and the uncertainty exclusion.
+47. **Ground (b) is material.** It requires an `unresolved` contradiction AND that the decision
+    relied on the metric, checked against the decision's own prose; otherwise the contradiction
+    is **recorded, not acted on**.
+48. **Ground (c) is checked numerically**, so one number at two precisions is one number, and it
+    is scoped to the prose - never to the decision's own `confidence`/`stop_loss`.
+49. **A failure is never an invalidation.** A provider error, an unparsable verdict or a missing
+    packet returns a non-invalidating outcome with a named reason, in the SAME key set as an
+    adjudicated one.
+50. **A downgrade is visible.** The ground is written onto the decision and rendered as a
+    `**Challenge**` footer, and the outcome - including a discard - is recorded, so a reader can
+    tell "the pass ran and found nothing" from "the pass did not run".
 
 ---
 

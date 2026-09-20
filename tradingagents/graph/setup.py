@@ -426,6 +426,23 @@ class GraphSetup:
         # so a gate-off graph is byte-identical to the pre-S11 chain.
         symmetry_on = bool(self.config.get("enable_evidence_symmetry"))
         post_analyst = "Evidence Symmetry" if symmetry_on else "Independent Researcher Stances"
+        # Phase 3 (§9) of docs/design_decision_context.md: the Decision Packet
+        # renders AFTER the analysts, because its CONFLICT ledger is built from
+        # the analyst reports. Inserted at the head of the post-analyst chain, so
+        # every decision consumer (trader, risk debators, PM) reads it and the
+        # pre-analyst nodes never see it. Gated: with the packet off the node is
+        # not registered and the graph is byte-identical to the pre-packet one.
+        if bool(self.config.get("enable_decision_packet")):
+            from tradingagents.strategies.decision_packet import (
+                DECISION_PACKET_NODE,
+                create_decision_packet_node,
+            )
+
+            workflow.add_node(
+                DECISION_PACKET_NODE, create_decision_packet_node(self.config)
+            )
+            workflow.add_edge(DECISION_PACKET_NODE, post_analyst)
+            post_analyst = DECISION_PACKET_NODE
 
         if self.analyst_concurrency > 1:
             workflow.add_edge(START, "Run Analysts")

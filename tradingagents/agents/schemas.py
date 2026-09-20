@@ -299,13 +299,29 @@ class PortfolioDecision(BaseModel):
             "recommendation never reads above the cap."
         ),
     )
+    challenge_ground: Literal["a", "b", "c"] | None = Field(
+        default=None,
+        description=(
+            "Filled by the closed-vocabulary challenge pass when it downgrades "
+            "this rating, naming which of its three closed grounds was met. "
+            "Never changed by the model."
+        ),
+    )
+    challenge_reason: str | None = Field(
+        default=None,
+        description=(
+            "Filled by the closed-vocabulary challenge pass alongside "
+            "``challenge_ground``: the mechanically checked ground, not the "
+            "model's wording. Never changed by the model."
+        ),
+    )
 
     @field_validator("price_target", "stop_loss", "confidence", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
 
-    @field_validator("risk_cap", "consensus", "data_quality", mode="before")
+    @field_validator("risk_cap", "consensus", "data_quality", "challenge_ground", mode="before")
     @classmethod
     def _nullish_literal_to_none(cls, v):
         return _coerce_optional_literal_none(v)
@@ -343,6 +359,13 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         # never read above it, so surface the cap alongside the (already
         # downgraded) rating for downstream parsers and the CLI.
         parts.extend(["", f"**Risk Cap**: {decision.risk_cap}"])
+    if decision.challenge_ground is not None:
+        # §10: an invalidation must be visible in the rendered decision, or a
+        # reader sees a lowered rating with no stated ground - which is exactly
+        # the "new caution rationale" the closed vocabulary exists to prevent.
+        parts.extend(
+            ["", f"**Challenge**: downgraded on closed ground ({decision.challenge_ground})"]
+        )
     return "\n".join(parts)
 
 
