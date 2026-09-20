@@ -1065,6 +1065,24 @@ carries that split's `combined_action` and names its source. The executor's own 
 is deliberately **not** fabricated - it is not engine state. A test asserts the split is
 populated rather than null, because the null version passed every other test.
 
+**Finding 5 - `analyst_prompt_chars` did not measure the prompt.** The three tool-loop
+analysts do not build one string: they render a static prefix (boilerplate + system message
++ evidence block + the bound tool catalog) and then append `MessagesPlaceholder("messages")`,
+which grows with every tool round. The first draft measured only
+`system_message + evidence_block` and filed it under a field named "prompt". The excluded
+static parts alone are ~600 chars of boilerplate plus the tool catalog - **2,432 chars for
+the market analyst's 117 tools, 1,174 for fundamentals' 54** - and the message history is
+unbounded. Corrected to record the breakdown explicitly: `prefix_chars` (the static part, and
+the quantity §3 measures, stable across rounds - which is what makes the W4 prefix cache
+work), `messages_chars` (the rendered conversation at the final call, labelled a proxy), and
+`chars` = the sum, which is what the model actually received. A test asserts `chars ==
+prefix_chars + messages_chars`, so the two cannot silently diverge again.
+
+**The pattern across findings 4 and 5 is one thing, and it is worth naming: a field whose
+name promises more than it measures.** Both were in new code written in a single session,
+and both passed every test that did not specifically ask what the field contained. That is
+the same failure the document exists to catch - and the telemetry is not exempt from it.
+
 **What it deliberately does not do.** No gate. No behaviour change: nothing reads a
 telemetry value back into a prompt or a decision, so a run with the block removed produces
 the same reports and the same rating. `context_mode` / `packet_version` /

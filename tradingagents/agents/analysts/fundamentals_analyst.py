@@ -6,7 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
-from tradingagents.agents.utils.prompt_metrics import record_stage
+from tradingagents.agents.utils.prompt_metrics import record_prompt_parts
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
@@ -446,7 +446,9 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
         return {
             "messages": [result],
             "fundamentals_report": report,
-            **record_stage("analyst_fundamentals", f"{system_message}\n{evidence_block}"),
+            **record_prompt_parts(
+                "analyst_fundamentals", f"{system_message}\n{evidence_block}", state["messages"]
+            ),
             "tool_evidence": tool_evidence,
         }
 

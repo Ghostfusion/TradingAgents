@@ -38,6 +38,7 @@ __all__ = [
     "decision_telemetry_block",
     "direction_of",
     "merge_prompt_metrics",
+    "record_prompt_parts",
     "record_stage",
     "snapshot_identity",
     "stage_metrics",
@@ -102,6 +103,41 @@ def record_stage(stage: str, prompt: object, **extra) -> dict:
         return {..., **record_stage("pm", prompt)}
     """
     entry = stage_metrics(prompt)
+    entry.update(extra)
+    return {PROMPT_METRICS_KEY: {stage: entry}}
+
+
+def record_prompt_parts(stage: str, prefix: str, messages: object, **extra) -> dict:
+    """For a node whose prompt is a TEMPLATE plus a growing message history.
+
+    The three tool-loop analysts do not build one string: they render a static
+    prefix (boilerplate + system message + evidence block + the bound tool
+    catalog) and then append ``MessagesPlaceholder("messages")``, which grows
+    with every tool round. Measuring only the prefix would put a number under a
+    field named "prompt" that is not the prompt - the same mislabelling this
+    module exists to avoid, so the breakdown is recorded explicitly:
+
+    - ``prefix_chars`` - the static part, and the quantity §3 of the design doc
+      measures (it is stable across rounds, which is what makes the W4 prefix
+      cache work);
+    - ``messages_chars`` - the rendered conversation at the final call;
+    - ``chars`` - the two together, which is what the model actually received.
+
+    ``messages_chars`` is a length of the rendered message list, so it is a
+    proxy for the token cost of the history, not an exact accounting. It is
+    labelled as one and it is the only quantity here that moves with round
+    count, which is precisely why it must not be omitted.
+    """
+    try:
+        messages_chars = len(str(messages))
+    except Exception:  # noqa: BLE001 - telemetry never raises
+        messages_chars = 0
+    entry = {
+        "chars": len(prefix) + messages_chars,
+        "tokens_est": tokens_est(len(prefix) + messages_chars),
+        "prefix_chars": len(prefix),
+        "messages_chars": messages_chars,
+    }
     entry.update(extra)
     return {PROMPT_METRICS_KEY: {stage: entry}}
 

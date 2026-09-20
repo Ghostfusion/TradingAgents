@@ -107,6 +107,28 @@ def test_fundamentals_node_returns_only_declared_channels():
     assert "security_type" not in out
 
 
+def test_analyst_prompt_metric_reports_the_whole_prompt():
+    """Phase 0: `chars` must be the prompt, not just its static prefix.
+
+    The tool-loop analysts render a template AND append a growing message
+    history. An earlier draft measured only `system_message + evidence_block`
+    and filed it under `analyst_prompt_chars` - a number that is not the prompt,
+    under a name that says it is. The breakdown is now explicit, and `chars`
+    must be the sum, so the two cannot silently diverge again.
+    """
+    from tradingagents.agents.analysts.fundamentals_analyst import (
+        create_fundamentals_analyst,
+    )
+
+    node = create_fundamentals_analyst(_FakeAnalystLLM(), config={})
+    entry = node(_fundamentals_state())["prompt_metrics"]["analyst_fundamentals"]
+
+    assert entry["prefix_chars"] > 0
+    assert entry["messages_chars"] > 0
+    assert entry["chars"] == entry["prefix_chars"] + entry["messages_chars"]
+    assert entry["tokens_est"] == entry["chars"] // 4
+
+
 @pytest.mark.unit
 def test_trader_node_returns_only_declared_channels(monkeypatch):
     # The advisory verification pass is irrelevant here; force it to degrade so
