@@ -55,11 +55,17 @@ Three sub-claims are worth separating, because they have different fixes:
 | | Sub-claim | Failure it describes |
 |---|---|---|
 | **H1a** | *Volume* dilutes. More tokens, same evidence → more hedging. | context dilution |
-| **H1b** | *Uncertainty* is miscounted as negative evidence. "Fed unknown" is weighed as a bearish fact. | category error in the prompt |
+| **H1b** | *Uncertainty framing* changes the decision. How unknowns are expressed - separately from evidence, or mixed into it - shifts the output. | presentation of epistemic uncertainty |
 | **H1c** | *Debate* manufactures caution. Cross-talk converges on the least-committal position. | conformity in multi-agent debate |
 
 H1a and H1b are the proposal's core. H1c is a distinct mechanism the proposal also touches
-(§7 of the proposal). They must be measured separately — §12.
+(§7 of the proposal). They must be measured separately - §12.
+
+**H1b is stated as a *framing* effect, not as miscounting.** The stronger claim - that the
+model literally counts an unknown as a bearish fact - is not what the experiment can isolate:
+a packet that separates `UNCERTAINTY` also signals *that the architecture considers
+uncertainty important*, so a behavioural change would not distinguish the two. The framing
+hypothesis is the defensible one; the miscounting claim can be tested later if wanted.
 
 ---
 
@@ -423,30 +429,39 @@ important rule. A block printing `AGREEMENT 7/8` beside `COMPOSITE 82` invites t
 compute `7/8 bullish -> BUY` instead of forming an independent judgement. The packet therefore
 reports **evidence**, never a recommendation, and it carries **no `DECISION` line**.
 
+The packet has **four semantic categories, kept visually distinct**:
+`constraints != evidence != synthesis != decision`.
+
 ```
 PACKET v1 - <TICKER> - <date>
----------------------------------------------
-PERMISSION   <TRADE_ALLOWED | BLOCKED>  gate=<PASS|WARN|REJECT> reason=<...>
+=============================================
+RISK CONSTRAINTS           <- NOT evidence; a decision-domain constraint
+permission = <TRADE_ALLOWED | BLOCKED>
+gate       = <PASS|WARN|REJECT>   reason = <...>
+CVaR <x> (budget <b>)  drawdown <d> (limit <l>)  liquidity <verdict>
 
-ENGINE EVIDENCE            <- research evidence
+EVIDENCE                   <- research evidence
 fundamental <s> [cov c]  technical <s> [cov c]  regime <s> [cov c]
 risk <s> [cov c]  sentiment <s> [cov c]  news <s|NA>  event <s|NA>
+DIRECTIONAL DISTRIBUTION  bullish=<b>  bearish=<d>  neutral=<n>
+UNCERTAINTY               <u> named gaps: <list>
+CONFLICT                  <k> same-metric conflicts (see ledger)
 
-DIRECTIONAL DISTRIBUTION   <- counts, not a verdict
-bullish=<b>  bearish=<d>  neutral=<n>
-UNCERTAINTY  <u> named gaps: <list>
+SYNTHESIS                  <- labelled downstream, printed last
+consensus  weighted_stance=<x>  label=<...>  n=<k>
+composite  score=<s>  coverage=<c>  floor=<f>  basis=<...>
 
-CONSENSUS                  <- labelled downstream
-weighted_stance=<x>  label=<...>  n=<k>
+TRADE PARAMETERS
+entry <..>  stop <..>  target <..>  size <..>
 
-COMPOSITE                  <- printed last, labelled downstream
-score=<s>  coverage=<c>  floor=<f>  basis=<...>
-
-CONFLICT     <k> same-metric conflicts (see ledger)
-RISK         CVaR <x> (budget <b>)  drawdown <d> (limit <l>)  liquidity <verdict>
-LEVELS       entry <..>  stop <..>  target <..>  size <..>
-FALSIFIERS   <the >=1 invalidation conditions already required by report_disclosure>
+FALSIFIERS
+<the >=1 invalidation conditions already required by report_disclosure>
 ```
+
+**Why `permission` moved into its own block.** `PERMISSION TRADE_ALLOWED` is not evidence - it
+is a *decision-domain constraint* already imposed by the deterministic gates. Listed among the
+engine scores it would visually resemble one more bullish input. Under `RISK CONSTRAINTS` it
+reads as what it is: a boundary the model reasons *within*, not a fact it weighs.
 
 **Why a distribution replaces the agreement count.** `AGREEMENT 7/8` is the shape most likely
 to become an implicit instruction, and it also has no producer today: `agreement_score`
@@ -629,6 +644,9 @@ the normal state of evidence, and it is already represented by the distribution 
 consensus line (§6). A contradiction means **one metric, two incompatible values** - the shape
 `report_verifier` already detects.
 
+**The invariant, stated precisely:** *the challenge pass may downgrade only on one of the
+three closed-vocabulary grounds; it may not create a new caution rationale.*
+
 **Rules that make it different from the debate:**
 
 1. **Closed vocabulary.** It cannot invent a new reason for caution. "Something could go wrong"
@@ -636,8 +654,13 @@ consensus line (§6). A contradiction means **one metric, two incompatible value
 2. **Evidence must be a packet row.** An objection citing nothing is discarded.
 3. **It can only downgrade** - the same shape as `stabilize_decision`
    (`tradingagents/strategies/decision_guardrail.py:105`), an established pattern in this repo.
-4. **It cannot raise caution from absence.** An `UNCERTAINTY` entry is not a valid
-   invalidation - the §8 rule, enforced mechanically here.
+4. **It cannot introduce a new caution rationale.** Invalidation *is* an increase in
+   caution, so "cannot add caution" would be false. The real invariant is sharper: the pass
+   may downgrade **only** on one of the three closed grounds, and may **not** create a new
+   rationale for caution. It may legitimately turn `BUY -> HOLD` on a breached falsifier or a
+   materially-relied-upon unresolved contradiction; it must never turn `BUY -> HOLD` because
+   *"there is uncertainty"*, *"markets are unpredictable"*, or *"another engine is bearish"*.
+   An `UNCERTAINTY` entry is not a valid invalidation - the §8 rule, enforced mechanically.
 5. **Directional disagreement is not a contradiction** (the materiality test above).
 
 **Why this is not the existing debate.** The debate's job is to surface risk and explain. Its
@@ -692,16 +715,44 @@ The correction is a factorial:
 | **Decision Packet representation** | P1 | P2 |
 
 ```
-context-size effect   = C2 - C1
-representation effect = P1 - C1
+C2 - C1  estimates the effect of moving from compact to large context
+         WITHIN the prose representation.
+P1 - C1  estimates the representation effect at compact size.
 ```
 
 This separates *"the model is sensitive to context volume"* from *"the model decides better
-when the information is structured"* - an extremely important distinction for the architecture,
-and one the four-arm design cannot make.
+when the information is structured"* - an important distinction the four-arm design cannot
+make.
 
-C1 and C2 carry the same information in the same prose form, differing only in length;
-`scripts/context_ab.py`'s existing digest approach is a natural producer for that pair.
+**But the volume claim must be qualified, and v2 overstated it.** `C2 - C1` is *not* pure
+context volume. A digest changes the amount of information, the number of facts, ordering,
+redundancy, positional placement, and possibly the linguistic form. So the honest reading is:
+
+> **C2 - C1 isolates volume only to the extent that the two representations preserve the same
+> evidence and differ primarily in context length.**
+
+That is a requirement on the construction, not a property of the subtraction. **C1 must
+therefore be built from C2 by a deterministic, information-preserving transformation with a
+known deletion rule** - not by free summarization:
+
+```
+C2 = all evidence, original ordering
+C1 = the same evidence CLASSES, bounded to first/last/representative rows
+```
+
+and the harness must **measure and report what was retained**:
+
+| retention check | C1 vs C2 |
+|---|---|
+| unique metrics | |
+| unique figures | |
+| bullish facts | |
+| bearish facts | |
+| uncertainty facts | |
+| source sections | |
+
+If retention is materially below 100% on any row, the difference is **not** a volume effect and
+must be reported as such. Without this table the factorial's first contrast is uninterpretable.
 
 ### 12.2 Report the distribution, not only the CCI
 
@@ -729,6 +780,24 @@ the full distribution:
 | Expected-value direction | | | | |
 
 plus `dHOLD`, `dBUY`, `dSELL` and `CCI` for each contrast.
+
+**And the metric that matters most for H1a: the paired decision flip rate.** Aggregates can
+hide the phenomenon - a model that flips `BUY` to `HOLD` on the same snapshot while other
+snapshots flip the other way can leave the distribution nearly unchanged. Because the arms are
+**paired on identical snapshots**, the transitions are directly observable:
+
+```
+flip_rate = changed_decisions / paired_runs
+
+C1 -> C2 and P1 -> P2 transition matrices:
+    directional -> hold        <- the phenomenon H1a predicts
+    hold -> directional
+    bullish -> bearish
+    bearish -> bullish
+```
+
+For this application a **paired transition matrix is more informative than CCI**, and it is
+what the harness should print first.
 
 **The question the experiment answers is not "does HOLD decrease?".** It is:
 
@@ -767,7 +836,39 @@ Other repo affordances that make the ablation cheap:
   (`tradingagents/reporting.py:636`) - so the outcome is a clean categorical variable needing no
   parsing.
 
-### 12.4 The honest caveat
+### 12.4 Separate the raw decision from the gated action
+
+The hypothesis concerns the **LLM decision**, not whether execution is permitted. In this
+architecture a large share of `HOLD`/no-trade outcomes can originate *downstream* of the model:
+
+```
+LLM rating -> risk gate -> decision guardrail -> signal/action split -> execution permission
+```
+
+So an observed `HOLD` may be `LLM = BUY`, `risk_gate = REJECT`, `final = HOLD/NO_TRADE` - a
+completely different phenomenon, and one this repo's gates produce **by design**
+(`decision_guardrail.stabilize_decision:105` caps the upside; `signal_action.signal_action_split:95`
+can only downgrade).
+
+Every arm must therefore record both layers:
+
+| layer | fields |
+|---|---|
+| **raw decision** | `raw_llm_rating`, `raw_llm_direction`, `raw_llm_confidence` |
+| **gates** | `risk_gate`, `guardrail_output` |
+| **final** | `final_action` |
+
+with two separately reported quantities:
+
+> **decision conservatism** = change in the raw decision-layer directional output, *before*
+> any deterministic risk gating.
+
+> **execution conservatism** = change in the final executable action, *after* the gates.
+
+Without this split, a conservatism result could be entirely an artifact of the risk system
+doing its job.
+
+### 12.5 The honest caveat
 
 `reports/` is gitignored and the historical record is real but not a controlled sample. A
 retrospective CCI computed from existing trees is **not** an experiment - it confounds context
@@ -784,7 +885,7 @@ pass is LAST, not first.
 
 | Phase | Work | Gate |
 |---|---|---|
-| **0** | **Measure only.** Record `packet_chars`, `analyst_prompt_chars`, `evidence_block_chars` and the decision category into `run_card.json`. No behaviour change. | the §3 numbers become a per-run series |
+| **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. | the §3 numbers become a per-run series |
 | **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. | the §12.2 distribution + grounding per arm, confounds stated |
 | **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1 | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
 | **3** | Conflict ledger (§9), after the open verifier pairs are classified | conflicts named with both sections + a mechanical classification |
@@ -798,6 +899,34 @@ architecture is producing the observed behaviour at all - is still open.
 **Phase 0 is the recommendation to start with.** It is small, it is not a behaviour change, and
 it turns §3's one-off measurement into a per-run series, which is what Phase 1 needs and what
 the repo currently lacks for any prompt.
+
+**Phase 0 telemetry - record more than character counts.** The run card becomes a
+decision-context observability layer:
+
+```
+prompt_metrics:
+    analyst_prompt_chars        analyst_prompt_tokens_est
+    evidence_block_chars        evidence_block_tokens_est
+    trader_prompt_chars         trader_prompt_tokens_est
+    research_manager_prompt_chars   research_manager_prompt_tokens_est
+    pm_prompt_chars             pm_prompt_tokens_est
+    decision_packet_chars       decision_packet_tokens_est
+
+decision:
+    raw_rating          raw_direction       raw_confidence
+    post_guardrail_rating                   final_action
+
+context:
+    context_mode        packet_version      packet_truncated
+
+evidence:
+    bullish_count   bearish_count   neutral_count
+    uncertainty_count               conflict_count
+```
+
+Six months later this answers *"when the PM prompt exceeds 12k tokens, does raw HOLD
+probability change?"* without reconstructing prompts from report trees - which is not possible
+today, because prompts are never persisted.
 
 ---
 
@@ -825,6 +954,16 @@ the repo currently lacks for any prompt.
 13. **A contradiction may invalidate only under the materiality test** - relied upon, AND
     unresolved, AND materially decisive; directional disagreement never qualifies (§10).
 14. **The factorial runs before the challenge pass** (§13).
+15. **The retention table is reported for C1 vs C2** (unique metrics, unique figures,
+    bullish/bearish/uncertainty facts, source sections). If retention is materially below
+    100%, the contrast is **not** reported as a volume effect (§12.1).
+16. **The paired decision transition matrix is printed**, not only CCI (§12.2).
+17. **Raw decision and gated action are recorded and reported separately** (§12.4) - decision
+    conservatism is measured before deterministic risk gating.
+18. **The packet keeps `constraints != evidence != synthesis != decision` visually distinct**;
+    `permission` lives under `RISK CONSTRAINTS` (§6).
+19. **The challenge pass may not create a new caution rationale** - downgrade only on the three
+    closed grounds (§10).
 
 ---
 
@@ -867,53 +1006,63 @@ the repo currently lacks for any prompt.
 
 ## 16. The converged architecture
 
-The target shape, with every box mapped to what exists (§4) or to the phase that adds it (§13):
+**The Decision Packet is an information boundary, not a decision boundary.** That distinction
+is what makes the contracts clean: the packet controls *what the decision model sees*, not
+*what it decides*, and not *what executes*.
 
 ```
-                        RAW DATA
-                           |
-              +------------+------------+
-              |                         |
-         QUANT ENGINES             LLM RESEARCH
-              |                         |
-              +------------+------------+
-                           |
-                    EVIDENCE BUS
-                    (analyst prompts; large by design)
-                           |
-              +------------+------------+
-              |                         |
-      deterministic synthesis     conflict detection
-      (exists: consensus.py,     (exists: report_verifier;
-       score_engine.combine)      ledger = Phase 3)
-              |                         |
-              +------------+------------+
-                           |
-                    DECISION PACKET          <- Phase 2, bounded
-                      ~1-3K tokens
-                           |
-                 +---------+---------+
-                 |                   |
-          independent reads      LLM decision
-          (exists:                 (exists: PM)
+                       RAW DATA
+                          |
+             +------------+------------+
+             |                         |
+       QUANT ENGINES              LLM RESEARCH
+             |                         |
+             +------------+------------+
+                          |
+                    EVIDENCE BUS           <- accumulate knowledge
+                          |
+             +------------+------------+
+             |                         |
+    deterministic synthesis     verification / conflict ledger
+    (exists: consensus.py,      (exists: report_verifier;
+     score_engine.combine)       ledger = Phase 3)
+             |                         |
+             +------------+------------+
+                          |
+                  DECISION PACKET          <- Phase 2. INFORMATION boundary.
+                 +--------+--------+          bounded, ~1-3K tokens
+                 |                 |
+          independent reads    decision model
+          (exists:                (exists: PM)
            independent_vote.py)
-                 |                   |
-                 +---------+---------+
-                           |
-                     BUY/HOLD/SELL
-                           |
-                  closed challenge        <- Phase 5, last
-                           |
-                  downgrade-only gate     <- exists: stabilize_decision,
-                           |                 signal_action_split
-                       EXECUTION
+                 |                 |
+                 +--------+--------+
+                          |
+                    RAW DECISION           <- DECISION boundary
+                          |
+                  CLOSED CHALLENGE         <- Phase 5, last
+                          |
+                DETERMINISTIC GATES        <- EXECUTION boundary
+                (exists: stabilize_decision,
+                 signal_action_split, risk_governor)
+                          |
+                       ACTION
 ```
+
+Three clean contracts:
+
+| Layer | Responsibility |
+|---|---|
+| **Evidence Bus** | accumulate knowledge - large by design |
+| **Decision Packet** | control the information presented to the decision model |
+| **Decision + Gates** | adjudicate, then constrain the action |
 
 The design principle it encodes:
 
 > **Research can be large. Decision context cannot be large by accident.** (§1.1)
 
 ## 17. Summary
+
 
 Per owner feedback the conclusion is stated as what has actually been established:
 
@@ -944,8 +1093,14 @@ What the repository does **not** have, in order of value:
 5. **A challenge pass that can only invalidate** (§10) - recorded invalidations exist; an
    invalidating *pass* does not.
 
-The single most useful next action is **Phase 0**: record the sizes. It is small, it changes no
-behaviour, and it converts the motivating observation from an anecdote into a time series.
+With the v3 corrections the design is no longer a proposal to "shrink prompts". It is a
+**controlled decision-context architecture with an experimental method** for determining
+whether context volume, representation, uncertainty framing, or downstream gating is actually
+responsible for the observed behaviour.
+
+The single most useful next action is **Phase 0**: record the telemetry. It is small, it
+changes no behaviour, and it converts the motivating observation from an anecdote into a time
+series.
 
 ---
 
