@@ -26,7 +26,12 @@ def create_aggressive_debator(llm, backup_llm=None):
         instrument_context = get_instrument_context_from_state(state)
 
         trader_decision = state["trader_investment_plan"]
-        computed_context = state.get("computed_decision_context") or ""
+        # Phase 2: the bounded Decision Packet when `enable_decision_packet` is
+        # on, else the compiled context byte-for-byte as before.
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.decision_packet import decision_packet_or_context
+
+        computed_context = decision_packet_or_context(state, get_config())
 
         prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
 

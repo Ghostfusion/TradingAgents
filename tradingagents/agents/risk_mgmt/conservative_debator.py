@@ -26,7 +26,12 @@ def create_conservative_debator(llm, backup_llm=None):
         instrument_context = get_instrument_context_from_state(state)
 
         trader_decision = state["trader_investment_plan"]
-        computed_context = state.get("computed_decision_context") or ""
+        # Phase 2: the bounded Decision Packet when `enable_decision_packet` is
+        # on, else the compiled context byte-for-byte as before.
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.decision_packet import decision_packet_or_context
+
+        computed_context = decision_packet_or_context(state, get_config())
 
         prompt = f"""As the Conservative Risk Analyst, your primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth. You prioritize stability, security, and risk mitigation, carefully assessing potential losses, economic downturns, and market volatility. When evaluating the trader's decision or plan, critically examine high-risk elements, pointing out where the decision may expose the firm to undue risk and where more cautious alternatives could secure long-term gains. Here is the trader's decision:
 

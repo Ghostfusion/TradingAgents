@@ -26,7 +26,12 @@ def create_neutral_debator(llm, backup_llm=None):
         instrument_context = get_instrument_context_from_state(state)
 
         trader_decision = state["trader_investment_plan"]
-        computed_context = state.get("computed_decision_context") or ""
+        # Phase 2: the bounded Decision Packet when `enable_decision_packet` is
+        # on, else the compiled context byte-for-byte as before.
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.decision_packet import decision_packet_or_context
+
+        computed_context = decision_packet_or_context(state, get_config())
 
         prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
 

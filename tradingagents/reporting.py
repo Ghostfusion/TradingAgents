@@ -827,51 +827,57 @@ def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict 
 def _run_card_evidence_counts(final_state: dict) -> dict:
     """Directional evidence counts for the Phase 0 telemetry block.
 
-    Counts what is available TODAY, and names what is not. The three directional
-    counts come from the structured independent stances (the risk trio and the
-    researcher pair) - the only per-role directional records in the state, each
-    carrying a canonical 5-tier rating. ``uncertainty_count`` is deliberately
-    ``None``: the uncertainty vocabulary does not exist until Phase 2's packet
-    (design doc §8), and a zero would read as "no uncertainty was present"
-    rather than "nothing counted it".
+    The three directional counts come from ``prompt_metrics.stance_direction_counts``
+    - the ONE producer of them, shared with the Decision Packet's
+    ``DIRECTIONAL DISTRIBUTION`` row so the packet the model read and the card
+    the operator reads cannot disagree (master rule 15). They are counts over the
+    structured independent stances (the risk trio and the researcher pair), the
+    only per-role directional records in the state.
+
+    ``uncertainty_count`` is now taken, from the Decision Packet's §8 counter -
+    the named gaps the engines declare. It was ``None`` through Phase 0 because
+    the vocabulary did not exist yet; a zero would have read as "no uncertainty
+    was present" rather than "nothing counted it".
 
     The ``sources`` key travels with the numbers so a reader can see what they
     are made of - a count over three stances is not a count over the whole
     decision context, and it must not be read as one.
     """
-    from tradingagents.agents.utils.prompt_metrics import direction_of
+    from tradingagents.agents.utils.prompt_metrics import stance_direction_counts
+    from tradingagents.strategies.decision_packet import uncertainty_read
 
     state = final_state or {}
-    counts = {"bullish_count": 0, "bearish_count": 0, "neutral_count": 0}
-    sources: list[str] = []
-    unreadable = 0
+    counts = stance_direction_counts(state)
+    out = {
+        "bullish_count": counts["bullish"],
+        "bearish_count": counts["bearish"],
+        "neutral_count": counts["neutral"],
+    }
 
-    for key in ("researcher_independent_stances", "risk_independent_stances"):
-        stances = state.get(key) or {}
-        if not isinstance(stances, dict) or not stances:
-            continue
-        for _role, payload in stances.items():
-            rating = (payload or {}).get("rating") if isinstance(payload, dict) else None
-            direction = direction_of(rating)
-            if direction is None:
-                unreadable += 1
-                continue
-            counts[f"{direction}_count"] += 1
-        sources.append(key)
-
-    counts["uncertainty_count"] = None
-    counts["uncertainty_count_reason"] = (
-        "not counted before Phase 2 (design doc §8 owns the uncertainty vocabulary)"
-        if not sources else "phase 2 owns the uncertainty counters"
-    )
+    # `uncertainty_count` is taken from the Decision Packet's §8 counter - the
+    # named gaps the engines declare. It was `None` through Phase 0 because the
+    # vocabulary did not exist yet. It stays `None` when there is NO SNAPSHOT:
+    # nothing examined the engines, and a `0` would read as "no uncertainty was
+    # present" rather than "nothing counted it" - the rule that made it null in
+    # the first place.
+    snapshot = state.get("quant_scorecard")
+    unc = uncertainty_read(snapshot)
+    out["uncertainty_count"] = unc["count"] if snapshot is not None else None
+    if snapshot is None:
+        out["uncertainty_count_reason"] = "no scorecard snapshot in state - nothing examined the engines"
+    elif unc["count"]:
+        out["uncertainty_count_reason"] = "named gaps declared by the enabled engines (design doc §8)"
+    else:
+        out["uncertainty_count_reason"] = "every enabled engine measured; no gap declared"
+    out["uncertainty_gaps"] = unc["gaps"] if snapshot is not None else None
     # The conflict count needs the same-metric pairs the verifier resolves; those
     # are not in run state (the verifier runs post-hoc over the tree). Named as
-    # absent rather than guessed.
-    counts["conflict_count"] = None
-    counts["conflict_count_reason"] = "resolved post-hoc by the report verifier, not in run state"
-    counts["counted_sources"] = sources
-    counts["unreadable_stances"] = unreadable
-    return counts
+    # absent rather than guessed. Phase 3 owns the ledger (§9).
+    out["conflict_count"] = None
+    out["conflict_count_reason"] = "resolved post-hoc by the report verifier, not in run state"
+    out["counted_sources"] = counts["sources"]
+    out["unreadable_stances"] = counts["unreadable"]
+    return out
 
 
 def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
@@ -887,18 +893,39 @@ def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
             PROMPT_METRICS_KEY,
             decision_telemetry_block,
         )
+        from tradingagents.strategies.decision_packet import (
+            DECISION_PACKET_KEY,
+            packet_facts,
+        )
 
+        # §7: "a packet_chars field written into run_card.json makes the budget
+        # observable per run". The measurement is of the packet the GRAPH
+        # rendered - the block the decision model actually read - not a fresh
+        # render from the final state, which would measure a different string.
+        #
+        # GATE OFF CHANGES NOTHING. `context_mode` stays `None` (its Phase 0
+        # value - the vocabulary is Phase 4's) and no `packet_chars` key is added,
+        # because either would alter the card on a run where the packet does not
+        # exist. That is the release invariant, and it is stronger than "the
+        # prompt is unchanged".
+        packet_on = bool((cfg or {}).get("enable_decision_packet"))
+        if packet_on:
+            facts = packet_facts((final_state or {}).get(DECISION_PACKET_KEY))
+            context_mode = "packet"
+        else:
+            facts = None
+            context_mode = None
         block = decision_telemetry_block(
             cfg,
             final_state,
-            # Phase 2 owns the packet, so there is no mode or version to report
-            # yet. Named as absent rather than defaulted to a plausible value.
-            context_mode=None,
-            packet_version=None,
-            packet_truncated=None,
+            context_mode=context_mode,
+            packet_version=facts["packet_version"] if facts else None,
+            packet_truncated=facts["packet_truncated"] if facts else None,
             evidence_counts=_run_card_evidence_counts(final_state),
         )
         block["prompt_metrics"] = dict((final_state or {}).get(PROMPT_METRICS_KEY) or {})
+        if facts:
+            block["packet_chars"] = facts["packet_chars"]
         block["recorded"] = True
         return block
     except Exception as exc:  # noqa: BLE001 - telemetry never breaks the card

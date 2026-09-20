@@ -401,9 +401,11 @@ class TestPhase0TelemetryBlock:
         assert sorted(merged) == ["analyst_market", "pm"]
         assert merged["pm"]["tokens_est"] == 200
 
-    def test_uncertainty_count_is_null_not_zero(self):
-        # Phase 2 owns the uncertainty vocabulary; 0 would read as "no
-        # uncertainty was present" rather than "nothing counted it".
+    def test_uncertainty_count_is_null_when_nothing_counted_it(self):
+        # The rule Phase 0 established and Phase 2 preserves: a counter that
+        # cannot be honestly taken is `None`, never `0` - `0` reads as "no
+        # uncertainty was present" rather than "nothing counted it". With no
+        # scorecard snapshot, nothing examined the engines.
         from tradingagents.reporting import _run_card_evidence_counts
 
         counts = _run_card_evidence_counts(
@@ -413,7 +415,32 @@ class TestPhase0TelemetryBlock:
         assert counts["bullish_count"] == 1
         assert counts["bearish_count"] == 1
         assert counts["uncertainty_count"] is None
+        assert "no scorecard snapshot" in counts["uncertainty_count_reason"]
         assert counts["counted_sources"] == ["researcher_independent_stances"]
+
+    def test_uncertainty_count_is_taken_once_the_snapshot_exists(self):
+        # Phase 2 supplied the vocabulary, so the same field is now a real count
+        # over the named gaps the enabled engines declare. An engine whose gate is
+        # OFF is not a gap - it is intentionally not running.
+        from tradingagents.reporting import _run_card_evidence_counts
+
+        def entry(enabled, score, reason=None):
+            return {"enabled": enabled, "score": score, "reason": reason}
+
+        counts = _run_card_evidence_counts(
+            {
+                "quant_scorecard": {
+                    "engines": {
+                        "fundamental": entry(True, 67.7),
+                        "event": entry(True, None, "the catalyst snapshot is stamped after the graph"),
+                        "news": entry(False, None, "enable_news_score is off"),
+                    }
+                }
+            }
+        )
+        assert counts["uncertainty_count"] == 1
+        assert "event" in counts["uncertainty_gaps"][0]
+        assert "news" not in counts["uncertainty_gaps"][0]
 
     def test_snapshot_identity_is_stable_and_content_addressed(self):
         from tradingagents.agents.utils.prompt_metrics import snapshot_identity

@@ -124,7 +124,12 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
         trader_plan = state["trader_investment_plan"]
         # Computed decision context (regime / plan card / risk snapshot) -
         # advisory hard data compiled by the graph.
-        computed_context = state.get("computed_decision_context") or ""
+        # Phase 2: with `enable_decision_packet` on this is the bounded Decision
+        # Packet instead, read from the string the graph rendered once.
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.decision_packet import decision_packet_or_context
+
+        computed_context = decision_packet_or_context(state, get_config())
 
         past_context = state.get("past_context", "")
         lessons_line = (

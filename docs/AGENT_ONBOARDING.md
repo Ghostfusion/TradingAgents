@@ -434,6 +434,41 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Phase 2 of `docs/design_decision_context.md` is BUILT - the Decision Packet - and it found that §6's packet sketch
+  contradicts §16's own architecture.** New `tradingagents/strategies/decision_packet.py`. The graph renders the packet ONCE before the graph into
+  `state["decision_packet"]`; the five consumers §6 names (trader, PM, the three risk debators) read the decision channel through
+  `decision_packet_or_context`, which is the gate. Gate `enable_decision_packet`, default False, registered in the five places; off ⇒ every consumer
+  gets `computed_decision_context` byte-for-byte. **Four findings.**
+  (1) **`gate` and `permission` are POST-DECISION facts.** `PASS|WARN|REJECT` is `risk_governor.govern`'s vocabulary and `govern` runs in the graph's
+  post-decision fold; `TRADE_ALLOWED` comes from `signal_action.portfolio_action_from_gate`, which derives it FROM that verdict; `BLOCKED` has no
+  producer at all (the live vocabulary is `PORTFOLIO_ACTIONS`, seven values). §16 puts the deterministic gates DOWNSTREAM of the decision, so a
+  pre-decision packet cannot carry either. The packet prints the pre-decision constraints instead - limits registry, measured book state, liquidity
+  verdict, and the regime gate (the one gate readable pre-graph, vocabulary `tradable|high-vol|fast-downtrend|catalyst-window|unknown` - a different
+  axis) - and names `permission` `unavailable_pre_decision` with the reason, the D-11 discipline.
+  (2) **`DIRECTIONAL DISTRIBUTION` HAS NO VALID PRODUCER.** §6 justified it with "the engines already carry a sign per component"; verified at the
+  definition sites, they do not - every engine band table is non-directional (`REGIME_BANDS` = benign/constructive/mixed/stressed/hostile,
+  `RISK_BANDS` = low risk/contained/moderate/elevated/high/severe, `NEWS_BANDS` = high-information/informative/mixed/quiet/stale/no-signal), and
+  `score_engine.align` maps every component to 0-100 IN THE FAVOURABLE DIRECTION, erasing the sign. No component dict carries a `sign` key. The one
+  counter that exists measures the INDEPENDENT STANCES, which §4.4 and acceptance criterion 22 FORBID as evidence. So the row is a NAMED GAP - a
+  fabricated distribution would present a diagnostics stream as evidence and a reader could not tell.
+  (3) **§8's three counters reduce to one.** `UNCERTAINTY` is built and honest (count + named gaps from `quant_scorecard`'s own `absent` map and each
+  engine's own `absent`/`absent_reasons`; an engine whose gate is OFF is NOT a gap - the `DISABLED`/`NA` distinction). The `EVIDENCE` half is the row
+  finding 2 rules out. `reporting._run_card_evidence_counts` now reads the same counter via `prompt_metrics.stance_direction_counts` (ONE producer),
+  so the card and the packet cannot disagree, and Phase 0's `null` becomes a real count - still `null` when there is NO snapshot.
+  (4) **The recorded scorecard is a PROJECTION**: `_run_card_quant_scorecard` drops each engine's `result`, so the card's `trade` entry carries no
+  `floor` and no `basis` and a card reader cannot recompute the composite. The live state snapshot does carry them. Not fixed - a WP-12 decision.
+  **Three defects in the packet's own first draft, all caught by RUNNING it:** `DECISION PACKET vv1` (doubled version); truncation picked victims by a
+  text heuristic that could have dropped the purpose line or a category note (now STRUCTURAL - only rows are droppable); and
+  `engine_row_max_chars` was declared in §7's budget and **never enforced** (now enforced by dropping WHOLE CELLS, never cutting a cell in half).
+  28 tests in `tests/test_decision_packet.py` (verified by `--collect-only`), plus the
+  Phase 0 uncertainty contract strengthened in `tests/test_decision_guardrail.py`. Suite
+  5015 -> **5044 passed, 6 skipped** (539 s). ruff clean.
+  **Live-verified** on `MSFT_20260920_145644` with both gates on: `run_card.json` carries
+  `context_mode="packet"`, `packet_version="v1"`, `packet_truncated=false`, `packet_chars=2796`,
+  and `uncertainty_count=10` with ten real named gaps - the field Phase 0 recorded as `null`.
+  A prompt-capture run proves the wiring both ways: gate on ⇒ the packet text is in the
+  trader's prompt and the compiled string is not; gate off ⇒ the reverse.
+
 - 2026-09-20 `(working tree)` - **Phase 1 of `docs/design_decision_context.md` is BUILT and RUN - and the measurement does NOT support the
   doc's premise.** The experiment: a 2x2 factorial (prose vs packet) x (compact vs large) over 12 real snapshots, 4 arms each, scored on the
   DECISION CATEGORY. Extended `scripts/context_ab.py` as the doc required - no parallel harness; `mcnemar_exact`, `ungrounded_figures`, the

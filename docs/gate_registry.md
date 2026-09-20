@@ -169,7 +169,17 @@ byte-identical to the run before it existed.
 | `enable_analyst_estimates` | `TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES` | supplies the estimate-change leg (`RevEC`) from the vendor's 90-day estimate trend, so a leg that was permanently `unavailable` becomes measured | `scripts/value_screener.py` (`--revision-index`), `tradingagents/dataflows/yfinance_sector.py::fetch_estimate_trend` | `test_analyst_estimates_wiring.py` | wired |
 | `enable_eodhd_rates` | `TRADINGAGENTS_ENABLE_EODHD_RATES` | reads TIPS real yields and the nominal-minus-real inflation expectation, so the equity risk premium `dcf.wacc_from_beta` assumes becomes measurable | `scripts/value_screener.py` (`--rates`), `tradingagents/dataflows/eodhd.py::get_real_yield_rates_eodhd`, `tradingagents/dataflows/eodhd.py::inflation_expectation_eodhd` | `test_eodhd_rates.py` | wired |
 
-## 7. Adding a gate — the rule
+## 7. Context gates — these change what the decision model reads
+
+A context gate changes the *representation* of the decision channel, never a
+decision, a size or a verdict. It is off by default, so a gate-off run is
+byte-identical to the run before it existed.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_decision_packet` | `TRADINGAGENTS_ENABLE_DECISION_PACKET` | replaces `computed_decision_context` with ONE bounded, deterministic Decision Packet for the decision model, and supplies the §8 uncertainty counters that Phase 0 recorded as `null` | `tradingagents/strategies/decision_packet.py::decision_packet_or_context` (the gate), `::render_decision_packet` (the render), `tradingagents/reporting.py::_run_card_decision_context` (the `packet_chars` measurement) | `test_decision_packet.py` | wired |
+
+## 8. Adding a gate — the rule
 
 A new gate is not done until: (1) it has a key in `DEFAULT_CONFIG`, (2) an
 `_ENV_OVERRIDES` row so it is flippable from `.env`, (3) a row in this file with

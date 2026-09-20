@@ -81,6 +81,8 @@ REGISTRY: dict[str, str] = {
     "enable_moomoo_snapshot": "wired",
     "enable_analyst_estimates": "wired",
     "enable_eodhd_rates": "wired",
+    # context gates (change what the decision model reads, never a decision)
+    "enable_decision_packet": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

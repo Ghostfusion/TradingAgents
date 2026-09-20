@@ -307,6 +307,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_REGIME_SCORE": "enable_regime_score",
     "TRADINGAGENTS_ENABLE_RISK_SCORE": "enable_risk_score",
     "TRADINGAGENTS_ENABLE_QUANT_SCORECARD": "enable_quant_scorecard",
+    "TRADINGAGENTS_ENABLE_DECISION_PACKET": "enable_decision_packet",
     # S11c's mirrored discretionary budget: the pair specs the mirror reads, as a
     # JSON list, e.g. '[{"roles": ["news", "fundamentals"], "budget": 2}]'.
     # Empty = the mirror is inert (nothing is ever suppressed).
@@ -1125,6 +1126,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # eight engine gates above decide which engines populate it, and this gate
         # never implies them (§9 D1).
         "enable_quant_scorecard": False,
+        # Phase 2 of docs/design_decision_context.md §6-§8: the Decision Packet -
+        # ONE bounded, deterministic block for the decision model, with the
+        # uncertainty counters that §8 makes part of v1. Off by default, and the
+        # release invariant is the stronger one: with this gate off every consumer
+        # receives `computed_decision_context` byte-for-byte as before, so a
+        # gate-off run is identical to the run before the packet existed.
+        "enable_decision_packet": False,
         # S11c pair specs: [{"roles": ["a", "b"], "budget": n}]. The budget is the
         # mirrored allowance of DISCRETIONARY (model-pool) calls per role; omit it
         # to mirror the smallest observed count of the pair instead. Empty (default)

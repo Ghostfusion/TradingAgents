@@ -71,7 +71,12 @@ def create_trader(llm, backup_llm=None):
         # Computed decision context (regime / re-rating / plan card / risk
         # snapshot) - advisory hard data compiled by the graph's
         # _compiled_decision_context; absent string = nothing to inject.
-        computed_context = state.get("computed_decision_context") or ""
+        # Phase 2: with `enable_decision_packet` on this is the bounded Decision
+        # Packet instead, read from the string the graph rendered once.
+        from tradingagents.dataflows.config import get_config
+        from tradingagents.strategies.decision_packet import decision_packet_or_context
+
+        computed_context = decision_packet_or_context(state, get_config())
 
         messages = [
             {

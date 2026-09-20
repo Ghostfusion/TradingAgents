@@ -685,9 +685,34 @@ class TradingAgentsGraph:
         # gate, re-rating evidence, trade plan card, risk snapshot, drift hint)
         # so the Trader / PM / 3 risk debators get hard computed data, not LLM
         # prose. Always advisory - never blocks.
+        # The close series is fetched ONCE here and handed to both the compiled
+        # context and the packet, so the packet's regime and plan rows cannot
+        # come from a second vendor read of the same series.
+        closes: list = []
+        try:
+            closes = self._try_fetch_closes(company_name)
+        except Exception:  # noqa: BLE001 - advisory; the rows degrade to gaps
+            closes = []
         init_agent_state["computed_decision_context"] = self._compiled_decision_context(
-            company_name, init_agent_state
+            company_name, init_agent_state, closes=closes
         )
+        # Phase 2 (§6-§8): the bounded Decision Packet, rendered ONCE here so
+        # there is one producer of the string and one `packet_chars`
+        # measurement. Gated: with `enable_decision_packet` off this block writes
+        # NOTHING, so the state, the prompts and run_card.json are byte-identical
+        # to the run before the packet existed.
+        if self.config.get("enable_decision_packet"):
+            try:
+                from tradingagents.strategies.decision_packet import (
+                    DECISION_PACKET_KEY,
+                    render_decision_packet,
+                )
+
+                init_agent_state[DECISION_PACKET_KEY] = render_decision_packet(
+                    init_agent_state, self.config, closes=closes
+                )
+            except Exception as exc:  # noqa: BLE001 - advisory; never break a run
+                logger.warning("decision packet skipped: %s", exc)
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date+graph-shape+run resumes; a
@@ -1279,7 +1304,9 @@ class TradingAgentsGraph:
             logger.warning("sentiment factor read skipped: %s", sent_exc)
             return None
 
-    def _compiled_decision_context(self, ticker: str, state: dict | None = None) -> str:
+    def _compiled_decision_context(
+        self, ticker: str, state: dict | None = None, *, closes: list | None = None
+    ) -> str:
         """Compile the deterministic decision context fed to the Trader, PM
         and the 3 risk debators (Phase A-E). All advisory; never blocks.
 
@@ -1288,6 +1315,11 @@ class TradingAgentsGraph:
         current book risk/daily-loss/HWM snapshot when measurable. Every number
         is computed or explicit 'unavailable' - never imagined. Best-effort:
         any hiccup degrades to a short line, never breaks the run.
+
+        ``closes`` is the close series when the caller already holds one. It is
+        fetched here otherwise, so a caller that also needs it (the Decision
+        Packet's regime and plan rows) can pass its own read rather than trigger
+        a second one - one series, one fetch.
         """
         out = []
         # WP-12 P12-3: the scorecard block goes **first**, deliberately. Site 10
@@ -1306,11 +1338,12 @@ class TradingAgentsGraph:
                 out.append(format_quant_scorecard(snapshot))
         except Exception:  # noqa: BLE001 - advisory; never break a run
             pass
-        closes = []
-        try:
-            closes = self._try_fetch_closes(ticker)
-        except Exception:  # noqa: BLE001
-            closes = []
+        closes = list(closes) if closes else []
+        if not closes:
+            try:
+                closes = self._try_fetch_closes(ticker)
+            except Exception:  # noqa: BLE001
+                closes = []
         try:
             from tradingagents.strategies.book_positions import render_holdings_block
 

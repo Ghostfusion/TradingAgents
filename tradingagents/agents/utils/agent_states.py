@@ -107,6 +107,16 @@ class AgentState(MessagesState):
         "docs/AGENT_ONBOARDING.md, 2026-08-28). Built only when "
         "`enable_quant_scorecard` is on; absent otherwise",
     ]
+    decision_packet: Annotated[
+        str,
+        "Phase 2 of docs/design_decision_context.md: the bounded, deterministic "
+        "Decision Packet - the decision channel the trader, the 3 risk debators "
+        "and the portfolio manager read in place of `computed_decision_context` "
+        "when `enable_decision_packet` is on. Rendered ONCE before the graph so "
+        "there is one producer of the string and one `packet_chars` measurement. "
+        "Declared here because native LangGraph SILENTLY DROPS undeclared keys; "
+        "written only when the gate is on, so a gate-off run gains no key",
+    ]
     risk_independent_stances: Annotated[
         dict, "Independent pre-debate risk stances (aggressive/conservative/neutral), no cross-talk"
     ]

@@ -443,39 +443,67 @@ The packet has **four semantic categories, kept visually distinct**:
 PACKET v1 - <TICKER> - <date>
 =============================================
 RISK CONSTRAINTS           <- NOT evidence; a decision-domain constraint
-permission = <TRADE_ALLOWED | BLOCKED>
-gate       = <PASS|WARN|REJECT>   reason = <...>
-CVaR <x> (budget <b>)  drawdown <d> (limit <l>)  liquidity <verdict>
+limits     max_position=.. book_cap=.. cvar_budget=.. drawdown_limit=.. sector_cap=..
+book       cvar=<x> (budget <b>)  drawdown=<d> (limit <l>)  stress=<s>
+liquidity  verdict=<...>  illiq=.. float_turnover=.. iwf=..
+regime     verdict=<tradable|high-vol|fast-downtrend|catalyst-window|unknown> pass=<..>
+permission unavailable_pre_decision - signal_action_split needs the post-decision gate verdict
 
 EVIDENCE                   <- research evidence
-fundamental <s> [cov c]  technical <s> [cov c]  regime <s> [cov c]
-risk <s> [cov c]  sentiment <s> [cov c]  news <s|NA>  event <s|NA>
-DIRECTIONAL DISTRIBUTION  bullish=<b>  bearish=<d>  neutral=<n>
-UNCERTAINTY               <u> named gaps: <list>
-CONFLICT                  <k> same-metric conflicts (see ledger)
+engines  fundamental=<s> [cov c]  technical=<s> [cov c]  regime=<s> [cov c]
+         risk=<s> [cov c]  sentiment=<s> [cov c]  news=<s|NA>  event=<s|NA>  trade=<s> [cov c]
+DIRECTIONAL DISTRIBUTION   unavailable_pre_producer - no engine carries a directional sign,
+                           and the independent stances are diagnostics, not evidence (§4.4)
+UNCERTAINTY  <u> named gaps: <list>
+CONFLICT     unavailable_pre_ledger - same-metric pairs are resolved post-hoc (§9, Phase 3)
 
 SYNTHESIS                  <- labelled downstream, printed last
-consensus  weighted_stance=<x>  label=<...>  n=<k>
+consensus  weighted_stance=<x>  label=<...>  agreement=<a>  n=<k>   (a DIAGNOSTIC, not evidence)
 composite  score=<s>  coverage=<c>  floor=<f>  basis=<...>
 
 TRADE PARAMETERS
-entry <..>  stop <..>  target <..>  size <..>
+levels  entry=<..> stop=<..> p1=<..> p2=<..> p3=<..> t1=<..> t2=<..>
+size    shares=<..> capital_at_risk=<..> peak_deployed=<..>
 
 FALSIFIERS
 <the >=1 invalidation conditions already required by report_disclosure>
 ```
 
+**Three rows in the sketch above cannot be filled at the packet's compile point, and each says
+so.** `permission` and the `gate` verdict are **post-decision** facts - `risk_governor.govern`
+produces `PASS|WARN|REJECT` in the graph's post-decision fold, and
+`signal_action.portfolio_action_from_gate` derives the portfolio instruction from that verdict.
+§16 puts the deterministic gates *downstream* of the decision, so a pre-decision packet cannot
+carry them, and the packet prints the pre-decision constraints instead. `DIRECTIONAL
+DISTRIBUTION` has no producer at all: the engine band tables are not directional and
+`score_engine.align` erases each observation's sign, while the one existing counter measures
+the independent stances - which §4.4 and criterion 22 forbid as evidence. `CONFLICT` is §9's
+ledger, which is Phase 3. §13.4 records all of this as the build's findings.
+
 **Why `permission` moved into its own block.** `PERMISSION TRADE_ALLOWED` is not evidence - it
 is a *decision-domain constraint* already imposed by the deterministic gates. Listed among the
 engine scores it would visually resemble one more bullish input. Under `RISK CONSTRAINTS` it
-reads as what it is: a boundary the model reasons *within*, not a fact it weighs.
+reads as what it is: a boundary the model reasons *within*, not a fact it weighs. (It is
+printed as a named gap pre-decision - see above - and the same reasoning is why the row belongs
+in this block and not in `EVIDENCE`.)
 
-**Why a distribution replaces the agreement count.** `AGREEMENT 7/8` is the shape most likely
-to become an implicit instruction, and it also has no producer today: `agreement_score`
-(`tradingagents/strategies/consensus.py:14`) operates on ratings, not engines, and nothing
-computes a directional agreement over engine scores. A **distribution**
-(`bullish=6 bearish=1 neutral=1`) conveys the same information without presenting a score to
-beat. The counts are cheap - the engines already carry a sign per component.
+**Why a distribution would replace the agreement count - and why it cannot, yet.** `AGREEMENT
+7/8` is the shape most likely to become an implicit instruction, and it also has no producer:
+`agreement_score` (`tradingagents/strategies/consensus.py:14`) operates on ratings, not
+engines, and nothing computes a directional agreement over engine scores. A **distribution**
+would convey the same information without presenting a score to beat.
+
+**But the counts are not cheap, and this sentence was wrong.** It read *"the engines already
+carry a sign per component"*. Verified at the definition sites during the Phase 2 build, they
+do not: every engine band table is non-directional (`REGIME_BANDS` =
+benign/constructive/mixed/stressed/hostile, `RISK_BANDS` =
+low risk/contained/moderate/elevated/high/severe, `NEWS_BANDS` =
+high-information/informative/mixed/quiet/stale/no-signal), and `score_engine.align` maps each
+component to a 0-100 value **in the favourable direction**, erasing the observation's sign. No
+component dict carries a `sign` key. The one counter that exists measures the **independent
+stances**, which §4.4 and acceptance criterion 22 forbid as evidence. The row is therefore a
+**named gap** in v1 - see §13.4 Finding 2. A fabricated distribution would be worse than none,
+because it would present a diagnostics stream as evidence and a reader could not tell.
 
 **Why `UNCERTAINTY` is in v1 rather than a later phase.** Owner feedback accepted: if the
 first packet omits it, the first experiment cannot test H1b at all. It costs nothing to add
@@ -958,7 +986,7 @@ pass is LAST, not first.
 |---|---|---|
 | **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. **BUILT** (see §13.1). | the §3 numbers become a per-run series |
 | **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. **BUILT** (see §13.2). | the §12.2 distribution + grounding per arm, confounds stated |
-| **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1 | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
+| **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1. **BUILT** (see §13.4). | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
 | **3** | Conflict ledger (§9), after the open verifier pairs are classified | conflicts named with both sections + a mechanical classification |
 | **4** | Conditional expansion (§11) | `context_mode` recorded; expansion rate measurable |
 | **5** | Closed-vocabulary challenge pass (§10) | cannot raise caution from an uncertainty entry; materiality test enforced |
@@ -1231,6 +1259,104 @@ target the **representation** axis, and it should first ask whether the packet's
 (engine scores, fixed key/value rows, no prose) is what suppresses confidence, rather than
 assuming a bounded packet is an improvement.
 
+### 13.4 Phase 2 as built, and the four rows it could not fill
+
+**Where the code lives.** `tradingagents/strategies/decision_packet.py` (new) owns the
+render; `tradingagents/graph/trading_graph.py` renders it **once** before the graph and stores
+it under `DECISION_PACKET_KEY`; `decision_packet_or_context` is the gate, and the five
+consumers named in §6 read the decision channel through it. `reporting` records
+`packet_chars` / `packet_version` / `packet_truncated` / `context_mode` in the card's
+`decision_context` block.
+
+**The packet is a pure function of state** - no model call, no vendor call, no state mutation.
+The one input not already in state is the close series, and the graph now fetches it **once**
+and hands it to both the compiled context and the packet, so the packet's regime and plan rows
+cannot come from a second read of the same series.
+
+**FINDING 1 - §6's packet sketch is internally inconsistent with §16's architecture.** §6's
+`RISK CONSTRAINTS` block specifies `gate = <PASS|WARN|REJECT>` and
+`permission = <TRADE_ALLOWED | BLOCKED>`. Both are **post-decision** facts:
+
+* `PASS|WARN|REJECT` is `risk_governor.govern`'s vocabulary, and `govern` runs in the graph's
+  **post-decision** fold, writing `final_state["risk_gate"]`. No pre-graph producer emits it.
+  The one gate readable before the decision is the **regime gate**, whose vocabulary is
+  `tradable | high-vol | fast-downtrend | catalyst-window | unknown` - a different axis
+  entirely, and the packet now prints that, labelled.
+* `TRADE_ALLOWED` is produced by `signal_action.portfolio_action_from_gate`, which derives it
+  **from the gate verdict** - so it is unavailable for the same reason. `BLOCKED` has no
+  producer at all: the live vocabulary is `PORTFOLIO_ACTIONS` (seven values), and the
+  two-value form exists only in this document.
+
+§16's own diagram puts the deterministic gates **downstream of the decision**
+(`RAW DECISION → CLOSED CHALLENGE → DETERMINISTIC GATES → ACTION`), so a pre-decision packet
+*cannot* carry them. The packet therefore prints the pre-decision constraints - the limits
+registry, the measured book state, the liquidity verdict, the regime gate - and names
+`permission` as `unavailable_pre_decision` with the reason, in the same spirit as
+`catalyst_window=unavailable_pre_graph` (D-11). **A row whose producer has not run is a named
+gap, never a default.**
+
+**FINDING 2 - the directional distribution has NO valid producer.** §6 justifies
+`bullish=<b> bearish=<d> neutral=<n>` with *"the engines already carry a sign per component"*.
+They do not, verified at the definition sites: every engine band table is non-directional
+(`REGIME_BANDS` = benign/constructive/mixed/stressed/hostile; `RISK_BANDS` = low
+risk/contained/moderate/elevated/high/severe; `NEWS_BANDS` =
+high-information/informative/mixed/quiet/stale/no-signal; `QUALITY_BANDS` =
+elite/above-average/peer median/below-average/poor/distressed), and `score_engine.align` maps
+each component to a 0-100 value **in the favourable direction**, erasing the observation's
+sign. No component dict carries a `sign` key; the only signed field is `raw`, whose arithmetic
+sign is meaningless for the band-mapped and boolean components (RSI, MFI, stochastic, Williams
+%R).
+
+The one counter that exists, `prompt_metrics.stance_direction_counts`, counts the
+**independent stances** - and §4.4 with acceptance criterion 22 makes those *"diagnostics, not
+evidence … they must not become a second evidence stream that the PM averages"*. Feeding them
+into the packet's `EVIDENCE` block would silently turn `independent_agreement` into the
+consensus the model defers to, which is the failure §4.4 exists to prevent. So the row is a
+**named gap**. A fabricated distribution would be worse than none: it would present a
+diagnostics stream as evidence, and a reader could not tell.
+
+**FINDING 3 - §8's three counters reduce to one.** `UNCERTAINTY` is built and honest: the
+count and the named gaps come from the one place each is declared - `quant_scorecard`'s own
+`absent` map for an engine that was enabled and could not measure, and the engine's own
+`absent` / `absent_reasons` for a component it could not measure. **An engine whose gate is
+off is not a gap**: it is intentionally not running, which is the `STATE_DISABLED` / `STATE_NA`
+distinction the scorecard already draws. The `EVIDENCE` side of the pair
+(`bullish`/`bearish`/`neutral`) is the row Finding 2 rules out, so the pair collapses to the
+uncertainty half. The §8 invariant is therefore enforced on what exists: *adding an enabled
+engine that cannot measure grows the `UNCERTAINTY` count and produces no directional count*.
+
+`reporting._run_card_evidence_counts` now reads the same `uncertainty_read`, so the card and
+the packet cannot disagree - and the field Phase 0 recorded as `null` is a real count, while
+staying `null` when there is **no snapshot** (nothing examined the engines).
+
+**FINDING 4 - the recorded scorecard is a projection, so a card reader cannot recompute the
+composite.** `reporting._run_card_quant_scorecard` writes each engine as
+`enabled`/`state`/`score`/`coverage`/`band`/`status` and **drops `result`**, so the card's
+`trade` entry carries no `floor` and no `basis`. The live snapshot in state does carry them,
+so the packet's `composite` row is complete in production - but a reader working from
+`run_card.json` alone cannot reproduce the composite's floor or its shipped `basis` string.
+**Not fixed here:** widening the card is a WP-12 decision, and it is not required by any
+Phase 2 criterion.
+
+**Two defects in the packet's own first draft, both caught by running it.** (1) The
+wiring-defect string printed `DECISION PACKET vv1` - a doubled version prefix. (2) The
+truncation pass picked victims by a text heuristic (`not line.isupper()`), which could have
+dropped the purpose line or a category note; it is now **structural** - only rows can be
+dropped, never a heading, a note or the header, so the labelling survives pressure. A third,
+found by a test: `engine_row_max_chars` was declared in the budget and **never enforced** - a
+declared bound that does nothing is the same defect class as a parameter that silently does
+nothing. It is now enforced by dropping **whole cells**, never by cutting a cell in half.
+
+**What the packet deliberately does not do.** No `DECISION` line (§6 rule 4, asserted). The
+`CONFLICT` row is a named gap, because §9's ledger is Phase 3 and the same-metric pairs are
+resolved post-hoc over the report tree. The consensus line sits under `SYNTHESIS` and is
+labelled a **diagnostic over independent reads**, not evidence - it is the line the PM already
+received, and §11 classifies `weighted_consensus` as a diagnostic. `reporting`'s section IVa
+still renders `computed_decision_context`, because the researchers keep the unbounded channel
+(§1.1: research can be large) and IVa is the report's research-side advisory block; **the
+packet's own text is not rendered into the report**, which is a gap worth closing when the
+packet is dark-launched for real.
+
 ---
 
 ## 14. Acceptance criteria
@@ -1239,8 +1365,8 @@ assuming a bounded packet is an improvement.
    byte-identical output. (The repo's established gate contract.)
 2. **A gate is a membership switch, not an inert body** — same rule.
 3. **New gates registered in five places**: `default_config.py` `DEFAULT_CONFIG`, an
-   `_ENV_OVERRIDES` row, `docs/gate_registry.md` §6, the `REGISTRY` dict in
-   `tests/test_gate_env_toggles.py`, and `.env.example`.
+   `_ENV_OVERRIDES` row, a `docs/gate_registry.md` table row (now §7, *context gates*),
+   the `REGISTRY` dict in `tests/test_gate_env_toggles.py`, and `.env.example`.
 4. **The packet is a pure function** — no vendor call, no model call, no state mutation.
 5. **No number without its coverage or a named gap.**
 6. **An uncertainty is never counted as bearish** — asserted by test, not by prompt text.
@@ -1290,6 +1416,29 @@ assuming a bounded packet is an improvement.
     as "none present" when the truth is "nothing counted it".
 27. **The telemetry block changes no behaviour**: no gate, and nothing reads a value back into
     a prompt or a decision.
+
+**Phase 2 criteria, met by the build recorded in §13.4.**
+
+28. **The packet fits its budget, and truncation is structural and visible.** Only rows can be
+    dropped - never a heading, a category note or the header - and the count of dropped rows
+    appears in the text. `engine_row_max_chars` is enforced by dropping **whole cells**, so a
+    surviving cell is always `name=value`.
+29. **A row whose producer has not run is a named gap.** `unavailable_pre_<stage>` with the
+    reason, never a plausible default: a default would read as a measurement nobody made, the
+    failure `catalyst_window=False` already committed (D-11).
+30. **The packet is rendered once and read by every consumer.** One producer of the string, one
+    `packet_chars` measurement; a consumer that re-rendered could disagree with the block the
+    model actually read.
+31. **The gate is read in exactly one place** (`decision_packet_or_context`), and a gate-on run
+    with no packet rendered reports a wiring defect rather than silently falling back to the
+    compiled context - a silent fallback would hide the defect behind plausible output.
+32. **The uncertainty counter draws the `DISABLED` / `NA` distinction.** An engine that is
+    enabled and could not measure is a named gap; an engine whose gate is off is not a gap at
+    all. `reporting._run_card_evidence_counts` reads the same counter, so the card and the
+    packet cannot disagree, and the field stays `null` when there is no snapshot.
+33. **The packet's text is not rendered into the report.** Section IVa still renders
+    `computed_decision_context`, because the researchers keep the unbounded channel (§1.1) and
+    IVa is the report's research-side block. **Named as an open gap**, not silently accepted.
 
 ---
 

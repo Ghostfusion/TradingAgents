@@ -34,6 +34,7 @@ __all__ = [
     "PROMPT_METRICS_KEY",
     "PM_LLM_OUTPUT_KEY",
     "DIRECTION_BY_RATING",
+    "STANCE_SOURCES",
     "TOKENS_PER_CHAR_DIVISOR",
     "decision_telemetry_block",
     "direction_of",
@@ -42,6 +43,7 @@ __all__ = [
     "record_stage",
     "snapshot_identity",
     "stage_metrics",
+    "stance_direction_counts",
     "tokens_est",
 ]
 
@@ -194,6 +196,54 @@ def direction_of(rating: str | None) -> str | None:
     if not rating:
         return None
     return DIRECTION_BY_RATING.get(str(rating).strip().capitalize())
+
+
+#: The state keys carrying per-role directional records, in the order they are
+#: sampled. The risk trio is sampled after the Trader; the researcher pair
+#: before the debate. A caller that holds only the first sees one source.
+STANCE_SOURCES: tuple[str, ...] = (
+    "researcher_independent_stances",
+    "risk_independent_stances",
+)
+
+
+def stance_direction_counts(state: dict | None) -> dict:
+    """**The ONE producer** of the directional distribution over stances.
+
+    Two readers consume this - the run card's ``evidence`` block and the
+    Decision Packet's ``DIRECTIONAL DISTRIBUTION`` row - and they must not be
+    able to disagree about how many stances were bullish (master rule 15).
+
+    The axis is the independent stances because they are the only per-role
+    directional records in the state, each carrying a canonical 5-tier rating.
+    It is deliberately NOT the engines: the engine band tables are not
+    directional (``benign``/``constructive``/``hostile``,
+    ``low risk``/``contained``/``severe``, ``high-information``/``stale``), so
+    there is no engine-axis sign to count.
+
+    ``sources`` travels with the counts so a reader can see what they are made
+    of - a count over three stances is not a count over the whole decision
+    context, and must not be read as one. An unreadable rating is counted
+    separately, never folded into ``neutral``.
+    """
+    counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+    sources: list[str] = []
+    unreadable = 0
+    for key in STANCE_SOURCES:
+        stances = (state or {}).get(key) or {}
+        if not isinstance(stances, dict) or not stances:
+            continue
+        for _role, payload in stances.items():
+            rating = (payload or {}).get("rating") if isinstance(payload, dict) else None
+            direction = direction_of(rating)
+            if direction is None:
+                unreadable += 1
+                continue
+            counts[direction] += 1
+        sources.append(key)
+    counts["sources"] = sources
+    counts["unreadable"] = unreadable
+    return counts
 
 
 def snapshot_identity(cfg: dict | None, final_state: dict | None) -> dict:
