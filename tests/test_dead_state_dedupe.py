@@ -100,7 +100,10 @@ def test_fundamentals_node_returns_only_declared_channels():
     node = create_fundamentals_analyst(_FakeAnalystLLM(), config={})
     out = node(_fundamentals_state())
     assert set(out) <= set(AgentState.__annotations__)
-    assert set(out) == {"messages", "fundamentals_report", "tool_evidence"}
+    # Phase 0 adds a DECLARED telemetry channel (prompt_metrics) to every
+    # node that builds a prompt; the guard is "no UNDECLARED channel",
+    # which the subset assertion above still enforces.
+    assert set(out) == {"messages", "fundamentals_report", "tool_evidence", "prompt_metrics"}
     assert "security_type" not in out
 
 
@@ -124,7 +127,7 @@ def test_trader_node_returns_only_declared_channels(monkeypatch):
     }
     out = node(state)
     assert set(out) <= set(AgentState.__annotations__)
-    assert set(out) == {"messages", "trader_investment_plan"}
+    assert set(out) == {"messages", "trader_investment_plan", "prompt_metrics"}
     assert "sender" not in out
 
 

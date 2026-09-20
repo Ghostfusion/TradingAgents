@@ -68,7 +68,9 @@ def test_etf_classification_uses_etf_toolset(monkeypatch):
     assert "get_balance_sheet" not in names
     assert "get_dcf_valuation" not in names
     # The classification selects the toolset only; it is not a state channel.
-    assert set(out) == {"messages", "fundamentals_report", TOOL_EVIDENCE_KEY}
+    assert set(out) == {
+        "messages", "fundamentals_report", TOOL_EVIDENCE_KEY, "prompt_metrics"
+    }
 
 
 def test_etf_disabled_uses_company_toolset(monkeypatch):

@@ -3,6 +3,8 @@ from typing import Annotated
 from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
+from tradingagents.agents.utils.prompt_metrics import merge_prompt_metrics
+
 
 # Researcher team state
 class InvestDebateState(TypedDict):
@@ -118,6 +120,19 @@ class AgentState(MessagesState):
     # per-analyst-key list of ToolEvidenceLeaf dicts gathered deterministically
     # when ``analyst_forced_tools`` is set; the analyst node reduces from the
     # rendered block. Absent when the legacy LLM-selected tool path runs.
+    # Phase 0 decision-context telemetry (docs/design_decision_context.md §13).
+    # ``prompt_metrics`` carries the reducer as Annotated metadata: every node
+    # returns its own one-stage fragment, and the default last-write-wins would
+    # keep only the last stage of the run. Stages recorded: analyst_market /
+    # analyst_news / analyst_fundamentals / analyst_sentiment / trader /
+    # research_manager / pm.
+    prompt_metrics: Annotated[dict, merge_prompt_metrics]
+    pm_llm_output: Annotated[
+        dict | None,
+        "Phase 0: the PM model's structured output BEFORE any deterministic "
+        "postprocess. NOT the same as pm_decision, which is captured after the "
+        "guardrail has already rewritten rating/confidence in place",
+    ]
     tool_evidence: Annotated[
         dict, "Analyst-key → list of ToolEvidenceLeaf dicts (deterministic gather)"
     ]

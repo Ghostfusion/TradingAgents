@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.prompt_metrics import record_stage
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
@@ -429,6 +430,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         return {
             "messages": [result],
             "market_report": report,
+            **record_stage("analyst_market", f"{system_message}\n{evidence_block}"),
             "tool_evidence": tool_evidence,
         }
 

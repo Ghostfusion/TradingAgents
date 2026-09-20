@@ -309,5 +309,123 @@ class TestPortfolioManagerRiskCapWiring:
         assert not out["pm_decision"]["guardrail_reason"]
 
 
+class TestPhase0DecisionContextBoundary:
+    """Phase 0 (docs/design_decision_context.md §12.4): the PM model's
+    structured emit is recorded BEFORE any deterministic postprocess.
+
+    The mutation this defends against is a one-line reorder: capturing
+    ``pm_llm_output`` after ``_guardrail_hook`` instead of before it. The
+    guardrail rewrites ``result.rating`` in place, so the reordered capture
+    returns the GUARDRAILED rating under a "raw" label - and every Phase 1
+    arm would then measure the gates instead of the model. ``pm_decision``
+    already IS the post-guardrail object; the two must differ here or the
+    boundary is not being recorded at all.
+    """
+
+    def test_raw_emit_survives_a_guardrail_downgrade(self, guardrail_on):
+        state = _pm_state(
+            [{"risk_id": "going_concern", "severity": RiskSeverity.HIGH,
+              "mitigation_stated": False}]
+        )
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.BUY))(state)
+
+        # The guardrail capped Buy -> Hold (pre-existing behaviour, unchanged).
+        assert out["pm_decision"]["rating"] == "Hold"
+        # ...and the raw emit still says what the model actually decided.
+        assert out["pm_llm_output"]["rating"] == "Buy"
+
+    def test_raw_emit_records_the_prompt_size(self, guardrail_on):
+        out = create_portfolio_manager(_pm_llm(PortfolioRating.BUY))(_pm_state([]))
+        entry = out["prompt_metrics"]["pm"]
+        assert entry["chars"] > 0
+        assert entry["tokens_est"] == entry["chars"] // 4
+
+
+class TestPhase0TelemetryBlock:
+    """The card block keeps the three decision layers apart."""
+
+    def test_llm_output_is_not_the_guardrailed_rating(self):
+        from tradingagents.agents.utils.prompt_metrics import decision_telemetry_block
+
+        state = {
+            "company_of_interest": "QCOM",
+            "trade_date": "2026-09-19",
+            "pm_decision": {"rating": "Hold", "guardrail_reason": "risk-cap: high"},
+            "pm_llm_output": {"rating": "Buy", "confidence": 0.72},
+            "risk_gate": {"verdict": "REJECT"},
+        }
+        block = decision_telemetry_block({}, state)
+        assert block["llm_output"]["rating"] == "Buy"
+        assert block["llm_output"]["direction"] == "bullish"
+        assert block["deterministic_postprocess"]["guardrail_rating"] == "Hold"
+        assert block["deterministic_postprocess"]["guardrail_changed_rating"] is True
+        assert block["deterministic_postprocess"]["risk_gate"] == "REJECT"
+
+    def test_signal_action_split_is_populated_not_phantom(self):
+        # An earlier draft read these from state, where nothing writes them, and
+        # silently recorded four nulls. The block must call the one real producer.
+        from tradingagents.agents.utils.prompt_metrics import decision_telemetry_block
+
+        block = decision_telemetry_block({}, {
+            "pm_decision": {"rating": "Buy"},
+            "pm_llm_output": {"rating": "Buy"},
+            "risk_gate": {"verdict": "REJECT", "reasons": ["portfolio drawdown over limit"]},
+        })
+        split = block["deterministic_postprocess"]["signal_action"]
+        assert split["security_signal"] == "BUY"
+        assert split["portfolio_action"] == "NO_NEW_RISK"
+        assert split["gated"] is True
+        # The execution layer carries the engine's last action value, not null.
+        assert block["execution"]["final_action"] == split["combined_action"]
+
+    def test_absent_raw_emit_is_null_not_the_guardrailed_value(self):
+        from tradingagents.agents.utils.prompt_metrics import decision_telemetry_block
+
+        # A tree rebuilt from markdown has pm_decision but no raw emit: the
+        # block must say null, never fall back to the post-guardrail rating.
+        block = decision_telemetry_block({}, {"pm_decision": {"rating": "Hold"}})
+        assert block["llm_output"]["rating"] is None
+        assert block["llm_output"]["captured"] is False
+
+    def test_prompt_metrics_reducer_merges_across_nodes(self):
+        from tradingagents.agents.utils.prompt_metrics import (
+            merge_prompt_metrics,
+            record_stage,
+        )
+
+        # Last-write-wins would keep only the PM stage; the reducer keeps both.
+        merged = merge_prompt_metrics(
+            record_stage("analyst_market", "x" * 400)["prompt_metrics"],
+            record_stage("pm", "y" * 800)["prompt_metrics"],
+        )
+        assert sorted(merged) == ["analyst_market", "pm"]
+        assert merged["pm"]["tokens_est"] == 200
+
+    def test_uncertainty_count_is_null_not_zero(self):
+        # Phase 2 owns the uncertainty vocabulary; 0 would read as "no
+        # uncertainty was present" rather than "nothing counted it".
+        from tradingagents.reporting import _run_card_evidence_counts
+
+        counts = _run_card_evidence_counts(
+            {"researcher_independent_stances": {"bull": {"rating": "Buy"},
+                                                "bear": {"rating": "Sell"}}}
+        )
+        assert counts["bullish_count"] == 1
+        assert counts["bearish_count"] == 1
+        assert counts["uncertainty_count"] is None
+        assert counts["counted_sources"] == ["researcher_independent_stances"]
+
+    def test_snapshot_identity_is_stable_and_content_addressed(self):
+        from tradingagents.agents.utils.prompt_metrics import snapshot_identity
+
+        state = {"company_of_interest": "QCOM", "trade_date": "2026-09-19"}
+        a = snapshot_identity({}, state)
+        b = snapshot_identity({}, dict(state))
+        assert a == b, "same evidence must hash the same"
+        # A different trade date is different evidence - the pair is invalid.
+        c = snapshot_identity({}, {**state, "trade_date": "2026-09-18"})
+        assert c["data_snapshot_hash"] != a["data_snapshot_hash"]
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

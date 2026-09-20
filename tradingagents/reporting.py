@@ -824,6 +824,87 @@ def write_alpha_ledger(final_state: dict, ticker: str, save_path, config: "dict 
     return p
 
 
+def _run_card_evidence_counts(final_state: dict) -> dict:
+    """Directional evidence counts for the Phase 0 telemetry block.
+
+    Counts what is available TODAY, and names what is not. The three directional
+    counts come from the structured independent stances (the risk trio and the
+    researcher pair) - the only per-role directional records in the state, each
+    carrying a canonical 5-tier rating. ``uncertainty_count`` is deliberately
+    ``None``: the uncertainty vocabulary does not exist until Phase 2's packet
+    (design doc §8), and a zero would read as "no uncertainty was present"
+    rather than "nothing counted it".
+
+    The ``sources`` key travels with the numbers so a reader can see what they
+    are made of - a count over three stances is not a count over the whole
+    decision context, and it must not be read as one.
+    """
+    from tradingagents.agents.utils.prompt_metrics import direction_of
+
+    state = final_state or {}
+    counts = {"bullish_count": 0, "bearish_count": 0, "neutral_count": 0}
+    sources: list[str] = []
+    unreadable = 0
+
+    for key in ("researcher_independent_stances", "risk_independent_stances"):
+        stances = state.get(key) or {}
+        if not isinstance(stances, dict) or not stances:
+            continue
+        for _role, payload in stances.items():
+            rating = (payload or {}).get("rating") if isinstance(payload, dict) else None
+            direction = direction_of(rating)
+            if direction is None:
+                unreadable += 1
+                continue
+            counts[f"{direction}_count"] += 1
+        sources.append(key)
+
+    counts["uncertainty_count"] = None
+    counts["uncertainty_count_reason"] = (
+        "not counted before Phase 2 (design doc §8 owns the uncertainty vocabulary)"
+        if not sources else "phase 2 owns the uncertainty counters"
+    )
+    # The conflict count needs the same-metric pairs the verifier resolves; those
+    # are not in run state (the verifier runs post-hoc over the tree). Named as
+    # absent rather than guessed.
+    counts["conflict_count"] = None
+    counts["conflict_count_reason"] = "resolved post-hoc by the report verifier, not in run state"
+    counts["counted_sources"] = sources
+    counts["unreadable_stances"] = unreadable
+    return counts
+
+
+def _run_card_decision_context(final_state: dict, cfg: dict | None) -> dict:
+    """The Phase 0 ``decision_context`` block for run_card.json.
+
+    Assembles the prompt metrics the nodes recorded, the three decision layers
+    (llm_output / deterministic_postprocess / execution), the context mode and
+    the snapshot identity. Advisory and total: any failure degrades to a
+    ``recorded: False`` stub, because a telemetry block must never cost a card.
+    """
+    try:
+        from tradingagents.agents.utils.prompt_metrics import (
+            PROMPT_METRICS_KEY,
+            decision_telemetry_block,
+        )
+
+        block = decision_telemetry_block(
+            cfg,
+            final_state,
+            # Phase 2 owns the packet, so there is no mode or version to report
+            # yet. Named as absent rather than defaulted to a plausible value.
+            context_mode=None,
+            packet_version=None,
+            packet_truncated=None,
+            evidence_counts=_run_card_evidence_counts(final_state),
+        )
+        block["prompt_metrics"] = dict((final_state or {}).get(PROMPT_METRICS_KEY) or {})
+        block["recorded"] = True
+        return block
+    except Exception as exc:  # noqa: BLE001 - telemetry never breaks the card
+        return {"recorded": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def _run_card_llm_cost_est() -> dict:
     """Advisory LLM cost block for run_card.json (llm_cost.py W1-8).
 
@@ -2053,6 +2134,15 @@ def write_report_tree(
             # tool_evidence.json) or the legacy LLM-selected path, which has
             # neither. Advisory; additive key.
             "evidence": _run_card_evidence(final_state, cfg),
+            # Phase 0 decision-context telemetry (docs/design_decision_context.md
+            # §13). Per-stage prompt sizes, the PM model's structured emit BEFORE
+            # any deterministic postprocess, the postprocess and the execution
+            # action as separate layers, the context mode, the evidence counts
+            # and the snapshot identity hashes. Measure only - nothing here is
+            # read back into a prompt or a decision. Without it, "when the PM
+            # prompt exceeds 12k tokens, does HOLD probability change?" is
+            # unanswerable, because prompts are never persisted.
+            "decision_context": _run_card_decision_context(final_state, cfg),
             "decision": {
                 "verdict": verdict,
                 "risk_halt": bool(final_state.get("risk_halt")),

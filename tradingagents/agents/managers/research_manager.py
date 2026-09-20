@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.prompt_metrics import record_stage
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -125,6 +126,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            **record_stage("research_manager", prompt),
         }
 
     return research_manager_node

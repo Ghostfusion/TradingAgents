@@ -13,6 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.prompt_metrics import record_stage
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -202,6 +203,7 @@ def create_trader(llm, backup_llm=None):
         return {
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
+            **record_stage("trader", messages),
         }
 
     return trader_node

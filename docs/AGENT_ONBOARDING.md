@@ -434,6 +434,30 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Phase 0 of `docs/design_decision_context.md` is BUILT - and building it found that the boundary it was meant
+  to name did not exist.** The doc's §12.4 insists the telemetry distinguish `llm_output` (the PM model's structured emit, before ANY
+  transformation) from `deterministic_postprocess` and `execution`. **`pm_decision` is not that.** `portfolio_manager._result_hook` called
+  `_guardrail_hook(result)` FIRST, and the guardrail rewrites `result.rating` and `result.confidence` **in place**; only then did it capture
+  `result.model_dump()`. So the state key the entire pipeline reads as "the PM's decision" was the **post-guardrail** object, and no record of the
+  model's own emit existed anywhere in a run. That is exactly the corruption §12.4 predicted for "six months from now"; it had already happened.
+  The capture now happens before the guardrail and lands in a new **`pm_llm_output`** channel. **Why it matters:** a `HOLD` may be the model's own
+  `HOLD` or an `llm_output.rating = "Buy"` plus a REJECT gate, and collapsing the two makes the Phase 1 factorial measure the gates instead of the
+  model. **Fails-before proof by MUTATION, not stash:** moving the capture back after `_guardrail_hook` makes `pm_llm_output["rating"]` read
+  `"Hold"` where it must read `"Buy"`; the source was restored byte-identical (sha256 checked in the `finally`).
+  **New `agents/utils/prompt_metrics.py`** owns the telemetry: per-stage prompt sizes for all seven LLM nodes (four analysts, trader, RM, PM), the
+  three decision layers, `context_mode`/`packet_version`/`packet_truncated`, directional evidence counts, and the §12.3 snapshot identity hashes
+  (`data_snapshot_hash` / `engine_output_hash` / `model_parameters_hash`). It assembles into an ADDITIVE `decision_context` key in `run_card.json`.
+  **Two LangGraph traps avoided.** (1) `prompt_metrics` needs an **additive reducer** - `Annotated[dict, merge_prompt_metrics]` - because every node
+  returns its own one-stage fragment and the default last-write-wins would keep only the final stage. (2) Both new channels must be declared on
+  `AgentState`, or LangGraph silently drops them. **Three honest nulls, never zeros:** `uncertainty_count` (Phase 2 owns the vocabulary) and
+  `conflict_count` (the verifier resolves same-metric pairs post-hoc, they are not in run state) are `null` with a `_reason`; a `0` would read as
+  "none present" when the truth is "nothing counted it". The three counts that CAN be taken are taken over the structured independent stances, and
+  `counted_sources` travels with them so nobody reads five stances as the whole decision context. **`PortfolioDecision` has no `direction` field** -
+  the model emits `rating` and `confidence` only - so `llm_output.direction` is a deterministic PROJECTION of the rating, computed in the same
+  expression that records it so the two cannot diverge. **Zero behaviour change:** no gate, and nothing reads a telemetry value back into a prompt
+  or a decision. Three pre-existing exact-set assertions on node return channels (`test_dead_state_dedupe.py` x2, `test_analyst_etf_routing.py`)
+  were updated for the new **declared** channel - the real invariant, "no node writes an UNDECLARED channel", is still enforced by the subset
+  assertion above each. 7 tests added. **4988 passed, 6 skipped** (baseline 4981 + 7).
 - 2026-09-18 `(working tree)` - **P0+P1 of both vendor-surface designs are built**, behind two new default-off gates. **`enable_moomoo_snapshot`**:
   `moomoo.get_kl_quota_moomoo` / `kl_quota_remaining_moomoo` (the live K-line quota, read as a screener pre-flight that warns and refuses cleanly at
   zero) and `moomoo.get_market_snapshot_moomoo` / `_batched_snapshot` (142 columns for a whole symbol list in one call; live 122 requested -> 120

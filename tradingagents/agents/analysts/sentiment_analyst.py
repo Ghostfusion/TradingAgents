@@ -37,6 +37,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_output_budget,
 )
+from tradingagents.agents.utils.prompt_metrics import record_stage
 from tradingagents.agents.utils.report_hygiene import (
     REPORT_HYGIENE_RULES,
     engine_score_block,
@@ -295,6 +296,7 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
+            **record_stage("analyst_sentiment", formatted_messages),
             "tool_evidence": evidence,
         }
 

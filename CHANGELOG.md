@@ -324,6 +324,73 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 **Web impact**: none — no tool name, CLI flag or JSON shape changed. The gate is off by default, and `run_card.json` is untouched by these three items (the card key is `P12-6`).
 
+
+### Added
+
+**Phase 0 decision-context telemetry - the design doc's approved next target, built.**
+
+`docs/design_decision_context.md` §13 Phase 0: record, per run, what the decision layer
+actually received and actually decided - without changing any behaviour. Prompts were never
+persisted, so *"when the PM prompt exceeds 12k tokens, does HOLD probability change?"* was
+unanswerable.
+
+New `tradingagents/agents/utils/prompt_metrics.py` owns the telemetry; the seven LLM nodes
+(the four analysts, the trader, the research manager, the PM) each record their own prompt
+size through an **additive LangGraph reducer** (the default last-write-wins would have kept
+only the final stage); `reporting._run_card_decision_context` assembles an additive
+`decision_context` block into `run_card.json`.
+
+**The build found that the boundary it was meant to name did not exist.** `pm_decision` is
+not the model's output: `portfolio_manager._result_hook` ran `_guardrail_hook(result)` FIRST,
+and the guardrail rewrites `result.rating` and `result.confidence` **in place** - only then
+did it capture `result.model_dump()`. The state key the whole pipeline reads as "the PM's
+decision" was therefore the **post-guardrail** object, and no record of the model's own emit
+existed anywhere. That is exactly the corruption the design doc's §12.4 predicted for "six
+months from now"; it had already happened. The capture now happens before the guardrail and
+lands in a new `pm_llm_output` channel.
+
+The block keeps three layers separate, which is the whole point: a `HOLD` may be the model's
+own `HOLD` or an `llm_output.rating = "Buy"` plus a REJECT gate, and collapsing them would
+make the two indistinguishable - the single most important distinction the Phase 1 factorial
+depends on. Also recorded: `context_mode` / `packet_version` / `packet_truncated` (null -
+Phase 2 owns them), directional evidence counts over the structured independent stances with
+`counted_sources` travelling alongside, and the §12.3 snapshot identity hashes
+(`data_snapshot_hash` / `engine_output_hash` / `model_parameters_hash`).
+
+**Three honest gaps, recorded as null rather than zero.** `uncertainty_count` needs the
+Phase 2 uncertainty vocabulary; `conflict_count` needs the same-metric pairs the report
+verifier resolves post-hoc over the tree. A `0` would read as "none was present" when the
+truth is "nothing counted it".
+
+**And a fourth finding, caught only by the live run.** The first draft read
+`signal_action` from `state["security_signal"]` / `["portfolio_action"]` /
+`["combined_action"]` / `["gated"]` and `execution.final_action` from
+`state["final_action"]`. **None of those five keys is ever written to state** - the split is
+computed inside `write_research_decision` as a local and goes straight into
+`research_decision.json` - so the first live card carried four nulls under names that read
+like measurements. That is the very failure mode this document is about, committed by the
+telemetry itself. Fixed by calling the one real producer (`signal_action_split`) with the
+same inputs the execution contract's emitter uses, so the two cannot disagree.
+`execution.final_action` now carries that split's `combined_action` and names its source; the
+executor's own binding gate is deliberately not fabricated, because it is not engine state.
+The null version passed every other test, so a test now asserts the split is populated.
+
+No gate, and nothing reads a telemetry value back into a prompt or a decision.
+
+Tests: 8 added to `tests/test_decision_guardrail.py` (the PM boundary, the prompt metric, the
+three-layer block, the populated split, the null-not-zero counters, the snapshot identity). The boundary test was
+proved **failing-first by mutation**: moving the capture back after `_guardrail_hook` makes
+`pm_llm_output["rating"]` read `"Hold"` instead of `"Buy"`, and the source was restored
+byte-identical. Three pre-existing exact-set assertions on node return channels
+(`test_dead_state_dedupe.py` x2, `test_analyst_etf_routing.py`) were updated for the new
+**declared** channel - the real invariant, "no node writes an UNDECLARED channel", is still
+enforced by the subset assertion above each.
+
+Suite: 4988 passed, 6 skipped (baseline 4981 + the new tests).
+
+**Web impact**: none - the block is additive and nothing renders it. `run_card.json` gains
+one key; a reader that ignores it sees the card it saw before.
+
 ### Fixed
 
 **Two defects found by asking what the tree-wide lint count actually was - one a broken guard, one a module that could not be parsed below 3.12 (2026-09-19).** Both surfaced from the 23 pre-existing `ruff check tradingagents/` findings, which had been reported as "pre-existing, not mine" without ever being enumerated. Two of the 23 were not style.

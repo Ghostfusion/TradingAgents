@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_output_budget,
 )
+from tradingagents.agents.utils.prompt_metrics import record_stage
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -368,6 +369,17 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
         _pm_capture: dict = {}
 
         def _result_hook(result):
+            # Phase 0 (docs/design_decision_context.md §12.4): dump the model's
+            # structured emit BEFORE the guardrail touches it. _guardrail_hook
+            # rewrites result.rating and result.confidence IN PLACE, so a dump
+            # taken after it is a post-guardrail number wearing a "raw" label -
+            # precisely the corruption the named boundary exists to prevent.
+            # model_dump returns a plain copy, so the later mutation cannot
+            # reach back into this snapshot.
+            try:
+                _pm_capture["llm_output"] = result.model_dump(mode="json")
+            except Exception:  # noqa: BLE001 - telemetry is advisory
+                _pm_capture["llm_output"] = None
             _guardrail_hook(result)
             try:
                 _pm_capture["obj"] = result.model_dump(mode="json")
@@ -402,6 +414,10 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
             "pm_decision": _pm_capture.get("obj"),
+            # Phase 0: the PM model's structured emit before any deterministic
+            # transformation, plus this stage's prompt size.
+            "pm_llm_output": _pm_capture.get("llm_output"),
+            **record_stage("pm", prompt),
         }
 
     return portfolio_manager_node

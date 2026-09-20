@@ -956,7 +956,7 @@ pass is LAST, not first.
 
 | Phase | Work | Gate |
 |---|---|---|
-| **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. | the §3 numbers become a per-run series |
+| **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. **BUILT** (see §13.1). | the §3 numbers become a per-run series |
 | **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. | the §12.2 distribution + grounding per arm, confounds stated |
 | **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1 | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
 | **3** | Conflict ledger (§9), after the open verifier pairs are classified | conflicts named with both sections + a mechanical classification |
@@ -1018,6 +1018,59 @@ Six months later this answers *"when the PM prompt exceeds 12k tokens, does HOLD
 probability change?"* without reconstructing prompts from report trees - which is not possible
 today, because prompts are never persisted.
 
+### 13.1 Phase 0 as built, and the three things it found
+
+**Where the code lives.** `tradingagents/agents/utils/prompt_metrics.py` (new) owns the
+telemetry; `agent_states.AgentState` declares the two new channels; the seven LLM nodes
+record their own stage; `reporting._run_card_decision_context` assembles the block into
+`run_card.json`. The block is `decision_context`, and it is **additive** - a reader that
+ignores it sees the card it saw before.
+
+**Finding 1 - the boundary did not exist, and the capture point was already wrong.**
+`pm_decision` is not the model's output. `portfolio_manager._result_hook` called
+`_guardrail_hook(result)` **first**, and the guardrail rewrites `result.rating` and
+`result.confidence` **in place**; only then did it capture `result.model_dump()`. So the
+state key the whole pipeline reads as "the PM's decision" is the **post-guardrail** object,
+and no record of the model's own emit existed anywhere in the run. This is precisely the
+corruption §12.4 predicted would happen "six months from now" - it had already happened.
+The fix is a capture before the guardrail; `pm_llm_output` is the new channel, and the
+regression test asserts the two differ under a real downgrade.
+
+**Finding 2 - the PM schema has no `direction` field.** `PortfolioDecision` emits `rating`
+and `confidence` only. `llm_output.direction` is therefore a **deterministic projection** of
+`llm_output.rating` onto the three-class axis, computed in the same expression that records
+the rating so the two cannot diverge. It is not a second producer of the direction - no
+other code derived one before this.
+
+**Finding 3 - two of the five evidence counters cannot be honest yet, so they are null.**
+`uncertainty_count` requires the Phase 2 uncertainty vocabulary; recording `0` would read as
+"no uncertainty was present" when the truth is "nothing counted it". `conflict_count`
+requires the same-metric pairs the report verifier resolves **post-hoc over the tree**, and
+those are not in run state. Both are recorded as `null` with a `_reason` string. The three
+directional counts that CAN be taken are taken over the structured independent stances (the
+risk trio and the researcher pair), and the block carries `counted_sources` so a reader can
+see the count is over five stances and not over the whole decision context.
+
+**Finding 4 - the first draft recorded two phantom fields, and a live run caught it.**
+`signal_action` was read from `state["security_signal"]` / `["portfolio_action"]` /
+`["combined_action"]` / `["gated"]`, and `execution.final_action` from
+`state["final_action"]`. **None of those five keys is ever written to state** - the split is
+computed inside `write_research_decision` as a local and goes straight into
+`research_decision.json`. So the first live card carried four nulls and a null under names
+that read like measurements. This is the same failure mode the document is about, committed
+by the telemetry itself: **a field that silently does nothing is worse than a named gap.**
+Fixed by calling the one real producer (`signal_action_split`) with the same inputs the
+execution contract's emitter uses, so the two cannot disagree; `execution.final_action` now
+carries that split's `combined_action` and names its source. The executor's own binding gate
+is deliberately **not** fabricated - it is not engine state. A test asserts the split is
+populated rather than null, because the null version passed every other test.
+
+**What it deliberately does not do.** No gate. No behaviour change: nothing reads a
+telemetry value back into a prompt or a decision, so a run with the block removed produces
+the same reports and the same rating. `context_mode` / `packet_version` /
+`packet_truncated` are recorded as `null` because Phase 2 owns them, and a defaulted
+`"compact"` would be a fabricated measurement.
+
 ---
 
 ## 14. Acceptance criteria
@@ -1049,7 +1102,7 @@ today, because prompts are never persisted.
     100%, the contrast is **not** reported as a volume effect (§12.1).
 16. **The paired decision transition matrix is printed**, not only CCI (§12.2).
 17. **Raw decision and gated action are recorded and reported separately** (§12.4) - decision
-    conservatism is measured before deterministic risk gating.
+    conservatism is measured before deterministic risk gating. **MET (Phase 0).**
 18. **The packet keeps `constraints != evidence != synthesis != decision` visually distinct**;
     `permission` lives under `RISK CONSTRAINTS` (§6).
 19. **The challenge pass may not create a new caution rationale** - downgrade only on the three
@@ -1064,6 +1117,19 @@ today, because prompts are never persisted.
     conditional expansion, but never enter the packet as evidence (§4.4).
 23. **A contrast with materially reduced retention is reported as a content-retention effect**,
     never as a pure volume effect (§12.1).
+
+**Phase 0 criteria, met by the build recorded in §13.1.**
+
+24. **The PM model's structured emit is captured before any deterministic postprocess.** A
+    regression test asserts `llm_output.rating` and `deterministic_postprocess.guardrail_rating`
+    **differ** under a real guardrail downgrade - the mutation that breaks it is a one-line
+    reorder of the capture.
+25. **Prompt size is recorded per stage**, merged across nodes by an additive reducer (the
+    default last-write-wins would keep only the final stage).
+26. **A counter that cannot be honestly taken is `null` with a reason**, never `0` - `0` reads
+    as "none present" when the truth is "nothing counted it".
+27. **The telemetry block changes no behaviour**: no gate, and nothing reads a value back into
+    a prompt or a decision.
 
 ---
 
@@ -1193,9 +1259,16 @@ With the v3 corrections the design is no longer a proposal to "shrink prompts". 
 whether context volume, representation, uncertainty framing, or downstream gating is actually
 responsible for the observed behaviour.
 
-The single most useful next action is **Phase 0**: record the telemetry. It is small, it
-changes no behaviour, and it converts the motivating observation from an anecdote into a time
-series.
+**Phase 0 is built** (§13.1): the telemetry is in `run_card.json`, it changes no behaviour, and
+it converts the motivating observation from an anecdote into a time series. Its build also
+found that the boundary it was meant to name did not exist - `pm_decision` had been the
+post-guardrail object all along.
+
+The single most useful next action is therefore **Phase 1: the factorial experiment** (§12),
+run *before* the Decision Packet is introduced. Its build will extend `scripts/context_ab.py`
+with a third item type scored on the decision category, print the paired transition matrix
+with counts first, and report the retention table for C1 vs C2 so each contrast is named a
+volume, content-retention, or representation effect.
 
 ---
 
