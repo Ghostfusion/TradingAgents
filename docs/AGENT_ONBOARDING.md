@@ -434,6 +434,33 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Phase 1 of `docs/design_decision_context.md` is BUILT and RUN - and the measurement does NOT support the
+  doc's premise.** The experiment: a 2x2 factorial (prose vs packet) x (compact vs large) over 12 real snapshots, 4 arms each, scored on the
+  DECISION CATEGORY. Extended `scripts/context_ab.py` as the doc required - no parallel harness; `mcnemar_exact`, `ungrounded_figures`, the
+  producers and the report are all reused. **The result:**
+  `C1->C2` (volume, prose) flip 0.333, dir->hold 1 vs hold->dir 3, **p=0.625** - the large context is marginally LESS conservative.
+  `P1->P2` (volume, packet) flip **0.000** - IDENTICAL ratings in all twelve.
+  `C1->P1` (representation, compact) flip 0.583, dir->hold **6** vs 1, p=0.125 - P(no-trade) 0.417 -> **0.833**, confidence 0.652 -> **0.248**,
+  ungrounded figures 2/12 -> **9/12**. **There is no measured volume effect to build for, in either representation.** What signal exists is on the
+  REPRESENTATION axis, and it points the WRONG way: a structured rendering made the model markedly more conservative and LESS grounded - the
+  opposite of what the architecture assumed a bounded packet would do. **n=12 is underpowered; nothing reaches p<0.05** (the representation
+  contrast needs ~20-25 snapshots at this effect size). Directional signals, not established findings.
+  **Four findings from building the instrument.** (1) **C2 - C1 cannot be a pure volume effect on this evidence**: two C1 constructions were
+  measured - the doc's literal "bounded to first/last rows" (chars 70%, bullish facts 50%, figures 56%) and dropping only non-evidential lines
+  (chars 95%, bearish facts 87%). Neither reaches 100%. On QCOM `20260920_013202` the evidence is already evidence-dense - 330 metrics, 2,597
+  figures, 256 sections in 136,335 chars - and removing every line with no figure or metric buys **5%**. **The volume of this context IS its
+  information**; a smaller context means less evidence, which is a content-retention effect by definition. (2) **The verdict needed a second
+  condition**: the first draft reported a "context-volume effect" for a C1 that was **TWO CHARACTERS** smaller than C2. A contrast must now both
+  retain the evidence AND shrink by >=5%, else it reports NO VOLUME ABLATION AVAILABLE. (3) **The repr error, a third time**: C2 was first built
+  with `join(str(r) for r in rendered)` but the render is a list of `{analyst, block}` DICTS, so it joined Python reprs and the metric/section
+  counts read **0**. Fixed to `entry["block"]` -> 330 metrics, 256 sections. Same mistake as Phase 0's finding 6, different file, found the same
+  way. (4) **THE IDENTITY CHECK WAS OVER-STRICT AND REJECTED 8 OF 12 VALID PAIRS.** `_snapshot_matches` treated a MISSING hash as a mismatch;
+  eight snapshots predate the scorecard gate and carry `engine_output_hash: None`, though all four arms had consumed the SAME evidence. The
+  invariant requires the snapshot to be the SAME, not RICH. Now three outcomes: match (incl. None == None), mismatch (invalidates), unverifiable
+  (kept, counted, reported). **An over-strict invariant is not a safe one** - it discards valid pairs and calls the loss rigour. Re-scoring the
+  saved run confirmed all 8 are `match`. **The representation arm is a labelled STAND-IN** (built from the run's own deterministic blocks; no
+  budget, no uncertainty vocabulary, no conflict ledger) because Phase 1 runs before the packet exists - a representation effect measured here
+  must not be read as a measurement of the packet. 20 tests in `tests/test_decision_factorial.py`.
 - 2026-09-20 `(working tree)` - **Phase 0 of `docs/design_decision_context.md` is BUILT - and building it found that the boundary it was meant
   to name did not exist.** The doc's §12.4 insists the telemetry distinguish `llm_output` (the PM model's structured emit, before ANY
   transformation) from `deterministic_postprocess` and `execution`. **`pm_decision` is not that.** `portfolio_manager._result_hook` called

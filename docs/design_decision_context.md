@@ -957,7 +957,7 @@ pass is LAST, not first.
 | Phase | Work | Gate |
 |---|---|---|
 | **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. **BUILT** (see §13.1). | the §3 numbers become a per-run series |
-| **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. | the §12.2 distribution + grounding per arm, confounds stated |
+| **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. **BUILT** (see §13.2). | the §12.2 distribution + grounding per arm, confounds stated |
 | **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1 | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
 | **3** | Conflict ledger (§9), after the open verifier pairs are classified | conflicts named with both sections + a mechanical classification |
 | **4** | Conditional expansion (§11) | `context_mode` recorded; expansion rate measurable |
@@ -1117,6 +1117,119 @@ telemetry value back into a prompt or a decision, so a run with the block remove
 the same reports and the same rating. `context_mode` / `packet_version` /
 `packet_truncated` are recorded as `null` because Phase 2 owns them, and a defaulted
 `"compact"` would be a fabricated measurement.
+
+### 13.2 Phase 1 as built: the decision factorial, and what it measured
+
+**Where the code lives.** `scripts/context_ab.py`, extended - not a parallel harness
+(§12.3). The existing `mcnemar_exact`, `ungrounded_figures`, the producers, the item
+builders and the report are all reused; the addition is a third item type whose score is the
+**decision category**, plus the §12.2/§12.3 apparatus around it. CLI:
+`--experiment decision --trees reports/<TREE>`.
+
+**The output order is the doc's order**: paired transitions first, then the distribution,
+then grounding, then the execution layer, then the retention table.
+
+**Finding 1 - `C2 - C1` cannot be a pure volume effect on this evidence, and the harness now
+says so.** The doc requires C1 to be built by an *information-preserving* transformation so
+the subtraction isolates volume. Two constructions were tried and measured:
+
+| construction | chars retained | evidence retained | verdict |
+|---|---:|---|---|
+| `bounded` - the doc's literal *"first/last/representative rows"* | 70% (fixture) | bullish facts **50%**, figures **56%** | content-retention effect |
+| `evidence` - drop only non-evidential lines | **95%** on a real tree | bearish facts **87%** | content-retention effect |
+
+Neither reaches the 100% the volume reading requires. On a real tree (QCOM
+`20260920_013202`) the evidence is **already evidence-dense**: 330 unique metrics, 2,597
+figures, 256 source sections in 136,335 chars, and removing every line that carries no
+figure or metric buys only **5%**. **The volume of this context IS its information.** A
+smaller context means less evidence, which is a content-retention effect by definition - and
+that is a finding about the architecture, not a failure of the instrument.
+
+**Finding 2 - the verdict logic needed a second condition.** The first draft checked only
+that evidence survived, and reported a **"context-volume effect" for a C1 that was 2
+characters smaller than C2**. A contrast between two identical-size contexts measures
+nothing, and naming it a volume effect is precisely the vacuous result §12.1 warns about. A
+contrast must now BOTH retain the evidence AND actually shrink by at least 5% before it may
+be called a volume effect; otherwise it is reported as `NO VOLUME ABLATION AVAILABLE`.
+
+**Finding 3 - the same repr error, a third time.** `decision_items_from_tree` first built C2
+with `"\n\n".join(str(r) for r in rendered)`. The rendered block is a list of
+`{analyst, block}` **dicts**, so that joined Python reprs and produced an evidence block
+whose metric and section counts were **0**. Fixed to read `entry["block"]`, after which the
+same tree yields 330 metrics and 256 sections. This is the identical mistake §13.1's finding
+6 records, in a different file, found the same way - by asking what the number contained.
+
+**Finding 4 - the representation arm is a stand-in, and is labelled as one.** Phase 1 runs
+*before* the Decision Packet exists (§13), so the P arms are built from the run's own
+deterministic blocks (`_packet_stand_in`) - engine scores, the trade score, the risk
+disagreement flag, the decision telemetry - in a fixed key/value shape. It has **no budget,
+no uncertainty vocabulary and no conflict ledger**, so it is not the packet, and a
+representation effect measured here must not be read as a measurement of the packet.
+
+**What it pins by test** (`tests/test_decision_factorial.py`, 20 tests): the retention table
+counts both sides; a same-size contrast is reported as no ablation; lost evidence is named
+content-retention rather than volume; a directional→hold drift is counted separately from
+hold→directional; entropy separates "more directional" from "more volatile"; an unparseable
+rating is never defaulted to `Hold`; and a snapshot mismatch **invalidates** the pair rather
+than merely noting it.
+
+**Finding 5 - the identity check was over-strict and rejected 8 of 12 valid pairs.** The
+first `_snapshot_matches` treated a **missing** hash as a mismatch. Eight of the twelve
+snapshots predate the scorecard gate and therefore carry `engine_output_hash: None`; all four
+arms had consumed the *same* evidence, but the check was demanding that the snapshot be
+**rich** when section 12.3's invariant only requires it to be **the same**. Re-scoring the
+saved run confirmed all eight are `match`. The check now returns three outcomes - `match`
+(including `None == None`), `mismatch` (a real disagreement, which invalidates), and
+`unverifiable` (no identity at all, kept but counted and reported). **An over-strict
+invariant is not a safe one**: it discards valid pairs and calls the loss rigour.
+
+### 13.3 The Phase 1 result, and it does not support H1a
+
+12 snapshots across 9 tickers and 6 dates, 4 arms each (48 model calls), one model
+(`openrouter/deepseek/deepseek-v4.1-flash`), every pair snapshot-verified.
+
+| contrast | flip rate | directional→hold | hold→directional | McNemar p |
+|---|---:|---:|---:|---:|
+| **C1 → C2** (volume, within prose) | 0.333 | 1 | 3 | 0.625 |
+| **P1 → P2** (volume, within packet) | **0.000** | 0 | 0 | 1.000 |
+| **C1 → P1** (representation, at compact size) | 0.583 | **6** | 1 | 0.125 |
+
+| metric | C1 prose-compact | C2 prose-large | P1 packet-compact | P2 packet-large |
+|---|---:|---:|---:|---:|
+| P(no-trade) | 0.417 | 0.250 | **0.833** | **0.833** |
+| confidence | 0.652 | 0.667 | **0.248** | 0.283 |
+| ungrounded figures | **2/12** | 7/12 | 9/12 | 9/12 |
+
+**H1a is not supported, in either representation.** Moving from compact to large prose flips
+33% of decisions with a **1:3** directional split that runs the *other* way - the large
+context is marginally *less* conservative (`P(no-trade)` 0.417 → 0.250, p=0.625). Inside the
+packet representation the large and compact arms produced **identical ratings in all twelve
+snapshots** - a flip rate of exactly zero. **There is no measured volume effect to build for.**
+
+**The representation axis carries what signal there is, and it points the wrong way.** The
+prose→packet contrast at compact size is the largest in the experiment: 58% of decisions
+change, 6:1 toward HOLD, `P(no-trade)` doubles to 0.833, and mean confidence **collapses from
+0.652 to 0.248** - while ungrounded figures *rise* from 2/12 to 9/12. A structured rendering
+did not make the model more decisive or better grounded here; it made it markedly more
+conservative and less grounded. That is the opposite of the outcome the architecture assumed
+a bounded packet would produce, and it is a reason to test a packet design before adopting
+one, not a reason to assume it helps.
+
+**n=12 is underpowered and nothing reaches p<0.05.** The representation contrast is the only
+one approaching significance (p=0.125 on 6 discordant pairs one way). Reaching p<0.05 at this
+effect size needs roughly 8-9 discordant pairs in the same direction, i.e. on the order of
+20-25 paired snapshots. **These are directional signals, not established findings.**
+
+**The retention caveat applies to the prose contrast.** C1 was 94% of C2's length and lost
+bearish facts (92%), so `C2 − C1` is a **content-retention effect**, not a volume effect - and
+it is a 6% ablation regardless, which is small even for that reading. The packet contrast
+(C1 → P1) is a genuine **representation** effect: same size class, different structure.
+
+**What this changes.** Section 12's premise - that the observed conservatism is plausibly a
+large-context phenomenon - is not what the measurement shows. The next experiment should
+target the **representation** axis, and it should first ask whether the packet's own shape
+(engine scores, fixed key/value rows, no prose) is what suppresses confidence, rather than
+assuming a bounded packet is an improvement.
 
 ---
 
