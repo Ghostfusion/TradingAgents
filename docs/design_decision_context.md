@@ -361,6 +361,13 @@ and `RESEARCHER_ROLES = ("bull","bear")` (`:37-38`).
 This is the proposal's §5 concern (separating independent judgment from debate contamination)
 **already implemented for the decision roles**.
 
+**Independent reads are diagnostics, not evidence.** They must not become a second evidence
+stream that the PM averages, or `independent_agreement` silently turns into a consensus the
+model defers to. The question the architecture asks is not *"how many agents agree?"* but
+*"given the bounded evidence, what does the decision model independently conclude?"* Under
+that reading `independent_agreement` is a **measurement of disagreement** - which is exactly
+what §11's conditional expansion needs as a trigger, and nothing else.
+
 ### 4.5 "Engine ownership / compact per-analyst evidence" — BUILT
 
 `quant_scorecard.ENGINE_SECTIONS` (`tradingagents/strategies/quant_scorecard.py:119`) is the
@@ -679,7 +686,8 @@ composite direction  ──►  agreement high  ──►  decide from the packe
                           agreement low   ──►  expand: attach the analyst reports
 ```
 
-**Trigger inputs already exist:** `independent_agreement` (`independent_vote.py:205`),
+**Trigger inputs already exist** - and they are diagnostics (§4.4), not evidence:
+`independent_agreement` (`independent_vote.py:205`),
 `weighted_consensus`/`should_hold` (`consensus.py:32`, `:57`), and the conflict count (§9).
 
 **Rule.** Expansion is **additive and bounded**: the expanded context attaches named
@@ -751,8 +759,19 @@ and the harness must **measure and report what was retained**:
 | uncertainty facts | |
 | source sections | |
 
-If retention is materially below 100% on any row, the difference is **not** a volume effect and
-must be reported as such. Without this table the factorial's first contrast is uninterpretable.
+**If retention is materially below 100% on any row, the contrast is not a *pure* volume
+effect.** It is still a valid experiment - it demonstrates that the shorter representation
+changes behaviour. What it cannot establish is that the difference is attributable **solely to
+token volume**. So the finding is reported under its correct name rather than discarded:
+
+| C1 vs C2 | conclusion |
+|---|---|
+| same evidence, different length | **context-volume effect** |
+| different evidence, different length | **context-compression / content-retention effect** |
+| same evidence, different organization | **representation effect** |
+
+Without the retention table the first contrast is uninterpretable - you cannot tell which of
+the three you measured.
 
 ### 12.2 Report the distribution, not only the CCI
 
@@ -797,7 +816,51 @@ C1 -> C2 and P1 -> P2 transition matrices:
 ```
 
 For this application a **paired transition matrix is more informative than CCI**, and it is
-what the harness should print first.
+what the harness should print first. Per paired snapshot the harness prints:
+
+```
+              C1 compact prose        C2 large prose
+              -----------------       ----------------
+LLM rating    HOLD                    BUY
+direction     neutral                 bullish
+confidence    0.61                    0.72
+```
+
+then aggregates the transitions with counts:
+
+```
+C1 -> C2
+BUY   -> HOLD     17
+HOLD  -> BUY       5
+SELL  -> HOLD      9
+HOLD  -> SELL      3
+BUY   -> SELL      1
+SELL  -> BUY       0
+```
+
+which shows whether the apparent conservatism is a **systematic directional -> HOLD
+transition** - something the aggregate `HOLD: C1 63% / C2 71%` cannot distinguish from
+unrelated churn in both directions.
+
+### 12.3 Snapshot identity is an invariant, not an assumption
+
+Pairing is only meaningful if the arms consume the **same deterministic evidence**. A market
+refresh, changed news, or a regenerated engine result would masquerade as a context effect -
+and this experiment is trying to detect something subtle in the model while everything else is
+held constant. Every paired observation therefore records and asserts:
+
+```
+experiment:
+    snapshot_id
+    ticker              as_of
+    data_snapshot_hash
+    engine_output_hash
+    model
+    model_parameters_hash
+```
+
+> **Invariant: all arms for a paired observation must consume the same deterministic evidence
+> snapshot.** A mismatch invalidates the pair; it is not a footnote in the report.
 
 **The question the experiment answers is not "does HOLD decrease?".** It is:
 
@@ -854,14 +917,22 @@ Every arm must therefore record both layers:
 
 | layer | fields |
 |---|---|
-| **raw decision** | `raw_llm_rating`, `raw_llm_direction`, `raw_llm_confidence` |
-| **gates** | `risk_gate`, `guardrail_output` |
-| **final** | `final_action` |
+| **llm_output** (the PM model's structured decision, before ANY transformation) | `rating`, `direction`, `confidence` |
+| **deterministic_postprocess** | `guardrail_rating`, `risk_gate`, `signal_action` |
+| **execution** | `final_action` |
+
+**The boundary is named, not implied.** `raw_rating` was the wrong label: it says "raw"
+without saying *raw relative to what*, and six months from now it could be populated from an
+already-normalised `PortfolioDecision` without anyone noticing. `llm_output` names the exact
+point - the PM model's structured emit - so the experiment's definition is unambiguous:
+
+> **Decision conservatism = change in the PM model's structured output, before any
+> deterministic post-processing.**
 
 with two separately reported quantities:
 
-> **decision conservatism** = change in the raw decision-layer directional output, *before*
-> any deterministic risk gating.
+> **decision conservatism** = change in the PM model's structured output, *before* any
+> deterministic post-processing.
 
 > **execution conservatism** = change in the final executable action, *after* the gates.
 
@@ -912,9 +983,14 @@ prompt_metrics:
     pm_prompt_chars             pm_prompt_tokens_est
     decision_packet_chars       decision_packet_tokens_est
 
-decision:
-    raw_rating          raw_direction       raw_confidence
-    post_guardrail_rating                   final_action
+llm_output:
+    rating              direction           confidence
+
+deterministic_postprocess:
+    guardrail_rating    risk_gate           signal_action
+
+execution:
+    final_action
 
 context:
     context_mode        packet_version      packet_truncated
@@ -924,7 +1000,21 @@ evidence:
     uncertainty_count               conflict_count
 ```
 
-Six months later this answers *"when the PM prompt exceeds 12k tokens, does raw HOLD
+**The immediate implementation target is deliberately small - eight items, zero behavioural
+change:**
+
+```
+1. identify the exact PM LLM-output boundary
+2. persist prompt sizes
+3. persist llm rating / direction / confidence
+4. persist postprocess / gate / final action separately
+5. persist context mode / version
+6. persist evidence counts
+7. persist snapshot identity / hash
+8. make zero behavioural changes
+```
+
+Six months later this answers *"when the PM prompt exceeds 12k tokens, does HOLD
 probability change?"* without reconstructing prompts from report trees - which is not possible
 today, because prompts are never persisted.
 
@@ -964,6 +1054,16 @@ today, because prompts are never persisted.
     `permission` lives under `RISK CONSTRAINTS` (§6).
 19. **The challenge pass may not create a new caution rationale** - downgrade only on the three
     closed grounds (§10).
+20. **The telemetry boundary is named, not implied** - `llm_output` (the PM's structured emit,
+    before ANY transformation) is distinct from `deterministic_postprocess` and `execution`
+    (§12.4).
+21. **Every paired observation records snapshot identity** (`snapshot_id`, `data_snapshot_hash`,
+    `engine_output_hash`, `model_parameters_hash`), and a mismatch **invalidates the pair**
+    (§12.3).
+22. **Independent reads are diagnostics** - they may measure disagreement and may trigger
+    conditional expansion, but never enter the packet as evidence (§4.4).
+23. **A contrast with materially reduced retention is reported as a content-retention effect**,
+    never as a pure volume effect (§12.1).
 
 ---
 
@@ -1004,58 +1104,53 @@ today, because prompts are never persisted.
 
 ---
 
-## 16. The converged architecture
+## 16. The frozen architecture contract
 
 **The Decision Packet is an information boundary, not a decision boundary.** That distinction
 is what makes the contracts clean: the packet controls *what the decision model sees*, not
 *what it decides*, and not *what executes*.
 
 ```
-                       RAW DATA
-                          |
-             +------------+------------+
-             |                         |
-       QUANT ENGINES              LLM RESEARCH
-             |                         |
-             +------------+------------+
-                          |
-                    EVIDENCE BUS           <- accumulate knowledge
-                          |
-             +------------+------------+
-             |                         |
-    deterministic synthesis     verification / conflict ledger
-    (exists: consensus.py,      (exists: report_verifier;
-     score_engine.combine)       ledger = Phase 3)
-             |                         |
-             +------------+------------+
-                          |
-                  DECISION PACKET          <- Phase 2. INFORMATION boundary.
-                 +--------+--------+          bounded, ~1-3K tokens
-                 |                 |
-          independent reads    decision model
-          (exists:                (exists: PM)
-           independent_vote.py)
-                 |                 |
-                 +--------+--------+
-                          |
-                    RAW DECISION           <- DECISION boundary
-                          |
-                  CLOSED CHALLENGE         <- Phase 5, last
-                          |
-                DETERMINISTIC GATES        <- EXECUTION boundary
-                (exists: stabilize_decision,
-                 signal_action_split, risk_governor)
-                          |
-                       ACTION
+                    EVIDENCE BUS
+              unlimited / research-oriented
+                         |
+              deterministic synthesis
+                         |
+              verification / conflicts
+                         |
+                 DECISION PACKET
+                    hard budget
+              +----------+----------+
+              |                     |
+       independent reads       decision model
+       diagnostic only              |
+              |                     |
+              +----------+----------+
+                         |
+                    RAW DECISION
+                  (LLM output only)
+                         |
+                 CLOSED CHALLENGE
+                  closed vocabulary
+                         |
+                DETERMINISTIC GATES
+                         |
+                      ACTION
 ```
 
-Three clean contracts:
+**The layer contracts.** Each layer has a permission and a prohibition; the prohibitions are
+what keep the boundaries real.
 
-| Layer | Responsibility |
-|---|---|
-| **Evidence Bus** | accumulate knowledge - large by design |
-| **Decision Packet** | control the information presented to the decision model |
-| **Decision + Gates** | adjudicate, then constrain the action |
+| Layer | May do | May not do |
+|---|---|---|
+| Evidence Bus | accumulate everything | decide |
+| Synthesis | calculate / compress | invent evidence |
+| Packet | constrain information | recommend |
+| Independent reads | measure disagreement | become consensus |
+| PM | adjudicate evidence | override hard constraints |
+| Challenge | invalidate on closed grounds | invent caution |
+| Gates | constrain action | create research evidence |
+| Execution | act | reinterpret research |
 
 The design principle it encodes:
 
