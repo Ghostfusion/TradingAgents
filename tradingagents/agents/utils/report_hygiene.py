@@ -51,6 +51,7 @@ REPORT_HYGIENE_RULES = (
 __all__ = [
     "MANDATORY_ENGINE_RULES",
     "REPORT_HYGIENE_RULES",
+    "engine_report_section",
     "engine_score_block",
     "scorecard_context_block",
 ]
@@ -139,22 +140,21 @@ def engine_score_block(
     labels = ", ".join(_engine_label(e) for e in owned if config.get(ENGINE_GATES[e]))
     body = "\n\n".join(sections)
     return (
-        "\n\nSCORE ENGINE — YOURS TO REPORT. The "
+        "\n\nSCORE ENGINE — SUPPLIED, YOURS TO INTERPRET. The "
         f"{labels} result belongs to THIS report; the ownership map assigns "
         f"{'/'.join(owned)} to the {analyst_key} analyst. It is already computed "
         "and supplied below — DO NOT re-derive it, recompute it, or substitute "
         "your own number.\n\n"
-        "Report it under a subsection headed "
-        f"'## {_engine_label(owned[0])} (engine score)', quoting the score, its "
-        "COVERAGE and its band VERBATIM. Coverage travels with the number: "
+        "The authoritative engine section is written into the report BY THE "
+        "SYSTEM, quoting the score, its COVERAGE and its band verbatim. Do NOT "
+        "reproduce that section or restate its numbers as a block of your own: "
+        "your job is to INTERPRET it. Coverage travels with the number: "
         "'72 at coverage 68%' means 72 over 68% of the intended evidence, so "
-        "never drop it, and never present a partial score as a complete one. "
-        "Where a category is reported NA it was withheld below its floor — "
-        "report it as withheld, never as zero. The engine is the highest-level "
-        "quantitative evidence summary for a human reviewer: it is NOT an "
-        "order, NOT a position size and NOT a gate. Interpret it — say what it "
-        "supports and what it argues against — but do not restate it as your "
-        "recommendation.\n\n"
+        "never present a partial score as a complete one. Where a category is "
+        "reported NA it was withheld below its floor — read it as withheld, "
+        "never as zero. The engine is the highest-level quantitative evidence "
+        "summary for a human reviewer: it is NOT an order, NOT a position size "
+        "and NOT a gate. Say what it supports and what it argues against.\n\n"
         "--- engine evidence (authoritative) ---\n"
         f"{body}\n"
         "--- end engine evidence ---"
@@ -297,3 +297,85 @@ def scorecard_context_block(
         "and say what they support and what they argue against.\n"
         "--- end scorecard ---"
     )
+
+
+def engine_report_section(
+    analyst_key: str,
+    ticker: str,
+    trade_date: str | None = None,
+    cfg: dict | None = None,
+    snapshot: dict | None = None,
+) -> str:
+    """The deterministic engine section for one analyst's REPORT.
+
+    **This is the authoritative placement.** The prompt tells the analyst what
+    the engine means; this function decides whether and where the result
+    appears, which is the owner's invariant: *"the model may interpret an engine
+    result, but does not decide whether or where the authoritative engine result
+    appears."*
+
+    It exists because the prompt route alone is not sufficient for every
+    analyst. The sentiment analyst runs schema-constrained output
+    (`agents/schemas.py::SentimentReport`), and that schema has **no field for
+    an engine result** - so a supplied block reaches its prompt but has nowhere
+    to land in its response, and whether the number appeared at all was model
+    discretion. Measured 2026-09-19: the earlier QCOM run's model volunteered it
+    into `narrative`, the next run's did not. Rendering here removes that
+    discretion for every analyst, not only the one whose schema exposed it.
+
+    **Renders, never recomputes.** The snapshot is the run's one score snapshot
+    (`trading_graph.py:651`), handed down through `state["quant_scorecard"]`, so
+    the report's number and the prompt's number cannot disagree.
+
+    Returns ``""`` when the master gate is off, when the analyst owns no engine,
+    when no snapshot was handed down, or when every owned engine is
+    unmeasurable - so a gate-off tree stays byte-identical.
+    """
+    config = cfg or {}
+    if not config.get("enable_quant_scorecard"):
+        return ""
+    snap = snapshot if isinstance(snapshot, dict) else None
+    if not snap:
+        return ""
+    try:
+        from tradingagents.strategies.quant_scorecard import (
+            ENGINE_GATES,
+            engines_for_analyst,
+            format_engine_detail,
+        )
+    except Exception:  # noqa: BLE001 - no map means no section
+        return ""
+
+    engines = snap.get("engines") or {}
+    blocks: list[str] = []
+    for engine in engines_for_analyst(analyst_key):
+        if not config.get(ENGINE_GATES[engine]):
+            continue
+        entry = engines.get(engine) or {}
+        if not entry.get("enabled"):
+            continue
+        label = _engine_label(engine)
+        score = entry.get("score")
+        head = f"## {label} (engine score)"
+        if score is None:
+            reason = entry.get("reason") or "not measured"
+            blocks.append(f"{head}\n\n**{label}: NA** - {reason}\n")
+            continue
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        line = f"**{label}: {_plain_float(score)}/100**"
+        if entry.get("band"):
+            line += f" ({entry['band']})"
+        line += f" | coverage {_coverage_text(entry.get('coverage'), ticker)}"
+        floor = result.get("floor")
+        if floor is not None:
+            line += f" | required floor {_plain_float(floor)}"
+        line += " | ABOVE FLOOR"
+        # The category -> measurement chain for THIS engine only, so the section
+        # carries its own evidence rather than pointing at section V.
+        detail = format_engine_detail(
+            {**snap, "engines": {engine: entry}}
+        ).strip()
+        blocks.append(f"{head}\n\n{line}\n\n{detail}\n")
+    if not blocks:
+        return ""
+    return "\n".join(blocks)

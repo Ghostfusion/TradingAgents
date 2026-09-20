@@ -278,3 +278,86 @@ def test_config_hash_moves_with_the_master_scorecard_gate():
         live["enable_quant_scorecard"] = original
         repro_check._CONFIG_HASH_CACHE.clear()
     assert off != on
+
+
+# --- the deterministic engine section in the analyst report -----------------
+
+
+def test_sentiment_report_gets_its_engine_section_deterministically():
+    """The gap this closes: `SentimentReport` (`agents/schemas.py:444`) has no
+    field for an engine result, so the supplied block reached that analyst's
+    PROMPT but its appearance in the REPORT was model discretion - the earlier
+    QCOM run's model volunteered it into `narrative`, the next run's did not.
+    Rendering it here removes the discretion."""
+    section = report_hygiene.engine_report_section(
+        "sentiment", "MSFT", "2026-09-19", _cfg(), _fake_snapshot()
+    )
+    assert section.startswith("## SentimentScore (engine score)")
+    assert "SentimentScore: 60/100" in section
+    assert "required floor 2" in section
+    assert "ABOVE FLOOR" in section
+
+
+def test_an_analyst_gets_only_the_engines_it_owns():
+    """Placement stays the ownership map's decision - the renderer reads it."""
+    snap = _fake_snapshot()
+    for analyst in ANALYSTS:
+        section = report_hygiene.engine_report_section(
+            analyst, "MSFT", "2026-09-19", _cfg(), snap
+        )
+        for engine in engines_for_analyst(analyst):
+            assert report_hygiene._engine_label(engine) in section, (analyst, engine)
+        for engine in ENGINES:
+            if engine in engines_for_analyst(analyst):
+                continue
+            assert f"## {report_hygiene._engine_label(engine)} (engine score)" not in section, (
+                analyst,
+                engine,
+            )
+
+
+def test_engine_section_is_empty_when_the_master_gate_is_off():
+    assert (
+        report_hygiene.engine_report_section(
+            "market", "MSFT", "2026-09-19", _cfg(master=False), _fake_snapshot()
+        )
+        == ""
+    )
+
+
+def test_engine_section_is_empty_without_a_snapshot():
+    """No snapshot means no section - never a recompute, never a guess."""
+    assert (
+        report_hygiene.engine_report_section("market", "MSFT", "2026-09-19", _cfg(), None)
+        == ""
+    )
+
+
+def test_engine_section_names_an_unmeasurable_engine_as_na():
+    snap = _fake_snapshot()
+    snap["engines"]["news"] = {
+        "engine": "news",
+        "enabled": True,
+        "score": None,
+        "coverage": None,
+        "band": None,
+        "reason": "no news producer measured",
+        "result": None,
+    }
+    section = report_hygiene.engine_report_section(
+        "news", "MSFT", "2026-09-19", _cfg(), snap
+    )
+    assert "**NewsScore: NA** - no news producer measured" in section
+    assert "NewsScore: 0" not in section
+
+
+def test_engine_section_is_deterministic():
+    """Same snapshot in, byte-identical text out - no clock, no ordering drift."""
+    snap = _fake_snapshot()
+    first = report_hygiene.engine_report_section(
+        "news", "MSFT", "2026-09-19", _cfg(), snap
+    )
+    second = report_hygiene.engine_report_section(
+        "news", "MSFT", "2026-09-19", _cfg(), snap
+    )
+    assert first == second

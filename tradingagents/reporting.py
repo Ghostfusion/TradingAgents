@@ -1551,23 +1551,51 @@ def write_report_tree(
     # 1. Analysts
     analysts_dir = save_path / "1_analysts"
     analyst_parts = []
-    for key, name in (
-        ("market_report", "Market Analyst"),
-        ("sentiment_report", "Sentiment Analyst"),
-        ("news_report", "News Analyst"),
-        ("fundamentals_report", "Fundamentals Analyst"),
+    # The engine section for each analyst, rendered from the run's ONE snapshot
+    # (never recomputed). This is the authoritative placement of an engine's
+    # result in its owner's report: the prompt tells the analyst what the engine
+    # MEANS, and this decides that the result APPEARS - the owner's invariant is
+    # that the model "may interpret an engine result, but does not decide whether
+    # or where the authoritative engine result appears". The prompt route alone
+    # could not carry it for the sentiment analyst, whose structured schema
+    # (`agents/schemas.py::SentimentReport`) has no field for an engine result.
+    _engine_snapshot = final_state.get("quant_scorecard")
+    _engine_ticker = final_state.get("company_of_interest") or ""
+    _engine_date = final_state.get("trade_date") or final_state.get("end_date")
+    for key, name, analyst_key in (
+        ("market_report", "Market Analyst", "market"),
+        ("sentiment_report", "Sentiment Analyst", "sentiment"),
+        ("news_report", "News Analyst", "news"),
+        ("fundamentals_report", "Fundamentals Analyst", "fundamentals"),
     ):
         text = final_state.get(key)
         if text:
             analysts_dir.mkdir(exist_ok=True)
             safe = key.replace("_report", "")
+            body = _finalize_section(text)
+            engine_section = ""
+            if cfg.get("enable_quant_scorecard") and _engine_snapshot:
+                try:
+                    from tradingagents.agents.utils.report_hygiene import (
+                        engine_report_section,
+                    )
+
+                    engine_section = engine_report_section(
+                        analyst_key,
+                        _engine_ticker,
+                        _engine_date,
+                        cfg,
+                        _engine_snapshot,
+                    )
+                except Exception:  # noqa: BLE001 - advisory; never break the report
+                    engine_section = ""
+            if engine_section:
+                body = body.rstrip() + "\n\n" + engine_section.rstrip() + "\n"
             # The analyst files are input evidence, not risk outputs: the
             # computed risk gate is NOT prepended here (it belongs in
             # 4_risk/ and 5_portfolio/decision.md, where it appears once).
-            (analysts_dir / f"{safe}.md").write_text(
-                _finalize_section(text), encoding="utf-8"
-            )
-            analyst_parts.append((name, _finalize_section(text)))
+            (analysts_dir / f"{safe}.md").write_text(body, encoding="utf-8")
+            analyst_parts.append((name, body))
         else:
             # Empty-report guard: an analyst that produced no report (tool
             # loop wedged on a slow/hung vendor call) must still leave an

@@ -347,6 +347,24 @@ the owner's "research evidence → score → interpretation" chain becomes visib
 is an addition to `write_report_tree` (`reporting.py:1392`) that renders each
 engine's already-computed result, and adds no producer.
 
+**Status (2026-09-19): Level 2 is BUILT, in two surfaces.** An earlier revision of
+this paragraph said it was "still NOT built", which was stale. The
+`## V. Engine score detail` section appends `format_engine_detail(snapshot)` to
+`complete_report.md` (`reporting.py` ~`:1807`; workstreams `P12-10`/`P12-12`).
+The **per-analyst** half was the genuinely missing one, and is now built too:
+`report_hygiene.engine_report_section(analyst_key, ticker, trade_date, cfg,
+snapshot)` renders the owning analyst's engines into `1_analysts/*.md`,
+**rendering only**, from the run's one snapshot.
+
+The per-analyst half exists because the prompt route alone could not carry it for
+every analyst. The sentiment analyst runs schema-constrained output
+(`agents/schemas.py::SentimentReport`), and that schema carries **no field for an
+engine result** — so a supplied block reached its prompt but had nowhere to land
+in its response, and whether the number appeared was model discretion. Measured on
+QCOM 2026-09-19: the earlier run's model volunteered it into `narrative`, the next
+run's did not. The renderer removes that discretion for every analyst, not only
+the one whose schema exposed it. See `ScoreContextContract.md` §13.
+
 ### 4.3 Score movement — the highest-value part, and the one with no producer
 
 The owner's strongest point is that movement can matter more than level: a
