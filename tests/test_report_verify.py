@@ -449,6 +449,110 @@ def test_period_tag_near_binds_the_closest_token():
     assert rv._period_tag_near(line, "999.99") == rv._period_tag(line)
 
 
+def test_basis_conflicts_classifies_two_producers_as_a_basis_difference():
+    """Two producers printing one metric is a basis difference, not a defect.
+
+    `t1`/`t2` are quoted by `get_tranche_plan` and `get_swing_set` by design, and
+    without the producer the classifier read every such pair as one metric
+    printing two values - accusing two producers that are each right.
+    """
+    reg = [
+        rv.BasisAssertion(metric="t1", value=115.40, basis="ratio",
+                          producer="get_tranche_plan", source="report"),
+        rv.BasisAssertion(metric="t1", value=115.2778, basis="ratio",
+                          producer="get_swing_set", source="report"),
+    ]
+    rows = rv.basis_conflicts(reg)
+    assert len(rows) == 1
+    assert rows[0].classification == "basis_difference"
+    assert "tranche_plan" in rows[0].reason and "swing_set" in rows[0].reason
+
+
+def test_basis_conflicts_reads_two_spellings_of_one_producer_as_one():
+    """`get_ratios` and `(ratios)` are one producer, so this is a real defect."""
+    reg = [
+        rv.BasisAssertion(metric="ttm p/e", value=20.9661, basis="ttm:ttm",
+                          producer="get_fundamentals", source="report"),
+        rv.BasisAssertion(metric="ttm p/e", value=20.334, basis="ttm:ttm",
+                          producer="fundamentals", source="report"),
+    ]
+    rows = rv.basis_conflicts(reg)
+    assert rows[0].classification == "defect", rows[0].reason
+
+
+def test_basis_conflicts_classifies_two_stated_bases_as_a_basis_difference():
+    reg = [
+        rv.BasisAssertion(metric="diluted eps", value=1.87, basis="q:2026/q3", source="report"),
+        rv.BasisAssertion(metric="diluted eps", value=5.01, basis="fy:fy25", source="report"),
+    ]
+    assert rv.basis_conflicts(reg)[0].classification == "basis_difference"
+
+
+def test_basis_conflicts_classifies_a_stated_basis_beside_a_bare_one_as_unresolved():
+    """The report never said what basis the bare value is on - §10 may not act."""
+    reg = [
+        rv.BasisAssertion(metric="rvol", value=4.68, basis="date:2026-09-18", source="report"),
+        rv.BasisAssertion(metric="rvol", value=4.638, basis="ratio", source="report"),
+    ]
+    assert rv.basis_conflicts(reg)[0].classification == "unresolved"
+
+
+def test_basis_conflicts_classifies_two_unit_classes_as_a_basis_difference():
+    """`vrp` is a percentage-point spread in one tool and a variance ratio in another."""
+    reg = [
+        rv.BasisAssertion(metric="vrp", value=2.10, basis="percent", source="report"),
+        rv.BasisAssertion(metric="vrp", value=0.0490, basis="ratio", source="report"),
+    ]
+    rows = rv.basis_conflicts(reg)
+    assert rows[0].classification == "basis_difference", rows[0].reason
+
+
+def test_basis_conflicts_is_empty_when_one_cluster():
+    """A metric quoted once, or twice within tolerance, is not a conflict."""
+    assert rv.basis_conflicts(
+        [rv.BasisAssertion(metric="roe", value=22.09, basis="ttm:ttm", source="report")]
+    ) == []
+    near = [
+        rv.BasisAssertion(metric="roe", value=22.09, basis="ttm:ttm", source="report"),
+        rv.BasisAssertion(metric="roe", value=22.1, basis="ttm:ttm", source="report"),
+    ]
+    assert rv.basis_conflicts(near) == []
+
+
+def test_producer_near_binds_before_after_and_ignores_periods():
+    """The attribution rule: a name before the value, or an adjacent parenthesised one."""
+    assert rv._producer_near("get_ratios reports EV/EBITDA 18.21", "18.21") == "get_ratios"
+    # A multiples row attributes by SHORT name, never by the `get_`-prefixed one.
+    line = "| P/E TTM | 36.60138 (fundamentals) / 36.33 (ratios) |"
+    assert rv._producer_near(line, "36.60138") == "fundamentals"
+    assert rv._producer_near(line, "36.33") == "ratios"
+    # A parenthesised PERIOD is a basis, not a producer.
+    assert rv._producer_near("EV/EBIT 26.29 (TTM 2026-06-30)", "26.29") == ""
+
+
+def test_basis_of_records_percentage_points_as_a_percentage():
+    assert rv._basis_of("VRP +2.10pp", "vrp", "+2.10") == "percent"
+    assert rv._basis_of("VRP 0.0490", "vrp", "0.0490") == "ratio"
+
+
+def test_basis_registry_carries_the_producer():
+    reg = rv._basis_registry("`get_ratios` reports EV/EBITDA **18.21**", set())
+    assert [(b.metric, b.producer) for b in reg] == [("ev/ebitda", "get_ratios")]
+
+
+def test_basis_registry_applies_the_conflict_scans_context_rejections():
+    """The registry must not admit a value the prose scan would have discarded.
+
+    A registry entry is what the classifier sees, so admitting an artefact here
+    is how a ledger acquires a row nobody can act on. `get_vif_read`'s score is
+    not an RSI, and the prose scan already knows that.
+    """
+    line = "`get_vif_read` on [rsi, mom] returns **5.4** for the variance factor"
+    assert rv._value_context_rejected("rsi", "5.4", line) is True
+    reg = rv._basis_registry(line, set())
+    assert [b.value for b in reg if b.metric == "rsi"] == []
+
+
 def test_internal_conflict_stochrsi_is_not_stochk():
     # The label "stoch" also matched "stochrsi", whose 0.0 then read as
     # conflicting %K (MU market.md 2026-09-14).

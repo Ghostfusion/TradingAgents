@@ -434,6 +434,28 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Phase 3 UNBLOCKED: the conflict ledger gets a mechanical, provenance-carrying producer.** §9 needed each row
+  to carry a `classification`; §13.5 left Phase 3 blocked because the detector's flags were dominated by its own extraction defects. **THE MOVE:
+  classify from the typed basis registry, not from the prose scan.** `_basis_registry` already produced a deduped `list[BasisAssertion]` of
+  `(metric, value, basis, source)` per report, so the conflict becomes a GROUP BY. That matters for rule 15 - the prose scan and a registry scan
+  would otherwise be two independent producers of "the same metric at two values". **SUPPRESSION BECOMES LABELLING:** the three suppression rules
+  (`_period_tag`, `_disclosed_pair`, `_UNIT_SCOPED_METRICS`) were each a classification the code computed and then THREW AWAY; they now emit it. A
+  suppressed row was invisible; a labelled row is visible, inert and auditable, and §10 reads only `unresolved`.
+  `classify_conflict` is arithmetic on provenance, no prose, no model call:
+  `≥2 producers -> basis_difference` / `≥2 stated bases -> basis_difference` / `≥2 unit classes -> basis_difference` / `stated beside unstated ->
+  unresolved` / `else (one producer, one basis) -> defect`.
+  **FOUR PROVENANCE FIXES, each closing a measured gap.** (1) `BasisAssertion.producer` via `_producer_near` - `t1`/`t2` are quoted by
+  `get_tranche_plan` AND `get_swing_set` by design, `vrp` is pp in one tool and a variance ratio in another; without the producer every such pair was
+  a defect. **166 -> 75.** (2) A parenthesised SHORT-NAME attribution: multiples rows write `(fundamentals)` / `(ratios)`, never `get_fundamentals`,
+  so the tool-scope regex could not see it; a parenthesised token is an attribution only when it carries NO digit (so `(2026-03-31)` stays a basis).
+  **75 -> 65.** (3) Producer-name normalisation - `get_fundamentals` and `(fundamentals)` are one producer named two ways. **65 -> 67** (the count
+  ROSE: it correctly stopped excusing two rows it had been excusing wrongly). (4) `pp` recorded as `percent`, so two unit classes read as two bases.
+  **67 -> 63.** **MEASURED over 53 trees, 284 rows: 199 `basis_difference` / 63 `defect` / 22 `unresolved`.** Ten tests, each proven
+  **failing-first by mutation** (sha256 restore verified); verifier suite 223 -> 233. **NOT claimed:** 27 of the 63 remaining defects are `atr` at
+  different WINDOWS (the basis records only the unit class), so a windowed-basis concept for ATR-like metrics is the largest remaining item; `t1`/`t2`
+  contribute 12 more with one side unattributed; a handful are extraction artefacts (`AMZN 'current ratio' 249.26`, `NVDA 'earnings power value' 14`,
+  `NVDA 'rsi' 4.14e37`). None is hidden - each is a payload row with its sides printed.
+
 - 2026-09-20 `(working tree)` - **The §9 conflict-ledger dependency checked: the open verifier pairs were NOT classified, and the triage found NO
   two-producer defect.** A `verify_flags.json` conflict row carries exactly three keys - `claim` (free prose), `status`, `reason` - with no
   `classification`, no `metric`, and no source sections; §9's vocabulary (`unresolved`/`basis_difference`/`defect`) appears nowhere in the code.

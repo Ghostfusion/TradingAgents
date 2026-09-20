@@ -629,31 +629,51 @@ The three values are `unresolved`, `basis_difference` (both producers correct on
 stated basis) and `defect` (one producer is wrong). Only `unresolved` may participate in a
 challenge invalidation (§10) - and only under the materiality test there.
 
-**Dependency: this is only as good as the verifier's classification. The currently-open
-same-metric pairs have now been triaged, and the result is the opposite of what this section
-assumed.** The five pairs, each traced to its mechanism by running the verifier's own
-extractors over the trees that produced them:
+**DEPENDENCY RESOLVED — the ledger now has a producer, and it is mechanical.** The three
+`classification` values are computed by `report_verifier.classify_conflict` from the typed
+basis registry, with no prose and no model call:
 
-| pair | classification | mechanism |
-|---|---|---|
-| LULU `ev/ebit` 5.50 / 4.40 | **detector defect** | a header cell naming two metrics - ``\| P/E / EV/EBIT / EV/EBITDA \| 7.68 / 5.50 / 4.40 \|`` - handed the **EV/EBITDA** leg to EV/EBIT |
-| LULU `scenario dcf base` 173.58 / 132.5 | **detector defect** | ``\| Scenario DCF bear/base/bull \| 132.5 / 173.58 / 249.05 \|`` bound `base` to the **bear** value |
-| JCI `altman z` 2.90 / 7.2461 | **detector defect** | ``\| Trap risk / Altman Z \| LOW / 2.90 (grey); Ohlson -7.2461 healthy \|`` read the **Ohlson** score as Altman Z |
-| AMZN `ev/ebit` 35.02 / 32.79 | **basis_difference (disclosed)** | the verdict's value vs `get_ratios`; the report itself says *"Both pairs are basis differences to quote with their producers, not one number"* |
-| QCOM `diluted eps` 1.87 / 5.01 | **basis_difference (disclosed)** | `$1.87 (2026/Q3)` vs `FY2025` - two labelled periods on one line |
+```
+two or more distinct PRODUCERS          -> basis_difference
+two or more distinct STATED bases       -> basis_difference
+two or more distinct UNIT CLASSES       -> basis_difference
+one stated basis beside an unstated one -> unresolved
+otherwise (one producer, one basis)     -> defect
+```
 
-**Not one is a two-producer defect (master rule 15).** Three are false positives in the
-verifier's own value extraction, and two are basis differences the report disclosed. The
-detector's flags are therefore **not yet trustworthy enough to feed a ledger** - which is
-exactly what this section's dependency note warned about, now confirmed by measurement rather
-than assumed.
+**Nothing is suppressed any more.** The prose-level scan already decided "is this disclosed" with
+`_period_tag`, `_disclosed_pair` and `_UNIT_SCOPED_METRICS`, but only to *drop* the row. The
+registry-based producer emits the same judgement as a **label**, which is what §9 needed: a
+`basis_difference` or `defect` row stays visible and is inert, and only `unresolved` may
+participate in a challenge invalidation (§10).
 
-Three defects were found and fixed on sight (§13.5), which took the corpus from **70 conflict
-rows over 26 trees to 30 over 24** on the analyst reports. The flags that remain need a
-**value-to-basis binding** these line-scoped regexes cannot express: when a line states two
-periods *and* two values, binding each value to the period nearest it is still not enough,
-because a value that recurs on a second line collects a second tag and the "every cluster has
-its own period" test fails. That is a different mechanism, and it is **not** attempted here.
+**Where it lives.** `BasisAssertion` gained a `producer` field (the tool or framework name
+nearest the value, before or in an adjacent parenthesis), and `verify_report_dir` emits
+`verification.<stem>.conflicts` — a list of `ConflictRow`, each carrying its `sides` with
+`(value, basis, producer, source)`. `basis_conflicts(registry)` is **the one producer** of the
+disagreements: the registry is already the machine-readable half of the report's figures, so the
+conflict is a GROUP BY, not a second pass of prose regexes (rule 15 — the prose scan and a
+registry scan would otherwise be two independent producers of "the same metric at two values").
+
+**The triage that motivated this (§13.5) found no two-producer defect among the open pairs** —
+three were false positives in the verifier's own value extraction and two were basis differences
+the report disclosed. Three detector defects were fixed on sight, and the classification above is
+the second half of that work.
+
+**Measured over 53 trees, 284 rows: 199 `basis_difference`, 63 `defect`, 22 `unresolved`.** The
+`defect` class began at 166 rows and fell as each provenance gap closed: the producer field took
+it to 75, a parenthesised attribution to 65, producer-name normalisation to 67 (one tool named
+`get_fundamentals` and `fundamentals` had been read as two), and unit classes to 63. **A
+`defect` row is the only class §10 may act on, so that count is the ledger's signal-to-noise.**
+
+**What still needs work, named.** 27 of the 63 remaining `defect` rows are `atr`, and they are not
+all defects: ATR is quoted at several windows (ATR-14, the chandelier's, the swing set's) and the
+basis records only the unit class, so two windows read as one basis. **A windowed-basis concept
+for ATR-like metrics is the single largest remaining item.** `t1`/`t2` contribute 12 more where
+one side still has no producer attributed. And a handful are extraction artefacts the classifier
+cannot be expected to catch — `AMZN 'current ratio' 249.26` (a price), `NVDA 'earnings power
+value' 14`, `NVDA 'rsi' 4.14e37` (masked digits). None of these is hidden: each is a row in the
+payload with its sides printed, so the next pass has somewhere to start.
 
 ---
 
@@ -1008,7 +1028,7 @@ pass is LAST, not first.
 | **0** | **Measure only** - the full telemetry block below into `run_card.json`. No behaviour change. **BUILT** (see §13.1). | the §3 numbers become a per-run series |
 | **1** | **The factorial experiment** (§12). Answer H1a / H1b / the representation question *before* building for them. **BUILT** (see §13.2). | the §12.2 distribution + grounding per arm, confounds stated |
 | **2** | **Decision Packet v1 + uncertainty counters** (§6, §8) - uncertainty is IN v1. **BUILT** (see §13.4). | packet <= budget; byte-identical when the master gate is off; the §8 invariant test |
-| **3** | Conflict ledger (§9), after the open verifier pairs are classified | conflicts named with both sections + a mechanical classification |
+| **3** | Conflict ledger (§9), after the open verifier pairs are classified. **UNBLOCKED** - the pairs are triaged (§13.5) and the mechanical classification is built (§13.6). | conflicts named with both sections + a mechanical classification |
 | **4** | Conditional expansion (§11) | `context_mode` recorded; expansion rate measurable |
 | **5** | Closed-vocabulary challenge pass (§10) | cannot raise caution from an uncertainty entry; materiality test enforced |
 
@@ -1452,6 +1472,64 @@ a value-to-basis binding these line-scoped regexes cannot express**, and it is n
 here. The honest statement to §9 is therefore: **the detector is better, and it is not yet good
 enough to feed a ledger** - so Phase 3 stays blocked on it, now for a measured reason.
 
+### 13.6 Unblocking Phase 3: classify from the basis registry, and stop suppressing
+
+§13.5 left Phase 3 blocked on the detector. The solution has one architectural move and four
+provenance fixes.
+
+**The move: the ledger is built from the typed basis registry, not from the prose scan.** The
+repo already had `_basis_registry` — a deduped `list[BasisAssertion]` of `(metric, value,
+basis, source)` triples per report, emitted so two runs of one ticker are comparable without
+diffing prose. That is exactly the input §9's `classification` needs, so the conflict becomes a
+**GROUP BY** rather than a second pass of regexes. This matters for rule 15: the prose scan and
+a registry scan would otherwise be two independent producers of "the same metric at two values",
+and a reader could see two different conflict lists for one tree. The prose scan keeps its own
+job — reporting the *claims* the LLM half verifies — and `verify_report_dir` now emits
+`conflicts` beside it.
+
+**Suppression becomes labelling.** The three existing suppression rules were each a
+classification the code computed and then threw away. Emitting them instead of discarding them
+is the whole change:
+
+| was | is |
+|---|---|
+| `_period_tag` -> drop the row | `basis` per figure -> `basis_difference` |
+| `_disclosed_pair` -> drop the row | `producer` per figure -> `basis_difference` |
+| `_UNIT_SCOPED_METRICS` -> drop the row | unit class in `basis` -> `basis_difference` |
+
+This is strictly more informative and strictly safer: a suppressed row was invisible, while a
+labelled row is visible, inert, and auditable. §10 reads only `unresolved`.
+
+**Four provenance fixes, each closing a measured gap.**
+
+1. **`producer` on every assertion** (`_producer_near`). `t1`/`t2` are quoted by
+   `get_tranche_plan` and `get_swing_set` by design; `vrp` is printed as a percentage-point
+   spread by one tool and a variance ratio by another. Without the producer every such pair was
+   a `defect`, which accuses producers that are each right. **166 -> 75 `defect` rows.**
+2. **A parenthesised short-name attribution.** Multiples rows attribute by SHORT name -
+   `| P/E TTM | 36.60138 (fundamentals) / 36.33 (ratios) / 36.2852 (Finnhub) |` - never by the
+   `get_`-prefixed tool name, so the tool-scope regex could not see it. A parenthesised token is
+   an attribution only when it carries **no digit** (so `(2026-03-31)` stays a basis) and no
+   period token of its own. **75 -> 65.**
+3. **Producer-name normalisation.** `get_fundamentals` and `(fundamentals)` are one producer
+   named two ways; comparing raw strings made one tool look like two and turned a real defect
+   into a `basis_difference`. The leading verb is not part of the identity. **65 -> 67** - the
+   count rose because it *correctly* stopped excusing two rows it had been excusing wrongly,
+   which is the right direction for a detector whose job is to find real disagreements.
+4. **Unit classes as bases.** `pp` is a percentage-point spread, not a bare ratio; recording it
+   as `percent` lets two unit classes read as two bases. **67 -> 63.**
+
+**Verification.** Ten tests, each proven **failing-first by mutation** - reverting the producer
+rule, the normalisation, the unit-class rule, the parenthesised attribution, the `pp` mapping and
+the registry's producer assignment fails all six targeted tests, with a sha256-verified restore.
+The verifier's own suite goes 223 -> 233, and the full engine suite is unchanged.
+
+**What this does and does not claim.** It does **not** claim the remaining 63 `defect` rows are
+all real defects - 27 are `atr` at different windows, which needs a windowed basis. It claims
+that the ledger now has a mechanical, provenance-carrying producer, that every row states what it
+was made of, and that the class §10 may act on is 63 rows rather than 166 with a large unknown
+fraction of them false.
+
 ---
 
 ## 14. Acceptance criteria
@@ -1534,6 +1612,24 @@ enough to feed a ledger** - so Phase 3 stays blocked on it, now for a measured r
 33. **The packet's text is not rendered into the report.** Section IVa still renders
     `computed_decision_context`, because the researchers keep the unbounded channel (§1.1) and
     IVa is the report's research-side block. **Named as an open gap**, not silently accepted.
+
+**Phase 3's dependency, met by §13.5-§13.6.**
+
+34. **Every conflict row carries its `classification`, computed by the verifier** - one of
+    `unresolved`, `basis_difference`, `defect` - from the typed `(metric, value, basis,
+    producer)` assertions, with no prose and no model call.
+35. **Nothing is suppressed.** The rules that used to drop a disclosed row now label it, so a
+    `basis_difference` is visible and inert rather than invisible. Only `unresolved` may
+    participate in a challenge invalidation (§10).
+36. **Two producers are never a defect.** A metric quoted by two tools is two measurements; a
+    `defect` requires one producer, one basis and two values, so the class §10 acts on is not
+    padded with accusations against producers that are each right.
+37. **The disagreements have ONE producer** (rule 15). The ledger reads `basis_conflicts` over
+    the registry; the prose scan keeps its own job of reporting claims, so no two functions
+    independently produce "the same metric at two values".
+38. **A value the prose scan would reject never enters the registry.** A registry entry is what
+    the classifier sees, so admitting an artefact there is how a ledger acquires a row nobody
+    can act on.
 
 ---
 

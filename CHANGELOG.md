@@ -326,6 +326,80 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 
 
+### Added
+
+**Unblocking Phase 3: the conflict ledger gets a mechanical, provenance-carrying producer.**
+
+`docs/design_decision_context.md` §9 needs each ledger row to name its sources and carry a
+`classification` computed by the verifier, not the model. §13.5 left Phase 3 blocked because the
+detector's flags were dominated by its own extraction defects. This is the solution.
+
+**THE MOVE: classify from the typed basis registry, not from the prose scan.** The repo already
+had `_basis_registry` - a deduped `list[BasisAssertion]` of `(metric, value, basis, source)`
+triples per report. That is exactly the input §9 needs, so the conflict becomes a GROUP BY
+rather than a second pass of regexes. That matters for rule 15: the prose scan and a registry
+scan would otherwise be two independent producers of "the same metric at two values", and a
+reader could see two different conflict lists for one tree. The prose scan keeps its own job
+(reporting the claims the LLM half verifies); `verify_report_dir` now emits `conflicts` beside it.
+
+**SUPPRESSION BECOMES LABELLING.** The three existing suppression rules were each a
+classification the code computed and then threw away:
+
+    was                                   is
+    _period_tag          -> drop the row  -> basis per figure    -> basis_difference
+    _disclosed_pair      -> drop the row  -> producer per figure -> basis_difference
+    _UNIT_SCOPED_METRICS -> drop the row  -> unit class in basis -> basis_difference
+
+Strictly more informative and strictly safer: a suppressed row was INVISIBLE, a labelled row is
+visible, inert and auditable. §10 reads only `unresolved`.
+
+`classify_conflict` is arithmetic on the provenance, with no prose and no model call:
+
+    two or more distinct PRODUCERS          -> basis_difference
+    two or more distinct STATED bases       -> basis_difference
+    two or more distinct UNIT CLASSES       -> basis_difference
+    one stated basis beside an unstated one -> unresolved
+    otherwise (one producer, one basis)     -> defect
+
+**FOUR PROVENANCE FIXES, each closing a measured gap.**
+
+1. `BasisAssertion.producer` - the tool or framework name nearest the value
+   (`_producer_near`). `t1`/`t2` are quoted by `get_tranche_plan` AND `get_swing_set` by
+   design; `vrp` is a percentage-point spread in one tool and a variance ratio in another.
+   Without the producer every such pair was a `defect`, accusing producers that are each
+   right. **166 -> 75 defect rows.**
+2. A parenthesised SHORT-NAME attribution. Multiples rows attribute by short name -
+   `| P/E TTM | 36.60138 (fundamentals) / 36.33 (ratios) / 36.2852 (Finnhub) |` - never by
+   the `get_`-prefixed one, so the tool-scope regex could not see it. A parenthesised token is
+   an attribution only when it carries NO digit (so `(2026-03-31)` stays a basis) and no period
+   token of its own. **75 -> 65.**
+3. Producer-name normalisation. `get_fundamentals` and `(fundamentals)` are one producer named
+   two ways; comparing raw strings made one tool look like two and turned a real defect into a
+   `basis_difference`. The leading verb is not part of the identity. **65 -> 67** - the count
+   ROSE because it correctly stopped excusing two rows it had been excusing wrongly.
+4. Unit classes as bases. `pp` is a percentage-point spread, not a bare ratio; recording it as
+   `percent` lets two unit classes read as two bases. **67 -> 63.**
+
+**MEASURED over 53 trees, 284 rows: 199 `basis_difference`, 63 `defect`, 22 `unresolved`.** A
+`defect` row is the only class §10 may act on, so that count is the ledger's signal-to-noise -
+and it is 63 rather than 166.
+
+**VERIFIED.** Ten tests, each proven FAILING-FIRST BY MUTATION: reverting the producer rule, the
+normalisation, the unit-class rule, the parenthesised attribution, the `pp` mapping and the
+registry's producer assignment fails all six targeted tests, with a sha256-verified restore.
+Verifier suite 223 -> 233.
+
+**WHAT THIS DOES NOT CLAIM.** It does not claim the remaining 63 `defect` rows are all real: 27
+are `atr` quoted at different WINDOWS (ATR-14, the chandelier's, the swing set's), and the basis
+records only the unit class, so two windows read as one basis. A windowed-basis concept for
+ATR-like metrics is the single largest remaining item. `t1`/`t2` contribute 12 more where one
+side still has no producer attributed. A handful are extraction artefacts (`AMZN 'current ratio'
+249.26` - a price; `NVDA 'earnings power value' 14`; `NVDA 'rsi' 4.14e37` - masked digits). None
+is hidden: each is a payload row with its sides printed, so the next pass has somewhere to start.
+
+**Web impact**: none - the verifier is advisory and never gates; no tool name, CLI flag or JSON
+shape changed. `conflicts` is an additive key in `report_verify.json`.
+
 ### Fixed
 
 **The §9 conflict-ledger dependency: the open verifier pairs triaged, and three detector defects fixed.**

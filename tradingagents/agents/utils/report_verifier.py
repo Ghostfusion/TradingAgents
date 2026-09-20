@@ -156,6 +156,17 @@ class BasisAssertion(BaseModel):
     metric: str
     value: float
     basis: str
+    producer: str = Field(
+        default="",
+        description=(
+            "The tool or framework name nearest before the value "
+            "(`get_ratios`, `swing_set`, `tranche_plan`), or empty when the "
+            "line names none. **Two producers are a basis difference, not a "
+            "defect**: the tranche plan's T1 and the swing set's T1 are two "
+            "frameworks' own targets, and without this field the classifier "
+            "reads them as one metric printing two values."
+        ),
+    )
     source: Literal["evidence", "report"] = Field(
         ...,
         description=(
@@ -165,9 +176,191 @@ class BasisAssertion(BaseModel):
     )
 
 
+class ConflictSide(BaseModel):
+    """One printed value of a metric, with the provenance §9's ledger needs."""
+
+    value: float
+    basis: str = Field(
+        ...,
+        description=(
+            "The period token printed beside THIS value (`date:2025-09-30`), "
+            "else the metric's unit class (`level`/`ratio`/`percent`/"
+            "`multiple`). A unit class is the weaker claim: it says what kind "
+            "of number it is, not which period it is on."
+        ),
+    )
+    producer: str = Field(
+        default="", description="The tool/framework that printed this value, or ''."
+    )
+    source: Literal["evidence", "report"] = Field(
+        ..., description="evidence = resolves to a tool leaf; report = prose only."
+    )
+
+
+class ConflictRow(BaseModel):
+    """One same-metric disagreement, **classified mechanically** (design doc §9).
+
+    §9 asks each ledger row to name its sources and carry a `classification`
+    computed by the verifier, not the model, with three values:
+
+    * ``basis_difference`` - two or more **stated** bases, so each value is
+      correct on its own basis. Both producers are right; the report should
+      quote them with their bases.
+    * ``defect`` - one basis, two materially different values. One producer is
+      wrong, because the metric claims a single basis and carries two numbers.
+    * ``unresolved`` - a mix: some value states its basis and another does not,
+      so the report never said what the bare value is on.
+
+    **Nothing is suppressed.** The prose-level scan already decides "is this
+    disclosed" with `_period_tag`, `_disclosed_pair` and `_UNIT_SCOPED_METRICS`,
+    but only to *drop* the row. Emitting the judgement instead of discarding it
+    is what lets §9's ledger exist: `basis_difference` and `defect` rows stay
+    visible and are inert, and only ``unresolved`` may participate in a
+    challenge invalidation (§10).
+    """
+
+    metric: str
+    sides: list[ConflictSide]
+    classification: Literal["unresolved", "basis_difference", "defect"]
+    reason: str
+
+
+#: The unit classes `_basis_of` falls back to when a value states no period.
+#: A basis in this set is NOT a disclosed basis - it is what kind of number the
+#: value is - so two values sharing one says nothing about whether they should
+#: agree.
+_UNSTATED_BASES = frozenset({"level", "ratio", "percent", "multiple"})
+
+
+def _producer_key(name: str) -> str:
+    """A producer's identity, independent of how the report spelled it.
+
+    Reports name the same tool both ways: ``get_ratios reports EV/EBITDA 18.21``
+    and ``| P/E TTM | 36.60138 (fundamentals) / 36.33 (ratios) |``. Comparing the
+    raw strings made one tool look like two, so QCOM 2026-09-19 ``ttm p/e``
+    20.9661 beside 20.334 classified as a basis difference when ONE tool printed
+    both. The leading verb is not part of the identity.
+    """
+    key = re.sub(r"^(?:get|compute|read|fetch)_", "", name.strip().lower())
+    return re.sub(r"[\s-]+", "_", key)
+
+
+def classify_conflict(metric: str, sides: list[ConflictSide]) -> tuple[str, str]:
+    """The mechanical classification of one same-metric disagreement.
+
+    The rule is arithmetic on the **producers and the bases**, and it needs no
+    prose:
+
+    * two or more distinct **producers** -> ``basis_difference``
+    * two or more distinct **stated** bases -> ``basis_difference``
+    * one stated basis beside an unstated one -> ``unresolved``
+    * otherwise (one producer, one basis) -> ``defect``
+
+    **Two producers is the first test for a reason.** ``t1``/``t2`` are quoted by
+    ``get_tranche_plan`` and ``get_swing_set`` by design, and ``vrp`` is printed
+    as a percentage-point spread by one tool and a variance ratio by another;
+    both are two measurements of two different things, and a classifier that
+    called them a defect would fill the ledger with accusations against
+    producers that are each right on their own basis.
+
+    The last case is the strict one and it is deliberate: one producer printing
+    two numbers for one metric on one basis means one of them is wrong. That is
+    the only case §10 may act on, and calling it ``defect`` is what makes the
+    ledger actionable.
+    """
+    producers = sorted({_producer_key(s.producer) for s in sides if s.producer})
+    stated = sorted({s.basis for s in sides if s.basis not in _UNSTATED_BASES})
+    unstated = sorted({s.basis for s in sides if s.basis in _UNSTATED_BASES})
+    if len(producers) >= 2:
+        return (
+            "basis_difference",
+            f"two producers printed these values ({', '.join(producers)})",
+        )
+    if len(stated) >= 2:
+        return (
+            "basis_difference",
+            f"each value carries its own stated basis ({', '.join(stated)})",
+        )
+    # Two UNIT classes are two bases. `vrp` is printed as a percentage-point
+    # spread by one tool and a variance ratio by another (+2.10pp vs +0.0490),
+    # and a beta is a multiple in one place and a ratio in another; comparing
+    # them as one metric at two values accuses producers that are each right.
+    # `_UNIT_SCOPED_METRICS` already encodes this for the prose scan - here it
+    # falls out of the basis, which is why the registry records the unit class.
+    if len(unstated) >= 2:
+        return (
+            "basis_difference",
+            f"the values are different kinds of number ({', '.join(unstated)})",
+        )
+    if stated and unstated:
+        return (
+            "unresolved",
+            f"one value states its basis ({stated[0]}) and another states none "
+            f"({', '.join(unstated)})",
+        )
+    if stated:
+        return (
+            "defect",
+            f"one stated basis ({stated[0]}) carries "
+            f"{len({round(s.value, 6) for s in sides})} different values",
+        )
+    return (
+        "defect",
+        "no value states a basis and "
+        f"{len({round(s.value, 6) for s in sides})} different values are printed",
+    )
+
+
+def basis_conflicts(registry: list[BasisAssertion]) -> list[ConflictRow]:
+    """§9's ledger rows, from the typed basis registry - **the one producer**.
+
+    The registry is already the machine-readable half of the report's figures
+    (`(metric, value, basis, source)` per assertion, deduped), so the
+    disagreement is a GROUP BY, not a second pass of prose regexes. That matters
+    for rule 15: the prose-level `_internal_conflicts` scan and this function
+    would otherwise be two independent producers of "the same metric at two
+    values", and a reader could see two different conflict lists for one tree.
+
+    A metric is a row only when its values differ materially at the metric's own
+    tolerance - the same `_INTERNAL_CONFLICT_METRICS` table, so the two cannot
+    disagree about what "materially" means.
+    """
+    by_metric: dict[str, list[ConflictSide]] = {}
+    for b in registry:
+        by_metric.setdefault(b.metric, []).append(
+            ConflictSide(
+                value=b.value, basis=b.basis, producer=b.producer, source=b.source
+            )
+        )
+
+    rows: list[ConflictRow] = []
+    for metric in sorted(by_metric):
+        sides = by_metric[metric]
+        tol = _INTERNAL_CONFLICT_METRICS.get(metric, (None, 0.01))[1]
+        # Distinct value clusters at the metric's own tolerance.
+        clusters: list[float] = []
+        for s in sorted(sides, key=lambda s: -s.value):
+            if not any(
+                abs(c - s.value) / max(abs(c), abs(s.value), 1e-9) <= tol
+                for c in clusters
+            ):
+                clusters.append(s.value)
+        if len(clusters) < 2:
+            continue
+        classification, reason = classify_conflict(metric, sides)
+        rows.append(
+            ConflictRow(
+                metric=metric,
+                sides=sides,
+                classification=classification,  # type: ignore[arg-type]
+                reason=reason,
+            )
+        )
+    return rows
+
+
 class ReportVerification(BaseModel):
     """Verdicts for one analyst report."""
-
     report: str = Field(..., description="Analyst key, e.g. 'fundamentals'.")
     claims: list[VerifierClaim] = Field(default_factory=list)
     overall: Literal["PASS", "FLAG", "UNKNOWN", "NUMERIC_ONLY"] = Field(
@@ -3975,6 +4168,18 @@ _METHOD_SCOPE_RE = re.compile(
     r"(?i)\b(swing\s*-?\s*set|tranche\s*plan|chandelier|ema\s*-?\s?(?:20|trail))\b"
 )
 
+# A multiples ROW attributes each value in parentheses by its SHORT name -
+# "| P/E TTM | 36.60138 (fundamentals) / 36.33 (ratios) / 36.2852 (Finnhub) |" -
+# never by the `get_`-prefixed tool name, so the tool-scope regex cannot see it
+# and both values were attributed to nobody. AMAT 2026-09-14 `ttm p/e` 36.60138
+# beside 36.33 then classified as a DEFECT against two producers that are both
+# right on their own basis.
+#
+# A parenthesised token is an attribution only when it carries NO digit (so
+# "(2026-03-31)" and "(TTM 2026-06-30)" stay periods, not producers) and no
+# period token of its own.
+_PAREN_SCOPE_RE = re.compile(r"\(([A-Za-z][A-Za-z0-9_ .-]{1,24})\)")
+
 
 def _tool_scoped_values(text: str, label: str) -> list[list[tuple[str, float]]]:
     """Metric values grouped by the producer named nearest them.
@@ -4385,6 +4590,56 @@ def _text_metrics(
     return claims, errors
 
 
+def _producer_near(line: str, raw: str) -> str:
+    """The tool or framework name this value is attributed to, or ``""``.
+
+    The same "bind to the nearest named thing" rule ``_tool_scoped_values``
+    applies when it groups a metric's values by producer - here applied to ONE
+    value, so a typed assertion carries its producer the way it already carries
+    its basis.
+
+    **Before OR immediately after.** Reports write both shapes:
+    ``get_ratios reports EV/EBITDA 18.21`` (name first) and
+    ``36.60138 (get_fundamentals) / 36.33 (get_ratios)`` (name in parentheses
+    after). Looking only backwards left the second value unattributed, so AMAT
+    2026-09-14 `ttm p/e` 36.60138 beside 36.33 classified as a DEFECT against two
+    producers that are both right.
+
+    A name AFTER wins only when it is adjacent (a parenthesised or comma-attached
+    attribution), never one from the next sentence.
+    """
+    at = line.find(raw)
+    if at < 0:
+        return ""
+    end = at + len(raw)
+    before, before_at = "", -1
+    for m in _TOOL_SCOPE_RE.finditer(line):
+        if m.end() <= at and m.end() > before_at:
+            before, before_at = m.group(1), m.end()
+    for m in _METHOD_SCOPE_RE.finditer(line):
+        if m.end() <= at and m.end() > before_at:
+            before, before_at = re.sub(r"\s+", "_", m.group(1).lower()), m.end()
+    # An adjacent attribution: `(get_ratios)`, `(ratios)`, `, get_ratios`.
+    gap = line[end : end + 3]
+    if not gap.startswith(("(", ",", " ", "`")):
+        return before
+    after, after_at = "", len(line) + 1
+    for m in _TOOL_SCOPE_RE.finditer(line):
+        if m.start() >= end and m.start() < after_at:
+            after, after_at = m.group(1), m.start()
+    for m in _PAREN_SCOPE_RE.finditer(line):
+        token = m.group(1).strip()
+        # No digit and no period token: "(ratios)" is an attribution,
+        # "(2026-03-31)" and "(TTM 2026-06-30)" are bases.
+        if any(ch.isdigit() for ch in token) or _period_tag(m.group(0)):
+            continue
+        if m.start() >= end and m.start() < after_at:
+            after, after_at = re.sub(r"\s+", "_", token.lower()), m.start()
+    if after and after_at - end <= 24:
+        return after
+    return before
+
+
 def _basis_of(line: str, metric: str, raw: str) -> str:
     """The basis this printed value carries: a stated period, else its unit class.
 
@@ -4397,13 +4652,18 @@ def _basis_of(line: str, metric: str, raw: str) -> str:
     here (P/E 135.94, EV/EBIT 32.79), so ``ratio`` carries no bound and a
     ``fraction_0_1``-style vocabulary would mislabel the common case.
     """
-    tag = _period_tag(line) if line else None
+    tag = _period_tag_near(line, raw) if line else None
     if tag:
         return tag
     if metric in _LEVEL_METRICS:
         return "level"
     unit = _unit_after(line, raw) if line else ""
-    if unit == "%":
+    # `pp` is a percentage-point SPREAD. It is not the same kind of number as a
+    # bare ratio, which is the whole point of recording the class: `vrp` is
+    # printed as +2.10pp by one tool and +0.0490 as a variance ratio by another,
+    # and both fell into `ratio` so the classifier read them as one metric
+    # printing two values instead of two tools printing two different things.
+    if unit in {"%", "pp"}:
         return "percent"
     if unit in {"x", "\u00d7"}:
         return "multiple"
@@ -4436,7 +4696,14 @@ def _basis_registry(report_text: str, evidence_dec: set) -> list[BasisAssertion]
                 flt = float(value)
             except (TypeError, ValueError):
                 continue
+            # The same context rejections the prose conflict scan applies, so the
+            # registry cannot admit a value that scan would have discarded. A
+            # registry entry is what the classifier sees, and admitting an
+            # artefact here is how a ledger acquires a row nobody can act on.
+            if _value_context_rejected(metric, str(raw), str(line or "")):
+                continue
             basis = _basis_of(str(line), metric, str(raw))
+            producer = _producer_near(str(line), str(raw))
             key = (metric, round(flt, 6), basis)
             if key in seen:
                 continue
@@ -4446,6 +4713,7 @@ def _basis_registry(report_text: str, evidence_dec: set) -> list[BasisAssertion]
                     metric=metric,
                     value=flt,
                     basis=basis,
+                    producer=producer,
                     source="evidence" if _matches(flt, evidence_dec) else "report",
                 )
             )
@@ -4609,6 +4877,10 @@ def verify_report_dir(
             # The typed (metric, value, basis) triples this report asserts, so
             # two runs of one ticker are comparable without diffing prose.
             "basis": [b.model_dump() for b in basis],
+            # Design doc §9's ledger rows: the same disagreements as
+            # `INTERNAL_CONFLICT`, but MACHINE-CLASSIFIED from the bases instead
+            # of suppressed. `unresolved` is the only class §10 may act on.
+            "conflicts": [c.model_dump() for c in basis_conflicts(basis)],
         }
         if metric_errors:
             # A metric that cannot parse the report is recorded, never silent:
