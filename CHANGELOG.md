@@ -56,6 +56,25 @@ Tests: `tests/test_engine_ownership_map.py` re-pointed and extended (7 new: full
 
 ### Fixed
 
+**The NewsScore engine could never measure — its only article source discarded every article (2026-09-19).** Found by asking why the QCOM run reported `news: no news producer measured`, rather than accepting the gap as a missing vendor.
+
+- **The feed arrives as a JSON string, and the reader only accepted a dict.** `_make_api_request` (`dataflows/alpha_vantage_common.py:120`) ends with `return response_text` — its declared `dict | str` return is **always the `str` branch**. So in `analysis_tools._av_news_articles`:
+
+  ```python
+  if isinstance(raw, dict):        # can never be true
+      return raw.get("feed") or []
+  return []                        # always this
+  ```
+
+  The vendor serves ~50 articles per call (measured live: 50 for QCOM) and the type check discarded **all** of them. NewsScore reported `no news producer measured` for every symbol on every date, and no amount of vendor health would have changed it.
+- **Measured before and after on the same symbol and date.** `_av_news_articles('QCOM', …)`: **0 articles → 50**. `_news_components('QCOM', '2026-09-19')`: **`{}` → `{'relevance': 5.5, 'novelty': 0.98}`**. The engine: **`score=None` ("no news producer measured") → `58.8` at coverage 0.25**, with the unproduced categories still printed `NA` and never `0`.
+- **The contract was already documented in the tree.** `alpha_vantage_fundamentals.py:9` says it plainly — *"``_make_api_request`` returns the fundamentals payload as a JSON string, so parse, filter, and re-serialize."* The fundamentals sibling parses; the news reader did not. The docstring now cites both sites.
+- **Tolerant, not brittle:** a dict still works (a caller that parsed first), a body that is not JSON yields an empty feed rather than an exception, and a vendor notice (`{"Information": "rate limit"}`) has no `feed` and so yields `[]` — the failure stays a named absence rather than becoming a crash.
+
+Tests: `tests/test_news_score.py` +2, both proven failing-first **by mutation** — removing the JSON-string branch (the original defect) and letting a junk body raise — then byte-identical restore.
+
+**Web impact**: `NewsScore` moves from permanently absent to a real measured score with coverage, for every symbol. Reports and `run_card.json` gain a `news_score` with a number where they previously carried `null` and `no news producer measured`; the five categories with no supplier still print `NA`.
+
 **The yfinance analyst-ratings leg raised on every call — three defects in one function (2026-09-19).** Also found by the live 4-symbol batch: `get_analyst_ratings` failed on **both** vendors, and the yfinance failure was an `AttributeError`, not an entitlement error.
 
 - **`analyst_price_targets` is a dict, and the code read it as a DataFrame.** The vendor's own signature is `def get_analyst_price_targets(self) -> dict:` with the docstring *"Keys: current low high mean median"* (`yfinance/base.py:317`). The old `.empty` / `.iloc[-1]` reads therefore raised `AttributeError: 'dict' object has no attribute 'empty'` **on every call** — the leg was dead, and with Finnhub returning 403 for this tool the whole `get_analyst_ratings` leaf had **no working vendor**.

@@ -283,3 +283,43 @@ def test_the_module_never_touches_the_sizing_or_gate_path() -> None:
 
 def test_the_composite_floor_is_below_the_component_set() -> None:
     assert COMPOSITE_MIN_COVERAGE <= len(COMPONENT_ORDER)
+
+
+# --- the Alpha Vantage feed arrives as a JSON STRING, not a dict -------------
+
+
+def test_the_av_news_reader_parses_the_json_string_the_vendor_returns(monkeypatch):
+    """`_make_api_request` ALWAYS returns `response_text` - a JSON STRING
+    (`dataflows/alpha_vantage_common.py:120`) - so its declared `dict | str`
+    return is always the `str` branch. An `isinstance(raw, dict)` test therefore
+    never passed, and this reader returned `[]` on every call for every symbol
+    and date: the vendor served ~50 articles and the type check discarded all of
+    them, which is why NewsScore reported "no news producer measured" and could
+    never measure. The fundamentals sibling documents the same contract
+    (`alpha_vantage_fundamentals.py:9`).
+    """
+    import json
+
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import alpha_vantage_news as avn
+
+    feed = [{"title": "Qualcomm joins WEDA", "overall_sentiment_score": 0.31}]
+    monkeypatch.setattr(avn, "get_news", lambda *a, **k: json.dumps({"feed": feed}))
+    assert at._av_news_articles("QCOM", "2026-08-20", "2026-09-19") == feed
+
+
+def test_the_av_news_reader_still_accepts_a_dict_and_rejects_junk(monkeypatch):
+    """The tolerant shape: a dict (some callers parse first) works, and a body
+    that is not JSON is an empty feed rather than an exception."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import alpha_vantage_news as avn
+
+    feed = [{"title": "x"}]
+    monkeypatch.setattr(avn, "get_news", lambda *a, **k: {"feed": feed})
+    assert at._av_news_articles("QCOM", "2026-08-20", "2026-09-19") == feed
+
+    monkeypatch.setattr(avn, "get_news", lambda *a, **k: "not json at all")
+    assert at._av_news_articles("QCOM", "2026-08-20", "2026-09-19") == []
+
+    monkeypatch.setattr(avn, "get_news", lambda *a, **k: '{"Information": "rate limit"}')
+    assert at._av_news_articles("QCOM", "2026-08-20", "2026-09-19") == []

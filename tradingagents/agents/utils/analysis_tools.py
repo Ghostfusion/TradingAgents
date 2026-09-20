@@ -8223,13 +8223,32 @@ def _sentiment_flag(name: str) -> bool:
 
 
 def _av_news_articles(ticker: str, start: str, end: str) -> list:
-    """Raw Alpha Vantage NEWS_SENTIMENT articles (the S4 feed); [] on failure."""
+    """Raw Alpha Vantage NEWS_SENTIMENT articles (the S4 feed); [] on failure.
+
+    **The feed arrives as a JSON STRING, not a dict.** `_make_api_request`
+    (`dataflows/alpha_vantage_common.py:120`) ends with ``return response_text`` - its
+    declared ``dict | str`` return is always the ``str`` branch - so an
+    ``isinstance(raw, dict)`` test can never be true and this reader returned
+    ``[]`` on every call, for every symbol and date. The vendor serves ~50
+    articles; the type check discarded all of them, which is why NewsScore
+    reported "no news producer measured" and could never measure. The
+    fundamentals sibling already documents the same contract
+    (`alpha_vantage_fundamentals.py:9`: *"``_make_api_request`` returns the
+    fundamentals payload as a JSON string, so parse..."*).
+    """
+    import json
+
     try:
         from tradingagents.dataflows.alpha_vantage_news import get_news
 
         raw = get_news(ticker, start, end)
     except Exception:  # noqa: BLE001 - optional rows must not break the tool
         return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
     if isinstance(raw, dict):
         return raw.get("feed") or []
     return []
