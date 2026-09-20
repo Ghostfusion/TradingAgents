@@ -326,6 +326,73 @@ Tests: `tests/test_quant_scorecard.py` **new, 27 tests**.
 
 
 
+### Fixed
+
+**The §9 conflict-ledger dependency: the open verifier pairs triaged, and three detector defects fixed.**
+
+`docs/design_decision_context.md` §9 said the ledger "is only as good as the verifier's
+classification" and that the open same-metric pairs had to be classified first. Checking
+answered the question immediately: **they were not classified at all.** A `verify_flags.json`
+conflict row carries exactly three keys - `claim` (free prose), `status`, `reason` - with no
+`classification`, no `metric` key and no source sections. §9's vocabulary
+(`unresolved` / `basis_difference` / `defect`) appears nowhere in the code.
+
+**THE TRIAGE FOUND NO TWO-PRODUCER DEFECT.** Running the verifier's own extractors over the
+trees that produced each pair:
+
+    LULU ev/ebit 5.50 / 4.40            detector defect  - the EV/EBITDA leg read as EV/EBIT
+    LULU scenario dcf base 173.58/132.5 detector defect  - the BEAR value read as base
+    JCI altman z 2.90 / 7.2461          detector defect  - the Ohlson score read as Altman Z
+    AMZN ev/ebit 35.02 / 32.79          basis_difference - the report says so itself
+    QCOM diluted eps 1.87 / 5.01        basis_difference - 2026/Q3 vs FY2025, both labelled
+
+Three are false positives in the verifier's own value extraction; two are basis differences the
+report disclosed. So the detector's flags are not yet trustworthy enough to feed a ledger -
+exactly what §9's dependency note warned about, now confirmed by measurement.
+
+**Finding 1 - `_table_cell_pair_value` computed the ordinal from `prefix.count("/")`.** A `/`
+inside a LABEL (`P/E`) is not a separator, and the count used the match's START. Three false
+positives followed: `| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 |` read the EV/EBITDA
+value as EV/EBIT; `| Scenario DCF bear/base/bull | 132.5 / 173.58 / 249.05 |` bound BOTH base
+and bull to the bear value, because the label regex legitimately matches the whole
+`bear/base/bull` phrase; and `| Trap risk / Altman Z | LOW / 2.90 (grey); Ohlson -7.2461
+healthy |` donated the Ohlson number. Fixed by cutting BOTH cells with one separator rule
+(`_table_legs`), taking the leg the match's LAST character occupies - these phrases read
+`<context> <label>` - and reading that leg's FIRST figure.
+
+**Finding 2 - the period tag was taken per LINE, not per figure.** `_period_tag` returns one tag
+for the whole line, so a line stating two labelled bases gave both figures the same tag and the
+disjointness test saw one shared period. `_period_tag_near` binds each figure to the nearest
+token. Its first version was wrong in a way worth recording: it iterated `_PERIOD_TAG_RES` in
+precedence order and returned the first KIND that matched anywhere, so a distant `FY2025` beat
+the `2026/Q3` sitting beside the figure. **Distance must decide first; precedence is only the
+tie-break.** A `\d{4}/Q[1-4]` spelling was also missing, so the vendor's own `2026/Q3` was not
+a period at all.
+
+**Finding 3 - the disclosed-basis test was silently inert on the reader path.** The
+`_METRIC_VALUE_READERS` branch builds entries as `(raw, value, None)` - no line - so `if line:`
+was false for every metric with a reader and the suppression below could never run.
+`_line_carrying` recovers the line from the report text rather than widening the readers'
+contract.
+
+**Effect.** Conflict rows over the analyst reports fell from **70 over 26 trees to 30 over 24**.
+Five regression tests added, each proven FAILING-FIRST BY MUTATION: reverting the three
+behaviours to their original bodies fails all five, and the restored file is byte-identical by
+sha256. The verifier's own 223 tests pass unchanged.
+
+**What remains, named.** The 30 survivors still contain false positives (`AMZN 2026-09-17
+'current ratio' 249.26; 1.0508` - a price read as a ratio; `NVDA 'rsi' 45.21; 41414141...` - the
+masked-digit corruption). The disclosed-basis suppression also still fails on JCI `ev/ebit` and
+LULU `debt/equity`, because a value that RECURS on a second line collects a second tag and the
+"every cluster carries its own period" test then fails. Fixing that needs a value-to-basis
+binding these line-scoped regexes cannot express, and it is not attempted here. **Phase 3 stays
+blocked on the detector, now for a measured reason.**
+
+Suite: 5044 -> 5049 passed, 6 skipped.
+
+**Web impact**: none - the verifier is advisory and never gates; no tool name, CLI flag or JSON
+shape changed.
+
 ### Added
 
 **Phase 2: the Decision Packet, and the three rows that have no producer.**

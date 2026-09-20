@@ -1283,14 +1283,52 @@ def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) ->
     return out
 
 
+def _table_legs(cell: str) -> list[str]:
+    """Split a table cell into its ``/``-separated legs.
+
+    **One separator rule, applied to BOTH cells of a row.** The ordinal that
+    selects a value only means anything if the label cell and the value cell are
+    cut the same way, so the choice is made once, from the label cell's own
+    shape, and reused.
+
+    A spaced ``/`` is the separator these tables use; a bare ``/`` inside a label
+    is part of the label. Splitting ``P/E / EV/EBIT / EV/EBITDA`` on every ``/``
+    would make ``P/E`` two labels and shift every ordinal after it - which is
+    exactly the defect this fixes: the EV/EBITDA value was read as EV/EBIT on
+    LULU 2026-09-15. When no spaced separator exists the cell is cut on the bare
+    ``/`` (``bear/base/bull``), which is the other shape these rows use.
+    """
+    parts = [p for p in re.split(r"\s+/\s+", cell)]
+    if len(parts) < 2:
+        parts = cell.split("/")
+    return [p.strip() for p in parts]
+
+
 def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     """The label's own leg when its table cell holds no figure of its own.
 
     A two-cell row such as ``| Net Income / Diluted EPS | $28,243,000,000 /
     $24.67 |`` lists the labels in one cell and their values, in the same
     order, in the next. Reading the first figure of the value cell would bind
-    the net income to the EPS, so the label's ordinal inside its own cell (the
-    number of "/" separators before it) selects the matching leg.
+    the net income to the EPS, so the label's ordinal inside its own cell
+    selects the matching leg.
+
+    **The ordinal is the label's POSITION among the label cell's legs**, not the
+    number of ``/`` before the match. Those differ in three ways, each of which
+    produced a false INTERNAL_CONFLICT on a real tree:
+
+    * a ``/`` inside a label (``P/E``) is not a separator, and counting it
+      shifted EV/EBIT onto the EV/EBITDA value (LULU 2026-09-15: 5.50 read
+      beside 4.40);
+    * a label phrase that spans two legs (``Scenario DCF bear/base``) matched
+      with nothing before it, so the ordinal came out 0 and ``base`` was read
+      as the BEAR value (LULU 2026-09-15: 173.58 read beside 132.5);
+    * a value leg naming a second metric (``2.90 (grey); Ohlson -7.2461``)
+      handed over that metric's number (JCI 2026-09-17: Altman Z 2.90 read
+      beside the Ohlson score 7.2461).
+
+    So: cut both cells the same way, take the leg the label occupies, and read
+    **its first figure** - a leg that names another metric cannot donate it.
     """
     if "|" not in line:
         return None
@@ -1298,27 +1336,53 @@ def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     pos = 0
     for idx, cell in enumerate(cells):
         if pos <= m.start() and m.end() <= pos + len(cell):
-            prefix = cell[:m.start() - pos]
             if _DOLLAR_RE.search(cell):
                 return None  # the label cell has its own figure: normal path
             if idx + 1 >= len(cells):
                 return None
-            legs = [
-                x.group(0) for x in _DOLLAR_RE.finditer(cells[idx + 1])
-                # a date inside the value cell is not a leg: keeping "09" out
-                # of "30.84% (09-21) / +4.59pp" makes the VRP ordinal select
-                # 4.59 instead of the IV (AMZN market.md 2026-09-14)
-                if not _is_date_fragment_in(x.group(0), line)
-            ]
-            if len(legs) < 2:
+            label_legs = _table_legs(cell)
+            if len(label_legs) < 2:
                 return None
-            ordinal = min(prefix.count("/"), len(legs) - 1)
-            raw = legs[ordinal]
-            try:
-                value = float(raw.replace(",", ""))
-            except ValueError:
+            # Which leg the label occupies. The match's LAST character decides,
+            # because these phrases read `<context> <label>`: the regex
+            # `scenario[\s-]*dcf.{0,40}?bull` legitimately matches the whole
+            # `Scenario DCF bear/base/bull` cell, and the metric named is the
+            # TAIL - `bull` (leg 2), not the `bear` it started on. Reading the
+            # span's start bound `base`/`bull` to the BEAR value on LULU
+            # 2026-09-15 (173.58 beside 132.5, and 249.05 beside 132.5).
+            #
+            # The span is shifted into CELL coordinates: `m` indexes the whole
+            # LINE, and `pos` is where this cell starts in it.
+            m_end = m.end() - pos - 1
+            ordinal = None
+            cursor = 0
+            for i, leg in enumerate(label_legs):
+                start = cell.find(leg, cursor)
+                if start < 0:
+                    continue
+                end = start + len(leg)
+                cursor = end
+                if start <= m_end < end:
+                    ordinal = i
+                    break
+            if ordinal is None:
                 return None
-            return raw, value
+            value_legs = _table_legs(cells[idx + 1])
+            if len(value_legs) < 2:
+                return None
+            ordinal = min(ordinal, len(value_legs) - 1)
+            leg = value_legs[ordinal]
+            # The FIRST figure of the leg: a later one belongs to whatever the
+            # leg goes on to name. A date fragment is not a figure.
+            for x in _DOLLAR_RE.finditer(leg):
+                raw = x.group(0)
+                if _is_date_fragment_in(raw, line):
+                    continue
+                try:
+                    return raw, float(raw.replace(",", ""))
+                except ValueError:
+                    continue
+            return None
         pos += len(cell) + 1
     return None
 
@@ -1610,6 +1674,10 @@ _PERIOD_TAG_RES: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"\bFY\s*\d{2,4}\s*[- ]?Q[1-4]\b", re.I), "fq"),
     (re.compile(r"\bQ[1-4]\s*FY\s*\d{2,4}\b", re.I), "q"),
     (re.compile(r"\bFY\s*\d{2,4}\b|\b\d{4}\s*/\s*FY\b", re.I), "fy"),
+    # The vendor's year/quarter spelling ("2026/Q3", QCOM 2026-09-20). Without
+    # it the only token on the line is the OTHER period, so a disclosed pair
+    # reads as one period and cannot be suppressed.
+    (re.compile(r"\b\d{4}\s*/\s*Q[1-4]\b", re.I), "q"),
     (re.compile(r"\b20\d{2}-\d{2}-\d{2}\b"), "date"),
     (re.compile(r"\bTTM\b|\btrailing\s+twelve\b", re.I), "ttm"),
     # A stated reporting PERIOD is a basis statement in prose form: AMZN
@@ -1635,6 +1703,61 @@ def _period_tag(line: str) -> str | None:
             token = re.sub(r"\s+", "", m.group(0)).lower()
             return f"{kind}:{token}"
     return None
+
+
+def _line_carrying(text: str, raw: str) -> str:
+    """The line of ``text`` that carries ``raw``, or ``""``.
+
+    The ``_METRIC_VALUE_READERS`` path returns ``(raw, value)`` pairs with no
+    provenance, which left ``line`` empty and made the disclosed-basis test in
+    ``_internal_conflicts`` unreachable for every metric that has a reader.
+    Recovering the line here is cheaper and safer than widening the readers'
+    contract, and it is what the fallback extractor already supplies.
+    """
+    if not raw:
+        return ""
+    for line in text.splitlines():
+        if raw in line:
+            return line
+    return ""
+
+
+def _period_tag_near(line: str, raw: str) -> str | None:
+    """The period/basis token disclosed nearest THIS figure, not the line's first.
+
+    ``_period_tag`` reads **one tag per line**. A line carrying two labelled
+    bases therefore hands both figures the same tag, the disjointness test in
+    ``_internal_conflicts`` sees one shared period, and two *disclosed*
+    measurements are reported as one metric at two values:
+
+    * JCI 2026-09-17 ``| EV/EBIT | 26.29 (TTM 2026-06-30) / 33.57 (2025-09-30) |``
+    * QCOM 2026-09-20 ``Diluted EPS $1.87 (2026/Q3) ... diluted EPS $5.01`` (FY2025)
+    * LULU 2026-09-15 ``| D/E | 0.36 ... 2026-01-31 | 2026-07-31 ... 0.45 |``
+
+    Binding to the nearest token is the same rule ``_tool_scoped_values`` already
+    applies to producers. **Distance decides first; ``_PERIOD_TAG_RES``' own
+    order is only the tie-break** - iterating the regexes in precedence order and
+    returning the first kind that matched anywhere gave a DISTANT ``FY2025``
+    precedence over the ``2026/Q3`` sitting immediately beside the figure, so
+    both figures on the QCOM line still came out with one shared tag. Falls back
+    to the line's own tag when the figure's text cannot be located.
+    """
+    at = line.find(raw)
+    if at < 0:
+        return _period_tag(line)
+    end = at + len(raw)
+    best: tuple[int, int, str, str] | None = None
+    for prec, (regex, kind) in enumerate(_PERIOD_TAG_RES):
+        for m in regex.finditer(line):
+            # Distance between the two spans; 0 when they touch or overlap.
+            gap = max(m.start() - end, at - m.end(), 0)
+            token = re.sub(r"\s+", "", m.group(0)).lower()
+            cand = (gap, prec, kind, token)
+            if best is None or cand < best:
+                best = cand
+    if best is None:
+        return None
+    return f"{best[2]}:{best[3]}"
 
 
 def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
@@ -1682,9 +1805,21 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
                 if bucket is None:
                     bucket = [v, raw, set(), line or ""]
                     distinct.append(bucket)
+                if not line:
+                    # The `_METRIC_VALUE_READERS` path carries no line, so the
+                    # disclosed-basis test below was SILENTLY INERT for every
+                    # metric that has a reader - which is most of them. QCOM
+                    # 2026-09-20 `Diluted EPS $1.87 (2026/Q3) ... diluted EPS
+                    # $5.01` (FY2025) is two labelled bases on one line and was
+                    # flagged as a conflict for exactly this reason.
+                    line = _line_carrying(report_text, raw)
                 if line:
                     bucket[3] = line
-                    tag = _period_tag(line)
+                    # Nearest-token, not the line's first: a line stating two
+                    # bases must tag each figure with its own, or the
+                    # disjointness test below sees one shared period and the
+                    # disclosed pair is reported as a conflict.
+                    tag = _period_tag_near(line, raw)
                     if tag:
                         bucket[2].add(tag)
             if len(distinct) < 2:

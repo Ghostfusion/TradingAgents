@@ -376,8 +376,81 @@ def test_internal_conflict_label_eats_no_leading_digit():
     assert not {"scenario dcf bear", "scenario dcf base", "scenario dcf bull"} & labels
 
 
+def test_internal_conflict_table_cell_names_two_metrics():
+    # A header cell naming TWO metrics must not hand the second one's value to
+    # the first. `| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 |` had its
+    # EV/EBITDA leg (4.40) read as EV/EBIT, inventing a conflict against the
+    # real 5.50 (LULU fundamentals.md 2026-09-15). The ordinal is the label's
+    # position among the cell's legs - a "/" inside a label (P/E) is not a
+    # separator.
+    t = "| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 | TTM flows; BS 2026-01-31 |\n"
+    got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
+        t, rv._INTERNAL_CONFLICT_METRICS["ev/ebit"][0], "ev/ebit", with_lines=True)}
+    assert got == {"5.5"}, got
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_bear_base_bull_row_binds_each_leg():
+    # `| Scenario DCF bear/base/bull | 132.5 / 173.58 / 249.05 |` bound BOTH
+    # base and bull to the bear value 132.5, because the label regex matches the
+    # whole `bear/base/bull` phrase and the ordinal was read from the match's
+    # START. The metric named is the match's TAIL (LULU 2026-09-15).
+    t = "| Scenario DCF bear/base/bull | 132.5 / 173.58 / 249.05 vs price 98.30 |\n"
+    for label, want in (("scenario dcf bear", "132.5"),
+                        ("scenario dcf base", "173.58"),
+                        ("scenario dcf bull", "249.05")):
+        rx, _tol = rv._INTERNAL_CONFLICT_METRICS[label]
+        got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
+            t, rx, label, with_lines=True)}
+        assert got == {f"{float(want):g}"}, (label, got)
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_value_leg_does_not_donate_another_metric():
+    # `| Trap risk / Altman Z | LOW / 2.90 (grey); Ohlson -7.2461 healthy |`
+    # read the OHLSON score as Altman Z, inventing a 2.90-vs-7.2461 conflict
+    # (JCI fundamentals.md 2026-09-17). A leg that goes on to name a second
+    # metric must not donate that metric's number.
+    t = "| Trap risk / Altman Z | LOW / 2.90 (grey); Ohlson -7.2461 healthy | verdict |\n"
+    got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
+        t, rv._INTERNAL_CONFLICT_METRICS["altman z"][0], "altman z", with_lines=True)}
+    assert got == {"2.9"}, got
+    assert rv._internal_conflicts(t) == []
+
+
+def test_internal_conflict_two_bases_on_one_line_are_disclosed_not_conflicting():
+    # A line stating TWO labelled bases must tag each figure with its OWN
+    # period. Reading one tag per LINE gave both figures the same period, so the
+    # disjointness test saw a shared basis and flagged a disclosed pair:
+    #   JCI 2026-09-17  | EV/EBIT | 26.29 (TTM 2026-06-30) / 33.57 (2025-09-30) |
+    #   QCOM 2026-09-20  Diluted EPS $1.87 (2026/Q3) ... diluted EPS $5.01 (FY2025)
+    jci = "| EV/EBIT | 26.29 (TTM 2026-06-30) / 33.57 (2025-09-30) | ratios |\n"
+    assert rv._internal_conflicts(jci) == []
+    qcom = (
+        "- **Diluted EPS $1.87** (2026/Q3), **-23.05% YoY**. FY2025 (10-K, ended "
+        "2025-09-28): revenue $44.28B, **diluted EPS $5.01**, tax $7.0B\n"
+    )
+    assert rv._internal_conflicts(qcom) == []
+
+
+def test_period_tag_near_binds_the_closest_token():
+    # The helper the above depends on. What is load-bearing is that two figures
+    # on one line get DIFFERENT tags when each has its own period - not which
+    # of two adjacent tokens (`TTM` and `2026-06-30` both describe the first
+    # basis) wins.
+    line = "| EV/EBIT | 26.29 (TTM 2026-06-30) / 33.57 (2025-09-30) |"
+    a = rv._period_tag_near(line, "26.29")
+    b = rv._period_tag_near(line, "33.57")
+    assert a != b, (a, b)
+    assert a in {"ttm:ttm", "date:2026-06-30"}, a
+    assert b == "date:2025-09-30", b
+    # A figure whose text cannot be located falls back to the line's own tag,
+    # so the single-basis case is unchanged.
+    assert rv._period_tag_near(line, "999.99") == rv._period_tag(line)
+
+
 def test_internal_conflict_stochrsi_is_not_stochk():
-    # The label "stoch" also matched "stochrsi", whose 0.0 then read as a
+    # The label "stoch" also matched "stochrsi", whose 0.0 then read as
     # conflicting %K (MU market.md 2026-09-14).
     t = "- stochK **12.42** — oversold. `get_mean_reversion_tech`: stochrsi **0.0**\n"
     assert rv._internal_conflicts(t) == []

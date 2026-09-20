@@ -629,10 +629,31 @@ The three values are `unresolved`, `basis_difference` (both producers correct on
 stated basis) and `defect` (one producer is wrong). Only `unresolved` may participate in a
 challenge invalidation (§10) - and only under the materiality test there.
 
-**Dependency:** this is only as good as the verifier's classification. The currently-open
-same-metric pairs (LULU `ev/ebit`, LULU `scenario dcf base`, LRCX `diluted eps`, LRCX
-`altman z`, AMZN `ev/ebit`) must first be classified as real two-producer defects or
-expected basis differences — otherwise the ledger will faithfully report noise.
+**Dependency: this is only as good as the verifier's classification. The currently-open
+same-metric pairs have now been triaged, and the result is the opposite of what this section
+assumed.** The five pairs, each traced to its mechanism by running the verifier's own
+extractors over the trees that produced them:
+
+| pair | classification | mechanism |
+|---|---|---|
+| LULU `ev/ebit` 5.50 / 4.40 | **detector defect** | a header cell naming two metrics - ``\| P/E / EV/EBIT / EV/EBITDA \| 7.68 / 5.50 / 4.40 \|`` - handed the **EV/EBITDA** leg to EV/EBIT |
+| LULU `scenario dcf base` 173.58 / 132.5 | **detector defect** | ``\| Scenario DCF bear/base/bull \| 132.5 / 173.58 / 249.05 \|`` bound `base` to the **bear** value |
+| JCI `altman z` 2.90 / 7.2461 | **detector defect** | ``\| Trap risk / Altman Z \| LOW / 2.90 (grey); Ohlson -7.2461 healthy \|`` read the **Ohlson** score as Altman Z |
+| AMZN `ev/ebit` 35.02 / 32.79 | **basis_difference (disclosed)** | the verdict's value vs `get_ratios`; the report itself says *"Both pairs are basis differences to quote with their producers, not one number"* |
+| QCOM `diluted eps` 1.87 / 5.01 | **basis_difference (disclosed)** | `$1.87 (2026/Q3)` vs `FY2025` - two labelled periods on one line |
+
+**Not one is a two-producer defect (master rule 15).** Three are false positives in the
+verifier's own value extraction, and two are basis differences the report disclosed. The
+detector's flags are therefore **not yet trustworthy enough to feed a ledger** - which is
+exactly what this section's dependency note warned about, now confirmed by measurement rather
+than assumed.
+
+Three defects were found and fixed on sight (§13.5), which took the corpus from **70 conflict
+rows over 26 trees to 30 over 24** on the analyst reports. The flags that remain need a
+**value-to-basis binding** these line-scoped regexes cannot express: when a line states two
+periods *and* two values, binding each value to the period nearest it is still not enough,
+because a value that recurs on a second line collects a second tag and the "every cluster has
+its own period" test fails. That is a different mechanism, and it is **not** attempted here.
 
 ---
 
@@ -1356,6 +1377,80 @@ still renders `computed_decision_context`, because the researchers keep the unbo
 (§1.1: research can be large) and IVa is the report's research-side advisory block; **the
 packet's own text is not rendered into the report**, which is a gap worth closing when the
 packet is dark-launched for real.
+
+### 13.5 The §9 dependency: the verifier's flags, triaged and three defects fixed
+
+§9 says the conflict ledger "is only as good as the verifier's classification". Checking
+whether the open pairs were classified answered the question in one step: **they were not
+classified at all.** A `verify_flags.json` conflict row carries exactly three keys - `claim`
+(free prose), `status`, `reason` - with no `classification`, no `metric` key and no source
+sections. §9's three-value vocabulary (`unresolved` / `basis_difference` / `defect`) appears
+nowhere in the codebase.
+
+What the verifier *does* have is classification **logic used only to suppress**. Three rules
+already decide "this is not a conflict" - `_period_tag` (a disclosed period is a basis),
+`_disclosed_pair` (the report named both values and their producers), and `_UNIT_SCOPED_METRICS`
+(two unit classes are two bases). None of them **labels** the row it spares. So the ledger's
+`classification` field is not a re-derivation; it is the same judgement, emitted instead of
+discarded - which is a smaller build than §9 implies, and the reason this triage mattered.
+
+**THE TRIAGE (§9's table) FOUND NO TWO-PRODUCER DEFECT.** Three of the five pairs were false
+positives in the verifier's own value extraction; two were basis differences the report itself
+disclosed. Running the verifier's extractors over the trees proved the mechanism for each.
+
+**Three detector defects, all confirmed and fixed on sight.**
+
+**Finding 1 - `_table_cell_pair_value` computed the ordinal from `prefix.count("/")`.** A `/`
+inside a **label** (`P/E`) is not a separator, and the count used the match's **start**. Three
+distinct false positives followed:
+
+* `| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 |` - the `P/E` label and the ` / `
+  separator both contributed a `/`, giving ordinal 2 and reading the **EV/EBITDA** value as
+  EV/EBIT (LULU 2026-09-15).
+* `| Scenario DCF bear/base/bull | 132.5 / 173.58 / 249.05 |` - the label regex legitimately
+  matches the whole `bear/base/bull` phrase, so the match started at leg 0 and **both** `base`
+  and `bull` were bound to the **bear** value (LULU: 173.58 beside 132.5, and 249.05 beside
+  132.5).
+* `| Trap risk / Altman Z | LOW / 2.90 (grey); Ohlson -7.2461 healthy |` - the value leg named
+  a **second metric** and donated its number (JCI 2026-09-17: Altman Z 2.90 beside the Ohlson
+  score 7.2461).
+
+The fix: cut **both** cells the same way (`_table_legs`, a spaced `/` as the separator with a
+bare `/` fallback), take the leg the match's **last character** occupies - these phrases read
+`<context> <label>`, so the metric is the tail - and read **that leg's first figure**, so a leg
+that goes on to name another metric cannot donate it.
+
+**Finding 2 - the period tag was taken per LINE, not per figure.** `_period_tag` returns one
+tag for the whole line, so a line stating two labelled bases gave both figures the same tag and
+the disjointness test saw one shared period. `_period_tag_near` binds each figure to the token
+**nearest it**. Its first version was wrong in a way worth recording: it iterated
+`_PERIOD_TAG_RES` in precedence order and returned the first *kind* that matched anywhere, so a
+**distant** `FY2025` beat the `2026/Q3` sitting immediately beside the figure. **Distance must
+decide first; precedence is only the tie-break.** A `\d{4}/Q[1-4]` spelling was also missing
+from the table, so the vendor's own `2026/Q3` was not a period at all.
+
+**Finding 3 - the disclosed-basis test was silently inert on the reader path.** The
+`_METRIC_VALUE_READERS` branch builds its entries as `(raw, value, None)` - no line - so
+`if line:` was false for every metric that has a reader, and the suppression below it could
+never run. The fallback extractor supplied lines; the readers did not. `_line_carrying`
+recovers the line from the report text, which is cheaper and safer than widening the readers'
+contract.
+
+**What the fixes did, and what they did not.** Conflict rows over the analyst reports fell from
+**70 over 26 trees to 30 over 24**. Five regression tests were added, each proven **failing-first
+by mutation**: reverting the three behaviours to their original bodies fails all five, and the
+restored file is byte-identical by sha256. The verifier's own suite (223 tests) passes
+unchanged.
+
+**What remains, named.** The 30 surviving flags still contain false positives - `AMZN
+2026-09-17 'current ratio' 249.26; 1.0508` (a price read as a ratio), `IBM 'scenario dcf bear'
+113.47; 0.3908`, `NVDA 'rsi' 45.21; 41414141...` (the masked-digit corruption), `NVDA 'earnings
+power value' 722,598,607,888.63; 14`. The disclosed-basis suppression also still fails on JCI
+`ev/ebit` and LULU `debt/equity`, because a value that **recurs** on a second line collects a
+second tag and the "every cluster carries its own period" test then fails. **Fixing that needs
+a value-to-basis binding these line-scoped regexes cannot express**, and it is not attempted
+here. The honest statement to §9 is therefore: **the detector is better, and it is not yet good
+enough to feed a ledger** - so Phase 3 stays blocked on it, now for a measured reason.
 
 ---
 

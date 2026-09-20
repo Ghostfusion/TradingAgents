@@ -434,6 +434,31 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **The §9 conflict-ledger dependency checked: the open verifier pairs were NOT classified, and the triage found NO
+  two-producer defect.** A `verify_flags.json` conflict row carries exactly three keys - `claim` (free prose), `status`, `reason` - with no
+  `classification`, no `metric`, and no source sections; §9's vocabulary (`unresolved`/`basis_difference`/`defect`) appears nowhere in the code.
+  **Triage of the five named pairs, each mechanism proven by running the verifier's own extractors:**
+  LULU `ev/ebit` 5.50/4.40 = **detector defect** (a header cell naming two metrics - `| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 |` - handed
+  the EV/EBITDA leg to EV/EBIT); LULU `scenario dcf base` 173.58/132.5 = **detector defect** (`| Scenario DCF bear/base/bull | 132.5 / 173.58 /
+  249.05 |` bound `base` to the BEAR value); JCI `altman z` 2.90/7.2461 = **detector defect** (the Ohlson score read as Altman Z); AMZN `ev/ebit`
+  35.02/32.79 = **basis_difference** (the report says so itself: "Both pairs are basis differences to quote with their producers, not one number");
+  QCOM `diluted eps` 1.87/5.01 = **basis_difference** (`$1.87 (2026/Q3)` vs `FY2025`). **Not one is a rule-15 two-producer defect.** The verifier
+  HAS classification logic - `_period_tag`, `_disclosed_pair`, `_UNIT_SCOPED_METRICS` - but uses it only to SUPPRESS, never to LABEL. So §9's
+  `classification` field is the same judgement emitted instead of discarded.
+  **Three detector defects, confirmed and fixed on sight.** (1) `_table_cell_pair_value` computed the ordinal from `prefix.count("/")` - a `/` inside
+  a LABEL (`P/E`) is not a separator - and used the match's START; fixed by cutting BOTH cells with one separator rule (`_table_legs`), taking the leg
+  the match's LAST character occupies (these phrases read `<context> <label>`), and reading that leg's FIRST figure (a leg naming a second metric can
+  no longer donate its number). (2) `_period_tag` returns ONE tag per LINE, so two labelled bases on one line got one shared tag; `_period_tag_near`
+  binds each figure to the nearest token - and its first version was wrong: it iterated `_PERIOD_TAG_RES` in precedence order and returned the first
+  KIND matching anywhere, so a distant `FY2025` beat the adjacent `2026/Q3`. **Distance decides first; precedence is only the tie-break.** A
+  `\d{4}/Q[1-4]` spelling was also missing. (3) The disclosed-basis test was **silently inert on the reader path**: `_METRIC_VALUE_READERS` builds
+  entries as `(raw, value, None)` - no line - so `if line:` was false for every metric with a reader; `_line_carrying` recovers the line.
+  **Effect:** analyst-report conflict rows 70/26 trees -> 30/24. Five regression tests, each proven **failing-first by mutation** (reverting the three
+  behaviours fails all five; sha256 restore verified). Verifier suite 223 pass. Full suite 5044 -> **5049 passed, 6 skipped**. **Still open and named:**
+  30 survivors include false positives (`AMZN 'current ratio' 249.26` - a price; `NVDA 'rsi' 45.21; 41414141...` - masked digits), and the
+  disclosed-basis suppression still fails when a value RECURS on a second line and collects a second tag. That needs a value-to-basis binding these
+  line-scoped regexes cannot express. **Phase 3 stays blocked on the detector, now for a measured reason.**
+
 - 2026-09-20 `(working tree)` - **Phase 2 of `docs/design_decision_context.md` is BUILT - the Decision Packet - and it found that §6's packet sketch
   contradicts §16's own architecture.** New `tradingagents/strategies/decision_packet.py`. The graph renders the packet ONCE before the graph into
   `state["decision_packet"]`; the five consumers §6 names (trader, PM, the three risk debators) read the decision channel through
