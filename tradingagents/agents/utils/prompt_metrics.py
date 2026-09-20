@@ -107,6 +107,40 @@ def record_stage(stage: str, prompt: object, **extra) -> dict:
     return {PROMPT_METRICS_KEY: {stage: entry}}
 
 
+def _messages_chars(messages: object) -> int:
+    """Size of a message list AS THE MODEL RECEIVES IT.
+
+    ``len(str(messages))`` is NOT this. A LangChain message's repr carries
+    Python scaffolding the provider never sees - ``content=``,
+    ``additional_kwargs={}``, ``response_metadata={}``, ``id=`` - which measured
+    **9.8% over** on a realistic tool-loop history. That is the same
+    mislabelling this module keeps having to fix, so the content and the tool
+    calls are summed directly and nothing else is counted.
+
+    A message whose content is a list (multimodal blocks) is measured by its
+    rendered parts. Anything unreadable contributes 0 rather than raising.
+    """
+    try:
+        items = list(messages or [])
+    except TypeError:
+        return 0
+    total = 0
+    for m in items:
+        try:
+            content = getattr(m, "content", None)
+            if content is None:
+                content = m if isinstance(m, str) else ""
+            if isinstance(content, str):
+                total += len(content)
+            else:
+                total += len(str(content))
+            for tc in (getattr(m, "tool_calls", None) or []):
+                total += len(str(tc))
+        except Exception:  # noqa: BLE001 - telemetry never raises
+            continue
+    return total
+
+
 def record_prompt_parts(stage: str, prefix: str, messages: object, **extra) -> dict:
     """For a node whose prompt is a TEMPLATE plus a growing message history.
 
@@ -120,18 +154,16 @@ def record_prompt_parts(stage: str, prefix: str, messages: object, **extra) -> d
     - ``prefix_chars`` - the static part, and the quantity §3 of the design doc
       measures (it is stable across rounds, which is what makes the W4 prefix
       cache work);
-    - ``messages_chars`` - the rendered conversation at the final call;
+    - ``messages_chars`` - the conversation at the final call, measured as the
+      model receives it (see ``_messages_chars``);
     - ``chars`` - the two together, which is what the model actually received.
 
-    ``messages_chars`` is a length of the rendered message list, so it is a
-    proxy for the token cost of the history, not an exact accounting. It is
-    labelled as one and it is the only quantity here that moves with round
-    count, which is precisely why it must not be omitted.
+    ``messages_chars`` covers the message CONTENT and tool-call payloads, not
+    the provider's own chat-template overhead (role markers, separators), which
+    is a few tokens per message and not knowable from here. It is a close proxy,
+    and unlike the repr it is not systematically inflated.
     """
-    try:
-        messages_chars = len(str(messages))
-    except Exception:  # noqa: BLE001 - telemetry never raises
-        messages_chars = 0
+    messages_chars = _messages_chars(messages)
     entry = {
         "chars": len(prefix) + messages_chars,
         "tokens_est": tokens_est(len(prefix) + messages_chars),

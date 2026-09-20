@@ -1078,10 +1078,39 @@ work), `messages_chars` (the rendered conversation at the final call, labelled a
 `chars` = the sum, which is what the model actually received. A test asserts `chars ==
 prefix_chars + messages_chars`, so the two cannot silently diverge again.
 
-**The pattern across findings 4 and 5 is one thing, and it is worth naming: a field whose
-name promises more than it measures.** Both were in new code written in a single session,
-and both passed every test that did not specifically ask what the field contained. That is
+**The pattern across findings 4, 5 and 6 is one thing, and it is worth naming: a field whose
+name promises more than it measures.** All three were in new code written in a single session,
+and all three passed every test that did not specifically ask what the field contained. That is
 the same failure the document exists to catch - and the telemetry is not exempt from it.
+
+**Finding 6 - the fix for finding 5 introduced the same error again.** The first repair
+measured the message history as ``len(str(messages))``. A LangChain message's repr carries
+Python scaffolding the provider never sees - ``content=``, ``additional_kwargs={}``,
+``response_metadata={}``, ``id=`` - which measured **9.8% over** on a realistic tool-loop
+history (6,319 chars repr vs 5,700 chars content). So the field went from undercounting the
+prompt to overcounting it, which is the identical mislabelling wearing a different sign.
+Corrected to sum the message **content** and the tool-call payloads directly, counting nothing
+else, with a test that asserts the repr scaffolding is excluded. The lesson is that "the number
+changed" is not evidence the number is now right; only asking what it contains is.
+
+**A pre-existing latent defect found by the same audit, NOT introduced here.** Auditing every
+state key the block reads against `AgentState` turned up three that are undeclared. One is
+legitimate: `risk_gate` is injected post-invoke (`trading_graph.py:1113`,
+`final_state["risk_gate"] = verdict`) and is present at report time - the live card carried
+`PASS`. One is documented as never populated: `price_caliber` has no producer reaching state
+(`dataflows/interface.py:910` sets it on a vendor result, not on the graph state), and
+`research_decision.json` already says so; it is kept in the identity hash deliberately, so the
+hash would change if a producer ever appears.
+
+**The third is a real dead branch.** `state.get("kill_switch_state")` is read in
+`prompt_metrics.py:274` **and in two pre-existing sites** (`reporting.py:380`, `reporting.py:665`),
+but nothing ever writes that key - `risk_hierarchy.kill_switch_state:81` is a *function*, not a
+state channel. So `kill_switch` is **always `False`** at every caller, and
+`signal_action_split`'s kill-switch branch (`EXIT` / `NO_TRADE`) can never fire from any of
+them. The kill switch is still evaluated inside `risk_hierarchy.evaluate_hierarchy` (precedence
+KILL > PORTFOLIO > TRADE > LIQUIDITY > REGIME), so the gate is not absent - but the rendered
+security/portfolio action never reflects it. **Not fixed here:** it changes execution semantics,
+so it is an owner call, not a telemetry change.
 
 **What it deliberately does not do.** No gate. No behaviour change: nothing reads a
 telemetry value back into a prompt or a decision, so a run with the block removed produces

@@ -129,6 +129,33 @@ def test_analyst_prompt_metric_reports_the_whole_prompt():
     assert entry["tokens_est"] == entry["chars"] // 4
 
 
+def test_message_size_counts_content_not_python_repr():
+    """The message half must not carry LangChain's repr scaffolding.
+
+    ``len(str(messages))`` measured 9.8% over a realistic tool-loop history -
+    `content=`, `additional_kwargs={}`, `response_metadata={}`, `id=` are all
+    Python repr that the provider never sees. Replacing one mislabelled number
+    with another would have been no fix at all.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from tradingagents.agents.utils.prompt_metrics import _messages_chars
+
+    msgs = [
+        HumanMessage(content="Analyze NVDA."),
+        AIMessage(content="", tool_calls=[
+            {"name": "get_stock_data", "args": {"ticker": "NVDA"}, "id": "c1"}
+        ]),
+        ToolMessage(content="x" * 1000, tool_call_id="c1"),
+    ]
+    measured = _messages_chars(msgs)
+    # The 1000-char body is counted...
+    assert measured >= 1000
+    # ...and the repr scaffolding is not (it would add ~500 more).
+    assert measured < len(str(msgs))
+    assert measured < 1000 + len("Analyze NVDA.") + len(str(msgs[1].tool_calls[0])) + 50
+
+
 @pytest.mark.unit
 def test_trader_node_returns_only_declared_channels(monkeypatch):
     # The advisory verification pass is irrelevant here; force it to degrade so
