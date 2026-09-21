@@ -1009,6 +1009,24 @@ def _run_card_llm_cost_est() -> dict:
         return {}
 
 
+def _fundamental_result_from_snapshot(final_state: dict) -> dict | None:
+    """The run's own fundamental engine result, or ``None`` when there is none.
+
+    The snapshot is built once and handed to the debate and to every renderer
+    (`trading_graph` -> `state["quant_scorecard"]`), so reading it is what makes
+    the prompt's number and the card's number the same number. Returns ``None``
+    for a tree written without a snapshot, which is the caller's fallback cue.
+    """
+    snapshot = (final_state or {}).get("quant_scorecard")
+    if not isinstance(snapshot, dict):
+        return None
+    entry = (snapshot.get("engines") or {}).get("fundamental")
+    if not isinstance(entry, dict):
+        return None
+    res = entry.get("result")
+    return res if isinstance(res, dict) else None
+
+
 def _run_card_fundamental_score(ticker: str, final_state: dict, cfg: dict) -> dict | None:
     """FundamentalScore block for run_card.json (WP-2 / WP-9).
 
@@ -1017,35 +1035,48 @@ def _run_card_fundamental_score(ticker: str, final_state: dict, cfg: dict) -> di
     basis, so a reader can **recompute the number from the card alone** rather
     than trusting it. Nothing here gates, sizes or reaches a rating.
 
-    The score is recomputed deterministically at write time from the same peer
-    panel the leaf uses (one producer: `fundamental_score_for_ticker`), because a
-    tool's rendered text is not a data source - the card must carry the numbers,
-    not a quote of them. Returns ``None`` when the gate is off, so a tree built
-    with the engine disabled is byte-identical to a pre-engine tree.
+    **P12-5 (defect D-8): it reads the run's own score snapshot when there is
+    one**, exactly as ``_run_card_trade_score`` does. The snapshot is the block
+    the analyst was handed, so the card and the prompt print one number.
+
+    Recomputing here was a SECOND producer, and not merely a redundant one.
+    ``resolve_peer_universe`` re-fetches statements and sectors live on every
+    call with no cache, and a transient vendor failure returns ``None`` metrics
+    that silently drop names from the cross-sectional scored set. Measured
+    2026-09-20: 113 metric diffs between two identical calls, and three
+    consecutive composites for one ``(MSFT, 2026-09-20)`` - 61.25 / 69.38 /
+    79.17. That is why ``reports/MSFT_20260920_145644`` carries 67.71 in its
+    prompt block and 55.21 in its card.
+
+    The recompute survives only as the fallback for a legacy state - a tree
+    written without the snapshot. Returns ``None`` when the gate is off, so a
+    tree built with the engine disabled is byte-identical to a pre-engine tree.
     """
     if not (cfg or {}).get("enable_fundamental_score"):
         return None
-    try:
-        from tradingagents.strategies.fundamental_score import (
-            fundamental_score_for_ticker,
-        )
+    res = _fundamental_result_from_snapshot(final_state)
+    if res is None:
+        try:
+            from tradingagents.strategies.fundamental_score import (
+                fundamental_score_for_ticker,
+            )
 
-        pm = final_state.get("pm_decision") or {}
-        date = pm.get("trade_date")
-        res = fundamental_score_for_ticker(ticker, date)
-    except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
-        return {
-            "status": None,
-            "score": None,
-            "coverage": None,
-            "components": None,
-            "weights": None,
-            "withheld": None,
-            "subscores": {},
-            "panel_n": None,
-            "basis": None,
-            "unavailable": f"{type(exc).__name__}: {exc}",
-        }
+            pm = final_state.get("pm_decision") or {}
+            date = pm.get("trade_date")
+            res = fundamental_score_for_ticker(ticker, date)
+        except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
+            return {
+                "status": None,
+                "score": None,
+                "coverage": None,
+                "components": None,
+                "weights": None,
+                "withheld": None,
+                "subscores": {},
+                "panel_n": None,
+                "basis": None,
+                "unavailable": f"{type(exc).__name__}: {exc}",
+            }
     subs = res.get("subscores") or {}
     key = res.get("ticker") or str(ticker).upper()
     out: dict = {

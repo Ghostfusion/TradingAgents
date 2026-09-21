@@ -434,6 +434,37 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **The FundamentalScore appendix was arithmetically impossible, and the card's number was a second producer.**
+  Found by reading `reports/MSFT_20260920_145644/1_analysts/fundamentals.md`, which prints `### FundamentalScore - 67.71/100` above
+  `- FQS: 0/100`, `- FGS: 0/100 over 1 components`, `withheld: {'FTNT': ..., 'GEN': ..., 'NOW': ..., 'RBRK': ..., 'ZS': ...}`,
+  `- VS: 0/100 over 2 components`, `- FRS: 0/100`. No weighted average of four zeroes is 67.71, and the `withheld` dict names
+  PEER-PANEL tickers. **Defect 1 - the renderer read a panel-keyed structure as a category-keyed one.** `format_engine_detail`
+  (`quant_scorecard.py`) was written for TechnicalScore/regime/risk/sentiment, whose categories carry `score`/`present`/`withheld`
+  as SCALARS. FundamentalScore is a PANEL engine: each sub-score keys `scores`/`bands`/`coverage`/`withheld` BY TICKER. Three
+  misreads: (a) the score came from `next(iter(scores.values()))`, and `factors.category_scores` inserts names in ASCENDING
+  percentile order (`sector_rank._pct_rank` walks sorted values), so the first entry is always the WORST peer, whose percentile
+  is `0.0` - that is why all four printed zero, a structural certainty not a coincidence; (b) `withheld` was printed verbatim and
+  is ticker-keyed; (c) `present` fell through to `factors_NA`, which is the set of factors with NO SUPPLIER, so `over 1
+  components` counted a MISSING factor (`rev_cagr5`) - and the `components` lookup could never match anyway, since the panel
+  engine's `components` is keyed by ticker too. **Fix:** resolve the analysed ticker's own row from the snapshot's own `ticker`,
+  print the sub-score's band and its coverage over its own factor set, and name NA factors as the gap they are
+  (`factors NA: rev_cagr5`). **Verified on live MSFT output:** FQS 75 (elite) + FGS 40 (stalling) + VS 75 (below-market) + FRS
+  87.5 (fortress) = 277.5 / 4 = 69.375 ~= **69.38**, the printed composite. **Defect 2 - D-8 recurring.**
+  `_run_card_fundamental_score` called `fundamental_score_for_ticker` AGAIN at write time, so one run had TWO producers: the
+  prompt's scorecard said **67.71** and the card said **55.21**. `_run_card_trade_score` already carries this fix (`P12-5`:
+  "reads the run's own score snapshot when there is one ... so all three surfaces print one number rather than three assemblies
+  (defect D-8)"). The fundamental block never got it; it now reads
+  `final_state["quant_scorecard"]["engines"]["fundamental"]["result"]`, recomputing ONLY as the legacy fallback. **The old
+  docstring claim "recomputed deterministically at write time" was FALSE:** `peer_universe.resolve_peer_universe` re-fetches
+  statements and sectors LIVE on every call with NO CACHE, and a transient vendor failure returns `None` metrics that silently
+  drop names from the cross-sectional scored set - measured on `(MSFT, 2026-09-20)`: **113 metric diffs between two identical
+  calls** and **three consecutive composites 61.25 / 69.38 / 79.17**. **Noted, NOT fixed:** `_pct_rank` does not round, so a
+  3-way tie over 7 scored names renders as the literal `33.333333333333336/100` (the composite IS rounded by `combine`); the
+  renderer's `_plain` is documented as EXACT for detail surfaces, so this is a producer characteristic, shared with the ETF
+  ranking path, and changing it is out of scope. Regression tests:
+  `tests/test_quant_scorecard.py::test_level_two_reads_the_analysed_tickers_own_row_in_a_panel_engine`,
+  `tests/test_fundamental_score.py::test_run_card_block_reads_the_runs_own_snapshot`. Both confirmed FAILING before the fix
+  (the first reproduced the report's block byte-for-byte).
 - 2026-09-20 `(working tree)` - **Design study: Dream-RSI (arXiv:2609.14858) read against this repo.**
   `docs/design_dream_rsi_replay_simulator.md`, new. No code changed. The paper optimises the *exploration policy* of a
   long-horizon program-discovery loop by turning completed discovery trees into a **replay simulator** (score candidate

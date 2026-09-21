@@ -1126,6 +1126,85 @@ def test_level_two_renders_categories_beside_their_measurements():
     assert "adx_aligned" not in text
 
 
+def test_level_two_reads_the_analysed_tickers_own_row_in_a_panel_engine():
+    """A panel engine keys its sub-scores by TICKER; the renderer must not read
+    whichever name the producer happened to insert first.
+
+    Measured 2026-09-20 on ``reports/MSFT_20260920_145644``: the report printed
+
+        - FQS: 0/100
+        - FGS: 0/100 over 1 components
+            withheld: {'FTNT': ..., 'GEN': ..., 'NOW': ..., 'RBRK': ..., 'ZS': ...}
+        - VS: 0/100 over 2 components
+        - FRS: 0/100
+
+    beneath a composite of **67.71/100** - an arithmetic impossibility, since no
+    weighted average of four zeroes is 67.71. Three separate misreads produced
+    it, all from treating a panel-keyed structure as a category-keyed one:
+
+    * the score came from ``next(iter(scores.values()))``. ``category_scores``
+      inserts names in **ascending percentile order**, so the first value is
+      always the *worst* peer - whose percentile is 0.0. Hence four zeroes;
+    * ``withheld`` was printed verbatim, and it is keyed by TICKER, so the block
+      named the peer panel's tickers rather than the analysed name;
+    * ``present`` fell through to ``factors_NA``, which is the set of factors
+      with **no supplier** - so "over 1 components" counted a *missing* factor.
+
+    The fix reads the analysed ticker's own row, names the NA factors as the gap
+    they are, and prints the sub-score's coverage over its own factor set.
+    """
+    snap = _render(
+        scores={"fundamental": 67.71}, enabled={"fundamental"}, status="RESEARCH_ONLY"
+    )
+    snap["ticker"] = "MSFT"
+    snap["engines"]["fundamental"]["result"] = {
+        "status": "RESEARCH_ONLY",
+        "subscores": {
+            "FQS": {
+                "scores": {"PANW": 0.0, "MSFT": 37.5, "FTNT": 100.0},
+                "bands": {"PANW": "poor", "MSFT": "poor", "FTNT": "elite"},
+                "coverage": {
+                    "MSFT": {"n": 7, "of": 7, "metrics": ["accruals", "f"]},
+                },
+                "withheld": {},
+                "factors_NA": [],
+            },
+            "FGS": {
+                "scores": {"ORCL": 0.0, "MSFT": 33.333333333333336},
+                "bands": {"ORCL": "contracting", "MSFT": "contracting"},
+                "coverage": {"MSFT": {"n": 2, "of": 2, "metrics": ["eps_yoy"]}},
+                "withheld": {"FTNT": "coverage 0 of 2 factors < floor 2"},
+                "factors_NA": ["rev_cagr5"],
+            },
+        },
+        # the panel engine's `components` is keyed by TICKER, so a factor-name
+        # lookup can never match it - another reason `factors_NA` is not a
+        # present-component list.
+        "components": {"MSFT": {"FQS": 37.5, "FGS": 33.333333333333336}},
+    }
+    text = qs.format_engine_detail(snap)
+
+    # the analysed name's own row, not the first peer's
+    assert "- FQS: 37.5/100 (poor)" in text
+    # `_plain` prints the producer's value EXACTLY (its documented contract for
+    # the detail surfaces), and `sector_rank._pct_rank` does not round - so a
+    # 3-way tie over 7 scored names is the literal 33.333333333333336. The
+    # composite is rounded by `combine`; the sub-scores are not.
+    assert "- FGS: 33.333333333333336/100 (contracting)" in text
+    assert "- FQS: 0/100" not in text
+    assert "- FRS:" not in text  # not in this fixture at all
+    # the peer-keyed withheld is not this ticker's reason
+    assert "FTNT" not in text
+    assert "GEN" not in text
+    # `factors_NA` is a NAMED GAP, never a "present component" count
+    assert "over 1 components" not in text
+    assert "over 2 components" not in text
+    assert "factors NA: rev_cagr5" in text
+    # coverage travels with the number, over the sub-score's own factor set
+    assert "coverage 7 of 7 factors" in text
+    assert "coverage 2 of 2 factors" in text
+
+
 def test_level_two_skips_gated_off_engines_and_reports_na_with_its_reason():
     snap = _render(
         scores={"trade": 70.0, "fundamental": 92.0},

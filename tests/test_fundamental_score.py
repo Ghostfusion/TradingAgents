@@ -542,6 +542,86 @@ def test_run_card_block_carries_a_recomputable_attribution(monkeypatch) -> None:
     assert block["panel_n"] == 10
 
 
+def test_run_card_block_reads_the_runs_own_snapshot(monkeypatch) -> None:
+    """The card must print the number the analyst was handed, not a fresh one.
+
+    Measured 2026-09-20 on ``reports/MSFT_20260920_145644``: the prompt's
+    scorecard carried ``FundamentalScore 67.71/100`` while the card's own block
+    carried **55.21** - the same run, the same ticker, the same date, two
+    producers. This block re-resolved the live peer panel instead of reading the
+    snapshot, which is defect **D-8** - the one ``_run_card_trade_score``
+    already fixed for TradeScore (P12-5) and this block never received.
+
+    The recompute is not merely redundant, it is not reproducible:
+    ``resolve_peer_universe`` re-fetches statements and sectors on every call
+    with no cache, and a transient vendor failure returns ``None`` metrics that
+    silently drop names from the cross-sectional scored set. Measured: 113
+    metric diffs between two identical calls, and three consecutive composites
+    for one ``(MSFT, 2026-09-20)`` - 61.25 / 69.38 / 79.17.
+    """
+    import tradingagents.strategies.fundamental_score as fs
+    from tradingagents.reporting import _run_card_fundamental_score
+
+    def _boom(*a, **kw):
+        raise AssertionError("the card must not re-resolve the peer panel")
+
+    monkeypatch.setattr(fs, "fundamental_score_for_ticker", _boom)
+    snapshot = {
+        "ticker": "MSFT",
+        "trade_date": "2026-09-20",
+        "engines": {
+            "fundamental": {
+                "enabled": True,
+                "score": 67.71,
+                "result": {
+                    "ticker": "MSFT",
+                    "status": STATUS_RESEARCH_ONLY,
+                    "scores": {"MSFT": 67.71, "FTNT": 45.0},
+                    "coverage": {
+                        "MSFT": {
+                            "n": 4,
+                            "of": 4,
+                            "subscores": ["FQS", "FGS", "VS", "FRS"],
+                            "coverage": 1.0,
+                        }
+                    },
+                    "components": {
+                        "MSFT": {"FQS": 87.5, "FGS": 50.0, "VS": 62.5, "FRS": 87.5}
+                    },
+                    "weights": None,
+                    "withheld": {},
+                    "subscores": {
+                        "FQS": {
+                            "scores": {"MSFT": 87.5},
+                            "bands": {"MSFT": "elite"},
+                            "coverage": {"MSFT": {"n": 7, "of": 7}},
+                            "status": "ADVISORY",
+                            "withheld": {},
+                            "factors_NA": [],
+                            "basis": "FQS ...",
+                        }
+                    },
+                    "panel_n": 9,
+                    "basis": "FundamentalScore composite [RESEARCH_ONLY]: ...",
+                    "unavailable": None,
+                },
+            }
+        },
+    }
+    block = _run_card_fundamental_score(
+        "MSFT",
+        {"quant_scorecard": snapshot, "pm_decision": {"trade_date": "2026-09-20"}},
+        {"enable_fundamental_score": True},
+    )
+    # the snapshot's number, verbatim - not a second panel's
+    assert block["score"] == 67.71
+    assert block["panel_n"] == 9
+    assert block["components"]["FQS"] == 87.5
+    assert block["subscores"]["FQS"]["score"] == 87.5
+    assert block["subscores"]["FQS"]["band"] == "elite"
+    assert block["coverage"]["n"] == 4
+
+
 def test_run_card_block_degrades_without_costing_the_card(monkeypatch) -> None:
     import tradingagents.strategies.fundamental_score as fs
     from tradingagents.reporting import _run_card_fundamental_score

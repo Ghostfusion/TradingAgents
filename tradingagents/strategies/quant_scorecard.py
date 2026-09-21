@@ -711,6 +711,7 @@ def format_engine_detail(snapshot: dict | None) -> str:
     """
     snap = snapshot or {}
     engines = snap.get("engines") or {}
+    ticker = str(snap.get("ticker") or "").strip().upper()
     lines: list[str] = []
     for name in ENGINE_GATES:
         entry = engines.get(name) or {}
@@ -741,21 +742,48 @@ def format_engine_detail(snapshot: dict | None) -> str:
         for cat, cat_entry in cats.items():
             if not isinstance(cat_entry, dict):
                 continue
-            c_score = cat_entry.get("score")
-            if c_score is None and isinstance(cat_entry.get("scores"), dict):
-                # fundamental keys its sub-scores by ticker
-                c_score = next(iter(cat_entry["scores"].values()), None)
+            # A PANEL engine (`FundamentalScore`) keys each sub-score's
+            # `scores`/`bands`/`coverage`/`withheld` by TICKER, so the analysed
+            # name's own row is the only correct read. Taking the first value
+            # instead reads whichever peer the producer inserted first - and
+            # `category_scores` inserts in ASCENDING percentile order, so that is
+            # always the WORST peer, whose percentile is 0.0. Measured on
+            # reports/MSFT_20260920_145644: the report printed `- FQS: 0/100`
+            # for a run whose own card carried FQS 37.5.
+            panel_keyed = isinstance(cat_entry.get("scores"), dict)
+            if panel_keyed:
+                c_score = (cat_entry.get("scores") or {}).get(ticker)
+                c_band = (cat_entry.get("bands") or {}).get(ticker)
+                withheld = (cat_entry.get("withheld") or {}).get(ticker)
+            else:
+                c_score = cat_entry.get("score")
+                c_band = cat_entry.get("band")
+                withheld = cat_entry.get("withheld")
             weight = cat_entry.get("weight")
             head = f"- {cat}"
             if weight is not None:
                 head += f" (weight {_plain(weight)})"
             head += f": {'NA' if c_score is None else _plain(c_score)}/100"
-            present = cat_entry.get("present") or cat_entry.get("factors_NA") or []
-            if isinstance(present, (list, tuple)) and present:
+            if c_band:
+                head += f" ({c_band})"
+            # `factors_NA` is the set of factors with NO supplier. It is a NAMED
+            # GAP, never a "present component" list - and for a panel engine the
+            # `components` dict is keyed by ticker, so a factor-name lookup
+            # against it could not match anyway.
+            present = cat_entry.get("present")
+            if panel_keyed:
+                cov = (cat_entry.get("coverage") or {}).get(ticker) or {}
+                if cov.get("of"):
+                    head += f" | coverage {cov.get('n', 0)} of {cov['of']} factors"
+            elif isinstance(present, (list, tuple)) and present:
                 head += f" over {len(present)} components"
             lines.append(head)
-            if cat_entry.get("withheld"):
-                lines.append(f"    withheld: {cat_entry['withheld']}")
+            if withheld:
+                lines.append(f"    withheld: {withheld}")
+            if panel_keyed:
+                na = cat_entry.get("factors_NA")
+                if isinstance(na, (list, tuple)) and na:
+                    lines.append(f"    factors NA: {', '.join(str(f) for f in na)}")
             for comp in present if isinstance(present, (list, tuple)) else []:
                 detail = components.get(comp) if isinstance(components, dict) else None
                 if not isinstance(detail, dict):
