@@ -1452,6 +1452,35 @@ target the **representation** axis, and it should first ask whether the packet's
 (engine scores, fixed key/value rows, no prose) is what suppresses confidence, rather than
 assuming a bounded packet is an improvement.
 
+**OWNER DECISION (2026-09-20): the packet PROCEEDS, as a bound rather than a lever.** Asked
+whether the Decision Packet should proceed at all given that `P1 → P2` measured a flip rate of
+exactly **zero**, the owner's answer was: *"Proceed - the packet is a bound, not a lever."*
+
+That settles the architectural question the measurement opened, and it settles it by **not**
+claiming what the data does not support:
+
+- **H1a is withdrawn as the packet's justification.** The packet is not built to reduce
+  context volume in order to make decisions more decisive. That hypothesis was tested and is
+  not supported in either representation (§13.3), so the packet's value must be argued from
+  its own properties, not from a volume effect.
+- **The packet's justification is its own contract**: a bounded, deterministic, auditable
+  decision channel - §7's budget, §8's uncertainty vocabulary, §9's conflict ledger with its
+  three states, and the invariant *"Research can be large. Decision context cannot be large by
+  accident."* (§1.1). A bound that is enforced and measured is defensible **without** any claim
+  that it improves the decision, and that is the claim the doc now makes.
+- **The representation axis is left OPEN and named.** It is where the only measured signal
+  lives (58% of decisions change, 6:1 toward HOLD, `P(no-trade)` 0.417 → 0.833, mean
+  confidence 0.652 → 0.248, ungrounded figures 2/12 → 9/12) - but on n=12 it is a directional
+  signal, and it is a *cost*, not a benefit. It is recorded as the next experiment, not acted
+  on.
+- **Phases 3-5 stay built and stay gated OFF.** `enable_decision_packet`,
+  `enable_context_expansion` and `enable_decision_challenge` all default `False`, so the
+  decision to proceed changes no run's behaviour.
+
+**What is explicitly NOT claimed anywhere in this document:** that the packet makes decisions
+better, more decisive, or less conservative. §13.3 measured the opposite direction on the
+representation axis, and §12's premise is retracted above rather than quietly reworded.
+
 ### 13.4 Phase 2 as built, and the four rows it could not fill
 
 **Where the code lives.** `tradingagents/strategies/decision_packet.py` (new) owns the
