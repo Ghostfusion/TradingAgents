@@ -26,8 +26,17 @@ than a malformed token.
     py -3.12 scripts/jev_decide.py
     py -3.12 scripts/jev_decide.py --tree reports/MSFT_20260920_145644
     py -3.12 scripts/jev_decide.py --stems market,news --json jev.json
+    py -3.12 scripts/jev_decide.py --stems 2_research/bull,5_portfolio/decision
+    py -3.12 scripts/jev_decide.py --all
     py -3.12 scripts/jev_decide.py --state-file notes.md
     py -3.12 scripts/jev_decide.py --questions my_questions.json
+
+A tree is STAGED, so a stem is not always an analyst report. ``--stems`` takes a
+bare analyst stem (``market`` -> ``1_analysts/market.md``), a stage-qualified
+path (``2_research/bull``), or a tree-root report (``complete_report``).
+``--all`` sends every report in the tree in pipeline order. Either way the
+report is judged on its own: one call per state, because the battery asks what
+*that document's* stance and horizon are.
 
 Exit code: 0 = every call answered; 1 = at least one call failed (the failure
 is printed with the vendor's own message, never swallowed).
@@ -51,6 +60,20 @@ DEFAULT_TIMEOUT = 300.0
 
 #: The four analyst report stems, in the order the run produces them.
 ANALYST_STEMS: tuple[str, ...] = ("fundamentals", "market", "news", "sentiment")
+
+#: The tree's staged directories, in pipeline order. The trailing "" is the
+#: tree-root roll-up (``complete_report.md``), which comes last.
+STAGE_ORDER: tuple[str, ...] = (
+    "1_analysts",
+    "2_research",
+    "3_trading",
+    "4_risk",
+    "5_portfolio",
+    "",
+)
+
+#: Where a bare analyst stem resolves. The majority of reads are analyst reports.
+ANALYST_DIR = STAGE_ORDER[0]
 
 #: The endpoint's question discriminators. Anything else is a 400.
 QUESTION_TYPES = frozenset({"noul", "choice", "score"})
@@ -103,19 +126,85 @@ def newest_tree(reports_dir: pathlib.Path | str) -> pathlib.Path:
     return trees[-1]
 
 
+def _resolve_spec(tree: pathlib.Path, spec: str) -> pathlib.Path | None:
+    """Resolve one ``--stems`` spec to a report inside ``tree``, or ``None``.
+
+    Two forms, because a tree is staged:
+
+    * ``market`` - a BARE name, tried as an analyst report first
+      (``1_analysts/market.md``) and then as a tree-root report, so
+      ``complete_report`` resolves too;
+    * ``2_research/bull`` - a SLASH means a path relative to the tree, which is
+      how the research, trading, risk and portfolio reports are reached. They
+      are not under ``1_analysts/``, so a stem list could never name them.
+
+    A candidate outside the tree is refused: the argument names a report tree,
+    so ``--stems ../../etc/passwd`` is a bug rather than a feature.
+    ``--state-file`` is the flag that deliberately takes any file.
+    """
+    spec = spec.strip()
+    if not spec:
+        return None
+    name = spec if spec.endswith(".md") else f"{spec}.md"
+    if "/" in spec or "\\" in spec:
+        candidates = [tree / name]
+    else:
+        candidates = [tree / ANALYST_DIR / name, tree / name]
+    root = tree.resolve()
+    for cand in candidates:
+        resolved = cand.resolve()
+        if resolved != root and root not in resolved.parents:
+            continue
+        if resolved.is_file():
+            return resolved
+    return None
+
+
 def report_states(tree: pathlib.Path | str, stems: Sequence[str]) -> list[tuple[str, str]]:
     """``[(label, text)]`` for the stems present in ``tree``, in ``stems`` order.
 
     A missing stem is skipped rather than sent as an empty state - an empty
-    state would be judged as if it were a document.
+    state would be judged as if it were a document. The label keeps the spec's
+    own spelling (``news``, ``2_research/bull``), so a run's output names the
+    file a reader would go and open.
     """
-    root = pathlib.Path(tree) / "1_analysts"
+    tree = pathlib.Path(tree)
     out: list[tuple[str, str]] = []
-    for stem in stems:
-        path = root / f"{stem}.md"
-        if path.exists():
-            out.append((stem, path.read_text(encoding="utf-8", errors="replace")))
+    for spec in stems:
+        path = _resolve_spec(tree, spec)
+        if path is None:
+            continue
+        label = spec.strip()
+        if label.endswith(".md"):
+            label = label[:-3]
+        out.append((label, path.read_text(encoding="utf-8", errors="replace")))
     return out
+
+
+def all_report_states(tree: pathlib.Path | str) -> list[tuple[str, str]]:
+    """Every report in ``tree``, in pipeline order.
+
+    The staged directories first (analysts -> research -> trading -> risk ->
+    portfolio), then the tree-root roll-up, so a read-out follows the run rather
+    than the alphabet. ``--stems`` cannot express this: it names reports one at
+    a time and a tree's report set grows as the pipeline gains stages.
+    """
+    tree = pathlib.Path(tree)
+    paths = [p for p in tree.rglob("*.md") if p.is_file()]
+
+    def order(p: pathlib.Path) -> tuple[int, str]:
+        rel = p.relative_to(tree)
+        stage = rel.parts[0] if len(rel.parts) > 1 else ""
+        idx = STAGE_ORDER.index(stage) if stage in STAGE_ORDER else len(STAGE_ORDER)
+        return (idx, str(rel).replace("\\", "/"))
+
+    return [
+        (
+            str(p.relative_to(tree)).replace("\\", "/")[:-3],
+            p.read_text(encoding="utf-8", errors="replace"),
+        )
+        for p in sorted(paths, key=order)
+    ]
 
 
 def validate_questions(questions: dict) -> None:
@@ -258,8 +347,13 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     src.add_argument("--tree", help="report tree (default: newest under reports/)")
     src.add_argument("--state-file", help="send this file as the state instead of a tree")
     src.add_argument("--state", help="send this literal text as the state")
-    p.add_argument("--stems", default=",".join(ANALYST_STEMS),
-                   help=f"comma-separated report stems (default: {','.join(ANALYST_STEMS)})")
+    p.add_argument("--stems", default=None,
+                   help="comma-separated reports: a bare analyst stem (`market`), a "
+                        "stage-qualified path (`2_research/bull`, `5_portfolio/decision`) "
+                        "or a tree-root report (`complete_report`). "
+                        f"Default: {','.join(ANALYST_STEMS)}")
+    p.add_argument("--all", dest="all_reports", action="store_true",
+                   help="send every report in the tree, in pipeline order")
     p.add_argument("--questions", help="JSON file overriding the default battery")
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
@@ -291,11 +385,14 @@ def main(argv: Iterable[str] | None = None) -> int:
         origin = "<literal>"
     else:
         tree = pathlib.Path(args.tree) if args.tree else newest_tree(repo / "reports")
-        stems = [s.strip() for s in args.stems.split(",") if s.strip()]
-        states = report_states(tree, stems)
+        if args.all_reports:
+            states = all_report_states(tree)
+        else:
+            raw_stems = args.stems or ",".join(ANALYST_STEMS)
+            states = report_states(tree, [s.strip() for s in raw_stems.split(",") if s.strip()])
         origin = tree.name
         if not states:
-            print(f"no matching reports in {tree}/1_analysts", file=sys.stderr)
+            print(f"no matching reports in {tree}", file=sys.stderr)
             return 1
 
     print(f"origin  : {origin}")

@@ -1061,7 +1061,7 @@ so a tree carries its own consistency record instead of depending on the opt-in
 | `python scripts/rebuild_complete_report.py reports/<dir>` | re-render TOC reports |
 | `python scripts/verify_sweep.py ...` | post-verifier adjudication workbench: condense a report tree's verify_flags.json into N confirmed (MISQUOTED/contradicted/internal-conflict) vs M suspect (unsupported) needing review; `--json` `--confirm-only` |
 | `python scripts/rule_eval.py --ticker SKHY` | per-rule forward-return table (fwd 1/5/10/20d, hit, MAE/MFE, Sharpe, PF; n>=30 INSUFFICIENT guard); advisory |
-| `python scripts/jev_decide.py [--tree <dir>]` | judge a document with the TypeSafe decisions model (`typesafe/jev-1.13`) via `POST /api/alpha/decisions` — not a chat model; `--state-file` / `--state` / `--stems` / `--questions`; exit 1 on any failed call |
+| `python scripts/jev_decide.py [--tree <dir>] [--all]` | judge a document with the TypeSafe decisions model (`typesafe/jev-1.13`) via `POST /api/alpha/decisions` — not a chat model; `--state-file` / `--state` / `--stems` / `--all` / `--questions`; exit 1 on any failed call |
 | `get_composite_sizing(confidence, stop_dist_pct, ...)` | composite recommended position: min(quarter-Kelly, risk/stop, cap) x vol x liquidity x uncertainty, clamped 0 by blocking portfolio action; `strategies/size.composite_position_size` |
 | `python scripts/smoke_structured_output.py` | smoke structured output |
 | `python main.py` | minimal Python API demo |

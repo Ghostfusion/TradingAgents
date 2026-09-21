@@ -125,14 +125,24 @@ slice or movers universe tractable.
   py -3.12 scripts/jev_decide.py
   py -3.12 scripts/jev_decide.py --tree reports/MSFT_20260920_145644
   py -3.12 scripts/jev_decide.py --stems market,news --json jev.json
+  py -3.12 scripts/jev_decide.py --stems 2_research/bull,5_portfolio/decision
+  py -3.12 scripts/jev_decide.py --all
   py -3.12 scripts/jev_decide.py --state-file notes.md
   ```
 
+  A report tree is **staged**, so a stem is not always an analyst report: a
+  bare name resolves to `1_analysts/<name>.md` and falls back to a tree-root
+  report (`complete_report`), while a slashed name is a path relative to the
+  tree (`2_research/bull`, `5_portfolio/decision`). `--all` sends every report
+  in the tree in pipeline order. A resolved path outside the tree is refused —
+  `--state-file` is the flag that deliberately takes any file. Each report is
+  judged on its own, one call per state.
+
   Flags: `--tree` (default: newest under `reports/`) `--state-file` `--state`
   (mutually exclusive; a literal document) `--stems` (default
-  `fundamentals,market,news,sentiment`) `--questions` `--model` `--endpoint`
-  `--timeout` `--env-file` `--json`. Exit 1 if any call fails; the vendor's
-  own message is printed, never summarised away.
+  `fundamentals,market,news,sentiment`) `--all` `--questions` `--model`
+  `--endpoint` `--timeout` `--env-file` `--json`. Exit 1 if any call fails; the
+  vendor's own message is printed, never summarised away.
 - `rebuild_complete_report.py` — re-render a report folder / all.
 - `smoke_structured_output.py` — smoke the structured-output path.
 - `orderflow_evaluate.py` — L4b ledger win-rate/alpha.

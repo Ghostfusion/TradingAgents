@@ -243,3 +243,115 @@ def test_main_fails_when_the_key_is_absent(monkeypatch, tmp_path, capsys):
 
     assert code == 1
     assert "OPENROUTER_API_KEY not found" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# a tree is STAGED - a stem list that can only reach 1_analysts/ cannot judge
+# a research, trading, risk or portfolio report
+# ---------------------------------------------------------------------------
+
+
+def _staged_tree(tmp_path):
+    """A miniature tree with one report in each stage plus the root roll-up."""
+    files = {
+        "1_analysts/market.md": "M",
+        "2_research/bull.md": "BULL",
+        "3_trading/trader.md": "T",
+        "4_risk/aggressive.md": "A",
+        "5_portfolio/decision.md": "D",
+        "complete_report.md": "ALL",
+    }
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_report_states_resolves_a_stage_qualified_spec(tmp_path):
+    """The gap this closes: `2_research/bull` is not under 1_analysts/."""
+    tree = _staged_tree(tmp_path)
+
+    states = jev.report_states(tree, ("2_research/bull", "5_portfolio/decision"))
+
+    assert [name for name, _ in states] == ["2_research/bull", "5_portfolio/decision"]
+    assert [text for _, text in states] == ["BULL", "D"]
+
+
+def test_report_states_falls_back_to_a_tree_root_report(tmp_path):
+    """`complete_report.md` is not an analyst report either."""
+    tree = _staged_tree(tmp_path)
+
+    states = jev.report_states(tree, ("complete_report",))
+
+    assert [name for name, _ in states] == ["complete_report"]
+    assert [text for _, text in states] == ["ALL"]
+
+
+def test_a_bare_stem_prefers_the_analyst_report_over_the_tree_root(tmp_path):
+    """A bare name means the analyst report; that is what it has always meant."""
+    tree = _staged_tree(tmp_path)
+    (tree / "market.md").write_text("ROOT", encoding="utf-8")
+
+    states = jev.report_states(tree, ("market",))
+
+    assert [text for _, text in states] == ["M"], "the analyst report wins"
+
+
+def test_report_states_never_escapes_the_tree_it_was_given(tmp_path):
+    """`--stems` names a report IN the tree; `--state-file` is the any-file flag."""
+    outside = tmp_path / "outside.md"
+    outside.write_text("SECRET", encoding="utf-8")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+
+    assert jev.report_states(tree, ("../outside",)) == []
+
+
+def test_all_report_states_returns_every_report_in_pipeline_order(tmp_path):
+    tree = _staged_tree(tmp_path)
+
+    states = jev.all_report_states(tree)
+
+    assert [name for name, _ in states] == [
+        "1_analysts/market",
+        "2_research/bull",
+        "3_trading/trader",
+        "4_risk/aggressive",
+        "5_portfolio/decision",
+        "complete_report",   # the roll-up last, not sorted among the stages
+    ]
+
+
+def test_all_report_states_on_a_tree_with_no_reports_is_empty(tmp_path):
+    (tmp_path / "1_analysts").mkdir()
+
+    assert jev.all_report_states(tmp_path) == []
+
+
+def test_main_all_sends_one_call_per_report(monkeypatch, tmp_path, capsys):
+    """`--all` must reach the staged reports the clone of this tree omitted."""
+    tree = _staged_tree(tmp_path)
+    poster = _fake_poster(200, OK_BODY)
+
+    code = _run_main(monkeypatch, tmp_path, poster, ["--tree", str(tree), "--all"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "JEV-DECIDE-COMPLETE" in out
+    assert len(poster.calls) == 6, "one call per report, not one call for the tree"
+    sent = [p[2]["state"] for p in poster.calls]
+    assert sent == ["M", "BULL", "T", "A", "D", "ALL"]
+    assert "2_research/bull" in out, "the read-out names the file a reader would open"
+
+
+def test_main_reports_when_no_spec_matches(monkeypatch, tmp_path, capsys):
+    tree = _staged_tree(tmp_path)
+    poster = _fake_poster(200, OK_BODY)
+
+    code = _run_main(monkeypatch, tmp_path, poster,
+                     ["--tree", str(tree), "--stems", "nope,also_nope"])
+
+    assert code == 1
+    assert "no matching reports" in capsys.readouterr().err
+    assert poster.calls == []

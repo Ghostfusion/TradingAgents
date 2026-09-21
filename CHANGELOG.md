@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**`scripts/jev_decide.py` could only reach 4 of a tree's 15 reports - the stem list is now stage-aware (2026-09-21).**
+
+`report_states` resolved every stem as `<tree>/1_analysts/<stem>.md`, so the utility could judge an analyst report and nothing else. A report tree is **staged** - `2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/` and the root roll-up - so the research, trading, risk and portfolio reports were unreachable. Running it on `NVDA_20260921_114014` judged 4 of the tree's 15 reports, and the 11 it could not reach include the one document that matters most: `5_portfolio/decision`.
+
+`--stems` now takes two forms. A **bare name** still resolves to `1_analysts/<name>.md` - that is what it has always meant, and the analyst report wins if a root file shares the name - and falls back to a tree-root report, so `complete_report` resolves. A **slashed name** is a path relative to the tree: `2_research/bull`, `5_portfolio/decision`. A resolved path outside the tree is refused outright (`--stems ../../etc/passwd` is a bug, not a feature); `--state-file` remains the flag that deliberately takes any file. New `--all` sends every report in the tree in **pipeline order** (stages first, roll-up last) rather than the alphabet, so a read-out follows the run.
+
+Verified live on `NVDA_20260921_114014`: `--stems 2_research/bull` resolves and judges (`bullish`, confidence 1.00, evidence 2.81 - the same read the ad-hoc driver produced), and `--all` enumerates exactly the 15 reports in pipeline order. The throwaway driver this replaces is deleted.
+
+`tests/test_jev_decide.py` **19 -> 27**: stage-qualified resolution, the tree-root fallback, the analyst-wins precedence, the escape refusal, `--all`'s pipeline order, an empty tree, `--all` reaching the staged reports through `main()` with the injected transport (6 calls for 6 reports, proving it is one call per report and not one per tree), and the no-match path failing with exit 1 and no request. Docs updated: `docs/developer/06-entrypoints.md` (the new forms and points, plus `--all` in the flag list) and `docs/api_reference.md`'s script table.
+
+**Web impact**: none. A CLI reachability fix in a `scripts/` utility; no tool, engine flag, env var or JSON shape changed.
+
 **A dangling test reference, and a lint contract the repo did not meet - the second was a red CI (2026-09-21).**
 
 **(1) A test pointed at a test file that does not exist.** `tests/test_decision_challenge.py`'s module docstring said the gate's registration "is enforced by `tests/test_gate_env_switches.py`" - the registrar is `tests/test_gate_env_toggles.py`, and the named file has never existed. A reader following the pointer finds nothing. Fixed, and **the class is now checked**: new `test_every_test_file_a_test_module_names_exists` in `tests/test_doc_binding_claims.py` - the doc-claims gate, whose docstring already frames the mission as "the false claim outlived the gate that produced it" - asserts every `tests/test_*.py` named by another test module exists. This is the third instance of the class this session (the gate registry's "Proven by" column named two more), each previously caught by hand.

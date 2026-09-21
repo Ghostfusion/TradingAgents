@@ -434,6 +434,25 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **`scripts/jev_decide.py` could only reach 4 of a report tree's 15 reports - the stem list is now
+  stage-aware.** `report_states` resolved every stem as `<tree>/1_analysts/<stem>.md`, so the utility could judge an ANALYST
+  report and nothing else. A tree is STAGED (`2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/`, plus the root roll-up), so
+  the research, trading, risk and portfolio reports were unreachable - and the 11 it could not reach included the one document
+  that matters most, `5_portfolio/decision`. Found by ACTUALLY RUNNING IT on a fresh tree (`NVDA_20260921_114014`, from the
+  "nvda msft goog ibm" 4-worker batch): the CLI reported `states: ['fundamentals','market','news','sentiment']` while the tree
+  held 15 `.md`. **`--stems` now takes two forms:** a BARE name still resolves to `1_analysts/<name>.md` (what it has always
+  meant; the analyst report wins if a root file shares the name) and falls back to a tree-root report so `complete_report`
+  resolves; a SLASHED name is a path relative to the tree (`2_research/bull`, `5_portfolio/decision`). **A resolved path outside
+  the tree is refused** - `--stems ../../etc/passwd` is a bug, not a feature; `--state-file` remains the flag that deliberately
+  takes any file. New **`--all`** sends every report in the tree in PIPELINE order (stages first, roll-up last) rather than the
+  alphabet, so a read-out follows the run. Verified live: `--stems 2_research/bull` resolves and judges (`bullish`, conf 1.00,
+  evidence 2.81 - the same read the ad-hoc driver produced), and `--all` enumerates exactly the 15 reports in pipeline order;
+  the throwaway driver is deleted. `tests/test_jev_decide.py` **19 -> 27** (stage-qualified resolution, root fallback,
+  analyst-wins precedence, the escape refusal, `--all` pipeline order, an empty tree, `--all` through `main()` with the injected
+  transport proving ONE CALL PER REPORT rather than one per tree, and the no-match path exiting 1 with no request). Docs:
+  `docs/developer/06-entrypoints.md` + `docs/api_reference.md`. Lesson: **a reader that takes a stem list will silently
+  under-report when the thing it reads grows a stage** - run it on a real tree, do not read it.
+
 - 2026-09-21 `(working tree)` - **A dangling test reference, and `ruff check .` (CI's own command) was FAILING while three documents
   claimed the repo was clean.** **(1)** `tests/test_decision_challenge.py`'s docstring said the gate registration "is enforced by
   `tests/test_gate_env_switches.py`" - the registrar is `tests/test_gate_env_toggles.py` and the named file has never existed.
