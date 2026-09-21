@@ -255,6 +255,9 @@ _ENV_OVERRIDES = {
     # Pre-market review (docs/pre_market_review.md): opt-in gate for the
     # in-batch same-night catalyst/quality re-check (choice (a)).
     "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
+    # TypeSafe verdict (tradingagents/jev.py): opt-in post-run judgement of the
+    # four analyst reports, stored in the report tree as jev_verdict.json.
+    "TRADINGAGENTS_ENABLE_JV_VERDICT": "enable_jev_verdict",
     # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
     # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
     # decline-driver / mechanics toolset instead of company statement tools.
@@ -1046,6 +1049,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # re-anchor path stays the standalone scripts/pre_market_review.py.
         # Opt-in - off by default, so a batch runs as before unless enabled.
         "enable_pre_market_review": False,
+        # TypeSafe verdict (tradingagents/jev.py, scripts/jev_decide.py): after
+        # save_reports, judge the four ANALYST reports with their position
+        # language neutralised and write jev_verdict.json into the report tree.
+        # Opt-in - off by default, so it costs nothing unless enabled, and a
+        # missing OPENROUTER_API_KEY skips it rather than failing the run.
+        "enable_jev_verdict": False,
         # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md).
         # Every read is additive and default-off: a run's artefacts cannot change
         # unless the flag is set. Each names the tool the agent must cite.

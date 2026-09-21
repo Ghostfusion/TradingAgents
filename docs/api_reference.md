@@ -227,6 +227,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` | default `true` |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` | default `false` |
+| `TRADINGAGENTS_ENABLE_JV_VERDICT` | `enable_jev_verdict` | default `false` |
 | `TRADINGAGENTS_FCF_YIELD_FLOOR` | `fcf_yield_floor` | default `0.06` |
 | `TRADINGAGENTS_ENABLE_ETF_ENGINE` | `enable_etf_engine` | default `false` |
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |

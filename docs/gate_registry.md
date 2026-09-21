@@ -208,6 +208,24 @@ shipped prompt block from every run that does not carry `.env` — a behaviour c
 disguised as a gate registration. The gate is real now (setting it `false` stops the
 injection); only its default is the historical one.
 
+## 7c. Post-run output gates — these add an artefact, never a decision
+
+A post-run output gate runs *after* the report is written and adds a file to the
+report tree. It cannot change a rating, a size, a verdict or anything the model
+reads: by the time it runs, the decision is already saved. It is off by default,
+so a gate-off run produces exactly the tree it produced before the gate existed.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_jev_verdict` | `TRADINGAGENTS_ENABLE_JV_VERDICT` | judges the four **analyst** reports with the TypeSafe decisions model, their position language neutralised, and writes `jev_verdict.json` (buy/hold/sell per report) into the report tree | `batch.py::_batch_jev_verdict` (the hook, called after `save_reports`), `tradingagents/jev.py::judge_tree` (the pass) | `test_jev_verdict_hook.py` (the gate fires both ways and the JSON lands in the tree), `test_jev_decide.py` (the recipe) | wired |
+
+`enable_jev_verdict` is the only gate that writes an artefact rather than
+reading a surface, which is why it is not in §6, §7 or §7b. It is also the only
+one whose dependency can be absent without being an error: the engine does not
+require `OPENROUTER_API_KEY`, so the hook skips with a log line rather than
+failing. It is best-effort like `enable_pre_market_review` - a judge that
+annotates a finished run must never fail it.
+
 ## 8. Adding a gate — the rule
 
 A new gate is not done until: (1) it has a key in `DEFAULT_CONFIG`, (2) an

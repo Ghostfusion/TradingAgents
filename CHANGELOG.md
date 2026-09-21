@@ -14,6 +14,26 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**Every finished report now carries its own TypeSafe verdict - `enable_jev_verdict` writes `jev_verdict.json` into the report tree (2026-09-21).** Owner instruction: run jev each time a report has finished generating, and put the verdict JSON in the corresponding report folder.
+
+**The jev core MOVED out of `scripts/` into the package.** The verdict must be callable from the pipeline (`batch.py`, which trading_web also calls), and production code importing from `scripts/` inverts the dependency while duplicating the logic would create a second authoritative producer of the same numbers. So `scripts/jev_decide.py` is now only the argument surface, and the model client, the neutraliser, the batteries and the tree readers live in `tradingagents/jev.py`. The 353-line core was **sliced, never retyped** - verified byte-identical after the move - and the 37 existing tests were repointed by changing one import line plus the three `main`/`_parse_args` call sites.
+
+**New entry point `judge_tree(tree, key=...)`** = the `--verdict` recipe (the four analyst reports, positions neutralised, buy/hold/sell) plus `write_verdict` into the tree. One call, so a caller cannot judge without storing - the point of the step is that the verdict travels with the report it is about. `verdict_for_tree` returns a payload carrying `ratings` (rating / confidence / probabilities / evidence / horizon per stem), `neutralized` counts, the raw `results`, and `failures`/`cost`.
+
+**The hook is best-effort, like `enable_pre_market_review`** - a judge that annotates a finished run must never fail it. A missing `OPENROUTER_API_KEY` skips with a log line rather than erroring (the engine does not require that key), and a vendor failure or a transport exception is recorded in the payload with the vendor's own message. Both are asserted.
+
+**New gate `enable_jev_verdict`** (`TRADINGAGENTS_ENABLE_JV_VERDICT`), registered in the five places. It **ships off** - matching `enable_pre_market_review`, and so the web app's runs do not silently start paying - and is set `true` in the owner's `.env`, which is what makes it fire on every run here.
+
+**A new registry section was needed: §7c "Post-run output gates".** This gate is not §6/§7b (it adds no source the model reads), not §7 (it changes nothing the model reads) and not §1/§2 (it cannot stop, shrink or reroute anything). By the time it runs the decision is already saved, so it can only add a file to the tree. The registry now says so, rather than filing it under a heading that would be a lie.
+
+`batch.py`'s two post-save hooks were extracted into `_post_save_annotations`, so the gate is testable without running the graph. New `tests/test_jev_verdict_hook.py` (12): the gate OFF means the judge is **never called** and ON means it is (the §8 "fails when the gate is ignored" requirement), the two post-save gates are independent, the JSON **lands in the report tree** at the asserted path, the hook sends the analyst reports neutralised with the rating battery, a research report never reaches the judge, and the three quiet-failure paths. **Proven failing-first by mutation:** making the hook call unconditionally turns `test_gate_off_never_calls_the_judge` red ("the gate was ignored - the judge ran while switched off"), sha256 restore MATCH.
+
+One test had to be written differently. `assert DEFAULT_CONFIG["enable_jev_verdict"] is False` passed before the `.env` flip and failed after it - `DEFAULT_CONFIG` is the default **after** `_apply_env_overrides`, so it asserts the developer's `.env`, not the shipped default. The test now reads the `DEFAULT_CONFIG` **literal** structurally via AST, which is env-independent and is what "ships off" actually means.
+
+**Measured live:** `_batch_jev_verdict` run against the real vendor on `NVDA_20260921_114014` and `MSFT_20260921_114625` wrote a 5.8 KB `jev_verdict.json` into each (NVDA `fundamentals=hold, market=hold, news=buy, sentiment=hold`; MSFT all four `hold`), 0 failures.
+
+**Web impact**: a behaviour change the app must know about. `analyze()` now calls the verdict hook, and trading_web's `run_batch` calls `analyze` directly - so a web-triggered run writes `jev_verdict.json` into its tree when `enable_jev_verdict` is on. It is off by default and best-effort, so an app that does not set the flag is unaffected; the file is additive and no existing field moves.
+
 **The jev judgement recipe is now `--verdict`: analyst reports only, de-biased, judged buy/hold/sell (2026-09-21).** Owner instruction: when asked to send a set of reports for a stock symbol, send **only the analyst reports**, **strip position language** ("buy", "hold", "sell", ...) first so the judge is not handed the conclusion, and ask it for a **three-way buy/hold/sell rating**.
 
 The three parts are one flag because they are one intent. `--verdict` = the four analyst reports only (never the research/risk/portfolio documents, which already carry a conclusion), their position language neutralised, and the buy/hold/sell battery. `--verdict` and `--all` are mutually exclusive - `--all` contradicts "analyst reports only" - and the pieces are available alone as `--neutralize` and `--rating`, so the composition is testable rather than implied.

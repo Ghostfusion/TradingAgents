@@ -1,4 +1,9 @@
-"""Hermetic tests for the TypeSafe decisions utility (``scripts/jev_decide.py``).
+"""Hermetic tests for the TypeSafe decisions judge.
+
+Two modules: the core (``tradingagents/jev.py`` - the model client, the
+neutraliser and the batteries, which the report pipeline also calls through
+``judge_tree``) and the CLI (``scripts/jev_decide.py`` - the argument surface).
+``jev`` is the core, ``cli`` is the CLI.
 
 The utility exists because ``typesafe/jev-1.13`` is not a chat model: it is
 rejected from ``/chat/completions`` and served only by ``/api/alpha/decisions``
@@ -21,7 +26,8 @@ import json
 
 import pytest
 
-import scripts.jev_decide as jev
+import scripts.jev_decide as cli
+import tradingagents.jev as jev
 
 # ---------------------------------------------------------------------------
 # key resolution - the 401 that blamed the header
@@ -193,7 +199,7 @@ def _run_main(monkeypatch, tmp_path, poster, argv):
     env = tmp_path / ".env"
     env.write_text("OPENROUTER_API_KEY=sk-or-v1-test\n", encoding="utf-8")
     monkeypatch.setattr(jev, "post_json", poster)
-    return jev.main(["--env-file", str(env), *argv])
+    return cli.main(["--env-file", str(env), *argv])
 
 
 def test_main_prints_the_answer_and_exits_zero(monkeypatch, tmp_path, capsys):
@@ -239,7 +245,7 @@ def test_main_fails_when_the_key_is_absent(monkeypatch, tmp_path, capsys):
     state.write_text("x", encoding="utf-8")
     monkeypatch.setattr(jev, "post_json", _fake_poster(200, OK_BODY))
 
-    code = jev.main(["--env-file", str(env), "--state-file", str(state)])
+    code = cli.main(["--env-file", str(env), "--state-file", str(state)])
 
     assert code == 1
     assert "OPENROUTER_API_KEY not found" in capsys.readouterr().err
@@ -485,4 +491,4 @@ def test_neutralize_alone_keeps_the_default_battery(monkeypatch, tmp_path):
 def test_verdict_and_all_are_mutually_exclusive(tmp_path):
     """`--verdict` means analyst reports only; `--all` contradicts it."""
     with pytest.raises(SystemExit):
-        jev._parse_args(["--verdict", "--all"])
+        cli._parse_args(["--verdict", "--all"])

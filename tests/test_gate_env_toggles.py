@@ -46,6 +46,7 @@ REGISTRY: dict[str, str] = {
     "enable_kelly_alloc": "wired",
     "enable_correlation_penalty": "wired",
     "enable_pre_market_review": "wired",
+    "enable_jev_verdict": "wired",
     "enable_preopen_depth": "wired",
     "risk_audit_enabled": "wired",
     "regime_state_enable": "wired",

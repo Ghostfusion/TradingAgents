@@ -248,6 +248,30 @@ _probe_start: float = 0.0
 config_probe = None
 
 
+def _post_save_annotations(symbol: str, report_dir, trade_date: str) -> None:
+    """Everything that annotates a just-written report tree, in one place.
+
+    Runs immediately after ``save_reports`` so the CLI batch and the in-process
+    web caller (trading_web's run_batch, which calls ``analyze`` directly) both
+    get it — the pre-market check used to live in ``main()``'s ``as_completed``
+    loop, so the web path silently skipped it.
+
+    Both hooks are best-effort and both are gated. Neither can change the
+    decision: the tree is already written, so this only adds files to it.
+    """
+    # Same-night pre-market re-check (choice (a) of the design): a
+    # catalyst/quality re-read of the just-written decision, not a gap
+    # re-anchor (that is the pre-open standalone script). Writes
+    # pre_market_review_<trade_date>.md.
+    if DEFAULT_CONFIG.get("enable_pre_market_review"):
+        _batch_pre_market_check(symbol, report_dir, trade_date)
+    # TypeSafe verdict on the just-written analyst reports. Owner instruction
+    # 2026-09-21: judge each time a report finishes generating, and store the
+    # result in that report's own folder. Writes jev_verdict.json.
+    if DEFAULT_CONFIG.get("enable_jev_verdict"):
+        _batch_jev_verdict(report_dir)
+
+
 def analyze(
     symbol: str,
     trade_date: str,
@@ -330,15 +354,7 @@ def analyze(
         / f"{safe_ticker_component(symbol).upper()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     ta.save_reports(final_state, symbol, save_path=report_dir)
-    # Same-night pre-market re-check (choice (a) of the design): a
-    # catalyst/quality re-read of the just-written decision, not a gap
-    # re-anchor (that is the pre-open standalone script). It runs HERE, right
-    # after save_reports, so the CLI batch and the in-process web caller
-    # (trading_web's run_batch, which calls analyze directly) both write
-    # pre_market_review_<trade_date>.md — it used to live in main()'s
-    # as_completed loop, so the web path silently skipped it.
-    if DEFAULT_CONFIG.get("enable_pre_market_review"):
-        _batch_pre_market_check(symbol, report_dir, trade_date)
+    _post_save_annotations(symbol, report_dir, trade_date)
     return symbol, decision, report_dir, wall_seconds, rating
 
 
@@ -558,6 +574,35 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
         print(f"[pre-market] {symbol}: {verdict['verdict']} -> {out}")
     except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
         print(f"[pre-market] review skipped for {symbol}: {exc}")
+
+
+def _batch_jev_verdict(report_dir) -> None:
+    """TypeSafe verdict on a just-written report tree, stored inside it.
+
+    Runs right after ``save_reports``: the four ANALYST reports, their own
+    position language neutralised, judged buy/hold/sell
+    (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe). The payload
+    lands in the tree as ``jev_verdict.json`` so the verdict travels with the
+    report it is about.
+
+    Best-effort, like the pre-market check: the judge annotates a finished run
+    and must never fail it. A missing ``OPENROUTER_API_KEY`` skips silently -
+    the engine does not require the key, so its absence is not an error.
+    """
+    try:
+        from tradingagents.jev import judge_tree, resolve_key
+
+        key = resolve_key(Path(__file__).resolve().parent / ".env")
+        if not key:
+            print("[jev] verdict skipped: OPENROUTER_API_KEY not set")
+            return
+        path, payload = judge_tree(report_dir, key=key)
+        ratings = ", ".join(
+            f"{stem}={v.get('rating')}" for stem, v in payload["ratings"].items()
+        )
+        print(f"[jev] verdict -> {path}  ({ratings}; failures={payload['failures']})")
+    except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
+        print(f"[jev] verdict skipped for {report_dir}: {exc}")
 
 
 def _batch_report_verify(symbol: str, report_dir) -> None:
