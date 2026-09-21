@@ -31,6 +31,19 @@ than a malformed token.
     py -3.12 scripts/jev_decide.py --state-file notes.md
     py -3.12 scripts/jev_decide.py --questions my_questions.json
 
+    # the standard "judge this symbol's reports" recipe
+    py -3.12 scripts/jev_decide.py --tree reports/NVDA_20260921_114014 --verdict
+
+``--verdict`` is the three things that recipe needs, in one flag: the four
+ANALYST reports only (never the research/risk/portfolio documents, which already
+carry a conclusion), their position language neutralised, and the buy/hold/sell
+battery. The pieces are available alone - ``--neutralize``, ``--rating``.
+
+Neutralising matters because the analyst reports STATE a rating, and a rating is
+what is being asked for: without it the judge measures agreement with the
+document rather than the evidence. The words are replaced by ``[POSITION]``, not
+deleted, so the substitution is visible and counted per report.
+
 A tree is STAGED, so a stem is not always an analyst report. ``--stems`` takes a
 bare analyst stem (``market`` -> ``1_analysts/market.md``), a stage-qualified
 path (``2_research/bull``), or a tree-root report (``complete_report``).
@@ -47,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -78,6 +92,60 @@ ANALYST_DIR = STAGE_ORDER[0]
 #: The endpoint's question discriminators. Anything else is a 400.
 QUESTION_TYPES = frozenset({"noul", "choice", "score"})
 
+#: Recommendation language that would anchor a judge on the report's OWN verdict
+#: instead of on its evidence. Matched case-insensitively on word boundaries, so
+#: ``buy`` does not touch ``buyback`` and ``hold`` does not touch
+#: ``shareholders`` or ``holdings``.
+#:
+#: Deliberately EXCLUDES ``long``, ``short``, ``add``, ``reduce``, ``trim`` and
+#: ``neutral``: each is ordinary English in a market report (``long-term``,
+#: ``short interest``, ``adds to risk``, ``reduces margin``, ``neutral rate``),
+#: so stripping them removes EVIDENCE rather than bias. Extend this tuple if a
+#: report family needs more - not the regex.
+POSITION_WORDS: tuple[str, ...] = (
+    "strong buy",
+    "strong sell",
+    "market outperform",
+    "market underperform",
+    "equal weight",
+    "equal-weight",
+    "market weight",
+    "market-weight",
+    "overweight",
+    "underweight",
+    "outperform",
+    "underperform",
+    "accumulate",
+    "distribute",
+    "buy",
+    "sell",
+    "hold",
+)
+
+#: What a stripped position becomes. A MARKER, not a deletion: a judge told a
+#: position WAS stated but not WHICH cannot adopt it, and the substitution stays
+#: auditable - the per-report count is printed.
+POSITION_MARKER = "[POSITION]"
+
+# Longest first, so ``strong buy`` is consumed whole instead of leaving ``strong``
+# beside a marker.
+_POSITION_RE = re.compile(
+    r"(?<![A-Za-z])(?:"
+    + "|".join(sorted((re.escape(w) for w in POSITION_WORDS), key=len, reverse=True))
+    + r")(?![A-Za-z])",
+    re.IGNORECASE,
+)
+
+
+def neutralize_positions(text: str) -> tuple[str, int]:
+    """Replace the report's own recommendation language with a marker.
+
+    Returns ``(text, replacements)``. This is what lets a judge read the
+    evidence without being handed the conclusion - the analyst reports state a
+    rating, and a rating is exactly what is being asked for.
+    """
+    return _POSITION_RE.subn(POSITION_MARKER, text)
+
 #: The default battery. Every question is about the document, not about what to
 #: trade - the caller owns that policy.
 DEFAULT_QUESTIONS: dict[str, dict] = {
@@ -96,6 +164,28 @@ DEFAULT_QUESTIONS: dict[str, dict] = {
         "instructions": "What horizon does the report's thesis address?",
         "criteria": {"short": None, "medium": None, "long": None},
     },
+}
+
+#: The buy/hold/sell battery (``--rating``). Same evidence and horizon questions
+#: as the default, with the directional one replaced by the three-way call the
+#: reports are actually read for. Use it WITH ``--neutralize``: asking for a
+#: rating while the document already states one measures agreement with the
+#: document, not the evidence.
+RATING_QUESTIONS: dict[str, dict] = {
+    "rating": {
+        "type": "choice",
+        "instructions": (
+            "On the evidence in this report alone, rate the ticker. Answer buy, "
+            "hold or sell."
+        ),
+        "criteria": {"buy": None, "hold": None, "sell": None},
+    },
+    "evidence": {
+        "type": "score",
+        "instructions": "How strong is the evidence behind that rating?",
+        "criteria": ["none", "weak", "moderate", "strong", "very strong"],
+    },
+    "horizon": DEFAULT_QUESTIONS["horizon"],
 }
 
 #: One network boundary, injectable, so the parsing and the CLI are testable
@@ -352,8 +442,21 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
                         "stage-qualified path (`2_research/bull`, `5_portfolio/decision`) "
                         "or a tree-root report (`complete_report`). "
                         f"Default: {','.join(ANALYST_STEMS)}")
-    p.add_argument("--all", dest="all_reports", action="store_true",
-                   help="send every report in the tree, in pipeline order")
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument("--all", dest="all_reports", action="store_true",
+                       help="send every report in the tree, in pipeline order")
+    p.add_argument("--neutralize", action="store_true",
+                   help="replace the report's own position language (buy/sell/hold, "
+                        "overweight/underweight, ...) with a marker before sending, so "
+                        "the judge reads the evidence and not the conclusion")
+    p.add_argument("--rating", action="store_true",
+                   help="judge with the buy/hold/sell battery instead of "
+                        "stance/evidence/horizon")
+    scope.add_argument("--verdict", action="store_true",
+                       help="the standard recipe for 'judge this symbol's reports': the "
+                            "four ANALYST reports only, position language neutralised, "
+                            "judged for a buy/hold/sell rating (implies --neutralize "
+                            "--rating)")
     p.add_argument("--questions", help="JSON file overriding the default battery")
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
@@ -374,7 +477,12 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"OPENROUTER_API_KEY not found in {args.env_file}", file=sys.stderr)
         return 1
 
-    questions = _load_questions(args.questions) if args.questions else DEFAULT_QUESTIONS
+    want_rating = args.rating or args.verdict
+    questions = (
+        _load_questions(args.questions) if args.questions
+        else RATING_QUESTIONS if want_rating
+        else DEFAULT_QUESTIONS
+    )
 
     if args.state_file:
         path = pathlib.Path(args.state_file)
@@ -395,10 +503,22 @@ def main(argv: Iterable[str] | None = None) -> int:
             print(f"no matching reports in {tree}", file=sys.stderr)
             return 1
 
+    if args.verdict or args.neutralize:
+        cleaned: list[tuple[str, str]] = []
+        stripped = 0
+        for name, state in states:
+            text, hits = neutralize_positions(state)
+            stripped += hits
+            print(f"neutralize: {name}: {hits} position term(s) -> {POSITION_MARKER}")
+            cleaned.append((name, text))
+        states = cleaned
+        print(f"neutralize: {stripped} replacement(s) across {len(states)} report(s)")
+
     print(f"origin  : {origin}")
     print(f"model   : {args.model}")
     print(f"endpoint: {args.endpoint}")
     print(f"states  : {[name for name, _ in states]}")
+    print(f"battery : {','.join(questions)}")
     print(f"key     : present ({len(key)} chars)")
 
     raw: list[dict] = []

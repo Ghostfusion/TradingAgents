@@ -130,6 +130,26 @@ slice or movers universe tractable.
   py -3.12 scripts/jev_decide.py --state-file notes.md
   ```
 
+  **The standard "judge this symbol's reports" recipe is `--verdict`**: the four
+  **analyst** reports only (never the research/risk/portfolio documents, which
+  already carry a conclusion), their **position language neutralised**, judged
+  for a **buy/hold/sell rating**. `--verdict` implies `--neutralize --rating`,
+  which are also available alone; `--verdict` and `--all` are mutually
+  exclusive, because `--all` contradicts "analyst reports only".
+
+  ```
+  py -3.12 scripts/jev_decide.py --tree reports/NVDA_20260921_114014 --verdict
+  ```
+
+  Neutralising matters because the analyst reports **state** a rating and a
+  rating is what is being asked for: without it the judge measures agreement
+  with the document rather than with the evidence. The words are replaced by
+  `[POSITION]` rather than deleted, so the substitution is visible and counted
+  per report. The word list is deliberately narrow — `long`, `short`, `add`,
+  `reduce`, `trim` and `neutral` are **not** stripped, because each is ordinary
+  English in a market report (`long-term`, `short interest`, `adds to risk`) and
+  removing them destroys evidence rather than bias.
+
   A report tree is **staged**, so a stem is not always an analyst report: a
   bare name resolves to `1_analysts/<name>.md` and falls back to a tree-root
   report (`complete_report`), while a slashed name is a path relative to the
@@ -140,9 +160,10 @@ slice or movers universe tractable.
 
   Flags: `--tree` (default: newest under `reports/`) `--state-file` `--state`
   (mutually exclusive; a literal document) `--stems` (default
-  `fundamentals,market,news,sentiment`) `--all` `--questions` `--model`
-  `--endpoint` `--timeout` `--env-file` `--json`. Exit 1 if any call fails; the
-  vendor's own message is printed, never summarised away.
+  `fundamentals,market,news,sentiment`) `--all` `--neutralize` `--rating`
+  `--verdict` `--questions` `--model` `--endpoint` `--timeout` `--env-file`
+  `--json`. Exit 1 if any call fails; the vendor's own message is printed, never
+  summarised away.
 - `rebuild_complete_report.py` — re-render a report folder / all.
 - `smoke_structured_output.py` — smoke the structured-output path.
 - `orderflow_evaluate.py` — L4b ledger win-rate/alpha.

@@ -434,6 +434,32 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **The jev judgement recipe is now `--verdict`: analyst reports only, de-biased, judged
+  buy/hold/sell.** Owner instruction - when asked to send a set of reports for a stock symbol, do three things: (1) send ONLY
+  the analyst reports, (2) strip position language ("buy", "hold", "sell", ...) before sending so the judge is not handed the
+  conclusion, (3) ask for a three-way buy/hold/sell rating. **One flag, because it is one intent:** `--verdict` = the four
+  analyst reports only (never the research/risk/portfolio documents, which already carry a conclusion) + position language
+  neutralised + the buy/hold/sell battery. `--verdict` and `--all` are MUTUALLY EXCLUSIVE (`--all` contradicts "analyst reports
+  only"); the pieces are available alone as `--neutralize` / `--rating`, so the composition is testable rather than implied.
+  **Neutralising is the substantive part:** the analyst reports STATE a rating and a rating is what is being asked for, so
+  without stripping it the judge measures agreement with the document rather than with the evidence. Words become `[POSITION]`,
+  never deleted - the substitution stays visible and is counted per report. **The word list is deliberately NARROW:**
+  `buy`/`sell`/`hold`, `strong buy`/`strong sell`, the weight and perform scales, `accumulate`/`distribute`. It EXCLUDES `long`,
+  `short`, `add`, `reduce`, `trim`, `neutral` - each is ordinary English in a market report (`long-term`, `short interest`,
+  `adds to risk`, `reduces margin`), so stripping them removes EVIDENCE, not bias. Case-insensitive on word boundaries, so
+  `buy` does not touch `buyback` and `hold` does not touch `shareholders`/`holdings`; multi-word positions are consumed whole
+  so `strong buy` leaves no orphan `strong`. **Measured live on `NVDA_20260921_114014`:** 20 terms replaced (fundamentals 9,
+  market 4, news 5, sentiment 2); ratings `fundamentals hold 0.85`, `market hold 0.67`, `news buy 0.25`, `sentiment hold 0.90`,
+  cost $0.000909. **The de-biasing CHANGED AN ANSWER:** under the old stance battery without neutralisation sentiment read
+  `bullish` at confidence 1.00; with its stated position stripped it reads `hold` at 0.90 on evidence 2.01 - the bullish call
+  was the DOCUMENT's, not the evidence's. **And note the cross-check this enables:** the analyst evidence judged blind gives a
+  HOLD consensus while the run's own decision was `Underweight` - the bearish conclusion is produced by the
+  research/risk/portfolio stages, not by the analyst evidence. `tests/test_jev_decide.py` **27 -> 37** (the replacement count,
+  multi-word consumption, the word-boundary guards, the deliberate non-stripping of ambiguous English, the no-op case, the
+  battery vs the discriminator, `--verdict` end-to-end asserting ALL THREE requirements at once, `--rating` alone NOT
+  neutralising, `--neutralize` alone keeping the default battery, `--verdict`/`--all` rejecting each other). Docs:
+  `docs/developer/06-entrypoints.md` + `docs/api_reference.md`.
+
 - 2026-09-21 `(working tree)` - **`scripts/jev_decide.py` could only reach 4 of a report tree's 15 reports - the stem list is now
   stage-aware.** `report_states` resolved every stem as `<tree>/1_analysts/<stem>.md`, so the utility could judge an ANALYST
   report and nothing else. A tree is STAGED (`2_research/`, `3_trading/`, `4_risk/`, `5_portfolio/`, plus the root roll-up), so

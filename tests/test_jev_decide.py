@@ -355,3 +355,134 @@ def test_main_reports_when_no_spec_matches(monkeypatch, tmp_path, capsys):
     assert code == 1
     assert "no matching reports" in capsys.readouterr().err
     assert poster.calls == []
+
+
+# ---------------------------------------------------------------------------
+# --verdict: analyst reports only, de-biased, judged buy/hold/sell
+# ---------------------------------------------------------------------------
+
+
+def test_neutralize_replaces_position_words_case_insensitively():
+    text = "We rate NVDA a Buy. Others say SELL, and the desk says hold."
+
+    clean, hits = jev.neutralize_positions(text)
+
+    assert hits == 3
+    assert jev.POSITION_MARKER in clean
+    for word in ("Buy", "SELL", "hold"):
+        assert word not in clean, f"{word!r} survived neutralisation"
+
+
+def test_neutralize_consumes_a_multiword_position_whole():
+    """`strong buy` must not leave `strong` sitting beside a marker."""
+    clean, hits = jev.neutralize_positions("Our call is a strong buy here.")
+
+    assert hits == 1
+    assert "strong" not in clean
+    assert clean.count(jev.POSITION_MARKER) == 1
+
+
+def test_neutralize_leaves_words_that_merely_contain_a_position_alone():
+    """The word boundaries are the whole point: `hold` is in `shareholders`."""
+    text = "Buybacks lifted shareholders; holdings rose and a seller sold."
+
+    clean, hits = jev.neutralize_positions(text)
+
+    assert hits == 0, f"over-matched: {clean!r}"
+    assert clean == text
+
+
+def test_neutralize_leaves_ambiguous_market_english_alone():
+    """`long`/`short`/`reduce`/`neutral` are evidence, not bias, in this domain."""
+    text = "Long-term demand is firm; short interest fell; this reduces margin risk."
+
+    clean, hits = jev.neutralize_positions(text)
+
+    assert hits == 0, f"stripped evidence: {clean!r}"
+
+
+def test_neutralize_is_a_no_op_on_a_report_with_no_position():
+    text = "Revenue grew 12% and gross margin expanded 140bp."
+
+    assert jev.neutralize_positions(text) == (text, 0)
+
+
+def test_rating_battery_satisfies_the_endpoint_discriminator():
+    jev.validate_questions(jev.RATING_QUESTIONS)
+    assert set(jev.RATING_QUESTIONS["rating"]["criteria"]) == {"buy", "hold", "sell"}
+    # the directional question is REPLACED, not joined by a second one
+    assert "stance" not in jev.RATING_QUESTIONS
+
+
+RATING_OK_BODY = json.dumps({
+    "model": "typesafe/jev-1.13-20260917",
+    "provider": "TypeSafe",
+    "answers": {
+        "rating": {"type": "choice", "choice": "hold", "confidence": 0.7,
+                   "probabilities": {"buy": 0.1, "hold": 0.7, "sell": 0.2}},
+    },
+    "usage": {"input_tokens": 10, "output_tokens": 5, "cost": 0.0002},
+})
+
+
+def test_verdict_sends_only_analyst_reports_neutralised_and_rated(
+    monkeypatch, tmp_path, capsys
+):
+    """The three requirements, asserted end to end through the CLI."""
+    tree = _staged_tree(tmp_path)
+    # All four analyst reports, so "analyst only" is a real filter and not an
+    # artefact of the fixture having one.
+    for stem in ("fundamentals", "news", "sentiment"):
+        (tree / "1_analysts" / f"{stem}.md").write_text(f"{stem} body.", encoding="utf-8")
+    (tree / "1_analysts" / "market.md").write_text(
+        "We recommend a Buy on NVDA; the desk is at hold.", encoding="utf-8"
+    )
+    poster = _fake_poster(200, RATING_OK_BODY)
+
+    code = _run_main(monkeypatch, tmp_path, poster, ["--tree", str(tree), "--verdict"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    # (1) analyst reports ONLY - the tree holds 6 reports, 4 are analyst ones
+    sent_names = [c[2]["state"] for c in poster.calls]
+    assert len(poster.calls) == 4, f"sent {len(poster.calls)} states, expected 4"
+    assert "BULL" not in sent_names, "a research report reached the judge"
+    # (2) position language is gone before sending
+    market = next(s for s in sent_names if "recommend" in s)
+    assert jev.POSITION_MARKER in market
+    assert "Buy" not in market and "hold" not in market
+    assert "neutralize: market: 2 position term(s)" in out
+    assert "neutralize: 2 replacement(s) across 4 report(s)" in out
+    # (3) the buy/hold/sell battery is what was asked
+    asked = poster.calls[0][2]["questions"]
+    assert set(asked) == {"rating", "evidence", "horizon"}
+    assert set(asked["rating"]["criteria"]) == {"buy", "hold", "sell"}
+    assert "choice = hold" in out
+
+
+def test_rating_alone_rates_without_stripping(monkeypatch, tmp_path, capsys):
+    """The pieces compose: `--rating` must not silently de-bias."""
+    tree = _staged_tree(tmp_path)
+    (tree / "1_analysts" / "market.md").write_text("We recommend a Buy.", encoding="utf-8")
+    poster = _fake_poster(200, RATING_OK_BODY)
+
+    _run_main(monkeypatch, tmp_path, poster, ["--tree", str(tree), "--rating"])
+
+    market = next(c[2]["state"] for c in poster.calls if "recommend" in c[2]["state"])
+    assert "Buy" in market, "--rating must not neutralise on its own"
+    assert jev.POSITION_MARKER not in market
+
+
+def test_neutralize_alone_keeps_the_default_battery(monkeypatch, tmp_path):
+    tree = _staged_tree(tmp_path)
+    poster = _fake_poster(200, OK_BODY)
+
+    _run_main(monkeypatch, tmp_path, poster, ["--tree", str(tree), "--neutralize"])
+
+    assert set(poster.calls[0][2]["questions"]) == {"stance", "evidence", "horizon"}
+
+
+def test_verdict_and_all_are_mutually_exclusive(tmp_path):
+    """`--verdict` means analyst reports only; `--all` contradicts it."""
+    with pytest.raises(SystemExit):
+        jev._parse_args(["--verdict", "--all"])
