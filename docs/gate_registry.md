@@ -190,8 +190,8 @@ gate-off run is byte-identical to the run before the surface existed.
 
 | Key | Env var | What it can do | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
-| `enable_options_surface` | `TRADINGAGENTS_ENABLE_OPTIONS_SURFACE` | CBOE delayed options chain: strike / DTE / IV / greeks, exactly as CBOE delivers them | `tradingagents/agents/utils/analysis_tools.py::get_options_surface` (the `_feature_gate` call) | `test_options_surface.py` | wired |
-| `enable_risk_free_curve` | `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | NY Fed SOFR history and the Treasury par-yield curve | `tradingagents/agents/utils/analysis_tools.py::get_sofr_curve` / `::get_treasury_curve` (the `_feature_gate` calls) | `test_risk_free_curve.py` | wired |
+| `enable_options_surface` | `TRADINGAGENTS_ENABLE_OPTIONS_SURFACE` | CBOE delayed options chain: strike / DTE / IV / greeks, exactly as CBOE delivers them | `tradingagents/agents/utils/analysis_tools.py::get_options_surface` (the `_feature_gate` call) | `test_phase3_gate_proofs.py` (the gate fires both ways), `test_cboe.py` (the vendor) | wired |
+| `enable_risk_free_curve` | `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | NY Fed SOFR history and the Treasury par-yield curve | `tradingagents/agents/utils/analysis_tools.py::get_sofr_curve` / `::get_treasury_curve` (the `_feature_gate` calls) | `test_phase3_gate_proofs.py` (the gate fires both ways), `test_federal_reserve.py` (the vendor) | wired |
 | `enable_benzinga_surface` | `TRADINGAGENTS_ENABLE_BENZINGA_SURFACE` | the Benzinga event surface: corporate guidance revisions, FDA/clinical milestones, secondary offerings, individual analyst actions, and news retraction ids | `tradingagents/agents/utils/benzinga_tools.py::get_guidance_revisions` / `::get_fda_calendar` / `::get_offerings_calendar` / `::get_analyst_actions` / `::get_news_removed` (the `_feature_gate` calls) | `test_benzinga_surface.py` | wired |
 
 `enable_benzinga_surface` is one gate for five tools because they are one
