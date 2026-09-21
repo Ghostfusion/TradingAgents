@@ -138,6 +138,97 @@ def test_newsapi_registered():
 # ---------------------------------------------------------------------------
 
 
+def test_benzinga_negotiates_json_because_the_default_response_is_xml(monkeypatch):
+    """The transport must ask for JSON; Benzinga's default is XML.
+
+    Measured live 2026-09-20 against ``api.benzinga.com`` with the real key:
+
+        no header                  -> 200  Content-Type: application/xml
+        Accept: application/json   -> 200  Content-Type: application/json
+        format=json                -> 200  Content-Type: application/xml  (IGNORED)
+
+    ``format=json`` is a query parameter the vendor silently ignores, and
+    ``resp.json()`` on an XML body raises ``ValueError`` - which
+    ``_benzinga_get`` typed as ``NoMarketDataError("non-JSON response")``. So
+    every call failed:
+
+        get_news_benzinga('AAPL', '2026-09-10', '2026-09-20')
+        -> NoMarketDataError: No market data for 'benzinga' (queried as
+           'news'): non-JSON response
+
+    The four sibling tests all ``mock.patch.object(benzinga, "_benzinga_get")``,
+    which is why this was invisible: they stub out the one layer that was
+    broken. This test drives the real transport against a stand-in that behaves
+    like the vendor - XML unless the ``Accept`` header asks for JSON.
+    """
+    from tradingagents.dataflows import benzinga
+
+    JSON_BODY = (
+        '[{"id": 61885260, "author": "Mohd Haider",'
+        ' "created": "Sun, 20 Sep 2026 10:00:00 -0400",'
+        ' "title": "Apple upgrade", "teaser": "analyst raises target",'
+        ' "url": "https://www.benzinga.com/news/26/09/61885260/apple-upgrade"}]'
+    )
+    XML_BODY = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<result is_array="true"><item><id>61885260</id></item></result>'
+    )
+
+    class _VendorLike:
+        """Behaves like the vendor: XML unless Accept asks for JSON."""
+
+        status_code = 200
+        sent_headers: dict = {}
+
+        def __init__(self, **kw):
+            type(self).sent_headers = kw.get("headers") or {}
+
+        @property
+        def text(self) -> str:
+            accept = str((type(self).sent_headers or {}).get("Accept") or "")
+            return JSON_BODY if "json" in accept.lower() else XML_BODY
+
+        def json(self):
+            accept = str((type(self).sent_headers or {}).get("Accept") or "")
+            if "json" not in accept.lower():
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            import json as _json
+
+            return _json.loads(JSON_BODY)
+
+    monkeypatch.setattr(benzinga, "_requests", type("R", (), {"get": staticmethod(lambda *a, **k: _VendorLike(**k))}))
+    monkeypatch.setattr(benzinga, "benzinga_api_key", lambda: "bz.TEST")
+
+    out = benzinga.get_news_benzinga("AAPL", "2026-09-10", "2026-09-20")
+    assert "## AAPL News — Benzinga" in out
+    assert "Apple upgrade" in out
+    assert "analyst raises target" in out
+    # and the request actually asked for JSON
+    assert "json" in str(_VendorLike.sent_headers.get("Accept", "")).lower()
+
+
+def test_benzinga_decodes_html_entities_in_headlines(monkeypatch):
+    """The vendor escapes ampersands; the render must not pass them through.
+
+    Measured live 2026-09-20: the payload carries
+    ``Technology Hardware, Storage &amp; Peripherals Industry``. The report is
+    markdown read by a human and by the analyst, so a raw entity is a wrong
+    string, not a cosmetic wart.
+    """
+    from tradingagents.dataflows import benzinga
+
+    payload = [
+        {"title": "Evaluating Apple In Technology Hardware, Storage &amp; Peripherals",
+         "created": "2026-09-10T12:00:00", "author": "Benzinga Insights",
+         "teaser": "R&amp;D spend &amp; margins", "url": "https://benzinga.com/1"},
+    ]
+    with mock.patch.object(benzinga, "_benzinga_get", return_value=payload):
+        out = benzinga.get_news_benzinga("AAPL", "2026-09-10", "2026-09-20")
+    assert "Storage & Peripherals" in out
+    assert "R&D spend & margins" in out
+    assert "&amp;" not in out
+
+
 def test_benzinga_missing_key(monkeypatch):
     from tradingagents.dataflows import benzinga
 

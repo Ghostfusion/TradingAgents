@@ -202,7 +202,7 @@ def test_transient_status_with_html_body_is_typed_rate_limit(monkeypatch, mod, s
     monkeypatch.setattr(mod, "time", SimpleNamespace(sleep=slept.append), raising=False)
     attempts: list[int] = []
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, **kwargs):
         attempts.append(1)
         return _Resp(status)
 
@@ -223,7 +223,7 @@ def test_permanent_client_error_is_not_retried(monkeypatch, mod):
     monkeypatch.setattr(mod, "time", SimpleNamespace(sleep=lambda *_: None), raising=False)
     attempts: list[int] = []
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, **kwargs):
         attempts.append(1)
         return _Resp(404, json_data={"message": "no such endpoint"})
 

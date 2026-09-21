@@ -55,7 +55,7 @@ in `batch.py`).
 | `TWELVEDATA_API_KEY` | `twelve_data_api_key` | Twelve Data (free "Basic": 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV; tail of `core_stock_apis`) |
 | `STOCKDATA_API_KEY` | `stockdata_api_key` | StockData.org (free "$0/mo": 100 requests/day; quote/EOD/intraday/news; tail of `core_stock_apis` + `news_data`) |
 | `NEWSAPI_API_KEY` | `newsapi_api_key` | NewsAPI.org (free Developer: 100 req/day; global macro headlines; tail of `news_data`/`get_global_news`) |
-| `BENZINGA_API_KEY` | `benzinga_api_key` | Benzinga Basic Financial News API (free tier; headline+teaser+link; ticker news). GDELT is keyless. |
+| `BENZINGA_API_KEY` | `benzinga_api_key` | Benzinga (live key registered 2026-09-20; ticker news = headline+link, plus calendars/fundamentals/insider/congress on the same key). GDELT is keyless. |
 | `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
 | `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
 | `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |

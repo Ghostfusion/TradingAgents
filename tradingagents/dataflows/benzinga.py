@@ -1,18 +1,26 @@
-"""Benzinga financial news vendor (free "Basic Financial News" tier).
+"""Benzinga financial news vendor.
 
-Benzinga's Basic Financial News API (free tier, e.g. via the AWS Marketplace
-"Basic Financial News API") returns ticker-scoped **financial** news with a
-headline, a body teaser, and a link to the full story. It is the rare free feed
-that is both ticker-filtered and financial-first, so it slots in BEFORE the
-generic keyword feeds in the ``news_data`` chain.
+Benzinga returns ticker-scoped **financial** news with a headline, a link, the
+author, the date and the tagged tickers. It is the rare free feed that is both
+ticker-filtered and financial-first, so it slots in BEFORE the generic keyword
+feeds in the ``news_data`` chain.
 
 Endpoint: ``GET https://api.benzinga.com/api/v2/news`` with ``tickers``,
-``dateFrom``/``dateTo``, ``updatedSince`` and the ``token``.
+``dateFrom``/``dateTo`` and the ``token``.
+
+**The response encoding is negotiated by header, not by parameter.** Benzinga's
+default is XML; ``Accept: application/json`` is the only switch, and the
+``format=json`` query parameter is silently ignored (measured 2026-09-20, see
+``_HEADERS``). Without the header every call fails as ``non-JSON response``.
 
 Key: ``BENZINGA_API_KEY`` in ``.env``. Raises the typed errors the router
 understands so a 401/403/429/empty degrades to the next vendor — never a
-fabricated value. The free tier supplies headline + teaser + link (no full
-body); the render reflects that honestly.
+fabricated value.
+
+Measured on the live key 2026-09-20: the ``/v2/news`` payload carries ``title``,
+``url``, ``created``, ``author``, ``stocks``, ``channels``, ``importance_rank``
+and ``image``, while **``teaser`` and ``body`` come back as empty strings** — so
+the render is headline + link, and it says so rather than implying a teaser.
 """
 
 from __future__ import annotations
@@ -34,6 +42,21 @@ _ARTICLE_LIMIT = 10
 _BACKOFF_BASE = 2.0
 _BACKOFF_CAP = 8.0
 
+#: Benzinga's default response encoding is **XML**. Measured live 2026-09-20
+#: against ``api.benzinga.com``:
+#:
+#:     no header                 -> 200  Content-Type: application/xml
+#:     Accept: application/json  -> 200  Content-Type: application/json
+#:     format=json               -> 200  Content-Type: application/xml  (IGNORED)
+#:
+#: ``format=json`` is a query parameter the vendor **silently ignores** - the
+#: same "a parameter that does nothing is worse than a named gap" trap as
+#: EODHD's ignored ``year``. The header is the only switch, so it is sent on
+#: every request: without it ``resp.json()`` raises on an XML body, which the
+#: status classifier below types as ``NoMarketDataError("non-JSON response")``
+#: and the whole vendor degrades on every call.
+_HEADERS = {"Accept": "application/json"}
+
 
 def _backoff_seconds(attempt: int) -> float:
     """Bounded exponential backoff for retry ``attempt`` (0-based)."""
@@ -52,6 +75,19 @@ def _error_detail(resp) -> str:
             return str(msg)[:200]
     text = str(getattr(resp, "text", "") or "").strip().replace("\n", " ")
     return text[:200] if text else f"HTTP {resp.status_code}"
+
+
+def _unescape(value) -> str:
+    """Decode HTML entities a vendor ships in its own text.
+
+    Benzinga escapes ampersands in headlines, so the raw field reads
+    ``Technology Hardware, Storage &amp; Peripherals``. The render is markdown
+    read by a human and by the analyst, so the entity is decoded rather than
+    passed through as literal text.
+    """
+    import html
+
+    return html.unescape(str(value or "")).replace("\n", " ").strip()
 
 
 def benzinga_api_key() -> str | None:
@@ -89,7 +125,7 @@ def _benzinga_get(path: str, params: dict | None = None) -> list | None:
     query["token"] = key
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            resp = _requests.get(url, params=query, timeout=TIMEOUT)
+            resp = _requests.get(url, params=query, timeout=TIMEOUT, headers=_HEADERS)
         except Exception as exc:  # noqa: BLE001 - network failure degrades
             if attempt < _MAX_RETRIES:
                 time.sleep(_backoff_seconds(attempt))
@@ -149,11 +185,15 @@ def get_news_benzinga(ticker: str, start_date: str, end_date: str) -> str:
         shown += 1
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title") or "(no title)")[:120]
+        # Titles arrive HTML-escaped ("Technology Hardware, Storage &amp;
+        # Peripherals"). The render is markdown read by a human and by the
+        # analyst, so the entity must be decoded or the reader sees `&amp;`.
+        title = _unescape(item.get("title"))[:120] or "(no title)"
         date = str(item.get("created") or item.get("updated") or "")[:16]
         source = str(item.get("author") or item.get("source") or "").strip()
-        # Free tier: teaser + link, not full body.
-        teaser = str(item.get("teaser") or item.get("body") or "").replace("\n", " ").strip()
+        # Headline + link on this tier; `teaser`/`body` come back as empty
+        # strings, so the render emits nothing rather than a blank line.
+        teaser = _unescape(item.get("teaser") or item.get("body"))
         link = str(item.get("url") or item.get("link") or "")
         lines.append(f"- **{title}**  ({date} {source})")
         if teaser:

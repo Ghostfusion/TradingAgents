@@ -48,7 +48,7 @@ VENDOR_LIST = ['alpha_vantage', 'benzinga', 'cboe', 'congress', 'eodhd',
 | 13 | **cboe** | CBOE delayed options chain (added in this fork) | `get_options_surface` (strike/DTE/IV/greeks); free, no key; opt-in `enable_options_surface` |
 | 14 | **federal_reserve** | NY Fed SOFR + Treasury par yields (added in this fork) | `get_sofr_curve` / `get_treasury_curve` (risk-free term structure for DCF/options math); free, no key; opt-in `enable_risk_free_curve` |
 | 15 | **gdelt** | GDELT DOC 2.0 (added in this fork) | keyless global news + native daily tone (`get_news_gdelt`, `get_gdelt_tone_series`, `get_gdelt_sentiment` news tool); **NOT in default `news_data` chain** - endpoint is network-flaky, opt-in via `...,gdelt` |
-| 16 | **benzinga** | Benzinga (added in this fork) | free Basic Financial News API: headline + teaser + link, ticker-scoped (`get_news_benzinga`); `BENZINGA_API_KEY`; opt-in (no real key registered yet) |
+| 16 | **benzinga** | Benzinga (added in this fork) | ticker-scoped financial news (`get_news_benzinga`): headline + link + author + tagged tickers; `BENZINGA_API_KEY`; opt-in (not in the default `news_data` chain). **Live key registered 2026-09-20.** The response encoding is negotiated by HEADER - `Accept: application/json`; the default is XML and the `format=json` query parameter is silently ignored. This tier's `teaser`/`body` come back as empty strings, so the render is headline + link. The same key also reaches the calendar/alt-data surface below. |
 | 17 | **newsapi** | NewsAPI.org (added in this fork) | free Developer 100 req/day: `get_news_newsapi` (ticker) + `get_global_news_newsapi` (macro headlines); `NEWSAPI_API_KEY`; tail of `news_data` + `get_global_news` |
 | 18 | **seekingalpha** | Seeking Alpha public RSS (added in this fork) | keyless per-ticker feed (titles/authors only, opinion-pinned): `get_news_seekingalpha`; **last** in `get_news`, serves only when every newswire vendor fails |
 | 19 | **fmp** | Financial Modeling Prep (added in this fork) | free-tier earnings-call transcripts (`get_earnings_transcript`); its other enrich (5y fundamentals/EV/surprises/prices) is still imported directly by the screener |
@@ -150,7 +150,7 @@ that resilience.
 | Twelve Data | `TWELVEDATA_API_KEY` | free 800 credits/day (added in this fork) |
 | StockData.org | `STOCKDATA_API_KEY` | free 100 req/day (added in this fork) |
 | NewsAPI | `NEWSAPI_API_KEY` | free 100 req/day (added in this fork) |
-| Benzinga | `BENZINGA_API_KEY` | free tier (added in this fork; no real key registered yet) |
+| Benzinga | `BENZINGA_API_KEY` | added in this fork; **live key registered 2026-09-20** — reaches news + calendars + fundamentals + insider/congress + bars + logos |
 | GDELT | none (keyless) | network-flaky; opt-in only |
 
 ## Considered, not integrated
