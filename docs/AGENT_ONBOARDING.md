@@ -434,6 +434,38 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **`scripts/jev_decide.py`: a utility for the TypeSafe decisions model
+  (`typesafe/jev-1.13` on OpenRouter), plus the two facts that make it necessary.** Both obstacles were found by CALLING the
+  model, not by reading anything. **(1) It is not a chat model.** `POST /chat/completions` returns `400` and names the endpoint
+  that does work: *"typesafe/jev-1.13 is a decisions model and cannot be used with the chat/completions endpoint. Use the
+  /api/alpha/decisions endpoint instead."* That endpoint takes `{model, state, questions}` - there is **no `messages` field**, so a
+  document is sent as `state` and the ask as `questions`. **(2) The question schema is a discriminated union on `type`**:
+  `noul` | `choice` | `score`. `choice` takes `criteria` as a **record** (label -> rubric or null), `score` as an **array**
+  (lowest -> highest), `noul` neither; and **`noul` answers with a FLOAT, not prose** (`0.67`) - it is a numeric judgment, not a
+  free-text channel. `validate_questions` enforces the contract before spending a request, so a shipped default battery cannot be
+  a 400. **(3) The key-resolution trap.** A hand-rolled byte parse of `.env` returned a **75-char** token where `dotenv_values`
+  returns the real **73-char** one: the value is **quoted** in `.env`, so the raw bytes carry the quote characters into the token.
+  OpenRouter replies `401 Missing Authentication header` - which blames the header, not the token - and the tell is that an
+  **arbitrary garbage token returns the same sentence** while a well-formed-but-unknown key returns `401 User not found.` So
+  `/models` proves nothing (it is a PUBLIC endpoint: it validated no key), and the utility uses `dotenv_values` like the engine.
+  **(4) The slug is absent from the public `/models` catalog** (446 entries, no `jev`/`typesafe`) and serves anyway - catalog
+  absence is not unavailability. The default battery asks about the document (stance, evidence strength, horizon) and encodes no
+  trading policy; `--questions FILE` overrides it. Live on `MSFT_20260920_145644`: ~0.7 s and ~$0.0002 per report; the two
+  price/valuation stems read `neutral` with the strongest evidence scores and the two narrative stems read `bullish` with weaker
+  evidence. 19 hermetic tests (`tests/test_jev_decide.py`), transport injectable, no vendor and no key. Documented in
+  `docs/developer/06-entrypoints.md` §6.5 and `docs/api_reference.md` §9.
+- 2026-09-20 `170d503` - **Owner decision: the Decision Packet PROCEEDS - as a BOUND, not a lever.** Asked whether the packet
+  should proceed at all given that Phase 1 measured `P1 -> P2` flip rate of **exactly 0.000**, the owner answered *"Proceed - the
+  packet is a bound, not a lever."* Recorded in `docs/design_decision_context.md` §13.3: **H1a is WITHDRAWN as the packet's
+  justification** (it was tested and is not supported in either representation), the packet's defence is its own contract (the §7
+  budget, §8 vocabulary, §9 ledger), the **representation axis is left OPEN and NAMED** (58% of decisions change, 6:1 toward HOLD,
+  `P(no-trade)` 0.417 -> 0.833, confidence 0.652 -> 0.248, ungrounded 2/12 -> 9/12 - a COST, on n=12), and Phases 3-5 stay built
+  and **gated OFF**. The doc claims nowhere that the packet makes decisions better. **Do not re-open this as a quality claim.**
+- 2026-09-20 `4072c64` (TradingExecution) - **Owner decision: signald recovery stays MANUAL.** Detection works and recovery is
+  manual by choice, not by omission: an auto-restart would mask a daemon that is *wedged* rather than dead (the PID lock refuses a
+  second instance, so the attempt is a silent no-op exactly when it matters) and would turn a visible outage into an invisible
+  restart loop. The cost - a Friday-afternoon death stays down until Monday 08:00 - is stated in
+  `TradingExecution/docs/RUNBOOK.md` rather than discovered at the next incident. **Do not add an auto-restart.**
 - 2026-09-20 `(working tree)` - **Nine standing defects fixed, and ONE OF THE RECORDED DEFECTS WAS WRONG: the signald "no
   supervisor exists" finding was a false premise.** **(0) The signald claim, corrected.** The record said *"the daemon is DEAD and
   nothing restarts it - no supervising restart process exists."* **False.** `Signald_Daemon` exists (logon + weekly MON-FRI 08:00,

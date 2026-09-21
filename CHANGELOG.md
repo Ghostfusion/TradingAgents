@@ -116,6 +116,18 @@ Tests: `tests/test_news_score.py` +2, both proven failing-first **by mutation** 
 
 ### Added
 
+**`scripts/jev_decide.py` — a utility for the TypeSafe decisions model, and the two facts that make it necessary (2026-09-20).** `typesafe/jev-1.13` is reachable on OpenRouter, but not the way a model usually is, and both obstacles were found by calling it rather than by reading anything.
+
+- **It is not a chat model.** `POST /chat/completions` returns `400` — *"typesafe/jev-1.13 is a decisions model and cannot be used with the chat/completions endpoint. Use the /api/alpha/decisions endpoint instead."* The endpoint that serves it takes `{model, state, questions}`; there is **no `messages` field**, so a document is sent as `state` and the ask as `questions`.
+- **The question schema is a discriminated union on `type`**: `noul` | `choice` | `score`. `choice` takes `criteria` as a **record** (label → rubric or null), `score` as an **array** (lowest → highest), `noul` neither. `noul` answers with a **float, not prose** (`0.67`) — it is a numeric judgment, not a free-text channel. The utility validates this contract before spending a request, so a shipped default battery cannot be a 400.
+- **The default battery asks about the document, not about what to trade** — stance, evidence strength, horizon. The caller owns the policy; `--questions FILE` overrides it.
+- **The key resolution is the same trap the engine's own loader avoids.** A hand-rolled byte parse of `.env` returned a 75-char token where `python-dotenv` returns the real 73-char one: the value is **quoted** in `.env`, so the raw bytes carry the quote characters into the token. OpenRouter's reply is `401 Missing Authentication header`, which reads like a missing header rather than a malformed token — and the tell is that an *arbitrary garbage* token returns the same sentence, while a well-formed-but-unknown key returns `401 User not found.` The utility uses `dotenv_values`, and a test pins the quoted-value case.
+- **Also worth recording: the slug is absent from the public `/models` catalog** (446 entries, no `jev`/`typesafe`) and serves anyway. Catalog absence is not unavailability.
+- Live, on `MSFT_20260920_145644`: four analyst reports, ~0.7 s and ~$0.0002 each. The two price/valuation stems read `neutral` with the strongest evidence scores; the two narrative stems read `bullish` with weaker evidence — the model is confident about tone and hesitant about rigour, not the reverse.
+- 19 hermetic tests (`tests/test_jev_decide.py`), no vendor and no key: the transport is one injectable function.
+
+**Web impact**: none — a new `scripts/` utility with no importable surface the app touches. Documented in `docs/developer/06-entrypoints.md` §6.5 and `docs/api_reference.md` §9.
+
 **Design: separating research context from decision context — the proposal, measured against what already exists (2026-09-19).** `docs/design_decision_context.md`, new. No code changes.
 
 Prompted by an owner architecture proposal: the decision model should adjudicate **already-compressed** evidence rather than accumulate the whole evidence universe, on the thesis that *"conservatism requires actual contradictory evidence rather than merely the existence of additional information."*

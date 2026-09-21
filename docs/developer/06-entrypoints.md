@@ -113,6 +113,26 @@ slice or movers universe tractable.
   `risk_basket_weights`) `--reports-dir` (default `reports/`) `--date`
   `--llm` (judge UNKNOWN conditions) `--json` `--dry-run` `--out-dir`
   (default `action_reports/`, keep-only-newest).
+- `jev_decide.py` — judge a document with the TypeSafe decisions model
+  (`typesafe/jev-1.13`) on OpenRouter. **Not a chat model**: it is rejected
+  from `/chat/completions`, and is served only by `POST /api/alpha/decisions`
+  with `{model, state, questions}`. The default battery asks about the
+  document itself (stance, evidence strength, horizon) and encodes no trading
+  policy; `--questions FILE` overrides it. Hermetic tests:
+  `tests/test_jev_decide.py`.
+
+  ```
+  py -3.12 scripts/jev_decide.py
+  py -3.12 scripts/jev_decide.py --tree reports/MSFT_20260920_145644
+  py -3.12 scripts/jev_decide.py --stems market,news --json jev.json
+  py -3.12 scripts/jev_decide.py --state-file notes.md
+  ```
+
+  Flags: `--tree` (default: newest under `reports/`) `--state-file` `--state`
+  (mutually exclusive; a literal document) `--stems` (default
+  `fundamentals,market,news,sentiment`) `--questions` `--model` `--endpoint`
+  `--timeout` `--env-file` `--json`. Exit 1 if any call fails; the vendor's
+  own message is printed, never summarised away.
 - `rebuild_complete_report.py` — re-render a report folder / all.
 - `smoke_structured_output.py` — smoke the structured-output path.
 - `orderflow_evaluate.py` — L4b ledger win-rate/alpha.
