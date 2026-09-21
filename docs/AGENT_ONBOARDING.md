@@ -434,6 +434,30 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **The analyst report-stub guard COULD NOT FIRE for a bare verdict line - the NTR tree shipped two stub
+  analyst reports.** Reported by the owner as "missing content in several report belong to ntr". `reports/NTR_20260921_151301`'s
+  `1_analysts/market.md` and `1_analysts/sentiment.md` looked plausible on disk (1,843 and 1,564 bytes) but their **model text was 36 and 407
+  chars**. `_looks_report_stub` tested `len(t) < 400 and _ANALYST_STATUS_TURN_RE.search(t)`, and that regex is
+  `\b(progress|let me (now )?(continue|gather|fetch|pull|collect|check|dig))\b` - a bare verdict line matches NONE of those alternatives, so
+  the length clause was **structurally unreachable** for exactly this shape. Reproduced: `_looks_report_stub("FINAL TRANSACTION PROPOSAL:
+  **HOLD**")` returned `False` on a 36-char "report". **The engine-score block masked both stubs**: `report_hygiene.engine_report_section`
+  appends the TechnicalScore/SentimentScore section *after* the guard runs, adding ~1,157-1,807 chars, so the saved artefact reads as
+  substantial while the model contributed 36 chars - **never length-check the saved file**. **Fix:** the test is length ALONE
+  (`len(t) < _REPORT_STUB_MIN_CHARS`, 400); the regex is deleted rather than kept as a second condition, because it was a proxy for "not a
+  real report" that could not fire for the pathology it existed to catch. The floor was chosen from measurement, not taste - across **64
+  report trees** the shortest genuine report is ~8.4 KB (market), ~6.2 KB (fundamentals), ~2.7 KB (sentiment) against stubs at 36 and 149
+  chars, a 20x margin; applying it to that corpus newly classifies exactly **two** reports as stubs (NTR market 36, MSFT 2026-09-16
+  fundamentals 149), both unambiguous. **Tests:** `tests/test_analyst_report_stub.py` gains the bare-verdict shape (the exact NTR text, plus
+  that the retry path replaces it with `**Report unavailable**` instead of shipping it) and a short-but-real report just over the floor; the
+  bare-verdict test is **RED** under a faithful mutation restoring the regex gate, with a byte-identical sha256 restore. **Web impact:** none.
+  **Known gap, NOT fixed here - and it is the reason NTR's sentiment is STILL a stub: the sentiment analyst has NO stub guard at all.**
+  `retry_chain_if_stub` is wired into the market, news and fundamentals nodes only; `sentiment_analyst.py` renders from the structured
+  `SentimentReport` via `invoke_structured_or_freetext` and stores the result unconditionally, and the schema's required `narrative` field
+  has no substance floor - so a one-sentence narrative renders a report with no analysis. Closing it means either a `narrative` minimum (a
+  schema/contract change) or wiring the guard into the structured node, and **the floor is a genuine judgement call, not a clear-cut fix**:
+  short sentiment reports are a CLUSTER, not a one-off (across 64 trees HPE 390, QCOM 402, NTR 407, NVDA 531/611, AMZN 1,188 against a p10 of
+  2,694), so raising the floor reclassifies ~9% of sentiment runs. Left to the owner.
+
 - 2026-09-21 `(working tree)` - **The Benzinga firehose miss was reported as a DEFINITIVE ABSENCE after a BOUNDED scan - and probing the
   endpoints first changed the fix.** `get_insider_transactions_benzinga` and `get_congress_trades_benzinga` scan the market-wide Form 4 /
   congressional firehoses and filter locally, because both endpoints ignore every ticker parameter. The budget was **four pages of

@@ -30,6 +30,22 @@ _FORCED_CONFIG = {
     "analyst_forced_tools_summary_window": 12000,
 }
 
+#: A realistic analyst report body. The fake LLM used to return a 12-char
+#: placeholder ("final report"), which the node's stub guard now correctly
+#: classifies as a degenerate report and replaces - so the pass-through these
+#: tests assert has to be asserted on a report-shaped string. Real analyst
+#: reports measure 2.7-12 KB; this is deliberately over the 400-char floor.
+_REAL_REPORT = (
+    "## Fundamentals Read\n\n"
+    "**Verdict:** HOLD. Revenue grew with a stable gross margin and positive "
+    "free cash flow, but the balance sheet carries a rising net-debt load and "
+    "the valuation is at the top of its five-year range.\n\n"
+    "### Evidence\n"
+    "- Operating cash flow covers capex with headroom; FCF conversion is above 1.\n"
+    "- Accruals are negative, so reported earnings are cash-backed.\n"
+    "- Net debt / EBITDA sits inside the covenant band but has widened.\n"
+)
+
 
 class _FakeBindable:
     """Callable stand-in for ``llm.bind_tools(tools)`` — captures the messages."""
@@ -70,7 +86,7 @@ def test_analyst_node_reduces_from_evidence_once(monkeypatch):
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(
-        _FakeLLM(["final report"], captured), config=_FORCED_CONFIG
+        _FakeLLM([_REAL_REPORT], captured), config=_FORCED_CONFIG
     )
 
     state = _base_state()
@@ -91,7 +107,7 @@ def test_analyst_node_reduces_from_evidence_once(monkeypatch):
     assert "FAKE_FIN_OK_TSM" in sys_text
 
     # The node also carries the report through unchanged.
-    assert out["fundamentals_report"] == "final report"
+    assert out["fundamentals_report"] == _REAL_REPORT
 
 
 def test_analyst_node_skips_regather_on_reentry(monkeypatch):
@@ -107,7 +123,7 @@ def test_analyst_node_skips_regather_on_reentry(monkeypatch):
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(
-        _FakeLLM(["final report"], captured), config=_FORCED_CONFIG
+        _FakeLLM([_REAL_REPORT], captured), config=_FORCED_CONFIG
     )
 
     state = _base_state()
@@ -141,14 +157,14 @@ def test_analyst_without_forced_config_is_unchanged(monkeypatch):
 
     captured: list = []
     node = fundamentals_mod.create_fundamentals_analyst(
-        _FakeLLM(["plain report"], captured), config=None
+        _FakeLLM([_REAL_REPORT], captured), config=None
     )
 
     out = node(_base_state())
     # Legacy path: no gather; tool_evidence stays empty on the returned state.
     assert calls["n"] == 0
     assert out.get(TOOL_EVIDENCE_KEY) == {}
-    assert out["fundamentals_report"] == "plain report"
+    assert out["fundamentals_report"] == _REAL_REPORT
     sys = "".join(m.content for m in captured if getattr(m, "type", "") == "system")
     assert EVIDENCE_SECTION_HEADER not in sys
 

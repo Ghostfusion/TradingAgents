@@ -60,6 +60,36 @@ def test_looks_report_stub_passes_real_report():
     assert structured._looks_report_stub(long_with_progress) is False
 
 
+# The exact degenerate market report captured from the NTR 2026-09-21 batch run:
+# the model answered the tool loop with its one-line verdict and nothing else.
+# The engine-score block that follows in the saved file is appended by
+# ``report_hygiene.engine_report_section`` AFTER this guard runs, so the guard
+# sees 36 chars while the artefact on disk is 1,843 bytes.
+_BARE_VERDICT_STUB = "FINAL TRANSACTION PROPOSAL: **HOLD**"
+
+
+def test_looks_report_stub_flags_a_bare_verdict_line():
+    """A one-line verdict is not a report, even though it is not a status turn.
+
+    The guard used to be ``len(t) < 400 and _ANALYST_STATUS_TURN_RE.search(t)``.
+    That regex matches progress announcements ("progress", "let me gather ...")
+    and a verdict line matches none of them, so the length clause could never
+    fire for this shape and NTR 2026-09-21 market.md shipped as exactly this.
+    """
+    assert structured._looks_report_stub(_BARE_VERDICT_STUB) is True
+    # and the retry path must replace it, never ship it as the report
+    chain = _fake_chain([])
+    out = structured.retry_chain_if_stub(chain, ["msg"], _BARE_VERDICT_STUB, "Market Analyst")
+    assert out.startswith("**Report unavailable**")
+
+
+def test_looks_report_stub_passes_a_report_just_over_the_floor():
+    """The floor must not discard a short-but-real report."""
+    real = "## Technical Read\n\n" + ("Price is below all three moving averages. " * 12)
+    assert len(real) > structured._REPORT_STUB_MIN_CHARS
+    assert structured._looks_report_stub(real) is False
+
+
 def test_retry_chain_if_stub_reinvokes_on_backup_and_returns_report():
     """A status-turn stub must be re-invoked once on the BACKUP chain (the
     original model that produced the stub is never re-paid); the completion

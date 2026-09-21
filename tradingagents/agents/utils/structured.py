@@ -698,10 +698,11 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
     return text
 
 
-_ANALYST_STATUS_TURN_RE = _re.compile(
-    r"\b(progress|let me (now )?(continue|gather|fetch|pull|collect|check|dig))\b",
-    _re.IGNORECASE,
-)
+#: Minimum length for a real analyst report. Measured across 64 report trees
+#: (2026-09-21): the shortest genuine report is ~8.4 KB for market, ~6.2 KB for
+#: fundamentals and ~2.7 KB for sentiment, while the degenerate stubs are 36 /
+#: 149 chars. A one-line verdict is not a report.
+_REPORT_STUB_MIN_CHARS = 400
 
 # Directive for the analyst-stub retry: write the COMPLETE report from the
 # tool evidence already gathered (the messages carry every tool result the
@@ -755,20 +756,33 @@ def _looks_report_stub(text: str) -> bool:
 
     Like ``_looks_stub`` for decisions, but catches the analyst-chain
     pathology: a model that answers a tool loop with a bare *status turn*
-    ("Good progress. Now let me gather the remaining signals ...") instead of
-    the report. Such a turn emits no tool_calls, so the router treats it as
-    final and it would land in ``*_report`` verbatim (observed: a 217-byte
-    fundamentals report). Detection: any degenerate stub OR a short
-    status-announcement sentence. Real analyst reports are long by design
-    ("comprehensive report ... as much detail as possible"); a one-line
-    progress note is not one.
+    ("Good progress. Now let me gather the remaining signals ...") or a bare
+    *verdict line* ("FINAL TRANSACTION PROPOSAL: **HOLD**") instead of the
+    report. Such a turn emits no tool_calls, so the router treats it as final
+    and it would land in ``*_report`` verbatim (observed: a 217-byte
+    fundamentals report; NTR 2026-09-21 market.md, 36 chars of model text).
+
+    Detection is **length alone**. It used to be
+    ``len(t) < 400 and _ANALYST_STATUS_TURN_RE.search(t)``, which made the
+    check unable to fire for a bare verdict line: the regex matched progress
+    announcements ("progress", "let me gather ...") and a verdict line matches
+    none of them, so a 36-char "report" passed as complete. The regex is gone
+    rather than kept as a second condition - length is the honest test, since a
+    real analyst report is long by design ("comprehensive report ... as much
+    detail as possible") and the shortest one measured across 64 trees is
+    2.7 KB.
+
+    NOTE: the engine-score block is appended to the SAVED file by
+    ``report_hygiene.engine_report_section`` *after* this guard runs, so the
+    saved artefact can look substantial - NTR market.md is 1,843 bytes on disk
+    against 36 bytes of model text. Never length-check the saved file.
     """
     t = (text or "").strip()
     if not t:
         return True
     if _looks_stub(t):
         return True
-    return len(t) < 400 and bool(_ANALYST_STATUS_TURN_RE.search(t))
+    return len(t) < _REPORT_STUB_MIN_CHARS
 
 
 def retry_chain_if_stub(chain: Any, messages: Any, response_text: str, agent_name: str,
