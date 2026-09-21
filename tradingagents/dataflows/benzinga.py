@@ -27,6 +27,18 @@ Not every parameter does something. Verified live:
     /v2.1/calendar/*   parameters[tickers] YES, parameters[date_from/to] YES
     /v2/bars           interval REQUIRED (without it the body is a stub)
     /v2.1/fundamentals symbols= (NOT tickers=)
+    /v1/sec/insider*   date_from/date_to YES, plain - the bracketed
+                       ``parameters[..]`` form is IGNORED; pagesize ragged
+    /v1/gov/usa/*      same spelling; pagesize ragged there too
+
+Measured further on the live key 2026-09-21, on the two market-wide firehose
+routes: ``pagesize`` is **not honoured as a cap** (``pagesize=100`` returned
+233 / 100 / 275 / 289 rows on consecutive pages; ``pagesize=1000`` returned
+2,425 in one response), and pages 1-4 of a trailing window all covered the
+**same newest filing day** as different row slices - the walk does not step
+back in filing time. A date window therefore *bounds* the query but does not
+*extend* the scan, which is why the budget for these two readers is stated in
+rows inspected, not in pages and not in days.
 
 Key: ``BENZINGA_API_KEY`` in ``.env``. Raises the typed errors the router
 understands so a 401/403/429/empty degrades to the next vendor - never a
@@ -45,6 +57,7 @@ import html
 import logging
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import requests as _requests
@@ -675,13 +688,86 @@ def _congress_symbol(row: dict) -> str:
     return ""
 
 
-def _filtered_pages(path: str, symbol: str, pages: int, page_size: int, extract, want: int):
-    """Rows whose extracted symbol matches, scanned over at most ``pages`` pages.
+def _insider_filing_date(row: dict) -> str:
+    """The FILING date on a Form 4 row - the axis this route serves and pages on.
 
-    Only for the two market-wide firehose endpoints, which ignore every ticker
-    parameter. Scans forward from the newest page and stops as soon as ``want``
-    matches are in hand, so the common case costs one request. A page shorter
-    than ``page_size`` is the end of the stream.
+    Deliberately not ``date_transaction``: measured live 2026-09-21, the rows
+    across pages 1-4 carry transaction dates spanning a year while every
+    ``filing_date`` sits inside a single day, so the filing date is what a
+    bounded scan actually covers. Reporting the transaction span as the
+    searched window would overstate it.
+    """
+    filing = row.get("filing")
+    if isinstance(filing, dict):
+        return str(filing.get("filing_date") or "")[:10]
+    return ""
+
+
+def _congress_report_date(row: dict) -> str:
+    """The DISCLOSURE date on a congressional trade row (the served axis)."""
+    return str(row.get("report_date") or "")[:10]
+
+
+#: The two firehose routes serve a market-wide stream, so a symbol's row is
+#: found by scanning and filtering locally. ``pagesize`` is NOT honoured as a
+#: cap there - measured live 2026-09-21, ``pagesize=100`` returned 233 / 100 /
+#: 275 / 289 rows on consecutive pages and ``pagesize=1000`` returned 2,425 in
+#: one response - so the scan budget below is stated in ROWS INSPECTED, never
+#: in nominal pages.
+_FIREHOSE_PAGE_SIZE = 1000
+_FIREHOSE_MAX_ROWS = 3000
+
+
+@dataclass(frozen=True)
+class _Scan:
+    """What a firehose scan actually covered, so a miss can be stated honestly.
+
+    A bounded scan that finds nothing is NOT proof of absence: the row may sit
+    in a slice beyond the budget. ``truncated`` records which case applies, and
+    ``describe`` renders the covered window for the miss message.
+    """
+
+    rows: list
+    inspected: int
+    pages: int
+    truncated: bool
+    lo: str
+    hi: str
+
+    def describe(self) -> str:
+        where = f"{self.lo}..{self.hi}" if self.lo else "dates unavailable"
+        head = f"first {self.inspected:,} rows of the newest filings ({where})"
+        if self.truncated:
+            return f"{head}, a bounded sample - an older filing may sit beyond it"
+        return head
+
+
+def _filtered_pages(
+    path: str,
+    symbol: str,
+    *,
+    extract,
+    want: int,
+    date_of,
+    page_size: int | None = None,
+    max_rows: int | None = None,
+) -> _Scan:
+    """Matching rows plus the row window covered, for a market-wide firehose route.
+
+    Only for the two firehose endpoints, which ignore every ticker parameter:
+    the stream is scanned and filtered locally for ``symbol``.
+
+    The budget is **rows inspected**, not pages. ``pagesize`` is not a cap on
+    these routes (see the module docstring), so a budget stated in pages does
+    not describe what was read; and measured live 2026-09-21, pages 1-4 of a
+    trailing window all covered the SAME newest filing day as different slices
+    - the walk does not step back in filing time, so this reports a row sample
+    and never a period.
+
+    A page shorter than ``page_size`` is NOT the end of the stream either (the
+    slices are ragged), so the walk ends on an empty page or the row budget;
+    when the budget is what stopped it, ``truncated`` is set and the caller
+    must not report the miss as a definitive absence.
 
     **The paging parameter is spelled differently per route family.** Measured
     live 2026-09-20: the ``/v1/*`` endpoints page on lowercase ``pagesize``
@@ -691,22 +777,41 @@ def _filtered_pages(path: str, symbol: str, pages: int, page_size: int, extract,
     slice, which is how the first version of this reader scanned four "pages"
     and found nothing.
     """
+    page_size = int(page_size if page_size is not None else _FIREHOSE_PAGE_SIZE)
+    max_rows = int(max_rows if max_rows is not None else _FIREHOSE_MAX_ROWS)
     target = str(symbol or "").strip().upper()
     found: list = []
-    for page in range(1, int(pages) + 1):
+    inspected = 0
+    pages = 0
+    lo = hi = ""
+    truncated = False
+    # A page guard so a server that keeps answering non-empty cannot loop for
+    # ever; two spare pages past the nominal count absorb the ragged slices.
+    max_pages = max(1, int(max_rows) // max(1, int(page_size))) + 2
+    for page in range(1, max_pages + 1):
         batch = _benzinga_get(path, {"pagesize": int(page_size), "page": page}) or []
+        pages += 1
         if not batch:
             break
+        inspected += len(batch)
         for row in batch:
             if not isinstance(row, dict):
                 continue
+            day = str(date_of(row) or "")[:10]
+            if len(day) == 10 and day[4] == "-":
+                lo = day if not lo or day < lo else lo
+                hi = day if not hi or day > hi else hi
             if str(extract(row) or "").strip().upper() == target:
                 found.append(row)
                 if len(found) >= want:
-                    return found
-        if len(batch) < int(page_size):
+                    return _Scan(found, inspected, pages, False, lo, hi)
+        if inspected >= max_rows:
+            truncated = True
             break
-    return found
+    else:
+        # The page guard ran out while rows were still arriving: budget-limited.
+        truncated = True
+    return _Scan(found, inspected, pages, truncated, lo, hi)
 
 
 def get_earnings_calendar_benzinga(
@@ -870,20 +975,20 @@ def get_insider_transactions_benzinga(ticker: str, limit: int = 10) -> str:
     relationship, the acquired/disposed direction, shares, price, the
     post-transaction holding and the 10b5-1 flag.
     """
-    rows = _filtered_pages(
+    scan = _filtered_pages(
         "v1/sec/insider_transactions/transactions",
         ticker,
-        4,
-        100,
-        _insider_symbol,
-        int(limit),
+        extract=_insider_symbol,
+        want=int(limit),
+        date_of=_insider_filing_date,
     )
-    if not rows:
+    if not scan.rows:
         raise NoMarketDataError(
             ticker,
             "insider transactions",
-            detail="no Form 4 transactions for this symbol in the most recent filings",
+            detail=f"no Form 4 transactions for this symbol in the {scan.describe()}",
         )
+    rows = scan.rows
     lines = [
         f"## {ticker.upper()} Insider Transactions (Benzinga)",
         "_most recent Form 4 filings, filtered locally (the endpoint takes no ticker filter)_",
@@ -942,15 +1047,20 @@ def get_congress_trades_benzinga(ticker: str, limit: int = 8) -> str:
     on filer context: party, state, district and the committees the filer sits
     on, alongside the amount band and the disclosure PDF.
     """
-    rows = _filtered_pages(
-        "v1/gov/usa/congress/trades", ticker, 4, 100, _congress_symbol, int(limit)
+    scan = _filtered_pages(
+        "v1/gov/usa/congress/trades",
+        ticker,
+        extract=_congress_symbol,
+        want=int(limit),
+        date_of=_congress_report_date,
     )
-    if not rows:
+    if not scan.rows:
         raise NoMarketDataError(
             ticker,
             "congress trades",
-            detail="no congressional trades for this symbol in the most recent filings",
+            detail=f"no congressional trades for this symbol in the {scan.describe()}",
         )
+    rows = scan.rows
     buys = sum(1 for r in rows if str(r.get("transaction_type") or "").upper().startswith("P"))
     sells = sum(1 for r in rows if str(r.get("transaction_type") or "").upper().startswith("S"))
     lines = [

@@ -307,8 +307,13 @@ def test_the_two_firehose_readers_page_with_the_lowercase_spelling(monkeypatch):
 
     with mock.patch.object(benzinga, "_benzinga_get", side_effect=_get):
         benzinga._filtered_pages(
-            "v1/sec/insider_transactions/transactions", "AAPL", 2, 100,
-            benzinga._insider_symbol, 5,
+            "v1/sec/insider_transactions/transactions",
+            "AAPL",
+            extract=benzinga._insider_symbol,
+            want=5,
+            date_of=benzinga._insider_filing_date,
+            page_size=100,
+            max_rows=200,
         )
 
     assert seen, "no request was made"
@@ -317,6 +322,105 @@ def test_the_two_firehose_readers_page_with_the_lowercase_spelling(monkeypatch):
         assert "pageSize" not in params, params
         assert params["pagesize"] == 100
     assert [p["page"] for p in seen] == [1, 2], "the reader must walk pages in order"
+
+
+def test_a_ragged_short_page_is_not_the_end_of_the_stream(monkeypatch):
+    """A page shorter than ``page_size`` must NOT end the walk.
+
+    Measured live 2026-09-21: ``pagesize=100`` returned 233 / 100 / 275 / 289
+    rows on consecutive pages of the Form 4 route, so a short page says nothing
+    about the stream ending. The first version treated ``len(batch) <
+    page_size`` as end-of-stream and stopped after page 1, dropping a row that
+    sits on page 2 - the same class of silent miss the ``pageSize`` spelling
+    bug caused.
+    """
+    from tradingagents.dataflows import benzinga
+
+    pages = {
+        1: [{"filing": {"company_symbol": "ZZZZ", "filing_date": "2026-09-18"}}] * 3,
+        2: [{"filing": {"company_symbol": "AAPL", "filing_date": "2026-09-18"}}] * 3,
+    }
+    asked: list[int] = []
+
+    def _get(path, params=None):
+        page = int((params or {}).get("page", 1))
+        asked.append(page)
+        return pages.get(page, [])
+
+    with mock.patch.object(benzinga, "_benzinga_get", side_effect=_get):
+        scan = benzinga._filtered_pages(
+            "v1/sec/insider_transactions/transactions",
+            "AAPL",
+            extract=benzinga._insider_symbol,
+            want=5,
+            date_of=benzinga._insider_filing_date,
+            page_size=100,
+            max_rows=1000,
+        )
+
+    assert asked[:2] == [1, 2], "a 3-row page must not end the walk"
+    assert len(scan.rows) == 3
+    assert (scan.lo, scan.hi) == ("2026-09-18", "2026-09-18")
+    assert scan.truncated is False
+
+
+def test_a_budget_limited_miss_names_the_row_window_not_absence(monkeypatch):
+    """A bounded scan that finds nothing must not claim the symbol has no filings.
+
+    The scan window is only ever a sample of the newest day - the pages do not
+    step back in filing time - so the miss has to carry the rows inspected, the
+    filing dates seen, and the fact that it was budget-limited.
+    """
+    from tradingagents.dataflows import benzinga
+
+    def _get(path, params=None):
+        return [
+            {"filing": {"company_symbol": "ZZZZ", "filing_date": "2026-09-17"}} for _ in range(60)
+        ] + [
+            {"filing": {"company_symbol": "YYYY", "filing_date": "2026-09-18"}} for _ in range(40)
+        ]
+
+    monkeypatch.setattr(benzinga, "_FIREHOSE_MAX_ROWS", 100)
+    monkeypatch.setattr(benzinga, "_FIREHOSE_PAGE_SIZE", 100)
+
+    with (
+        mock.patch.object(benzinga, "_benzinga_get", side_effect=_get),
+        pytest.raises(NoMarketDataError) as excinfo,
+    ):
+        benzinga.get_insider_transactions_benzinga("AAPL")
+
+    msg = str(excinfo.value)
+    assert "no Form 4 transactions" in msg
+    assert "100 rows" in msg
+    assert "2026-09-17..2026-09-18" in msg
+    assert "bounded sample" in msg, msg
+
+
+def test_an_exhausted_scan_states_the_window_without_claiming_a_sample(monkeypatch):
+    """A scan that reached the end of the stream is complete WITHIN its window.
+
+    The miss must still name the window, but must not hedge with "bounded
+    sample" when the stream actually ended.
+    """
+    from tradingagents.dataflows import benzinga
+
+    def _get(path, params=None):
+        if int((params or {}).get("page", 1)) > 1:
+            return []
+        return [
+            {"filing": {"company_symbol": "ZZZZ", "filing_date": "2026-09-18"}} for _ in range(10)
+        ]
+
+    with (
+        mock.patch.object(benzinga, "_benzinga_get", side_effect=_get),
+        pytest.raises(NoMarketDataError) as excinfo,
+    ):
+        benzinga.get_insider_transactions_benzinga("AAPL")
+
+    msg = str(excinfo.value)
+    assert "10 rows" in msg
+    assert "2026-09-18..2026-09-18" in msg
+    assert "bounded sample" not in msg, msg
 
 
 def test_news_removed_still_uses_the_camelcase_spelling(monkeypatch):

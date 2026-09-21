@@ -434,6 +434,30 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **The Benzinga firehose miss was reported as a DEFINITIVE ABSENCE after a BOUNDED scan - and probing the
+  endpoints first changed the fix.** `get_insider_transactions_benzinga` and `get_congress_trades_benzinga` scan the market-wide Form 4 /
+  congressional firehoses and filter locally, because both endpoints ignore every ticker parameter. The budget was **four pages of
+  `pagesize=100`**, and the miss path raised `NoMarketDataError(detail="no Form 4 transactions for this symbol in the most recent filings")` -
+  a flat claim of absence after looking at a prefix of one filing day. **Both phases of the recorded plan now land: the budget is ROWS, and the
+  miss names the window it covered.** **Phase 0 changed the fix.** The two routes DO honour `date_from`/`date_to` - but only the **plain**
+  spelling; the bracketed `parameters[date_from]` the calendars use is IGNORED there (a 2020 and a 2024 window both returned 0 rows, so the
+  filter is real rather than ignored). Three further measurements then decided it: (1) `pagesize` is **not a cap** - `pagesize=100` returned
+  233 / 100 / 275 / 289 rows on consecutive pages and `pagesize=1000` returned 2,425 in one response; (2) the page cursor is **stable**
+  (identical row sets on back-to-back walks) but pages 1-4 of a trailing window ALL cover the SAME newest filing day as different slices, so the
+  walk never steps back in filing time; (3) a date window therefore *bounds* the query but does not *extend* the scan - so "the fix may be a
+  date window" is refuted and the plan's step (1), the row budget, is what shipped. **Phase 1:** `_filtered_pages` takes `page_size`/`max_rows`,
+  inspects every row a page returns, and ends on an empty page or the budget - never on a short page. The old `if len(batch) < page_size: break`
+  was unsound on ragged slices (a 3-row page ended the scan with rows still arriving). It returns a `_Scan` record
+  (`rows`/`inspected`/`pages`/`truncated`/`lo`/`hi`) so truncation is observable rather than inferred. **Phase 2:** `_Scan.describe()` renders
+  into both miss paths, e.g. `first 3,425 rows of the newest filings (2026-09-14..2026-09-17), a bounded sample - an older filing may sit
+  beyond it`; a scan that reached the end of the stream drops the hedge. The date axis is the SERVED one - the **filing** date for Form 4
+  (never `date_transaction`, which spans a year inside a single filing day) and the disclosure `report_date` for congress - so the window is
+  not overstated. **Measured live:** a genuinely absent symbol (`AAPL`, `SPY`) now gets the honest bounded-sample message naming 3,425 rows and
+  the window; a present one (`DELL`, 194 rows in the live window) is reached in **1 request inspecting 2,425 rows** where the old budget spent
+  4 requests for 400 nominal rows; congress `AAPL` renders `4 buys / 4 sells (net +0)`. **Tests:** `tests/test_benzinga_surface.py` 27 -> 30,
+  two of them failing-first by mutation with a byte-identical sha256 restore - reinstating the short-page break, and reverting the miss detail
+  to the flat absence claim. **Web impact:** none - both render shapes are unchanged and no tool, CLI flag, env var or JSON key moves.
+
 - 2026-09-21 `(working tree)` - **Every finished report now carries its own TypeSafe verdict: `enable_jev_verdict` writes
   `jev_verdict.json` into the report tree.** Owner instruction: run jev each time a report has finished generating, and put the
   verdict JSON in the corresponding report folder. **The jev core MOVED out of `scripts/` into the package** -
