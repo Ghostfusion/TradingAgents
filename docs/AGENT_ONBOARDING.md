@@ -434,6 +434,32 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Design study: Dream-RSI (arXiv:2609.14858) read against this repo.**
+  `docs/design_dream_rsi_replay_simulator.md`, new. No code changed. The paper optimises the *exploration policy* of a
+  long-horizon program-discovery loop by turning completed discovery trees into a **replay simulator** (score candidate
+  policies offline against recorded outcomes, redeploy the best). **The mechanism does not transfer here, for two
+  independently checked reasons.** (1) **A recorded tree here is a chain, not a tree** - Dream-RSI replays because its tree
+  holds outcomes for branches a different policy would have taken; this repo runs ONE trajectory per analyst, so replay can
+  only evaluate TRUNCATIONS of what actually ran. (2) **The round structure is not recorded at all** - verified on
+  `reports/WDC_20260915_120300`: `tool_evidence.json` leaves carry `ts` = `time.monotonic()` (`evidence_gather._leaf`), a
+  process-relative float and not a round index; those leaves are the deterministic gather's SINGLE pass, not the LLM's
+  rounds; `run_card.json` has no round counts; and `tool_call_log.log_tool_call` writes to `<data_cache_dir>/tool_calls/`,
+  OUTSIDE the report tree, with no round index either. So the paper's `N_im` / `k_i*` have no producer here. **What does
+  transfer:** (a) **the selection rule must not be the paper's** - its `V^{m*} >= V^0` is an IN-SAMPLE guarantee, i.e. the
+  winner's curse, and this repo already owns the correction unused on this question (`strategies/evaluate.py`:
+  `deflated_sharpe:103`, `pbo_flag:235`, `reality_check:311`, `spa:351`, `purged_cpcv_splits:181`); (b) the **prefix-only**
+  constraint (a policy may read only what it could have observed at decision time - the allocation is currently scattered
+  across `research_depth`, `MAX_TOOL_ROUNDS` and a dozen gates with no such statement); (c) a **cost term** - quality
+  (`verify_flags.json`) and cost (`reporting._run_card_llm_cost_est:980`) are measured and NEVER joined; (d) **§5.1 as a
+  falsifiable experiment** - the paper measures explicit directional guidance as consistently UNDERPERFORMING its unguided
+  counterpart, and this repo injects exactly that on by default (`enable_reflection` `default_config.py:819`;
+  `reflection_hint` `strategies/reflection.py:83`; `build_reflection_context:109`; `past_context` `trading_graph.py:619-625`
+  -> `portfolio_manager.py:134-139`). Cheap ablation of an always-on feature, runnable with `context_ab.mcnemar_exact:309`
+  over the 56 recorded trees. **Prior work credited:** `scripts/context_ab.py` IS a replay simulator over recorded trees
+  already (`decision_items_from_tree:1189`, `ARMS:396`, `compact_prose:454`) - for CONTEXT policies; it does not replay how
+  much research to buy. **Pre-existing discrepancy recorded:** `deflated_sharpe`'s docstring says "Euler-Mascheroni-based"
+  but its body is the simplified `observed - sqrt(2*ln n_trials)`. **Do not start at the replay loop** - the plan's Phase E
+  is the last thing to build, not the first.
 - 2026-09-20 `(working tree)` - **`scripts/jev_decide.py`: a utility for the TypeSafe decisions model
   (`typesafe/jev-1.13` on OpenRouter), plus the two facts that make it necessary.** Both obstacles were found by CALLING the
   model, not by reading anything. **(1) It is not a chat model.** `POST /chat/completions` returns `400` and names the endpoint
