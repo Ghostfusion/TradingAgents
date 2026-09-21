@@ -40,7 +40,6 @@ from pathlib import Path
 import pytest
 
 from scripts.score_panel import (
-    CHUNK_SIZE,
     GAP_FPI_MARKET_CAP,
     META_KEY,
     REDUNDANT_ABS_CORR,
@@ -67,7 +66,6 @@ from scripts.score_panel import (
     write_panel,
 )
 from tradingagents.strategies import alpha_health
-
 
 # --------------------------------------------------------------------------
 # Synthetic fixtures: a planted factor, a noise factor, and a stub transport
@@ -219,7 +217,7 @@ def test_a_second_invocation_makes_zero_network_calls(tmp_path):
 def test_the_universe_is_chunked_for_batching_and_the_estimate_is_what_runs(tmp_path):
     transport = Transport()
     big = [f"T{i:04d}" for i in range(1100)]
-    build = build_panel([DATES[0]], big, transport=transport, cache_dir=str(tmp_path))
+    build_panel([DATES[0]], big, transport=transport, cache_dir=str(tmp_path))
     assert len(transport.requested) == 1100
     assert transport.calls == 3, "the batch size is 500 => 500 + 500 + 100"
     est = estimate_cost(1100)
@@ -278,7 +276,7 @@ def test_a_name_with_no_facts_is_recorded_as_a_gap_not_dropped(tmp_path):
     class _Gappy(Transport):
         def __call__(self, chunk, date):
             res = super().__call__(chunk, date)
-            gaps = {t: "no annual XBRL facts on EDGAR" for t in chunk[:2]}
+            gaps = dict.fromkeys(chunk[:2], "no annual XBRL facts on EDGAR")
             return res._replace(fins={t: f for t, f in res.fins.items()
                                       if t not in gaps}, gaps=gaps)
 
@@ -447,7 +445,7 @@ def test_the_row_floors_still_withhold_a_row_and_state_the_reason():
 def test_na_is_not_zero_for_the_panel_metrics():
     panel = _planted_panel(_truth(), dates=DATES)
     # half the names lose the factor at every date: they leave the denominator
-    for d, rows in panel.items():
+    for _d, rows in panel.items():
         for t in sorted(rows)[: len(rows) // 2]:
             rows[t].pop("fcf_yield", None)
     report = evaluate_panel(panel, dates=DATES)
@@ -531,7 +529,7 @@ def test_the_trend_momentum_rs_block_is_reported_with_its_pairwise_correlations(
     panel = _planted_panel(_truth(), dates=DATES)
     # make the block's members one bet by construction, as the plan says they are
     for rows in panel.values():
-        for t, row in rows.items():
+        for _t, row in rows.items():
             row["roc20"] = row["adx"] * 0.5
             row["rsi"] = row["adx"] * -0.25 + 0.1
     report = evaluate_panel(panel, dates=DATES)
@@ -551,7 +549,7 @@ def test_the_trend_momentum_rs_block_is_reported_with_its_pairwise_correlations(
 def test_the_fcf_yield_cluster_is_reported_with_its_pairwise_correlations():
     panel = _planted_panel(_truth(), dates=DATES)
     for rows in panel.values():
-        for t, row in rows.items():
+        for _t, row in rows.items():
             row["price_to_free_cash_flow"] = 1.0 / row["fcf_yield"]
             row["price_to_cash_flow"] = 2.0 / row["fcf_yield"]
     report = evaluate_panel(panel, dates=DATES)
@@ -568,7 +566,7 @@ def test_the_fcf_yield_cluster_is_reported_with_its_pairwise_correlations():
 def test_a_redundant_factor_is_marked_and_the_category_verdict_follows():
     panel = _planted_panel(_truth(), dates=DATES)
     for rows in panel.values():
-        for t, row in rows.items():
+        for _t, row in rows.items():
             row["earnings_yield"] = row["fcf_yield"]
     report = evaluate_panel(panel, dates=DATES)
     assert report["factors"]["earnings_yield"]["redundant"] is True

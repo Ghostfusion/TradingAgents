@@ -55,6 +55,34 @@ def test_compute_social_scores_failure_none(tmp_path):
         assert compute_social_scores("ZZZ", cache_dir=str(tmp_path)) is None
 
 
+def test_readers_do_not_append_to_the_baseline(tmp_path):
+    """One run must advance the rolling baseline ONCE.
+
+    `compute_social_scores` has three callers in a run - the sentiment
+    analyst's prefetch plus two tool-side readers (`get_sentiment_computed` on
+    the market toolset, and the SentimentScore component assembler). Every one
+    of them used to append, so a single run wrote today's score two or three
+    times: the baseline accumulated duplicate rows, and each later read's
+    `surprise_velocity` was z-scored against a history that already contained
+    today's value. `record=False` makes every caller but the prefetch a READER.
+    """
+    with mock.patch(
+        "tradingagents.dataflows.stocktwits.stocktwits_counts",
+        return_value=(12, 4, 2, 18),
+    ):
+        # The designated recorder: the analyst's prefetch.
+        compute_social_scores("AAPL", cache_dir=str(tmp_path))
+        # Two readers in the same run.
+        r_read = compute_social_scores("AAPL", cache_dir=str(tmp_path), record=False)
+        compute_social_scores("AAPL", cache_dir=str(tmp_path), record=False)
+
+    baseline = tmp_path / "sentiment_baseline_AAPL.jsonl"
+    # Exactly ONE row, not three.
+    assert baseline.read_text(encoding="utf-8").split() == ["0.5"]
+    # And the reader still returns a real score - it is a reader, not a no-op.
+    assert r_read is not None and r_read["computed_score"] == pytest.approx(0.5)
+
+
 def test_computed_line_renders():
     line = computed_sentiment_line(
         {"computed_score": -0.42, "computed_velocity": 1.2, "sample_size": 120}

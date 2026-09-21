@@ -169,8 +169,6 @@ def test_mention_heat_and_the_tone_legs_are_separate_components() -> None:
 def test_attention_and_tone_are_not_summed_into_one_number() -> None:
     """The two components are in different categories, so neither can stand in
     for the other in the composite."""
-    res = sentiment_score(_full_values())
-    cats = res["categories"]
     tone_cat = COMPONENTS["weighted_tone"].category
     heat_cat = COMPONENTS["mention_heat"].category
     assert tone_cat != heat_cat
@@ -268,7 +266,7 @@ def test_a_reader_recomputing_the_weighted_mean_gets_the_printed_score() -> None
 
 
 def test_a_supplied_weight_vector_is_used_and_printed() -> None:
-    w = {cat: 1.0 for cat in CATEGORY_ORDER}
+    w = dict.fromkeys(CATEGORY_ORDER, 1.0)
     w["news_sentiment"] = 4.0
     res = sentiment_score(_full_values(), weights=w)
     num = sum(w[c] * res["categories"][c]["score"] for c in CATEGORY_ORDER)
@@ -375,4 +373,4 @@ def test_scale_table_is_symmetric_and_canonical_is_unit() -> None:
 
 
 def test_the_composite_floor_is_below_the_full_category_set() -> None:
-    assert COMPOSITE_MIN_COVERAGE <= len(CATEGORY_ORDER)
+    assert len(CATEGORY_ORDER) >= COMPOSITE_MIN_COVERAGE

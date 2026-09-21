@@ -24,6 +24,12 @@ from pathlib import Path
 
 import pytest
 
+from tradingagents.strategies.risk_multiplier import (
+    HARD_NAMES,
+    SOFT_CATALOG,
+    RiskMultiplier,
+    combine,
+)
 from tradingagents.strategies.trade_score import (
     COMPOSITE_MIN_COVERAGE,
     ENGINE_LETTERS,
@@ -42,12 +48,6 @@ from tradingagents.strategies.trade_score import (
     promotion_state,
     trade_score,
 )
-from tradingagents.strategies.risk_multiplier import (
-    HARD_NAMES,
-    SOFT_CATALOG,
-    RiskMultiplier,
-    combine,
-)
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tradingagents" / "strategies" / "trade_score.py"
@@ -57,7 +57,7 @@ MODULE_PATH = REPO / "tradingagents" / "strategies" / "trade_score.py"
 ACCEPTANCE_CASE = {"F": 92, "T": 85, "R": 78, "K": 35}
 
 #: Every engine at its maximum — the composite the gate must ignore.
-MAXIMAL = {name: 100.0 for name in ENGINE_ORDER}
+MAXIMAL = dict.fromkeys(ENGINE_ORDER, 100.0)
 
 
 def _references(path: Path) -> set[str]:
@@ -222,7 +222,7 @@ def test_a_missing_engine_does_not_punish_the_name() -> None:
 
 
 def test_no_engine_at_all_withholds_never_zero_never_fifty() -> None:
-    for empty in ({}, {name: None for name in ENGINE_ORDER}):
+    for empty in ({}, dict.fromkeys(ENGINE_ORDER)):
         res = trade_score(empty)
         assert res["score"] is None
         assert res["score"] not in (0, 50)
@@ -251,7 +251,7 @@ def test_the_floor_is_a_count_capped_at_the_engine_set() -> None:
     from tradingagents.strategies.score_engine import coverage_floor
 
     assert COMPOSITE_MIN_COVERAGE == 2
-    assert COMPOSITE_MIN_COVERAGE <= len(ENGINE_ORDER)
+    assert len(ENGINE_ORDER) >= COMPOSITE_MIN_COVERAGE
     assert coverage_floor(COMPOSITE_MIN_COVERAGE, len(ENGINE_ORDER)) == COMPOSITE_MIN_COVERAGE
     # one engine is not a composite: the design's whole point is four numbers
     res = trade_score({"fundamental": 90})
@@ -654,8 +654,6 @@ def test_the_engine_assembly_never_substitutes_a_number(monkeypatch) -> None:
     import tradingagents.agents.utils.analysis_tools as at
     import tradingagents.dataflows.config as cfgmod
     import tradingagents.strategies.fundamental_score as fs
-    import tradingagents.strategies.regime_score as rs
-    import tradingagents.strategies.technical_score as ts
     from tradingagents.strategies.quant_scorecard import ENGINE_GATES
 
     def _boom(*a, **kw):

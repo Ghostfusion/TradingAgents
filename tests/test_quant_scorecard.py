@@ -797,7 +797,7 @@ def test_a_fully_gated_and_measured_scorecard_reads_complete():
     switched off is `PARTIAL`, not complete-with-fewer-parts. That is what stops
     a half-configured run reading as a whole one (master rule 3).
     """
-    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every = dict.fromkeys(qs.ENGINE_GATES, 50.0)
     every.update(
         {"fundamental": 92.0, "technical": 85.0, "regime": 78.0, "risk": 35.0}
     )
@@ -876,7 +876,7 @@ def test_the_card_key_carries_the_same_block_the_debate_read():
     """The gate-on card gains exactly one key, and its block is the prompt's block."""
     from tradingagents.reporting import _run_card_quant_scorecard
 
-    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every = dict.fromkeys(qs.ENGINE_GATES, 50.0)
     every.update(
         {"fundamental": 92.0, "technical": 85.0, "regime": 78.0, "risk": 35.0}
     )
@@ -1198,7 +1198,7 @@ def test_the_three_engine_states_are_named_not_inferred():
 
 def test_a_missing_measurement_makes_it_partial_even_with_no_gate_off():
     """The case the distinction exists for: everything enabled, one engine NA."""
-    every = {name: 50.0 for name in qs.ENGINE_GATES}
+    every = dict.fromkeys(qs.ENGINE_GATES, 50.0)
     every["event"] = None  # enabled, but it could not measure
     snap = _render(scores=every, enabled=set(qs.ENGINE_GATES), status="RESEARCH_ONLY")
     status = qs.scorecard_status(snap)

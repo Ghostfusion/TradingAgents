@@ -18,6 +18,7 @@ and every consumer falls back to the legacy parse-from-history path.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 
 from tradingagents.agents.schemas import IndependentStance, render_stance
 from tradingagents.agents.utils.agent_utils import (
@@ -202,10 +203,19 @@ def create_independent_stance_node(roles, llm, backup_llm=None):
     return independent_stance_node
 
 
-def independent_agreement(risk_stances: dict) -> float | None:
-    """agreement_score over the INDEPENDENT risk ratings; None < 2 valid."""
+def independent_agreement(
+    risk_stances: dict, roles: Sequence[str] | None = None
+) -> float | None:
+    """agreement_score over the INDEPENDENT ratings; None < 2 valid.
+
+    ``roles`` selects which sampled stances to score, so the research debate can
+    score its OWN bull/bear pair instead of the risk trio's. Omitted, it is
+    ``RISK_ROLES`` - the original contract, unchanged. Parameterised rather than
+    reimplemented: agreement has exactly one producer.
+    """
+    roles = tuple(roles) if roles else RISK_ROLES
     ratings = []
-    for role in RISK_ROLES:
+    for role in roles:
         s = risk_stances.get(role) or {}
         rating = s.get("rating")
         if isinstance(rating, str) and rating:

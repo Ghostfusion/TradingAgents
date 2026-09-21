@@ -23,6 +23,13 @@ free, keyless and point-in-time (`IMPLEMENTATION_PLAN.md` §3.2). Every line
 below that names EODHD as the fundamentals source is therefore history, kept as
 the evidence for that change.
 
+**Claim corrected, 2026-09-20.** §4's `news_score` row read `**0** measured`,
+carried over from the run of record. The panel half of that number still holds
+and was re-measured (§4), so the row keeps it and now names it; but it is not
+the engine's answer. Commit `ccd0c5b` (2026-09-19) fixed the news reader, which
+had discarded every article, and the live per-symbol path now measures **2 of
+11** components. The row prints both axes with their provenance.
+
 **Run of record** (2026-09-18, engine at `1b8e82d` + the WP-10 work):
 
 ```
@@ -254,13 +261,17 @@ CPCV overfit mask on 13 of them is the strongest form of warning.
 Every one of these engines **exists in the tree** and is read by the registry
 (the run's `engines` block), and none of them carries a single panel-measurable
 factor. The reason is the same in each case and is stated rather than implied.
+The `measured` column is the **panel's** own count (`n_measured`, the engine's
+declared factors that appear as panel metrics); where an engine measures on the
+live per-symbol path but not on the panel, the cell prints both numbers with the
+axis named — `news_score` is the one such row today.
 
 | engine | declared factors | measured | why not |
 | --- | --: | --: | --- |
 | `fundamental_score` | 28 | **0** | the fundamentals leg now has a live, keyless source — SEC EDGAR XBRL (2026-09-18, `IMPLEMENTATION_PLAN.md` §3.2) — so the engine is no longer vendor-blocked; what remains is the wide panel run, not a negotiation. The leg is **proven live on 7 names at 17-25 metrics each** (MSFT, LULU, WDC, SIMO, TSM, NVDA, AMZN), with Beneish M absent for the documented marketable-securities reason and IFRS filers (TSM) recorded as named `_meta.fundamentals_gaps`. `n_measured` stays **0** because that column is what the panel actually measured and no wide panel run has been done yet — **not** because the engine is still blocked. **The FCF-yield cluster, the valuation category and the growth category are UNMEASURED pending that run.** |
 | `risk_score` | 32 | **0** | its inputs are position/book-level (`book_risk`, drawdown, concentration) or options/vol surfaces — no cross-sectional producer on a per-name price+fundamentals panel |
 | `sentiment_score` | 18 | **0** | news/social/analyst/options/short-interest producers are per-name vendor reads; a bulk panel does not carry them |
-| `news_score` | 11 | **0** | GDELT/EODHD news reads are per-name and per-article; the engine also has no category weight table the registry can read (its vector prints `UNMEASURED` with that reason) |
+| `news_score` | 11 | **0** panel / **2 of 11** live | **Corrected 2026-09-20 — the panel's `0` is not the engine's answer.** The `0` is re-measured, not carried over: re-running the harness over the same 30 cached panels (`2026-08-06` … `2026-09-17`, median 147 names) returns `engines.news_score.n_measured: 0`, and the reason is structural — none of the engine's 11 declared component names is in the panel's 37-name metric vocabulary (`analysis_tools._technical_components` + `panel_row_from_fin`), a bulk cross-section has no per-article leg. On the **live per-symbol path** the engine now measures **2 of 11** (`relevance`, `novelty`): of the 8 `reports/*/run_card.json` cards that carry a `news_score` key, **3** carry a real score — MSFT **57.6** (twice) and QCOM **58.8**, all 2026-09-20, coverage 0.25, basis `NewsScore: 2 of 11 component(s) measured` — and **5** (2026-09-19 and earlier) carry `"score": null, "unavailable": "no news producer measured"`. That `null` was the `ccd0c5b` defect: the Alpha Vantage NEWS_SENTIMENT body is a JSON **string**, the reader type-checked it as a dict and discarded every article, so the engine was dead for every symbol on every date (its own suite, `py -3.12 -m pytest tests/test_news_score.py -q`: 25 passed). The reads remain per-name and per-article (chain `EODHD /sentiments` then `Alpha Vantage NEWS_SENTIMENT` then `GDELT` tone) and no bulk panel carries them; the 9 components with no producer still print `NA`, never `0`. The engine still has no `CATEGORY_WEIGHTS` the registry can read — `COMPONENT_WEIGHTS` is a component table, not a category one — so its weight vector prints `UNMEASURED` with that reason. |
 | `regime_score` | 6 | **0** | it is a **market-level** object: its components are market trend, breadth, VIX percentile and term structure — one value per date, not one per name. A cross-sectional IC is not the right statistic for it, and this layer does not fake one. |
 | `event_state` | 0 | **0** | **not a scored engine**: EventScore is a state/flag object (master §1.4: four output types stay four), so it is out of the panel's scope by construction, and the registry says so |
 

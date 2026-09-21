@@ -25,7 +25,6 @@ from tradingagents.strategies.technical_score import (
     CATEGORY_ORDER,
     CATEGORY_WEIGHTS,
     COMPONENTS,
-    COMPOSITE_MIN_COVERAGE,
     RAMPS,
     TECH_BANDS,
     align_components,
@@ -223,7 +222,7 @@ def test_a_reader_recomputing_the_weighted_mean_gets_the_printed_score() -> None
 
 
 def test_a_supplied_weight_vector_is_printed_and_used() -> None:
-    w = {cat: 1.0 for cat in CATEGORY_ORDER}
+    w = dict.fromkeys(CATEGORY_ORDER, 1.0)
     w["trend"] = 4.0
     res = technical_score(_full_values(), weights=w)
     num = sum(w[c] * res["categories"][c]["score"] for c in CATEGORY_ORDER)
@@ -457,7 +456,7 @@ def test_run_card_block_carries_the_attribution(monkeypatch) -> None:
     assert block["status"] == "ADVISORY"
     assert block["score"] is not None
     num = den = 0.0
-    for cat, entry in block["categories"].items():
+    for _cat, entry in block["categories"].items():
         if entry["score"] is None:
             continue
         num += entry["weight"] * entry["score"]

@@ -646,6 +646,68 @@ def get_valuation_z_score(
     )
 
 
+#: The two annual period ROWS of the vendor's estimate-trend frame that carry
+#: the consensus EPS levels this reader needs (a forward P/E needs a forward
+#: EPS; an expected growth needs the year before it). The frame's rows are
+#: ``0q`` / ``+1q`` / ``0y`` / ``+1y``; ``dataflows/yfinance_sector`` names the
+#: reader's default period (``0q``) and documents the shape.
+_FORWARD_PEG_BASIS = "vendor consensus EPS estimate trend (current vs next FY)"
+_FY_CURRENT = "0y"
+_FY_NEXT = "+1y"
+
+
+def _forward_peg_read(ticker: str, price: float | None) -> float | None:
+    """Forward PEG = forward P/E / expected growth (%), or None.
+
+    Both legs come from ONE source - the vendor's own consensus EPS estimate
+    levels, read through the existing producer
+    ``dataflows/yfinance_sector.fetch_estimate_trend`` (the same reader the
+    screener's ``RevEC`` leg uses): forward P/E = ``price / next-FY consensus
+    EPS``, expected growth = the next-FY level over the current-FY level.
+
+    Read only when ``enable_analyst_estimates`` is on - that is the gate the
+    estimate trend is already held behind, and with it off this returns None
+    without touching the network, so a run that never enabled the estimate
+    trend is unchanged.
+
+    None - never a proxy - when the gate is off, either level is missing or
+    unparseable, a base is non-positive (a growth rate off a negative EPS base
+    is not a growth rate), the expected growth is not positive (a negative
+    denominator is not a PEG), or the price is unusable. A TRAILING growth
+    read (``eps_yoy`` / ``revenue_yoy``) is deliberately NOT substituted: the
+    parameter names a forward measure, and a trailing rate under this name
+    would promise more than it measures.
+    """
+    if price is None or price <= 0:
+        return None
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        if not (get_config() or {}).get("enable_analyst_estimates"):
+            return None
+    except Exception:  # noqa: BLE001 - a config read must never break the tool
+        return None
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_estimate_trend
+
+        current = fetch_estimate_trend(ticker, period=_FY_CURRENT)
+        nxt = fetch_estimate_trend(ticker, period=_FY_NEXT)
+        eps_now = float(current[0]) if current else None
+        eps_next = float(nxt[0]) if nxt else None
+    except Exception:  # noqa: BLE001 - advisory input degrades to unmeasured
+        return None
+    if eps_now is None or eps_next is None:
+        return None
+    # `not (x > 0)` rather than `x <= 0`: a NaN level (not a number a vendor
+    # should ship, but cheap to refuse) fails this form instead of passing it.
+    if not (eps_now > 0 and eps_next > 0):
+        return None
+    growth = eps_next / eps_now - 1.0
+    if not growth > 0:
+        return None
+    return (price / eps_next) / (growth * 100.0)
+
+
 @tool
 def get_value_dip_setup(
     ticker: Annotated[str, "ticker symbol"],
@@ -757,6 +819,12 @@ def get_value_dip_setup(
             eps_surprise = float(m.group(0).rstrip("%")) / 100.0
     except Exception:  # noqa: BLE001 - degrade to None (no fabrication)
         eps_surprise = None
+    # Re-rating evidence #4: the measured forward PEG. `forward_peg` was a dead
+    # parameter (no caller passed it) because nothing in the tree produced an
+    # expected growth rate; `_forward_peg_read` is that producer, over the
+    # vendor's own consensus estimate levels. Unmeasured => None, never a
+    # trailing-growth proxy under a forward name.
+    forward_peg = _forward_peg_read(ticker, float(closes[-1]) if closes else None)
     setup = value_dip_setup(
         closes,
         highs,
@@ -771,6 +839,7 @@ def get_value_dip_setup(
         fcf=fcf,
         regime_gate=regime_row,
         eps_surprise=eps_surprise,
+        forward_peg=forward_peg,
         require_knife=bool(
             (__import__("tradingagents.dataflows.config", fromlist=["get_config"]).get_config() or {}).get(
                 "value_dip_knife_enable"
@@ -840,8 +909,10 @@ def get_value_dip_setup(
         )
     rr = rows.get("re_rating") or {}
     if rr.get("measured"):
+        _fp = (rr.get("inputs") or {}).get("forward_peg")
         lines.append(
             f"  re_rating: pass={rr.get('pass')} evidence={rr.get('evidence') or 'none measured'}"
+            + (f" [forward PEG basis: {_FORWARD_PEG_BASIS}]" if _fp is not None else "")
         )
     kv = rows.get("knife_velocity") or {}
     if kv:

@@ -535,6 +535,68 @@ def test_basis_of_records_percentage_points_as_a_percentage():
     assert rv._basis_of("VRP 0.0490", "vrp", "0.0490") == "ratio"
 
 
+def test_basis_of_binds_the_atr_window_printed_beside_the_figure():
+    """One report quotes several ATR parameterisations, so the basis carries one.
+
+    A basis of `ratio` for all of them made the ledger read ONE metric printing
+    several values: AMAT 2026-09-14's verified `atr(14) 22.50` beside the
+    chandelier's `ATR(14, simple mean 16.7221)` classified as a `defect`
+    against a single producer. Every spelling the reports print binds to the
+    figure's own label.
+    """
+    assert rv._basis_of("ATR(14) 3.25 = 6.90% of price", "atr", "3.25") == "atr:14"
+    assert rv._basis_of("ATR-14 3.25 on this close", "atr", "3.25") == "atr:14"
+    assert rv._basis_of("atr_14 3.25 on this close", "atr", "3.25") == "atr:14"
+    assert rv._basis_of("14-bar ATR 3.25 on this close", "atr", "3.25") == "atr:14"
+    assert rv._basis_of("ATR 14 3.25 on this close", "atr", "3.25") == "atr:14"
+    # The window alone does not identify an ATR: the swing tools state a simple
+    # mean of TR where the snapshot's is Wilder's, at the same 14.
+    assert (
+        rv._basis_of("ATR(14, simple mean of TR)=2.5302 below", "atr", "2.5302")
+        == "atr:14-simple"
+    )
+    # `_period_tag_near`-style proximity: HPE 2026-09-14 writes "The verified
+    # ATR(14) is 3.75. The swing model uses its own ATR basis of 3.7714", and
+    # reading the sentence's window as 3.7714's would re-collapse the two.
+    far = "The verified ATR(14) is 3.75. The swing model uses its own ATR basis of 3.7714."
+    assert rv._basis_of(far, "atr", "3.7714") == "atr"
+
+
+def test_basis_of_does_not_read_an_atr_multiple_or_a_bar_anchor_as_a_window():
+    """`(n x ATR)` is a multiple OF the ATR, and the 22-bar anchor is a high.
+
+    "chandelier 54.5252 (3x ATR 2.5302 below the 22-bar high)" is ATR 2.5302
+    with no stated window; reading the 3 (or the 22 of the bar anchor) as one
+    hands the value a basis the report never printed.
+    """
+    line = "chandelier 54.5252 (3x ATR 2.5302 below the 22-bar high)"
+    assert rv._basis_of(line, "atr", "2.5302") == "atr"
+
+
+def test_two_atr_windows_classify_as_a_basis_difference():
+    """Two windows are two measurements, so the ledger may not call it a defect."""
+    text = (
+        "- The verified snapshot prints ATR(14) 3.25 = 6.90% of price.\n"
+        "- The swing tool's own ATR(21) reads 2.53 on the same close.\n"
+    )
+    rows = rv.basis_conflicts(rv._basis_registry(text, set()))
+    assert [r.classification for r in rows] == ["basis_difference"], rows[0].reason
+
+
+def test_one_atr_window_printed_at_two_values_stays_a_defect():
+    """The window basis is a narrower basis, not a blanket excuse.
+
+    One producer printing ATR(14) at two values is still one measurement at two
+    values - the only class §10 may act on - so it must stay a `defect`.
+    """
+    text = (
+        "- The verified snapshot prints ATR(14) 3.25 on this close.\n"
+        "- The summary table repeats ATR(14) 3.77 for the same close.\n"
+    )
+    rows = rv.basis_conflicts(rv._basis_registry(text, set()))
+    assert [r.classification for r in rows] == ["defect"], rows[0].reason
+
+
 def test_basis_registry_carries_the_producer():
     reg = rv._basis_registry("`get_ratios` reports EV/EBITDA **18.21**", set())
     assert [(b.metric, b.producer) for b in reg] == [("ev/ebitda", "get_ratios")]
@@ -1572,6 +1634,13 @@ def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypat
     # UNKNOWN (which now means "nothing ran at all"). The degrade contract is
     # unchanged where it matters: never raise, and never upgrade the LLM verdict.
     assert payload["verification"]["fundamentals"]["overall"] == "NUMERIC_ONLY"
+    # The failure is NAMED. This branch used to fall through with no `reason`
+    # at all AND count against `max_calls` as a success, so a run whose calls
+    # were all rejected read `UNKNOWN` everywhere with nothing to tell it apart
+    # from a verifier that never started.
+    entry = payload["verification"]["fundamentals"]
+    assert "verify call failed" in entry["reason"], entry
+    assert "provider down" in entry["reason"]
 
 
 def test_verify_report_dir_unknown_when_there_is_no_figure_to_check(tmp_path, monkeypatch):
@@ -1584,6 +1653,9 @@ def test_verify_report_dir_unknown_when_there_is_no_figure_to_check(tmp_path, mo
     payload = rv.verify_report_dir(report_dir, llm_override=_NoopLLM(), max_calls=1)
     assert payload["verification"]["fundamentals"]["overall"] == "UNKNOWN"
     assert payload["verification"]["fundamentals"]["basis"] == []
+    # UNKNOWN here is a REJECTED call, not a verifier that never ran - and the
+    # difference is on the record.
+    assert "verify call failed" in payload["verification"]["fundamentals"]["reason"]
 
 
 class _NoopLLM:

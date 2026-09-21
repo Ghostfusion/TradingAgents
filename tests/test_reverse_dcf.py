@@ -75,7 +75,7 @@ class TestPriceImpliedFcf:
         r = _msft()
         implied = [row["implied_fcf"] for row in r["rows"]]
         assert len(implied) > 1
-        assert all(later < earlier for earlier, later in zip(implied, implied[1:]))
+        assert all(later < earlier for earlier, later in zip(implied, implied[1:], strict=False))
 
     def test_rows_round_trip_back_to_the_price(self):
         # Each row, fed forward through the shared convention, must reproduce

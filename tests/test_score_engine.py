@@ -10,7 +10,6 @@ from tradingagents.strategies.score_engine import (
     coverage_floor,
 )
 
-
 # --- 1. an absent component leaves the denominator ---------------------------
 
 def test_an_absent_component_is_not_a_zero():

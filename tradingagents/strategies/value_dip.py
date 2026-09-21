@@ -1002,7 +1002,13 @@ def value_dip_setup(
     loose_technical: bool = False,
     min_closes_trend: int = 200,
     regime_gate: dict | None = None,
-    catalyst_window: bool = False,
+    # Tri-state, forwarded unchanged to ``regime_gate_read``: ``None`` = the
+    # caller supplied NO event fact, so the regime read reports the catalyst
+    # axis UNMEASURED. A ``False`` DEFAULT was the D-11 defect - it asserted a
+    # measurement nobody made and the model quoted "no catalyst" back as fact.
+    # An explicit ``True``/``False`` is the caller's measured answer and is
+    # still honoured (and reported) as such.
+    catalyst_window: bool | None = None,
     eps_surprise: float | None = None,
     revision_score: float | None = None,
     inst_accum: bool | None = None,
@@ -1134,6 +1140,9 @@ def value_dip_setup(
         try:
             from .regime import regime_gate_read
 
+            # D-11: forwarded UNCHANGED, tri-state. An omitted
+            # ``catalyst_window`` stays ``None`` -> the read reports the axis
+            # unmeasured; it is never coerced to a measured-looking ``False``.
             regime_row = regime_gate_read(closes, cfg=None, catalyst_window=catalyst_window)
         except Exception:  # noqa: BLE001 - degrade to unknown, never fail
             regime_row = None

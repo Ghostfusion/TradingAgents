@@ -56,6 +56,15 @@ SECTION_PROSE = {
 
 ROUND_RECORDS = "round_records"
 SCORE_SERIES = "score_series"
+# The independent pre-debate agreement for THIS section's own roles, read by
+# `_complete_round`'s consensus contour. It lives on the section channel because
+# `_complete_round` only ever receives the channel, not the graph state.
+INDEPENDENT_AGREEMENT = "independent_agreement"
+# Where the sampled stances live in the GRAPH STATE, per section.
+STANCES_KEY = {
+    "research": "researcher_independent_stances",
+    "risk": "risk_independent_stances",
+}
 CLAIM_LEDGER = "claim_ledger"
 CLAIM_LEDGER_MD = "claim_ledger_md"
 L1_KEY = "l1"
@@ -615,6 +624,14 @@ def create_debate_l1(
         }
         new_ds[CLAIM_LEDGER_MD] = ledger.render_markdown(used_claim_ids=used_claim_ids)
         new_ds[L1_KEY] = {"side": role, **severity}
+        # D-10: `_complete_round` reads the independent pre-debate agreement off
+        # the CHANNEL, and nothing ever wrote it - so `termination_check`'s
+        # consensus contour could never fire and every debate ran to its round
+        # cap. The stances live in the graph STATE, which only this node sees,
+        # so this is the one place the read can be joined. None (the independent
+        # pass off, or fewer than two rated roles) keeps the contour off, which
+        # is the honest answer rather than a fabricated consensus.
+        new_ds[INDEPENDENT_AGREEMENT] = _section_agreement(state, section)
 
         if severity.get("l1_action") == TRIGGER_REGEN:
             new_ds[PENDING_REGEN] = role
@@ -630,6 +647,28 @@ def create_debate_l1(
         return {channel: new_ds}
 
     return l1_node
+
+
+def _section_agreement(state: dict, section: str) -> float | None:
+    """The independent pre-debate agreement for this section's OWN roles.
+
+    The research debate scores its bull/bear pair and the risk debate its
+    aggressive/conservative/neutral trio - each scores its own pre-debate reads,
+    never the other section's. One producer: this delegates to
+    ``independent_vote.independent_agreement`` rather than re-deriving a score.
+
+    ``None`` when the independent pass did not run (its gate is off) or fewer
+    than two roles carry a rating. None is not a neutral value: it is what keeps
+    the consensus contour off, and a fabricated agreement would terminate a
+    debate that has not converged.
+    """
+    try:
+        from tradingagents.agents.utils.independent_vote import independent_agreement
+
+        stances = state.get(STANCES_KEY.get(section, "")) or {}
+        return independent_agreement(stances, roles=SECTION_ROLES[section])
+    except Exception:  # noqa: BLE001 - a missing producer is not consensus
+        return None
 
 
 def _complete_round(
@@ -664,7 +703,8 @@ def _complete_round(
     ds[SCORE_SERIES] = score_series
 
     # Contour: consensus-exit from the independent pre-debate stances.
-    inv = ds.get("independent_agreement")
+    # Written by `l1_node` from the graph state (see INDEPENDENT_AGREEMENT).
+    inv = ds.get(INDEPENDENT_AGREEMENT)
     hard = ds.get(TERMINATED, False)
     decision, reason = termination_check(
         score_series,
@@ -953,6 +993,8 @@ __all__ = [
     "SECTION_PROSE",
     "ROUND_RECORDS",
     "SCORE_SERIES",
+    "INDEPENDENT_AGREEMENT",
+    "STANCES_KEY",
     "CLAIM_LEDGER",
     "CLAIM_LEDGER_MD",
     "L1_KEY",

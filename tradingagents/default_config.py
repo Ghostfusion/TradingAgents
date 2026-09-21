@@ -244,6 +244,14 @@ _ENV_OVERRIDES = {
     # float turnover, days-to-absorb, IWF, HHI). Off by default - preserves
     # current behavior.
     "TRADINGAGENTS_ENABLE_LIQUIDITY_GATE": "enable_liquidity_gate",
+    # Compiled decision context (the Phase A-E deterministic block injected
+    # into the Trader / PM / risk-debator prompts: regime gate, re-rating
+    # evidence, trade plan card, risk snapshot, drift hint). Documented and set
+    # in `.env` since 2026-09-04 but NEVER read - the block was built
+    # unconditionally, so the variable was inert. Default True preserves that
+    # behaviour exactly; the gate exists so the injection can be turned OFF
+    # without editing code.
+    "TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT": "enable_computed_context",
     # Pre-market review (docs/pre_market_review.md): opt-in gate for the
     # in-batch same-night catalyst/quality re-check (choice (a)).
     "TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW": "enable_pre_market_review",
@@ -934,6 +942,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "max_book_names": 10,  # V3: minimum names for diversification
         # Risk governor (risk_management_plan.md): deterministic risk gate.
         "enable_risk_governor": False,
+        # Compiled decision context (Phase A-E): the deterministic block
+        # (regime gate / re-rating / trade plan / risk snapshot / drift hint)
+        # injected into the Trader, PM and risk-debator prompts. True matches
+        # the shipped behaviour the block always had; the key exists so the
+        # documented TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT is no longer inert.
+        "enable_computed_context": True,
         "enable_decision_audit": False,  # item 6: PM claim-vs-computed audit note
         "risk_max_position_pct": 0.45,  # R0: book cap
         "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget

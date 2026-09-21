@@ -230,7 +230,7 @@ class TestOpenRouterRequestShape:
         assert captured["kwargs"]["extra_body"]["provider"]["allow_fallbacks"] is False
 
     def test_bad_sort_and_bad_latency_fail_loudly(self, monkeypatch):
-        captured = self._capture(monkeypatch)
+        self._capture(monkeypatch)
         cfg_mod, cfg = self._config(openrouter_provider_sort="cheapest")
         cfg_mod.set_config(cfg)
         with pytest.raises(ValueError, match="openrouter_provider_sort"):

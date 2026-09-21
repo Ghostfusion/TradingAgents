@@ -5867,7 +5867,18 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
             vals["neutral_share"] = agg[-1]["neutral_share"]
         if agg[-1].get("dispersion") is not None:
             vals["dispersion"] = agg[-1]["dispersion"]
-    social = compute_social_scores(ticker)
+    # record=False + the configured cache dir: this is a READER of the same
+    # baseline the sentiment analyst's prefetch RECORDS. It used to append a
+    # third time per run, and to the DEFAULT cache dir rather than the run's
+    # configured one - so it could write today's score into a different
+    # baseline file than the one the prefetch reads.
+    try:
+        from tradingagents.dataflows.config import get_config as _gc
+
+        _cache = (_gc() or {}).get("data_cache_dir")
+    except Exception:  # noqa: BLE001 - a missing config is not a wrong number
+        _cache = None
+    social = compute_social_scores(ticker, cache_dir=_cache, record=False)
     if social:
         if social.get("computed_score") is not None:
             vals["social_score"] = social["computed_score"]
@@ -8401,7 +8412,13 @@ def get_sentiment_computed(
         return f"computed sentiment unavailable for {ticker}: {exc}"
     try:
         cfg = get_config()
-        result = _scores(ticker, cache_dir=cfg.get("data_cache_dir"), limit=30)
+        # record=False: the sentiment analyst's prefetch is the single RECORDER
+        # of the rolling baseline. This tool used to append too, so one run
+        # wrote today's score twice and the second read's surprise velocity was
+        # z-scored against a history already containing today's value.
+        result = _scores(
+            ticker, cache_dir=cfg.get("data_cache_dir"), limit=30, record=False
+        )
         if not result:
             return f"computed sentiment unavailable for {ticker}: no StockTwits data."
         line = _line(result)

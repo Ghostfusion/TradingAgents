@@ -81,7 +81,7 @@ def test_the_imminence_scalar_is_monotone_and_bounded() -> None:
     for family, horizon in HORIZONS.items():
         values = [imminence(d, horizon) for d in range(-5, int(2 * horizon) + 1)]
         assert all(v is not None and 0.0 <= v <= 1.0 for v in values), family
-        assert all(b <= a for a, b in zip(values, values[1:])), family  # non-increasing
+        assert all(b <= a for a, b in zip(values, values[1:], strict=False)), family  # non-increasing
         assert imminence(0, horizon) == 1.0, family
         assert imminence(horizon, horizon) == 0.0, family
         assert imminence(horizon + 1, horizon) == 0.0, family
@@ -195,7 +195,7 @@ def test_the_printed_family_scores_recompute_the_printed_composite() -> None:
 
 
 def test_a_supplied_weight_vector_is_printed_and_used() -> None:
-    w = {family: 1.0 for family in FAMILY_ORDER}
+    w = dict.fromkeys(FAMILY_ORDER, 1.0)
     w["earnings"] = 3.0
     res = event_state(_full_components(), weights=w)
     assert res["weights"] == w
@@ -217,7 +217,7 @@ def test_the_engine_status_is_research_only_for_the_unvalidated_combination() ->
     res = event_state(_full_components())
     assert res["status"] == STATUS_RESEARCH_ONLY
     assert res["status"] == "RESEARCH_ONLY"
-    assert "RESEARCH_ONLY" not in {s for s in (res["band"],)}
+    assert "RESEARCH_ONLY" not in {res["band"]}
     # The scale direction is printed, not implied: 100 = an event on top of us.
     assert "INVERTED" in res["basis"]
 
@@ -289,9 +289,9 @@ def test_the_event_state_passes_the_hard_block_through_and_owns_no_window() -> N
         if isinstance(node, ast.Compare):
             assert HARD_BLOCK_KEY not in ast.unparse(node), ast.unparse(node)
         if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
-            assert HARD_BLOCK_KEY != ast.unparse(node.slice).strip("'\""), ast.unparse(node)
+            assert ast.unparse(node.slice).strip("'\"") != HARD_BLOCK_KEY, ast.unparse(node)
     assert HARD_BLOCK_KEY not in COMPONENTS  # a passthrough, not a scored component
-    assert HARD_BLOCK_KEY not in {n for n in FLAG_COMPONENTS}
+    assert HARD_BLOCK_KEY not in set(FLAG_COMPONENTS)
 
 
 def test_the_flags_are_printed_and_never_scored() -> None:

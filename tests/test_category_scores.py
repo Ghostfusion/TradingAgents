@@ -15,8 +15,8 @@ from tradingagents.strategies.cross_section import cross_sectional_z, winsorize
 from tradingagents.strategies.decision_guardrail import SCORE_BANDS
 from tradingagents.strategies.factors import (
     QUALITY_BANDS,
-    quality_band,
     category_scores,
+    quality_band,
 )
 
 DIRECTIONS = {"f": 1, "m": -1, "z": 1}

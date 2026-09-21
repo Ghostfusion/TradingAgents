@@ -129,7 +129,7 @@ def test_the_five_absent_categories_print_na_with_a_reason_never_zero() -> None:
 
 
 def test_with_the_five_absent_fed_none_the_score_is_none_at_zero_coverage() -> None:
-    res = news_score({name: None for name in ABSENT_COMPONENTS})
+    res = news_score(dict.fromkeys(ABSENT_COMPONENTS))
     assert res["score"] is None
     assert res["coverage"] == 0.0
     assert len(res["absent_reasons"]) == 5
@@ -169,7 +169,7 @@ def test_the_present_components_score_the_weighted_mean_of_themselves() -> None:
 
 
 def test_a_supplied_weight_vector_is_used_and_printed() -> None:
-    w = {name: 1.0 for name in COMPONENT_ORDER}
+    w = dict.fromkeys(COMPONENT_ORDER, 1.0)
     w["novelty"] = 4.0
     res = news_score(_present(), weights=w)
     present = {k: v for k, v in res["aligned"].items() if v is not None}
@@ -282,7 +282,7 @@ def test_the_module_never_touches_the_sizing_or_gate_path() -> None:
 
 
 def test_the_composite_floor_is_below_the_component_set() -> None:
-    assert COMPOSITE_MIN_COVERAGE <= len(COMPONENT_ORDER)
+    assert len(COMPONENT_ORDER) >= COMPOSITE_MIN_COVERAGE
 
 
 # --- the Alpha Vantage feed arrives as a JSON STRING, not a dict -------------

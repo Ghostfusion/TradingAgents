@@ -271,13 +271,22 @@ def _baseline_file(cache_dir, ticker) -> str:
 
 
 def compute_social_scores(
-    ticker: str, cache_dir: str | None = None, limit: int = 30
+    ticker: str, cache_dir: str | None = None, limit: int = 30, record: bool = True
 ) -> dict | None:
     """Deterministic score + surprise velocity from StockTwits counts.
 
     Persists a rolling score baseline per ticker so ``surprise_velocity`` can
     z-score today's sentiment vs its own history. Returns None on any failure
     (the caller degrades silently).
+
+    ``record`` controls the APPEND to that baseline, and it is the fix for a
+    double-write: this function has two callers in one run - the sentiment
+    analyst's prefetch and ``get_sentiment_computed`` (bound to the market
+    analyst) - and both used to append. So one run wrote today's score TWICE,
+    and the second call's ``surprise_velocity`` was z-scored against a history
+    that already contained today's value. The prefetch is the designated
+    RECORDER (``record=True``); every other caller is a READER and passes
+    ``record=False``, so the baseline advances exactly once per run.
     """
     try:
         from tradingagents.dataflows.stocktwits import stocktwits_counts
@@ -297,8 +306,9 @@ def compute_social_scores(
                     with contextlib.suppress(ValueError):
                         history.append(float(ln))
         velocity = surprise_velocity(score, history[-30:])
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{score}\n")
+        if record:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"{score}\n")
         crowd = crowd_ratio(bull, bear, neutrals=unlabeled)
         n_bull = max(0, int(bull or 0))
         n_bear = max(0, int(bear or 0))

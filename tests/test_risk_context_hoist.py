@@ -159,3 +159,54 @@ def test_insufficient_liquidity_guard_reads_risk_context(monkeypatch):
         {"trade_date": "2026-08-19", "final_trade_decision": "Buy"}, "NVDA"
     )
     assert "insufficient_liquidity" not in (absent.get("position_contract") or "")
+
+
+def test_kill_switch_state_is_produced_and_can_fire(monkeypatch):
+    """The emergency tier is WRITTEN, so EXIT / NO_TRADE can finally fire.
+
+    `signal_action_split`'s `kill_switch` leg was dead: three call sites read
+    ``state["kill_switch_state"]["active"]`` and NOTHING wrote the key, so every
+    read took the silent ``False`` default and a hard book drawdown could never
+    force the emergency action. The producer is MEASURED - the one realized book
+    drawdown this run already resolved, against the configured HWM hard tier -
+    and the session-p&l leg, which has no in-engine producer (the executor owns
+    live p&l), is NAMED rather than guessed.
+    """
+    from tradingagents.strategies.signal_action import signal_action_split
+
+    graph = _graph(monkeypatch, _closes())
+
+    def _run(drawdown):
+        state = {
+            "trade_date": "2026-08-19",
+            "final_trade_decision": "Hold",
+            "risk_context": {"book_drawdown": drawdown},
+        }
+        return graph._apply_strategy_overlays(state, "NVDA").get("kill_switch_state") or {}
+
+    # A realized book drawdown past the hard tier arms it.
+    armed = _run(0.25)
+    assert armed.get("active") is True
+    assert armed.get("drawdown_pct") == pytest.approx(0.25)
+    assert armed.get("hard_max_drawdown_pct") == pytest.approx(0.20)
+    assert "drawdown" in (armed.get("measured_legs") or [])
+    # The leg with no in-engine producer is named, never silently false.
+    assert armed.get("day_loss_pct") is None
+    assert "day_loss" in (armed.get("unmeasured_legs") or [])
+
+    # And the split it feeds now reaches the emergency action.
+    split = signal_action_split(
+        "Hold", gate_verdict="REJECT", kill_switch=bool(armed.get("active"))
+    )
+    assert split["portfolio_action"] == "NO_TRADE"
+
+    # Below the tier it is measured CLEAR, not absent.
+    clear = _run(0.02)
+    assert clear.get("active") is False
+    assert "drawdown" in (clear.get("measured_legs") or [])
+
+    # No measurable drawdown: the leg is absent from measured_legs, so the state
+    # says "not measured" instead of reporting a clear book.
+    unknown = _run(None)
+    assert unknown.get("active") is False
+    assert "drawdown" not in (unknown.get("measured_legs") or [])

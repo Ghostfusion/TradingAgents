@@ -85,6 +85,10 @@ REGISTRY: dict[str, str] = {
     "enable_decision_packet": "wired",
     "enable_context_expansion": "wired",
     "enable_decision_challenge": "wired",
+    # The one context gate defaulting True: the Phase A-E block was built
+    # unconditionally while its documented env var was inert, so "always on"
+    # is the shipped behaviour and the default must not change it.
+    "enable_computed_context": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

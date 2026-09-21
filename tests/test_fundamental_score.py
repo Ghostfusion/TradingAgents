@@ -181,7 +181,7 @@ def test_a_missing_factor_does_not_punish_the_name() -> None:
     """`NA != 0`: the name with a hole scores on its own merits, not at zero."""
     panel = _panel()
     full = quality_subscore(panel, min_coverage=3)["scores"]
-    holed = {k: v for k, v in panel.items()}
+    holed = dict(panel.items())
     holed["N9"] = {k: v for k, v in panel["N9"].items() if k != "gp_a"}
     after = quality_subscore(holed, min_coverage=3)["scores"]
     assert after["N9"] is not None
@@ -401,7 +401,7 @@ def test_scaled_dcf_upside_reaches_the_panel_only_when_supplied() -> None:
     # enters the engine
     full = {f"N{i}": {"ev_ebit": 30.0 - i, "dcf_upside": 0.2 - i / 100.0} for i in range(10)}
     full["N0"] = {**full["N0"], "dcf_upside": 0.125}
-    scaled_full = fundamental_score_for_ticker("N0", resolver=_resolver,
+    fundamental_score_for_ticker("N0", resolver=_resolver,
                                                dcf_upside=None)
     assert "dcf_upside" in (
         fundamental_score_for_ticker(
@@ -514,8 +514,8 @@ def test_run_card_block_is_absent_when_the_gate_is_off() -> None:
 
 
 def test_run_card_block_carries_a_recomputable_attribution(monkeypatch) -> None:
-    from tradingagents.reporting import _run_card_fundamental_score
     import tradingagents.strategies.fundamental_score as fs
+    from tradingagents.reporting import _run_card_fundamental_score
 
     def _resolver(*, tickers, current_date, include_score_metrics):
         return {"metrics": _panel(), "basis": "synthetic panel"}
@@ -543,8 +543,8 @@ def test_run_card_block_carries_a_recomputable_attribution(monkeypatch) -> None:
 
 
 def test_run_card_block_degrades_without_costing_the_card(monkeypatch) -> None:
-    from tradingagents.reporting import _run_card_fundamental_score
     import tradingagents.strategies.fundamental_score as fs
+    from tradingagents.reporting import _run_card_fundamental_score
 
     def _boom(*a, **kw):
         raise RuntimeError("panel fetch failed")

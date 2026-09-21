@@ -685,6 +685,11 @@ class TradingAgentsGraph:
         # gate, re-rating evidence, trade plan card, risk snapshot, drift hint)
         # so the Trader / PM / 3 risk debators get hard computed data, not LLM
         # prose. Always advisory - never blocks.
+        # Gated on `enable_computed_context`. This block used to be built
+        # UNCONDITIONALLY while `.env`/`.env.example` documented
+        # TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT - a variable nothing read, so
+        # setting it to `false` silently did nothing. The default is True, which
+        # is byte-identical to the behaviour every prior run had.
         # The close series is fetched ONCE here and handed to both the compiled
         # context and the packet, so the packet's regime and plan rows cannot
         # come from a second vendor read of the same series.
@@ -693,9 +698,10 @@ class TradingAgentsGraph:
             closes = self._try_fetch_closes(company_name)
         except Exception:  # noqa: BLE001 - advisory; the rows degrade to gaps
             closes = []
-        init_agent_state["computed_decision_context"] = self._compiled_decision_context(
-            company_name, init_agent_state, closes=closes
-        )
+        if self.config.get("enable_computed_context"):
+            init_agent_state["computed_decision_context"] = self._compiled_decision_context(
+                company_name, init_agent_state, closes=closes
+            )
         # Phase 3 (§9): the Decision Packet is now rendered by the `Decision
         # Packet` graph NODE, just after the analysts - because §9's conflict
         # ledger is a property of the analyst reports, which do not exist before
@@ -1135,6 +1141,50 @@ class TradingAgentsGraph:
                             "numbers": "catalyst-hard-block",
                         }
                     final_state["risk_gate"] = verdict
+                    # Kill-switch state (risk_hierarchy.kill_switch_state, the
+                    # EMERGENCY tier above the governor's own limits). Until now
+                    # NOTHING wrote this key, so every reader - prompt_metrics,
+                    # reporting's two signal_action_split call sites - read a
+                    # silent `False` default and `portfolio_action_from_gate`'s
+                    # `kill_switch` leg (EXIT / NO_TRADE) could never fire.
+                    #
+                    # Measured, never asserted. The drawdown leg uses the ONE
+                    # realized book drawdown this run already resolved
+                    # (risk_ctx["book_drawdown"], peak-to-trough, the same number
+                    # the governor gates on) against the configured HWM hard
+                    # tier. The session-p&l leg has NO in-engine producer - the
+                    # executor owns live p&l - so it is passed as None, which
+                    # makes that leg False rather than guessed, and the state
+                    # names which legs were measurable.
+                    try:
+                        from tradingagents.strategies.risk_hierarchy import (
+                            kill_switch_state as _kill_state,
+                        )
+
+                        _hard_dd = float(
+                            self.config.get("risk_hwm_hard_pct", 0.20)
+                        )
+                        _legs = ["drawdown"] if basket_dd is not None else []
+                        final_state["kill_switch_state"] = {
+                            "active": bool(
+                                _kill_state(
+                                    None,
+                                    hard_max_drawdown_pct=_hard_dd,
+                                    drawdown_pct=basket_dd,
+                                )
+                            ),
+                            "drawdown_pct": basket_dd,
+                            "hard_max_drawdown_pct": _hard_dd,
+                            "day_loss_pct": None,
+                            "measured_legs": _legs,
+                            "unmeasured_legs": ["day_loss"],
+                            "source": (
+                                "book drawdown vs risk_hwm_hard_pct; session p&l "
+                                "has no in-engine producer (the executor owns it)"
+                            ),
+                        }
+                    except Exception as kill_exc:  # noqa: BLE001 - advisory state
+                        logger.warning("kill switch state skipped: %s", kill_exc)
                     # drawdown_limit is hoisted by the pre-graph precompute
                     # (single source); setdefault keeps a direct-call fallback
                     # reading the same limits registry the governor gates on.

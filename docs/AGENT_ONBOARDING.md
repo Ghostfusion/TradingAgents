@@ -434,6 +434,56 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-20 `(working tree)` - **Nine standing defects fixed, and ONE OF THE RECORDED DEFECTS WAS WRONG: the signald "no
+  supervisor exists" finding was a false premise.** **(0) The signald claim, corrected.** The record said *"the daemon is DEAD and
+  nothing restarts it - no supervising restart process exists."* **False.** `Signald_Daemon` exists (logon + weekly MON-FRI 08:00,
+  `RestartOnFailure` PT1M x10, `ExecutionTimeLimit` PT0S) and `Signald_Watchdog` exists (weekdays 08:00, every 5 min for 7h30m).
+  Measured on the 2026-09-18 death: died **15:15 CT** (`^C`; `Last Result` `-1073741510` = `0xC000013A` `STATUS_CONTROL_C_EXIT` - a
+  deliberate `schtasks /end`, not a crash); `RestartOnFailure` **cannot** fire (it retries a *failed* run, and a deliberate end is not
+  one); the watchdog **did** fire at **15:30**, `Last Result: 1` (the `heartbeat_loss` page). So **detection works, recovery is
+  manual**, and the weekday 08:00-15:30 window means a Friday-afternoon death is paged **exactly once** then silent all weekend.
+  `TradingExecution/docs/RUNBOOK.md:36` said *"Nothing runs the watchdog for you"* while line 56 of the same section documented the
+  scheduled task - **stale and self-contradicting, corrected** (`TradingExecution 3423f2b`). The D-6 failure mode (*a stale line
+  hiding a wire*) in our own record. **(1) ATR windows are now part of the basis.** `_basis_of` recorded only the unit class, so ATR
+  quoted at several windows collapsed into one basis and read as `defect`. New `_windowed_basis` binds the window printed beside the
+  figure (`ATR(14)`/`ATR-14`/`atr_14`/`14-bar ATR`/`ATR 14` -> `atr:14`; `ATR(14, simple mean of TR)` -> `atr:14-simple`) and does
+  NOT read the `(n x ATR)` multiple leg or a `22-bar` anchor as a window. **Re-measured over the same 56 trees in ONE run, before and
+  after: `defect` 59 -> 32 (-27, exactly the ATR rows), `basis_difference` 186 -> 215, `unresolved` 18 -> 16, TOTAL 263 -> 263.**
+  The unchanged total is the evidence it is a pure RECLASSIFICATION, not a quiet excuse. **(2) The kill-switch state is PRODUCED.**
+  Three readers (`prompt_metrics.py`, `reporting.py` x2) read `state["kill_switch_state"]["active"]` and NOTHING wrote the key, so
+  `portfolio_action_from_gate`'s `kill_switch` leg (`EXIT`/`NO_TRADE`) was dead. Measured from the one realized book drawdown the run
+  already resolved against the configured HWM hard tier; the session-p&l leg has **no in-engine producer** (the executor owns live
+  p&l) so it is passed `None` and NAMED in `unmeasured_legs`, never guessed. **(3) `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` was INERT**
+  - documented in `.env` since 2026-09-04 and read by nothing; the block was built unconditionally. Real gate now, registered in all
+  five places, and **`True` is its default - the only context gate that is** (the shipped behaviour was "always on"; `False` would
+  have silently dropped a shipped prompt block from every run without `.env`). **(4) D-10: the debate consensus exit was dead.**
+  `_complete_round` reads the agreement off the section CHANNEL while the stances live in the graph STATE, which only `l1_node` sees -
+  so the key was never written and every debate ran to its round cap. `independent_agreement` gained `roles` so the research debate
+  scores its OWN bull/bear pair (parameterised, one producer); `None` keeps the contour off, because a fabricated `1.0` would terminate
+  a debate that never converged. **(5) A forward `PEG` had no caller** - wired to `dataflows/yfinance_sector.fetch_estimate_trend`
+  (price / next-FY consensus EPS over next-FY vs current-FY growth) behind the EXISTING `enable_analyst_estimates` gate, with the basis
+  printed; trailing `eps_yoy`/`revenue_yoy` were REJECTED as proxies that do not measure forward growth. **(6) `value_dip_setup`'s
+  `catalyst_window: bool = False`** was the last false assertion of the D-11 class; now tri-state, forwarded unchanged. **(7) The
+  sentiment baseline was written TWICE per run** - `compute_social_scores` APPENDS to the baseline `surprise_velocity` z-scores
+  against, and had three callers in one run (the prefetch + two tool-side readers); the second reader also passed no `cache_dir`, so it
+  could write a DIFFERENT baseline file than the prefetch reads. New `record: bool = True` makes the prefetch the single RECORDER and
+  every other caller a READER. **(8) A provider failure was counted as a verifier SUCCESS and lost its reason** - the exception branch
+  fell through with no `reason` and still incremented `stem_succeeded`, so a run whose calls were all rejected read `UNKNOWN`
+  everywhere with nothing to distinguish it from a verifier that never started (Alibaba's "inappropriate content" rejection did
+  exactly this). **(9) The recorded `sentiment_tools()` "defect" is NOT a defect** - the sentiment analyst binding no tools is
+  documented deliberate design in four places, and the toolset exists so the ENGINE can reach those leaves; the real defect in that
+  cluster was the double-append above. **Failing-first by mutation, byte-identical restore:** kill-switch producer removed ->
+  `test_kill_switch_state_is_produced_and_can_fire` fails (`assert None is True`); D-10 join removed ->
+  `test_d10_consensus_exit_reads_the_section_agreement` fails (`KeyError: 'independent_agreement'`). **The mutation harness itself had
+  to be fixed** - it round-tripped through `str` with `newline=""` on a `core.autocrlf=true` mixed CRLF/LF tree, silently rewriting two
+  source files' line endings; it now reads/writes BYTES, and both files were restored to CRLF with `git diff` confirming identical
+  content (96 insertions / 4 deletions). **Also:** the 47 pre-existing ruff findings in `tests/` cleared (behaviour-preserving), so
+  `ruff check tradingagents/ tests/` is clean for the first time; and `docs/scores/MEASUREMENT_FINDINGS.md:262-263`'s stale
+  `news_score ... **0** measured` was RE-MEASURED - the panel axis is genuinely `0` (structural: none of the engine's 11 component
+  names is in the panel's 37-name vocabulary) but the live path now measures **2 of 11** (of 8 cards carrying `news_score`, 3 real -
+  MSFT 57.6 x2, QCOM 58.8 - and 5 `"score": null, "unavailable": "no news producer measured"`). `test_report_verify.py` 233 -> 237,
+  `test_sentiment_computed.py` +1, `test_debate_risk_parity.py` +1, `test_risk_context_hoist.py` +1.
+
 - 2026-09-20 `(working tree)` - **Phases 3-5 of `docs/design_decision_context.md` built: the conflict ledger renders, the context can expand, the
   challenge pass is closed-vocabulary.** Three gates, all default `False`. **PHASE 3 (§9) - the render had to MOVE.** §9 promotes the
   same-metric disagreements "into the packet", and §13.4 rendered the packet **pre-graph**; but the ledger is a property of the ANALYST

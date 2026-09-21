@@ -700,3 +700,120 @@ def test_support_structure_separates_base_distance_from_base_depth():
     prose = " ".join(sp["reasons"])
     assert "above the multi-month base low" in prose
     assert f"{sp['distance_to_base_pct']:.1%}" in prose
+
+
+# ---------------------------------------------------------------------------
+# The value_dip_setup seam: the catalyst axis (D-11) and the forward PEG
+# ---------------------------------------------------------------------------
+
+
+def _calm_uptrend(n=260):
+    """Low-vol monotone uptrend: reads tradable (not high-vol / knife)."""
+    return [100.0 + 0.05 * i for i in range(n)]
+
+
+def test_value_dip_setup_omitted_catalyst_window_is_unmeasured():
+    """D-11: `catalyst_window` is tri-state, and an omitted value must not assert
+    "no catalyst".
+
+    The parameter defaulted to `False` and was forwarded straight into the
+    tri-state `regime_gate_read`, so a caller holding no event fact made the
+    regime row claim a MEASURED clear catalyst window - the model then quoted
+    that back as fact. `None` must now survive the whole call, while an explicit
+    measured `True`/`False` is still honoured and reported.
+    """
+    closes = _calm_uptrend()
+    highs = [c + 0.5 for c in closes]
+    lows = [c - 0.5 for c in closes]
+    vols = [1_000_000] * len(closes)
+    base = {"margin_of_safety": 0.25, "fcf_yield": 0.08}
+
+    unsupplied = value_dip_setup(closes, highs, lows, vols, **base)
+    regime = unsupplied["rows"]["regime_gate"]
+    assert regime is not None
+    assert regime["catalyst_window"] is None
+    assert regime["pass"] is True  # no fact -> no veto either
+    assert not any("no catalyst" in r for r in regime["reasons"])
+    assert any("not measured" in r for r in regime["reasons"])
+    assert not any("no catalyst" in r for r in unsupplied["reasons"])
+
+    measured_clear = value_dip_setup(
+        closes, highs, lows, vols, catalyst_window=False, **base
+    )
+    assert measured_clear["rows"]["regime_gate"]["catalyst_window"] is False
+    assert any("no catalyst" in r for r in measured_clear["rows"]["regime_gate"]["reasons"])
+
+    measured_open = value_dip_setup(
+        closes, highs, lows, vols, catalyst_window=True, **base
+    )
+    open_regime = measured_open["rows"]["regime_gate"]
+    assert open_regime["catalyst_window"] is True
+    assert open_regime["pass"] is False
+    assert any("catalyst window open" in r for r in open_regime["reasons"])
+
+
+def test_get_value_dip_setup_measures_the_forward_peg_through_the_real_caller(monkeypatch):
+    """Defect: `forward_peg` was a DEAD parameter - no caller passed it - so the
+    re-rating row could never carry the `forward PEG < 1` evidence it names.
+
+    The producer reads the vendor's own consensus EPS estimate levels (current
+    vs next fiscal year) through the existing estimate-trend reader: forward
+    P/E = price / next-FY EPS, expected growth = next-FY / current-FY - 1. With
+    no levels - or with `enable_analyst_estimates` off, the gate that reader is
+    already held behind - the row stays unmeasured and nothing is invented.
+    """
+    import types
+
+    import tradingagents.agents.utils.analysis_tools as AT
+    import tradingagents.agents.utils.value_dip_tools as V
+    import tradingagents.dataflows.config as cfg_mod
+    from tradingagents.dataflows import statement_parsing as sp, yfinance_sector as ys
+
+    closes = _dip_series()
+    ohlcv = {
+        "closes": closes,
+        "highs": [c + 1.0 for c in closes],
+        "lows": [c - 1.0 for c in closes],
+        "volumes": [1_000_000] * len(closes),
+    }
+    monkeypatch.setattr(sp, "fetch_ticker", lambda t, d, **kw: {"market_cap": 1e11})
+    monkeypatch.setattr(V, "_ohlcv", lambda ticker: ohlcv)
+    monkeypatch.setattr(V, "route_to_vendor", lambda *a, **k: "NO_DATA_AVAILABLE")
+    monkeypatch.setattr(V, "margin_of_safety_impl", lambda dcf_out, closes_: 0.25)
+    # Isolate the re-rating row to the forward PEG: no earnings surprise.
+    monkeypatch.setattr(AT, "get_earnings_surprise", types.SimpleNamespace(invoke=lambda *a, **k: ""))
+    monkeypatch.setattr(AT, "get_dcf_valuation", types.SimpleNamespace(invoke=lambda *a, **k: ""))
+    monkeypatch.setattr(
+        cfg_mod, "get_config", lambda: {"enable_analyst_estimates": True, "fcf_yield_floor": 0.06}
+    )
+
+    levels = {"0y": [4.0] * 5, "+1y": [5.0] * 5}
+    monkeypatch.setattr(
+        ys, "fetch_estimate_trend", lambda t, period="0q", timeout=8.0: levels.get(period)
+    )
+    out = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    # forward P/E = price / 5.0; expected growth = 25% -> PEG = forward P/E / 25
+    expected_peg = (closes[-1] / 5.0) / 25.0
+    assert 0.0 < expected_peg < 1.0  # the band the re-rating row needs
+    assert f"forward_peg={expected_peg:.2f}" in out
+    assert "re_rating: pass=True" in out
+    assert "forward PEG basis:" in out  # the row names what the number measures
+
+    # No levels from the vendor -> unmeasured, and no trailing-growth proxy.
+    monkeypatch.setattr(
+        ys, "fetch_estimate_trend", lambda t, period="0q", timeout=8.0: None
+    )
+    unmeasured = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "forward_peg=" not in unmeasured
+    assert "forward PEG basis:" not in unmeasured
+
+    # Gate off -> the estimate trend is not even read (no new network call).
+    def _must_not_be_read(*a, **k):
+        raise AssertionError("estimate trend read with enable_analyst_estimates off")
+
+    monkeypatch.setattr(
+        cfg_mod, "get_config", lambda: {"enable_analyst_estimates": False, "fcf_yield_floor": 0.06}
+    )
+    monkeypatch.setattr(ys, "fetch_estimate_trend", _must_not_be_read)
+    gated_off = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
+    assert "forward_peg=" not in gated_off

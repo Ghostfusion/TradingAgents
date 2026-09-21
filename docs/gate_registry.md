@@ -180,6 +180,16 @@ byte-identical to the run before it existed.
 | `enable_decision_packet` | `TRADINGAGENTS_ENABLE_DECISION_PACKET` | replaces `computed_decision_context` with ONE bounded, deterministic Decision Packet for the decision model, and supplies the §8 uncertainty counters that Phase 0 recorded as `null` | `tradingagents/strategies/decision_packet.py::decision_packet_or_context` (the gate), `::render_decision_packet` (the render), `tradingagents/reporting.py::_run_card_decision_context` (the `packet_chars` measurement) | `test_decision_packet.py` | wired |
 | `enable_context_expansion` | `TRADINGAGENTS_ENABLE_CONTEXT_EXPANSION` | §11: attaches the analyst reports, named and bounded, to the decision context when the evidence is DIVIDED; records `context_mode: packet+expanded` so the expansion rate is measurable | `tradingagents/strategies/decision_packet.py::expansion_decision` (the trigger), `::render_expansion` (the render), `::create_decision_packet_node` (the write) | `test_decision_packet.py` | wired |
 | `enable_decision_challenge` | `TRADINGAGENTS_ENABLE_DECISION_CHALLENGE` | §10: ONE closed-vocabulary call after the decision that may only DOWNGRADE, and only on one of three grounds, each re-checked mechanically against the packet | `tradingagents/strategies/decision_challenge.py::run_challenge` (the pass), `::adjudicate_challenge` (the decider), `tradingagents/agents/managers/portfolio_manager.py::_challenge_hook` (the site) | `test_decision_challenge.py` | wired |
+| `enable_computed_context` | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | the Phase A-E deterministic block (regime gate / re-rating / trade plan card / risk snapshot / drift hint) injected into the Trader, PM and risk-debator prompts | `tradingagents/graph/trading_graph.py` (`_compiled_decision_context` call) | `test_gate_env_toggles.py` | wired |
+
+**The one context gate that defaults ON.** `enable_computed_context` is `True` in
+`DEFAULT_CONFIG`, unlike every other row above. That is deliberate: the block was
+built **unconditionally** for its whole life while `.env.example` and the CHANGELOG
+documented the variable as the switch, so the variable was inert and the shipped
+behaviour was "always on". Defaulting it `False` here would have silently dropped a
+shipped prompt block from every run that does not carry `.env` — a behaviour change
+disguised as a gate registration. The gate is real now (setting it `false` stops the
+injection); only its default is the historical one.
 
 ## 8. Adding a gate — the rule
 

@@ -166,6 +166,9 @@ def _bound_tool_names() -> set[str]:
     call it (the gate asserted the docs, not the capability). Reading the
     actual lists is the only definition that cannot be fooled by wording.
     """
+    import contextlib
+
+    import tradingagents.dataflows.config as _cfgmod
     from tradingagents.agents.toolsets import analyst_toolset
     from tradingagents.agents.utils import risk_tool_loop
 
@@ -174,10 +177,6 @@ def _bound_tool_names() -> set[str]:
     # and with it on the LLM can call it. This test asks "can an agent reach
     # this tool at all", so it reads the toolsets with every engine gate forced
     # on and restores the config afterwards.
-    import contextlib
-
-    import tradingagents.dataflows.config as _cfgmod
-
     _engine_gates = (
         "enable_fundamental_score",
         "enable_technical_score",
@@ -190,7 +189,7 @@ def _bound_tool_names() -> set[str]:
     )
     _saved = dict(_cfgmod.get_config() or {})
     with contextlib.suppress(Exception):
-        _cfgmod.set_config({**_saved, **{g: True for g in _engine_gates}})
+        _cfgmod.set_config({**_saved, **dict.fromkeys(_engine_gates, True)})
 
     risk_tool_loop._build_lists()
     names: set[str] = set()

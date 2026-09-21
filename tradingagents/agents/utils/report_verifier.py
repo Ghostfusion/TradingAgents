@@ -4692,6 +4692,105 @@ def _producer_near(line: str, raw: str) -> str:
     return before
 
 
+#: Metrics one report quotes at several PARAMETERISATIONS at once. Only
+#: ``atr`` is here: a single market.md prints the verified snapshot's
+#: ``atr(14) 22.50``, the chandelier's ``ATR(14, simple mean 16.7221)`` and a
+#: bare ``ATR 16.7221``, so a basis of ``ratio`` for all of them made the
+#: ledger read ONE metric printing several values - 27 of the 59 ``defect``
+#: rows measured over the 56 trees in ``reports/`` were this pair, the largest
+#: single class of false accusation left. Every other metric's window is part
+#: of its own label (``rsi``, ``ema20``, ``200-day sma``) or is not quoted
+#: twice in one report, and their bases are deliberately untouched.
+_WINDOWED_METRICS = frozenset({"atr"})
+
+#: How far a printed ATR definition may sit from the figure it explains. A
+#: label is written beside its value ("ATR(14) 3.25", "atr_14 3.25"), and the
+#: figure's window may be pushed further off by the parenthetical that carries
+#: it ("ATR(14, simple mean of TR)=5.9157" puts 24 chars between the 14 and
+#: the value). A definition on the far side of a sentence does NOT belong to
+#: the figure: "The verified ATR(14) is 3.75. The structure stop at 42.7265
+#: uses 2.5302" is ATR 2.5302 with no stated window, and reading the
+#: sentence's ATR(14) as its window would re-collapse two different ATRs onto
+#: one basis. The scale is the one ``_METRIC_WINDOW`` already uses for a label
+#: separated from its value.
+_WINDOWED_NEAR = 40
+
+#: One ATR definition as the reports print it: the window in parentheses
+#: ("ATR(14)"), as a suffix ("ATR-14", "ATR:14", "atr_14"), as a bare number
+#: ("ATR 14") or as a prefix ("14-bar ATR"). The multiplier of an
+#: ``(n x ATR)`` leg is NOT a window and is never matched - "chandelier
+#: 54.5252 (3x ATR 2.5302 below the 22-bar high)" is ATR 2.5302 with no
+#: stated window, not ATR(3) and not ATR(22).
+_ATR_DEFINITION_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:(?P<bar>\d{1,3})\s*[- ]?\s*bar\s+)?atr(?![A-Za-z0-9])"
+    r"(?:\s*[\(\[]\s*(?P<params>[^\)\]]{0,48}?)\s*[\)\]])?"
+    r"(?:\s*[-_:]\s*(?P<post>\d{1,3})(?![\d.]))?"
+    r"(?:\s+(?P<space>\d{1,3})(?![\d.]))?"
+)
+_ATR_PARAM_WINDOW_RE = re.compile(r"\d{1,3}")
+#: The swing tools state their ATR is a SIMPLE mean of TR (``get_swing_set`` /
+#: ``get_swing_exits``) where the verified snapshot's is Wilder's. Same window,
+#: different statistic: the reports call them "different ATR bases" and pair
+#: each stop with one of them.
+_ATR_SIMPLE_MEAN_RE = re.compile(r"(?i)simple[-\s]*(?:mean|tr)\b")
+
+
+def _windowed_basis(line: str, metric: str, raw: str) -> str:
+    """The basis of a WINDOWED metric's value: the definition printed beside it.
+
+    ``atr`` is quoted at several parameterisations inside ONE report, and a
+    basis that recorded only the unit class made those several measurements
+    read as one metric printing several values - which the ledger then called
+    ``defect``. AMAT 2026-09-14 is the type case: the verified snapshot's
+    ``atr(14) 22.50`` beside the chandelier's ``ATR(14, simple mean 16.7221)``,
+    and the report says outright which is which ("this is the swing tool's ATR
+    16.7221, **not** the headline ATR(14) 22.50").
+
+    So the basis is the ATR's own printed definition: ``atr:14`` for a plain
+    ``ATR(14)``, ``atr:14-simple`` for ``ATR(14, simple mean of TR)``,
+    ``atr:simple`` when only the statistic is stated, and ``atr`` when the
+    report states neither. **The window alone is not enough**: both ATRs above
+    are 14, so a bare ``atr:14`` for each would keep the false ``defect``.
+
+    Two values whose printed definitions MATCH still share one basis, so one
+    producer printing them at two values is still a ``defect`` - this is a
+    narrower basis, not an exemption from the classifier.
+
+    The definition is read only NEAR THE FIGURE (``_WINDOWED_NEAR``), by the
+    same nearest-token rule ``_period_tag_near`` and ``_producer_near`` use: a
+    window belonging to a different ATR further along the sentence is not this
+    figure's.
+    """
+    at = line.find(raw)
+    if at < 0:
+        # The figure's own text cannot be located, so nothing on the line can
+        # be bound to it: record the metric with no parameterisation rather
+        # than a neighbour's.
+        return metric
+    end = at + len(raw)
+    best: tuple[int, re.Match] | None = None
+    for m in _ATR_DEFINITION_RE.finditer(line):
+        gap = max(m.start() - end, at - m.end(), 0)
+        if best is None or gap < best[0]:
+            best = (gap, m)
+    window = ""
+    if best is not None and best[0] <= _WINDOWED_NEAR:
+        m = best[1]
+        window = m.group("bar") or m.group("post") or m.group("space") or ""
+        if not window:
+            pm = _ATR_PARAM_WINDOW_RE.search(m.group("params") or "")
+            window = pm.group(0) if pm else ""
+    basis = f"{metric}:{window}" if window else metric
+    simple: int | None = None
+    for m in _ATR_SIMPLE_MEAN_RE.finditer(line):
+        gap = max(m.start() - end, at - m.end(), 0)
+        if simple is None or gap < simple:
+            simple = gap
+    if simple is not None and simple <= _WINDOWED_NEAR:
+        basis += "-simple"
+    return basis
+
+
 def _basis_of(line: str, metric: str, raw: str) -> str:
     """The basis this printed value carries: a stated period, else its unit class.
 
@@ -4700,6 +4799,13 @@ def _basis_of(line: str, metric: str, raw: str) -> str:
     Without one the value is recorded as its unit class, which is the weaker
     claim a reader can still compare against another run ON THE SAME CLASS.
 
+    A WINDOWED metric (``_WINDOWED_METRICS``) is the exception: its window and
+    statistic are part of what the number measures, so they are recorded
+    instead of the unit class (see ``_windowed_basis``). Recording the class
+    for those made one report's ``ATR(14)`` and ``ATR(14, simple mean of TR)``
+    one basis carrying two values - the false ``defect`` this pass exists to
+    stop.
+
     Deliberately not a fraction/percent dichotomy: a ratio above 1 is ordinary
     here (P/E 135.94, EV/EBIT 32.79), so ``ratio`` carries no bound and a
     ``fraction_0_1``-style vocabulary would mislabel the common case.
@@ -4707,6 +4813,8 @@ def _basis_of(line: str, metric: str, raw: str) -> str:
     tag = _period_tag_near(line, raw) if line else None
     if tag:
         return tag
+    if metric in _WINDOWED_METRICS:
+        return _windowed_basis(line, metric, raw) if line else metric
     if metric in _LEVEL_METRICS:
         return "level"
     unit = _unit_after(line, raw) if line else ""
@@ -4898,6 +5006,7 @@ def verify_report_dir(
             }
             stem_succeeded += 1
             continue
+        failed_reason: str | None = None
         try:
             verification = verify_evidence_call(
                 llm,
@@ -4908,6 +5017,15 @@ def verify_report_dir(
                 backup_llm=backup_llm,
             )
         except Exception as exc:  # noqa: BLE001 — advisory: never raise mid-run
+            # A provider failure is NOT a successful verification. This branch
+            # used to fall straight through to the shared entry assembly, so the
+            # outcome read `overall: UNKNOWN` with NO reason and STILL counted
+            # against `max_calls` as a success - a run whose calls were all
+            # rejected reported UNKNOWN on every stem with nothing to tell it
+            # apart from a verifier that never started. (Alibaba's "Output data
+            # may contain inappropriate content" rejection did exactly that.)
+            # The reason is recorded and the stem does not consume budget.
+            failed_reason = f"verify call failed: {type(exc).__name__}: {exc}"
             logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         evidence_dec = _evidence_decimals(evidence, stem)
@@ -4940,8 +5058,13 @@ def verify_report_dir(
             # this function and lose the WHOLE payload for every section (30 of
             # 35 report trees had no verify_flags.json).
             entry["metric_errors"] = metric_errors
+        if failed_reason is not None:
+            # Named, in the same shape the max_calls / unusable branches use, so
+            # a consumer can tell a REJECTED call from a verifier that never ran.
+            entry["reason"] = failed_reason
+        else:
+            stem_succeeded += 1
         outcomes[stem] = entry
-        stem_succeeded += 1
 
     return {
         "report_dir": str(report_dir),

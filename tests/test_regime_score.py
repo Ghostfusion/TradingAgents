@@ -30,8 +30,8 @@ from tradingagents.strategies.regime import (
 )
 from tradingagents.strategies.regime_score import (
     AXIS_KEYS,
-    COMPONENTS,
     COMPONENT_ORDER,
+    COMPONENTS,
     COMPOSITE_MIN_COVERAGE,
     MEASURED_CATEGORIES,
     MIN_BARS,
@@ -450,7 +450,7 @@ def test_a_supplied_weight_vector_is_used_and_printed() -> None:
 def test_a_reader_recomputing_the_weighted_mean_gets_the_printed_score() -> None:
     res = regime_score(_mid_values())
     num = den = 0.0
-    for name, entry in res["components"].items():
+    for _name, entry in res["components"].items():
         value = entry["aligned"]
         if value is None:
             continue

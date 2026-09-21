@@ -279,11 +279,11 @@ def test_dcf_shows_what_an_assumed_beta_is_worth(monkeypatch):
     assert "beta_sensitivity=(0.8->" in out
     v = _leaf_floats(out)
     # Every printed leg is a real fair value, and the sensitivity straddles it.
-    legs = dict(
-        (float(a), float(b))
+    legs = {
+        float(a): float(b)
         for a, b in (pair.split("->") for pair in
                      out.split("beta_sensitivity=(")[1].split(")")[0].split())
-    )
+    }
     assert legs[1.1] < v["fair_value"] < legs[0.8]
 
 

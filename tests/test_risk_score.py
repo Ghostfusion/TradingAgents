@@ -338,7 +338,7 @@ def test_the_printed_contributions_recompute_the_printed_score() -> None:
 
 
 def test_a_supplied_weight_vector_is_printed_and_used() -> None:
-    w = {cat: 1.0 for cat in CATEGORY_ORDER}
+    w = dict.fromkeys(CATEGORY_ORDER, 1.0)
     w["tail"] = 4.0
     res = risk_score(_full_values(), weights=w)
     num = sum(w[cat] * res["categories"][cat]["score"] for cat in CATEGORY_ORDER)
@@ -557,13 +557,11 @@ def test_the_event_leg_is_disjoint_from_eventscore_occurrence_keys() -> None:
         if not name.isupper():
             continue
         obj = getattr(module, name)
-        if isinstance(obj, dict):
-            keys |= {k for k in obj if isinstance(k, str)}
-        elif isinstance(obj, (tuple, list)):
+        if isinstance(obj, (dict, tuple, list)):
             keys |= {k for k in obj if isinstance(k, str)}
     assert not keys & EVENTSCORE_OCCURRENCE_KEYS, keys & EVENTSCORE_OCCURRENCE_KEYS
     # and this engine's event leg is the EXPOSURE measures
-    event_keys = {n for n in CATEGORY_COMPONENTS["event"]}
+    event_keys = set(CATEGORY_COMPONENTS["event"])
     assert {"catalyst_scale", "catalyst_risk_penalty"} <= event_keys
     assert not event_keys & EVENTSCORE_OCCURRENCE_KEYS
 

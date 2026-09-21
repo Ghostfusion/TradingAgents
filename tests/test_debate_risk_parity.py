@@ -239,6 +239,55 @@ class TestBoundedContextPhases:
         disputes = active_disputes(ds)
         assert disputes and disputes[0]["status"] == "violated"
 
+    def test_d10_consensus_exit_reads_the_section_agreement(self):
+        """The consensus contour could never fire: nothing wrote the key.
+
+        `_complete_round` reads the independent pre-debate agreement off the
+        section CHANNEL, but the sampled stances live in the graph STATE, which
+        only `l1_node` sees - so the key was never written, `termination_check`
+        always received ``None``, and every debate ran to its round cap. The
+        research debate must score its OWN bull/bear pair, not the risk trio's.
+        """
+        from tradingagents.agents.researchers.structured_debate import (
+            INDEPENDENT_AGREEMENT,
+            create_debate_l1,
+        )
+        from tradingagents.agents.schemas import RiskDebaterTurnPayload
+
+        node = create_debate_l1(lambda s: {}, section="risk", cfg={})
+        turn = RiskDebaterTurnPayload.model_validate({
+            "round_index": 1,
+            "stance": "AGGRESSIVE",
+            "core_thesis": "t",
+            "quantitative_claims": [],
+            "recommended_allocation_pct": 5.0,
+        }).model_dump()
+        state = {
+            "structured_risk_state": {
+                "round_records": [
+                    {"aggressive": turn, "conservative": turn, "neutral": turn},
+                ],
+                "last_side": "neutral",
+            },
+            "risk_independent_stances": {
+                "aggressive": {"rating": "Buy"},
+                "conservative": {"rating": "Buy"},
+                "neutral": {"rating": "Buy"},
+            },
+        }
+        ds = node(state)["structured_risk_state"]
+        # A unanimous pre-debate read is agreement 1.0, and the contour stops.
+        assert ds[INDEPENDENT_AGREEMENT] == 1.0
+        assert ds["terminated"] is True
+        assert "consensus" in str(ds["reason"]).lower()
+
+        # With no independent pass the contour must stay OFF. `None` is not a
+        # neutral value: a fabricated 1.0 would terminate a debate that never
+        # converged, which is worse than running to the cap.
+        off = node({**state, "risk_independent_stances": {}})["structured_risk_state"]
+        assert off[INDEPENDENT_AGREEMENT] is None
+        assert "consensus" not in str(off.get("reason") or "").lower()
+
     def test_p1_delta_prompt_bounded_no_transcript(self):
         from tradingagents.agents.researchers.structured_debate import (
             GROUND_TRUTH_REGISTRY,
