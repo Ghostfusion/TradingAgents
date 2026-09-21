@@ -18,112 +18,125 @@ in `batch.py`).
 
 ### 1.1 Env -> config overrides (complete)
 
-| Env var | Config key |
-| --- | --- |
-| `TRADINGAGENTS_LLM_PROVIDER` | `llm_provider` |
-| `TRADINGAGENTS_DEEP_THINK_LLM` | `deep_think_llm` |
-| `TRADINGAGENTS_QUICK_THINK_LLM` | `quick_think_llm` |
-| `TRADINGAGENTS_VERIFY_MODEL` | `report_verify_model` | advisory LLM report-verifier model (empty = quick tier); see `scripts/report_verify.py` |
-| `TRADINGAGENTS_VERIFY_MAX_CALLS` | `report_verify_max_calls` | verifier LLM calls per report tree (default 12) |
-| `TRADINGAGENTS_LLM_BACKEND_URL` | `backend_url` |
-| `TRADINGAGENTS_OUTPUT_LANGUAGE` | `output_language` |
-| `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `max_debate_rounds` |
-| `TRADINGAGENTS_RESEARCH_DEPTH` | `research_depth` | ONE depth knob (1/3/5): drives BOTH research and risk debate rounds to the same level |
+The table is **generated from the code** — `_ENV_OVERRIDES` plus the literal
+`os.getenv("TRADINGAGENTS_...", fallback)` reads inside `DEFAULT_CONFIG` (the
+union is the surface). `tests/test_api_reference_env_table.py` re-derives that
+surface and asserts this table lists exactly it, keys each row correctly, uses
+one cell count, and lists no env var twice — so "complete" is checked, not
+claimed. Re-run `py -3.12 scripts/gen_api_reference_table.py --write` after
+changing a config key; `--check` exits non-zero when the table is stale.
+
+| Env var | Config key | Notes |
+| --- | --- | --- |
+| `TRADINGAGENTS_LLM_PROVIDER` | `llm_provider` | default `openai` |
+| `TRADINGAGENTS_DEEP_THINK_LLM` | `deep_think_llm` | default `gpt-5.5` |
+| `TRADINGAGENTS_QUICK_THINK_LLM` | `quick_think_llm` | default `gpt-5.4-mini` |
+| `TRADINGAGENTS_LLM_BACKEND_URL` | `backend_url` | default `None` |
+| `TRADINGAGENTS_OUTPUT_LANGUAGE` | `output_language` | default `English` |
+| `TRADINGAGENTS_MAX_DEBATE_ROUNDS` | `max_debate_rounds` | default `1` |
 | `TRADINGAGENTS_MAX_RISK_ROUNDS` | `max_risk_discuss_rounds` | per-round override; wins over RESEARCH_DEPTH |
+| `TRADINGAGENTS_RESEARCH_DEPTH` | `research_depth` | ONE depth knob (1/3/5): drives BOTH research and risk debate rounds to the same level |
 | `TRADINGAGENTS_ENABLE_DEBATE` | `enable_debate` | structured multi-agent debate on (default off — legacy one-shot chain unchanged) |
-| `TRADINGAGENTS_DEBATE_BULL_MODEL` / `_BEAR_MODEL` / `_JUDGE_MODEL` | `debate_bull_model` / `debate_bear_model` / `debate_judge_model` | per-role `family:id` models; empty = quick/deep fallback. BULL drives bull (research) + aggressive (risk); BEAR drives bear + conservative; JUDGE drives both blind judges; neutral = quick |
+| `TRADINGAGENTS_DEBATE_BULL_MODEL` | `debate_bull_model` | per-role `family:id` models; empty = quick/deep fallback. BULL drives bull (research) + aggressive (risk); BEAR drives bear + conservative; JUDGE drives both blind judges; neutral = quick |
+| `TRADINGAGENTS_DEBATE_BEAR_MODEL` | `debate_bear_model` | default empty |
+| `TRADINGAGENTS_DEBATE_JUDGE_MODEL` | `debate_judge_model` | default empty |
 | `TRADINGAGENTS_DEBATE_NEUTRAL_MODEL` | `debate_neutral_model` | `family:id` for the neutral RISK debater; empty = quick fallback |
-| `TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE` | `debate_judge_ensemble` |
+| `TRADINGAGENTS_DEBATE_JUDGE_ENSEMBLE` | `debate_judge_ensemble` | default `1` |
 | `TRADINGAGENTS_DEBATE_MAX_ROUNDS` | `debate_max_rounds` | 5 (DebaterTurnPayload round_index 1..5) |
-| `TRADINGAGENTS_DEBATE_MIN_GAIN` / `_STOP_CONSECUTIVE` / `_CONSENSUS_THRESH` | `debate_min_gain` / `debate_stop_consecutive` / `debate_consensus_thresh` | termination knobs |
+| `TRADINGAGENTS_DEBATE_MAX_OUTPUT_TOKENS` | `debate_max_output_tokens` |  |
+| `TRADINGAGENTS_DEBATE_TEMPERATURE` | `debate_temperature` | default `0.1` |
+| `TRADINGAGENTS_DEBATE_JSON_MODE` | `debate_json_mode` | default `true` |
+| `TRADINGAGENTS_DEBATE_MIN_GAIN` | `debate_min_gain` | termination knobs |
+| `TRADINGAGENTS_DEBATE_STOP_CONSECUTIVE` | `debate_stop_consecutive` | default `2` |
+| `TRADINGAGENTS_DEBATE_CONSENSUS_THRESH` | `debate_consensus_thresh` | default `0.85` |
+| `TRADINGAGENTS_DEBATE_SCORING_WEIGHTS` | `debate_scoring_weights` | default `{'evidence': 0.6, 'novelty': 0.25, 'constraint': 0.15}` |
+| `TRADINGAGENTS_DEBATE_ABSTAIN_ALLOWED` | `debate_abstain_allowed` | default `true` |
+| `TRADINGAGENTS_DEBATE_FAST_ABORT` | `debate_fast_abort` | default `true` |
 | `TRADINGAGENTS_DEBATE_REGEN_MAX` | `debate_regen_max` | R1' bounded single-role regeneration budget (1) |
-| `TRADINGAGENTS_DEBATE_DIVERGENCE_CAP_ROUNDS` | `debate_divergence_cap_rounds` |
+| `TRADINGAGENTS_DEBATE_DIVERGENCE_CAP_ROUNDS` | `debate_divergence_cap_rounds` | default `1` |
 | `TRADINGAGENTS_DEBATE_REWEIGHT_TO_BASELINE` | `debate_reweight_to_baseline` | R2' base α toward baseline (0.5) |
 | `TRADINGAGENTS_DEBATE_ENTRENCH_THRESH` | `debate_entrench_thresh` | I_entrench above this -> penalty (0.8) |
-| `TRADINGAGENTS_DEBATE_DIVERGENCE_MIN` | `debate_divergence_min` | |bull−bear| below → artificial-consensus flag (0.15) |
+| `TRADINGAGENTS_DEBATE_DIVERGENCE_MIN` | `debate_divergence_min` | default `0.15` |
 | `TRADINGAGENTS_DEBATE_BASELINE_FALLBACK` | `debate_baseline_fallback` | R1': an unverifiable debate degrades to the baseline stances (true, default); **false stops the run** with `DebateBaselineFallbackError` |
 | `TRADINGAGENTS_DEBATE_REQUIRE_CAPABILITY_MATRIX` | `debate_require_capability_matrix` | R3 startup check: **raises** `DebateCapabilityError` for a debate role (assessed on its `debate_*_model` or the tier fallback) that cannot meet its floor (default false = warn only) |
-| `TRADINGAGENTS_CHECKPOINT_ENABLED` | `checkpoint_enabled` |
-| `TRADINGAGENTS_BENCHMARK_TICKER` | `benchmark_ticker` |
-| `TRADINGAGENTS_TEMPERATURE` | `temperature` |
-| `TRADINGAGENTS_LLM_MAX_RETRIES` | `llm_max_retries` |
-| `TRADINGAGENTS_FINNHUB_API_KEY` | `finnhub_api_key` |
-| `TRADINGAGENTS_MASSIVE_API_KEY` | `massive_api_key` |
-| `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |
+| `TRADINGAGENTS_CHECKPOINT_ENABLED` | `checkpoint_enabled` | default `false` |
+| `TRADINGAGENTS_BENCHMARK_TICKER` | `benchmark_ticker` | default `None` |
+| `TRADINGAGENTS_TEMPERATURE` | `temperature` | default `None` |
+| `TRADINGAGENTS_TOP_P` | `top_p` | default `None` |
+| `TRADINGAGENTS_FREQUENCY_PENALTY` | `frequency_penalty` | default `None` |
+| `TRADINGAGENTS_PRESENCE_PENALTY` | `presence_penalty` | default `None` |
+| `TRADINGAGENTS_LLM_MAX_RETRIES` | `llm_max_retries` | default `None` |
+| `TRADINGAGENTS_FINNHUB_API_KEY` | `finnhub_api_key` |  |
+| `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |  |
 | `TRADINGAGENTS_EODHD_API_KEY` | `eodhd_api_key` | EODHD daily OHLCV (free 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota (100 calls/7 days) |
+| `TRADINGAGENTS_MASSIVE_API_KEY` | `massive_api_key` |  |
 | `TIINGO_API_KEY` | `tiingo_api_key` | Tiingo market data (free Starter tier: EOD OHLCV + fundamental statements + IEX quote + crypto; ~1,000 calls/day) |
 | `TWELVEDATA_API_KEY` | `twelve_data_api_key` | Twelve Data (free "Basic": 800 credits/day, 8/min; realtime US stocks/forex/crypto quotes + historical time-series OHLCV; tail of `core_stock_apis`) |
 | `STOCKDATA_API_KEY` | `stockdata_api_key` | StockData.org (free "$0/mo": 100 requests/day; quote/EOD/intraday/news; tail of `core_stock_apis` + `news_data`) |
 | `NEWSAPI_API_KEY` | `newsapi_api_key` | NewsAPI.org (free Developer: 100 req/day; global macro headlines; tail of `news_data`/`get_global_news`) |
 | `BENZINGA_API_KEY` | `benzinga_api_key` | Benzinga (live key registered 2026-09-20; ticker news = headline+link, plus calendars/fundamentals/insider/congress on the same key). GDELT is keyless. |
-| `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |
-| `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |
-| `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` |
-| `TRADINGAGENTS_MOOMOO_HOST` | `moomoo_host` |
-| `TRADINGAGENTS_MOOMOO_PORT` | `moomoo_port` |
-| `TRADINGAGENTS_MOOMOO_ACCOUNT` | `moomoo_account` |
-| `TRADINGAGENTS_MOOMOO_AUTOSTART` | `moomoo_autostart` |
-| `TRADINGAGENTS_MOOMOO_OPEND_PATH` | `moomoo_opend_path` |
-| `TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS` | `moomoo_max_connections` |
-| `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT` | `moomoo_call_timeout` | per-call wall-clock timeout (s) for moomoo SDK calls; the SDK's own `ReqInfo.wait()` allows 20s, this caps a degraded gateway at 5s (default) so a run can't stall on hundreds of slow calls |
-| `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | `enable_strategy_overlays` |
-| `TRADINGAGENTS_ENABLE_REFLECTION` | `enable_reflection` |
+| `TRADINGAGENTS_PATENTSVIEW_API_KEY` | `patentsview_api_key` |  |
+| `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` | `enable_massive_flat` | default `false` |
+| `TRADINGAGENTS_MASSIVE_FLAT_DIR` | `massive_flat_dir` | default `data/massive_flat` |
+| `TRADINGAGENTS_TOOL_CALL_LOG_DIR` | `tool_call_log_dir` | default empty |
+| `TRADINGAGENTS_ALPACA_API_KEY_ID` | `alpaca_api_key_id` |  |
+| `TRADINGAGENTS_ALPACA_API_SECRET` | `alpaca_api_secret` |  |
+| `TRADINGAGENTS_ENABLE_ALPACA` | `enable_alpaca` | default `false` |
+| `TRADINGAGENTS_MOOMOO_HOST` | `moomoo_host` | default `127.0.0.1` |
+| `TRADINGAGENTS_MOOMOO_PORT` | `moomoo_port` | default `11111` |
+| `TRADINGAGENTS_MOOMOO_ACCOUNT` | `moomoo_account` | default `None` |
+| `TRADINGAGENTS_MOOMOO_AUTOSTART` | `moomoo_autostart` | default `false` |
+| `TRADINGAGENTS_MOOMOO_OPEND_PATH` | `moomoo_opend_path` | default `None` |
+| `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | `enable_strategy_overlays` | default `true` |
+| `TRADINGAGENTS_ENABLE_REFLECTION` | `enable_reflection` | default `true` |
 | `TRADINGAGENTS_ENABLE_SENTIMENT` | `enable_sentiment` | when on (default True), the sentiment report gets the computed StockTwits score + surprise velocity injected |
-| `TRADINGAGENTS_ENABLE_ORDERFLOW` | `enable_orderflow` |
-| `TRADINGAGENTS_ENABLE_POSITION_CONTRACT` | `enable_position_contract` |
-| `TRADINGAGENTS_ENABLE_CALIBRATION` | `enable_calibration` |
-| `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` |
+| `TRADINGAGENTS_ENABLE_ORDERFLOW` | `enable_orderflow` | default `false` |
+| `TRADINGAGENTS_ENABLE_POSITION_CONTRACT` | `enable_position_contract` | default `false` |
+| `TRADINGAGENTS_ENABLE_CALIBRATION` | `enable_calibration` | default `false` |
+| `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` | consensus/agreement scaling of the size |
+| `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` | default `false` |
+| `TRADINGAGENTS_ENABLE_FACTOR_PROFILE` | `enable_factor_profile` | default `false` |
+| `TRADINGAGENTS_ENABLE_TOPK_DROP` | `enable_topk_drop` | default `false` |
+| `TRADINGAGENTS_ENABLE_ENHANCED_INDEX` | `enable_enhanced_index` | default `false` |
+| `TRADINGAGENTS_BACKTEST_LIMIT_THRESHOLD` | `backtest_limit_threshold` | default `0.0` |
+| `TRADINGAGENTS_BACKTEST_VOLUME_PARTICIPATION` | `backtest_volume_participation` | default `0.0` |
+| `TRADINGAGENTS_BACKTEST_DEAL_PRICE` | `backtest_deal_price` | default `close` |
+| `TRADINGAGENTS_ENABLE_PIT_REGISTRY` | `enable_pit_registry` | default `false` |
+| `TRADINGAGENTS_ENABLE_FACTOR_MODEL` | `enable_factor_model` | default `false` |
+| `TRADINGAGENTS_ENABLE_DECISION_GUARDRAIL` | `enable_decision_guardrail` | default `false` |
+| `TRADINGAGENTS_ENABLE_SKILL_OVERLAYS` | `enable_skill_overlays` | **inert** (docstring-only mentions) |
+| `TRADINGAGENTS_SKILL_DIR` | `skill_dir` | default empty |
+| `TRADINGAGENTS_ENABLE_NEWS_RELEVANCE` | `enable_news_relevance` | default `false` |
+| `TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION` | `enable_report_attribution` | default `false` |
+| `TRADINGAGENTS_ENABLE_PREDICTION_LEDGER` | `enable_prediction_ledger` | default `false` |
+| `TRADINGAGENTS_PREDICTION_HORIZON_DAYS` | `prediction_horizon_days` | default `60` |
+| `TRADINGAGENTS_LLM_TIER_MAP` | `llm_tier_map` | default `{}` |
+| `TRADINGAGENTS_LLM_TIER_MODEL` | `llm_tier_model` | default `{}` |
+| `TRADINGAGENTS_MONITOR_NOTIFY` | `monitor_notify` | default `false` |
+| `TRADINGAGENTS_MONITOR_WEBHOOK` | `monitor_webhook` | default empty |
+| `TRADINGAGENTS_ENABLE_FACTOR_PROPOSAL_LOOP` | `enable_factor_proposal_loop` | default `false` |
+| `TRADINGAGENTS_ENABLE_TUNER` | `enable_tuner` | default `false` |
 | `TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE` | `enable_independent_vote` | when on, the 3 risk + bull/bear stances are sampled INDEPENDENTLY before the debate and the agreement/consensus (G3 + the PM's dissent flag + the G1 contract multiply) comes from those uncontaminated pre-debate opinions — the debate stays the risk-surfacing layer |
 | `TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR` | `enable_sentiment_factor` | when on (default off), the position scale multiplies by 1 ± `sentiment_factor_max_scale` ONLY when the name's measured news-sentiment rank IC ≥ `sentiment_factor_min_ic` (else neutral 1.0, never blocks) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_IC` | `sentiment_factor_min_ic` | measured rank-IC floor for the sentiment fold (default 0.02) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MAX_SCALE` | `sentiment_factor_max_scale` | max +/- position-scale move from the sentiment fold (default 0.2) |
 | `TRADINGAGENTS_SENTIMENT_FACTOR_MIN_SCALE` | `sentiment_factor_min_scale` | floor for the sentiment fold scale (default 0.5) |
-| `TRADINGAGENTS_VOLATILITY_ESTIMATOR` | `volatility_estimator` | overlay sizing estimator: `close` (default) \| `ewma` \| `garch` (parkinson / garman-klass / yang-zhang are analyst tools, need OHLC) |
+| `TRADINGAGENTS_VOLATILITY_ESTIMATOR` | `volatility_estimator` | overlay sizing estimator: `close` (default) \ |
 | `TRADINGAGENTS_COVARIANCE_SHRINKAGE_ENABLE` | `covariance_shrinkage_enable` | Ledoit-Wolf shrunk covariance in the covariance allocators (advisory, default off) |
-| `TRADINGAGENTS_COVARIANCE_SHRINKAGE_TARGET` | `covariance_shrinkage_target` | shrinkage target: `scaled_identity` (default) \| `diag` |
+| `TRADINGAGENTS_COVARIANCE_SHRINKAGE_TARGET` | `covariance_shrinkage_target` | shrinkage target: `scaled_identity` (default) \ |
 | `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | `enable_kelly_alloc` | allocation block uses multi-asset fractional Kelly (advisory, default off) |
 | `TRADINGAGENTS_KELLY_FRACTION` | `kelly_alloc_fraction` | fractional-Kelly scaling (default 0.25) |
-| `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | `enable_composite_rank` |
-| `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` |
-| `TRADINGAGENTS_ENABLE_RISK_GOVERNOR` | `enable_risk_governor` |
+| `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` | default `false` |
+| `TRADINGAGENTS_ENABLE_RISK_GOVERNOR` | `enable_risk_governor` | default `false` |
 | `TRADINGAGENTS_ENABLE_DECISION_AUDIT` | `enable_decision_audit` | on, the PM's report shows a claim-vs-computed audit note |
-| `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
-| `TRADINGAGENTS_ENABLE_EVENTS` | `enable_events` |
-| `TRADINGAGENTS_CATALYST_WINDOW_DAYS` | `catalyst_window_days` |
-| `TRADINGAGENTS_CATALYST_BASELINE_MOVE` | `catalyst_baseline_move` |
-| `TRADINGAGENTS_CATALYST_MACRO_WINDOW_DAYS` | `catalyst_macro_window_days` |
-| `TRADINGAGENTS_CATALYST_MACRO_SCALE` | `catalyst_macro_scale` |
-| `TRADINGAGENTS_CATALYST_FED_WINDOW_DAYS` | `catalyst_fed_window_days` |
-| `TRADINGAGENTS_CATALYST_FED_SCALE` | `catalyst_fed_scale` |
-| `TRADINGAGENTS_CATALYST_MISS_SCALE` | `catalyst_miss_scale` |
-| `TRADINGAGENTS_CATALYST_SCALE_FLOOR` | `catalyst_scale_floor` |
-| `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` |  # default 5 (forward earnings blackout) | `market_stress_index`/`market_stress_vol_cap` (index vol cap) | `min_dollar_volume`/`max_spread_bps` (liquidity guards)
-| `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` |
-| `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` |
-| `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` |
-| `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` |
-| `TRADINGAGENTS_HOLDINGS_TICKERS` | `holdings_tickers` | Option B: actual-book tickers for the PM holdings read; empty = the risk basket is used (Option A) |
-| `TRADINGAGENTS_HOLDINGS_WEIGHTS` | `holdings_weights` | Option B: actual-book weights (fractions of the whole book incl. cash; <1.0 remainder = cash sleeve). See `scripts/positions_to_basket.py` to derive them from position CSVs |
-| `TRADINGAGENTS_RISK_COMPACT_REPORT` | `risk_compact_report` |
-| `TRADINGAGENTS_GOOGLE_THINKING_LEVEL` | `google_thinking_level` |
-| `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` |
-| `TRADINGAGENTS_ANTHROPIC_EFFORT` | `anthropic_effort` |
-| `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` |
-| `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` |
-| `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` |
-| `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
-| `TRADINGAGENTS_OPENROUTER_STREAMING` | `openrouter_streaming` | stream OpenRouter responses; default `false`. A large prompt spends a long time in prefill with nothing on the wire, and OpenRouter only commits HTTP 200 + headers once a provider accepts the request (later failures arrive in-stream, not as a bare 504). langchain aggregates the chunks, so `invoke()`/tool loops are unchanged |
-| `TRADINGAGENTS_OPENROUTER_SESSION_ID` | `openrouter_session_id` | sticky-routing key sent as the request-body `session_id`: `auto` = one generated id per client (per symbol run), a literal string (≤256 chars) pins a named session, empty (default) = off. Keeps each turn on the provider holding the warmed prefix cache; OpenRouter's sticky routing is disabled by `provider.order`, so this repo never sends one |
-| `TRADINGAGENTS_OPENROUTER_PROVIDER_SORT` | `openrouter_provider_sort` | `provider.sort`: `price` \| `throughput` \| `latency`; empty (default) keeps OpenRouter's price-based load balancing. Sorting disables that balancing, so the same model can route to pricier hosts |
-| `TRADINGAGENTS_OPENROUTER_PREFERRED_MAX_LATENCY` | `openrouter_preferred_max_latency` | `provider.preferred_max_latency` in seconds; empty/0 = not sent |
-| `TRADINGAGENTS_OPENROUTER_PREFERRED_MIN_THROUGHPUT` | `openrouter_preferred_min_throughput` | `provider.preferred_min_throughput` in tokens/sec; empty/0 = not sent |
-| `TRADINGAGENTS_OPENROUTER_REQUIRE_PARAMETERS` | `openrouter_require_parameters` | `true` = only hosts that honor every parameter in the request (tools, `max_tokens`) |
-| `TRADINGAGENTS_OPENROUTER_ALLOW_FALLBACKS` | `openrouter_allow_fallbacks` | default `true` (OpenRouter's own default, so nothing is sent); `false` = fail instead of falling back when the preferred host is unavailable |
-| `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 8000; the fallback for both tiers |
-| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
-| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
-| `TRADINGAGENTS_BACKUP_LLM` | `backup_llm` | backup model for truncation-continuation retries: `provider:model` (or a bare model id using `TRADINGAGENTS_LLM_PROVIDER`). When ANY LLM response is cut at the output cap, the continuation retry runs on this model instead of re-paying the one that truncated. Empty = same-model continuations (legacy behavior) |
-| `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` |
+| `TRADINGAGENTS_REGIME_STATE_ENABLE` | `regime_state_enable` | regime-state size multiplier |
+| `TRADINGAGENTS_VOL_CAP_ENABLE` | `vol_cap_enable` | volatility-cap size multiplier |
+| `TRADINGAGENTS_ENABLE_HARD_GUARDS` | `enable_hard_guards` | hard-guard labels (`max_portfolio_risk` / `data_quality_failure` / `insufficient_liquidity`) |
+| `TRADINGAGENTS_ALPHA_LEDGER_ENABLE` | `alpha_ledger_enable` | default `false` |
+| `TRADINGAGENTS_KNIFE_COMPOSITE_ENABLE` | `knife_composite_enable` | default `false` |
+| `TRADINGAGENTS_KNIFE_SCORE_WEIGHTS` | `knife_score_weights` | default `[0.25, 0.2, 0.2, 0.2, 0.15]` |
+| `TRADINGAGENTS_KNIFE_SCORE_BANDS` | `knife_score_bands` | default `[1.5, 2.5, 3.0]` |
+| `TRADINGAGENTS_VALUE_DIP_KNIFE_ENABLE` | `value_dip_knife_enable` | default `false` |
 | `TRADINGAGENTS_VALUE_DIP_VDU_ENABLE` | `value_dip_vdu_enable` | strict: VDU ladder hard-gates entry (dry-up + trigger candle + RVOL>=1.3 + momentum confirmation); candidate=False -> no entry |
 | `TRADINGAGENTS_VALUE_DIP_REQUIRE_CATALYST` | `value_dip_require_catalyst` | strict: value-dip needs re-rating evidence |
 | `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | strict: block dip entries in high-vol/fast-downtrend/catalyst windows |
@@ -131,15 +144,16 @@ in `batch.py`).
 | `TRADINGAGENTS_VALUE_DIP_REGIME_DOWNTREND_BAND` | `value_dip_regime_downtrend_band` | knife guard: price below 200-SMA by this |
 | `TRADINGAGENTS_VALUE_DIP_REGIME_HALVE` | `value_dip_regime_halve` | instead of block, size x0.5 |
 | `TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT` | `risk_daily_loss_budget_pct` | daily realized-loss cap -> de-risk |
-| `TRADINGAGENTS_RISK_HWM_SOFT_PCT` / `_HARD_PCT` | `risk_hwm_soft_pct` / `risk_hwm_hard_pct` | drawdown-from-HWM tiers |
-| `TRADINGAGENTS_BREAKEVEN_TRIGGER` | `breakeven_trigger` | atr \| r \| structure (BE after confirmation) |
+| `TRADINGAGENTS_RISK_HWM_SOFT_PCT` | `risk_hwm_soft_pct` | drawdown-from-HWM tiers |
+| `TRADINGAGENTS_RISK_HWM_HARD_PCT` | `risk_hwm_hard_pct` | default `0.2` |
+| `TRADINGAGENTS_BREAKEVEN_TRIGGER` | `breakeven_trigger` | atr \ |
 | `TRADINGAGENTS_STOP_NEVER_WIDEN` | `stop_never_widen` | unified stop never widened |
-| `TRADINGAGENTS_MIN_HOLDING_DAYS` / `_MAX_TRADES_PER_PERIOD` | `min_holding_days` / `max_trades_per_period` | turnover guards |
-| `TRADINGAGENTS_SLEEVE_TAG_ENABLED` | `sleeve_tag_enabled` |
-| `TRADINGAGENTS_ENABLE_PREOPEN_RVOL` / `_PREOPEN_RVOL_INSTITUTIONAL_X` | `enable_preopen_rvol` / `preopen_rvol_institutional_x` | P1: pre-market RVOL vs 30d pre-open avg (Alpaca free IEX) |
-| `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | P2: live IEX quote-depth thin-book proxy |
-| `TRADINGAGENTS_ENABLE_ALPHA_PROFILE` | `enable_alpha_profile` | C3: post-fill drift vs arrival in strategy-quality report | tag decisions with style sleeve |
+| `TRADINGAGENTS_MIN_HOLDING_DAYS` | `min_holding_days` | turnover guards |
+| `TRADINGAGENTS_MAX_TRADES_PER_PERIOD` | `max_trades_per_period` | turnover guards |
+| `TRADINGAGENTS_SLEEVE_TAG_ENABLED` | `sleeve_tag_enabled` | default `true` |
 | `TRADINGAGENTS_DRIFT_THRESHOLD` | `drift_threshold` | alpha-decay win-rate drift trigger |
+| `TRADINGAGENTS_ENABLE_PREOPEN_RVOL` | `enable_preopen_rvol` | P1: pre-market RVOL vs 30d pre-open avg (Alpaca free IEX) |
+| `TRADINGAGENTS_PREOPEN_RVOL_INSTITUTIONAL_X` | `preopen_rvol_institutional_x` | P1: pre-market RVOL vs 30d pre-open avg (Alpaca free IEX) |
 | `TRADINGAGENTS_PSR_BENCHMARK_SHARPE` | `psr_benchmark_sharpe` | PSR benchmark Sharpe (default 0.0) |
 | `TRADINGAGENTS_ROLLING_WINDOW` | `rolling_window` | rolling evaluation window (default 132) |
 | `TRADINGAGENTS_DOWNSIDE_MAR` | `downside_mar` | minimum acceptable return for downside measures (default 0.0) |
@@ -150,59 +164,134 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | two-pass risk manager on (default OFF; not wired to runtime) |
 | `TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT` | `volume_share_vol_limit` | volume-share slippage volume limit (default 0.1) |
 | `TRADINGAGENTS_VOLUME_SHARE_PRICE_IMPACT` | `volume_share_price_impact` | volume-share slippage price impact (default 0.025) |
+| `TRADINGAGENTS_ENABLE_EVENTS` | `enable_events` | default `true` |
+| `TRADINGAGENTS_CATALYST_WINDOW_DAYS` | `catalyst_window_days` | default `5` |
+| `TRADINGAGENTS_CATALYST_BASELINE_MOVE` | `catalyst_baseline_move` | default `0.02` |
+| `TRADINGAGENTS_CATALYST_MACRO_WINDOW_DAYS` | `catalyst_macro_window_days` | default `3` |
+| `TRADINGAGENTS_CATALYST_MACRO_SCALE` | `catalyst_macro_scale` | default `0.6` |
+| `TRADINGAGENTS_CATALYST_FED_WINDOW_DAYS` | `catalyst_fed_window_days` | default `10` |
+| `TRADINGAGENTS_CATALYST_FED_SCALE` | `catalyst_fed_scale` | default `0.6` |
+| `TRADINGAGENTS_CATALYST_MISS_SCALE` | `catalyst_miss_scale` | default `0.5` |
+| `TRADINGAGENTS_CATALYST_SCALE_FLOOR` | `catalyst_scale_floor` | default `0.25` |
+| `TRADINGAGENTS_CATALYST_HARD_BLOCK_DAYS` | `catalyst_hard_block_days` | # default 5 (forward earnings blackout) |
+| `TRADINGAGENTS_MARKET_STRESS_INDEX` | `market_stress_index` | default empty |
+| `TRADINGAGENTS_MARKET_STRESS_VOL_CAP` | `market_stress_vol_cap` | default `0.85` |
+| `TRADINGAGENTS_MIN_DOLLAR_VOLUME` | `min_dollar_volume` | default `None` |
+| `TRADINGAGENTS_MAX_SPREAD_BPS` | `max_spread_bps` | default `None` |
+| `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` | default `0.1` |
+| `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` | default `0.03` |
+| `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` | default `[]` |
+| `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` | default `{}` |
+| `TRADINGAGENTS_HOLDINGS_TICKERS` | `holdings_tickers` | Option B: actual-book tickers for the PM holdings read; empty = the risk basket is used (Option A) |
+| `TRADINGAGENTS_HOLDINGS_WEIGHTS` | `holdings_weights` | Option B: actual-book weights (fractions of the whole book incl. cash; <1.0 remainder = cash sleeve). See `scripts/positions_to_basket.py` to derive them from position CSVs |
+| `TRADINGAGENTS_MOOMOO_MAX_CONNECTIONS` | `moomoo_max_connections` | default `25` |
+| `TRADINGAGENTS_MOOMOO_CALL_TIMEOUT` | `moomoo_call_timeout` | per-call wall-clock timeout (s) for moomoo SDK calls; the SDK's own `ReqInfo.wait()` allows 20s, this caps a degraded gateway at 5s (default) so a run can't stall on hundreds of slow calls |
+| `TRADINGAGENTS_MOOMOO_SCREEN_ENABLE` | `moomoo_screen_enable` | default `false` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_PE_MAX` | `moomoo_screen_pe_max` | default `30.0` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_ROE_MIN` | `moomoo_screen_roe_min` | default `0.12` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_MAX_CHG5D` | `moomoo_screen_max_chg5d` | default `-0.05` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_MAX_RSI` | `moomoo_screen_max_rsi` | default `35.0` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_PB_MIN` | `moomoo_screen_pb_min` | default `None` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_PB_MAX` | `moomoo_screen_pb_max` | default `None` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_DIP_DAYS` | `moomoo_screen_dip_days` | default `5` |
+| `TRADINGAGENTS_MOOMOO_SCREEN_EXCHANGES` | `moomoo_screen_exchanges` | default `NYSE,NASDAQ` |
+| `TRADINGAGENTS_RISK_COMPACT_REPORT` | `risk_compact_report` | default `false` |
+| `TRADINGAGENTS_GOOGLE_THINKING_LEVEL` | `google_thinking_level` | default `None` |
+| `TRADINGAGENTS_OPENAI_REASONING_EFFORT` | `openai_reasoning_effort` | default `None` |
+| `TRADINGAGENTS_ANTHROPIC_EFFORT` | `anthropic_effort` | default `None` |
+| `TRADINGAGENTS_ANALYST_CONCURRENCY` | `analyst_concurrency` | default `1` |
+| `TRADINGAGENTS_ANALYST_FORCED_TOOLS` | `analyst_forced_tools` | default `[]` |
+| `TRADINGAGENTS_ANALYST_FORCED_TOOLS_MAX_PARALLEL` | `analyst_forced_tools_max_parallel` | default `1` |
+| `TRADINGAGENTS_ANALYST_FORCED_TOOLS_TIMEOUT_S` | `analyst_forced_tools_timeout_s` | default `30` |
+| `TRADINGAGENTS_ANALYST_FORCED_TOOLS_SUMMARY_WINDOW` | `analyst_forced_tools_summary_window` | default `12000` |
+| `TRADINGAGENTS_ANALYST_TOOLS_MODEL_SUPPLIED` | `analyst_tools_model_supplied` | default `[]` |
+| `TRADINGAGENTS_OPENROUTER_REASONING_EFFORT` | `openrouter_reasoning_effort` | default empty |
+| `TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS` | `openrouter_ignore_providers` | comma-separated provider slugs to always skip (sent as `provider.ignore` in the OpenRouter request body via `extra_body`) to block slow/unreliable endpoints; empty = no restriction |
+| `TRADINGAGENTS_OPENROUTER_STREAMING` | `openrouter_streaming` | stream OpenRouter responses; default `false`. A large prompt spends a long time in prefill with nothing on the wire, and OpenRouter only commits HTTP 200 + headers once a provider accepts the request (later failures arrive in-stream, not as a bare 504). langchain aggregates the chunks, so `invoke()`/tool loops are unchanged |
+| `TRADINGAGENTS_OPENROUTER_SESSION_ID` | `openrouter_session_id` | sticky-routing key sent as the request-body `session_id`: `auto` = one generated id per client (per symbol run), a literal string (≤256 chars) pins a named session, empty (default) = off. Keeps each turn on the provider holding the warmed prefix cache; OpenRouter's sticky routing is disabled by `provider.order`, so this repo never sends one |
+| `TRADINGAGENTS_OPENROUTER_PROVIDER_SORT` | `openrouter_provider_sort` | `provider.sort`: `price` \ |
+| `TRADINGAGENTS_OPENROUTER_PREFERRED_MAX_LATENCY` | `openrouter_preferred_max_latency` | `provider.preferred_max_latency` in seconds; empty/0 = not sent |
+| `TRADINGAGENTS_OPENROUTER_PREFERRED_MIN_THROUGHPUT` | `openrouter_preferred_min_throughput` | `provider.preferred_min_throughput` in tokens/sec; empty/0 = not sent |
+| `TRADINGAGENTS_OPENROUTER_REQUIRE_PARAMETERS` | `openrouter_require_parameters` | `true` = only hosts that honor every parameter in the request (tools, `max_tokens`) |
+| `TRADINGAGENTS_OPENROUTER_ALLOW_FALLBACKS` | `openrouter_allow_fallbacks` | default `true` (OpenRouter's own default, so nothing is sent); `false` = fail instead of falling back when the preferred host is unavailable |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | per-role max output tokens (hard ceiling via `max_tokens`); default 8000; the fallback for both tiers |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK` | `max_output_tokens_quick` | quick-tier cap (analysts / researchers / debaters / trader); default 8000 (raised from 6000 after 2026-08-27 reports truncated mid-sentence at the 6000 cap) |
+| `TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP` | `max_output_tokens_deep` | deep-tier cap (Research Manager + Portfolio Manager); default 2500 |
+| `TRADINGAGENTS_BACKUP_LLM` | `backup_llm` | backup model for truncation-continuation retries: `provider:model` (or a bare model id using `TRADINGAGENTS_LLM_PROVIDER`). When ANY LLM response is cut at the output cap, the continuation retry runs on this model instead of re-paying the one that truncated. Empty = same-model continuations (legacy behavior) |
+| `TRADINGAGENTS_ENABLE_VALUE_DIP` | `enable_value_dip` | default `false` |
+| `TRADINGAGENTS_ENABLE_TRANCHE_RISK` | `enable_tranche_risk` | default `false` |
+| `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` | default `[0.3, 0.3, 0.4]` |
+| `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` | default `1.5` |
+| `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` | default `0.015` |
+| `TRADINGAGENTS_TRANCHE_ACCOUNT` | `tranche_account` | default `100000.0` |
+| `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
+| `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` | default `true` |
+| `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` | default `false` |
+| `TRADINGAGENTS_FCF_YIELD_FLOOR` | `fcf_yield_floor` | default `0.06` |
+| `TRADINGAGENTS_ENABLE_ETF_ENGINE` | `enable_etf_engine` | default `false` |
+| `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
+| `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
+| `TRADINGAGENTS_MAX_PAIRWISE_CORR` | `max_pairwise_corr` | hard cluster ceiling on pairwise position correlation (default off) |
+| `TRADINGAGENTS_TRAILING_STOP_ATR_MULT` | `trailing_stop_atr_mult` | ATR-multiplied trailing stop (atr*mult) instead of static %% (default off) |
+| `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` | `correlation_penalty_frac` | weight cut for a penalized name, renormalized across the book (default 0.3) |
 | `TRADINGAGENTS_ENABLE_OPTIONS_SURFACE` | `enable_options_surface` | CBOE delayed options chain -> IV/greeks surface (default OFF) |
 | `TRADINGAGENTS_ENABLE_RISK_FREE_CURVE` | `enable_risk_free_curve` | NY Fed SOFR + Treasury par-yield curve (default OFF) |
 | `TRADINGAGENTS_ENABLE_SCREENER` | `enable_screener` | yfinance universe screener (symbol/PE/EPS/beta/mkt-cap) (default OFF) |
-| `TRADINGAGENTS_ENABLE_MARKET_ROUTING` | `enable_market_routing` | DSA §3.4 market-classified routing on (default OFF; the chain is bit-identical when off) |
-| `TRADINGAGENTS_MARKET_SOURCE_PRIORITY` | `market_source_priority` | JSON market -> comma-separated vendor list, e.g. `{"US": "eodhd,tiingo,yfinance,moomoo"}`; reorders that method's chain for the market (takes effect with `enable_market_routing`; unregistered vendors in the list are skipped) |
 | `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | `enable_market_movers` | yfinance gainers/losers/actives (default OFF) |
 | `TRADINGAGENTS_ENABLE_BENZINGA_SURFACE` | `enable_benzinga_surface` | Benzinga event surface: guidance revisions / FDA milestones / secondary offerings / analyst actions / news retractions (default OFF) |
-| — | `enable_sector_multifactor` | sector-rotation P1: `get_sector_rank` adds a multi-factor score — momentum composite + RS vs benchmark + trend + risk, tie-aware cross-sectional percentiles (default OFF; `strategies/formulas/sector_rotation.md`) |
-| — | `enable_sector_industry` | sector-rotation P2: industry-ETF layer ranked only inside the parent sector (default OFF) |
-| — | `enable_sector_breadth` | sector-rotation P3: constituent % above MA50 + EW/CW leadership for the curated core set (`sector_rank.SECTOR_CONSTITUENTS`); fetch-heavy, run-cached (default OFF) |
-
-| `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
-| `TRADINGAGENTS_CORRELATION_THRESHOLD` | `correlation_threshold` | avg pairwise correlation above this triggers the penalty (default 0.6) |
-| `TRADINGAGENTS_MAX_PAIRWISE_CORR` | `max_pairwise_corr` | hard cluster ceiling on pairwise position correlation (default off) |  | `get_live_price_sanity` / `live_price_sanity` (below-day-low / mismatch flag)
-| `TRADINGAGENTS_TRAILING_STOP_ATR_MULT` | `trailing_stop_atr_mult` | ATR-multiplied trailing stop (atr*mult) instead of static %% (default off) |
-| `TRADINGAGENTS_CORRELATION_PENALTY_FRAC` | `correlation_penalty_frac` | weight cut for a penalized name, renormalized across the book (default 0.3) |
-| `TRADINGAGENTS_TRANCHE_WEIGHTS` | `tranche_weights` |
-| `TRADINGAGENTS_TRANCHE_STOP_MULT` | `tranche_stop_mult` |
-| `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` |
-| `TRADINGAGENTS_TRANCHE_ACCOUNT` | `tranche_account` |
-| `TRADINGAGENTS_RESULTS_DIR` | `results_dir` |
-| `TRADINGAGENTS_CACHE_DIR` | `data_cache_dir` |
-| `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` |
-| `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` | `enable_massive_flat` |
-| `TRADINGAGENTS_MASSIVE_FLAT_DIR` | `massive_flat_dir` |
+| `TRADINGAGENTS_ENABLE_MARKET_ROUTING` | `enable_market_routing` | DSA §3.4 market-classified routing on (default OFF; the chain is bit-identical when off) |
+| `TRADINGAGENTS_MARKET_SOURCE_PRIORITY` | `market_source_priority` | JSON market -> comma-separated vendor list, e.g. `{"US": "eodhd,tiingo,yfinance,moomoo"}`; reorders that method's chain for the market (takes effect with `enable_market_routing`; unregistered vendors in the list are skipped) |
 | `TRADINGAGENTS_ENABLE_SPREAD_ESTIMATOR` | `enable_spread_estimator` | quote-free Corwin-Schultz / Abdi-Ranaldo spread FLOOR (Q1) |
 | `TRADINGAGENTS_ENABLE_BOOK_RISK_SIZING` | `enable_book_risk_sizing` | minimum-CVaR book sizing under the CVaR budget (Q2) |
 | `TRADINGAGENTS_ENABLE_CONFORMAL_BANDS` | `enable_conformal_bands` | calibrated valuation bands with realized coverage (Q3) |
 | `TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION` | `enable_return_decomposition` | overnight vs intraday return decomposition (Q5) |
 | `TRADINGAGENTS_ENABLE_TEXT_FACTORS` | `enable_text_factors` | Loughran-McDonald tone / readability / divergence (Q6) |
 | `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
+| `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
+| `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |
+| `TRADINGAGENTS_ENABLE_GROWTH_SCORES` | `enable_growth_scores` | default `false` |
+| `TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_AGG` | `enable_weighted_sentiment_agg` | default `false` |
+| `TRADINGAGENTS_ENABLE_CROWD_RATIO_BANDS` | `enable_crowd_ratio_bands` | default `false` |
+| `TRADINGAGENTS_ENABLE_ANALYST_REVISION_INDEX` | `enable_analyst_revision_index` | default `false` |
+| `TRADINGAGENTS_ENABLE_QUALITY_COMPOSITE` | `enable_quality_composite` | default `false` |
+| `TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS` | `enable_score_eval_rows` | default `false` |
+| `TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_WINDOW` | `enable_weighted_sentiment_window` | default `false` |
+| `TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY` | `enable_evidence_symmetry` | default `false` |
+| `TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE` | `enable_fundamental_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_TECHNICAL_SCORE` | `enable_technical_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_SENTIMENT_SCORE` | `enable_sentiment_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_NEWS_SCORE` | `enable_news_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_TRADE_SCORE` | `enable_trade_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_EVENT_STATE` | `enable_event_state` | default `false` |
+| `TRADINGAGENTS_ENABLE_EVENT_CALENDARS` | `enable_event_calendars` | default `false` |
+| `TRADINGAGENTS_ENABLE_MOOMOO_SNAPSHOT` | `enable_moomoo_snapshot` | default `false` |
+| `TRADINGAGENTS_ENABLE_ANALYST_ESTIMATES` | `enable_analyst_estimates` | default `false` |
+| `TRADINGAGENTS_ENABLE_EODHD_RATES` | `enable_eodhd_rates` | default `false` |
+| `TRADINGAGENTS_ENABLE_REGIME_SCORE` | `enable_regime_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_RISK_SCORE` | `enable_risk_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_QUANT_SCORECARD` | `enable_quant_scorecard` | default `false` |
+| `TRADINGAGENTS_ENABLE_DECISION_PACKET` | `enable_decision_packet` | default `false` |
+| `TRADINGAGENTS_ENABLE_CONTEXT_EXPANSION` | `enable_context_expansion` | default `false` |
+| `TRADINGAGENTS_ENABLE_DECISION_CHALLENGE` | `enable_decision_challenge` | default `false` |
+| `TRADINGAGENTS_EVIDENCE_SYMMETRY_PAIRS` | `evidence_symmetry_pairs` | default `[]` |
 | `TRADINGAGENTS_ENABLE_THRESHOLD_GATE` | `enable_threshold_gate` | **inert** - declared, read by nothing (see `docs/gate_registry.md` §4) |
-| `TRADINGAGENTS_ENABLE_RISK_MANAGER` | `enable_risk_manager` | **inert** |
-| `TRADINGAGENTS_ENABLE_SKILL_OVERLAYS` | `enable_skill_overlays` | **inert** (docstring-only mentions) |
-| `TRADINGAGENTS_ENABLE_TRAILING_EXIT` | `enable_trailing_exit` | **inert** (the trailing arithmetic is gated by `enable_exits`) |
-| `TRADINGAGENTS_VALUE_DIP_REGIME_GATE` | `value_dip_regime_gate` | **inert** (its paired cap `value_dip_regime_vol_cap` IS read) |
-| `TRADINGAGENTS_VOLUME_SHARE_VOL_LIMIT` | `volume_share_vol_limit` | **inert** |
 | `TRADINGAGENTS_ENABLE_REGIME` | `enable_regime` | **inert** |
 | `TRADINGAGENTS_ENABLE_FACTORS` | `enable_factors` | **inert** |
-| `TRADINGAGENTS_ENABLE_HARD_GUARDS` | `enable_hard_guards` | hard-guard labels (`max_portfolio_risk` / `data_quality_failure` / `insufficient_liquidity`) |
-| `TRADINGAGENTS_ENABLE_AGREEMENT` | `enable_agreement` | consensus/agreement scaling of the size |
-| `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | `enable_kelly_alloc` | portfolio-level fractional-Kelly allocation |
+| `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | P2: live IEX quote-depth thin-book proxy |
+| `TRADINGAGENTS_ENABLE_SECTOR_MULTIFACTOR` | `enable_sector_multifactor` | sector-ranking reads (multi-factor, industry group, breadth, vendor constituents) |
+| `TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY` | `enable_sector_industry` | default `false` |
+| `TRADINGAGENTS_ENABLE_SECTOR_BREADTH` | `enable_sector_breadth` | default `false` |
+| `TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS` | `enable_sector_eodhd_constituents` | default `false` |
 | `TRADINGAGENTS_RISK_AUDIT_ENABLED` | `risk_audit_enabled` | hash-chained risk audit ledger |
-| `TRADINGAGENTS_REGIME_STATE_ENABLE` | `regime_state_enable` | regime-state size multiplier |
-| `TRADINGAGENTS_VOL_CAP_ENABLE` | `vol_cap_enable` | volatility-cap size multiplier |
-| `TRADINGAGENTS_ENABLE_PREOPEN_DEPTH` | `enable_preopen_depth` | pre-open depth read |
-| `TRADINGAGENTS_ENABLE_SECTOR_MULTIFACTOR` / `_INDUSTRY` / `_BREADTH` / `_EODHD_CONSTITUENTS` | `enable_sector_multifactor` / `enable_sector_industry` / `enable_sector_breadth` / `enable_sector_eodhd_constituents` | sector-ranking reads (multi-factor, industry group, breadth, vendor constituents) |
 | `TRADINGAGENTS_MAX_POSITION_PCT` | `max_position_pct` | single-name position cap (governor) |
 | `TRADINGAGENTS_RISK_MAX_POSITION_PCT` | `risk_max_position_pct` | whole-book position cap (governor) |
 | `TRADINGAGENTS_SECTOR_CAP_LIMIT` | `sector_cap_limit` | sector concentration cap (governor) |
-| `TRADINGAGENTS_RISK_DAILY_LOSS_BUDGET_PCT` | `risk_daily_loss_budget_pct` | daily loss limit (governor) |
-| `TRADINGAGENTS_RISK_HWM_SOFT_PCT` / `_HARD_PCT` | `risk_hwm_soft_pct` / `risk_hwm_hard_pct` | high-water-mark drawdown -> WARN / REJECT |
-| `TRADINGAGENTS_VALUE_DIP_REGIME_VOL_CAP` | `value_dip_regime_vol_cap` | volatility above which a dip entry is refused |
+| `TRADINGAGENTS_RESULTS_DIR` | `results_dir` | default `computed: os.path.join(_TRADINGAGENTS_HOME, 'logs')` |
+| `TRADINGAGENTS_CACHE_DIR` | `data_cache_dir` | default `computed: os.path.join(_TRADINGAGENTS_HOME, 'cache')` |
+| `TRADINGAGENTS_LLM_FAILURE_JOURNAL_DIR` | `llm_failure_journal_dir` | default empty |
+| `TRADINGAGENTS_VERIFY_MODEL` | `report_verify_model` | advisory LLM report-verifier model (empty = quick tier); see `scripts/report_verify.py` |
+| `TRADINGAGENTS_VERIFY_MAX_CALLS` | `report_verify_max_calls` | verifier LLM calls per report tree (default 12) |
+| `TRADINGAGENTS_MEMORY_LOG_PATH` | `memory_log_path` | default `computed: os.path.join(_TRADINGAGENTS_HOME, 'memory', 'trading_memory.md')` |
 
 (Secrets are read from env inside the vendors; `TRADINGAGENTS_DISABLE_REDDIT=1`
 in `.env` turns off Reddit fetches.)

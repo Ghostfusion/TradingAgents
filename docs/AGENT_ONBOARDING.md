@@ -434,6 +434,29 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **`docs/api_reference.md` §1.1 said "(complete)" over a table that was 36% empty, so the
+  table is now GENERATED from the code and a test keeps it that way.** The heading documented **165 of 258** `_ENV_OVERRIDES`
+  rows: **95 knobs were missing** - the whole debate block (`TRADINGAGENTS_DEBATE_*`), `TRADINGAGENTS_BACKTEST_*`,
+  `enable_decision_guardrail`, `enable_tuner`, `enable_prediction_ledger`, `enable_news_relevance`, `llm_tier_*`, `monitor_*`,
+  `knife_*`, `moomoo_screen_*`, `patentsview_api_key`, `tool_call_log_dir`, every `enable_*_score` gate. Same class as the bugs
+  this session has been fixing: **a name that promises more than it measures.** Hand-patching was the cause - the table has been
+  backfilled by hand at least three times (2026-08-21 `TRADINGAGENTS_ENABLE_MASSIVE_FLAT`, and twice more), and it showed:
+  **~15 duplicate rows**, **3 mangled rows** that had lost their env cell and merged into a neighbour (`catalyst_hard_block_days`,
+  `enable_alpha_profile`, `max_pairwise_corr`), an **unescaped `|` in the `debate_divergence_min` note** (`|bull−bear|`) that
+  split that row into five cells, and 2-cell rows under a 2-column header beside 3-cell rows. **One knob did not exist:**
+  `TRADINGAGENTS_ENABLE_ALPHA_PROFILE` -> `enable_alpha_profile` - no file reads the env var, the key is in neither
+  `DEFAULT_CONFIG` nor `_ENV_OVERRIDES`, and the real `alpha_profile` is a **report output key** in
+  `scripts/strategy_quality_report.py:211`. That row conflated a report field with a gate; removed. **Two mechanisms reach the
+  config and the doc now covers the union:** `_ENV_OVERRIDES` (258) plus the six literal `os.getenv("TRADINGAGENTS_...", fb)`
+  reads inside `DEFAULT_CONFIG` (`results_dir`, `data_cache_dir`, `llm_failure_journal_dir`, `report_verify_model`,
+  `report_verify_max_calls`, `memory_log_path`) = **264 pairs**, ordered by the code's own declaration order. New
+  `scripts/gen_api_reference_table.py` (`--write` / `--check`) preserves every existing human note verbatim and adds only a
+  code-derived `default X` note for new rows - never an invented semantic one, never a value for a credential-shaped key. New
+  `tests/test_api_reference_env_table.py` (4) asserts the table lists exactly the code's surface, keys each row correctly, uses
+  one cell count, and has no duplicate env var. **Failing-first against the pre-fix document: 3 of 4 red (102 omitted, cell
+  counts `{23: 2, 43: 5}`, the duplicate set), sha256 restore MATCH.** Lesson: a doc that claims completeness needs a check that
+  FAILS when it stops being complete, or the claim decays on the next hand-edit.
+
 - 2026-09-20 `(working tree)` - **The FundamentalScore appendix was arithmetically impossible, and the card's number was a second producer.**
   Found by reading `reports/MSFT_20260920_145644/1_analysts/fundamentals.md`, which prints `### FundamentalScore - 67.71/100` above
   `- FQS: 0/100`, `- FGS: 0/100 over 1 components`, `withheld: {'FTNT': ..., 'GEN': ..., 'NOW': ..., 'RBRK': ..., 'ZS': ...}`,
