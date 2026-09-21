@@ -175,3 +175,54 @@ def test_documented_bindings_are_real():
         "docs/api_reference.md asserts bindings the toolsets do not have "
         "(the doc is the contract the next reader trusts):\n  " + "\n  ".join(bad)
     )
+
+
+# ---------------------------------------------------------------------------
+# A named test file must exist.
+#
+# Same class as the table above, one layer out: a test that says "enforced by
+# `tests/test_X.py`" is making a claim a reader will follow. Three of these were
+# wrong before this check existed - `tests/test_decision_challenge.py` pointed at
+# a `test_gate_env_switches.py` that never existed, and the gate registry's
+# "Proven by" column named two more (`test_options_surface.py`,
+# `test_risk_free_curve.py`) over gates that had no proof at all. Each was found
+# by hand; this is the check that finds them instead.
+#
+# Scoped deliberately to references made BY TEST MODULES. Docs are not included:
+# measured over `docs/`, 28 `tests/test_*.py` references resolve to nothing and
+# are all legitimate - `docs/implementation_plan_*.md` and `docs/design_*.md` are
+# forward-looking plans naming tests still to be written, several in the sibling
+# repos (`test_doc_claims.py`, `test_engine_contract.py` are `trading_web`'s,
+# `test_inbox.py`/`test_envelope_v2.py` are `TradingExecution`'s), and the
+# CHANGELOG records renames (`test_quality_composite.py` ->
+# `test_category_scores.py`). A blanket doc check would be an over-strict
+# invariant that fails on 28 true statements. A test naming a test is not a
+# plan; it is a pointer.
+# ---------------------------------------------------------------------------
+
+# Word-boundary anchored: `strategies/backtest_engine.py` ends with
+# `test_engine.py` and must NOT be read as a reference to a test module.
+_TEST_REF = re.compile(r"(?<![A-Za-z0-9_])test_[A-Za-z0-9_]+\.py")
+
+# This module is the one exclusion, and the only one: the comment block above
+# has to quote the broken filenames to explain the defect, so its prose is a
+# specification rather than a pointer. Excluding it by NAME (not by pattern)
+# keeps that from becoming a general escape hatch.
+_SELF = Path(__file__).name
+
+
+def test_every_test_file_a_test_module_names_exists():
+    bad: list[str] = []
+    for path in sorted((REPO / "tests").glob("*.py")):
+        if path.name == _SELF:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for ref in _TEST_REF.findall(line):
+                if ref == path.name:
+                    continue
+                if not (REPO / "tests" / ref).exists():
+                    bad.append(f"{path.name}:{lineno} names `tests/{ref}`, which does not exist")
+    assert not bad, (
+        "a test module points at a test file that is not there, so a reader "
+        "following it finds nothing:\n  " + "\n  ".join(bad)
+    )

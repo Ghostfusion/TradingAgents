@@ -7,7 +7,7 @@ test asserts what a reader of the recorded outcome observes, not the wording of
 the discard message.
 
 The gate's own registration (DEFAULT_CONFIG / `_ENV_OVERRIDES` / the registry doc
-/ `.env.example` / flippability) is enforced by `tests/test_gate_env_switches.py`;
+/ `.env.example` / flippability) is enforced by `tests/test_gate_env_toggles.py`;
 it is not duplicated here.
 """
 

@@ -1271,7 +1271,7 @@ def factor_statistics(scores: dict, prices: dict, *, holding: int, n_buckets: in
         "panel_status": rows.get("status"),
         "status_reason": rows.get("status_reason"),
         "ic_label": alpha_health.ic_label(
-            ((rows.get("ic") or {}).get("mean_rank_ic"))
+            (rows.get("ic") or {}).get("mean_rank_ic")
         ),
     }
 
@@ -1333,7 +1333,7 @@ def redundancy_matrix(observations: dict, metrics, *, min_pairs: int = MIN_PAIRS
 def block_report(matrix: dict, *, registry: dict, measured=None) -> dict:
     """The two named blocks, with the pairwise correlations that decide them."""
     pairs = matrix.get("pairs") or {}
-    measured_set = set(str(m) for m in (measured or []))
+    measured_set = {str(m) for m in (measured or [])}
     out: dict = {}
     for block_name, block in REDUNDANCY_BLOCKS.items():
         members = block_members(block, registry)
@@ -1711,7 +1711,7 @@ def _pbo(factors: dict, n_trials: int) -> dict:
         "flag": bool(evaluate.pbo_flag(train, test)),
         "n_trials": int(n_trials),
         "measured": len(names),
-        "per_factor": dict(zip(names, ({"train_spread": t, "oos_spread": o} for t, o in zip(train, test)), strict=False)),
+        "per_factor": dict(zip(names, ({"train_spread": t, "oos_spread": o} for t, o in zip(train, test, strict=False)), strict=False)),
         "basis": (
             "evaluate.pbo_flag: the factor with the best in-sample spread is "
             "checked for a negative out-of-sample spread, over the family "

@@ -137,7 +137,7 @@ There are **two Python environments** and they are NOT interchangeable:
 py -3.12 -c "import sys; print(sys.executable)"
 py -3.12 -m pytest tests/ -q --no-header -p no:cacheprovider
 py -3.12 scripts/value_screener.py --help
-py -3.12 -m ruff check tradingagents/ ...
+py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/workflows/ci.yml`)
 ```
 
 ## Where the debugger/breakpoints live
@@ -433,6 +433,31 @@ has changed before); never assume an endpoint works — the SDK's
   live-vendor modules (`value_screener`/`scan_strategies`/`growth_screens`/
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
+
+- 2026-09-21 `(working tree)` - **A dangling test reference, and `ruff check .` (CI's own command) was FAILING while three documents
+  claimed the repo was clean.** **(1)** `tests/test_decision_challenge.py`'s docstring said the gate registration "is enforced by
+  `tests/test_gate_env_switches.py`" - the registrar is `tests/test_gate_env_toggles.py` and the named file has never existed.
+  Fixed, and the class is now checked: `test_every_test_file_a_test_module_names_exists` in `tests/test_doc_binding_claims.py`
+  (the doc-claims gate, whose docstring already frames the mission as "the false claim outlived the gate that produced it")
+  asserts every `tests/test_*.py` named by another test module exists. **Third instance of the class this session** (the gate
+  registry's "Proven by" column named two more), each previously caught by hand. **Scoped to test-module references on purpose**:
+  measured over `docs/`, **28** `tests/test_*.py` references resolve to nothing and ALL are legitimate - `docs/implementation_plan_*.md`
+  and `docs/design_*.md` are forward-looking plans naming tests still to be written, several in the sibling repos
+  (`test_doc_claims.py`/`test_engine_contract.py` are `trading_web`'s, `test_inbox.py`/`test_envelope_v2.py` are
+  `TradingExecution`'s), and the CHANGELOG records renames. A blanket doc check would be an over-strict invariant failing on 28
+  TRUE statements. Word-boundary anchored so `strategies/backtest_engine.py` is not read as a `test_engine.py`. Failing-first:
+  restoring the stale reference turns the guard red, sha256 restore MATCH. **(2)** `.github/workflows/ci.yml:61` runs `ruff check .`
+  under a job literally named "ruff (strict, full repo)", and `AGENT_ONBOARDING.md:183-184`, `docs/developer/08-development.md:26`
+  and the README all state the whole repo is clean. **It was not - 4 findings:** `scripts/score_panel.py:1274` UP034,
+  `:1336` C401, `:1714` B905 (the INNER `zip(train, test)` lacked `strict=`; the outer call had it), `cli/stats_handler.py:1` I001.
+  All four fixed behaviour-preservingly (`set(gen) == {gen}`, `zip(a,b) == zip(a,b,strict=False)`); B905 takes `strict=False`
+  NOT `True` - `strict=True` would raise on ragged pairs and a lint fix must not change behaviour. **So my initial framing
+  ("widen the scope") was WRONG: the scope was already documented whole-repo in three places - the defect was that the repo
+  did not meet its own stated bar and nothing caught it locally.** The real trap was the copy-pasteable quick command:
+  `AGENT_ONBOARDING.md:140` read `py -3.12 -m ruff check tradingagents/ ...`, so an agent copying it lints ONE directory and
+  reports clean - that is how `scripts/` and `cli/` rotted. It now reads `ruff check .`, matching the contract the same file
+  states 40 lines later. **`ruff check .` passes.** Lesson: when a doc states a repo-wide bar, the fix is to MEET it, not to
+  narrow the bar to what currently passes - and check the copy-pasteable command, not just the prose.
 
 - 2026-09-21 `(working tree)` - **`docs/api_reference.md` §1.1 said "(complete)" over a table that was 36% empty, so the
   table is now GENERATED from the code and a test keeps it that way.** The heading documented **165 of 258** `_ENV_OVERRIDES`

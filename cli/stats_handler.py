@@ -4,7 +4,6 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
-
 # langchain maps the provider's prompt-cache counters into
 # ``usage_metadata["input_token_details"]``: cached reads come from the
 # provider's ``cached_tokens``, cache writes from ``cache_write_tokens``.

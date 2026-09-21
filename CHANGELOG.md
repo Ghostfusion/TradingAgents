@@ -14,6 +14,27 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**A dangling test reference, and a lint contract the repo did not meet - the second was a red CI (2026-09-21).**
+
+**(1) A test pointed at a test file that does not exist.** `tests/test_decision_challenge.py`'s module docstring said the gate's registration "is enforced by `tests/test_gate_env_switches.py`" - the registrar is `tests/test_gate_env_toggles.py`, and the named file has never existed. A reader following the pointer finds nothing. Fixed, and **the class is now checked**: new `test_every_test_file_a_test_module_names_exists` in `tests/test_doc_binding_claims.py` - the doc-claims gate, whose docstring already frames the mission as "the false claim outlived the gate that produced it" - asserts every `tests/test_*.py` named by another test module exists. This is the third instance of the class this session (the gate registry's "Proven by" column named two more), each previously caught by hand.
+
+The guard is **scoped to test-module references, deliberately**. Measured over `docs/`, 28 `tests/test_*.py` references resolve to nothing and every one is legitimate: `docs/implementation_plan_*.md` and `docs/design_*.md` are forward-looking plans naming tests still to be written, several in the sibling repos (`test_doc_claims.py`/`test_engine_contract.py` are `trading_web`'s, `test_inbox.py`/`test_envelope_v2.py` are `TradingExecution`'s), and the CHANGELOG records renames (`test_quality_composite.py` -> `test_category_scores.py`). A blanket doc check would be an over-strict invariant that fails on 28 true statements. A test naming a test is not a plan; it is a pointer. The scan is word-boundary anchored so `strategies/backtest_engine.py` is not read as a reference to a `test_engine.py`.
+
+**(2) `ruff check .` - CI's own command - was failing, and three documents already claimed otherwise.** `.github/workflows/ci.yml:61` runs `ruff check .` under a job named "ruff (strict, full repo)", and `docs/AGENT_ONBOARDING.md:183-184`, `docs/developer/08-development.md:26` and the README all state the whole repo is clean. It was not - 4 findings:
+
+| site | rule | fix |
+| --- | --- | --- |
+| `scripts/score_panel.py:1274` | UP034 | extraneous parens around the `mean_rank_ic` read |
+| `scripts/score_panel.py:1336` | C401 | `set(gen)` -> a set comprehension |
+| `scripts/score_panel.py:1714` | B905 | the **inner** `zip(train, test)` lacked `strict=` (the outer call had it) |
+| `cli/stats_handler.py:1` | I001 | one blank line too many after the import block |
+
+All four fixed behaviour-preservingly: the substitutions are proven identical (`set(gen) == {gen}`, `zip(a, b) == zip(a, b, strict=False)`), and B905 deliberately takes `strict=False` rather than `True` - `strict=True` would raise on ragged pairs, and a lint fix must not change behaviour.
+
+**The reason they rotted is the copy-pasteable command, not the scope.** `docs/AGENT_ONBOARDING.md:140`'s quick-command block read `py -3.12 -m ruff check tradingagents/ ...`; an agent copying it lints one directory and reports clean. It now reads `ruff check .`, matching the contract the same file states 40 lines later and the command CI runs.
+
+**Web impact**: none. A test-reference correction, four behaviour-preserving lint fixes and one doc command; no tool, CLI flag, env var or JSON shape changed.
+
 **`docs/api_reference.md` §1.1 claimed "(complete)" and was 36% empty - the table is now generated from the code and a test keeps it that way (2026-09-21).** The heading sat over a table documenting **165 of 258** `_ENV_OVERRIDES` rows, so **95 config knobs were absent from the one document that says it lists all of them**: the entire debate-model block (`TRADINGAGENTS_DEBATE_*`), `TRADINGAGENTS_BACKTEST_*`, `enable_decision_guardrail`, `enable_tuner`, `enable_prediction_ledger`, `enable_news_relevance`, `llm_tier_*`, `monitor_*`, `knife_*`, `moomoo_screen_*`, `patentsview_api_key`, `tool_call_log_dir`, and every `enable_*_score` gate.
 
 The table had also accumulated the damage of repeated hand-patching (it has been backfilled by hand at least three times, e.g. the 2026-08-21 `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` pass): **~15 duplicated rows** (`enable_risk_manager` twice, `enable_trailing_exit` twice, `enable_agreement` twice, `enable_kelly_alloc` twice, `value_dip_regime_gate` twice, `enable_preopen_depth` twice, `risk_hwm_*` twice, ...), **three mangled rows** that had lost their env cell and merged into a neighbour (the `catalyst_hard_block_days` row, the `enable_alpha_profile` row, the `max_pairwise_corr` row), and an **unescaped `|` in the `debate_divergence_min` note** (`|bull−bear|`) that split that row into five cells. Rows mixed two and three cells under a two-column header, so the document rendered inconsistently.
