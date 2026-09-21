@@ -81,6 +81,17 @@ REGISTRY: dict[str, str] = {
     "enable_moomoo_snapshot": "wired",
     "enable_analyst_estimates": "wired",
     "enable_eodhd_rates": "wired",
+    # Benzinga event surface: guidance revisions, FDA milestones, secondary
+    # offerings, individual analyst actions, news retractions. One gate for the
+    # whole surface - one vendor, one risk profile, one opt-in.
+    "enable_benzinga_surface": "wired",
+    # These two shipped with a DEFAULT_CONFIG entry, an _ENV_OVERRIDES row and a
+    # .env.example line but NO row here and no doc row, so the five-place rule
+    # was unmet. They were also unregisterable: their only read site is
+    # `_feature_gate("enable_x", ...)`, an idiom the Status scan did not match.
+    # The scan now matches it, so both can be declared honestly.
+    "enable_options_surface": "wired",
+    "enable_risk_free_curve": "wired",
     # context gates (change what the decision model reads, never a decision)
     "enable_decision_packet": "wired",
     "enable_context_expansion": "wired",
@@ -124,12 +135,19 @@ def _read_sites(key: str) -> list[str]:
     A plain substring search is not enough: `enable_skill_overlays` appears in
     two docstrings and is read by nothing, and calling that "wired" would defeat
     the point of the registry. So the key must appear as a quoted literal in an
-    access idiom (``cfg.get("key")``, ``config["key"]``, ``_flag("key")``, a
-    comparison, a membership test). Root-level entry points (``batch.py``) count
-    too - a gate read there is still a gate.
+    access idiom (``cfg.get("key")``, ``config["key"]``, ``_flag("key")``,
+    ``_feature_gate("key", ...)``, a comparison, a membership test). Root-level
+    entry points (``batch.py``) count too - a gate read there is still a gate.
+
+    ``_feature_gate`` was added to the idiom list on 2026-09-20: it is the
+    established pattern for a gated analyst tool (the flag key is its first
+    argument), and while it was absent every gate using it was unregisterable -
+    the scan found no read site, so the registry could only have called a live
+    gate ``inert``. ``enable_options_surface`` and ``enable_risk_free_curve``
+    were in exactly that state.
     """
     pattern = re.compile(
-        r"""(?:\.get\(|\[|_flag\(|==|!=|in\s*\(|in\s*\{|\bor\b\s*)\s*["']"""
+        r"""(?:\.get\(|\[|_flag\(|_feature_gate\(|==|!=|in\s*\(|in\s*\{|\bor\b\s*)\s*["']"""
         + re.escape(key)
         + r"""["']"""
     )

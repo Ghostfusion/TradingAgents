@@ -273,6 +273,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE": "enable_risk_free_curve",
     "TRADINGAGENTS_ENABLE_SCREENER": "enable_screener",
     "TRADINGAGENTS_ENABLE_MARKET_MOVERS": "enable_market_movers",
+    # Benzinga event surface (guidance / FDA / offerings / analyst actions /
+    # news retractions). One gate for the whole surface: one vendor, one risk
+    # profile, one opt-in.
+    "TRADINGAGENTS_ENABLE_BENZINGA_SURFACE": "enable_benzinga_surface",
     # DSA §3.4 market-classified routing (docs/api_reference.md §6.3; ships in
     # .env.example as JSON): opt-in per-market vendor chains + the health
     # breaker. Both default off/empty, so the chain is unchanged unless set.
@@ -684,18 +688,30 @@ DEFAULT_CONFIG = _apply_env_overrides(
             # the EOD plan); moomoo/yfinance stay as fallbacks. EODHD cannot
             # serve fundamentals/technicals/intraday/options on the EOD plan,
             # so those chains keep moomoo/yfinance first.
-            "core_stock_apis": "eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata",  # Options: ... , tiingo, twelve_data, stockdata
+            # Ordered by quota then richness: eodhd (100k/day) > moomoo
+            # (local OpenD, no quota) > yfinance (free) > tiingo (~1k/day) >
+            # twelve_data (800 credits/day) > stockdata (100/day). Benzinga
+            # is a daily-bar-only backup and sits last.
+            "core_stock_apis": "eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata,benzinga",  # Options: ... , tiingo, twelve_data, stockdata
             "technical_indicators": "moomoo,yfinance,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo
             "fundamental_data": "moomoo,yfinance,tiingo,alpha_vantage",  # Options: alpha_vantage, yfinance, moomoo, tiingo
-            "news_data": "eodhd,moomoo,yfinance,alpha_vantage,stockdata,newsapi",  # Options: + newsapi; set "...,gdelt" to use GDELT (keyless, may be network-flaky)
+            # Benzinga sits second: it is ticker-scoped and financial-first,
+            # so it precedes the generic keyword feeds. Ordered by payload
+            # richness then by quota - eodhd (entitled, 100k/day plan),
+            # benzinga, moomoo (local OpenD), yfinance (free, Yahoo-throttled),
+            # alpha_vantage (25 req/day), stockdata (100/day), newsapi (100/day).
+            "news_data": "eodhd,benzinga,moomoo,yfinance,alpha_vantage,stockdata,newsapi",  # Options: + newsapi; set "...,gdelt" to use GDELT (keyless, may be network-flaky)
             # Daily news-sentiment series (-1..1) + 7d SMA. EODHD /sentiments
             # (primary, EOD plan entitled); AV NEWS_SENTIMENT (25 req/day tail);
             # GDELT native tone (keyless, flaky, ~3-month window) last.
             "news_sentiment": "eodhd,alpha_vantage,gdelt",
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)
-            "analyst_ratings": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
-            "earnings_calendar": "moomoo,finnhub,yfinance",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
+            # moomoo (local OpenD, consensus + targets) first; finnhub
+            # (60/min, recommendation-trend history) next; yfinance (keyless)
+            # then benzinga as backups.
+            "analyst_ratings": "moomoo,finnhub,yfinance,benzinga",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
+            "earnings_calendar": "moomoo,finnhub,yfinance,benzinga",  # Options: finnhub (needs key), moomoo, yfinance (keyless)
             "options_data": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
             "sec_filings": "sec_edgar",  # Options: sec_edgar (free, no key)
             "short_interest": "moomoo,yfinance",  # Options: yfinance (free, no key), moomoo
@@ -708,7 +724,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "fed_watch": "moomoo",
             "market_breadth": "moomoo",
             "revenue_breakdown": "moomoo",
-            "corporate_actions": "eodhd,moomoo",
+            "corporate_actions": "eodhd,moomoo,benzinga",
             "earnings_catalyst": "moomoo",
             "institution_data": "moomoo,yfinance",  # Options: moomoo, yfinance (keyless holders)
             "earnings_surprise": "moomoo",
@@ -719,10 +735,24 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "risk_free_curve": "federal_reserve",  # NY Fed SOFR + Treasury CSV (no key)
             "equity_screener": "yfinance",  # yfinance screener (free)
             "market_movers": "yfinance",  # yfinance discovery/movers (free)
+            # Benzinga event surface (all behind enable_benzinga_surface,
+            # default off). One vendor each.
+            "guidance_revisions": "benzinga",
+            "fda_calendar": "benzinga",
+            "offerings_calendar": "benzinga",
+            "analyst_actions": "benzinga",
+            "news_retractions": "benzinga",
         },
         # Tool-level configuration (takes precedence over category-level)
         "tool_vendors": {
             # Example: "get_stock_data": "alpha_vantage",  # Override category default
+            # get_insider_transactions lives in the `news_data` category, so it
+            # would otherwise inherit the news chain. Ordered richest and
+            # least-limited first: moomoo (local OpenD, no quota, owner/title/
+            # shares/price), yfinance (keyless), alpha_vantage (25 req/day),
+            # then benzinga - whose endpoint takes no ticker filter, so it pages
+            # the market-wide stream and filters locally.
+            "get_insider_transactions": "moomoo,yfinance,alpha_vantage,benzinga",
         },
         # DSA §3.4 market-classified vendor routing (opt-in). When
         # ``enable_market_routing`` is on, ``market_source_priority`` maps a
@@ -1053,6 +1083,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_risk_free_curve": False,
         "enable_screener": False,
         "enable_market_movers": False,
+        # Benzinga event surface: corporate guidance revisions, FDA milestones,
+        # secondary offerings, individual analyst actions and news retractions.
+        # Default OFF - each @tool returns a DISABLED sentinel until this is on,
+        # so a gate-off run is byte-identical to the run before it existed.
+        "enable_benzinga_surface": False,
         # Sector rotation P1-P3 (strategies/formulas/sector_rotation.md): each
         # advisory layer is default-off so the sector read is unchanged until
         # opted in. P1 multi-factor rank, P2 industry layer, P3 constituent

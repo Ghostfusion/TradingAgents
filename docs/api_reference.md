@@ -156,6 +156,7 @@ in `batch.py`).
 | `TRADINGAGENTS_ENABLE_MARKET_ROUTING` | `enable_market_routing` | DSA §3.4 market-classified routing on (default OFF; the chain is bit-identical when off) |
 | `TRADINGAGENTS_MARKET_SOURCE_PRIORITY` | `market_source_priority` | JSON market -> comma-separated vendor list, e.g. `{"US": "eodhd,tiingo,yfinance,moomoo"}`; reorders that method's chain for the market (takes effect with `enable_market_routing`; unregistered vendors in the list are skipped) |
 | `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | `enable_market_movers` | yfinance gainers/losers/actives (default OFF) |
+| `TRADINGAGENTS_ENABLE_BENZINGA_SURFACE` | `enable_benzinga_surface` | Benzinga event surface: guidance revisions / FDA milestones / secondary offerings / analyst actions / news retractions (default OFF) |
 | — | `enable_sector_multifactor` | sector-rotation P1: `get_sector_rank` adds a multi-factor score — momentum composite + RS vs benchmark + trend + risk, tie-aware cross-sectional percentiles (default OFF; `strategies/formulas/sector_rotation.md`) |
 | — | `enable_sector_industry` | sector-rotation P2: industry-ETF layer ranked only inside the parent sector (default OFF) |
 | — | `enable_sector_breadth` | sector-rotation P3: constituent % above MA50 + EW/CW leadership for the curated core set (`sector_rank.SECTOR_CONSTITUENTS`); fetch-heavy, run-cached (default OFF) |

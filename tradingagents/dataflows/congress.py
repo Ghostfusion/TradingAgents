@@ -13,12 +13,20 @@ in-process for a few hours — a session that screens many tickers should not
 re-download the full files per ticker. Any network/key failure degrades to
 ``None`` (the analysis tool renders 'unavailable'), mirroring the other
 optional vendors.
+
+A total failure **raises** the typed ``NoMarketDataError`` so the router can
+fall through to the next configured vendor. It used to return the prose
+"congress trades unavailable..." instead, which the router reads as a
+successful result and stops the chain on - so every later vendor for
+``get_congress_trades`` was unreachable.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+
+from .errors import NoMarketDataError
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +152,16 @@ def get_congress_trades(ticker: str, limit: int = 8) -> str:
     """Matched House + Senate trades for a ticker, as a formatted report.
 
     Returns a string ("**House**: n buys / m sells (net +/-k)" blocks + the
-    sample rows), or an explicit 'congress trades unavailable for X: reason'
-    on a failure. Each chamber renders independently so one source failing
-    never wipes the other. Free, keyless sources (GitHub mirrors of the
-    House/Senate Stock Watcher datasets).
+    sample rows). Each chamber renders independently so one source failing
+    never wipes the other, and a partial result is still returned. A TOTAL
+    failure raises the typed ``NoMarketDataError`` (with the per-chamber
+    reasons as its detail) rather than returning prose, so the router can fall
+    through to the next configured vendor. Free, keyless sources (GitHub
+    mirrors of the House/Senate Stock Watcher datasets).
     """
     ticker = str(ticker or "").strip().upper()
     if not ticker:
-        return "congress trades unavailable: no ticker"
+        raise ValueError("congress trades: no ticker supplied")
     blocks = []
     errors = []
     for key, url, label in (("house", _HOUSE_URL, "House"), ("senate", _SENATE_URL, "Senate")):
@@ -161,7 +171,16 @@ def get_congress_trades(ticker: str, limit: int = 8) -> str:
             logger.warning("%s congress data failed for %s: %s", label, ticker, exc)
             errors.append(f"{label}: {exc}")
     if not blocks:
-        return f"congress trades unavailable for {ticker}: " + ("; ".join(errors) or "unknown")
+        # MUST raise, not return prose. The router treats any returned string as
+        # a success and stops the chain, so returning "unavailable..." here made
+        # every later vendor for get_congress_trades unreachable - a configured
+        # fallback that could never run. The reason travels as the typed error's
+        # detail and still reaches the analyst through the router's sentinel.
+        raise NoMarketDataError(
+            ticker,
+            "congress trades",
+            detail="; ".join(errors) or "neither chamber returned data",
+        )
     body = "\n\n".join(blocks)
     if errors:
         body += f"\n\n(unavailable: {'; '.join(errors)})"

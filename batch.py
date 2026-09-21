@@ -92,6 +92,14 @@ VENDOR_PRESETS = {
         "risk_free_curve": "federal_reserve",
         "equity_screener": "yfinance",
         "market_movers": "yfinance",
+        # Benzinga event surface (enable_benzinga_surface, default off). Named
+        # here so the preset never drops a category silently; this preset uses
+        # no Benzinga vendor, so they are disabled.
+        "guidance_revisions": "none",
+        "fda_calendar": "none",
+        "offerings_calendar": "none",
+        "analyst_actions": "none",
+        "news_retractions": "none",
     },
     # Pure-yfinance stack (the pre-moomoo defaults).
     "yfinance": {
@@ -126,6 +134,14 @@ VENDOR_PRESETS = {
         "risk_free_curve": "federal_reserve",
         "equity_screener": "yfinance",
         "market_movers": "yfinance",
+        # Benzinga event surface (enable_benzinga_surface, default off). Named
+        # here so the preset never drops a category silently; this preset uses
+        # no Benzinga vendor, so they are disabled.
+        "guidance_revisions": "none",
+        "fda_calendar": "none",
+        "offerings_calendar": "none",
+        "analyst_actions": "none",
+        "news_retractions": "none",
     },
     # EODHD-first OHLCV (daily bars; EOD plan 100k/day @ 1000/min). The
     # moomoo K-line quota (100 calls/7 days) is the screener's bottleneck, so
@@ -162,6 +178,14 @@ VENDOR_PRESETS = {
         "risk_free_curve": "federal_reserve",
         "equity_screener": "yfinance",
         "market_movers": "yfinance",
+        # Benzinga event surface (enable_benzinga_surface, default off). Named
+        # here so the preset never drops a category silently; this preset uses
+        # no Benzinga vendor, so they are disabled.
+        "guidance_revisions": "none",
+        "fda_calendar": "none",
+        "offerings_calendar": "none",
+        "analyst_actions": "none",
+        "news_retractions": "none",
     },
     # Tiingo-as-fallback (additive): eodhd/moomoo/yfinance stay first for
     # OHLCV and fundamentals; Tiingo (free Starter tier, low caps) is a
@@ -197,6 +221,14 @@ VENDOR_PRESETS = {
         "risk_free_curve": "federal_reserve",
         "equity_screener": "yfinance",
         "market_movers": "yfinance",
+        # Benzinga event surface (enable_benzinga_surface, default off). Named
+        # here so the preset never drops a category silently; this preset uses
+        # no Benzinga vendor, so they are disabled.
+        "guidance_revisions": "none",
+        "fda_calendar": "none",
+        "offerings_calendar": "none",
+        "analyst_actions": "none",
+        "news_retractions": "none",
     },
 }
 

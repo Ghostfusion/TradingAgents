@@ -60,25 +60,90 @@ VENDOR_LIST = ['alpha_vantage', 'benzinga', 'cboe', 'congress', 'eodhd',
 
 ### Default chains per category (from `data_vendors`)
 
+Each chain is ordered **richest payload first, then by quota** - the
+vendor most likely to answer with usable data and the most headroom leads, and
+the narrower or more tightly limited ones are backups.
+
 ```
-core_stock_apis      : eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata
-technical_indicators : moomoo,yfinance
-fundamental_data     : moomoo,yfinance,tiingo
-news_data            : eodhd,moomoo,yfinance,alpha_vantage,stockdata,newsapi
+core_stock_apis      : eodhd,moomoo,yfinance,tiingo,twelve_data,stockdata,benzinga
+technical_indicators : moomoo,yfinance,alpha_vantage
+fundamental_data     : moomoo,yfinance,tiingo,alpha_vantage
+news_data            : eodhd,benzinga,moomoo,yfinance,alpha_vantage,stockdata,newsapi
+news_sentiment       : eodhd,alpha_vantage,gdelt
 macro_data           : fred,moomoo
 prediction_markets   : polymarket,moomoo
-analyst_ratings      : moomoo,finnhub
-earnings_calendar    : moomoo,finnhub
+analyst_ratings      : moomoo,finnhub,yfinance,benzinga
+earnings_calendar    : moomoo,finnhub,yfinance,benzinga
 options_data         : moomoo,yfinance
 sec_filings          : sec_edgar
 short_interest       : moomoo,yfinance
 exchange_symbols     : eodhd
-corporate_actions    : eodhd,moomoo
+corporate_actions    : eodhd,moomoo,benzinga
+congress_trades      : congress,benzinga
 moomoo-only extras   : capital_flow, smart_money, economic_calendar, fed_watch,
                        market_breadth, revenue_breakdown,
                        earnings_catalyst, institution_data, earnings_surprise,
                        expected_move
+OpenBB free surfaces : options_surface (cboe), risk_free_curve (federal_reserve),
+                       equity_screener (yfinance), market_movers (yfinance)
+Benzinga-only surface: guidance_revisions, fda_calendar, offerings_calendar,
+                       analyst_actions, news_retractions   (enable_benzinga_surface)
 ```
+
+**Tool-level overrides** (`tool_vendors`) take precedence over the category
+chain. One is set by default:
+
+```
+get_insider_transactions : moomoo,yfinance,alpha_vantage,benzinga
+```
+
+`get_insider_transactions` lives in the `news_data` **category**, so without an
+override it would inherit the news chain and put the Benzinga Form 4 firehose
+first on every lookup. The override also corrects an ordering that was against
+the criterion above: `alpha_vantage` (a 25 req/day keyed vendor) used to sit in
+front of `moomoo` (local OpenD, no quota, richest rows) and `yfinance`
+(keyless).
+
+---
+
+### The Benzinga event surface (`enable_benzinga_surface`, default OFF)
+
+Five capabilities served by the one registered Benzinga key. Four of them had
+**no producer at all** in this repo before 2026-09-20, and the fifth is the
+event view of a route that only had a consensus snapshot.
+
+| Tool | Endpoint | What it adds |
+| --- | --- | --- |
+| `get_guidance_revisions` | `/v2.1/calendar/guidance` | management's own forward revenue/EPS range per future period, with the prior range and the vendor's narrative note. The only forward *growth* producer in the data layer |
+| `get_fda_calendar` | `/v2.1/calendar/fda` | approvals, rejections and trial results, with drug, indication, co-sponsors and outcome |
+| `get_offerings_calendar` | `/v2.1/calendar/offerings` | secondary offerings: shares, price, gross size, shelf flag - a dilution signal |
+| `get_analyst_actions` | `/v2.1/calendar/ratings` | one row per action: firm, analyst, rating change, price-target move. The *event* view, complementary to `get_analyst_ratings`' consensus |
+| `get_news_removed` | `/v2/news-removed` | retracted article ids - the only feed here that can **invalidate** evidence already collected |
+
+While the gate is off each tool returns a `DATA_DISABLED` sentinel and never
+fetches, so a gate-off run is byte-identical to the run before the surface
+existed.
+
+**Three measured transport facts, each of which broke something.** Benzinga
+negotiates JSON by **header** (`Accept: application/json`); the default is XML
+and the `format=json` query parameter is silently ignored. The **version
+segment is per-route** - news is `/api/v2`, the calendars `/api/v2.1`, the
+alt-data surface `/api/v1` - so a `BASE` pinning `/api/v2` made two thirds of
+the API unreachable. And the **envelope is not consistent**: `/v2/news` is a
+bare list, every calendar is a dict keyed by its own family, the alt-data
+surface is `{"data": [...]}` and `/v2.1/fundamentals` is `{"result": [...]}`.
+
+**Not every parameter does something**, so each one shipped was verified to
+change the response first:
+
+| Endpoint | Honoured | Silently ignored |
+| --- | --- | --- |
+| `/v2.1/calendar/*` | `parameters[tickers]`, `parameters[date_from]`, `parameters[date_to]`, `pageSize` | - |
+| `/v2/news-removed` | `pageSize`, `page` | **every date parameter** (so the reader offers no window) |
+| `/v2/bars` | `symbols`, `interval`, `from`, `to` | - (`interval` is *required*: without it the body is a stub row with no candles) |
+| `/v2.1/fundamentals` | `symbols=` | `tickers=` |
+| `/v1/gov/usa/congress/trades` | `pageSize`, `page` | **every ticker parameter** (so the reader pages the market-wide stream and filters locally) |
+| `/v1/sec/insider_transactions/transactions` | `pageSize`, `page` | **every ticker parameter** (same local filter) |
 
 ---
 

@@ -573,6 +573,49 @@ has changed before); never assume an endpoint works — the SDK's
   MSFT 57.6 x2, QCOM 58.8 - and 5 `"score": null, "unavailable": "no news producer measured"`). `test_report_verify.py` 233 -> 237,
   `test_sentiment_computed.py` +1, `test_debate_risk_parity.py` +1, `test_risk_context_hoist.py` +1.
 
+- 2026-09-20 `(working tree)` - **The Benzinga surface: five new capabilities, six backup registrations, and three transport
+  defects that made two thirds of the API unreachable.** Owner instruction: put Benzinga in the `news_data` chain, implement the
+  five capabilities from the entitlement assessment, wire the vendor as a backup wherever an alternative exists, and re-rank every
+  multi-vendor chain by payload richness then quota. **The chain:** `news_data` is now `eodhd,benzinga,moomoo,yfinance,alpha_vantage,
+  stockdata,newsapi` - Benzinga is SECOND because it is the rare free feed that is both ticker-filtered and financial-first, so it
+  precedes the generic keyword feeds; the exclusion it replaces was justified by "no real key registered yet", a reason that lapsed
+  the moment the key was exercised. **Five capabilities, four with no producer at all before this:** `get_guidance_revisions`
+  (`/v2.1/calendar/guidance`, management's own forward revenue/EPS range - the only forward GROWTH producer in the data layer),
+  `get_fda_calendar` (`/v2.1/calendar/fda`), `get_offerings_calendar` (`/v2.1/calendar/offerings`, a dilution signal),
+  `get_analyst_actions` (`/v2.1/calendar/ratings`, the event view complementary to `get_analyst_ratings`' consensus), and
+  `get_news_removed` (`/v2/news-removed`, the only feed here that can INVALIDATE evidence already collected). All five sit behind ONE
+  new gate, `enable_benzinga_surface` (default OFF, registered in all five places) - one vendor's surface, one risk profile, one
+  opt-in; while off each returns a `DATA_DISABLED` sentinel and never fetches. **Six backup registrations** on `get_stock_data`,
+  `get_earnings_calendar`, `get_analyst_ratings`, `get_insider_transactions`, `get_congress_trades`, `get_corporate_actions`.
+  **Re-ranking:** one chain was ordered AGAINST the criterion - `get_insider_transactions` ran `alpha_vantage,yfinance,moomoo`, a
+  25 req/day keyed vendor in front of `moomoo` (local OpenD, no quota, richest rows) and `yfinance` (keyless); now
+  `moomoo,yfinance,alpha_vantage,benzinga` via a `tool_vendors` override, needed because the method lives in the `news_data`
+  CATEGORY and would otherwise inherit the news chain and put the Form 4 firehose first on every lookup. **Three transport defects,
+  each of which broke something: (1) `BASE` hardcoded the `/v2` version segment**, so `v2.1/calendar/ratings` was requested as
+  `/api/v2/v2.1/calendar/ratings` and answered with the gateway's own `no Route matched with those values` 404 - the module could
+  only ever reach the `/v2` routes, so NO calendar was implementable (news is `/api/v2`, calendars `/api/v2.1`, alt-data `/api/v1`).
+  **(2) Every dict-wrapped 200 was collapsed to `None`** - `/v2/news` is a bare list but every calendar is a dict keyed by its own
+  family (`{"ratings": [...]}`), the alt-data surface is `{"data": [...]}` and `/v2.1/fundamentals` is `{"result": [...]}`; returning
+  `None` for any dict reported each of those as "no data" on a 200 that carried rows, so only the bare-list news route ever worked.
+  **(3) `congress.get_congress_trades` could not fail, so it could not fall back** - `route_to_vendor` treats ANY returned string as
+  success, so the prose `"congress trades unavailable..."` stopped the chain and every later vendor for that method was unreachable
+  (the Benzinga backup added here would have been dead code); it now raises the typed `NoMarketDataError` with the reason as detail,
+  and a partial result (one chamber answering) still renders. **Three parameters that do nothing, so none was shipped:**
+  `/v2/news-removed` ignores EVERY date parameter (empty filter, one-day window and three-month window all return identical rows)
+  while `pageSize`/`page` work, so that reader takes a limit and a page and states it offers no window; both alt-data endpoints
+  ignore EVERY ticker parameter (`tickers`/`symbols`/`parameters[tickers]`/`company_symbol` all returned the identical market-wide
+  stream), so those readers page the stream, filter locally, and say so; and `/v2/bars` REQUIRES `interval`, without which the
+  vendor answers 200 with a stub row carrying no candles. **Tests:** `tests/test_benzinga_surface.py`, 25 tests; the two transport
+  tests are failing-first proofs - each re-run against a faithful reconstruction of the pre-fix behaviour (`BASE` re-pinned to
+  `/api/v2`; `_unwrap_records` reverted to collapsing every dict) turned RED, with a byte-identical sha256 restore. **A pre-existing
+  registration gap fixed in the same pass:** `enable_options_surface` and `enable_risk_free_curve` shipped with a `DEFAULT_CONFIG`
+  key, an `_ENV_OVERRIDES` row and a `.env.example` line but NO `docs/gate_registry.md` row and no registry entry - three of the
+  five places - and were UNREGISTERABLE, because their only read site is `_feature_gate("enable_x", ...)`, an idiom the
+  Status-enforcing scan did not match, so the scan found no read site and the registry could only have called a live gate `inert`.
+  The scan now matches `_feature_gate(`, and both are declared `wired` with a doc row. **Web impact:** additive - five new tool
+  names, all returning `DATA_DISABLED` while the gate is off (it is off in `.env`); two existing chains change order (`news_data`,
+  `get_insider_transactions`), so the served vendor for those methods can differ from a previous run's.
+
 - 2026-09-20 `(working tree)` - **Phases 3-5 of `docs/design_decision_context.md` built: the conflict ledger renders, the context can expand, the
   challenge pass is closed-vocabulary.** Three gates, all default `False`. **PHASE 3 (§9) - the render had to MOVE.** §9 promotes the
   same-metric disagreements "into the packet", and §13.4 rendered the packet **pre-graph**; but the ledger is a property of the ANALYST

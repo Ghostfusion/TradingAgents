@@ -22,6 +22,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_allocation,
     get_allocation_black_litterman,
     get_alpha_scoring,
+    get_analyst_actions,
     get_analyst_ratings,
     get_analyst_verdict,
     get_balance_sheet,
@@ -83,6 +84,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_extended_indicators,
     get_factor_profile,
     get_fcf_yield,
+    get_fda_calendar,
     get_fed_watch,
     get_financial_history,
     get_fixed_income_risk,
@@ -94,6 +96,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_garch_volatility,
     get_gdelt_sentiment,
     get_global_news,
+    get_guidance_revisions,
     get_horizon_var,
     get_hrp_alloc,
     get_income_statement,
@@ -122,11 +125,13 @@ from tradingagents.agents.utils.agent_utils import (
     get_momentum_detail,
     get_news,
     get_news_relevance_read,
+    get_news_removed,
     get_news_sentiment,
     get_news_sentiment_series,
     get_normality,
     get_normalized_cycle_dcf,
     get_normalized_fcf_dcf,
+    get_offerings_calendar,
     get_opening_range,
     get_opex_read,
     get_option_breakeven,
@@ -391,6 +396,13 @@ def news_tools() -> list:
                 # P0-7b: NewsScore's analyst category (5%) reads this leaf, and it
                 # was bound only to fundamentals_company_tools.
                 get_analyst_revision_index,
+                # Benzinga event surface (enable_benzinga_surface, default off;
+                # each returns a DISABLED sentinel while the gate is off).
+                get_guidance_revisions,
+                get_fda_calendar,
+                get_offerings_calendar,
+                get_analyst_actions,
+                get_news_removed,
             ]
     return tools
 
@@ -457,6 +469,13 @@ def fundamentals_company_tools() -> list:
                 get_kalman_spread,
                 get_allocation_black_litterman,
                 get_position_risk_multiplier,
+                # Benzinga company-event surface (enable_benzinga_surface,
+                # default off). news_removed is deliberately absent here: a
+                # withdrawn article is a news-integrity fact, not a fundamental.
+                get_guidance_revisions,
+                get_fda_calendar,
+                get_offerings_calendar,
+                get_analyst_actions,
             ]
     return tools
 

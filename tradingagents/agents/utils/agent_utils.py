@@ -162,6 +162,13 @@ from tradingagents.agents.utils.analyst_data_tools import (
     get_analyst_ratings,
     get_earnings_calendar,
 )
+from tradingagents.agents.utils.benzinga_tools import (
+    get_analyst_actions,
+    get_fda_calendar,
+    get_guidance_revisions,
+    get_news_removed,
+    get_offerings_calendar,
+)
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
@@ -465,6 +472,12 @@ __all__ = [
     "get_instrument_context_from_state",
     "get_language_instruction",
     "create_msg_delete",
+    # Benzinga event surface (enable_benzinga_surface, default off).
+    "get_guidance_revisions",
+    "get_fda_calendar",
+    "get_offerings_calendar",
+    "get_analyst_actions",
+    "get_news_removed",
 ]
 
 logger = logging.getLogger(__name__)

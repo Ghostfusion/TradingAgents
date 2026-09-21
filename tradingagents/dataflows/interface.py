@@ -14,7 +14,20 @@ from .alpha_vantage import (
 from .alpha_vantage_news import (
     get_news_sentiment_alpha_vantage as get_news_sentiment_alpha_vantage,
 )
-from .benzinga import get_news_benzinga
+from .benzinga import (
+    get_analyst_actions_benzinga,
+    get_analyst_ratings_benzinga,
+    get_congress_trades_benzinga,
+    get_corporate_actions_benzinga,
+    get_earnings_calendar_benzinga,
+    get_fda_calendar_benzinga,
+    get_guidance_benzinga,
+    get_insider_transactions_benzinga,
+    get_news_benzinga,
+    get_news_removed_benzinga,
+    get_offerings_benzinga,
+    get_stock_data_benzinga,
+)
 from .cboe import get_options_surface as get_options_surface_cboe
 from .config import get_config
 from .congress import get_congress_trades
@@ -336,6 +349,27 @@ TOOLS_CATEGORIES = {
         "description": "Top U.S. gainers / losers / most-actives (yfinance discovery)",
         "tools": ["get_market_movers"],
     },
+    # Benzinga event surface (all optional, all behind enable_benzinga_surface).
+    "guidance_revisions": {
+        "description": "Corporate guidance revisions: management's own forward revenue/EPS range",
+        "tools": ["get_guidance_revisions"],
+    },
+    "fda_calendar": {
+        "description": "FDA and clinical milestones (approvals, rejections, trial results)",
+        "tools": ["get_fda_calendar"],
+    },
+    "offerings_calendar": {
+        "description": "Secondary offerings: shares issued, price, gross size, shelf flag",
+        "tools": ["get_offerings_calendar"],
+    },
+    "analyst_actions": {
+        "description": "Individual analyst actions: firm, rating change, price-target move",
+        "tools": ["get_analyst_actions"],
+    },
+    "news_retractions": {
+        "description": "Retracted article IDs (the only feed that can invalidate prior evidence)",
+        "tools": ["get_news_removed"],
+    },
 }
 
 # The flat vendor registry is derived from VENDOR_METHODS (below) so it can
@@ -389,6 +423,12 @@ OPTIONAL_CATEGORIES = {
     "risk_free_curve",
     "equity_screener",
     "market_movers",
+    # Benzinga event surface: optional enrichment, degrades to a sentinel.
+    "guidance_revisions",
+    "fda_calendar",
+    "offerings_calendar",
+    "analyst_actions",
+    "news_retractions",
 }
 
 # Mapping of methods to their vendor-specific implementations
@@ -412,6 +452,9 @@ VENDOR_METHODS = {
         "tiingo": get_stock_data_tiingo,
         "twelve_data": get_stock_data_twelve_data,
         "stockdata": get_stock_data_stockdata,
+        # Backup: daily OHLCV only, and ``interval`` is required or the vendor
+        # answers a stub row with no candles.
+        "benzinga": get_stock_data_benzinga,
     },
     # technical_indicators
     "get_indicators": {
@@ -471,6 +514,8 @@ VENDOR_METHODS = {
         # not in the DEFAULT chain: GDELT's endpoint is network-flaky, Benzinga
         # needs a registered key. Add to `news_data` to enable.
         "gdelt": get_news_gdelt,
+        # Benzinga is ticker-scoped and financial-first, so it sits before the
+        # generic keyword feeds in the DEFAULT news_data chain.
         "benzinga": get_news_benzinga,
         # seekingalpha is the keyless contributor-commentary tail: it serves
         # (title/author only, opinion-pinned) only when every newswire vendor
@@ -494,6 +539,9 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
         "moomoo": get_insider_transactions_moomoo,
+        # Backup. The endpoint ignores every ticker parameter, so this reader
+        # scans the newest pages and filters locally.
+        "benzinga": get_insider_transactions_benzinga,
     },
     # macro_data
     "get_macro_indicators": {
@@ -518,12 +566,16 @@ VENDOR_METHODS = {
         "finnhub": get_analyst_ratings_finnhub,
         "moomoo": get_analyst_ratings_moomoo,
         "yfinance": get_analyst_ratings_yfinance,
+        # Backup: a consensus DERIVED from the individual actions in the
+        # trailing window, labelled as such in the render.
+        "benzinga": get_analyst_ratings_benzinga,
     },
     # earnings_calendar
     "get_earnings_calendar": {
         "finnhub": get_earnings_calendar_finnhub,
         "moomoo": get_earnings_calendar_moomoo,
         "yfinance": get_earnings_calendar_yfinance,
+        "benzinga": get_earnings_calendar_benzinga,
     },
     # options_data
     "get_options_chain": {
@@ -570,6 +622,7 @@ VENDOR_METHODS = {
         "moomoo": get_corporate_actions_moomoo,
         "massive": get_corporate_actions_massive,
         "eodhd": get_corporate_actions_eodhd,
+        "benzinga": get_corporate_actions_benzinga,
     },
     "get_exchange_symbols": {
         "eodhd": get_exchange_symbols_text_eodhd,
@@ -613,6 +666,9 @@ VENDOR_METHODS = {
     # congress_trades (keyless House/Senate Stock Watcher mirrors)
     "get_congress_trades": {
         "congress": get_congress_trades,
+        # Backup. The endpoint ignores every ticker parameter, so this reader
+        # scans the newest pages and filters locally.
+        "benzinga": get_congress_trades_benzinga,
     },
     # financial history (SEC EDGAR XBRL companyconcept, keyless)
     "get_financial_history": {
@@ -623,6 +679,24 @@ VENDOR_METHODS = {
     },
     "get_patent_activity": {
         "patentsview": get_patent_activity,
+    },
+    # Benzinga event surface (all behind enable_benzinga_surface; a single
+    # vendor each, so the chain is one name and an empty window degrades to
+    # the typed no-data error).
+    "get_guidance_revisions": {
+        "benzinga": get_guidance_benzinga,
+    },
+    "get_fda_calendar": {
+        "benzinga": get_fda_calendar_benzinga,
+    },
+    "get_offerings_calendar": {
+        "benzinga": get_offerings_benzinga,
+    },
+    "get_analyst_actions": {
+        "benzinga": get_analyst_actions_benzinga,
+    },
+    "get_news_removed": {
+        "benzinga": get_news_removed_benzinga,
     },
 }
 

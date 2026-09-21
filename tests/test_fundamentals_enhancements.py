@@ -54,8 +54,16 @@ def test_net_summary_counts():
 
 
 def test_get_congress_trades_no_ticker_no_network():
-    out = congress.get_congress_trades("")
-    assert isinstance(out, str) and "unavailable" in out
+    """A blank ticker is a caller error, and it must NOT reach the network.
+
+    This used to assert the prose "congress trades unavailable" was returned.
+    That contract was the defect: ``route_to_vendor`` treats any returned
+    string as a successful result and stops the chain, so a vendor that answers
+    prose instead of raising makes every later vendor for the method
+    unreachable. It now raises before any fetch.
+    """
+    with pytest.raises(ValueError):
+        congress.get_congress_trades("")
 
 
 def test_get_congress_trades_renders_both_chambers(monkeypatch):
