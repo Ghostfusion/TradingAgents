@@ -14,6 +14,22 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**Yang-Zhang volatility gained a per-bar series - the same estimator, one window per bar (2026-09-21).** A regime model needs a vol *series*; the repo had only the scalar `yang_zhang_vol` over a window. The tempting rewrite (rolling mean, then squared deviation, then a second rolling sum) is a SECOND implementation that drifts from the scalar and silently doubles the warm-up, so this adds `yang_zhang_vol_series` on a shared core instead: `_yz_legs`, `_yz_k` and `_yz_variance` are now the single definition of the alignment, the weight and the combination, and `yang_zhang_vol` was refactored onto them. That keeps one producer for the estimator (master rule 15) rather than two that can disagree.
+
+**The refactor is bit-identical.** Measured against a verbatim copy of the pre-change scalar on 179 real SPY bars (2026-01-02..2026-09-18): identical at every window tried (None / 5 / 20 / 60 / 120 / 400) and on all five edge cases (empty, 2 bars, zero variance, a zero-price row, mismatched list lengths).
+
+**The series matches the scalar at EVERY bar, not just the last.** Same bars, window 20 and 60: 0 mismatching indices out of 160 and 120 - `series[i] == yang_zhang_vol(bars ending at i, window=w)` exactly, including windows containing a bad row, where `k` is keyed on the aligned row count rather than the requested window.
+
+**Warm-up is `window - 1` bars, not `2 * window`.** Measured: first non-None at index 19 for window 20 and 59 for window 60. A nested-rolling form needs 40 and 120 and would drop that many rows from anything training on the series - a data-loss change disguised as an estimator swap.
+
+**`None`, never `0`.** A window with no measurable variance (zero range and zero drift) yields `None` and `measured: 0`; a window below 3 - the core needs 2 interior rows - is all-`None` rather than a number nobody should trust. The returned dict carries `series`, `n`, `measured`, `window` and `basis`, so coverage travels with the numbers.
+
+**Tests.** `tests/test_strategies_covariance_models.py` gains three: the per-bar pinning test, the warm-up/alignment test, and the None-never-zero test. Two faithful mutations are RED with byte-identical sha256 restores - keying `k` on the requested window instead of the aligned rows (reddens the pinning test alone) and doubling the warm-up to `2 * window` (reddens all three).
+
+**Also corrected, same pass.** The module docstring's own inventory omitted `yang_zhang_vol` - exported, and called by `get_volatility_estimators` - and `docs/developer/04-strategies.md` omitted it and `semivariance`.
+
+**Web impact**: none. A new exported function on an existing strategy module; no tool, CLI flag, env var or JSON key changes, and the existing scalar is numerically unchanged.
+
 **Phase 3 of the Benzinga firehose plan - the live verification, on the owner-named symbol `SKHY` (2026-09-21).** The plan's step 3 required verifying live on a known-good symbol and a genuine no-data symbol *before shipping*. Ground truth was established by walking the firehose well past the shipped budget: 12 pages at `pagesize=1000` returned **20,811 Form 4 rows with 12/12 unique page hashes**, and 6 pages of the congressional route returned 5,568 rows.
 
 **A true absence is now distinguishable from a truncated scan - VERIFIED.** `SKHY` has **no row anywhere in the walk** (0 of 20,811 Form 4 rows, 0 of 5,568 congressional rows), and both readers return the honest miss: `no Form 4 transactions for this symbol in the first 4,304 rows of the newest filings (2026-09-11..2026-09-17), a bounded sample - an older filing may sit beyond it`. The 4,304 is the *real* inspected count rather than the 3,000-row budget: a page is inspected whole and the budget is checked after it, so the overshoot is reported rather than hidden.

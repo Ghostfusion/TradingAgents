@@ -5,6 +5,8 @@ realized vol in ``regime.py``:
 
 - Parkinson high-low range estimator (intraday range, day-only estimate),
 - Garman-Klass OHLC estimator (range + open-close gap, day-only estimate),
+- Yang-Zhang drift-independent OHLC estimator (overnight gap + range), as a
+  scalar over a window and as a per-bar series for regime features,
 - upside/downside semivariance over the close-to-close series, whose
   decomposition ``RS- + RS+ = RV`` is exact (the score consumes ``sqrt`` of the
   downside leg - `TechnicalScore.md` §4, pinned in `RiskScore.md` §0.3),
@@ -27,6 +29,7 @@ __all__ = [
     "parkinson_vol",
     "garman_klass_vol",
     "yang_zhang_vol",
+    "yang_zhang_vol_series",
     "ewma_vol",
     "garch11_fit",
 ]
@@ -204,6 +207,71 @@ def garman_klass_vol(
     return math.sqrt(max(var, 0.0) * periods)
 
 
+def _yz_sample_var(vals: list[float]) -> float | None:
+    """Sample variance (ddof=1) over already-collected terms; None below 2."""
+    m = len(vals)
+    if m < 2:
+        return None
+    mean = sum(vals) / m
+    return sum((v - mean) ** 2 for v in vals) / (m - 1)
+
+
+def _yz_k(m: int) -> float:
+    """The Yang-Zhang weight for ``m`` aligned interior rows.
+
+    **One definition.** The scalar and the per-bar series both call this, so the
+    weight cannot drift between them. ``m`` is the number of rows that survived
+    the price guard, NOT the requested window: a window containing a bad row has
+    ``m < window`` and takes the weight for the rows it actually used.
+    """
+    return 0.34 / (1.34 + (m + 1.0) / (m - 1.0))
+
+
+def _yz_legs(
+    o: list, h: list, lo: list, c: list
+) -> tuple[float, float, float, int] | None:
+    """The three Yang-Zhang legs over aligned OHLC rows: ``(var_o, var_c, var_rs, m)``.
+
+    **One alignment convention.** The interior rows are ``i = 1 .. n-1`` of the
+    supplied lists, so a window of ``w`` bars yields ``w - 1`` overnight terms -
+    the first takes the window's OWN first close, not the bar before it. Both
+    callers slice identically, so the series value at bar ``i`` is exactly the
+    scalar over the bars ending at ``i`` (pinned for every bar in
+    ``tests/test_strategies_covariance_models.py``).
+
+    None below 2 usable interior rows. ``var_rs`` is a MEAN, not mean-corrected:
+    Rogers-Satchell is already an unbiased variance term.
+    """
+    o_terms: list[float] = []
+    c_terms: list[float] = []
+    rs_terms: list[float] = []
+    m = 0  # aligned interior rows (i needs a prior close)
+    for i in range(1, len(o)):
+        if o[i] <= 0 or c[i - 1] <= 0 or c[i] <= 0 or lo[i] <= 0:
+            continue
+        m += 1
+        o_terms.append(math.log(o[i] / c[i - 1]))
+        c_terms.append(math.log(c[i] / o[i]))
+        rs_terms.append(
+            math.log(h[i] / c[i]) * math.log(h[i] / o[i])
+            + math.log(lo[i] / c[i]) * math.log(lo[i] / o[i])
+        )
+    if m < 2:
+        return None
+    var_o = _yz_sample_var(o_terms)
+    var_c = _yz_sample_var(c_terms)
+    if var_o is None or var_c is None:
+        return None
+    return var_o, var_c, sum(rs_terms) / m, m
+
+
+def _yz_variance(legs: tuple[float, float, float, int]) -> float:
+    """Combine the three legs under the shared weight - the ONE combination."""
+    var_o, var_c, var_rs, m = legs
+    k = _yz_k(m)
+    return var_o + k * var_c + (1.0 - k) * var_rs
+
+
 def yang_zhang_vol(
     opens: list,
     highs: list,
@@ -223,6 +291,9 @@ def yang_zhang_vol(
     estimates), the overnight leg captures the news-gap component, so the
     estimator is drift-independent and complete over the full day. None with
     < 3 bars or a zero total variance (degenerate) — never fabricated.
+
+    One window, one number. For the per-bar series a regime model needs, use
+    ``yang_zhang_vol_series``: the same core, so the two cannot disagree.
     """
     o = [float(x) for x in opens]
     h = [float(x) for x in highs]
@@ -236,41 +307,78 @@ def yang_zhang_vol(
         n = min(len(o), len(h), len(lo), len(c))
         if n < 3:
             return None
-
-    def _var(vals: list[float]) -> float | None:
-        m = len(vals)
-        if m < 2:
-            return None
-        mean = sum(vals) / m
-        s = sum((v - mean) ** 2 for v in vals)
-        return s / (m - 1)
-
-    o_terms: list[float] = []
-    c_terms: list[float] = []
-    rs_terms: list[float] = []
-    m = 0  # aligned interior rows (i needs a prior close)
-    for i in range(1, n):
-        if o[i] <= 0 or c[i - 1] <= 0 or c[i] <= 0 or lo[i] <= 0:
-            continue
-        m += 1
-        o_terms.append(math.log(o[i] / c[i - 1]))
-        c_terms.append(math.log(c[i] / o[i]))
-        rs_terms.append(
-            math.log(h[i] / c[i]) * math.log(h[i] / o[i])
-            + math.log(lo[i] / c[i]) * math.log(lo[i] / o[i])
-        )
-    if m < 2:
+    legs = _yz_legs(o[:n], h[:n], lo[:n], c[:n])
+    if legs is None:
         return None
-    var_o = _var(o_terms)
-    var_c = _var(c_terms)
-    var_rs = sum(rs_terms) / m  # Rogers-Satchell is a mean, not mean-corrected
-    if var_o is None or var_c is None:
-        return None
-    k = 0.34 / (1.34 + (m + 1.0) / (m - 1.0))
-    var = var_o + k * var_c + (1.0 - k) * var_rs
+    var = _yz_variance(legs)
     if var <= 0:
         return None
     return math.sqrt(var * periods)
+
+
+def yang_zhang_vol_series(
+    opens: list,
+    highs: list,
+    lows: list,
+    closes: list,
+    window: int,
+    periods: float = _DAYS,
+) -> dict:
+    """Per-bar Yang-Zhang volatility: the SAME estimator, one window per bar.
+
+    The scalar answers "how volatile was the last window"; a regime model needs
+    the whole series. This is **not** a second estimator - it calls the same
+    ``_yz_legs`` / ``_yz_k`` / ``_yz_variance`` core, so the value at bar ``i``
+    is exactly the scalar over the bars ending at ``i``, for every bar.
+
+    Returns ``{"series", "n", "measured", "window", "basis"}``:
+
+    * ``series`` - aligned to the input and the same length. ``None`` before the
+      first full window and for any degenerate window. The warm-up is
+      ``window - 1`` bars; a naive nested-rolling implementation (mean, then
+      squared deviation, then a second rolling sum) needs ``2 * window`` and
+      silently drops rows from whatever trains on it.
+    * ``measured`` - how many bars carry a number. Coverage travels with the
+      series, so a caller can see how much it actually got.
+    * ``None`` rather than ``0`` for an unmeasurable window: a window with no
+      measurable variance is a gap, not a quiet market.
+
+    ``window`` must be >= 3 (the core needs 2 interior rows); a smaller window
+    yields an all-``None`` series rather than a number nobody should trust.
+    """
+    o = [float(x) for x in opens]
+    h = [float(x) for x in highs]
+    lo = [float(x) for x in lows]
+    c = [float(x) for x in closes]
+    n = min(len(o), len(h), len(lo), len(c))
+    o, h, lo, c = o[:n], h[:n], lo[:n], c[:n]
+    w = int(window)
+    series: list[float | None] = [None] * n
+    if w >= 3:
+        for i in range(w - 1, n):
+            start = i - w + 1
+            legs = _yz_legs(
+                o[start : i + 1], h[start : i + 1], lo[start : i + 1], c[start : i + 1]
+            )
+            if legs is None:
+                continue
+            var = _yz_variance(legs)
+            if var <= 0:
+                continue
+            series[i] = math.sqrt(var * periods)
+    measured = sum(1 for v in series if v is not None)
+    return {
+        "series": series,
+        "n": n,
+        "measured": measured,
+        "window": w,
+        "basis": (
+            f"Yang-Zhang over {w}-bar windows, annualized x sqrt({periods:g}); "
+            f"{measured} of {n} bars measured, first at index {w - 1} "
+            f"(warm-up {w - 1} bars, not 2x window); None where a window had "
+            f"< 2 usable interior rows or zero variance - never 0"
+        ),
+    }
 
 
 def ewma_vol(

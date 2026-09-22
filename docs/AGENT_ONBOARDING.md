@@ -434,6 +434,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **Yang-Zhang gained a per-bar SERIES, on a shared core rather than as a second implementation.** A regime
+  model needs a vol *series*; the repo had only the scalar `yang_zhang_vol` over a window. `yang_zhang_vol_series(opens, highs, lows, closes,
+  window, periods=252)` returns `{series, n, measured, window, basis}` - aligned to the input, `None` before the first full window and for any
+  degenerate one. The shared core is `_yz_legs` / `_yz_k` / `_yz_variance`, which `yang_zhang_vol` was refactored onto, so alignment, the weight
+  and the combination each have ONE definition (rule 15: the two forms cannot disagree). **The refactor is bit-identical** - measured against a
+  verbatim copy of the pre-change scalar on 179 real SPY bars, identical at windows None/5/20/60/120/400 and on all five edge cases (empty, 2
+  bars, zero variance, a zero-price row, mismatched lengths). **The series matches the scalar at EVERY bar**, not just the last: 0 mismatching
+  indices out of 160 (window 20) and 120 (window 60), including windows holding a bad row, where `k` is keyed on the aligned row count and not
+  the requested window. **Warm-up is `window - 1`, not `2 * window`** - measured, first non-None at index 19 (w=20) and 59 (w=60); the nested
+  rolling form a naive rewrite produces needs 40 and 120 and would silently drop that many rows from anything training on the series. **`None`,
+  never `0`.** Three tests in `tests/test_strategies_covariance_models.py`; two faithful mutations RED with byte-identical sha256 restores
+  (keying `k` on the requested window reddens the pinning test alone; doubling the warm-up reddens all three). Same pass: the module docstring's
+  own inventory omitted `yang_zhang_vol` and `docs/developer/04-strategies.md` omitted it and `semivariance` - both corrected. **STALE CITATIONS
+  REPORTED, NOT FIXED:** `docs/scores/{RiskScore,TechnicalScore,RegimeScore}.md` cite `volatility_models.*` at lines 48/78/116/185/226, but the
+  real pre-change lines were 139/169/207/276/317 - those are owner-attributed score docs, and the citations were already stale before this change
+  (this change shifts `ewma_vol` to 384 and `garch11_fit` to 425).
+
 - 2026-09-21 `(working tree)` - **The analyst report-stub guard COULD NOT FIRE for a bare verdict line - the NTR tree shipped two stub
   analyst reports.** Reported by the owner as "missing content in several report belong to ntr". `reports/NTR_20260921_151301`'s
   `1_analysts/market.md` and `1_analysts/sentiment.md` looked plausible on disk (1,843 and 1,564 bytes) but their **model text was 36 and 407

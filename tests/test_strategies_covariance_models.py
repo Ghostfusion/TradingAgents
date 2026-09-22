@@ -14,7 +14,10 @@ from tradingagents.strategies.covariance_models import (
     ewma_covariance,
     ledoit_wolf_shrink,
 )
-from tradingagents.strategies.volatility_models import yang_zhang_vol
+from tradingagents.strategies.volatility_models import (
+    yang_zhang_vol,
+    yang_zhang_vol_series,
+)
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -60,6 +63,81 @@ def test_yang_zhang_captures_overnight_gap():
 def test_yang_zhang_insufficient_degenerate_none():
     assert yang_zhang_vol([], [], [], []) is None
     assert yang_zhang_vol([100.0] * 2, [101.0] * 2, [99.0] * 2, [100.0] * 2) is None  # < 3 bars
+
+
+def _varying_ohlc(n=80, base=100.0, seed=11):
+    """Deterministic non-flat OHLC: overnight gaps, drifting close, varying range."""
+    rng = np.random.default_rng(seed)
+    opens, highs, lows, closes = [], [], [], []
+    prev = base
+    for _ in range(n):
+        o = prev * (1.0 + float(rng.normal(0.0, 0.004)))
+        c = o * (1.0 + float(rng.normal(0.0005, 0.008)))
+        span = 0.006 + abs(float(rng.normal(0.0, 0.003)))
+        opens.append(o)
+        highs.append(max(o, c) * (1.0 + span))
+        lows.append(min(o, c) * (1.0 - span))
+        closes.append(c)
+        prev = c
+    return opens, highs, lows, closes
+
+
+def test_yang_zhang_series_matches_the_scalar_at_every_bar():
+    """One producer: the per-bar series IS the scalar over the bars ending at
+    each bar - for EVERY bar, not just the last one.
+
+    This is the gate that keeps a second implementation from appearing. Two
+    plausible rewrites drift from the scalar and land here: keying ``k`` on the
+    requested window instead of the aligned row count (the bad row below makes
+    those differ), and a nested rolling mean/sum, which shifts the alignment by
+    a bar and doubles the warm-up.
+    """
+    o, h, lo, c = _varying_ohlc(n=80)
+    o[40] = 0.0  # a bad row: any window containing it has m < window
+    w = 20
+    out = yang_zhang_vol_series(o, h, lo, c, w)
+    series = out["series"]
+    assert len(series) == len(c)
+    assert series[-1] == yang_zhang_vol(o, h, lo, c, window=w)
+    for i in range(w - 1, len(c)):
+        want = yang_zhang_vol(o[: i + 1], h[: i + 1], lo[: i + 1], c[: i + 1], window=w)
+        assert series[i] == want, f"bar {i}: series {series[i]} != scalar {want}"
+
+
+def test_yang_zhang_series_warmup_is_window_minus_one():
+    """The warm-up is ``window - 1`` bars, and the series stays aligned to the
+    input.
+
+    A nested-rolling implementation (rolling mean, then squared deviation, then
+    a second rolling sum) needs ``2 * window`` and silently drops rows from
+    whatever trains on the series - a data-loss change disguised as an
+    estimator swap.
+    """
+    o, h, lo, c = _varying_ohlc(n=80)
+    for w in (20, 30):
+        out = yang_zhang_vol_series(o, h, lo, c, w)
+        series = out["series"]
+        assert out["n"] == len(c)
+        assert out["window"] == w
+        assert all(v is None for v in series[: w - 1])
+        assert series[w - 1] is not None
+        assert out["measured"] == len(c) - (w - 1)
+
+
+def test_yang_zhang_series_is_none_never_zero():
+    """A window with no measurable variance yields None, never 0.0 - a model
+    reading 0.0 would see a quiet market where there is no measurement. A
+    window below 3 (the core needs 2 interior rows) is all-None for the same
+    reason: never a number nobody should trust."""
+    flat = [100.0] * 40  # zero range AND zero drift: every leg is exactly 0
+    out = yang_zhang_vol_series(flat, flat, flat, flat, 20)
+    assert out["measured"] == 0
+    assert set(out["series"]) == {None}
+    for w in (0, 1, 2):
+        assert yang_zhang_vol_series(flat, flat, flat, flat, w)["measured"] == 0
+    # ...while a flat series with a real range is measurable (the RS term).
+    o, h, lo, c = _flat_ohlc(n=40)
+    assert yang_zhang_vol_series(o, h, lo, c, 20)["measured"] == 21
 
 
 # --- Ledoit-Wolf ---
