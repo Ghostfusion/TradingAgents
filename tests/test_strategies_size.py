@@ -29,6 +29,25 @@ def test_vol_target_scale():
     assert volatility_target_scale([], 0.15) == 0.0
 
 
+def test_vol_target_override_needs_no_return_series():
+    """Regression: the `len(returns) < 5` guard ran BEFORE the override branch,
+    so `vol_override` - documented as supplying an externally computed
+    annualized vol, e.g. GARCH's long-run vol - returned 0.0 whenever the
+    caller had no series to hand. A 0.0 scale silently zeroes a position size
+    rather than scaling it, and it is why two callers re-derived the ratio
+    inline instead of calling the one producer (rule 15).
+    """
+    # an override IS the input, so the series length is irrelevant
+    for series in ([], [0.01] * 3, [0.01] * 30):
+        got = volatility_target_scale(series, vol_override=0.25, target_vol=0.15)
+        assert abs(got - 0.6) < 1e-9, series
+    # the 0..3 clamp and the no-data contract are unchanged
+    assert volatility_target_scale([], vol_override=0.01, target_vol=0.15) == 3.0
+    assert volatility_target_scale([], vol_override=0.0, target_vol=0.15) == 0.0
+    assert volatility_target_scale([], target_vol=0.15) == 0.0
+    assert volatility_target_scale([], vol_override=0.25, target_vol=0.0) == 0.0
+
+
 def test_atr_positive():
     high = [100.0] * 3 + [102.0] * 3
     low = [99.0] * 6

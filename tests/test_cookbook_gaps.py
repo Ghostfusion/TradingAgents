@@ -111,6 +111,116 @@ def test_neutralize_degenerate_dollar_center_only():
     assert abs(sum(w.values())) < 5e-5
 
 
+def test_neutralize_book_does_not_amplify_float_residue():
+    """A book already inside the constraint space has no neutral version.
+
+    The projection is correct - it leaves ~1e-16 - but the guard tested
+    `gross <= 0`, which that residue never satisfies, so `gross_target / 1e-15`
+    renormalized the noise into a fully-invested book with a plausible gross of
+    1.0. Equal-weighted legs with one beta per leg are exactly this case, and
+    the result was an all-long book labelled dollar+beta neutral.
+    """
+    legs = {"UP3": 0.5, "UP4": 0.5, "DN3": -0.5, "DN4": -0.5}
+    betas = {"UP3": 1.2, "UP4": 1.2, "DN3": 0.8, "DN4": 0.8}
+    assert cross_section.neutralize_book(legs, betas=betas, gross_target=1.0) == {}
+    # the same leg set with NO beta constraint is a real (dollar-neutral) book
+    w = cross_section.neutralize_book(legs, gross_target=1.0)
+    assert abs(sum(w.values())) < 5e-5
+    assert sum(abs(v) for v in w.values()) == pytest.approx(1.0, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# The advisory cross-sectional momentum book (strategies/cross_section.py)
+# ---------------------------------------------------------------------------
+
+
+def _momentum_panel(bars: int = 300):
+    """Eight names with distinct drifts and DISTINCT betas.
+
+    Distinct betas matter: equal-weighted legs whose names share one beta per
+    leg lie in the constraint space, and the neutralization then has no neutral
+    book to return (pinned by the test above).
+    """
+    rng = random.Random(11)
+    panel, betas = {}, {}
+    drifts = [
+        ("UP1", 0.0018), ("UP2", 0.0015), ("UP3", 0.0006), ("UP4", 0.0003),
+        ("DN1", -0.0003), ("DN2", -0.0006), ("DN3", -0.0015), ("DN4", -0.0018),
+    ]
+    for i, (name, drift) in enumerate(drifts):
+        price = 100.0
+        series = []
+        for _ in range(bars):
+            price *= math.exp(drift + rng.gauss(0, 0.012))
+            series.append(round(price, 4))
+        panel[name] = series
+        betas[name] = round(0.6 + 0.12 * i, 4)
+    return panel, betas
+
+
+def test_momentum_book_ranks_the_panel_and_neutralizes_it():
+    panel, betas = _momentum_panel()
+    book = cross_section.momentum_book(panel, betas=betas)
+    assert book is not None
+    assert book["n"] == 8
+    assert book["k_top"] == 2 and book["k_bottom"] == 2  # quintiles of 8
+    # every long-leg name outranks every short-leg name, and the panel's
+    # extremes are in the book
+    assert min(book["scores"][n] for n in book["top"]) > max(
+        book["scores"][n] for n in book["bottom"]
+    )
+    assert max(book["scores"], key=book["scores"].get) in book["top"]
+    assert min(book["scores"], key=book["scores"].get) in book["bottom"]
+    # the neutralized book satisfies the constraints it was asked for
+    assert abs(sum(book["weights"].values())) < 5e-5
+    assert abs(sum(book["weights"][n] * betas[n] for n in book["weights"])) < 5e-5
+    assert book["gross"] == pytest.approx(1.0, abs=1e-4)
+    # and the gate's effect is measured, not asserted
+    assert abs(book["net_beta_raw"]) > 0.05
+    assert abs(book["net_beta"]) < 5e-5
+
+
+def test_momentum_book_holds_only_the_selected_legs():
+    """The projection must not spread the hedge onto unselected names."""
+    panel, betas = _momentum_panel()
+    book = cross_section.momentum_book(panel, betas=betas)
+    assert set(book["weights"]) <= set(book["top"]) | set(book["bottom"])
+
+
+def test_momentum_book_scores_come_from_the_one_producer():
+    """Rule 15: the score is factors.vol_adjusted_momentum, not a re-derivation."""
+    panel, _ = _momentum_panel()
+    book = cross_section.momentum_book(panel, min_n=8)
+    for name, closes in panel.items():
+        assert book["scores"][name] == pytest.approx(
+            factors.vol_adjusted_momentum(closes, lookback=126, vol_window=21), abs=1e-6
+        )
+
+
+def test_momentum_book_reports_the_floor_and_the_dropped_names():
+    panel, _ = _momentum_panel()
+    assert cross_section.momentum_book({}, min_n=8) is None
+    assert cross_section.momentum_book(None, min_n=8) is None
+    # three scored names is not a cross-section
+    assert cross_section.momentum_book(dict(list(panel.items())[:3]), min_n=8) is None
+    # a name without enough history is a named gap, not a zero
+    short = dict(panel)
+    short["NEW"] = [1.0, 2.0, 3.0]
+    book = cross_section.momentum_book(short, min_n=8)
+    assert "NEW" in book["dropped"]
+    assert "NEW" not in book["scores"]
+    assert book["n_scored"] == 8
+
+
+def test_momentum_book_never_invents_a_beta():
+    panel, _ = _momentum_panel()
+    book = cross_section.momentum_book(panel)  # no betas supplied
+    assert book["net_beta"] is None
+    assert book["net_beta_raw"] is None
+    # the dollar constraint still applies, so the book is not empty
+    assert abs(sum(book["weights"].values())) < 5e-5
+
+
 def test_residualize_returns_removes_market():
     rng = random.Random(5)
     mkt = [rng.gauss(0, 0.01) for _ in range(120)]

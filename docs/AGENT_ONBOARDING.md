@@ -434,6 +434,25 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **Cross-sectional momentum is now an advisory READ, and building it found two defects - one of which could hand back an all-long book as "dollar+beta neutral".**
+  The pasted strategy brief's top pick ("cross-sectional momentum with factor neutralization") was ~70% ALREADY IN THE REPO as pure functions with no production caller:
+  `cross_section.neutralize_book:233` (dollar+beta+sector orthogonal projection), `quantile_split:165`, `centered_rank:136`, `factors.vol_adjusted_momentum:46`, `book_risk.net_beta:177`. What was missing was the composition, the panel and the wiring.
+  **NEW: `cross_section.momentum_book`** - composes those primitives (never re-derives one, rule 15), splits the top/bottom quintiles, equal-weights the legs, neutralizes them
+  **within the selected legs** (projecting over the whole panel spreads the orthogonal adjustment onto UNSELECTED names, so the book quietly holds the middle), and reports net beta
+  BEFORE -> AFTER so the gate's effect is measured. Advisory: not an engine, not a gate, not in `TradeScore` (rule 17), and NOT market breadth - the panel size travels with the read.
+  `None` below 8 scored names. **NEW tool `get_cross_section_momentum`** (market analyst): bounded panel (caller names, or ticker + vendor peers), closes from the run's `_ohlcv` cache,
+  betas **date-aligned** to the benchmark (`residualize_returns` truncates to common LENGTH, which pairs different sessions when a name has a gap - so an unalignable name gets NO beta
+  and `net_beta` reports the book beta as unknown rather than summing a partial). Live-verified: 8-name panel, net beta **+1.6258 -> +0.0000**, only the 4 selected legs held.
+  **DEFECT 1 (`neutralize_book`): float residue amplified into a book.** The projection is CORRECT - an equal-weighted leg set with one beta per leg lies entirely in the constraint space,
+  so it leaves `~1e-16`. But the guard tested `gross <= 0`, which residue never satisfies, so `gross_target / 1e-15` **renormalized the noise into a fully-invested book with a plausible gross
+  of 1.0** (observed `{0.25, 0.25, 0.25, 0.25}` - all long). The fallback also returned the RAW book, which violates the constraints the caller asked for. Now: guard is relative
+  (`1e-12 * raw_gross`) and the annihilation case returns `{}`. **When a projection "never fails", check what it returns when it produces nothing.**
+  **DEFECT 2 (`volatility_target_scale`): the producer could not be called with the input it exists for.** `vol_override` (GARCH long-run vol) sat BELOW the `len(returns) < 5` guard, so it
+  returned **0.0** with no series - and 0.0 zeroes a position size rather than scaling it. That is why `size.composite_position_size` and `analysis_tools.get_risk_overlay` re-derived
+  `max(0, min(target_vol/vol, 3))` inline. Guard order fixed, both delegate, delegation **bit-identical** for existing callers. **CHECKED, NOT A DEFECT:** `momentum.ts_momentum_weights`'s
+  `target_vol / mean(sigma_i)` is a BOOK-level ex-ante quantity, not the portfolio realized-vol scale - the review claimed three re-derivations, two were real.
+  Tests: `test_cookbook_gaps.py` 27 -> 33, `test_strategies_size.py` +1; both defects RED under a faithful mutation with byte-identical sha256 restores.
+
 - 2026-09-22 `(working tree)` - **A test sat one second inside its own timeout and killed the whole suite.** `tests/test_debate_stream_hermetic.py` capped itself at
   `pytest.mark.timeout(120)` while `test_full_stream_reaches_research_manager_when_structured_on` performs the **real ~87-tool vendor gather** (the LLM factory is
   stubbed; the vendor calls are not). Measured call time **119.21s** = 99.3% of the cap. `pytest-timeout`'s thread method does not fail one test when the cap is

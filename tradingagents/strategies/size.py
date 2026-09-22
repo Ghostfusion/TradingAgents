@@ -40,15 +40,23 @@ def volatility_target_scale(
     Uses EWR volatility by default; ``vol_override`` supplies an externally
     computed annualized vol (e.g. GARCH long-run vol from the
     ``volatility_estimator`` config) so the sizing reflects the chosen
-    estimator. Returns None-safe 0 on no data.
+    estimator. An override IS the input, so it needs no return series.
+    Returns None-safe 0 on no data.
     """
     import math
 
-    if len(returns) < 5 or target_vol <= 0:
+    if target_vol <= 0:
         return 0.0
+    # The override branch comes FIRST: testing the return series ahead of it
+    # made this path unreachable for the caller it exists for (a vol computed
+    # elsewhere, with no series to hand) and returned 0.0 - which zeroes a
+    # position size instead of scaling it. That is also why two callers
+    # re-derived the ratio inline rather than calling this function.
     if vol_override is not None and vol_override > 0:
         raw = target_vol / float(vol_override)
         return max(0.0, min(raw, 3.0))
+    if len(returns) < 5:
+        return 0.0
     var = 0.0
     for r in returns:
         var = decay * var + (1.0 - decay) * (r * r)
@@ -104,7 +112,11 @@ def composite_position_size(
     base = max(0.0, min(base, max_position_pct))
     vol_scale = 1.0
     if annualized_vol is not None and annualized_vol > 0:
-        vol_scale = max(0.0, min(target_vol / annualized_vol, 3.0))
+        # volatility_target_scale owns the ratio and its 0..3 clamp; the inline
+        # copy here is how the two drifted apart (rule 15).
+        vol_scale = volatility_target_scale(
+            [], target_vol=target_vol, vol_override=annualized_vol
+        )
         if vol_scale < 1.0:
             reasons.append(f"vol scale {vol_scale:.2f}x (target_vol/annualized_vol)")
     liq = 1.0 if liquidity_scalar is None else max(0.0, min(liquidity_scalar, 1.0))

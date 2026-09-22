@@ -247,8 +247,13 @@ def neutralize_book(
     beta get the cross-sectional average beta proxy; names with no sector are
     left unconstrained.
 
-    Returns the weight dict (missing names dropped by the projection) or ``{}``
-    when fewer than 2 names survive.
+    Returns the weight dict (missing names dropped by the projection), or ``{}``
+    when fewer than 2 names survive **or** when the projection annihilates the
+    book - which happens exactly when the input already lay in the constraint
+    space (all longs sharing one beta, all shorts another, equal-weighted). Then
+    there is no neutral book carrying that alpha structure, and an empty result
+    is the honest answer rather than the input handed back as if it were
+    neutral.
     """
     names = [n for n in (weights or {}) if _is_num(weights.get(n))]
     if len(names) < 2:
@@ -291,10 +296,20 @@ def neutralize_book(
         mean = sum(raw) / len(raw)
         adj = [v - mean for v in raw]
     # Gross-exposure renormalization (keep sign structure).
+    raw_gross = sum(abs(v) for v in raw)
     gross = sum(abs(v) for v in adj)
-    if gross <= 0 or not math.isfinite(gross):
-        gross = sum(abs(v) for v in raw)
-        adj = list(raw)
+    # A projection that annihilates the book means the INPUT lay entirely in the
+    # constraint space - an equal-weighted, beta-matched long/short leg set is
+    # exactly that - so there is no neutral book carrying this alpha structure.
+    # Two things were wrong here: the guard tested `gross <= 0`, which the
+    # ~1e-16 residue of a correct projection never satisfies, so
+    # `gross_target / 1e-15` amplified that noise into a fully-invested book
+    # with a plausible gross of 1.0; and the fallback returned the RAW book,
+    # which violates the very constraints the caller asked for while the
+    # function's contract says it enforces them. Both are replaced by an honest
+    # empty result - "no book survives" is not "a book that is not neutral".
+    if not math.isfinite(gross) or gross <= 1e-12 * raw_gross:
+        return {}
     scale = gross_target / gross if gross > 0 else 0.0
     return {names[i]: round(adj[i] * scale, 6) for i in range(len(names))}
 
@@ -354,6 +369,113 @@ def group_median(values_by_key, groups, min_n=5):
     return out
 
 
+def momentum_book(
+    closes_by_name: dict,
+    *,
+    betas: dict | None = None,
+    sector_map: dict | None = None,
+    lookback: int = 126,
+    vol_window: int = 21,
+    frac: float = 0.2,
+    min_n: int = 8,
+    gross_target: float = 1.0,
+) -> dict | None:
+    """An advisory cross-sectional momentum BOOK over a caller-supplied panel.
+
+    Composes the primitives rather than re-deriving any of them: the score is
+    the ONE risk-adjusted momentum producer (``factors.vol_adjusted_momentum``),
+    the rank is ``centered_rank``, the legs are ``quantile_split``, the
+    neutralization is ``neutralize_book`` (dollar + beta + sector) and the book
+    beta is ``book_risk.net_beta``. Nothing here is a second producer.
+
+    The two legs are equal-weighted (long the top ``frac``, short the bottom
+    ``frac``) and then neutralized **within the selected legs**, and the book's
+    net beta is reported BEFORE and AFTER the projection so the gate's effect
+    is visible rather than asserted.
+
+    ADVISORY, and not an engine: the result never enters ``TradeScore`` and is
+    not a gate (master rule 17). It is also **not market breadth** - the panel
+    is whatever the caller could see, so ``n`` travels with the read and a book
+    over a handful of names must never be read as a decile book of the market.
+
+    ``betas``/``sector_map`` are the caller's: a name missing from ``betas``
+    makes the book beta ``None`` (``net_beta`` refuses a partial sum that would
+    read as a flat book), and a missing ``sector_map`` simply leaves the book
+    dollar+beta neutral instead of sector neutral.
+
+    Returns ``None`` when fewer than ``min_n`` names carry a measurable score -
+    a long/short book over four names is not a cross-section - and never a
+    fabricated one.
+    """
+    from .book_risk import net_beta
+    from .factors import vol_adjusted_momentum
+
+    scored: dict = {}
+    dropped: dict = {}
+    for name, closes in (closes_by_name or {}).items():
+        key = str(name)
+        if not isinstance(closes, list) or not closes:
+            dropped[key] = "no close series"
+            continue
+        score = vol_adjusted_momentum(closes, lookback=lookback, vol_window=vol_window)
+        if score is None:
+            dropped[key] = f"fewer than {lookback + vol_window} bars"
+            continue
+        scored[key] = float(score)
+    if len(scored) < min_n:
+        return None
+
+    names = sorted(scored)
+    scores = [scored[n] for n in names]
+    ranks = centered_rank(scores)
+    buckets = quantile_split(scores, frac=frac, keyed=names)
+    top, bottom = list(buckets["top"]), list(buckets["bottom"])
+
+    leg_weights = dict.fromkeys(names, 0.0)
+    for n in top:
+        leg_weights[n] = 1.0 / len(top)
+    for n in bottom:
+        leg_weights[n] = -1.0 / len(bottom)
+    # Neutralize ONLY the selected legs. Projecting over the whole panel also
+    # spreads the hedge onto names that were never selected (the orthogonal
+    # adjustment is distributed across every name in the input), which turns a
+    # "long the top quintile / short the bottom" book into a book that quietly
+    # holds the middle too.
+    legs = {n: w for n, w in leg_weights.items() if w != 0.0}
+    weights = neutralize_book(
+        legs, betas=betas, sector_map=sector_map, gross_target=gross_target
+    )
+    gross = sum(abs(v) for v in weights.values())
+
+    return {
+        "n": len(names),
+        "n_scored": len(scored),
+        "dropped": dropped,
+        "lookback": lookback,
+        "vol_window": vol_window,
+        "frac": frac,
+        "top": top,
+        "bottom": bottom,
+        "k_top": len(top),
+        "k_bottom": len(bottom),
+        "scores": {n: round(scored[n], 6) for n in names},
+        "ranks": {n: round(ranks[i], 6) for i, n in enumerate(names)},
+        "leg_weights": {n: round(v, 6) for n, v in leg_weights.items()},
+        "weights": weights,
+        "net_beta_raw": net_beta(legs, betas or {}),
+        "net_beta": net_beta(weights, betas or {}),
+        "gross": round(gross, 6),
+        "sector_neutral": bool(sector_map),
+        "basis": (
+            f"risk-adjusted momentum (lookback {lookback}, vol window {vol_window}) "
+            f"over {len(names)} scored name(s), top/bottom {frac:.0%} "
+            f"({len(top)}/{len(bottom)} names), neutralized "
+            f"{'dollar+beta+sector' if sector_map else 'dollar+beta'} "
+            f"within the selected legs"
+        ),
+    }
+
+
 __all__ = [
     "winsorize",
     "cross_sectional_z",
@@ -364,4 +486,5 @@ __all__ = [
     "neutralize_book",
     "no_trade_band",
     "group_median",
+    "momentum_book",
 ]

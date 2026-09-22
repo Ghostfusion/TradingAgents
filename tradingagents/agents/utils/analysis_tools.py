@@ -4714,6 +4714,183 @@ def get_composite_rank(
 
 
 # ---------------------------------------------------------------------------
+# Cross-sectional momentum book (market analyst) - advisory, not an engine
+# ---------------------------------------------------------------------------
+
+# The panel is whatever the caller can see, so it is capped: every name is a
+# vendor call, and the neutralization does not need hundreds of names to be
+# honest about how many it got.
+_CROSS_SECTION_MAX_NAMES = 40
+_CROSS_SECTION_MIN_OBS = 60
+
+
+def _aligned_log_returns(dates, closes, bench_dates, bench_closes):
+    """Date-aligned log returns for one name against the benchmark.
+
+    Returns ``(name_returns, bench_returns)``, or ``(None, None)`` when fewer
+    than ``_CROSS_SECTION_MIN_OBS`` sessions line up. Truncating the two series
+    to their common LENGTH - what ``cross_section.residualize_returns`` does -
+    pairs different sessions whenever a name has a gap, so the beta here is
+    aligned by date instead. An unalignable name gets no beta, and a book with
+    an unmeasured beta reports ``None`` rather than a partial sum.
+    """
+    from tradingagents.strategies.book_context import log_returns
+
+    bench = {
+        d: c
+        for d, c in zip(bench_dates or [], bench_closes or [], strict=False)
+        if c
+    }
+    nd: list = []
+    nc: list = []
+    for d, c in zip(dates or [], closes or [], strict=False):
+        b = bench.get(d)
+        if b and c:
+            nd.append(c)
+            nc.append(b)
+    if len(nd) < _CROSS_SECTION_MIN_OBS + 1:
+        return None, None
+    return log_returns(nd), log_returns(nc)
+
+
+@tool
+def get_cross_section_momentum(
+    ticker: Annotated[str, "ticker symbol the read is anchored to"],
+    names: Annotated[
+        list[str] | None,
+        "optional universe to rank; omit to use the ticker plus its vendor peer set",
+    ] = None,
+) -> str:
+    """Advisory cross-sectional momentum BOOK over a panel of names.
+
+    Ranks the panel by risk-adjusted momentum (return over the lookback divided
+    by realized vol), takes the top and bottom quintiles, equal-weights the two
+    legs and neutralizes them dollar- and beta-wise, then reports the book's net
+    beta BEFORE and AFTER the projection. Use it before any 'leaders are
+    outrunning laggards / this is a dispersion trade / the winners are crowded'
+    claim, and cite its weights rather than deriving a long/short split by hand.
+
+    It is advisory: it never places an order, never sizes one, and is NOT part
+    of TradeScore or any gate. It is also NOT market breadth - the panel is only
+    the names supplied (or the ticker's peer set), so the printed panel size is
+    part of the read and a book over nine names must not be quoted as a decile
+    book of the market. Percent-above-moving-average and advance/decline are not
+    measured here at all.
+    """
+    try:
+        from tradingagents.strategies.cross_section import momentum_book
+        from tradingagents.strategies.evaluate import beta as _beta
+    except Exception as exc:  # noqa: BLE001
+        return f"cross-sectional momentum unavailable for {ticker}: {exc}"
+
+    panel = [str(n).strip().upper() for n in (names or []) if str(n).strip()]
+    panel = list(dict.fromkeys(panel))[:_CROSS_SECTION_MAX_NAMES]
+    source = "caller-supplied"
+    if len(panel) < 2:
+        # No usable list: fall back to the bounded peer path get_composite_rank
+        # uses (the ticker plus up to 8 vendor peers).
+        panel = [str(ticker).strip().upper()]
+        source = "ticker + vendor peers"
+        try:
+            from tradingagents.dataflows.finnhub import (
+                get_company_peers_finnhub,
+                peer_symbols,
+            )
+
+            peers = [
+                p
+                for p in peer_symbols(get_company_peers_finnhub(ticker))
+                if p and p != str(ticker).strip().upper()
+            ]
+            panel += peers[:8]
+        except Exception:  # noqa: BLE001 - the single-name panel fails the floor below
+            pass
+
+    bench = _benchmark_bars()
+    closes_by_name: dict = {}
+    betas: dict = {}
+    no_series: list = []
+    for name in panel:
+        bars = _ohlcv(name)
+        closes = bars.get("closes") or []
+        if not closes:
+            no_series.append(name)
+            continue
+        closes_by_name[name] = closes
+        nr, br = _aligned_log_returns(
+            bars.get("dates"), closes, bench.get("dates"), bench.get("closes")
+        )
+        if nr and br:
+            b = _beta(nr, br)
+            if b is not None:
+                betas[name] = round(float(b), 4)
+
+    book = momentum_book(closes_by_name, betas=betas)
+    head = f"## Cross-Sectional Momentum Book - {ticker} (advisory, not an engine)"
+    if book is None:
+        return (
+            f"{head}\n\n"
+            f"unavailable: {len(closes_by_name)} name(s) with a measurable score "
+            f"from a {len(panel)}-name {source} panel - below the floor for a "
+            f"long/short cross-section (8).\n"
+            + (f"no close series: {', '.join(no_series)}\n" if no_series else "")
+            + "This is a named gap, not a flat book."
+        )
+
+    lines = [
+        head,
+        "",
+        f"Panel: {book['n']} scored name(s) from a {len(panel)}-name {source} panel"
+        + (f" (no close series: {', '.join(no_series)})" if no_series else ""),
+        f"Score: {book['basis']}",
+        f"Betas: {len(betas)} of {book['n']} measured (date-aligned vs the benchmark)",
+        "",
+    ]
+    for label, leg in (("Long (top quintile)", book["top"]), ("Short (bottom quintile)", book["bottom"])):
+        lines.append(f"### {label}")
+        lines.append("| Name | Score | Rank |")
+        lines.append("| --- | --- | --- |")
+        for n in leg:
+            lines.append(f"| {n} | {book['scores'][n]:+.4f} | {book['ranks'][n]:+.2f} |")
+        lines.append("")
+    lines.append("### Neutralized book (dollar + beta)")
+    if book["weights"]:
+        lines.append("| Name | Leg | Weight |")
+        lines.append("| --- | --- | --- |")
+        for n, w in sorted(book["weights"].items(), key=lambda kv: -abs(kv[1])):
+            # Label the POSITION the book ends up with, not the leg it was
+            # selected from: the projection can flip a name's sign.
+            leg = "long" if w > 0 else "short"
+            lines.append(f"| {n} | {leg} | {w:+.4f} |")
+        lines.append("")
+        lines.append(f"- gross {book['gross']:.4f}")
+    else:
+        lines.append(
+            "- unavailable: no neutral book survives for this leg structure. The "
+            "selected legs already lie in the dollar+beta constraint space (equal "
+            "weights with one beta per leg), so projecting the constraints out "
+            "leaves nothing - widening the panel or dropping the beta constraint "
+            "is what changes it. The legs above are still the ranking read."
+        )
+        lines.append("")
+    raw_b, net_b = book["net_beta_raw"], book["net_beta"]
+    if raw_b is None or net_b is None:
+        lines.append(
+            "- net beta: **unknown** - a weighted name has no measured beta, and "
+            "a partial sum would read as a flat book."
+        )
+    else:
+        lines.append(f"- net beta: {raw_b:+.4f} raw -> {net_b:+.4f} after neutralization")
+    lines.append("")
+    lines.append(
+        "Advisory only: this book is not a gate, does not size a position, and "
+        "does not enter TradeScore. The panel is the names above, not the "
+        "market - do not quote it as market breadth."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Item 4: tail / book risk (market analyst) ----------------
 # ---------------------------------------------------------------------------
 
@@ -10463,7 +10640,10 @@ def get_risk_overlay(
         cppi = cppi_exposure(portfolio_value, floor, multiplier)
     vt = None
     if expected_vol is not None and expected_vol > 0:
-        vt = max(0.0, min(target_vol / expected_vol, 3.0))
+        # The producer owns the ratio and its 0..3 clamp (rule 15).
+        from tradingagents.strategies.size import volatility_target_scale
+
+        vt = volatility_target_scale([], target_vol=target_vol, vol_override=expected_vol)
     lines = [f"## Risk Overlay — book PV {portfolio_value:,.0f}", ""]
     if cppi is not None:
         lines.append(f"- CPPI: risky {cppi:,.0f} ({(cppi / portfolio_value * 100):.0f}% of PV) "
