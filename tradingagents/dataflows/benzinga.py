@@ -34,11 +34,26 @@ Not every parameter does something. Verified live:
 Measured further on the live key 2026-09-21, on the two market-wide firehose
 routes: ``pagesize`` is **not honoured as a cap** (``pagesize=100`` returned
 233 / 100 / 275 / 289 rows on consecutive pages; ``pagesize=1000`` returned
-2,425 in one response), and pages 1-4 of a trailing window all covered the
-**same newest filing day** as different row slices - the walk does not step
-back in filing time. A date window therefore *bounds* the query but does not
-*extend* the scan, which is why the budget for these two readers is stated in
-rows inspected, not in pages and not in days.
+2,425 in one response), so the budget for these two readers is stated in rows
+inspected, never in nominal pages.
+
+**The cursor DOES step back in filing time; the regime decides how far.** An
+earlier note here claimed it never does, on the strength of a windowed probe.
+Re-measured 2026-09-21:
+
+- *unfiltered* - what these two readers actually make, no date params: pages
+  1-4 returned 2,349 / 1,955 / 2,199 / 2,171 rows over 11 distinct filing
+  days, stepping 2026-09-17 back to 2026-09-04; a 12-page walk returned 12/12
+  unique pages spanning 2026-08-18..2026-09-17.
+- *windowed* - ``date_from``/``date_to`` set: the top of the window is
+  re-sliced, so page 1 was a single day (2026-09-17), but the walk still steps
+  back (4 pages reached 2026-09-08..2026-09-09).
+
+So a bounded scan covers a genuine DATE PERIOD, which is exactly what
+``_Scan.describe()`` prints, and a date window *would* extend the scan rather
+than merely bound it. The budget stays in rows because what has to be bounded
+is the request count; whether to layer a date window on top is a separate
+design question, not a substitute for the budget.
 
 Key: ``BENZINGA_API_KEY`` in ``.env``. Raises the typed errors the router
 understands so a 401/403/429/empty degrades to the next vendor - never a
@@ -759,10 +774,12 @@ def _filtered_pages(
 
     The budget is **rows inspected**, not pages. ``pagesize`` is not a cap on
     these routes (see the module docstring), so a budget stated in pages does
-    not describe what was read; and measured live 2026-09-21, pages 1-4 of a
-    trailing window all covered the SAME newest filing day as different slices
-    - the walk does not step back in filing time, so this reports a row sample
-    and never a period.
+    not describe what was read. The unfiltered walk these readers make DOES
+    step back in filing time (measured 2026-09-21: 12 pages, 12/12 unique,
+    2026-09-17 back to 2026-08-18), so ``lo``/``hi`` are a real date period
+    and ``describe`` reports it. The hedge is about the ROW BUDGET, never about
+    the dates: a scan that reached the end of the stream needs no hedge, while
+    one the budget stopped has a period it cannot claim is complete.
 
     A page shorter than ``page_size`` is NOT the end of the stream either (the
     slices are ragged), so the walk ends on an empty page or the row budget;

@@ -468,19 +468,35 @@ has changed before); never assume an endpoint works — the SDK's
   filter is real rather than ignored). Three further measurements then decided it: (1) `pagesize` is **not a cap** - `pagesize=100` returned
   233 / 100 / 275 / 289 rows on consecutive pages and `pagesize=1000` returned 2,425 in one response; (2) the page cursor is **stable**
   (identical row sets on back-to-back walks) but pages 1-4 of a trailing window ALL cover the SAME newest filing day as different slices, so the
-  walk never steps back in filing time; (3) a date window therefore *bounds* the query but does not *extend* the scan - so "the fix may be a
-  date window" is refuted and the plan's step (1), the row budget, is what shipped. **Phase 1:** `_filtered_pages` takes `page_size`/`max_rows`,
+  walk never steps back in filing time **[SUPERSEDED 2026-09-21 - see the Phase 3 record below: the UNFILTERED walk these readers make DOES step
+  back monotonically (12 pages, 12/12 unique page hashes, 2026-09-17 back to 2026-08-18). The observation holds only of a windowed walk, and only
+  at the top of the window]**; (3) a date window therefore *bounds* the query but does not *extend* the scan **[SUPERSEDED - a date window WOULD
+  extend it; the row budget still stands, on the request count rather than on this]**. The plan's step (1), the row budget, is what shipped. **Phase 1:** `_filtered_pages` takes `page_size`/`max_rows`,
   inspects every row a page returns, and ends on an empty page or the budget - never on a short page. The old `if len(batch) < page_size: break`
   was unsound on ragged slices (a 3-row page ended the scan with rows still arriving). It returns a `_Scan` record
   (`rows`/`inspected`/`pages`/`truncated`/`lo`/`hi`) so truncation is observable rather than inferred. **Phase 2:** `_Scan.describe()` renders
   into both miss paths, e.g. `first 3,425 rows of the newest filings (2026-09-14..2026-09-17), a bounded sample - an older filing may sit
   beyond it`; a scan that reached the end of the stream drops the hedge. The date axis is the SERVED one - the **filing** date for Form 4
   (never `date_transaction`, which spans a year inside a single filing day) and the disclosure `report_date` for congress - so the window is
-  not overstated. **Measured live:** a genuinely absent symbol (`AAPL`, `SPY`) now gets the honest bounded-sample message naming 3,425 rows and
-  the window; a present one (`DELL`, 194 rows in the live window) is reached in **1 request inspecting 2,425 rows** where the old budget spent
-  4 requests for 400 nominal rows; congress `AAPL` renders `4 buys / 4 sells (net +0)`. **Tests:** `tests/test_benzinga_surface.py` 27 -> 30,
-  two of them failing-first by mutation with a byte-identical sha256 restore - reinstating the short-page break, and reverting the miss detail
-  to the flat absence claim. **Web impact:** none - both render shapes are unchanged and no tool, CLI flag, env var or JSON key moves.
+  not overstated. **Measured live:** a symbol absent from the scanned window (`AAPL`, `SPY`) gets the honest bounded-sample message naming 3,425
+  rows and the window; a present one (`DELL`, 194 rows in the live window) is reached in **1 request inspecting 2,425 rows** where the old budget
+  spent 4 requests for 400 nominal rows; congress `AAPL` renders `4 buys / 4 sells (net +0)`. **Tests:** `tests/test_benzinga_surface.py`
+  27 -> 30, two of them failing-first by mutation with a byte-identical sha256 restore - reinstating the short-page break, and reverting the miss
+  detail to the flat absence claim. **Web impact:** none - both render shapes are unchanged and no tool, CLI flag, env var or JSON key moves.
+  **Phase 3 (2026-09-21) - the live verification, on the owner-named symbol `SKHY`, and it REFUTED two recorded claims.** Ground truth came from
+  walking past the shipped budget: 12 pages x `pagesize=1000` = **20,811 Form 4 rows, 12/12 unique page hashes**, and 6 congressional pages =
+  5,568 rows. **Verified:** `SKHY` has no row anywhere in that walk, and both readers return the honest miss naming the real inspected count
+  (`first 4,304 rows ... (2026-09-11..2026-09-17), a bounded sample - an older filing may sit beyond it`) - so a true absence IS distinguishable
+  from a truncated scan, which was the point of the fix. The 4,304 is the real count, not the 3,000 budget: a page is inspected whole and the
+  budget is checked after it. **Verified:** `DELL` (first row at global index 1,789) still hits in 1 request. **FAILED arm, left to the owner:**
+  the plan's known-good symbol `AAPL` sits at global index **5,354** - beyond `_FIREHOSE_MAX_ROWS = 3000` - so the shipped budget MISSES a
+  mega-cap that genuinely has filings; at `max_rows=7000` it hits in 3 requests (`2026-09-08: Jennifer Newstead (SVP) - disposed 1438 shares @
+  317.23 (code s) [10b5-1 plan]`). Raising it is a cost decision (a miss on an absent symbol costs ~7 requests of ~2,000 rows), so it is not
+  changed here. **REFUTED #1:** the paging claim tagged SUPERSEDED above - the unfiltered walk DOES step back in filing time (pages 1-4:
+  2,349 / 1,955 / 2,199 / 2,171 rows over 11 distinct filing days, 2026-09-17 back to 2026-09-04), so `describe()` reports a real date PERIOD and
+  a date window WOULD extend the scan. **REFUTED #2, and it was this ledger's own error:** "AAPL has no Form 4 rows in the current window and was
+  never a valid known-good" was concluded from a 3,000-row bounded scan - it repeated the very defect under repair. The `benzinga.py` module
+  docstring and the `_filtered_pages` docstring now carry the corrected measurement.
 
 - 2026-09-21 `(working tree)` - **Every finished report now carries its own TypeSafe verdict: `enable_jev_verdict` writes
   `jev_verdict.json` into the report tree.** Owner instruction: run jev each time a report has finished generating, and put the
