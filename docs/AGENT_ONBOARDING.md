@@ -488,11 +488,16 @@ has changed before); never assume an endpoint works — the SDK's
   5,568 rows. **Verified:** `SKHY` has no row anywhere in that walk, and both readers return the honest miss naming the real inspected count
   (`first 4,304 rows ... (2026-09-11..2026-09-17), a bounded sample - an older filing may sit beyond it`) - so a true absence IS distinguishable
   from a truncated scan, which was the point of the fix. The 4,304 is the real count, not the 3,000 budget: a page is inspected whole and the
-  budget is checked after it. **Verified:** `DELL` (first row at global index 1,789) still hits in 1 request. **FAILED arm, left to the owner:**
-  the plan's known-good symbol `AAPL` sits at global index **5,354** - beyond `_FIREHOSE_MAX_ROWS = 3000` - so the shipped budget MISSES a
-  mega-cap that genuinely has filings; at `max_rows=7000` it hits in 3 requests (`2026-09-08: Jennifer Newstead (SVP) - disposed 1438 shares @
-  317.23 (code s) [10b5-1 plan]`). Raising it is a cost decision (a miss on an absent symbol costs ~7 requests of ~2,000 rows), so it is not
-  changed here. **REFUTED #1:** the paging claim tagged SUPERSEDED above - the unfiltered walk DOES step back in filing time (pages 1-4:
+  budget is checked after it. **Verified:** `DELL` (first row at global index 1,789) still hits in 1 request. **Known-good arm, RESOLVED by owner
+  decision 2026-09-21:** the plan's known-good symbol `AAPL` sits at global index **5,354** - beyond the then-shipped `_FIREHOSE_MAX_ROWS = 3000` -
+  so that budget MISSED a mega-cap that genuinely has filings. The owner raised it to **7000**, re-verified live on all three arms: `AAPL` HIT in
+  4 requests, `DELL` still 1 request, `SKHY` still an honest MISS now naming 8,674 rows instead of 4,304. The cost is confined to the miss path.
+  **Both `_Scan` branches are now exercised live** (the first pass never did): the insider route always truncates - its stream dwarfs any sane
+  budget - so it always hedges, while the **congressional** route reaches end-of-stream inside the budget and drops the hedge (`truncated=False`,
+  7 requests). The end-of-stream is confirmed rather than assumed: a `pagesize=500` cross-check terminates the same way and bottoms out at the
+  same oldest disclosure date, 2025-09-23. **Observation, NOT changed:** the two page sizes returned different totals for the same stream (5,568
+  at `pagesize=1000`, 6,068 at `pagesize=500`), so the slices overlap rather than partition it - "rows inspected" is request volume, not distinct
+  rows. **REFUTED #1:** the paging claim tagged SUPERSEDED above - the unfiltered walk DOES step back in filing time (pages 1-4:
   2,349 / 1,955 / 2,199 / 2,171 rows over 11 distinct filing days, 2026-09-17 back to 2026-09-04), so `describe()` reports a real date PERIOD and
   a date window WOULD extend the scan. **REFUTED #2, and it was this ledger's own error:** "AAPL has no Form 4 rows in the current window and was
   never a valid known-good" was concluded from a 3,000-row bounded scan - it repeated the very defect under repair. The `benzinga.py` module

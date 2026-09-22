@@ -729,8 +729,16 @@ def _congress_report_date(row: dict) -> str:
 #: 275 / 289 rows on consecutive pages and ``pagesize=1000`` returned 2,425 in
 #: one response - so the scan budget below is stated in ROWS INSPECTED, never
 #: in nominal pages.
+#:
+#: **The budget is sized so the scan reaches a mega-cap, not so it is cheap.**
+#: Owner decision 2026-09-21, after phase 3 measured the arms live: ``AAPL``'s
+#: first Form 4 row sits at global index 5,354 and ``DELL``'s at 1,789, so the
+#: previous 3,000 missed a symbol that genuinely has filings. At 7,000 AAPL is
+#: reached in 3 requests and DELL in 1; a miss on a genuinely absent symbol
+#: costs about 7 requests of ~2,000 rows each, which is the price of not
+#: reporting a mega-cap as having no filings.
 _FIREHOSE_PAGE_SIZE = 1000
-_FIREHOSE_MAX_ROWS = 3000
+_FIREHOSE_MAX_ROWS = 7000
 
 
 @dataclass(frozen=True)

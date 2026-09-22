@@ -20,7 +20,21 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 **The hit path is untouched - VERIFIED.** `DELL`'s first row sits at global index 1,789, inside the budget: one request, 23 rendered lines.
 
-**The known-good arm FAILS at the shipped budget, and is left to the owner.** `AAPL`'s first Form 4 row is at global index **5,354** - beyond `_FIREHOSE_MAX_ROWS = 3000` - so at the shipped budget `get_insider_transactions_benzinga("AAPL")` MISSES, honestly. Raising the budget to 7,000 reaches it in 3 requests: `2026-09-08: Jennifer Newstead (SVP) - disposed 1438 shares @ 317.23 (code s) [10b5-1 plan]`. The honest-miss fix is therefore correct and complete, but the budget cannot reach a mega-cap's filings. Whether to raise it is a cost decision - at 7,000 a miss on a genuinely absent symbol costs ~7 requests of ~2,000 rows each - not a defect fix, so it is not changed here.
+**The known-good arm FAILS at the shipped budget.** `AAPL`'s first Form 4 row is at global index **5,354** - beyond `_FIREHOSE_MAX_ROWS = 3000` - so at the shipped budget `get_insider_transactions_benzinga("AAPL")` MISSES, honestly. Raising the budget to 7,000 reaches it: `2026-09-08: Jennifer Newstead (SVP) - disposed 1438 shares @ 317.23 (code s) [10b5-1 plan]`. The honest-miss fix is therefore correct and complete, but the budget cannot reach a mega-cap's filings. **[RESOLVED - see v2 below: the owner raised the budget to 7,000.]**
+
+**v2 - the owner raised `_FIREHOSE_MAX_ROWS` to 7000 (2026-09-21).** Re-verified live on the same three arms, with request counts:
+
+| arm | at 3,000 | at 7,000 |
+|---|---|---|
+| `AAPL` (first row at 5,354) | MISS | **HIT, 4 requests** |
+| `DELL` (first row at 1,789) | HIT, 1 request | **HIT, 1 request** |
+| `SKHY` (no row in 20,811) | MISS, 4,304 rows named | **MISS, 8,674 rows named** |
+
+The cost is confined to the miss path - 4 requests / 8,674 rows instead of 2 requests / 4,304 on the insider route - and `_Scan.describe()` renders the larger window, so the hedge stays true: `first 8,674 rows of the newest filings (2026-09-04..2026-09-17), a bounded sample - an older filing may sit beyond it`.
+
+**Both `_Scan` branches are now exercised live, which the first pass never did.** The insider route always truncates - its stream dwarfs any sane budget - so it always hedges. The **congressional** route reaches end-of-stream inside the budget and so drops the hedge: `no congressional trades for this symbol in the first 5,568 rows of the newest filings (2025-09-23..2026-07-21)`, `truncated=False`, 7 requests. That is the designed behaviour, and the end-of-stream is now confirmed rather than assumed - a `pagesize=500` cross-check terminates the same way (a short page, then an empty one) and bottoms out at the same oldest disclosure date, 2025-09-23.
+
+**Observation, NOT changed:** the two page sizes returned **different totals for the same stream** - 5,568 rows at `pagesize=1000`, 6,068 at `pagesize=500`. The slices therefore overlap rather than partition it, so "rows inspected" is a request-volume measure and not a count of distinct rows, and "the first N rows" is approximate in the same way the module already documents for ragged slices. No behaviour depends on the count being a partition, and the rendered string is left alone here.
 
 **The recorded paging claim is REFUTED, and the docstrings are corrected in this entry.** The previous entry records that "the walk does not step back in filing time", from a *windowed* probe. Re-measured 2026-09-21, the **unfiltered** walk these two readers actually make steps back **monotonically**: pages 1-4 returned 2,349 / 1,955 / 2,199 / 2,171 rows over 11 distinct filing days, stepping 2026-09-17 back to 2026-09-04, and a 12-page walk spanned 2026-08-18..2026-09-17 with 12/12 unique pages. A **windowed** walk re-slices the top of the window - page 1 was a single day (2026-09-17) - but still walks back, 4 pages reaching 2026-09-08..2026-09-09. Two consequences: `_Scan.describe()` reports a genuine **date period**, which its own docstring denied while the code printed one; and a date window *would* extend the scan rather than merely bound it, so the premise Phase 0 used to reject the date-window option does not hold. The row budget still stands - what has to be bounded is the request count - but whether to layer a date window on top is a design question that is open again. `benzinga.py`'s module docstring and the `_filtered_pages` docstring now carry the corrected measurement.
 
