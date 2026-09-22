@@ -105,3 +105,20 @@ def test_strategy_quality_render_includes_omega(monkeypatch):
 
 def _up(start: float = 100.0, step: float = 0.5, n: int = 200) -> list:
     return [start + step * i for i in range(n)]
+
+
+def test_industry_neutral_z_names_its_grouping_for_what_it_is():
+    """The neutralisation is within the CALLER's grouping - in this repo a
+    provider sector label, which is neither GICS nor an industry group. The
+    parameter said ``sector_map`` while the function name said industry, so a
+    reader could not tell what was actually being demeaned."""
+    import inspect
+
+    from tradingagents.strategies.cross_section import industry_neutral_z
+
+    params = list(inspect.signature(industry_neutral_z).parameters)
+    assert params[1] == "group_map", params
+    out = industry_neutral_z(
+        [1.0, 2.0, 3.0, 4.0], group_map={0: "A", 1: "A", 2: "B", 3: "B"}
+    )
+    assert out is not None and len(out["z"]) == 4

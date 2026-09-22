@@ -87,36 +87,40 @@ def cross_sectional_z(values) -> dict | None:
 
 
 def industry_neutral_z(
-    values, sector_map: dict | None = None,
+    values, group_map: dict | None = None,
     lower_q: float = 0.01, upper_q: float = 0.99,
 ) -> dict | None:
     """Industry-neutralized factor z (Grinold-Kahn): winsorize -> demean by
-    sector -> z-score the residuals.
+    the caller's peer GROUP -> z-score the residuals.
 
-    ``values``: iterable aligned with ``sector_map`` entries (index -> sector
-    name). Within each sector the factor is demeaned (removes the average
-    sector effect), then the demeaned values are standardized cross-sectionally.
-    Names NOT in ``sector_map`` are left in a residual "unknown" bucket (they
+    ``group_map`` is the CALLER's grouping (index -> group name) and nothing
+    here constrains what it is. In this repo it is a provider SECTOR label from
+    ``yfinance_sector.fetch_sector``, which is neither GICS nor an industry
+    group - so the parameter is named for what it holds rather than for the
+    function's name. The operation is the standard industry-neutralisation:
+    within each group the factor is demeaned (removes the average group
+    effect), then the demeaned values are standardized cross-sectionally.
+    Names NOT in ``group_map`` are left in a residual "unknown" bucket (they
     are demeaned against each other, not dropped). Requires >= 2 finite
-    sector-demeaned values and nonzero std; returns ``{"z": [..], "mean": ..,
+    group-demeaned values and nonzero std; returns ``{"z": [..], "mean": ..,
     "std": .., "n_sectors": ..}`` or None. Pure / never fabricates.
     """
     wins = winsorize(values, lower_q, upper_q)
-    sector_mean: dict = {}
+    group_mean: dict = {}
     for idx, v in enumerate(wins):
         if v is None:
             continue
-        sec = (sector_map.get(idx) if sector_map else None) or "unknown"
-        sector_mean.setdefault(sec, [0.0, 0])
-        sector_mean[sec][0] += float(v)
-        sector_mean[sec][1] += 1
+        grp = (group_map.get(idx) if group_map else None) or "unknown"
+        group_mean.setdefault(grp, [0.0, 0])
+        group_mean[grp][0] += float(v)
+        group_mean[grp][1] += 1
     demeaned: list = []
     for idx, v in enumerate(wins):
         if v is None:
             demeaned.append(None)
             continue
-        sec = (sector_map.get(idx) if sector_map else None) or "unknown"
-        m, cnt = sector_mean[sec]
+        grp = (group_map.get(idx) if group_map else None) or "unknown"
+        m, cnt = group_mean[grp]
         demeaned.append(float(v) - (m / cnt if cnt else 0.0))
     z = cross_sectional_z([x for x in demeaned if x is not None])
     if z is None:
@@ -130,7 +134,7 @@ def industry_neutral_z(
             out.append(z["z"][zi])
             zi += 1
     return {"z": out, "mean": z["mean"], "std": z["std"],
-            "n_sectors": len(sector_mean)}
+            "n_sectors": len(group_mean)}
 
 
 def centered_rank(values) -> list[float] | None:

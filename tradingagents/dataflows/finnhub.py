@@ -468,8 +468,10 @@ def get_insider_activity_finnhub(symbol: str, curr_date: str | None = None) -> s
 def get_profile_finnhub(ticker: str) -> dict | None:
     """Finnhub company profile2 (free tier) key-gated sector/identity lookup.
 
-    Returns the raw profile dict (sector, industry, marketCap, float, ipo,
-    country...) or None when the key is missing / Finnhub errors. This is the
+    Returns the vendor's own ``company_profile2`` payload, unmodified and
+    with no key renaming - the classification is Finnhub's ``finnhubIndustry``
+    field, which is its own taxonomy rather than GICS. None when the key is
+    missing / Finnhub errors. This is the
     authoritative second-tier sector source behind FMP in the screener's
     ``--sector-rank`` fallback chain; wrapped in try/except by callers so it
     never raises into a scan.
@@ -477,15 +479,18 @@ def get_profile_finnhub(ticker: str) -> dict | None:
     try:
         data = _client().company_profile2(symbol=ticker) or {}
         if isinstance(data, dict) and data.get("ticker"):
-            # ``finnhubIndustry`` is Finnhub's OWN proprietary classification,
-            # NOT GICS (an earlier comment here claimed GICS; Finnhub documents
-            # the field as its own industry system). It is copied to ``sector``
-            # because ``fetch_sector`` reads that key - which means the key
-            # named `sector` is filled from a field named *Industry*, while the
-            # payload's real ``industry`` field is left unread. A caller cannot
-            # tell the difference; see docs/design_security_context.md.
-            if "finnhubIndustry" in data and "sector" not in data:
-                data["sector"] = data["finnhubIndustry"]
+            # Returned UNMODIFIED - no key renaming. ``finnhubIndustry`` is
+            # Finnhub's OWN proprietary classification, NOT GICS (an earlier
+            # comment here claimed GICS; Finnhub documents the field as its own
+            # industry system). The payload carries NO ``sector`` key - and no
+            # ``industry`` key either (live-probed 2026-09-22: the full key set
+            # is country, currency, estimateCurrency, exchange, finnhubIndustry,
+            # floatingShare, ipo, logo, marketCapitalization, name, phone,
+            # shareOutstanding, ticker, weburl). So this function used to CREATE
+            # the ``sector`` key from ``finnhubIndustry``, which made a key named
+            # *sector* hold an *industry* value and hid the taxonomy from every
+            # consumer. The caller does that mapping now; see
+            # docs/design_security_context.md section 7.2.
             return data
         return None
     except Exception:  # noqa: BLE001 - optional enrichment never raises

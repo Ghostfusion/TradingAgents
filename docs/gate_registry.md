@@ -1,4 +1,4 @@
-# Gate Registry — every gate, its switch, where it fires, and what proves it
+# Gate Registry — every policy, data-surface and context gate, its switch, where it fires, and what proves it
 
 Status: **maintained** (2026-09-11). Companion to
 `docs/implementation_plan_quant_formula_additions.md` (round-2 additions) and the
@@ -21,6 +21,18 @@ document on every suite run:
 5. the **Status** column is verified against the source: a `wired` gate must be
    read somewhere outside `default_config.py`, and an `inert` gate must be read
    by nothing.
+
+**What this file covers — and what it does not.** The rows below are the policy,
+data-surface and context gates: the ones that change what a run *does*. This is
+**not** the whole `enable_*` surface. The eight score-engine gates
+(`enable_fundamental_score`, `enable_technical_score`, `enable_regime_score`,
+`enable_risk_score`, `enable_sentiment_score`, `enable_news_score`,
+`enable_trade_score`, `enable_quant_scorecard`) have no row here; they are
+covered by `tests/test_quant_scorecard.py` (the gate map, the default-off
+assertions and the ownership contract) and `tests/test_engine_ownership_map.py`
+(engine -> section -> gate). Growing this file to cover them is deliberate future
+work, one family at a time — an unverified "Proven by" cell is worse than a
+missing row in a file whose purpose is to stop gates that cannot fire.
 
 **Flipping a gate.** Put the env var in `.env` (uncommented) and restart — config
 is read at import, so a running process does not pick up a change:

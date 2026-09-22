@@ -261,3 +261,38 @@ def test_canonicalize_reads_operating_profit_when_moomoo_reports_it_so():
     # A single-period payload yields a flat value (the prior dict form needs a
     # second period table).
     assert canonical["operating_income"] == 155240000000.0
+
+
+# ---------------------------------------------------------------------------
+# sector: an industry-GROUP row must never fill the sector key
+# ---------------------------------------------------------------------------
+
+
+def test_no_sector_alias_can_be_satisfied_by_an_industry_group_row():
+    """``fin["sector"]`` (statement_parsing.py:1555) selects the Altman variant
+    and feeds the Piotroski basis, so an industry-group value landing there is a
+    silently wrong model choice - ``altman_variant_for`` resolves it through
+    ``sector_group_of`` and a stray financial group WITHHOLDS the variant for a
+    non-financial company.
+
+    The removed alias was the unspaced ``industrygroup``. ``_norm`` replaces
+    non-alphanumerics with a SPACE, so the spaced vendor label "Industry Group"
+    never matched it; an UNSEPARATED label ("IndustryGroup") did. Both must miss.
+    """
+    from tradingagents.dataflows.statement_parsing import _ROW_ALIASES, _norm
+
+    aliases = _ROW_ALIASES["sector"]
+    assert aliases == ["sector"]
+    for label in ("Industry Group", "IndustryGroup", "industry group"):
+        assert _norm(label) not in aliases, label
+
+
+def test_an_industry_group_row_does_not_match_the_sector_key():
+    from tradingagents.dataflows.statement_parsing import _match_row
+
+    # The spaced form never matched: the alias had no separator to strip.
+    assert _match_row({"Industry Group": 42.0}, "sector") is None
+    # The unseparated form DID match before the alias was removed.
+    assert _match_row({"IndustryGroup": 42.0}, "sector") is None
+    # The sector row itself still fills the key.
+    assert _match_row({"Sector": "Technology"}, "sector") == ("Sector", "Technology")

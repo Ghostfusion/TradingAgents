@@ -568,7 +568,7 @@ Three properties this rendering must have:
 
 ## 20. Defects found while grounding this design
 
-The repo's recurring defect class is **"a field whose name promises more than it measures"**. This investigation found six instances on the classification path. Three are documentation-only and were corrected; three are behavioural and are reported for the owner's decision (§20.2), plus one unrelated registry-coverage defect reported in §20.3.
+The repo's recurring defect class is **"a field whose name promises more than it measures"**. This investigation found six instances on the classification path. Three are documentation-only and were corrected; three are behavioural, were reported for the owner's decision, and were then **fixed on his instruction** (§20.2) - one of them showing the report itself was wrong; plus one unrelated registry-coverage defect (§20.3), whose first stage is now applied.
 
 ### 20.1 Corrected (documentation-only, no behaviour change)
 
@@ -576,19 +576,19 @@ The repo's recurring defect class is **"a field whose name promises more than it
 | --- | --- | --- | --- |
 | 1 | `yfinance_sector.py:5` module docstring | claimed `fetch_sector` returns "the ticker's GICS sector" | states it returns the provider's sector label |
 | 2 | `yfinance_sector.py:65` `fetch_sector` docstring | "GICS sector for the ticker" — but four legs return four taxonomies; also omitted the Finnhub leg entirely | lists all four legs, states the source is discarded and the value is not GICS |
-| 3 | `finnhub.py:480` comment | "Finnhub returns the GICS sector under `finnhubIndustry`" — Finnhub documents `finnhubIndustry` as its **own** classification, not GICS | corrected, with the `sector`-filled-from-`Industry` naming collapse noted |
+| 3 | `finnhub.py:482` comment | "Finnhub returns the GICS sector under `finnhubIndustry`" — Finnhub documents `finnhubIndustry` as its **own** classification, not GICS | corrected, with the `sector`-filled-from-`Industry` naming collapse noted |
 
-### 20.2 Reported, not changed (behavioural)
+### 20.2 Reported, then fixed (behavioural)
 
-| # | Where | Defect | Why not changed here |
+| # | Where | Defect | Resolution |
 | --- | --- | --- | --- |
-| 4 | `finnhub.py:487-488` | the key named `sector` is populated from a field named **`finnhubIndustry`**, while the payload's real `industry` field is left unread | the rename is load-bearing — `fetch_sector` reads `prof.get("sector")`. Removing it changes classification behaviour and needs the taxonomy decision this doc proposes |
-| 5 | `statement_parsing.py:180` | `"sector": ["sector", "industrygroup"]` — the canonical `sector` key accepts an **industry-group** value. The alias is **dead** (no vendor payload emits an `industrygroup` row) but is a latent trap, and `fin["sector"]` is used as the Altman variant selector (`statement_parsing.py:1558`) and by `quant_formula_tools.py:218` (Altman) and `:237` (Piotroski) | fixing it changes which Altman variant a name receives |
-| 6 | `cross_section.py:89` | `industry_neutral_z` takes a parameter named `sector_map` (`:90`), and `peer_universe.resolve_growth_medians` (`:304`) computes "Industry medians" by partitioning on a **sector** label | a rename plus a contract clarification; no behaviour change intended, but it touches a scoring path |
+| 4 | `finnhub.py:468` | the key named `sector` was populated from a field named **`finnhubIndustry`**. **This report was wrong on one point:** live-probed 2026-09-22, `company_profile2` carries **no `sector` key and no `industry` key at all** — the old rename was the only reason `prof["sector"]` existed | **FIXED.** `get_profile_finnhub` returns the vendor payload unmodified (the comment is at `finnhub.py:482-493`) and `fetch_sector` does the mapping, preserving the old precedence exactly: `prof.get("sector") or prof.get("finnhubIndustry")` (`yfinance_sector.py:112`). The old rename only fired when `sector` was absent, so **behaviour is unchanged for real payloads** — the mapping moved, the precedence did not |
+| 5 | `statement_parsing.py:187` | `"sector": ["sector", "industrygroup"]` — the canonical `sector` key accepted an **industry-group** value. **This report was wrong about the alias being dead:** `_norm` replaces non-alphanumerics with a SPACE, so the spaced label "Industry Group" never matched — but an **unseparated** label (`IndustryGroup`) did, which a failing-first test caught. `fin["sector"]` is the Altman variant selector (`statement_parsing.py:1565`) and feeds the Piotroski basis, and `altman_variant_for` routes it through `sector_group_of`, where a stray financial group resolves to `XLF` and **withholds the variant** for a non-financial company | **FIXED.** The alias is deleted (`"sector": ["sector"]`). A payload carrying an `IndustryGroup` row no longer fills `sector`; the variant then falls back to the manufacturer test instead of being suppressed |
+| 6 | `cross_section.py:89` | `industry_neutral_z` took a parameter named `sector_map` (`:90`), and `peer_universe.resolve_growth_medians` (`:304`) computed "Industry medians" by partitioning on a **sector** label | **FIXED (naming only).** The parameter is `group_map` (`:90`), with the docstring stating the grouping is the caller's — in this repo a provider sector label from `fetch_sector`, which is neither GICS nor an industry group. `resolve_growth_medians` now says peer-group medians. The **function name is unchanged**: `industry-neutral` is the standard Grinold-Kahn term for neutralising within the peer group, and renaming it is a 4-site public change for a cosmetic gain. Both callers pass positionally, so no caller changed and no behaviour changed. The returned key stays `n_sectors` — a returned-dict contract is wider than a parameter name, so it is reported rather than renamed |
 
 ### 20.3 Reported, unrelated to classification
 
-`docs/gate_registry.md` titles itself **"every gate"** and its own §8 (`gate_registry.md:229`) says a gate is not done without a row in it — yet **48 of the 88 `enable_*` keys in `DEFAULT_CONFIG` have no row**, including all eight score-engine gates and `enable_quant_scorecard`. The doc and `tests/test_gate_env_toggles.REGISTRY` (`:35`) agree with each other (40 rows), so nothing is inconsistent — the coverage is simply 45% of the `enable_*` surface while the title claims all of it. The engine gates are instead covered by `tests/test_quant_scorecard.py:442-444` and `tests/test_engine_ownership_map.py`. **Not changed:** authoring 48 rows of "Enforced at"/"Proven by" evidence is a substantial, judgement-heavy task, and an unverified row is worse than a missing one in a document whose stated purpose is to stop gates that cannot fire.
+`docs/gate_registry.md` titles itself **"every gate"** and its own §8 (`gate_registry.md:229`) says a gate is not done without a row in it — yet **48 of the 88 `enable_*` keys in `DEFAULT_CONFIG` have no row**, including all eight score-engine gates and `enable_quant_scorecard`. The doc and `tests/test_gate_env_toggles.REGISTRY` (`:35`) agree with each other (40 rows), so nothing is inconsistent — the coverage is simply 45% of the `enable_*` surface while the title claims all of it. The engine gates are instead covered by `tests/test_quant_scorecard.py:442-444` and `tests/test_engine_ownership_map.py`. **Stage 1 applied (2026-09-22):** the title is narrowed to the families the file actually covers and a new paragraph names where the eight score-engine gates are covered, so the doc no longer implies a row for every gate; a test fails if the over-claim returns. **Not done:** authoring the 48 remaining rows of "Enforced at"/"Proven by" evidence is a substantial, judgement-heavy task, and an unverified row is worse than a missing one in a document whose stated purpose is to stop gates that cannot fire.
 
 ---
 
@@ -713,7 +713,7 @@ A sector label is a prior. A prior that can exclude is a decision, and this laye
 | `sector_group_of` | `tradingagents/strategies/sector_rank.py:163` |
 | `INDUSTRY_ETFS` | `tradingagents/strategies/sector_rank.py:570` |
 | `_GICS_MAP` | `tradingagents/dataflows/sp500_universe.py:29` |
-| `_ROW_ALIASES` (`industrygroup` alias) | `tradingagents/dataflows/statement_parsing.py:75` / `:180` |
+| `_ROW_ALIASES` (`sector` alias) | `tradingagents/dataflows/statement_parsing.py:75` / `:187` |
 | `industry_neutral_z` | `tradingagents/strategies/cross_section.py:89` |
 | `VENDOR_METHODS` | `tradingagents/dataflows/interface.py:445` |
 | `SUBSCORE_FACTORS` / `validate_schema` | `tradingagents/strategies/factor_schema.py:317` / `:376` |

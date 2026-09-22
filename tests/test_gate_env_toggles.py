@@ -242,3 +242,35 @@ def test_wired_gates_are_read_somewhere_and_inert_ones_are_read_nowhere():
         if status == "inert" and hits:
             wrong[key] = f"claimed inert but read by {hits[:2]}"
     assert not wrong, wrong
+
+
+def test_the_registry_doc_does_not_claim_coverage_it_does_not_have():
+    """The doc covered 40 of the 88 ``enable_*`` keys while titling itself
+    "every gate". An over-claim in the file whose whole purpose is to stop
+    gates that cannot fire is the same failure in a new place: a reader trusts
+    the ABSENCE of a row. The title is narrowed to the families it does cover
+    and the engine gates are named as covered elsewhere."""
+    text = DOC.read_text(encoding="utf-8")
+    title = text.splitlines()[0]
+    assert "every gate" not in title.lower(), title
+    assert "enable_quant_scorecard" in text, "the excluded engine gates must be named"
+    assert "test_quant_scorecard.py" in text, "name where they are covered"
+
+
+def test_the_engine_gates_the_doc_excludes_really_are_covered_elsewhere():
+    """The pointer the doc now makes has to be true."""
+    engine_gates = [
+        "enable_fundamental_score",
+        "enable_technical_score",
+        "enable_sentiment_score",
+        "enable_news_score",
+        "enable_trade_score",
+        "enable_regime_score",
+        "enable_risk_score",
+        "enable_quant_scorecard",
+    ]
+    for key in engine_gates:
+        assert key in dc.DEFAULT_CONFIG, key
+        assert key not in REGISTRY, f"{key} is now a registry row - update the doc"
+    scorer = (REPO / "tests" / "test_quant_scorecard.py").read_text(encoding="utf-8")
+    assert "enable_quant_scorecard" in scorer

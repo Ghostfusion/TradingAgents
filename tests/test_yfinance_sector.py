@@ -134,7 +134,7 @@ def test_fetch_sector_finnhub_second_tier():
         mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
         mock.patch(
             "tradingagents.dataflows.finnhub.get_profile_finnhub",
-            return_value={"sector": "Technology", "ticker": "AAPL"},
+            return_value={"finnhubIndustry": "Technology", "ticker": "AAPL"},
         ),
         mock.patch("yfinance.Ticker", side_effect=boom),
     ):
@@ -174,7 +174,7 @@ def test_fetch_sector_etf_universe_wins_over_provider_misclassification():
             mock.patch("tradingagents.dataflows.fmp.get_company_profile",
                        return_value={"sector": "Financial Services"}),
             mock.patch("tradingagents.dataflows.finnhub.get_profile_finnhub",
-                      return_value={"sector": "Financial Services"}),
+                      return_value={"finnhubIndustry": "Financial Services"}),
             mock.patch("yfinance.Ticker", side_effect=boom),
         ):
             assert ys.fetch_sector(etf) == expected, etf
@@ -186,3 +186,73 @@ def test_fetch_sector_etf_universe_wins_over_provider_misclassification():
         mock.patch("yfinance.Ticker", side_effect=boom),
     ):
         assert ys.fetch_sector("BAC") == "Financial Services"
+
+
+def _no_yf(t):
+    raise AssertionError("yfinance must not be reached when a provider answers")
+
+
+def test_profile_finnhub_does_not_invent_a_sector_key():
+    """The vendor's classification is ``finnhubIndustry`` - Finnhub's OWN
+    taxonomy, not GICS. Copying it onto a key named ``sector`` made a key named
+    *sector* hold an *industry* value, so the one consumer read a taxonomy it
+    could not see (docs/design_security_context.md section 7.2). The function
+    returns the vendor payload unmodified; the consumer does the mapping."""
+    from tradingagents.dataflows import finnhub
+
+    # The vendor's REAL key set, live-probed 2026-09-22. There is no `sector`
+    # key and no `industry` key at all, so the old rename was the only source of
+    # `sector` - and the payload must come back exactly as it arrived.
+    payload = {
+        "ticker": "AAPL",
+        "finnhubIndustry": "Technology",
+        "country": "US",
+        "currency": "USD",
+        "exchange": "NASDAQ/NMS (Global Select Market)",
+        "ipo": "1980-12-12",
+        "marketCapitalization": 4020000.0,
+        "name": "Apple Inc",
+        "phone": "14089961010",
+        "shareOutstanding": 14840.0,
+        "weburl": "https://www.apple.com/",
+    }
+    with mock.patch.object(finnhub, "_client") as client:
+        client.return_value.company_profile2.return_value = payload
+        out = finnhub.get_profile_finnhub("AAPL")
+
+    assert out is not None
+    assert "sector" not in out, "the vendor payload must come back unmodified"
+    assert out == payload, "no key may be added, removed or changed"
+    assert out["finnhubIndustry"] == "Technology"
+
+
+def test_fetch_sector_reads_finnhub_industry_when_that_is_all_there_is():
+    """End to end: Finnhub's own field reaches ``fetch_sector``, so the vendor
+    module does not need to rename anything for the value to arrive."""
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_profile_finnhub",
+            return_value={"ticker": "AAPL", "finnhubIndustry": "Technology"},
+        ),
+        mock.patch("yfinance.Ticker", side_effect=_no_yf),
+    ):
+        assert ys.fetch_sector("AAPL") == "Technology"
+
+
+def test_fetch_sector_keeps_the_vendor_sector_key_ahead_of_industry():
+    """Precedence preserved. The old rename only fired when ``sector`` was
+    ABSENT, so a payload carrying both must still answer with ``sector``."""
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    with (
+        mock.patch("tradingagents.dataflows.fmp.get_company_profile", return_value=None),
+        mock.patch(
+            "tradingagents.dataflows.finnhub.get_profile_finnhub",
+            return_value={"sector": "Financial Services", "finnhubIndustry": "Banking"},
+        ),
+        mock.patch("yfinance.Ticker", side_effect=_no_yf),
+    ):
+        assert ys.fetch_sector("AAPL") == "Financial Services"

@@ -177,7 +177,14 @@ _ROW_ALIASES = {
         "available for sale securities",
     ],
     "inventory": ["inventory"],
-    "sector": ["sector", "industrygroup"],
+    # The sector row ONLY. An earlier alias also accepted "industrygroup",
+    # which is not a sector: ``_norm`` keeps the space in "Industry Group", so
+    # the spaced vendor label never matched it, but an UNSEPARATED label
+    # ("IndustryGroup") did. ``fin["sector"]`` is read at :1555 and selects
+    # the Altman variant at :1565. A stray financial group resolves to XLF in
+    # ``altman_variant_for``, which WITHHOLDS the variant for a non-financial
+    # company. An industry group must never reach the sector key.
+    "sector": ["sector"],
     "roe": ["roe ttm", "roe rfy", "roettm", "roerfy"],
     "net_receivables": [
         "receivables",  # moomoo aggregate line (net of the -Accounts/Taxes/Other sub-items)

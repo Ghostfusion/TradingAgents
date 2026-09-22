@@ -104,8 +104,12 @@ def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
     try:
         from tradingagents.dataflows.finnhub import get_profile_finnhub
 
-        prof = get_profile_finnhub(ticker)
-        sec = str((prof or {}).get("sector") or "").strip()
+        prof = get_profile_finnhub(ticker) or {}
+        # The profile comes back unmodified, so the classification is under the
+        # vendor's own key. ``sector`` is tried FIRST because the old producer
+        # filled it when present, so a payload carrying both must keep answering
+        # with ``sector`` - the mapping moved, the precedence did not.
+        sec = str(prof.get("sector") or prof.get("finnhubIndustry") or "").strip()
         if sec:
             return sec
     except Exception:  # noqa: BLE001

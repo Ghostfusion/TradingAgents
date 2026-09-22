@@ -302,7 +302,12 @@ def resolve_peer_universe(
 
 
 def resolve_growth_medians(financials, sectors, *, min_n: int = 5) -> dict:
-    """Industry medians for the G-Score, from a peer universe (round-3 S10).
+    """Peer-GROUP medians for the G-Score, from a peer universe (round-3 S10).
+
+    The grouping is the caller's ``sectors`` map - a provider SECTOR label in
+    this repo (``yfinance_sector.fetch_sector``), which is neither GICS nor an
+    industry group. These are therefore peer-group medians over that grouping,
+    which is what the G-Score legs compare a name against.
 
     ``financials``: ``{ticker: canonical fin}``; ``sectors``: ``{ticker:
     sector label}`` (the resolver's ``sectors`` map, or the screener's own
