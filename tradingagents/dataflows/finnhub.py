@@ -477,7 +477,13 @@ def get_profile_finnhub(ticker: str) -> dict | None:
     try:
         data = _client().company_profile2(symbol=ticker) or {}
         if isinstance(data, dict) and data.get("ticker"):
-            # Finnhub returns the GICS sector under ``finnhubIndustry``.
+            # ``finnhubIndustry`` is Finnhub's OWN proprietary classification,
+            # NOT GICS (an earlier comment here claimed GICS; Finnhub documents
+            # the field as its own industry system). It is copied to ``sector``
+            # because ``fetch_sector`` reads that key - which means the key
+            # named `sector` is filled from a field named *Industry*, while the
+            # payload's real ``industry`` field is left unread. A caller cannot
+            # tell the difference; see docs/design_security_context.md.
             if "finnhubIndustry" in data and "sector" not in data:
                 data["sector"] = data["finnhubIndustry"]
             return data

@@ -2,7 +2,7 @@
 
 Provides the two Phase-1/2 inputs the moomoo vendor chain does not cover:
 
-* ``fetch_sector``           - the ticker's GICS sector (yfinance ``info``)
+* ``fetch_sector``           - the ticker's provider SECTOR label (see below)
 * ``fetch_revision_actions`` - analyst grade actions in the last N days
   (yfinance ``upgrades_downgrades``) as a cheap proxy for "positive forward
   earnings revisions" - net upgrades over downgrades in the window
@@ -62,14 +62,26 @@ def _etf_universe_sector(ticker: str) -> str | None:
 
 
 def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
-    """GICS sector for the ticker; None when unavailable.
+    """The ticker's sector LABEL from the first source that answers; None when
+    unavailable.
+
+    NOT necessarily GICS. The four legs return four different taxonomies under
+    one string: FMP's own profile taxonomy, Finnhub's proprietary
+    ``finnhubIndustry``, Yahoo's ``info.sector`` (which is sub-industry
+    granularity for many names), or - for a known ETF - the repo's own SPDR
+    issuer label. Nothing on this path normalizes to GICS; only a consumer
+    calling ``sector_rank._canonical_sector`` does any canonicalization, and
+    **the answering source is discarded**, so a caller cannot tell which
+    taxonomy it received. Treat this as a provider label, never as GICS.
 
     0) ETF identity first: a known ETF's sector comes from the repo's
        universe mapping (never the provider's equity-sector field, which
        misattributes ETFs — e.g. IGV/SOXX/XLK returned "Financial Services").
     1) FMP company profile (key-gated, instant when the key is set and not
        rate-limited) - the authoritative source when available.
-    2) yfinance ``info`` on a daemon thread as a guarded fallback (slow /
+    2) Finnhub ``company_profile2`` (key-gated) - the second source when the
+       FMP key is rate-limited or unset.
+    3) yfinance ``info`` on a daemon thread as a guarded fallback (slow /
        blocked vendor or unset key can never hang the scanner; worst case:
        None = unknown sector, which the sector gate treats as no-data).
     """

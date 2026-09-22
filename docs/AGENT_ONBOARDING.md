@@ -434,6 +434,30 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **Design: the overlay layer's missing front end, and the taxonomy the repo mislabels as GICS.**
+  `docs/Conditional_Research_Overlays_Design.md`'s Overlay Detector has three sub-steps (`doc:263-265`): materiality test, evidence sufficiency, **applicability test**.
+  **The third has no producer anywhere in that doc** - "applicability" is named once and never defined, no step reads any property of the company, the registry is keyed
+  only on theme id (`doc:782-789`), and §36's ten open decisions do not include "which overlays are candidates for a given company". §17 (`doc:725-772`) is NOT that step:
+  its four sector headings all sit under the same theme and enumerate *evidence fields for an already-chosen theme* ("the schema remains the same while the evidence
+  adapters differ", `doc:772`). **NEW `docs/design_security_context.md`** supplies the producer: a deterministic `SecurityContext` (sector + industry + provenance +
+  canonical sector + SPDR key + SEC SIC + security type), a versioned theme applicability matrix, and the three-way split into Classification / Candidate / Materiality.
+  **THE KEY IDEA - the widening invariant:** the matrix may **add** candidates and may **never remove** one (`candidates = ALL_REGISTERED_THEMES | matrix_candidates(sector)`).
+  The brief's own example is why: a company in **Energy** whose AI exposure is material anyway (data-centre electricity demand) would be silently missed by a prior that
+  can exclude. **A prior that can exclude is not a prior, it is a decision.** Monotonicity makes "sector is a prior, not the final decision" a property-tested guarantee
+  rather than a discipline, and the matrix's real job becomes ORDERING evidence effort under `MAX_ACTIVE_OVERLAYS = 3`. Absence is not exclusion - an unclassified company
+  yields ALL themes. **DEFECT - four taxonomies labelled one "GICS":** `fetch_sector` (`yfinance_sector.py:64`) was documented as "GICS sector" but its four legs return
+  FMP's taxonomy, Finnhub's **proprietary** `finnhubIndustry`, Yahoo's label (which the repo's OWN comment at `sector_rank.py:91` calls **sub-industry granularity**), or
+  the repo's ETF issuer label - and **the answering source is discarded**. GICS is licensed by MSCI/S&P and assigned at company level; the repo has no GICS source, no GICS
+  code, and no SIC or NAICS anywhere. Three documentation-only claims corrected (zero behaviour change): the module docstring, the `fetch_sector` docstring (which also
+  omitted the Finnhub leg), and the `finnhub.py:480` comment claiming `finnhubIndustry` is GICS. **Reported, NOT changed (behavioural):** `finnhub.py:487-488` fills the key
+  named `sector` from a field named *Industry* while the payload's real `industry` goes unread; `statement_parsing.py:180` lets the canonical `sector` key accept an
+  `industrygroup` value (a DEAD alias - no payload emits that row - but a latent trap, and `fin["sector"]` selects the Altman variant at `:1558`); and
+  `cross_section.industry_neutral_z:89` takes `sector_map` while `peer_universe.resolve_growth_medians:304` computes "Industry medians" by partitioning on a SECTOR label.
+  **Also reported:** `docs/gate_registry.md` titles itself "every gate" and §8 (`:229`) requires a row for every gate, yet **48 of the 88 `enable_*` keys in `DEFAULT_CONFIG`
+  have no row** - including all eight score-engine gates and `enable_quant_scorecard`. The doc and `REGISTRY` agree with each other (40 rows), so nothing is inconsistent;
+  coverage is 45% of the `enable_*` surface. Not changed: 48 judgement-heavy evidence rows, and an unverified row is worse than a missing one in a doc whose purpose is to
+  stop gates that cannot fire. Tests: comment-only code change; full suite green; 357 passed across the seven touched-module files; `ruff check .` clean.
+
 - 2026-09-22 `(working tree)` - **Four declared fields are now MEASURED, and the wiring exposed that FIVE of the sixteen gaps are DECLARATION defects rather than wiring gaps.**
   The coverage scorecard named sixteen fields whose declared producer is never reached. Wiring four of them showed that in five cases the DECLARATION is wrong:
   the named producer **cannot emit the declared quantity at all** - the same class as `ad_ratio` and the breadth legs, now five instances in one engine family.
