@@ -568,7 +568,7 @@ Three properties this rendering must have:
 
 ## 20. Defects found while grounding this design
 
-The repo's recurring defect class is **"a field whose name promises more than it measures"**. This investigation found six instances on the classification path. Two are documentation-only and were corrected; four are behavioural and are reported for the owner's decision.
+The repo's recurring defect class is **"a field whose name promises more than it measures"**. This investigation found six instances on the classification path. Three are documentation-only and were corrected; three are behavioural and are reported for the owner's decision (§20.2), plus one unrelated registry-coverage defect reported in §20.3.
 
 ### 20.1 Corrected (documentation-only, no behaviour change)
 
