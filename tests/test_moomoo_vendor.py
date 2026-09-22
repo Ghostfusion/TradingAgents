@@ -449,6 +449,10 @@ class MoomooSdkHandlingTests(unittest.TestCase):
             out = moomoo.get_market_breadth_moomoo()
         self.assertIn("Semiconductors", out)
         self.assertIn("Rise/fall distribution", out)
+        # NEGATIVE_INFINITY is the TYPE, not the border: the vendor sends a
+        # sentinel (0) on the open side, so the band must render as an open
+        # one, never as "0% … -3%".
+        self.assertIn("| -inf … -3% | 10 |", out)
 
     def test_revenue_breakdown_formats_segments(self):
         data = {
@@ -563,6 +567,83 @@ class MoomooSdkHandlingTests(unittest.TestCase):
         ):
             cat = interface.get_category_for_method(method)
             self.assertIn(cat, interface.OPTIONAL_CATEGORIES, f"{method} -> {cat}")
+
+
+class MoomooBreadthRenderTests(unittest.TestCase):
+    """The rise/fall bands: the vendor's ``type`` names the shape, not the border.
+
+    An open-ended band carries a sentinel (0) on the side the vendor does not
+    mean, so a render that reads the borders alone emitted "7% … 0%" and
+    "0% … -7%". Those labels reached analyst reports verbatim, and two reports
+    summed them into an "advancers" figure that was not any band.
+    """
+
+    # Verbatim from reports/AMAT_20260914_191359/tool_evidence.json, in the
+    # vendor's own (arbitrary) list order.
+    _PAYLOAD = [
+        {"type": "NORMAL_RANGE", "left_border": -5, "right_border": -3, "stock_count": 847},
+        {"type": "NORMAL_RANGE", "left_border": 0, "right_border": 3, "stock_count": 3795},
+        {"type": "NORMAL_RANGE", "left_border": 3, "right_border": 5, "stock_count": 528},
+        {"type": "NORMAL_RANGE", "left_border": 5, "right_border": 7, "stock_count": 253},
+        {"type": "POSITIVE_INFINITY", "left_border": 7, "right_border": 0, "stock_count": 494},
+        {"type": "NEGATIVE_INFINITY", "left_border": 0, "right_border": -7, "stock_count": 731},
+        {"type": "NORMAL_RANGE", "left_border": -7, "right_border": -5, "stock_count": 391},
+        {"type": "NORMAL_RANGE", "left_border": -3, "right_border": 0, "stock_count": 6556},
+        {"type": "NORMAL_RANGE", "left_border": 0, "right_border": 0, "stock_count": 4471},
+    ]
+
+    def setUp(self):
+        _reset()
+
+    def _render(self, range_list):
+        ctx = mock.Mock()
+        ctx.get_heat_map_data.return_value = (RET_OK, pd.DataFrame())
+        ctx.get_rise_fall_distribution.return_value = (
+            RET_OK,
+            {"plate": "US.USAALL", "range_list": range_list},
+        )
+        with mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx):
+            return moomoo.get_market_breadth_moomoo()
+
+    @staticmethod
+    def _labels(out):
+        return [
+            ln.split("|")[1].strip()
+            for ln in out.splitlines()
+            if ln.startswith("| ") and ln != "| --- | --- |" and "Move range" not in ln
+        ]
+
+    def test_open_ended_bands_are_labelled_from_type(self):
+        out = self._render(self._PAYLOAD)
+        self.assertIn("| 7% … +inf | 494 |", out)
+        self.assertIn("| -inf … -7% | 731 |", out)
+        # the sentinel must never be rendered as a bound
+        self.assertNotIn("7% … 0%", out)
+        self.assertNotIn("0% … -7%", out)
+
+    def test_bands_render_in_ascending_order(self):
+        self.assertEqual(
+            self._labels(self._render(self._PAYLOAD)),
+            [
+                "-inf … -7%",
+                "-7% … -5%",
+                "-5% … -3%",
+                "-3% … 0%",
+                "0% … 0%",
+                "0% … 3%",
+                "3% … 5%",
+                "5% … 7%",
+                "7% … +inf",
+            ],
+        )
+
+    def test_absent_border_is_not_an_invented_infinity(self):
+        """The vendor sends the string 'N/A' for an absent field, never None."""
+        out = self._render(
+            [{"type": "N/A", "left_border": "N/A", "right_border": "N/A", "stock_count": 5}]
+        )
+        self.assertIn("| ? … ? | 5 |", out)
+        self.assertNotIn("-inf … inf", out)
 
 
 class MoomooReturnsEndTests(unittest.TestCase):

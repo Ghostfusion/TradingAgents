@@ -97,10 +97,17 @@ def get_fed_watch() -> str:
 @tool
 def get_market_breadth() -> str:
     """
-    Retrieve US market breadth: sector heat-map moves and the rise/fall
-    distribution across the market. Separates a stock's idiosyncratic move from
+    Retrieve US market breadth: the rise/fall distribution across the market
+    (how many stocks sit in each move band) plus, when the vendor returns it,
+    the top sector heat-map moves. Separates a stock's idiosyncratic move from
     a market-wide regime — useful for the news analyst's macro context. Uses the
     configured market_breadth vendor.
+
+    It does NOT report percent-above-a-moving-average, advance/decline or
+    new-highs/lows, and prints no panel size: the vendor call takes no panel, so
+    those would have to be invented. Cite it before any 'broad or narrow
+    participation' claim, and for a real %-above-50d participation read with its
+    sample size use get_sector_rotation_screen(enable_breadth=True).
 
     Returns:
         str: A formatted report of US market breadth

@@ -41,6 +41,7 @@ from __future__ import annotations
 import atexit
 import contextlib
 import logging
+import math
 import os
 import re
 import socket
@@ -1828,6 +1829,53 @@ def get_fed_watch_moomoo() -> str:
 # ---------------------------------------------------------------------------
 
 
+# The vendor NAMES each rise/fall bucket's shape in `type`, and the borders are
+# only meaningful for the closed ones - an open-ended bucket carries a sentinel
+# on its open side. Reading the borders alone rendered "| 7% … 0% |" and
+# "| 0% … -7% |" for months, and those labels landed verbatim in analyst
+# reports. The sentinel is on `type`; it is never on the border.
+_RISE_FALL_OPEN_ABOVE = "POSITIVE_INFINITY"  # (left_border, +inf)
+_RISE_FALL_OPEN_BELOW = "NEGATIVE_INFINITY"  # (-inf, right_border)
+
+
+def _rise_fall_rows(buckets: list) -> list[tuple[float, float, str, object]]:
+    """Normalise the vendor's rise/fall buckets to (lo, hi, label, count).
+
+    ``lo``/``hi`` are numeric sort keys (±inf for an open end) so the bands
+    render in ascending order instead of the vendor's arbitrary list order.
+    An absent border renders as ``?``, never as an invented infinity: only
+    ``type`` can say an end is open.
+    """
+
+    def _num(v, default: float) -> float:
+        return float(v) if isinstance(v, (int, float)) else default
+
+    def _pct(v, default: str) -> str:
+        return f"{v}%" if isinstance(v, (int, float)) else default
+
+    rows = []
+    for b in buckets:
+        kind = str(b.get("type") or "")
+        lo, hi = b.get("left_border"), b.get("right_border")
+        count = b.get("stock_count", "N/A")
+        if kind == _RISE_FALL_OPEN_ABOVE:
+            lo_n, hi_n = _num(lo, math.inf), math.inf
+            label = f"{_pct(lo, '?')} … +inf"
+        elif kind == _RISE_FALL_OPEN_BELOW:
+            lo_n, hi_n = -math.inf, _num(hi, -math.inf)
+            label = f"-inf … {_pct(hi, '?')}"
+        elif kind == "RISE_LIMIT":
+            lo_n, hi_n, label = math.inf, math.inf, "limit up (A-share)"
+        elif kind == "FALL_LIMIT":
+            lo_n, hi_n, label = -math.inf, -math.inf, "limit down (A-share)"
+        else:
+            lo_n, hi_n = _num(lo, -math.inf), _num(hi, math.inf)
+            label = f"{_pct(lo, '?')} … {_pct(hi, '?')}"
+        rows.append((lo_n, hi_n, label, count))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    return rows
+
+
 def get_market_breadth_moomoo() -> str:
     """US market breadth: sector heat map + rise/fall distribution."""
     ctx = _ensure_ctx()
@@ -1856,12 +1904,8 @@ def get_market_breadth_moomoo() -> str:
                 lines.append("### Rise/fall distribution (US)")
                 lines.append("| Move range | Stocks |")
                 lines.append("| --- | --- |")
-                for b in buckets[:9]:
-                    lo, hi = b.get("left_border"), b.get("right_border")
-                    n = b.get("stock_count", 0)
-                    lo_s = "-inf" if lo is None or str(lo) == "NEGATIVE_INFINITY" else f"{lo}%"
-                    hi_s = "+inf" if hi is None or str(hi) == "POSITIVE_INFINITY" else f"{hi}%"
-                    lines.append(f"| {lo_s} … {hi_s} | {n} |")
+                for _, _, label, count in _rise_fall_rows(buckets):
+                    lines.append(f"| {label} | {count} |")
     except Exception:
         pass
     if len(lines) == 2:

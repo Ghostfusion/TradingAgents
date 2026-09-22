@@ -434,6 +434,23 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **The market-breadth read promised measurements the vendor never sends, and its one live table rendered REVERSED.** `get_market_breadth`
+  (moomoo) returns the vendor's rise/fall distribution and nothing else. The market prompt claimed "percent above the 20/50/200-day, advance-decline, new highs/lows ...
+  with its panel size printed"; the news prompt told the model to call `get_market_breadth(ticker)` when the tool takes **no arguments** - a call that cannot succeed.
+  **Measured across 91 report trees:** 42 got a real read, **0** contained a `% above the 20/50/200-day` claim, and the analysts correctly reported `NO_DATA_AVAILABLE`
+  instead of substituting - so the false promise was **latent**, not active. The prompts were corrected anyway: a surface that promises a measurement nothing produces
+  is this repo's recurring defect class.
+  **The live defect was the RENDER.** The vendor NAMES each band's shape in `type` (`POSITIVE_INFINITY` = `(7%, +inf)`, `NEGATIVE_INFINITY` = `(-inf, -7%)`) and puts a
+  sentinel on the border it does NOT mean; `get_market_breadth_moomoo` read the sentinel off the BORDER, so both open-end branches were dead code and the table rendered
+  `| 7% … 0% | 494 |` / `| 0% … -7% | 731 |`. Those labels reached analyst reports verbatim, and two reports summed them into an "advancers" figure no band held.
+  `_rise_fall_rows` now reads the shape from `type`, sorts the bands ascending, and renders an absent border (the vendor sends the string `'N/A'`, never `None`) as `?`
+  rather than an invented infinity. **The panel is a NAMED GAP, not a promise:** market-wide breadth needs a `{name: closes}` panel, `market_breadth` takes one
+  pre-fetched, `constituent_universe` is budget-bounded against fetching it ("FMP 250 req/day, yfinance throttled"), and `_technical_components`
+  (`analysis_tools.py:5036-5041`) already declined it. The prompt now points at the participation read that EXISTS - `get_sector_rotation_screen(enable_breadth=True)`,
+  per-sector `% above 50d SMA` with its own sample size - and `docs/design_sector_rotation_screener.md` §5.5 records both options and why wiring the panel would **not**
+  close the score leaf's gap (different surface). Tests: `tests/test_moomoo_vendor.py` 54 -> 57, plus the existing breadth test strengthened - it asserted only the
+  section headers, which is why the reversed table survived. All three RED under a faithful mutation (sentinel read off the border) with a byte-identical restore.
+
 - 2026-09-21 `(working tree)` - **The three genuinely-absent regime reads are built, each on an EXISTING producer.** From the screener review's "only
   defensible build" list. **(1) Event-anchored AVWAP** - `extended_indicators.anchored_vwap_levels` locates anchors as bar INDICES and computes each level
   with the existing `anchored_vwap` over the slice from that bar (one implementation of the arithmetic). Anchors: `swing_low`/`swing_high` via the new

@@ -114,6 +114,35 @@ flags), not buy signals.
   sector ("tighten / no new entries here") — **note only**; the repo never
   auto-sells.
 
+### 5.5 Market-wide breadth — a named, deliberate gap (R1)
+
+`get_market_breadth` is **not** a market-wide participation read, and no surface
+should say it is. It returns the vendor's rise/fall distribution (stocks per
+move band) plus, when the vendor answers, the top sector heat-map moves; the
+call takes **no panel**, so percent-above-a-moving-average, advance/decline and
+new-highs/lows cannot come from it at all.
+
+The market-wide producer is `strategies/market_breadth.py::market_breadth`, and
+it takes a **pre-fetched** `{name: closes}` panel. Fetching one per tool call is
+the cost `constituent_universe` (`sector_screener.py`) is budget-bounded against
+("FMP 250 req/day, yfinance throttled"), and `_technical_components`
+(`analysis_tools.py:5036-5041`) already declined it for the score leaf — the
+`breadth` component stays declared and absent, and the engine prints the gap
+rather than letting a sector proxy stand in for the market.
+
+So the honest options, in cost order:
+
+1. **Reuse §5.3** — `get_sector_rotation_screen(enable_breadth=True)` renders
+   per-sector `% above 50d SMA` with its own sample size (`above/n`, gated at
+   n < 20 → n/a). It costs no new fetch. **This is what the market analyst's
+   prompt points at**, and it is a *sector* read, not a market-wide one.
+2. **Wire the market-wide panel into the tool** — a ~500-name panel per call.
+   A separate cost decision, and it would **not** close the score leaf's gap:
+   the tool is a different surface from `_technical_components`, which passes
+   `pct_above_50d` itself.
+
+A new gate is not needed for either: `enable_sector_breadth` already exists.
+
 ## 6. Data feasibility (free)
 
 | Data | Free path | Risk |
