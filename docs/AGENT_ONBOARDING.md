@@ -450,11 +450,22 @@ has changed before); never assume an endpoint works — the SDK's
   this platform; the producer now emits `as_posix()`. (2) The app's README claimed the DSA advisory gates were
   "visible read-only on the Config screen" - false from the commit that wrote it (`af57ea1`): that screen is a
   curated security allowlist (`main.py:CONFIG_ALLOWED_KEYS`, 25 keys) covering 4 of this repo's **88** `enable_*`
-  gates. Corrected in the app's README rather than silently widened (the allowlist is a decision contract).
+  gates. `[SUPERSEDED 2026-09-22: the owner chose to expose them - see the v2 bullet below.]`
   Verification: app suite 149 -> 152, frontend vitest 49, live-checked in a browser (artefacts render with sizes,
   `5_portfolio/decision.md` opens, "62 tools in 10 themes", all four screener toggles bind), three failing-first
   mutations with byte-identical restores. **This repo is unchanged by the sync** - no engine symbol, CLI flag, gate
   or JSON shape moved.
+  **v2 (2026-09-22):** the owner chose **expose all 88 `enable_*` gates**, so the allowlist is no longer
+  hand-listed on the gate side. `main.py:allowed_config_keys` now returns `CONFIG_ALLOWED_KEYS | {every enable_*
+  boolean in DEFAULT_CONFIG}` - 109 keys, derived at request time, so a gate the engine adds appears on the Config
+  screen on its own. The curated 25 still guard the keys they exist for (`project_dir` / `results_dir` /
+  `data_cache_dir` / `memory_log_path` / `moomoo_account` all stay out), and the derivation is safe precisely
+  because every gate is a boolean - it cannot carry a path or an account the way the W-P2-5 denylist predecessors
+  did. The app's README Config + DSA rows now state the true shape instead of my earlier "not visible" correction.
+  `test_config_returns_no_paths_and_no_secret_values` (which pinned the bare constant) was updated to the derived
+  contract, and a new test asserts the ENDPOINT carries every engine gate while no path key leaks - both directions,
+  with the wiring and the helper mutated separately to prove each fails. App suite 152 -> 153; live-verified: 107
+  rows rendered, 88 of them gates, zero leaked keys. trading_web commit `c010147`.
 
 - 2026-09-22 `(working tree)` - **Cross-sectional momentum is now an advisory READ, and building it found two defects - one of which could hand back an all-long book as "dollar+beta neutral".**
   The pasted strategy brief's top pick ("cross-sectional momentum with factor neutralization") was ~70% ALREADY IN THE REPO as pure functions with no production caller:
