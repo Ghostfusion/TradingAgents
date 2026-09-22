@@ -434,6 +434,28 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **The web app is synced with the 49 engine commits that landed after its last one** (trading_web commit `83345c6`).
+  The app's HEAD was 2026-09-18 21:53:59 -0500, which lines up with engine `4acc555` (21 s earlier); 49 engine commits
+  landed after that. Rule 4 ("every TradingAgents change reflects in trading_web") is now discharged for the window:
+  **6 new tools** (`get_cross_section_momentum` + the five Benzinga event readers - `VALUE_TOOL_SPECS` + the dispatch
+  map + `valueTools.js` + a regenerated `docs/web_TOPICS.md`; 56 -> 62 declared, 9 -> 10 themes), **4 screener flags**
+  (`--rates`, plus `--revision-index` / `--growth-scores` / `--quality-score`, which shipped 2026-09-13 and had never
+  been wired), **the report viewer renders JSON at all now** (it globbed `*.md` only, so `run_card.json`,
+  `research_decision.json`, `jev_verdict.json`, `verify_flags.json` and `tool_evidence.json` were all invisible;
+  each artefact now carries its byte size and a `truncated` flag - a real `tool_evidence.json` is ~350 KB), and the
+  two new entry points joined the Raw allowlist (`jev_decide.py`, `gen_api_reference_table.py`; 22 -> 24).
+  **Two defects fell out.** (1) `read_report_tree` built its keys with `str(Path.relative_to(...))`, which is
+  backslash-separated on Windows, while `ReportView` auto-opens on `k == "5_portfolio/decision.md"` and HelpGuide
+  documents that same POSIX key - so the final decision, the grade and the position size, was NEVER auto-opened on
+  this platform; the producer now emits `as_posix()`. (2) The app's README claimed the DSA advisory gates were
+  "visible read-only on the Config screen" - false from the commit that wrote it (`af57ea1`): that screen is a
+  curated security allowlist (`main.py:CONFIG_ALLOWED_KEYS`, 25 keys) covering 4 of this repo's **88** `enable_*`
+  gates. Corrected in the app's README rather than silently widened (the allowlist is a decision contract).
+  Verification: app suite 149 -> 152, frontend vitest 49, live-checked in a browser (artefacts render with sizes,
+  `5_portfolio/decision.md` opens, "62 tools in 10 themes", all four screener toggles bind), three failing-first
+  mutations with byte-identical restores. **This repo is unchanged by the sync** - no engine symbol, CLI flag, gate
+  or JSON shape moved.
+
 - 2026-09-22 `(working tree)` - **Cross-sectional momentum is now an advisory READ, and building it found two defects - one of which could hand back an all-long book as "dollar+beta neutral".**
   The pasted strategy brief's top pick ("cross-sectional momentum with factor neutralization") was ~70% ALREADY IN THE REPO as pure functions with no production caller:
   `cross_section.neutralize_book:233` (dollar+beta+sector orthogonal projection), `quantile_split:165`, `centered_rank:136`, `factors.vol_adjusted_momentum:46`, `book_risk.net_beta:177`. What was missing was the composition, the panel and the wiring.
