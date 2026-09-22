@@ -434,6 +434,29 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **Market-wide breadth is now MEASURED: P0-3's producer had zero callers, and `ad_ratio` had no producer at all.**
+  `strategies/market_breadth.py` (P0-3) was fully implemented with seven tests and both consumers declared it in their component tables -
+  `technical_score`'s `pct_above_50d` / `pct_above_200d` / `ad_ratio` and `regime_score`'s `breadth` - while **nothing in the live path ever called it**.
+  Every run, every symbol, those four fields were declared and absent. `regime_score`'s own table recorded the caller it did not have
+  ("prerequisite 2 (P0-3); the leaf passes pct_above_50d") and both assemblers carried a comment explaining the missing panel.
+  **The panel (P0-2): NEW `dataflows/market_panel.py::market_closes(fetch_closes, *, universe=None, limit=None)`** builds the
+  `{name: closes}` map `market_breadth` takes, over the full S&P 500 (`sp500_universe`, disk-cached weekly), and caches it for the
+  process - the owner chose the full universe over a sample, **fetched once per run**. The fetcher is INJECTED, not imported: the run's
+  OHLCV cache lives in `agents/utils/analysis_tools` and a `dataflows` module must not import from `agents`. Every series comes from that
+  same `_ohlcv` cache, so the panel cannot describe a different price basis than the rest of the run, and a name whose fetch failed stays
+  in the map with an empty series so `market_breadth`'s `coverage` reports it instead of dropping it from the denominator.
+  **One read, five consumers:** `analysis_tools._market_breadth_read()` assembles the panel once per process and is read by BOTH assemblers
+  (`_technical_components`, `_regime_components`), so the two agent tools and the run card share one panel. `_clear_ohlcv_cache` now clears
+  the breadth read and the panel too.
+  **DEFECT found while wiring - `ad_ratio` had no producer.** `technical_score` declares `ad_ratio` with `market_breadth` as producer and a
+  `(-0.30, 0.30)` ramp, but the module returned only `advance_decline` (a difference), never a ratio - so even with the panel wired that leg
+  could not be measured. The ratio is now emitted by the one module that already computes numerator and denominator (rule 15), withheld on a
+  small sample like the percentages. Nothing else produced `ad_ratio`, so this is the single producer, not a second one.
+  **Absent stays absent:** a panel below `min_n`, an unavailable universe, or a failing read leaves the components OUT of the denominator
+  rather than scoring a zero.
+  Verification: `tests/test_market_panel.py` (14) + `tests/test_strategies_market_breadth.py` +2 (engine suite 5252 -> 5268, 0 failed), five mutations RED with byte-identical
+  sha256 restores. Web impact: none.
+
 - 2026-09-22 `(working tree)` - **A field-level coverage scorecard, and the twelve producers it found that nothing calls.**
   Coverage measured near-identical across four unrelated symbols (`technical_score` 0.95 four times, `regime_score` 0.83
   four times, `news_score` 0.25 four times), which says the gaps are a property of the PIPELINE, not of the stock. Nothing
@@ -455,7 +478,7 @@ has changed before); never assume an endpoint works — the SDK's
   `pct_above_50d` / `pct_above_200d` / `ad_ratio`, and `regime_score` `breadth`. That module is fully implemented and has
   7 tests, and it has **zero production callers** - `regime_score`'s own component table even records the caller it does
   not have ("prerequisite 2 (P0-3); the leaf passes pct_above_50d"), and `analysis_tools:5299` states the reason
-  ("market-wide breadth needs a panel this call does not fetch"). Also: `sentiment.mention_volume` (2 fields),
+  ("market-wide breadth needs a panel this call does not fetch"). `[CLOSED 2026-09-22: both were wired the same day - see the market-breadth wiring entry above.]` Also: `sentiment.mention_volume` (2 fields),
   `pre_market.premarket_gap` (2), `options_surface.implied_move_pct` / `iv_percentile`,
   `portfolio_optimizer.enforce_sector_exposure`, `yfinance_short_interest.get_short_interest_yfinance`. Four further
   `news_score` components declare no producer at all.

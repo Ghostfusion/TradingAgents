@@ -131,3 +131,31 @@ def test_the_52w_counts_match_a_known_five_name_panel():
     assert got["new_highs_52w"] == 1
     assert got["new_lows_52w"] == 2
     assert got["net_new_highs_52w"] == -1
+
+
+
+# ---------------------------------------------------------------------------
+# ad_ratio - the leg `technical_score` declares with THIS module as producer
+# ---------------------------------------------------------------------------
+
+
+def test_ad_ratio_is_the_advance_decline_ratio_over_the_panel():
+    """`technical_score` declares `ad_ratio` with `market_breadth` as its
+    producer and a (-0.30, 0.30) ramp, so the module must emit the RATIO and
+    not only the difference: one producer, two readings of one numerator
+    (rule 15)."""
+    panel = {f"UP{i}": [100.0 + 0.1 * j for j in range(260)] for i in range(20)}
+    panel.update({f"DN{i}": [100.0 - 0.1 * j for j in range(260)] for i in range(5)})
+    got = market_breadth(panel)
+    assert got["advancers"] == 20
+    assert got["decliners"] == 5
+    assert got["ad_ratio"] == pytest.approx(0.6)
+    assert got["ad_ratio"] == pytest.approx(got["advance_decline"] / got["n"])
+
+
+def test_ad_ratio_is_withheld_on_a_small_sample_like_the_percentages():
+    """A 3-name advance/decline ratio is not a market read (master rule 1)."""
+    got = market_breadth({f"X{i}": [100.0 + j for j in range(60)] for i in range(3)})
+    assert got["small_sample"] is True
+    assert got["ad_ratio"] is None
+    assert got["pct_above_50d"] is None

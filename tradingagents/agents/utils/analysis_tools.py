@@ -41,10 +41,24 @@ from tradingagents.strategies.options_math import expiry_days
 # vendor CSV N times (duplicate data + quota burn). Keyed by (ticker, days).
 _RUN_OHLCV_CACHE: dict[tuple[str, int], dict] = {}
 
+# Run-level market-breadth cache: the breadth read costs a whole S&P 500
+# panel, and five consumers want it (the technical and regime assemblers,
+# the two tools, the run card). Built once per run, like the OHLCV cache.
+_RUN_BREADTH_CACHE: dict[str, dict] = {}
+
 
 def _clear_ohlcv_cache() -> None:
-    """Drop the run-level OHLCV cache (tests / fresh runs)."""
+    """Drop the run-level OHLCV and breadth caches (tests / fresh runs)."""
     _RUN_OHLCV_CACHE.clear()
+    _RUN_BREADTH_CACHE.clear()
+    try:
+        from tradingagents.dataflows.market_panel import (
+            _reset_market_panel_cache,
+        )
+
+        _reset_market_panel_cache()
+    except Exception:  # noqa: BLE001 - cache hygiene is best-effort
+        pass
 
 
 def _load_ohlcv_df(ticker: str) -> object:
@@ -319,6 +333,34 @@ def _benchmark_bars() -> dict:
     except Exception:
         bench = "SPY"
     return _ohlcv(bench)
+
+
+def _market_breadth_read() -> dict | None:
+    """The market-wide breadth read over the run's shared S&P 500 panel.
+
+    `strategies/market_breadth.market_breadth` (P0-3) is the producer; the
+    panel comes from `dataflows.market_panel.market_closes` (P0-2),
+    assembled once per process, so the consumers of this read share ONE
+    panel. Every series comes from `_ohlcv`, so the panel cannot describe a
+    different price basis than the rest of the run.
+
+    `None` when the panel or the read is unavailable - never a number from a
+    handful of names, which is exactly what `market_breadth` withholds below
+    its `min_n`.
+    """
+    if "read" in _RUN_BREADTH_CACHE:
+        return _RUN_BREADTH_CACHE["read"] or None
+    read: dict | None = None
+    try:
+        from tradingagents.dataflows.market_panel import market_closes
+        from tradingagents.strategies.market_breadth import market_breadth
+
+        panel = market_closes(lambda t: _ohlcv(t).get("closes") or [])
+        read = market_breadth(panel) if panel else None
+    except Exception:  # noqa: BLE001 - an advisory leg degrades, never blocks
+        read = None
+    _RUN_BREADTH_CACHE["read"] = read or {}
+    return read
 
 
 def _txt_round(v, nd: int = 4) -> str:
@@ -5016,10 +5058,12 @@ def get_fundamental_score(
 def _technical_components(ticker: str) -> dict:
     """Assemble the `TechnicalScore` components from the run's own OHLCV.
 
-    Every value comes from a producer that already exists, fed the bars
-    `_ohlcv` already cached for this run - no new fetch, no new formula. A
-    producer that cannot measure returns `None` (or a short dict), which leaves
-    the component out of the denominator rather than scoring it as 0 or 50.
+    Every value comes from a producer that already exists. The name's own legs
+    are fed the bars `_ohlcv` already cached for this run - no new fetch, no new
+    formula - and the breadth legs are fed the run's ONE shared market panel
+    (P0-2), assembled once per process rather than per call. A producer that
+    cannot measure returns `None` (or a short dict), which leaves the component
+    out of the denominator rather than scoring it as 0 or 50.
 
     The bar-count guards are per producer, not global: the oscillators need 30
     bars, the 200-day structures need 205, `vcp_setup` needs its 90-day window.
@@ -5211,11 +5255,15 @@ def _technical_components(ticker: str) -> dict:
         vals["sqrt_rs_minus"] = sem["sqrt_rs_minus"]
 
     # --- breadth -----------------------------------------------------------
-    # Market-wide breadth needs a {name: closes} PANEL; this call has one
-    # name's bars, and a panel fetched per tool call is not a read this leaf
-    # should pay for. The component stays declared and absent, and the engine
-    # prints the gap (coverage 95/100) rather than a sector proxy standing in
-    # for the market (`strategies/market_breadth.py` is the producer).
+    # Market-wide breadth over the run's shared S&P 500 panel (P0-2/P0-3).
+    # `_market_breadth_read` assembles that panel once per process, so this is
+    # not a per-tool-call fetch; `market_breadth` withholds the percentages on
+    # a small sample, and the component then stays ABSENT rather than taking a
+    # sector proxy for the market.
+    breadth = _market_breadth_read() or {}
+    for key in ("pct_above_50d", "pct_above_200d", "ad_ratio"):
+        if breadth.get(key) is not None:
+            vals[key] = breadth[key]
     return vals
 
 
@@ -5296,7 +5344,8 @@ def _render_technical_score(ticker: str, res: dict) -> str:
         lines.append("")
         lines.append(
             f"not measured (NA, never 0): {', '.join(absent)} - "
-            "market-wide breadth needs a panel this call does not fetch "
+            "market-wide breadth reads the run's shared S&P 500 panel and is "
+            "withheld when that panel is unavailable or below its sample gate "
             "(strategies/market_breadth.py); the rest depend on history the "
             "series did not carry"
         )
@@ -5768,9 +5817,11 @@ def _regime_components() -> dict:
     ENVIRONMENT, so the trend and the realized-vol percentile are the
     benchmark's, not the analysed name's.
 
-    `breadth` needs a `{name: closes}` panel; a tool call that fetched the whole
-    S&P universe would pay a network round trip per name for one 5%-weight leg,
-    so it stays ABSENT with its reason (P0-2's panel is the run-time source).
+    `breadth` needs a `{name: closes}` panel; that panel is P0-2's, assembled
+    once per process by `_market_breadth_read` over the S&P 500, so the read
+    costs one panel for the whole run rather than a round trip per name per
+    call. It reads the 50d column the component table names, and it stays
+    ABSENT when `market_breadth` withholds it on a small sample.
     """
     from datetime import datetime
 
@@ -5790,6 +5841,14 @@ def _regime_components() -> dict:
         if mt.get("trend") is not None:
             vals["market_trend"] = mt["trend"]
     except Exception:  # noqa: BLE001 - an advisory leg degrades, it never blocks
+        pass
+    try:
+        # P0-3's producer over P0-2's panel. The component table names the 50d
+        # column ("the leaf passes pct_above_50d"), so that is the leg read.
+        br = (_market_breadth_read() or {}).get("pct_above_50d")
+        if br is not None:
+            vals["breadth"] = br
+    except Exception:  # noqa: BLE001
         pass
     try:
         ch = _chop(

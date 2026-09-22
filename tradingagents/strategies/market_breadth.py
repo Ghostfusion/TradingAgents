@@ -56,6 +56,7 @@ def market_breadth(
           "pct_above_20d" | "pct_above_50d" | "pct_above_200d": 0-100 | None,
           "n": usable names, "coverage": usable / total,
           "advance_decline": advancers - decliners (0 when none moved),
+          "ad_ratio": (advancers - decliners) / n, or None on a small sample,
           "new_highs": names at their own series high,
           "new_lows": names at their own series low,
           "new_highs_52w" | "new_lows_52w" | "net_new_highs_52w": counts over a
@@ -121,6 +122,14 @@ def market_breadth(
         "n": n,
         "coverage": round(n / total, 3) if total else 0.0,
         "advance_decline": advancers - decliners,
+        # The RATIO form of the same numerator over the same panel - so
+        # `technical_score`'s declared `ad_ratio` leg has the producer its own
+        # component table names, and the difference and the ratio are one
+        # producer's two readings rather than two producers of one quantity
+        # (rule 15). Withheld on a small sample for the same reason the
+        # percentages are: a 3-name advance/decline ratio is not a market read.
+        "ad_ratio": (None if gated.get("small_sample")
+                     else round((advancers - decliners) / n, 4)),
         "advancers": advancers,
         "decliners": decliners,
         "new_highs": highs,
