@@ -434,6 +434,43 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **A field-level coverage scorecard, and the twelve producers it found that nothing calls.**
+  Coverage measured near-identical across four unrelated symbols (`technical_score` 0.95 four times, `regime_score` 0.83
+  four times, `news_score` 0.25 four times), which says the gaps are a property of the PIPELINE, not of the stock. Nothing
+  read the per-field picture across runs, so a field that is never populated looked identical to one populated on most runs.
+  **NEW: `scripts/coverage_scorecard.py`** - reads every `run_card.json` under a reports dir and asks one question per
+  declared field: was it measured, and if not, why not? The declared universe comes from `score_panel.engine_registry()`
+  (the one place each engine's own component table is read - no second vocabulary). The denominator is the trees where the
+  engine was actually MEASURED, so a gated-off engine cannot drag a field's fill rate down.
+  **The classification is the point.** A zero fill rate is one of three things and only one is a defect here: `unbuilt`
+  (the declared producer is empty), `unwired` (a producer is named and nothing outside its own module calls it), or
+  `structural` (the producer is reached and this run supplied no value). Fill rate alone cannot separate them; the declared
+  producer string plus an AST call-site scan can. **The scan resolves import aliases** - the live path renames producers on
+  import (`analysis_tools.get_liquidation_days` does `from ...liquidity_risk import days_to_absorb as _dta` then `_dta(...)`),
+  and reading only the call node's own name reported five live producers as never called. That was a false defect the scan
+  produced itself, caught before shipping. A producer string that names no callable, resolves to no file, or names a
+  function its file does not define returns "cannot tell" rather than a false `unwired`.
+  **FOUND on the 68 trees - twelve fields whose declared producer is never reached from the live path.** The largest family
+  is `strategies/market_breadth.py::market_breadth` at **four fields across two engines**: `technical_score`
+  `pct_above_50d` / `pct_above_200d` / `ad_ratio`, and `regime_score` `breadth`. That module is fully implemented and has
+  7 tests, and it has **zero production callers** - `regime_score`'s own component table even records the caller it does
+  not have ("prerequisite 2 (P0-3); the leaf passes pct_above_50d"), and `analysis_tools:5299` states the reason
+  ("market-wide breadth needs a panel this call does not fetch"). Also: `sentiment.mention_volume` (2 fields),
+  `pre_market.premarket_gap` (2), `options_surface.implied_move_pct` / `iv_percentile`,
+  `portfolio_optimizer.enforce_sector_exposure`, `yfinance_short_interest.get_short_interest_yfinance`. Four further
+  `news_score` components declare no producer at all.
+  **Presence is read from explicit lists, never from a value** - a measured `0.0` is a measurement, not a gap (`adx: 0.0`
+  is present). Each engine publishes presence differently (`technical_score` category `components`, `risk_score` category
+  `present`, `fundamental_score` subscore `coverage.metrics`, `regime_score` engine `components`, and for
+  `sentiment_score`/`news_score` the complement of `absent`, which those engines define as the complement of what they
+  measured); each shape is read as itself, not unified. A field the card says nothing about leaves the denominator.
+  **Not a defect, checked:** `risk_score`'s `liquidity` reports 2/3 not 4/5 because `risk_score.category_score:486` scores
+  over `SCORED` components only and leaves the `PRINTED` ones out; and the registry's declared set is a superset of the
+  live engine's for `fundamental_score` (28 declared against 25 counted), which is why an engine whose declaration carries
+  no producer column is reported as "cannot tell" rather than `unbuilt`.
+  Verification: `tests/test_coverage_scorecard.py` (25), four mutations RED with byte-identical sha256 restores. Web
+  impact: none - a new `scripts/` entry point, no tool, CLI flag or JSON shape the app consumes changed.
+
 - 2026-09-22 `(working tree)` - **The web app is synced with the 49 engine commits that landed after its last one** (trading_web commit `83345c6`).
   The app's HEAD was 2026-09-18 21:53:59 -0500, which lines up with engine `4acc555` (21 s earlier); 49 engine commits
   landed after that. Rule 4 ("every TradingAgents change reflects in trading_web") is now discharged for the window:
