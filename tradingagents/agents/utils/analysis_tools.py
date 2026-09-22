@@ -46,11 +46,17 @@ _RUN_OHLCV_CACHE: dict[tuple[str, int], dict] = {}
 # the two tools, the run card). Built once per run, like the OHLCV cache.
 _RUN_BREADTH_CACHE: dict[str, dict] = {}
 
+# Run-level options-surface cache: the chain fetch is network, and `RiskScore`
+# wants one leg off it (the ATM-implied 1-sigma move). Built once per ticker per
+# run, like the OHLCV and breadth caches.
+_RUN_OPTIONS_CACHE: dict[str, dict] = {}
+
 
 def _clear_ohlcv_cache() -> None:
-    """Drop the run-level OHLCV and breadth caches (tests / fresh runs)."""
+    """Drop the run-level OHLCV, breadth and options caches (tests / fresh runs)."""
     _RUN_OHLCV_CACHE.clear()
     _RUN_BREADTH_CACHE.clear()
+    _RUN_OPTIONS_CACHE.clear()
     try:
         from tradingagents.dataflows.market_panel import (
             _reset_market_panel_cache,
@@ -5401,6 +5407,51 @@ def get_technical_score(
         return f"technical score unavailable for {ticker}: render failed ({exc})"
 
 
+def _risk_options_read(ticker: str) -> dict:
+    """The numeric options-surface legs ``RiskScore`` consumes, cached per run.
+
+    One chain builder (``_options_chain_rows_lambda`` - the same one the gamma
+    and derivatives-flow leaves read) and one producer, the declared one:
+    ``options_surface.implied_move_pct``, called directly so the citation in
+    ``risk_score.COMPONENTS`` names a function this module actually reaches.
+    """
+    key = str(ticker).upper()
+    cached = _RUN_OPTIONS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    out: dict = {}
+    try:
+        from tradingagents.strategies.options_surface import implied_move_pct
+
+        got = _options_chain_rows_lambda(ticker)
+        if got is not None:
+            rows = got[0]
+            atm = min(
+                rows,
+                key=lambda r: abs(float(r.get("strike") or 0.0) - float(r.get("spot") or 0.0)),
+            )
+            iv = atm.get("iv")
+            days = atm.get("days_to_expiry")
+            if iv is not None:
+                out["atm_iv"] = float(iv)
+            pct = (
+                implied_move_pct(float(iv), float(days))
+                if iv is not None and days is not None
+                else None
+            )
+            if pct is not None:
+                # `implied_move_pct` returns PERCENT - its own docstring says
+                # "(%)" and it multiplies by 100.0. `risk_score` declares this
+                # component a FRACTION with ramp (0.01, 0.10). The /100.0 IS the
+                # seam: without it a 1-sigma 4% move arrives as 4.0, saturates
+                # the ramp and scores a confident wrong number.
+                out["implied_move_pct"] = round(float(pct) / 100.0, 6)
+    except Exception:  # noqa: BLE001 - advisory; absent, never a fabricated leg
+        out = {}
+    _RUN_OPTIONS_CACHE[key] = out
+    return out
+
+
 def _risk_components(ticker: str) -> dict:
     """Assemble the `RiskScore` components the repo can honestly measure.
 
@@ -5434,13 +5485,16 @@ def _risk_components(ticker: str) -> dict:
         liquidity_verdict,
         spread_estimate,
     )
+    from tradingagents.strategies.pre_market import premarket_gap
     from tradingagents.strategies.regime import realized_vol
+    from tradingagents.strategies.size import atr as _atr
     from tradingagents.strategies.volatility_models import semivariance
 
     data = _ohlcv(ticker)
     closes = data.get("closes") or []
     highs = data.get("highs") or []
     lows = data.get("lows") or []
+    opens = data.get("opens") or []
     volumes = data.get("volumes") or []
     if len(closes) < 30:
         return {}
@@ -5468,6 +5522,24 @@ def _risk_components(ticker: str) -> dict:
     # one leg degrades, the rest stand
     with contextlib.suppress(Exception):
         vals["liquidity_verdict"] = liquidity_verdict(illiq, None, None)["verdict"]
+
+    # --- gap risk: the run's own last two bars (prior close -> session open) ---
+    # `premarket_gap` ALSO returns through_stop, and reading it from this call
+    # would be a FABRICATED False: handed no prior stop/entry it answers False,
+    # which reads as "the gap did not trade through the stop" when the truth is
+    # that no prior plan was ever in hand - those levels live behind
+    # `pre_market.load_prior_state` / `parse_planned_levels`, which nothing on
+    # this path holds. Only `gap_atr`, the leg this engine declares against this
+    # producer, is taken.
+    if len(opens) == len(closes) and len(closes) >= 2 and opens[-1]:
+        gap = premarket_gap(closes[-2], opens[-1], atr=_atr(highs, lows, closes))
+        if gap.get("gap_atr") is not None:
+            vals["gap_atr"] = gap["gap_atr"]
+
+    # --- implied move: the chain the gamma / derivatives-flow leaves read ---
+    opts = _risk_options_read(ticker)
+    if opts.get("implied_move_pct") is not None:
+        vals["implied_move_pct"] = opts["implied_move_pct"]
 
     # --- the book: the same basket and the same resolver the governor uses ---
     try:
@@ -6071,6 +6143,7 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
         aggregate_weighted_sentiment,
         compute_social_scores,
         daily_sentiment_sma,
+        mention_volume,
         sentiment_velocity,
     )
 
@@ -6091,6 +6164,13 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
         vel = sentiment_velocity([r.get("score") for r in rows])
         if vel is not None:
             vals["tone_velocity"] = vel
+        # ATTENTION, not tone. `daily_sentiment_sma` already carries the per-day
+        # mention count (`n`, 0 on a calendar day with no articles), which is
+        # exactly the history `sentiment.mention_volume` takes. It is a separate
+        # component from the tone legs and is never summed with them (§13 Q9).
+        heat = mention_volume([int(r.get("n") or 0) for r in rows])
+        if heat is not None:
+            vals["mention_heat"] = heat
     try:
         articles = _av_news_articles(ticker, start, end)
     except Exception:  # noqa: BLE001
@@ -6265,10 +6345,33 @@ def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -
                 vals["novelty"] = nov["novelty"]
         except Exception:  # noqa: BLE001
             pass
-        # Persistence needs a MENTION HISTORY (a per-day count series); this leaf
-        # holds one window's articles, so the leg stays absent with its reason
-        # rather than being computed from a series that does not exist
-        # (sentiment.mention_volume takes the history, not the articles).
+    # Persistence is the ATTENTION ratio (`sentiment.mention_volume`), not a
+    # property of the article set: it needs a per-day mention COUNT series,
+    # which this leaf's window does not carry but the sentiment feed does.
+    # This leg used to stay absent on the claim that no such series existed;
+    # it does - `_sentiment_points_with_source` -> `daily_sentiment_sma`
+    # returns `n` per calendar day (0 on a day with no articles), which is the
+    # history the producer takes. It is deliberately OUTSIDE the `if articles:`
+    # block above: mentions and headlines are different feeds, so an empty news
+    # window must not withhold an attention leg the sentiment feed can measure.
+    # NOTE: the declaration also cites `sentiment.decayed_weight:91`. That half
+    # is NOT called here: `mention_volume(history, recent)` accepts no weights,
+    # so a decayed baseline would be a second producer of the same ratio
+    # (master rule 15). The citation's second half has no call site.
+    try:
+        from tradingagents.strategies.sentiment import (
+            daily_sentiment_sma,
+            mention_volume,
+        )
+
+        points, _src = _sentiment_points_with_source(ticker, start, end)
+        rows = daily_sentiment_sma(points) if points else None
+        if rows:
+            heat = mention_volume([int(r.get("n") or 0) for r in rows])
+            if heat is not None:
+                vals["persistence"] = heat
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
     try:
         from tradingagents.strategies.analyst_revisions import revision_ratio
 

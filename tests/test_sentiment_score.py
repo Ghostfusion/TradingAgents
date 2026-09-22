@@ -374,3 +374,44 @@ def test_scale_table_is_symmetric_and_canonical_is_unit() -> None:
 
 def test_the_composite_floor_is_below_the_full_category_set() -> None:
     assert len(CATEGORY_ORDER) >= COMPOSITE_MIN_COVERAGE
+
+
+# ---------------------------------------------------------------------------
+# The assembler leg this engine declares: mention_heat
+# ---------------------------------------------------------------------------
+
+
+def _points(*pairs):
+    return [{"date": d, "score": 0.1, "n": n} for d, n in pairs]
+
+
+def test_mention_heat_is_assembled_from_the_per_day_count_series(monkeypatch) -> None:
+    """`sentiment.mention_volume` takes a per-day mention COUNT history, and
+    `daily_sentiment_sma` already carries one (`n`, 0 on a calendar day with no
+    articles). The component was declared on every run and assembled on none."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies import sentiment as sent
+
+    points = _points(("2026-09-01", 3), ("2026-09-02", 3),
+                     ("2026-09-03", 3), ("2026-09-04", 9))
+    monkeypatch.setattr(at, "_sentiment_points_with_source",
+                        lambda *a, **k: (points, "eodhd"))
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(sent, "compute_social_scores", lambda *a, **k: {})
+
+    vals, _source = at._sentiment_components("HEAT", "2026-09-04")
+    # 9/1..9/3 average 3 mentions/day; the last day is 9 -> ratio 3.0
+    assert vals["mention_heat"] == pytest.approx(3.0)
+
+
+def test_mention_heat_stays_absent_without_a_mention_series(monkeypatch) -> None:
+    """NA is not 0: no daily points means no attention ratio."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies import sentiment as sent
+
+    monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(sent, "compute_social_scores", lambda *a, **k: {})
+
+    vals, _source = at._sentiment_components("HEAT", "2026-09-04")
+    assert "mention_heat" not in vals

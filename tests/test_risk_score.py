@@ -611,3 +611,102 @@ def test_net_beta_treats_an_uninvested_remainder_as_zero_beta_cash() -> None:
     # weights summing below 1.0 leave a cash sleeve: beta 0 by construction, so
     # the book's beta is the invested part's, never renormalised up to 1.0
     assert net_beta({"AAPL": 0.5}, {"AAPL": 2.0}) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# The assembler legs this engine declares: gap_atr and implied_move_pct
+# ---------------------------------------------------------------------------
+
+
+def _risk_bars(n: int = 80, start: float = 100.0) -> dict:
+    """Synthetic bars shaped like `analysis_tools._ohlcv`'s return."""
+    closes = [start + 0.5 * i for i in range(n)]
+    return {
+        "dates": [f"2026-0{1 + i // 28}-{1 + i % 28:02d}" for i in range(n)],
+        "closes": closes,
+        "highs": [c * 1.01 for c in closes],
+        "lows": [c * 0.99 for c in closes],
+        "opens": list(closes),
+        "volumes": [1_000_000.0] * n,
+    }
+
+
+def test_gap_atr_is_assembled_from_the_runs_last_two_bars(monkeypatch) -> None:
+    """`pre_market.premarket_gap` over (closes[-2], opens[-1]) with `size.atr` -
+    the two producers this component names. It was declared on every run and
+    assembled on none, so the leg was absent in every tree."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.size import atr
+
+    bars = _risk_bars()
+    bars["opens"][-1] = bars["closes"][-2] * 0.97  # a 3% gap down at the open
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: bars)
+    monkeypatch.setattr(at, "_risk_options_read", lambda ticker: {})
+    at._clear_ohlcv_cache()
+    try:
+        vals = at._risk_components("GAPT")
+    finally:
+        at._clear_ohlcv_cache()
+
+    a = atr(bars["highs"], bars["lows"], bars["closes"])
+    assert a is not None and a > 0
+    assert vals["gap_atr"] == pytest.approx(
+        (bars["opens"][-1] - bars["closes"][-2]) / a, abs=1e-4
+    )
+    assert vals["gap_atr"] < 0, "a gap DOWN is signed; the engine pins the magnitude"
+
+
+def test_gap_atr_stays_absent_when_there_is_no_open(monkeypatch) -> None:
+    """NA is not 0: without a second bar there is no overnight gap to measure."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    bars = _risk_bars()
+    bars["opens"] = []
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: bars)
+    monkeypatch.setattr(at, "_risk_options_read", lambda ticker: {})
+    at._clear_ohlcv_cache()
+    try:
+        vals = at._risk_components("GAPT")
+    finally:
+        at._clear_ohlcv_cache()
+    assert "gap_atr" not in vals
+
+
+def test_implied_move_pct_is_a_fraction_not_the_producers_percent(monkeypatch) -> None:
+    """The producer returns PERCENT (`options_surface.implied_move_pct` multiplies
+    by 100.0, and its docstring says "(%)") while this engine declares the
+    component a FRACTION with ramp (0.01, 0.10). Wired naively, a 1-sigma 7%
+    move arrives as 7.17, saturates the ramp and scores a confident wrong number
+    with no error anywhere."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.options_surface import implied_move_pct
+
+    rows = [{"strike": 100.0, "iv": 0.25, "days_to_expiry": 30,
+             "spot": 100.0, "oi": 1.0, "side": "call"}]
+    monkeypatch.setattr(
+        at, "_options_chain_rows_lambda",
+        lambda ticker: (rows, 100.0, 30 / 365.0, "2026-10-16", 30),
+    )
+    at._clear_ohlcv_cache()
+    try:
+        out = at._risk_options_read("OPTS")
+    finally:
+        at._clear_ohlcv_cache()
+
+    producer = implied_move_pct(0.25, 30.0)
+    assert producer is not None and producer > 1.0, "the producer's number is a percent"
+    assert out["implied_move_pct"] == pytest.approx(producer / 100.0, abs=1e-6)
+    lo, hi = RAMPS["implied_move_pct"]
+    assert lo <= out["implied_move_pct"] <= hi, "inside the declared ramp, not past it"
+
+
+def test_implied_move_pct_stays_absent_when_the_chain_is_unusable(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    monkeypatch.setattr(at, "_options_chain_rows_lambda", lambda ticker: None)
+    at._clear_ohlcv_cache()
+    try:
+        out = at._risk_options_read("OPTS")
+    finally:
+        at._clear_ohlcv_cache()
+    assert "implied_move_pct" not in out

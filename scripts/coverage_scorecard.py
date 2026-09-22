@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -448,6 +449,147 @@ def action_for(klass: str) -> str:
     }.get(klass, ACTION_UNKNOWN)
 
 
+#: Why a field CANNOT be filled, keyed ``"engine.field"``.
+#:
+#: This exists so an empty field is STATED rather than left as a blank someone
+#: later fills with a number the repo cannot support. Every entry cites the
+#: definition site it rests on, and the entries marked "do not build" are
+#: refusals, not a backlog.
+GAP_REASONS: dict[str, str] = {
+    "risk_score.gap_atr": (
+        "WIRED: pre_market.premarket_gap over the run's own last two bars. Trees "
+        "written before the fix still read absent - the fill rates come from disk, "
+        "the wiring from live code"
+    ),
+    "risk_score.implied_move_pct": (
+        "WIRED: options_surface.implied_move_pct over the chain the gamma and "
+        "derivatives-flow leaves already read, converted percent->fraction at the "
+        "seam. Trees written before the fix still read absent"
+    ),
+    "risk_score.iv_percentile": (
+        "needs a per-day IV HISTORY no producer can supply, and the code says so "
+        "(analysis_tools.get_options_iv_read prints 'IV percentile: n/a'; "
+        "tests/test_calc_agent_wiring.py records it). Filling it means inventing "
+        "the history - leave it absent"
+    ),
+    "risk_score.sector_max_share": (
+        "the declared producer returns the WRONG SHAPE: "
+        "portfolio_optimizer.enforce_sector_exposure:169 returns the adjusted "
+        "WEIGHT DICT (:196), not the scalar this component ramps (0.15, 0.45). A "
+        "scalar needs a shared sector_weights() over that same aggregation, and "
+        "the book exists only when risk_basket_tickers/holdings_tickers are "
+        "configured (book_context.configured_basket:44); no ticker->sector map "
+        "producer exists either, only per-name network "
+        "yfinance_sector.fetch_sector:64"
+    ),
+    "risk_score.through_stop": (
+        "needs the PRIOR plan's stop/entry, reachable only through "
+        "pre_market.load_prior_state:332 / parse_planned_levels:413, which nothing "
+        "under tradingagents/ calls (only scripts/pre_market_review.py). "
+        "premarket_gap answers through_stop=False when handed no stop, so reading "
+        "it here would FABRICATE 'did not trade through the stop' - do not wire it"
+    ),
+    "sentiment_score.mention_heat": (
+        "WIRED: sentiment.mention_volume over the per-day count series "
+        "daily_sentiment_sma already carries. Trees written before the fix still "
+        "read absent"
+    ),
+    "sentiment_score.short_pct_float": (
+        "the declared producer returns the WRONG TYPE: "
+        "yfinance_short_interest.get_short_interest_yfinance:37 returns a MARKDOWN "
+        "STRING (:95). shortPercentOfFloat is read at :55 and rendered x100 at :77, "
+        "so a numeric sibling is needed. The producer is NOT dead code - it is "
+        "dispatched through interface.VENDOR_METHODS['get_short_interest'] (:591) "
+        "and runs in every market-analyst gather, which an AST call scan cannot see"
+    ),
+    "news_score.persistence": (
+        "WIRED: sentiment.mention_volume over the same per-day count series. The "
+        "declaration's second citation (sentiment.decayed_weight:91) has NO call "
+        "site - mention_volume accepts no weights, so a decayed baseline would be a "
+        "second producer of one ratio. Trees written before the fix still read "
+        "absent"
+    ),
+    "news_score.fundamental_impact": (
+        "no revenue or margin ESTIMATE exists anywhere in the repo - only EPS "
+        "estimate levels, themselves gated behind analyst_revisions. Building it "
+        "means inventing the input: do not build it"
+    ),
+    "news_score.regulatory_legal": (
+        "the only cheap proxy is a litigious-word share (text_factors.lm_tone:147) "
+        "and the engine ALREADY REJECTED it - event_state.FAMILY_AVAILABILITY "
+        "records the court/legal family as ABSENT with evidence "
+        "(event_state.py:109-125). An honest measure needs a new source"
+    ),
+    "news_score.industry_shock": (
+        "BUILDABLE from data the run already fetches: the 11 SPDR series come from "
+        "get_sector_rank (analysis_tools.py:3544-3548) plus one fetch_sector "
+        "(:3558). Not yet wired"
+    ),
+    "news_score.guidance_change": (
+        "BUILDABLE with no new vendor: benzinga.get_guidance_benzinga:456 already "
+        "parses numeric min/max/prior (:490-503) and then discards them into prose "
+        "(:519). Needs a numeric producer; the vendor is default-off"
+    ),
+}
+
+#: Class defaults - the weakest reason, stating only what the scan can prove.
+_GAP_DEFAULTS: dict[str, str] = {
+    "unbuilt": "no producer is declared for this field",
+    "unwired": (
+        "the declared producer has no DIRECT call site. An indirect dispatch (a "
+        "VENDOR_METHODS / route_to_vendor dict lookup) reads exactly the same way, "
+        "so verify before calling it dead"
+    ),
+    "structural": (
+        "the declared producer is reached, yet no tree measured this field - check "
+        "whether the producer can emit the DECLARED quantity (units, return type, "
+        "sign)"
+    ),
+    "unknown": (
+        "the producer string names no callable this layer can resolve, so neither "
+        "wired nor dead can be claimed"
+    ),
+}
+
+
+def _absent_reasons(module: str) -> dict[str, str]:
+    """The engine's OWN absent-reason table, when it declares one.
+
+    ``news_score.ABSENT_REASONS`` is the engine itself stating why a component
+    has no producer. Reading it here means this report's "why" cannot drift from
+    the engine's, and an engine that adds a reason gets it printed for free.
+    """
+    if not module:
+        return {}
+    try:
+        import importlib
+
+        table = getattr(importlib.import_module(module), "ABSENT_REASONS", None)
+    except Exception:  # noqa: BLE001 - a missing table is not a finding
+        return {}
+    if not isinstance(table, dict):
+        return {}
+    return {str(k): str(v) for k, v in table.items()}
+
+
+def gap_reason(engine: str, field: str, klass: str, *, absent: dict[str, str]) -> str | None:
+    """Why this field cannot be filled, or ``None`` when it IS measured.
+
+    Order: this module's authored reason (which cites a definition site), then
+    the ENGINE's own reason (so the two cannot drift), then a class default that
+    says only what the scan can prove.
+    """
+    if klass in ("ok", "monitor", "sparse"):
+        return None
+    authored = GAP_REASONS.get(f"{engine}.{field}")
+    if authored:
+        return authored
+    declared = absent.get(field)
+    if declared:
+        return f"{declared} (the engine's own reason)"
+    return _GAP_DEFAULTS.get(klass, _GAP_DEFAULTS["unknown"])
+
+
 # ---------------------------------------------------------------------------
 # The scorecard
 # ---------------------------------------------------------------------------
@@ -497,6 +639,7 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
         producer_column = any(
             str((spec or {}).get("producer") or "").strip() for spec in declared.values()
         )
+        absent_reasons = _absent_reasons(str(ent.get("module") or ""))
         for field, spec in declared.items():
             denom = stated[field]
             fill = (counts[field] / denom) if denom else None
@@ -512,6 +655,7 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
                 "wired": wired,
                 "class": klass,
                 "action": action_for(klass),
+                "gap": gap_reason(engine, field, klass, absent=absent_reasons),
                 "flat_zero": (zeros[field] if zeros[field] else 0),
             }
         engines_out[engine] = {
@@ -582,6 +726,13 @@ def render_text(report: dict) -> str:
             )
             if f["producer"]:
                 lines.append(f"       producer: {f['producer']}")
+            if f.get("gap"):
+                # The point of the report: an empty field carries its REASON, so
+                # the gap is visible instead of inviting a fabricated number.
+                lines.append(textwrap.fill(
+                    str(f["gap"]), width=96,
+                    initial_indent="       why: ", subsequent_indent="            ",
+                ))
             if f["flat_zero"]:
                 lines.append(f"       flat_zero: measured {f['flat_zero']} time(s), "
                              f"always 0.0 - check for a placeholder")
@@ -617,6 +768,11 @@ def main(argv: list[str] | None = None) -> int:
                 if f["class"] in ("unbuilt", "unwired"):
                     print(f"{engine:<20} {field:<28} {f['class']:<9} "
                           f"{f['producer'] or '(no producer declared)'}")
+                    if f.get("gap"):
+                        print(textwrap.fill(
+                            str(f["gap"]), width=96,
+                            initial_indent="    why: ", subsequent_indent="         ",
+                        ))
         return 0
     print(render_text(report))
     return 0
@@ -637,6 +793,7 @@ __all__ = [
     "DEFAULT_REPORTS_DIR",
     "FILL_MONITOR",
     "FILL_OK",
+    "GAP_REASONS",
     "LIVE_ROOTS",
     "action_for",
     "build_scorecard",
@@ -644,6 +801,7 @@ __all__ = [
     "explicit_absent",
     "explicit_present",
     "field_states",
+    "gap_reason",
     "has_call_site",
     "load_cards",
     "main",

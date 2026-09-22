@@ -252,3 +252,70 @@ def test_main_actionable_lists_only_the_actionable_gaps(tmp_path, capsys):
     assert rc == 0
     assert "fundamental_impact" in out  # declared producer is empty -> unbuilt
     assert "relevance" not in out  # measured, so not a gap
+
+
+# ---------------------------------------------------------------------------
+# Why a gap is a gap
+# ---------------------------------------------------------------------------
+
+
+def test_every_unmeasured_field_carries_a_reason(tmp_path):
+    """An empty field states WHY it is empty. The whole point is that the gap
+    stays visible instead of inviting a number the repo cannot support."""
+    card = {
+        "news_score": {
+            "score": 12.0,
+            "absent": ["fundamental_impact", "persistence"],
+            "categories": {"fundamental_impact": {"score": None, "weight": 20.0}},
+        },
+    }
+    _write_tree(tmp_path, "T1", card)
+    report = cs.build_scorecard(str(tmp_path), engines=("news_score",))
+    fields = report["engines"]["news_score"]["fields"]
+    for name in ("fundamental_impact", "persistence"):
+        f = fields[name]
+        assert f["fill_rate"] == 0.0
+        assert f["gap"], f"{name} is empty with no recorded reason"
+        assert len(f["gap"]) > 40, "a reason, not a placeholder"
+    assert "do not build it" in fields["fundamental_impact"]["gap"]
+
+
+def test_a_measured_field_carries_no_excuse(tmp_path):
+    """The reason is for gaps only - a filled field needs none."""
+    card = {"news_score": {"score": 60.0, "absent": ["fundamental_impact"],
+                           "categories": {"novelty": {"components": ["novelty"]}}}}
+    _write_tree(tmp_path, "T1", card)
+    report = cs.build_scorecard(str(tmp_path), engines=("news_score",))
+    fields = report["engines"]["news_score"]["fields"]
+    assert fields["novelty"]["fill_rate"] == 1.0
+    assert fields["novelty"]["gap"] is None
+
+
+def test_the_engines_own_reason_is_used_when_none_is_authored():
+    """An engine that records its own absent-reason gets it printed, so the
+    report and the engine cannot drift apart - and an authored reason wins."""
+    table = {"widget": "no widget producer exists"}
+    assert cs.gap_reason("unknown_engine", "widget", "unbuilt", absent=table) == (
+        "no widget producer exists (the engine's own reason)"
+    )
+    # the authored reason for a known gap WINS over any engine table
+    authored = cs.gap_reason("news_score", "fundamental_impact", "unbuilt", absent=table)
+    assert authored.startswith("no revenue or margin ESTIMATE")
+    # with nothing recorded anywhere, a class default still answers
+    assert cs.gap_reason("unknown_engine", "widget", "unbuilt", absent={})
+
+
+def test_the_real_engine_absent_table_is_read_at_runtime():
+    """`news_score.ABSENT_REASONS` is read from the engine, never copied here."""
+    reasons = cs._absent_reasons("tradingagents.strategies.news_score")
+    assert "materiality" in reasons
+    assert "revenue/margin" in reasons["fundamental_impact"]
+    assert cs._absent_reasons("") == {}
+    assert cs._absent_reasons("no.such.module") == {}
+
+
+def test_an_unwired_reason_names_the_indirect_dispatch_blind_spot():
+    """`unwired` means "no DIRECT call site" - the scan cannot see a
+    VENDOR_METHODS / route_to_vendor dict lookup, and the default says so."""
+    reason = cs.gap_reason("some_engine", "some_field", "unwired", absent={})
+    assert "DIRECT" in reason and "VENDOR_METHODS" in reason

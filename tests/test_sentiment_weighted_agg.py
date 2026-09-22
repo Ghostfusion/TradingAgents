@@ -141,3 +141,45 @@ def test_news_tool_appends_weighted_rows_only_when_gated(monkeypatch):
     assert on.startswith("## base series")
     assert "Weighted news aggregation" in on
     assert "unweighted = published per-day mean" in on
+
+
+# ---------------------------------------------------------------------------
+# The freshness weight is one producer (sentiment.decayed_weight)
+# ---------------------------------------------------------------------------
+
+
+def test_decayed_weight_zeroes_a_future_dated_article():
+    """The producer's own guard, which the weighted aggregation now depends on.
+    It calls `decayed_weight` instead of re-deriving `2.0 ** (-age / half_life)`
+    inline; the two agreed ONLY because the caller clamps `age_days` to >= 0, and
+    the inline copy would answer a weight ABOVE 1.0 for a negative age."""
+    from tradingagents.strategies.sentiment import decayed_weight
+
+    assert decayed_weight(-1.0) == 0.0
+    assert decayed_weight(-1.0, 7.0) == 0.0
+    assert decayed_weight(0.0) == 1.0
+    assert decayed_weight(7.0) == pytest.approx(0.5)
+    assert decayed_weight(14.0) == pytest.approx(0.25)
+
+
+def test_the_weighted_mean_uses_the_producer_freshness_factor():
+    """Two articles bucketed to the SAME session but published a day apart carry
+    different ages, so the freshness factor does not cancel out of the ratio: the
+    weighted mean is pinned against `decayed_weight` itself."""
+    from tradingagents.strategies.sentiment import decayed_weight
+
+    arts = [
+        # 20:00Z is 16:00 NY - at the cutoff, so it rolls to the 08-02 session
+        _art(1, "2000", 0.4, "A", rel=100.0),
+        _art(2, "1000", -0.2, "B", rel=100.0),
+    ]
+    out = aggregate_weighted_sentiment(arts, ticker="AAPL", half_life=7.0)
+    assert out is not None and len(out) == 1
+    row = out[0]
+    assert row["n"] == 2
+    w_old, w_new = decayed_weight(1.0, 7.0), decayed_weight(0.0, 7.0)
+    assert w_old != w_new, "the two ages must differ or the factor cancels"
+    assert row["weighted"] == pytest.approx(
+        (w_old * 0.4 + w_new * -0.2) / (w_old + w_new), abs=1e-4
+    )
+    assert row["weighted"] != pytest.approx(row["unweighted"])

@@ -701,7 +701,14 @@ def aggregate_weighted_sentiment(
         for it in items:
             w = float(it["relevance"]) / 100.0 if it["relevance"] is not None else 1.0
             if half_life and float(half_life) > 0:
-                w *= 2.0 ** (-float(it["age_days"]) / float(half_life))
+                # `decayed_weight` is the ONE producer of the freshness weight;
+                # the inline `2.0 ** (-age / half_life)` copy that stood here was
+                # a second one. It agreed ONLY because `age_days` is clamped to
+                # >= 0 above, so it inherited the producer's `age_days < 0 -> 0.0`
+                # guard by accident: drop that clamp and the copy weights a
+                # future-dated article ABOVE 1.0 while the producer answers 0.0
+                # (master rule 15: one quantity, one producer).
+                w *= decayed_weight(float(it["age_days"]), float(half_life))
             if it["official"]:
                 w *= float(official_boost)
             weights.append(w)

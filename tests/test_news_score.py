@@ -323,3 +323,46 @@ def test_the_av_news_reader_still_accepts_a_dict_and_rejects_junk(monkeypatch):
 
     monkeypatch.setattr(avn, "get_news", lambda *a, **k: '{"Information": "rate limit"}')
     assert at._av_news_articles("QCOM", "2026-08-20", "2026-09-19") == []
+
+
+# ---------------------------------------------------------------------------
+# The assembler leg this engine declares: persistence
+# ---------------------------------------------------------------------------
+
+
+def _mention_points(*pairs):
+    return [{"date": d, "score": 0.1, "n": n} for d, n in pairs]
+
+
+def test_persistence_is_assembled_from_the_mention_count_series(monkeypatch) -> None:
+    """`news_score` declares persistence against `sentiment.mention_volume`, and
+    the leg stayed absent on the claim that no per-day count series existed. It
+    does: `_sentiment_points_with_source` -> `daily_sentiment_sma` returns `n`
+    per calendar day."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies import analyst_revisions as ar
+
+    points = _mention_points(("2026-09-01", 2), ("2026-09-02", 2),
+                             ("2026-09-03", 2), ("2026-09-04", 8))
+    monkeypatch.setattr(at, "_sentiment_points_with_source",
+                        lambda *a, **k: (points, "eodhd"))
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
+    monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
+
+    vals = at._news_components("PERS", "2026-09-04")
+    # the headline window is EMPTY here on purpose: mentions and headlines are
+    # different feeds, so an empty news set must not withhold the attention leg
+    assert vals["persistence"] == pytest.approx(8 / 2.0)
+
+
+def test_persistence_stays_absent_without_a_mention_series(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies import analyst_revisions as ar
+
+    monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
+    monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
+
+    assert "persistence" not in at._news_components("PERS", "2026-09-04")

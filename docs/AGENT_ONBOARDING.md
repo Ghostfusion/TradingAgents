@@ -434,6 +434,32 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **Four declared fields are now MEASURED, and the wiring exposed that FIVE of the sixteen gaps are DECLARATION defects rather than wiring gaps.**
+  The coverage scorecard named sixteen fields whose declared producer is never reached. Wiring four of them showed that in five cases the DECLARATION is wrong:
+  the named producer **cannot emit the declared quantity at all** - the same class as `ad_ratio` and the breadth legs, now five instances in one engine family.
+  **Tier 1 (`risk_score`, the only tier inside `TradeScore` at 0.20):** **`gap_atr`** - `pre_market.premarket_gap` over the run's own last two bars
+  (`closes[-2]` -> `opens[-1]`) with `size.atr`; `_risk_components` never touched either gap leg. **`through_stop` is deliberately NOT read from that call** -
+  `premarket_gap` answers `False` when handed no prior stop/entry, which would report "the gap did not trade through the stop" when the truth is that no prior
+  plan was ever in hand (those levels live behind `pre_market.load_prior_state` / `parse_planned_levels`, which nothing under `tradingagents/` holds).
+  **`implied_move_pct` - THE UNITS TRAP:** `options_surface.implied_move_pct` returns **PERCENT** (docstring "(%)", multiplies by 100.0) while `risk_score`
+  declares a **FRACTION** with ramp `(0.01, 0.10)`, so a naive wiring delivers a 1-sigma 7% move as 7.17 and **saturates the ramp** - a confident wrong number
+  with no error anywhere. The seam divides by 100.0 and a test pins the result INSIDE the declared ramp. No new fetch and no gate flip:
+  `_options_chain_rows_lambda` is the builder the gamma/derivatives leaves already read.
+  **Tier 2 (advisory - `sentiment_score` and `news_score` are OUTSIDE `COMPOSITE_ENGINES`):** `mention_heat` and `persistence` both read `sentiment.mention_volume`,
+  which takes a per-day mention COUNT history - a series that **already existed**: `daily_sentiment_sma` returns `n` per calendar day (0 on a day with no articles).
+  `_sentiment_components` held the rows and never read `n`; `_news_components` carried a comment claiming the series did not exist. **It does.** The news leg sits
+  OUTSIDE its `if articles:` block on purpose - mentions and headlines are different feeds, so an empty headline window must not withhold an attention leg.
+  **DEFECT (rule 15, BEHAVIOUR-PRESERVING):** `aggregate_weighted_sentiment` re-derived the freshness weight inline instead of calling `decayed_weight`; the two agreed
+  ONLY because the caller clamps `age_days >= 0`, so the copy inherited the `age_days < 0 -> 0.0` guard by accident. **This one has no behavioural test and cannot
+  have one** - the mutation that reverts it leaves the suite GREEN, which is the evidence it is a dedup, not a fix.
+  **THE DECLARATION DEFECTS (reported, NOT built):** `sector_max_share` <- `enforce_sector_exposure:169` returns the adjusted weight **DICT** (`:196`), not a scalar;
+  `short_pct_float` <- `get_short_interest_yfinance:37` returns a **markdown STRING** (`:95`) - and that producer is **NOT dead**, it is dispatched through
+  `interface.VENDOR_METHODS['get_short_interest']:591`, which an AST call scan cannot see, so the scorecard's `unwired` means "no DIRECT call site", not "dead";
+  `iv_percentile` needs a per-day IV history no producer can supply; `guidance_change`/`industry_shock` are BUILDABLE (Benzinga already parses numeric guidance
+  min/max/prior before discarding them into prose; the 11 SPDR series are already fetched by `get_sector_rank`); `fundamental_impact` and the cheap `regulatory_legal`
+  are REFUSALS. **`scripts/coverage_scorecard.py` now prints WHY every field is empty** - authored reason first, then the engine's OWN `ABSENT_REASONS` (so the report
+  and the engine cannot drift), then a class default; `--actionable` prints it inline. Rule 4 checked: `trading_web` holds ZERO references to any field touched here.
+
 - 2026-09-22 `(working tree)` - **Market-wide breadth is now MEASURED: P0-3's producer had zero callers, and `ad_ratio` had no producer at all.**
   `strategies/market_breadth.py` (P0-3) was fully implemented with seven tests and both consumers declared it in their component tables -
   `technical_score`'s `pct_above_50d` / `pct_above_200d` / `ad_ratio` and `regime_score`'s `breadth` - while **nothing in the live path ever called it**.
