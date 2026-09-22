@@ -14,7 +14,12 @@ from langchain_core.runnables import RunnableLambda
 
 from tradingagents.default_config import DEFAULT_CONFIG
 
-pytestmark = pytest.mark.timeout(120)
+# The full-stream test performs the REAL ~87-tool vendor gather (no LLM
+# network: the factory is stubbed), and measured 119.21s call time - one
+# second inside the old 120s cap, so a loaded machine exceeded it and
+# pytest-timeout's thread method then killed the WHOLE suite run, not just
+# this test. 300s is 2.5x the measured cost.
+pytestmark = pytest.mark.timeout(300)
 
 
 class _StubLLM(RunnableLambda):

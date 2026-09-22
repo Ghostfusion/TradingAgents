@@ -434,6 +434,13 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-22 `(working tree)` - **A test sat one second inside its own timeout and killed the whole suite.** `tests/test_debate_stream_hermetic.py` capped itself at
+  `pytest.mark.timeout(120)` while `test_full_stream_reaches_research_manager_when_structured_on` performs the **real ~87-tool vendor gather** (the LLM factory is
+  stubbed; the vendor calls are not). Measured call time **119.21s** = 99.3% of the cap. `pytest-timeout`'s thread method does not fail one test when the cap is
+  crossed - it dumps stacks and **terminates the process** - so a full-suite run died at 216s with **no summary and a bare exit 1**, and an immediate re-run passed
+  green (5220). The module now carries **300s** (2.5x the measured cost); the global 180s default is untouched. **When a suite dies with no summary and a
+  `++++ Timeout ++++` dump, look for a module-level `pytest.mark.timeout(...)` set BELOW the global default and a test whose cost approaches it.**
+
 - 2026-09-22 `(working tree)` - **The market-breadth read promised measurements the vendor never sends, and its one live table rendered REVERSED.** `get_market_breadth`
   (moomoo) returns the vendor's rise/fall distribution and nothing else. The market prompt claimed "percent above the 20/50/200-day, advance-decline, new highs/lows ...
   with its panel size printed"; the news prompt told the model to call `get_market_breadth(ticker)` when the tool takes **no arguments** - a call that cannot succeed.
