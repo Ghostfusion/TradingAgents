@@ -1,8 +1,16 @@
-"""Phase 1 unit tests: regime features + rule labels (offline, no hmm)."""
+"""Phase 1 unit tests: regime features + rule labels + the filtered HMM (offline).
+
+The walk-forward HMM is pure NumPy (the same choice ``garch11_fit`` makes), so
+it is covered here rather than skipped for a missing optional dependency.
+"""
+
+import numpy as np
 
 from tradingagents.strategies.regime import (
     CHOP_TREND_THRESHOLD,
     choppiness,
+    hmm_filtered_regime,
+    hmm_regime,
     realized_vol,
     regime_label,
     trend_strength,
@@ -220,3 +228,87 @@ def test_the_compiled_context_never_asserts_a_catalyst_measurement():
     )
     assert "catalyst_window=unavailable_pre_graph" in with_overlay
     assert "catalyst_window=True" not in with_overlay
+
+
+# --- walk-forward filtered HMM (pure NumPy, no optional dependency) ---
+
+
+def _two_regime_closes(n_up=150, n_down=150, seed=5):
+    """An up-regime (positive drift, low vol) then a down-regime (negative drift,
+    high vol): the simplest series whose regime the filter must recover."""
+    rng = np.random.default_rng(seed)
+    r = np.concatenate(
+        [
+            rng.normal(0.0012, 0.006, n_up),
+            rng.normal(-0.0018, 0.020, n_down),
+        ]
+    )
+    return [100.0 * float(v) for v in np.exp(np.cumsum(r))]
+
+
+def test_the_filtered_probability_does_not_change_when_future_bars_arrive():
+    """THE property that separates a filter from a smoother.
+
+    A filtered probability is ``P(S_t | x_1:t)``, so appending bars AFTER ``t``
+    must leave every earlier row identical. A smoothed posterior
+    (``hmmlearn.predict_proba`` runs the backward pass too) changes instead -
+    which is why this runs the forward recursion itself.
+    """
+    short = _two_regime_closes(n_down=150)
+    long = _two_regime_closes(n_down=200)
+    a = hmm_filtered_regime(short, short, short, short, n_states=2)
+    b = hmm_filtered_regime(long, long, long, long, n_states=2)
+    assert a is not None and b is not None
+    assert a["n"] == len(short)  # bar-aligned to the closes it was given
+    compared = 0
+    for t in range(a["first_index"], a["n"]):
+        ra, rb = a["probs"][t], b["probs"][t]
+        if ra is None or rb is None:
+            continue
+        assert ra == rb, f"bar {t} changed when 50 future bars were appended"
+        compared += 1
+    assert compared > 10, "too few overlapping bars to prove anything"
+    # the rows before the first filtered read are a named gap, not zeros
+    assert all(p is None for p in a["probs"][: a["first_index"]])
+
+
+def test_the_filter_labels_a_down_ending_series_as_bear():
+    closes = _two_regime_closes()
+    res = hmm_filtered_regime(closes, closes, closes, closes, n_states=2)
+    assert res is not None
+    assert res["last"]["label"] == "bear"
+    # canonical order: state 0 carries the higher mean log return
+    means = [m[0] for m in res["params"]["means"]]
+    assert means[0] > means[1]
+    # ...and the regime it ended in is the high-volatility one
+    vols = res["params"]["vol_means"]
+    assert vols[res["last"]["state"]] == max(vols)
+    # every measured bar carries a full probability vector
+    for row in res["probs"][res["first_index"] :]:
+        assert row is not None
+        assert abs(sum(row) - 1.0) < 1e-6
+
+
+def test_the_filter_is_deterministic():
+    closes = _two_regime_closes()
+    a = hmm_filtered_regime(closes, closes, closes, closes, n_states=2)
+    b = hmm_filtered_regime(closes, closes, closes, closes, n_states=2)
+    assert a is not None and b is not None
+    assert a["probs"] == b["probs"]
+    assert a["last"] == b["last"]
+
+
+def test_the_filter_reports_a_named_gap_when_the_history_is_too_short():
+    """No fit on a series the walk-forward cannot train on - None, never a label
+    from a model that saw three points."""
+    flat = [100.0] * 30
+    assert hmm_filtered_regime(flat, flat, flat, flat) is None
+    assert hmm_filtered_regime([], [], [], []) is None
+
+
+def test_hmm_regime_is_the_label_view_of_the_same_filter():
+    """One HMM producer, two entry points: the label cannot disagree with the
+    probabilities because it is read off them."""
+    assert hmm_regime([100.0] * 30, 2) == "unknown"
+    assert hmm_regime([], 2) == "unknown"
+    assert hmm_regime(_two_regime_closes(), 2) == "bear"

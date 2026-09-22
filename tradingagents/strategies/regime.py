@@ -3,9 +3,10 @@
 Deterministic features first: realized volatility (21d percentile vs a
 reference window), 200-SMA trend, and choppiness on ONE scale (0-100,
 high = ranging: canonical CHOP with OHLC, the inverted Kaufman efficiency
-ratio on closes alone). An optional 2-3 state hidden Markov model (hmmlearn)
-labels bull/bear when installed; the deterministic path is always available
-and testable offline.
+ratio on closes alone). A walk-forward Gaussian hidden Markov model - pure
+NumPy, no optional dependency - gives FILTERED state probabilities
+(P(S_t | x_1:t), the forward pass only) and a bull/neutral/bear label; the
+deterministic path is always available and testable offline.
 
 Wire-up: compute features from daily OHLCV in a pre-graph step, stash
 `regime` in graph state, and let the risk node scale position size /
@@ -216,26 +217,314 @@ def regime_label(
     return "neutral"
 
 
-def hmm_regime(close: list[float], n_states: int = 2) -> str:
-    """Optional HMM label; falls back to 'unknown' without hmmlearn."""
-    try:
-        import numpy as np
-        from hmmlearn.hmm import GaussianHMM
+def _log_returns(closes) -> list:
+    """Natural-log returns aligned to ``closes`` (index 0 is None)."""
+    cs = []
+    for c in closes or []:
+        try:
+            cs.append(float(c))
+        except (TypeError, ValueError):
+            cs.append(None)
+    out: list = [None]
+    for i in range(1, len(cs)):
+        a, b = cs[i - 1], cs[i]
+        out.append(math.log(b / a) if (a and b and a > 0 and b > 0) else None)
+    return out
 
-        rets = np.array(close[1:]) / np.maximum(np.array(close[:-1]), 1e-9) - 1.0
-        rets = rets[:, None]
-        if len(rets) < 20 or np.ptp(rets) == 0:
-            return "unknown"
-        model = GaussianHMM(
-            n_components=n_states, covariance_type="full", n_iter=50, random_state=7
+
+def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict | None:
+    """Baum-Welch (scaled forward-backward) on a ``(T, D)`` feature matrix.
+
+    Pure NumPy - the same choice ``garch11_fit`` makes - so the filter has no
+    optional dependency and is testable offline. Scaling (rather than log-space)
+    keeps it readable: each alpha row is normalized by its own scale factor, and
+    the log-likelihood is the sum of the log scale factors.
+
+    None on a degenerate fit (a singular covariance that cannot be regularized).
+    """
+    import numpy as np
+
+    n_rows, D = x.shape
+    if n_rows < n_states * 2:
+        return None
+    rng = np.random.default_rng(int(seed))
+    idx = rng.permutation(n_rows)
+    chunks = [c for c in np.array_split(idx, n_states) if len(c)]
+    if len(chunks) < n_states:
+        return None
+    means = np.array([x[c].mean(axis=0) for c in chunks])
+    covars = np.array([np.cov(x[c].T, ddof=0).reshape(D, D) + np.eye(D) * 1e-6 for c in chunks])
+    pi = np.full(n_states, 1.0 / n_states)
+    A = np.full((n_states, n_states), 1.0 / n_states)
+    prev_ll = -np.inf
+    ll = -np.inf
+    try:
+        for _ in range(int(n_iter)):
+            B = np.empty((n_rows, n_states))
+            for k in range(n_states):
+                inv = np.linalg.inv(covars[k])
+                det = max(float(np.linalg.det(covars[k])), 1e-300)
+                d = x - means[k]
+                quad = np.einsum("ij,jk,ik->i", d, inv, d)
+                B[:, k] = np.exp(-0.5 * (D * math.log(2.0 * math.pi) + math.log(det) + quad))
+            B = np.clip(B, 1e-300, None)
+
+            alpha = np.empty((n_rows, n_states))
+            c = np.empty(n_rows)
+            alpha[0] = pi * B[0]
+            c[0] = alpha[0].sum() or 1e-300
+            alpha[0] /= c[0]
+            for t in range(1, n_rows):
+                alpha[t] = (alpha[t - 1] @ A) * B[t]
+                c[t] = alpha[t].sum() or 1e-300
+                alpha[t] /= c[t]
+
+            gamma = np.empty((n_rows, n_states))
+            gamma[-1] = alpha[-1]
+            xi = np.zeros((n_states, n_states))
+            beta = np.ones(n_states)
+            for t in range(n_rows - 2, -1, -1):
+                beta = (A @ (B[t + 1] * beta)) / c[t + 1]
+                gamma[t] = alpha[t] * beta
+                s = gamma[t].sum() or 1e-300
+                gamma[t] /= s
+                xi += np.outer(alpha[t], B[t + 1] * beta) / c[t + 1]
+
+            ll = float(np.log(c).sum())
+            pi = gamma[0] / (gamma[0].sum() or 1e-300)
+            A = xi / np.maximum(xi.sum(axis=1, keepdims=True), 1e-300)
+            w = gamma.sum(axis=0)
+            means = (gamma.T @ x) / np.maximum(w[:, None], 1e-300)
+            for k in range(n_states):
+                d = x - means[k]
+                covars[k] = (d * gamma[:, k : k + 1]).T @ d / max(w[k], 1e-300) + np.eye(D) * 1e-8
+            if abs(ll - prev_ll) < tol:
+                break
+            prev_ll = ll
+    except (np.linalg.LinAlgError, FloatingPointError, ValueError):
+        return None
+    if not np.isfinite(ll):
+        return None
+    return {"pi": pi, "A": A, "means": means, "covars": covars, "loglik": ll}
+
+
+def _hmm_filter_step(alpha, model, obs):
+    """One filtered step: ``P(S_t | x_{1:t})`` from ``P(S_{t-1} | x_{1:t-1})``.
+
+    This is the forward recursion - NOT ``predict_proba``, which runs the
+    backward pass too and so conditions on observations after ``t``.
+    """
+    import numpy as np
+
+    prior = np.asarray(alpha) @ model["A"]
+    d = obs - model["means"]
+    dens = np.empty(len(model["means"]))
+    for k in range(len(model["means"])):
+        inv = np.linalg.inv(model["covars"][k])
+        det = max(float(np.linalg.det(model["covars"][k])), 1e-300)
+        dens[k] = math.exp(
+            -0.5 * (len(obs) * math.log(2.0 * math.pi) + math.log(det) + d[k] @ inv @ d[k])
         )
-        model.fit(rets)
-        state = model.predict(rets)[-1]
-        means = model.means_.reshape(-1)
-        # state with higher mean = bullish regime
-        return "bull" if means[state] == max(means) else "bear"
-    except Exception:
+    post = prior * np.clip(dens, 1e-300, None)
+    total = post.sum()
+    return post / total if total > 0 else prior
+
+
+def _hmm_filter_series(model, x):
+    """Filtered probabilities over a sequence: the last row is ``P(S | x_{1:T})``."""
+    import numpy as np
+
+    alpha = np.asarray(model["pi"], dtype=float).copy()
+    out = np.empty((len(x), len(model["means"])))
+    for t in range(len(x)):
+        alpha = _hmm_filter_step(alpha, model, x[t])
+        out[t] = alpha
+    return out
+
+
+def _hmm_canonical(model: dict) -> dict:
+    """Reorder states by mean log return, descending - state 0 is the best drift.
+
+    HMM state indices are arbitrary and Baum-Welch is non-convex, so the labels
+    must be canonicalized or state 0 at one refit is a different regime at the
+    next. Sorting on the return mean is deterministic and needs no division;
+    the volatility shape is REPORTED (``vol_means``) rather than assumed, because
+    the estimator does not guarantee it is monotone in the same order.
+    """
+    import numpy as np
+
+    order = np.argsort(-np.asarray(model["means"])[:, 0], kind="stable")
+    return {
+        "pi": model["pi"][order],
+        "A": model["A"][np.ix_(order, order)],
+        "means": model["means"][order],
+        "covars": model["covars"][order],
+        "loglik": model["loglik"],
+        "order": [int(i) for i in order],
+    }
+
+
+def hmm_filtered_regime(
+    opens,
+    highs,
+    lows,
+    closes,
+    *,
+    n_states: int = 3,
+    vol_window: int = 10,
+    min_train: int = 252,
+    refit_every: int = 20,
+    n_iter: int = 60,
+    restarts: int = 3,
+    seed: int = 7,
+) -> dict | None:
+    """Walk-forward Gaussian HMM whose probabilities are FILTERED, not smoothed.
+
+    A regime model used live may only condition on data it has. ``predict_proba``
+    in hmmlearn runs the forward AND backward passes, so its rows are
+    ``P(S_t | x_{1:T})`` - they use the future. This runs the forward recursion
+    only, so row ``t`` is ``P(S_t | x_{1:t})``: the value available at that bar's
+    close.
+
+    Two further leaks are closed by construction. Parameters are refit on
+    ``x[:t]`` - strictly past data - every ``refit_every`` bars, and after each
+    refit the filter is re-run over that same past window so the carried state
+    is the new model's own posterior, not the previous model's. States are
+    canonicalized by mean return at every refit (``_hmm_canonical``), so the
+    columns keep their meaning across refits even though the raw indices do not.
+
+    Features are ``[log return, volatility]`` where the volatility leg is
+    ``volatility_models.yang_zhang_vol_series`` - the drift-independent,
+    gap-aware estimator (master rule 15: no second volatility producer). Passing
+    closes alone for OHLC collapses Yang-Zhang to close-to-close volatility,
+    which is why ``hmm_regime`` can delegate here.
+
+    Returns ``{"states", "probs", "n_states", "n", "first_index", "last",
+    "params", "refits", "basis"}`` or None when the history is too short or no
+    fit converged. ``probs`` and ``states`` are BAR-ALIGNED to ``closes``, the
+    same convention ``yang_zhang_vol_series`` uses: index them with the bar
+    index you use on the closes, ``None`` / ``-1`` before ``first_index``,
+    which is the first bar carrying a filtered read.
+    """
+    import numpy as np
+
+    from .volatility_models import yang_zhang_vol_series
+
+    if int(n_states) < 2:
+        return None
+    cs = [float(c) for c in (closes or [])]
+    if len(cs) < 3:
+        return None
+    yz = yang_zhang_vol_series(opens, highs, lows, closes, int(vol_window))
+    vol_series = yz["series"]
+    rets = _log_returns(closes)
+    rows = []
+    for i in range(len(cs)):
+        r = rets[i]
+        v = vol_series[i] if i < len(vol_series) else None
+        if r is not None and v is not None:
+            rows.append((i, r, v))
+    if len(rows) < int(min_train) + 2:
+        return None
+    bar_index = [i for i, _, _ in rows]
+    x = np.array([[r, v] for _, r, v in rows], dtype=float)
+
+    k_states = int(n_states)
+    n_bars = len(cs)
+    probs: list = [None] * n_bars
+    states = [-1] * n_bars
+    model = None
+    alpha = None
+    refits = 0
+    for t in range(int(min_train), len(x)):
+        if model is None or (t - int(min_train)) % int(refit_every) == 0:
+            best = None
+            for j in range(max(1, int(restarts))):
+                cand = _hmm_em(x[:t], k_states, int(n_iter), int(seed) + 17 * j)
+                if cand is None:
+                    continue
+                if best is None or cand["loglik"] > best["loglik"]:
+                    best = cand
+            if best is None:
+                return None
+            model = _hmm_canonical(best)
+            refits += 1
+            # Re-run the filter over the past window under the NEW parameters, so
+            # the carried state is this model's posterior in ITS canonical order.
+            # All of x[:t] is past, so this is not a leak.
+            alpha = _hmm_filter_series(model, x[:t])[-1]
+        alpha = _hmm_filter_step(alpha, model, x[t])
+        # Bar-aligned, like ``yang_zhang_vol_series``: index it with the same
+        # bar index you use on ``closes``.
+        probs[bar_index[t]] = [round(float(p), 6) for p in alpha]
+        states[bar_index[t]] = int(np.argmax(alpha))
+
+    measured = sum(1 for p in probs if p is not None)
+    if not measured:
+        return None
+    first_index = bar_index[int(min_train)]
+    last_probs = probs[bar_index[-1]]
+    last_state = states[bar_index[-1]] if states[bar_index[-1]] >= 0 else 0
+    means = model["means"]
+    label = (
+        ("bull" if last_state == 0 else "bear")
+        if k_states == 2
+        else ("bull" if last_state == 0 else "bear" if last_state == k_states - 1 else "neutral")
+    )
+    return {
+        "states": states,
+        "probs": probs,
+        "n_states": k_states,
+        "n": n_bars,
+        "measured": measured,
+        "first_index": first_index,
+        "last": {
+            "state": last_state,
+            "label": label,
+            "probs": [round(float(p), 6) for p in last_probs],
+            "mean_log_return": round(float(means[last_state][0]), 8),
+            "mean_vol": round(float(means[last_state][1]), 8),
+        },
+        "params": {
+            "means": [[round(float(v), 8) for v in row] for row in means],
+            "vol_means": [round(float(m[1]), 8) for m in means],
+            "transmat": [[round(float(v), 6) for v in row] for row in model["A"]],
+        },
+        "refits": refits,
+        "basis": (
+            f"{k_states}-state Gaussian HMM over [log return, "
+            f"yang_zhang_vol({int(vol_window)})] on {len(x)} feature rows, output "
+            f"BAR-ALIGNED to the {n_bars} closes; "
+            f"FILTERED probabilities P(S_t | x_1:t) - the forward pass only, no "
+            f"backward pass; parameters refit on the strictly-past prefix every "
+            f"{int(refit_every)} bars ({refits} refit(s)), states canonicalized by "
+            f"mean return; {measured} of {n_bars} bars carry a filtered read, "
+            f"first at bar {first_index}"
+        ),
+    }
+
+
+def hmm_regime(close: list[float], n_states: int = 2) -> str:
+    """Walk-forward HMM regime label: 'bull', 'bear' (2 states) or 'neutral'.
+
+    Delegates to ``hmm_filtered_regime`` so there is ONE HMM producer: this is
+    the label view of the same filter, not a second implementation. Closes alone
+    are passed as the OHLC input, which collapses the Yang-Zhang volatility leg
+    to close-to-close - a real estimator on that input, not a fallback.
+
+    Returns 'unknown' when the history is too short for the walk-forward fit or
+    no fit converged - a named gap, never a guessed label. Needs roughly
+    ``min_train`` (252) usable bars.
+    """
+    try:
+        res = hmm_filtered_regime(
+            close, close, close, close, n_states=int(n_states)
+        )
+    except Exception:  # noqa: BLE001 - advisory axis degrades
         return "unknown"
+    if not res or not res.get("last"):
+        return "unknown"
+    return str(res["last"]["label"])
 
 
 

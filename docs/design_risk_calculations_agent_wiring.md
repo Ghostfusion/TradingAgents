@@ -286,7 +286,8 @@ capital-at-risk, no governor limits, no fixed-risk size, no expected move.
    `alpha_eval.alpha_score`/`insight_accuracy` (magnitude-scored alpha),
    `statistical.cointegration_pair`/`granger_causality`/`ols_factors`/
    `variance_inflation_factor`, `rotation.vol_cones`,
-   `pre_market.ledger_track_record`, `hmm_regime` (hmmlearn-gated).
+   `pre_market.ledger_track_record`, `hmm_regime` (walk-forward, filtered
+   probabilities, pure NumPy as of 2026-09-21 - no longer hmmlearn-gated).
 5. **F5 — `get_risk_gate` exposes only part of `govern()`.** The governor
    accepts `daily_loss_pct`, `hwm_drawdown_pct`, `liquidity_verdict`,
    `capital_at_risk_pct`, `risk_cap_pct`, `sector_pct` — the tool only passes

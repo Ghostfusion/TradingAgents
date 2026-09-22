@@ -13,14 +13,17 @@ import pytest
 from tradingagents.strategies.extended_indicators import (
     accumulation_distribution,
     anchored_vwap,
+    anchored_vwap_levels,
     cci,
     chaikin_money_flow,
+    date_anchor_index,
     force_index,
     golden_death_cross,
     ichimoku,
     momentum_oscillator,
     roc,
     scan_candlesticks,
+    swing_pivots,
     trix,
     vpt,
 )
@@ -165,6 +168,146 @@ def test_anchored_vwap_from_anchor():
     av = anchored_vwap(closes, vols, anchor_price=103.0)
     assert av is not None
     assert av == pytest.approx(105.0, abs=0.01)
+
+
+# --- event-anchored AVWAP levels ---
+
+
+def _ohlc(closes, pad=0.5):
+    return [c + pad for c in closes], [c - pad for c in closes]
+
+
+def test_swing_pivots_requires_confirmation():
+    """A low that can still be undercut is not a swing: the series minimum at the
+    LAST bar has no confirming bars after it, so there is no pivot low."""
+    lows = [5.0, 4.0, 3.0, 2.0, 1.0, 0.5]
+    piv = swing_pivots([x + 10 for x in lows], lows, left=2, right=2)
+    assert piv["low"] is None
+    assert piv["left"] == 2 and piv["right"] == 2
+
+
+def test_swing_pivots_rejects_a_flat_shelf():
+    """A tied minimum is not a pivot - a flat shelf is not a swing low."""
+    lows = [5.0, 3.0, 3.0, 3.0, 5.0, 6.0, 7.0]
+    piv = swing_pivots([x + 10 for x in lows], lows, left=1, right=1)
+    assert piv["low"] is None
+
+
+def test_swing_pivots_finds_the_most_recent_confirmed_pivot():
+    lows = [5.0, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3, 4, 5, 6]
+    piv = swing_pivots([x + 10 for x in lows], lows, left=2, right=2)
+    assert piv["low"] == 12  # the second V, not the first (index 4)
+
+
+def test_date_anchor_index_places_an_event_on_the_first_session_at_or_after_it():
+    dates = ["2026-01-05", "2026-01-06", "2026-01-09", "2026-01-12"]
+    assert date_anchor_index(dates, "2026-01-09") == 2  # the session itself
+    assert date_anchor_index(dates, "2026-01-10") == 3  # a Saturday -> the next one
+    assert date_anchor_index(dates, "2026-01-03") == 0  # before the series -> bar 0
+    # A FUTURE event has no bar to anchor. Anchoring the last bar would invent one.
+    assert date_anchor_index(dates, "2026-02-01") is None
+    # "not-a-date" is ten characters, so a length check would let it through and
+    # string-compare against every ISO date without ever failing.
+    assert date_anchor_index(dates, "not-a-date") is None
+    assert date_anchor_index([], "2026-01-09") is None
+    assert date_anchor_index(["garbage", "2026-01-09"], "2026-01-09") == 1
+
+
+def test_anchored_vwap_levels_measures_each_anchor_against_the_last_close():
+    """The swing-low level IS ``anchored_vwap`` from that bar (one implementation
+    of the arithmetic), and the read says which side of it the last close sits."""
+    closes = [10.0, 9, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    highs, lows = _ohlc(closes)
+    res = anchored_vwap_levels(closes, highs, lows, [1.0] * len(closes), left=2, right=2)
+    assert res is not None
+    low = res["levels"]["swing_low"]
+    assert low["index"] == 2
+    # constant volume from bar 2: the VWAP is the mean of closes[2:]
+    assert low["vwap"] == pytest.approx(13.0, abs=0.01)
+    assert low["above"] is True
+    assert low["distance_pct"] == pytest.approx(38.462, abs=0.01)
+    assert res["last_close"] == 18.0
+    # flat volume is not expanding volume, so the shift signal is off
+    assert res["shift"]["volume_ratio"] == pytest.approx(1.0)
+    assert res["shift"]["lost_swing_low_vwap"] is False
+    assert res["shift"]["signal"] is False
+
+
+def test_the_shift_read_needs_both_the_breach_and_the_expanding_volume():
+    """The read the anchors exist for: price below the swing-low VWAP is the
+    breach, and it only becomes the signal on expanding volume."""
+    closes = [10.0, 9, 8, 9, 10, 11, 12, 9.0]
+    highs, lows = _ohlc(closes)
+    on_volume = anchored_vwap_levels(
+        closes, highs, lows, [1.0] * 7 + [5.0], left=2, right=2
+    )
+    quiet = anchored_vwap_levels(closes, highs, lows, [1.0] * 8, left=2, right=2)
+    assert on_volume is not None and quiet is not None
+    # both breached the swing-low VWAP...
+    assert on_volume["levels"]["swing_low"]["vwap"] == pytest.approx(9.5, abs=0.01)
+    assert on_volume["shift"]["lost_swing_low_vwap"] is True
+    assert quiet["shift"]["lost_swing_low_vwap"] is True
+    # ...but only one did it on volume
+    assert on_volume["shift"]["volume_ratio"] == pytest.approx(3.0, abs=0.01)
+    assert on_volume["shift"]["on_expanding_volume"] is True
+    assert on_volume["shift"]["signal"] is True
+    assert quiet["shift"]["volume_ratio"] == pytest.approx(1.0)
+    assert quiet["shift"]["signal"] is False
+
+
+def test_date_anchored_levels_are_a_named_gap_without_the_session_axis():
+    """Without ``dates`` the OPEX and caller event anchors are omitted with the
+    reason - never anchored at bar 0."""
+    closes = [10.0 + i for i in range(30)]
+    highs, lows = _ohlc(closes)
+    res = anchored_vwap_levels(closes, highs, lows, [1.0] * 30, left=2, right=2)
+    assert res is not None
+    assert "opex_monthly" not in res["levels"]
+    assert "no session dates supplied" in res["basis"]
+
+
+def test_opex_and_caller_event_dates_anchor_on_their_own_session():
+    """With the session axis, the third-Friday OPEX calendar (taken from
+    derivatives_gamma, not recomputed) and a caller-supplied FOMC date each
+    resolve to a bar."""
+    dates = [f"2026-01-{d:02d}" for d in range(1, 31)]
+    closes = [10.0 + i for i in range(30)]
+    highs, lows = _ohlc(closes)
+    res = anchored_vwap_levels(
+        closes,
+        highs,
+        lows,
+        [1.0] * 30,
+        dates=dates,
+        event_dates={"fomc": "2026-01-10"},
+        left=2,
+        right=2,
+    )
+    assert res is not None
+    assert res["levels"]["fomc"]["index"] == 9  # 2026-01-10 is index 9
+    assert res["levels"]["fomc"]["date"] == "2026-01-10"
+    assert res["levels"]["opex_monthly"]["index"] == 15  # third Friday = 2026-01-16
+    assert res["levels"]["opex_monthly"]["date"] == "2026-01-16"
+    assert res["levels"]["opex_quarterly"]["index"] is not None
+
+
+def test_an_event_outside_the_series_is_reported_not_anchored():
+    dates = [f"2026-01-{d:02d}" for d in range(1, 31)]
+    closes = [10.0 + i for i in range(30)]
+    highs, lows = _ohlc(closes)
+    res = anchored_vwap_levels(
+        closes, highs, lows, [1.0] * 30, dates=dates,
+        event_dates={"fomc": "2027-06-01"}, left=2, right=2,
+    )
+    assert res is not None
+    row = res["levels"]["fomc"]
+    assert row["vwap"] is None
+    assert "outside this series" in row["reason"]
+
+
+def test_anchored_vwap_levels_needs_two_bars():
+    assert anchored_vwap_levels([], [], [], []) is None
+    assert anchored_vwap_levels([100.0], [101.0], [99.0], [1.0]) is None
 
 
 # ---------------------------------------------------------------------------

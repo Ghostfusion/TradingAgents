@@ -15,7 +15,9 @@ involved. This is the "compute, don't narrate" core.
 - `relative_strength.py` — `relative_strength_report`: leading/uptrend/lagging
   vs SPY.
 - `momentum.py` — pillars, first-pullback, RVOL, session flags (intraday).
-- `regime.py` — regime gate (vol percentile / trend label).
+- `regime.py` — regime gate (vol percentile / trend label), the CUSUM/EWMA/BOCPD
+  shift detectors, and the walk-forward Gaussian HMM with filtered probabilities
+  (`hmm_filtered_regime`; `hmm_regime` is its label view).
 - `sector_rank.py` — `--sector-rank` logic (SPDR top-3 by momentum).
 - `size.py` — Kelly / vol-target / position sizing (position_sizing).
 - `portfolio.py` — `value_ratio_weights`, cap adjustments (watchlist alloc).
@@ -73,9 +75,12 @@ involved. This is the "compute, don't narrate" core.
 - `extended_indicators.py` — the standard trend/momentum/volume/structure
   group computed locally (no vendor): Ichimoku cloud, golden/death cross,
   CCI, ROC, momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin
-  Money Flow, anchored VWAP + `scan_candlesticks` (doji/hammer/shooting-star/
-  engulfing/morning+evening star). Exposed as `get_extended_indicators` +
-  `get_candlestick_patterns` on the market analyst.
+  Money Flow, anchored VWAP + `anchored_vwap_levels` (the event-anchored
+  levels: confirmed swing pivots, monthly/quarterly OPEX from
+  `derivatives_gamma.opex_dates`, caller-supplied event dates, and the
+  lost-the-swing-low-VWAP-on-volume shift read) + `scan_candlesticks`
+  (doji/hammer/shooting-star/engulfing/morning+evening star). Exposed as
+  `get_extended_indicators` + `get_candlestick_patterns` on the market analyst.
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
   EV->equity bridge) powering `get_dcf_valuation`.
 - `journal.py` — `--journal` alloc/journal.

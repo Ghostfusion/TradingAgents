@@ -48,8 +48,10 @@ def get_regime_state(
         f"drawdown={lb['drawdown']} ({rs['drawdown']['drawdown']}), "
         f"F_regime={rs['factor']} (crash={rs.get('crash')})"
     )
-    # Optional HMM regime label (strategies/regime.hmm_regime): a 2-state
-    # Gaussian-HMM macro regime - 'unknown' without hmmlearn (never a guess).
+    # Walk-forward HMM regime label (strategies/regime.hmm_regime): a 2-state
+    # Gaussian HMM over [log return, Yang-Zhang vol] with FILTERED
+    # probabilities. 'unknown' when the history is too short to fit a
+    # walk-forward model (never a guess).
     try:
         from tradingagents.strategies.regime import hmm_regime
 

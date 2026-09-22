@@ -2836,7 +2836,8 @@ def test_get_value_floors_no_tax_does_not_crash(monkeypatch):
 
 def test_extended_indicators_computes_all_reads(monkeypatch):
     """The extended group wraps Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/
-    CMF/anchored VWAP + golden cross in one call (shares the OHLCV cache)."""
+    CMF/anchored VWAP + the event-anchored levels + golden cross in one call
+    (shares the OHLCV cache)."""
     closes = _uptrend(260)
     fake = {
         "closes": closes,
@@ -2844,13 +2845,17 @@ def test_extended_indicators_computes_all_reads(monkeypatch):
         "highs": [c + 3 for c in closes],
         "lows": [c - 3 for c in closes],
         "volumes": [5_000_000.0] * 260,
+        # the session axis the OPEX/event anchors need (the tool reads it off
+        # the same OHLCV cache)
+        "dates": [f"2026-{1 + (i // 28):02d}-{1 + (i % 28):02d}" for i in range(260)],
     }
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
     out = T.get_extended_indicators.invoke({"ticker": "AAPL"})
     assert "extended indicators AAPL" in out
     for token in ("ichimoku:", "cci=", "roc=", "trix=", "force_index=",
                   "accumulation_distribution=", "vpt=", "cmf=",
-                  "anchored_vwap=", "golden/death cross"):
+                  "anchored_vwap=", "anchored_vwap_levels", "swing_low",
+                  "opex_monthly", "shift:", "golden/death cross"):
         assert token in out
 
 

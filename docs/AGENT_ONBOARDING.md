@@ -434,6 +434,27 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-09-21 `(working tree)` - **The three genuinely-absent regime reads are built, each on an EXISTING producer.** From the screener review's "only
+  defensible build" list. **(1) Event-anchored AVWAP** - `extended_indicators.anchored_vwap_levels` locates anchors as bar INDICES and computes each level
+  with the existing `anchored_vwap` over the slice from that bar (one implementation of the arithmetic). Anchors: `swing_low`/`swing_high` via the new
+  `swing_pivots` (requires the right-hand CONFIRMATION bars - a low that can still be undercut is not a swing; a tied minimum is not a pivot),
+  `opex_monthly`/`opex_quarterly` from `derivatives_gamma.opex_dates` (the repo's ONE third-Friday calendar), and any `event_dates` the CALLER supplies -
+  FOMC/earnings dates come from a calendar, so they are input, never inferred from bars. `shift` = price below the swing-low VWAP **and** volume >=
+  `volume_multiple` (1.5x) its average since that anchor. Surfaced in the existing `get_extended_indicators` tool; prompt trigger extended.
+  **(2) True 52-week NH/NL** - new fields `new_highs_52w`/`new_lows_52w`/`net_new_highs_52w` on the ONE breadth producer, counted over a FIXED
+  252-session year so a 60-bar and a 300-bar panel agree for the same last year; a name short of a year is excluded and reported in `new_highs_52w_n`;
+  no year at all gives `None`, not `0`. New fields only - the printed `basis` keeps its meaning and now states the 52-week coverage.
+  **(3) Walk-forward HMM with FILTERED probabilities** - `regime.hmm_filtered_regime`, pure NumPy (no optional dependency), forward recursion ONLY so
+  row `t` is `P(S_t | x_1:t)`; `hmmlearn.predict_proba` runs the backward pass too and its rows use the future. Refit on `x[:t]` every 20 bars, filter
+  re-run over that past window after each refit, states canonicalized by mean return; features `[log return, yang_zhang_vol_series]`. **`hmm_regime` now
+  DELEGATES to it** - one HMM producer, two entry points - which retires the `hmmlearn` gate that made it return `unknown` on every run (247 occurrences,
+  zero real labels, 91 trees). **Measured, not asserted:** appending 50 future bars to a 300-bar series left **0 of 39** overlapping filtered rows changed;
+  the filter recovers a seeded two-regime series; deterministic across runs; `None` on too-short history. **A defect my own test caught:** `date_anchor_index`
+  length-checked the date string, and `"not-a-date"` is exactly 10 chars, so it string-compared against every ISO date and returned a bar instead of `None` -
+  it now PARSES the date, and a FUTURE event is a named gap rather than an anchor at the last bar. Also: `regime_score.py`'s citation of
+  `market_breadth.py::market_breadth` moved 37 -> 44 and was updated in the same pass (the `test_every_component_names_one_producer_with_a_line` gate
+  checks it points at the `def`).
+
 - 2026-09-21 `(working tree)` - **Yang-Zhang gained a per-bar SERIES, on a shared core rather than as a second implementation.** A regime
   model needs a vol *series*; the repo had only the scalar `yang_zhang_vol` over a window. `yang_zhang_vol_series(opens, highs, lows, closes,
   window, periods=252)` returns `{series, n, measured, window, basis}` - aligned to the input, `None` before the first full window and for any

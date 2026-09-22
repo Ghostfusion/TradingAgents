@@ -84,10 +84,50 @@ def test_an_empty_or_unusable_panel_is_none_never_zero():
 
 
 def test_the_new_high_count_is_measured_against_the_window_it_was_given():
-    """A 60-bar panel cannot produce a 52-week figure, and the basis says which
-    window the counts came from so the read cannot be quoted as one."""
+    """``new_highs`` counts against the panel each name was given, and the basis
+    says which window that was. The fixed-year pair is the one that may be
+    quoted as 52-week, and a 60-bar panel cannot fill it: None, not 0.
+
+    This used to assert ``"52" not in basis`` - a proxy for "the read makes no
+    52-week claim". Now that a genuine 52-week counter exists, the claim is
+    pinned where it belongs: on the counter.
+    """
     short = {f"N{i}": [100.0 + j for j in range(60)] for i in range(25)}
     got = market_breadth(short)
     assert got["new_highs"] == 25
     assert "up to 60 bars each" in got["basis"]
-    assert "52" not in got["basis"]
+    assert got["new_highs_52w"] is None
+    assert got["new_lows_52w"] is None
+    assert got["net_new_highs_52w"] is None
+    assert got["new_highs_52w_n"] == 0
+
+
+def test_the_52w_counters_use_a_fixed_year_not_the_panel_window():
+    """The whole point of the fixed lookback: a 300-bar panel and the last 252
+    bars of it give the SAME 52-week answer, and that answer can differ from the
+    panel-window count - which is why both are printed.
+
+    Construction: 300 bars flat at 100 with a 300.0 spike at index 10 (outside
+    the last 252) and a 159.0 last bar. Against the full panel the last bar is
+    not a high (300 beats it); against the last 252 sessions it is.
+    """
+    s = [100.0] * 300
+    s[10] = 300.0
+    s[-1] = 159.0
+    got = market_breadth({"SPIKE": s}, min_n=1)
+    assert got["new_highs"] == 0  # the panel-window count sees the old spike
+    assert got["new_highs_52w"] == 1  # the fixed-year count does not
+    assert got["new_highs_52w_n"] == 1
+    assert got["new_lows_52w"] == 0
+    assert got["net_new_highs_52w"] == 1
+    assert "252-session year" in got["basis"]
+
+
+def test_the_52w_counts_match_a_known_five_name_panel():
+    """Known-answer check on the shared fixture: 260 bars each, so all five names
+    carry a year - one at its high (RISE), two at their low (FALL, FALL_FLAT)."""
+    got = market_breadth(_five_name_panel(), min_n=5)
+    assert got["new_highs_52w_n"] == 5
+    assert got["new_highs_52w"] == 1
+    assert got["new_lows_52w"] == 2
+    assert got["net_new_highs_52w"] == -1

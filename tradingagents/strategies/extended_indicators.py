@@ -19,6 +19,8 @@ tools unchanged.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from .technical_factors import ema
 
 
@@ -309,6 +311,222 @@ def anchored_vwap(closes, volumes, anchor_price: float | None = None) -> float |
     if den == 0:
         return None
     return round(num / den, 4)
+
+
+# ---------------------------------------------------------------------------
+# Event-anchored AVWAP levels (the anchor an analyst names, not the plain line)
+# ---------------------------------------------------------------------------
+
+
+def swing_pivots(highs, lows, *, left: int = 5, right: int = 5) -> dict:
+    """The most recent CONFIRMED swing pivot indices (fractal low and high).
+
+    A pivot low at ``i`` needs its low strictly below the ``left`` bars before
+    it and the ``right`` bars after it. The confirmation window is the point:
+    the newest ``right`` bars can never be a pivot, because a low that can still
+    be undercut is not a swing. Ties do not qualify - a flat shelf is not a
+    pivot.
+
+    Returns ``{"low", "high", "left", "right"}``, ``None`` where the series
+    holds no pivot of that kind.
+    """
+    h = [_f(x) for x in (highs or [])]
+    lo = [_f(x) for x in (lows or [])]
+    n = min(len(h), len(lo))
+    lw, rw = int(left), int(right)
+    out: dict = {"low": None, "high": None, "left": lw, "right": rw}
+    if lw < 1 or rw < 1 or n < lw + rw + 1:
+        return out
+    for i in range(n - rw - 1, lw - 1, -1):
+        lows_w = lo[i - lw : i + rw + 1]
+        highs_w = h[i - lw : i + rw + 1]
+        if (
+            out["low"] is None
+            and None not in lows_w
+            and lo[i] == min(lows_w)
+            and lows_w.count(lo[i]) == 1
+        ):
+            out["low"] = i
+        if (
+            out["high"] is None
+            and None not in highs_w
+            and h[i] == max(highs_w)
+            and highs_w.count(h[i]) == 1
+        ):
+            out["high"] = i
+        if out["low"] is not None and out["high"] is not None:
+            break
+    return out
+
+
+def date_anchor_index(dates, event_date) -> int | None:
+    """The bar index an event anchors: the FIRST session at or after it, or None.
+
+    The anchor is where the move the event caused begins. An event on a session
+    anchors that session (the reaction is intraday); an event on a non-session -
+    a Saturday statement, a holiday - anchors the next session, which is the
+    first bar that can contain the reaction.
+
+    None when the event falls after the last session: a future event has no bar
+    to anchor, and anchoring the last bar would invent one. None for an
+    unparseable date or a series with no usable dates - never bar 0 by default.
+
+    The date is PARSED, not length-checked: ``"not-a-date"`` is ten characters
+    and would string-compare against every ISO date without ever failing.
+    """
+    try:
+        want = datetime.strptime(str(event_date or "")[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+    for i, d in enumerate(dates or []):
+        try:
+            when = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if when >= want:
+            return i
+    return None
+
+
+def anchored_vwap_levels(
+    closes,
+    highs,
+    lows,
+    volumes,
+    *,
+    dates=None,
+    event_dates=None,
+    left: int = 5,
+    right: int = 5,
+    volume_multiple: float = 1.5,
+) -> dict | None:
+    """Anchored VWAP from several event anchors, each measured against the last close.
+
+    ``anchored_vwap`` answers one question - the cumulative VWAP from a price
+    level. This answers the one an analyst actually asks: from WHICH anchor, and
+    has price lost it. Each anchor is located as a bar INDEX and the level is
+    computed by the existing ``anchored_vwap`` over the slice from that bar, so
+    there is one implementation of the arithmetic (master rule 15) and the two
+    cannot disagree.
+
+    Anchors reported, in order:
+
+    * ``swing_low`` / ``swing_high`` - the most recent confirmed fractal pivot
+      (``swing_pivots``). The low is the start of the current rally, so losing
+      its VWAP is the classic "the buyers who started this are underwater" read.
+    * ``opex_monthly`` / ``opex_quarterly`` - the most recent monthly (third
+      Friday) and quarterly (Mar/Jun/Sep/Dec) expiries, taken from
+      ``derivatives_gamma.opex_dates`` - the repo's one OPEX calendar, not a
+      second third-Friday calculation.
+    * any ``event_dates`` the CALLER supplies, e.g. ``{"fomc": "2026-09-16"}``.
+      FOMC and earnings dates come from a calendar, so they are taken as input
+      and never inferred from the bars.
+
+    The date-anchored levels need ``dates`` (the session axis). Without it they
+    are reported as a named gap rather than anchored at bar 0.
+
+    Returns ``{"levels", "last_close", "shift", "basis"}``, or None with fewer
+    than 2 bars. Every attempted anchor gets a row: a value, or ``None`` with
+    the reason. ``shift`` is the read the anchors exist for - price below the
+    swing-low VWAP on expanding volume - and it is ``None`` when no swing low
+    was found, never ``False`` on an unmeasured axis.
+    """
+    cs = [_f(x) for x in (closes or [])]
+    vs = [_f(x) for x in (volumes or [])]
+    n = min(len(cs), len(vs))
+    if n < 2 or cs[n - 1] is None:
+        return None
+    last = cs[n - 1]
+    ds = [str(d)[:10] for d in (dates or [])]
+    levels: dict = {}
+    notes: list[str] = []
+
+    def _add(name: str, idx: int | None, why: str) -> None:
+        if idx is None or not 0 <= idx < n:
+            levels[name] = {
+                "index": None, "date": None, "vwap": None,
+                "above": None, "distance_pct": None, "reason": why,
+            }
+            return
+        vwap = anchored_vwap(cs[idx:n], vs[idx:n])
+        if vwap is None:
+            levels[name] = {
+                "index": idx, "date": None, "vwap": None,
+                "above": None, "distance_pct": None,
+                "reason": "no usable bar after the anchor",
+            }
+            return
+        levels[name] = {
+            "index": idx,
+            "date": ds[idx] if idx < len(ds) else None,
+            "vwap": vwap,
+            "above": bool(last > vwap),
+            "distance_pct": round((last / vwap - 1.0) * 100.0, 3) if vwap else None,
+        }
+
+    piv = swing_pivots(highs, lows, left=left, right=right)
+    _add("swing_low", piv["low"], f"no confirmed {left}/{right} pivot low in this series")
+    _add("swing_high", piv["high"], f"no confirmed {left}/{right} pivot high in this series")
+
+    if ds:
+        last_day = ds[n - 1] if n - 1 < len(ds) else ""
+        try:
+            from .derivatives_gamma import opex_dates
+
+            years = {int(last_day[:4]), int(last_day[:4]) - 1} if len(last_day) == 10 else set()
+            monthly = sorted(
+                d.isoformat()
+                for y in sorted(years)
+                for d in opex_dates(y)
+                if d.isoformat() <= last_day
+            )
+            if monthly:
+                _add("opex_monthly", date_anchor_index(ds, monthly[-1]),
+                     "no monthly expiry at or before this series")
+                quarterly = [d for d in monthly if int(d[5:7]) in (3, 6, 9, 12)]
+                if quarterly:
+                    _add("opex_quarterly", date_anchor_index(ds, quarterly[-1]),
+                         "no quarterly expiry at or before this series")
+            else:
+                notes.append("no OPEX date falls inside this series")
+        except Exception:  # noqa: BLE001 - the calendar is optional
+            notes.append("OPEX calendar unavailable")
+    else:
+        notes.append(
+            "no session dates supplied, so the OPEX and caller event anchors are omitted"
+        )
+
+    for name, when in sorted((event_dates or {}).items()):
+        _add(str(name), date_anchor_index(ds, when),
+             f"event date {when!r} is outside this series")
+
+    shift = None
+    low = levels.get("swing_low") or {}
+    if low.get("vwap") is not None:
+        idx = int(low["index"])
+        vols = [v for v in vs[idx:] if v is not None]
+        avg = (sum(vols) / len(vols)) if vols else None
+        last_vol = vs[n - 1]
+        ratio = round(last_vol / avg, 3) if (avg and last_vol is not None) else None
+        lost = bool(last < low["vwap"])
+        expanding = ratio is not None and ratio >= float(volume_multiple)
+        shift = {
+            "lost_swing_low_vwap": lost,
+            "volume_ratio": ratio,
+            "volume_multiple": float(volume_multiple),
+            "on_expanding_volume": expanding,
+            "signal": bool(lost and expanding),
+        }
+
+    measured = sum(1 for lv in levels.values() if lv.get("vwap") is not None)
+    basis = (
+        f"{measured} of {len(levels)} anchor(s) measured over {n} bars; swing "
+        f"pivots confirmed {int(left)}/{int(right)}; each level is "
+        f"anchored_vwap over the slice from its own bar"
+    )
+    if notes:
+        basis += " | " + "; ".join(notes)
+    return {"levels": levels, "last_close": last, "shift": shift, "basis": basis}
 
 
 # ---------------------------------------------------------------------------

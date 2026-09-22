@@ -148,14 +148,14 @@ COMPONENTS: dict[str, Component] = {
         _c("di_spread", "trend", "higher_better", "technical_factors.adx:179 (di_plus - di_minus)"),
         _c("above_sma200", "trend", "higher_better", "swing.trend_architecture:71"),
         _c("sma_stack", "trend", "higher_better", "swing.trend_architecture:71"),
-        _c("golden_cross", "trend", "higher_better", "extended_indicators.golden_death_cross:53"),
-        _c("ichimoku_above_cloud", "trend", "higher_better", "extended_indicators.ichimoku:78"),
+        _c("golden_cross", "trend", "higher_better", "extended_indicators.golden_death_cross:55"),
+        _c("ichimoku_above_cloud", "trend", "higher_better", "extended_indicators.ichimoku:80"),
         _c("aroon_osc", "trend", "higher_better", "technical_factors.aroon:513 (up - down)"),
         # momentum (18)
         _c("rsi", "momentum", "higher_better", "swing.rsi:39", "NON-MONOTONIC: band-mapped"),
         _c("stoch_k", "momentum", "higher_better", "technical_factors.stochastic_oscillator:146", "NON-MONOTONIC"),
         _c("mfi", "momentum", "higher_better", "technical_factors.mf_index:112", "NON-MONOTONIC"),
-        _c("roc20", "momentum", "higher_better", "extended_indicators.roc:149"),
+        _c("roc20", "momentum", "higher_better", "extended_indicators.roc:151"),
         _c("momentum_12_1", "momentum", "higher_better", "momentum.momentum_12_1:358"),
         _c("macd_hist_pct", "momentum", "higher_better", "value_dip._macd_hist:500 / last close"),
         # relative strength (12)
@@ -174,7 +174,7 @@ COMPONENTS: dict[str, Component] = {
         # volume (10)
         _c("rvol", "volume", "higher_better", "momentum.rvol:25"),
         _c("elder_ratio", "volume", "higher_better", "technical_factors.elder_thermometer:494", "NON-MONOTONIC"),
-        _c("cmf", "volume", "higher_better", "extended_indicators.chaikin_money_flow:261"),
+        _c("cmf", "volume", "higher_better", "extended_indicators.chaikin_money_flow:263"),
         _c("volume_dry_up", "volume", "higher_better", "value_dip.volume_dry_up:601"),
         # breakout / pullback (10)
         _c("vcp_candidate", "breakout", "higher_better", "swing.vcp_setup:326"),

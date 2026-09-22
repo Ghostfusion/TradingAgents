@@ -6905,19 +6905,20 @@ def get_extended_indicators(
 ) -> str:
     """Extended trend/momentum/volume indicators: Ichimoku cloud, CCI, ROC,
     momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin Money Flow,
-    anchored VWAP and the golden/death cross.
+    anchored VWAP (plain and event-anchored) and the golden/death cross.
 
     Complements get_technical_factors / get_indicators / get_mean_reversion_tech
     with the standard indicator group the project did not previously compute.
     One combined call (shares the run-level OHLCV cache). Use before any
     'Ichimoku cloud / CCI overbought / ROC momentum / TRIX turn / A-D
     accumulation / volume-price trend / Chaikin Money Flow / VWAP cost-basis /
-    golden cross' claim.
+    golden cross / lost the swing-low VWAP / OPEX-anchored VWAP' claim.
     """
     try:
         from tradingagents.strategies.extended_indicators import (
             accumulation_distribution as _ad,
             anchored_vwap as _avwap,
+            anchored_vwap_levels as _avwap_levels,
             cci as _cci,
             chaikin_money_flow as _cmf,
             force_index as _fi,
@@ -6946,6 +6947,30 @@ def get_extended_indicators(
         cmf = _cmf(data["highs"], data["lows"], closes, data["volumes"])
         av = _avwap(closes, data["volumes"])
         gdc = _gdc(closes)
+        avl = _avwap_levels(
+            closes,
+            data["highs"],
+            data["lows"],
+            data["volumes"],
+            dates=data.get("dates"),
+        )
+        av_lines = ["  anchored_vwap_levels (event anchors, vs the last close):"]
+        for _name, _lv in (avl or {}).get("levels", {}).items():
+            if _lv.get("vwap") is None:
+                av_lines.append(f"    {_name}: n/a - {_lv.get('reason')}")
+            else:
+                av_lines.append(
+                    f"    {_name} ({_lv.get('date') or '?'}): vwap={_lv['vwap']} "
+                    f"close {'above' if _lv['above'] else 'BELOW'} "
+                    f"({_lv['distance_pct']:+.2f}%)"
+                )
+        _sh = (avl or {}).get("shift")
+        if _sh:
+            av_lines.append(
+                f"    shift: lost_swing_low_vwap={_sh['lost_swing_low_vwap']} "
+                f"vol={_sh['volume_ratio']}x vs {_sh['volume_multiple']}x "
+                f"-> signal={_sh['signal']}"
+            )
         lines = [
             f"extended indicators {ticker} (close {closes[-1]:.2f}):",
             f"  ichimoku: conversion={ic.get('conversion')} base={ic.get('base')} "
@@ -6960,6 +6985,7 @@ def get_extended_indicators(
             f"  vpt={vp} (volume price trend)",
             f"  cmf={cmf} (above +0.1 = buying pressure)",
             f"  anchored_vwap={av} (cumulative cost basis)",
+            *av_lines,
         ]
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001

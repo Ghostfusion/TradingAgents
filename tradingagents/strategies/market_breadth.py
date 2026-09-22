@@ -25,6 +25,13 @@ from .sector_screener import breadth_with_gate
 #: universe, not a sector map, so the key is a label rather than a ticker.
 PANEL_KEY = "MARKET"
 
+#: One trading year - the FIXED lookback behind the ``*_52w`` counters. 252 is
+#: the session count the volatility models annualize with, so "52-week" means
+#: the same thing everywhere in the repo. A name with fewer bars cannot print a
+#: 52-week high, so it is excluded from the count and reported in
+#: ``new_highs_52w_n`` rather than assumed flat.
+_YEAR_SESSIONS = 252
+
 
 def _usable(series) -> list[float] | None:
     """The finite closes of one name, or None when the series is unusable."""
@@ -51,6 +58,9 @@ def market_breadth(
           "advance_decline": advancers - decliners (0 when none moved),
           "new_highs": names at their own series high,
           "new_lows": names at their own series low,
+          "new_highs_52w" | "new_lows_52w" | "net_new_highs_52w": counts over a
+              FIXED one-year lookback, or None when no name carries a year,
+          "new_highs_52w_n": how many names carried the full year,
           "small_sample": bool, "min_n": int, "basis": str,
           "reason": why the percentages are withheld (small sample only),
         }
@@ -60,6 +70,14 @@ def market_breadth(
     makes them 52-week highs/lows and a 60-bar panel does not. The basis string
     says which window the panel carried, so the read cannot be quoted as a
     52-week figure it never measured.
+
+    The ``_52w`` pair is the one that CAN be quoted as 52-week: it measures the
+    last ``_YEAR_SESSIONS`` (252) closes whatever the panel length, so a 60-bar
+    and a 300-bar panel agree for the same last year of bars. A name with fewer
+    than a year of bars is excluded from the count and reported in
+    ``new_highs_52w_n`` - never counted, and never assumed not-at-a-high. With
+    no name carrying a year the pair is ``None`` rather than ``0``: a count over
+    an empty denominator is not a breadth read (master rule 1).
 
     Never returns 0 for an absent read: an empty map is ``None``, and a panel
     below ``min_n`` keeps its counts with the percentages withheld and the reason
@@ -73,6 +91,8 @@ def market_breadth(
     row = (multi_breadth({PANEL_KEY: panel}, windows=windows, min_n=min_n) or {}).get(PANEL_KEY) or {}
     gated = breadth_with_gate(row, min_n=min_n)
     advancers = decliners = highs = lows = 0
+    highs_52w = lows_52w = 0
+    year_names = 0
     bars = 0
     for series in panel.values():
         vals = _usable(series)
@@ -85,6 +105,18 @@ def market_breadth(
             highs += 1
         if vals[-1] <= min(vals):
             lows += 1
+        # The ``_52w`` pair uses a FIXED lookback, so it does not move with the
+        # panel length the way ``new_highs``/``new_lows`` do: a 60-bar panel and
+        # a 300-bar panel give the same answer for the same last year of bars.
+        # A name shorter than a year is excluded and counted in
+        # ``new_highs_52w_n`` - never treated as not-at-a-high.
+        if len(vals) >= _YEAR_SESSIONS:
+            year = vals[-_YEAR_SESSIONS:]
+            year_names += 1
+            if vals[-1] >= max(year):
+                highs_52w += 1
+            if vals[-1] <= min(year):
+                lows_52w += 1
     out = {
         "n": n,
         "coverage": round(n / total, 3) if total else 0.0,
@@ -93,11 +125,18 @@ def market_breadth(
         "decliners": decliners,
         "new_highs": highs,
         "new_lows": lows,
+        # New fields only: ``new_highs``/``new_lows`` above keep their meaning
+        # (counts against the panel window), so nothing already printed moves.
+        "new_highs_52w": highs_52w if year_names else None,
+        "new_lows_52w": lows_52w if year_names else None,
+        "net_new_highs_52w": (highs_52w - lows_52w) if year_names else None,
+        "new_highs_52w_n": year_names,
         "small_sample": bool(gated.get("small_sample")),
         "min_n": min_n,
         "basis": (
             f"{n}-name panel, up to {bars} bars each; new highs/lows are measured "
-            f"against that window"
+            f"against that window; the _52w pair over a fixed "
+            f"{_YEAR_SESSIONS}-session year ({year_names} of {n} names carry one)"
         ),
     }
     for w in windows:
