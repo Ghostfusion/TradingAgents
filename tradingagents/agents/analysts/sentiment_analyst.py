@@ -173,6 +173,7 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
+                    " When your report is complete, deliver it in full and stop."
                     # No tool-calling here: the data is pre-fetched into the
                     # prompt, so tool-range wording would only invite a
                     # hallucinated tool call (#1130).

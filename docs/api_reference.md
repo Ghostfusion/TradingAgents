@@ -826,7 +826,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
 | `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
 | `get_gdelt_sentiment(ticker, look_back_days?)` | `gdelt.get_gdelt_tone_series` | news | GDELT native daily news-tone series (keyless, -100..100) - a computed sentiment read |
-| `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
+| `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots R1-R3/S1-S3 + ATR-normalised pivot distance/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |
 | `get_book_tail_risk(ticker, weights?)` | `book_risk.portfolio_cvar` + `book_correlated_stress` + `drawdown_gate` + `book_context` resolver | market/trader | book-level portfolio CVaR + correlated -10% stress + the measured book drawdown, each labelled with the mix it came from (configured basket vs the analyzed name alone - a name-level drawdown is never printed as "the book") |

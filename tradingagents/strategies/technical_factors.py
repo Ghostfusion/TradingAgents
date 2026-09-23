@@ -239,13 +239,19 @@ def adx(highs, lows, closes, n: int = 14) -> dict:
 def pivot_points(
     high: float | None, low: float | None, close: float | None
 ) -> dict:
-    """Classic daily/weekly pivot + support/resistance levels."""
+    """Classic daily/weekly pivot + support/resistance levels, R1-S3.
+
+    The full Floor-Trader set (P, R1/R2/R3, S1/S2/S3), so the name matches
+    what comes back. None fields when any input is missing.
+    """
     if high is None or low is None or close is None:
-        return {"p": None, "r1": None, "s1": None, "r2": None, "s2": None}
+        return {"p": None, "r1": None, "s1": None, "r2": None, "s2": None,
+                "r3": None, "s3": None}
     try:
         h, low_, c = float(high), float(low), float(close)
     except (TypeError, ValueError):
-        return {"p": None, "r1": None, "s1": None, "r2": None, "s2": None}
+        return {"p": None, "r1": None, "s1": None, "r2": None, "s2": None,
+                "r3": None, "s3": None}
     p = (h + low_ + c) / 3.0
     return {
         "p": round(p, 4),
@@ -253,7 +259,30 @@ def pivot_points(
         "s1": round(2 * p - h, 4),
         "r2": round(p + (h - low_), 4),
         "s2": round(p - (h - low_), 4),
+        "r3": round(h + 2 * (p - low_), 4),
+        "s3": round(low_ - 2 * (h - p), 4),
     }
+
+
+def pivot_distance_atr(close: float | None, pivot: float | None,
+                       atr_value: float | None) -> float | None:
+    """Distance from close to a pivot level, in ATRs (stationary).
+
+    A raw dollar distance to a pivot is not comparable across names or price
+    levels: 5 points is noise in one instrument and a full stop in another.
+    Dividing by ATR makes it stationary, which is the form a threshold or a
+    model input can use. None when any input is missing or ATR is not positive
+    - never 0.0, which would read as "price is exactly at the pivot".
+    """
+    try:
+        if close is None or pivot is None or atr_value is None:
+            return None
+        atr_f = float(atr_value)
+        if atr_f <= 0:
+            return None
+        return round((float(close) - float(pivot)) / atr_f, 4)
+    except (TypeError, ValueError):
+        return None
 
 
 __all__ = [
@@ -262,6 +291,7 @@ __all__ = [
     "mf_index",
     "stochastic_oscillator",
     "adx",
+    "pivot_distance_atr",
     "pivot_points",
     "stoch_rsi",
     "rsi2",

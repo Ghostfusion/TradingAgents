@@ -353,6 +353,7 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
+                    " When your report is complete, deliver it in full and stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}\n{evidence_block}",

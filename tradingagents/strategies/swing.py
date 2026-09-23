@@ -290,25 +290,36 @@ def chandelier_exit(
 def fib_levels(swing_high: float | None, swing_low: float | None) -> dict:
     """Fibonacci retracement levels between a swing low and swing high.
 
-    Returns the classic 0.382 / 0.5 / 0.618 retracement levels (prices) plus
-    the retracement fraction of the current price relative to the range, or
-    None fields when either bound is missing/equal.
+    Returns the classic retracement levels (prices) plus the retracement
+    fraction of the current price relative to the range, or None fields when
+    either bound is missing/equal.
+
+    The set is the standard one - 0.236 / 0.382 / 0.5 / 0.618 / 0.786 (0.786 is
+    sqrt(0.618), and 0.5 is included by convention rather than being a
+    Fibonacci ratio). A caller picks the band it wants; ``fib_zone`` in
+    analysis_tools uses 0.382-0.618 only, so widening this set does not move
+    that score component.
     """
     if swing_high is None or swing_low is None:
-        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+        return {"range": None, "0.236": None, "0.382": None, "0.5": None,
+                "0.618": None, "0.786": None, "level": None}
     try:
         hi = float(swing_high)
         lo = float(swing_low)
     except (TypeError, ValueError):
-        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+        return {"range": None, "0.236": None, "0.382": None, "0.5": None,
+                "0.618": None, "0.786": None, "level": None}
     if hi <= lo:
-        return {"range": None, "0.382": None, "0.5": None, "0.618": None, "level": None}
+        return {"range": None, "0.236": None, "0.382": None, "0.5": None,
+                "0.618": None, "0.786": None, "level": None}
     rng = hi - lo
     return {
         "range": round(rng, 4),
+        "0.236": round(hi - 0.236 * rng, 4),
         "0.382": round(hi - 0.382 * rng, 4),
         "0.5": round(hi - 0.5 * rng, 4),
         "0.618": round(hi - 0.618 * rng, 4),
+        "0.786": round(hi - 0.786 * rng, 4),
         "level": None,
     }
 

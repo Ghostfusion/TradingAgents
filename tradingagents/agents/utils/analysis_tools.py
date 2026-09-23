@@ -7183,16 +7183,19 @@ def get_technical_factors(
     reversal, accumulation and volume-profile reads the analyst prompt does
     not otherwise expose. One combined call (shares the run-level OHLCV
     cache) so no duplicate data is fetched. Use before any 'trend strength /
-    pivot support-resistance / Aroon age / Fisher turn / Chaikin accumulation /
+    pivot support-resistance + the ATR-normalised pivot distance / Aroon age /
+    Fisher turn / Chaikin accumulation /
     Elder-Ray buying pressure / Supertrend direction / POC-value-area' claim.
     """
     try:
+        from tradingagents.strategies.size import atr as _atr
         from tradingagents.strategies.technical_factors import (
             adx as _adx,
             aroon as _aroon,
             chaikin_oscillator as _chaikin,
             elder_ray as _elder_ray,
             fisher_transform as _fisher,
+            pivot_distance_atr as _pivot_dist,
             pivot_points as _pivots,
             supertrend as _supertrend,
             volume_profile as _volprof,
@@ -7206,6 +7209,9 @@ def get_technical_factors(
     try:
         a = _adx(data["highs"], data["lows"], closes)
         piv = _pivots(data["highs"][-1], data["lows"][-1], closes[-1])
+        _pd = _pivot_dist(closes[-1], piv.get("p"),
+                          _atr(data["highs"], data["lows"], closes, window=14))
+        pd_txt = f"{_pd:+.2f}x ATR" if _pd is not None else "unavailable (no ATR or pivot)"
         ar = _aroon(data["highs"], data["lows"])
         fi = _fisher(closes)
         ch = _chaikin(data["highs"], data["lows"], closes, data["volumes"])
@@ -7217,7 +7223,9 @@ def get_technical_factors(
             f"  adx={a.get('adx')} di+={a.get('di_plus')} di-={a.get('di_minus')} "
             f"strong={a.get('strong')}",
             f"  pivots: p={piv.get('p')} r1={piv.get('r1')} s1={piv.get('s1')} "
-            f"r2={piv.get('r2')} s2={piv.get('s2')}",
+            f"r2={piv.get('r2')} s2={piv.get('s2')} r3={piv.get('r3')} s3={piv.get('s3')}",
+            f"  pivot distance: {pd_txt} (close vs P; stationary across names "
+            f"and price levels, so the number is comparable)",
             f"  aroon: up={ar.get('aroon_up')} down={ar.get('aroon_down')} "
             f"verdict={ar.get('verdict')}",
             f"  fisher={fi.get('fisher') if fi else None} trigger={fi.get('trigger') if fi else None}",

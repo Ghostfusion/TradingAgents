@@ -16,6 +16,7 @@ from tradingagents.strategies.technical_factors import (
     fisher_transform,
     kst,
     mf_index,
+    pivot_distance_atr,
     pivot_points,
     stochastic_oscillator,
     supertrend,
@@ -192,3 +193,57 @@ def test_volume_profile_reports_its_own_coverage():
     assert r2["value_area_pct"] >= 0.7
     assert r2["value_area_high"] - r2["value_area_low"] > 20.0
     assert volume_profile([1], [1])["poc"] is None
+
+
+def test_fib_levels_degenerate_paths_share_one_key_set():
+    """Every degenerate path returns the SAME keys as the live path.
+
+    A caller does dict access on the result - ``fib_zone`` reads ["0.382"] and
+    ["0.618"] - so a key present on one path and absent on another is a KeyError
+    waiting for the right input. fib_levels has FOUR return paths (missing
+    bound, non-numeric bound, high <= low, and the real one), which is exactly
+    where the 0.236/0.786 widening could have shipped a partial edit.
+    """
+    shapes = {
+        frozenset(fib_levels(*args))
+        for args in [(None, None), (None, 100.0), (100.0, 100.0), (100.0, 110.0), ("x", "y")]
+    }
+    assert len(shapes) == 1, f"degenerate paths disagree on keys: {shapes}"
+    assert shapes == {frozenset(fib_levels(110.0, 100.0))}
+
+
+def test_fib_levels_are_the_standard_retracement_set():
+    f = fib_levels(110.0, 100.0)  # range 10
+    assert f["0.236"] == pytest.approx(107.64, rel=1e-3)
+    assert f["0.786"] == pytest.approx(102.14, rel=1e-3)
+    # 0.786 is sqrt(0.618): the two levels must not be transposed.
+    assert f["0.786"] < f["0.618"] < f["0.5"] < f["0.382"] < f["0.236"]
+
+
+def test_pivot_points_full_set_and_consistent_shape():
+    p = pivot_points(105.0, 95.0, 100.0)
+    assert p["p"] == pytest.approx(100.0)
+    assert p["r3"] == pytest.approx(115.0)  # h + 2*(p - low) = 105 + 2*5
+    assert p["s3"] == pytest.approx(85.0)  # low - 2*(h - p) = 95 - 2*5
+    assert p["r3"] > p["r2"] > p["r1"] > p["p"] > p["s1"] > p["s2"] > p["s3"]
+    shapes = {
+        frozenset(pivot_points(*a))
+        for a in [(None, None, None), (1.0, None, 2.0), ("x", "y", "z")]
+    }
+    assert shapes == {frozenset(p)}
+
+
+def test_pivot_distance_atr_is_stationary_and_never_invents_zero():
+    # 3 points above the pivot, ATR 2 -> 1.5 ATRs.
+    assert pivot_distance_atr(103.0, 100.0, 2.0) == pytest.approx(1.5)
+    assert pivot_distance_atr(96.0, 100.0, 2.0) == pytest.approx(-2.0)
+    # The same dollar gap in a higher-ATR name is a smaller distance.
+    assert pivot_distance_atr(103.0, 100.0, 6.0) == pytest.approx(0.5)
+    # A non-positive ATR must be None, never 0.0: 0.0 reads as "price sits
+    # exactly on the pivot", which is a claim the input cannot support.
+    assert pivot_distance_atr(103.0, 100.0, 0.0) is None
+    assert pivot_distance_atr(103.0, 100.0, -2.0) is None
+    assert pivot_distance_atr(103.0, 100.0, None) is None
+    assert pivot_distance_atr(None, 100.0, 2.0) is None
+    assert pivot_distance_atr(103.0, None, 2.0) is None
+    assert pivot_distance_atr("x", 100.0, 2.0) is None

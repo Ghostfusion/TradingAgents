@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**Three standard-instrumentation gaps closed, and one of them was a claim the code did not keep (2026-09-23).** `technical_factors.pivot_points` returned P/R1/S1/R2/S2 while its docstring said "Classic daily/weekly pivot + support/resistance levels" - and the classic Floor-Trader set is R1-R3/S1-S3. The name promised the full set and the function returned two thirds of it. R3 = H + 2(P - L) and S3 = L - 2(H - P) are now returned, so the name matches. Pivots are rendered (`analysis_tools.get_technical_factors`), not a TechnicalScore input, so no score moved.
+
+`swing.fib_levels` returned 0.382/0.5/0.618 and now returns the standard retracement set - adding **0.236 and 0.786** (0.786 is sqrt(0.618)). **Correction to the earlier read of this:** widening the returned set does NOT widen `fib_zone`. That score component reads ["0.382"] and ["0.618"] only, so it is untouched - the caution that this would move a score was wrong, and the docstring now says so where a future caller will read it.
+
+**New: `technical_factors.pivot_distance_atr(close, pivot, atr)`** - `(close - pivot) / ATR`, the stationary form of a pivot distance. A raw dollar gap is not comparable across names or price levels (5 points is noise in one instrument and a full stop in another); in ATRs it is. Surfaced by `get_technical_factors` as `pivot distance: -0.35x ATR (close vs P; stationary ...)`. **It returns None for a non-positive ATR, never 0.0** - 0.0 would read as "price sits exactly on the pivot", a claim the input cannot support.
+
+**The invariant the widening nearly broke, now tested.** `fib_levels` has four return paths (missing bound, non-numeric bound, high <= low, and the real one) and `pivot_points` has three. Adding keys to only some of them is a KeyError waiting for the right input - and that is exactly what a partial edit produced while making this change. Both now have a test that every degenerate path returns the SAME key set as the live path.
+
+**Web impact**: additive only. `trading_web` registers `get_technical_factors` as the `technical_factors` value tool (`backend/capabilities.py:1220`, `docs/web_TOPICS.md:60`) and renders its returned string; the change adds r3/s3 to the pivots line and one new pivot-distance line. Nothing removed, renamed or reshaped, and the app's test pins the tool name rather than its output.
+
+**Tests.** 4 new in `tests/test_strategies_technical_factors.py` - the standard fib set with its ordering (0.786 < 0.618 < 0.5 < 0.382 < 0.236, so the two are not transposed), the full pivot ordering r3 > r2 > r1 > p > s1 > s2 > s3, the degenerate-shape invariants, and the distance's zero-ATR boundary. Full engine suite: 5339 passed, 6 skipped, 0 failed (baseline 5335 + the 4 new tests). `ruff check .` clean.
+
 **The four analyst reports stopped carrying a vote (2026-09-23).** Each analyst prompt asked the model to prefix its response with `FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**` "so the team knows to stop", so a `1_analysts/*.md` report often opened AND closed with a one-line directional vote. **Nothing consumed it.** An exhaustive grep across all three repos found no parser, counter, schema field, gate, card key or metric on the analyst side - and no reference at all in `trading_web` or `TradingExecution`. The votes were prose for the debating LLMs and the reader.
 
 **The trader's line is a different object and stays.** `schemas.render_trader_proposal` *renders* it from the validated `TraderProposal.action` enum, so the trader's `FINAL TRANSACTION PROPOSAL` is generated from a typed field, never inherited from an analyst - and `test_truncation_retry`/`test_structured_agents`/`smoke_structured_output` pin it. Likewise `report_verifier`'s `_FINAL_VERDICT` scan, which flags two DIFFERENT verdicts in one artifact (a restart artifact); it reads the trader/PM text and stays.
@@ -25,6 +37,8 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 **Known trade-off, accepted:** the instruction was also the analysts' only explicit stop affordance ("so the team knows to stop"). The tool-call loop's own caps are code, not prompt text, so termination does not depend on it - but a longer analyst monologue is the plausible cost, and it is recorded here rather than discovered later.
 
 **Web impact**: none - `trading_web` contains no reference to the line (verified across the repo), and its Reports screen renders the `.md` artifacts generically.
+
+**v2 (the same day): the stop affordance came back as one line per prompt.** The instruction removed above also carried the analysts' only explicit stop coaching - "so the team knows to stop" - and that cost was recorded here rather than left to surface. It is now restored vote-free: one line, identical in all four prompts, `" When your report is complete, deliver it in full and stop."` Placed after `Execute what you can to make progress.` in market/news/fundamentals, and after the assistant sentence in sentiment (above its `#1130` no-tool comment, so it reads as a completion instruction rather than tool guidance). Net length is still shorter than the original two-line block, and no verdict is required anywhere.
 
 **Tests.** Full engine suite: 5335 passed, 6 skipped, 0 failed (unchanged - nothing consumed the vote). `ruff check .` clean.
 
