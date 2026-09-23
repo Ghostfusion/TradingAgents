@@ -6,9 +6,10 @@ routed through company tools; the inverse bug was operating companies (JPM,
 GS, MS, BLK, SCHW, NTRS, STT) classified "ETF" by a bare issuer name or a bare
 "Trust" match, handing them the ETF toolset.
 
-UNKNOWN is the deliberate non-fund fallback: the analyst branches only on
-``security_type == "ETF"``, so UNKNOWN keeps the unchanged company path (see
-the module docstring, source 4). A name may only prove a wrapper when it
+The non-fund answer is UNKNOWN, or ``operating_company`` when the provider
+supplies positive evidence (a ``quote_type`` of EQUITY): the analyst branches
+only on ``security_type == "ETF"``, so either keeps the UNCHANGED company path
+(see the module docstring, source 4). A name may only prove a wrapper when it
 carries fund-specific evidence - a literal ETF/Fund token, or a pure fund
 brand next to a Trust/Index structure - never a bare issuer name.
 """
@@ -32,12 +33,16 @@ _OPERATING_COMPANIES = {
 }
 
 
-def test_listed_operating_companies_are_not_etf():
+def test_listed_operating_companies_are_named_and_are_not_etf():
+    """P0-9's criterion, by name: an EQUITY quote_type names the operating
+    company it is. The regression it exists to catch - a bare issuer name
+    (JPMorgan, BlackRock, State Street) matching a fund pattern - is still
+    caught by the `not is_etf` half."""
     for ticker, name in _OPERATING_COMPANIES.items():
         c = classify_security(
             ticker, identity={"quote_type": "EQUITY", "company_name": name}
         )
-        assert c["security_type"] == "UNKNOWN", (ticker, c)
+        assert c["security_type"] == "operating_company", (ticker, c)
         assert not is_etf(c)
 
 

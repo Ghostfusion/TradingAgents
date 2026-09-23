@@ -45,7 +45,7 @@ and the contract (§19, `doc:814-820`) takes only `symbol` + `evidence`. No key,
 Three things, in order of importance:
 
 1. **`SecurityContext`** — a deterministic, provenance-carrying classification object built once per run from data the run already holds or already fetches. It is the missing producer for `doc:265`'s applicability test.
-2. **The theme applicability matrix, as a WIDENING-ONLY prior.** The matrix may *add* candidate themes. It may **never remove one.** This turns the parent doc's informal "sector is a prior, not the final decision" into a structural, testable property — and it is the single most important idea in this document (§11).
+2. **The theme priority matrix, as a WIDENING-ONLY prior.** The matrix may *add* candidate themes. It may **never remove one.** This turns the parent doc's informal "sector is a prior, not the final decision" into a structural, testable property — and it is the single most important idea in this document (§11).
 3. **A taxonomy honesty rule.** The repo currently labels four different provider taxonomies as "GICS" and stores no provenance. This doc defines one canonical internal vocabulary (the one already in the repo), records the raw label and its source, and never claims GICS.
 
 ### The one-sentence thesis
@@ -177,7 +177,7 @@ This is the honest version of the pasted brief's "store GICS-style Sector → In
 | Level | Status | Decision |
 | --- | --- | --- |
 | Sector | Available (raw + canonical) | Capture |
-| Industry | Available from all three vendors, **discarded everywhere** | Capture as `industry_raw` + source; normalize through the SAME `_canonical_sector` (it already maps 73 sector and sub-industry labels) |
+| Industry | Available from all three vendors, **discarded everywhere** | Capture as `industry_raw` + source. The bridge to a sector is the SAME `_canonical_sector` (it already maps 73 sector and sub-industry labels), stored as **`industry_implied_sector`** - an industry *mapped to a sector*, which is not a normalised industry, and is not named as one |
 | Industry group | **No producer** | Do NOT claim. Named gap |
 | Sub-industry | **No field**; only string aliases inside `_GICS_TO_SPDR` | Do NOT claim. Named gap |
 | SEC SIC | Free, authoritative, **already fetched and discarded** (§9.3) | Capture opportunistically as a second opinion |
@@ -272,9 +272,10 @@ SecurityContext(
     company_name: str | None,
 
     sector_raw: str | None,          # verbatim from the provider
-    sector_source: str | None,       # "fmp" | "finnhub" | "yfinance" | "repo_etf_map"
+    sector_source: str | None,       # "yfinance" - the ONLY producer on this path (§9.4)
     industry_raw: str | None,
     industry_source: str | None,
+    industry_implied_sector: str | None,  # industry_raw bridged to a canonical SECTOR (§7.4)
 
     sector_canonical: str | None,    # via sector_rank._canonical_sector
     spdr_etf: str | None,            # via sector_rank.sector_group_of
@@ -284,9 +285,6 @@ SecurityContext(
 
     security_type: str | None,       # strategies.security_type.classify_security
     classification_as_of: str | None,
-    agreement: str,                  # "single_source" | "agree" | "disagree" | "unknown"
-    disagreement: dict,              # {"sector": {"fmp": ..., "yfinance": ...}}
-    basis: str,                      # one deterministic sentence, see §18
 )
 ```
 
@@ -314,25 +312,30 @@ SEC SIC is free, deterministic, and authoritative as a *regulatory* classificati
 
 The repo has already been bitten by exactly this: `yfinance_sector._etf_universe_sector` (`:39`) exists *because* "IGV/SOXX/XLK all come back as `Financial Services` from yfinance/FMP" (documented at `:42-46`). That is a provider misclassification, and the repo's workaround is to override the provider for ETFs.
 
-`agreement` records one of:
+### 9.5 The agreement enum that could not fire - deleted
 
-- `single_source` — only one source answered. Normal, not a warning.
-- `agree` — two or more answered and canonicalized to the same sector.
-- `disagree` — two or more answered and canonicalized differently. Both raw values are kept in `disagreement`.
-- `unknown` — nothing answered.
+The first draft of this section specified `agreement` as one of `single_source` / `agree` / `disagree` / `unknown`, with a `disagreement` dict holding both raw values, and §12 handed `disagree` to the materiality layer as a confidence penalty.
 
-`disagree` is **not** resolved here. Resolving it would require a precedence policy the owner has not set, and a wrong resolution is invisible downstream. It is surfaced, and the materiality layer may treat it as an evidence-confidence penalty (parent doc §13, `doc:585-607`).
+**It was unreachable.** `resolve_instrument_identity` (`agent_utils.py:575`) makes exactly **one** vendor read - `yf.Ticker(normalize_symbol(ticker)).info` (`:595`) - and returns exactly one `sector`. So `sector_source` could only ever be `"yfinance"`, `agree` and `disagree` could never fire, and `disagreement` could never be non-empty. A second sector source would have to be fetched, and `fetch_sector` (`yfinance_sector.py:64`) is **not** `lru_cache`d, so that is a new network call - which §14 and §24 both forbid.
+
+A state that cannot occur is worse than a named absence: it reads as a check that ran and passed. Three enum values, a dict, a test and a success criterion were all dead, and the dead `disagree` fed a design decision. So the surface is deleted rather than shipped unreachable.
+
+**What survives is the independent signal.** `sec_sic` is still captured - free, deterministic, and genuinely independent of any sector label - but it is **recorded, not compared**, because comparing it would require the SIC-to-sector crosswalk this design refuses to build (§9.3). The owner's decision, 2026-09-22.
+
+**P4 is therefore scoped, not withdrawn.** "Disagreement is recorded, never resolved" still governs any signal that *can* differ; with one sector source there is simply nothing to record. If a second source is ever added, the enum comes back **with** it, and this section becomes the record of what had to be true first.
 
 ---
 
-## 10. The theme applicability matrix
+## 10. The theme PRIORITY matrix
 
 ### 10.1 Shape
 
 ```python
-#: Declared policy: canonical sector -> {theme_id: candidate relevance}.
+#: Declared policy: canonical sector -> {theme_id: priority}.
 #: NOT a measurement, NOT a score, NOT a direction.
-THEME_APPLICABILITY: dict[str, dict[str, str]] = {
+#: Named PRIORITY, not "applicability": applicability implies "not applicable -> not
+#: evaluated", which is exactly what §11 forbids. The matrix orders effort.
+THEME_PRIORITY_MATRIX: dict[str, dict[str, str]] = {
     "technology":   {"ai": HIGH,   "tariff": LOW,    "china": MEDIUM,
                      "commodity": LOW, "regulatory": MEDIUM, "cyber": HIGH},
     "energy":       {"ai": MEDIUM, "tariff": MEDIUM, "china": MEDIUM,
@@ -428,7 +431,7 @@ The candidate set is the input to the parent doc's §8 detector (`doc:342-394`),
 
 1. **A defined candidate set** — previously undefined.
 2. **An ordering hint** — so a budget-constrained detector spends its first effort well.
-3. **A confidence input** — `agreement == "disagree"` is a reason to lower evidence confidence (parent doc §13), since a misclassified company is a materiality error at the root.
+3. **Nothing that grades the classification.** The first draft handed `agreement == "disagree"` to the materiality layer as a confidence penalty; that state was unreachable (§9.5) and the input is deleted with it. A misclassified company is still a materiality error at the root, but this layer cannot detect that with one source, so it does not pretend to.
 4. **Nothing else.** No score, no direction, no activation.
 
 Activation remains exactly where the parent doc puts it: `MATERIAL` and `HIGHLY_MATERIAL` enter decision context (`doc:373`); `MONITOR` stays in research context (`doc:375`).
@@ -484,7 +487,7 @@ Therefore:
 
 ## 16. Configuration and gates
 
-One gate, registered in the five places the repo's own rule requires (`docs/gate_registry.md:229` §8):
+One gate, registered in the six places the repo's own rule requires (`docs/gate_registry.md` §8 - the rule said five until 2026-09-22 and omitted the last row):
 
 ```text
 enable_security_context   (default False)
@@ -498,6 +501,7 @@ TRADINGAGENTS_ENABLE_SECURITY_CONTEXT
 | 3 | `docs/gate_registry.md` table row | pattern at `gate_registry.md:61` |
 | 4 | `REGISTRY` in `tests/test_gate_env_toggles.py` | pattern at `test_gate_env_toggles.py:55` |
 | 5 | `.env.example` | pattern at `.env.example:446` |
+| 6 | `docs/api_reference.md` §1.1 env-var table (machine-checked against every env var the config reads) | `py -3.12 scripts/gen_api_reference_table.py --write` |
 
 Gate off ⇒ `SecurityContext` is not built, no card block is written, and the run is byte-identical to today. This is the repo's established contract for an added block (`reporting.py:1242`).
 
@@ -522,13 +526,18 @@ No artefact currently persists sector or industry as a structured key — it sur
 One deterministic sentence, printed in the research artefact. Example:
 
 ```text
-Security context: sector=technology (source: fmp, raw "Information Technology"),
-industry=software (source: fmp), spdr=XLK, sec_sic=7372 (Services-Prepackaged
-Software), type=operating_company, agreement=single_source.
-Candidate themes: 6 registered; prior order from THEME_APPLICABILITY
-v2026-09-22.1 (technology): ai=HIGH, cyber=HIGH, china=MEDIUM, regulatory=MEDIUM,
-tariff=LOW, commodity=LOW. This is a declared prior, not a measurement, and it
-does not gate: every registered theme remains a candidate.
+One line, as delivered:
+
+```text
+Security context: sector=Technology (source: yfinance); canonical=technology;
+spdr=XLK; industry=Consumer Electronics (source: yfinance); type=operating_company.
+Candidate themes: 6 registered (prior order, 2026-09-22.1: ai=HIGH, cyber=HIGH,
+china=MEDIUM, regulatory=MEDIUM, commodity=LOW, tariff=LOW). This is a declared
+prior, not a measurement, and it does not gate: every registered theme remains a
+candidate.
+```
+
+**It is deliberately ONE line** (403 characters for AAPL). It is read by analysts, so the structured detail lives in the run card and not in an LLM's context. The three properties below are each tested.
 ```
 
 Three properties this rendering must have:
@@ -545,8 +554,8 @@ Three properties this rendering must have:
 
 1. Provenance travels: `sector_source` is set whenever `sector_raw` is.
 2. `_canonical_sector` is *called*, not reimplemented — a mutation to the existing map changes this layer's output.
-3. `agreement` is `disagree` when two sources canonicalize differently, and both raw values survive.
-4. `agreement` is `single_source` when only one source answers (not a warning).
+3. `sector_source` names only a producer that can have produced the value (§9.5).
+4. There is no `agreement` / `disagreement` field - the unreachable enum is not shipped.
 5. An unclassified context yields `None` for every derived field and does not raise.
 6. The matrix validator rejects an unknown theme id, an unknown sector row, and a numeric relevance.
 
@@ -596,11 +605,11 @@ The repo's recurring defect class is **"a field whose name promises more than it
 
 The parent doc's ten (`doc:1397-1410`) stand. This layer adds:
 
-11. **Candidate admission** — is the matrix's ordering the only prior, or may a sector ever *deprioritise a theme below the budget line*? (This doc says ordering only, never exclusion — §11. If the owner wants exclusion, the widening invariant must be explicitly withdrawn, and the XOM/AI case accepted as a known miss.)
+11. **Candidate admission — ANSWERED 2026-09-22: ordering only, never exclusion.** The widening invariant stands as written and is enforced by a property test over every canonical sector. Exclusion was offered and declined; the XOM/AI case stays caught.
 12. **Matrix ownership** — who may edit a cell, and does a cell change require a version bump? (Proposed: yes, always.)
 13. **SIC-to-sector crosswalk** — build one, or keep SIC as an independent second opinion only? (Proposed: second opinion only; a crosswalk is a new taxonomy.)
-14. **Disagreement handling** — surface only, or also a confidence penalty? (Proposed: surface now; the penalty is the materiality layer's call, per parent doc §13.)
-15. **`industry_raw` normalization** — reuse `_canonical_sector` (which maps industry labels to sectors) or keep `industry_raw` unnormalized? (Proposed: reuse; a second normalizer would violate rule 15.)
+14. **Disagreement handling — CLOSED 2026-09-22: the surface is deleted.** Not "surface only": with one reachable sector source there was nothing to surface (§9.5). Reopens automatically if a second source is ever added.
+15. **`industry_raw` normalization — ANSWERED 2026-09-22: reuse `_canonical_sector`, stored as `industry_implied_sector`.** Named for what it is - an industry bridged to a *sector* - so no reader mistakes it for a normalised industry (a second normalizer would violate rule 15).
 
 ---
 
@@ -621,7 +630,24 @@ These slot into the parent doc's §39 order (`doc:1506-1525`) **between items 2 
 | SC-9 | Cross-run tracker (`scripts/`) | SC-7 | follows the `coverage_scorecard.py` shape |
 | SC-10 | Parent doc §36 gains item 11 | SC-5 | the open decision is recorded |
 
-Do not begin with SC-8 or SC-9. SC-1 through SC-5 are the layer; the rest is plumbing.
+**SC-1 to SC-8 are BUILT (2026-09-22, commit pending).** `tradingagents/strategies/security_context.py`, the `enable_security_context` gate in all five places, and the `security_context` run-card block are in the tree; SC-2's SIC capture is `sec_edgar.peek_sic`, which reads the payload the run already fetched and never fetches.
+
+SC-5b is the next item. Do not begin with SC-8 or SC-9.
+
+| # | Deliverable | Status |
+| --- | --- | --- |
+| SC-1 | `SecurityContext` + `build_security_context` | **built** |
+| SC-2 | SEC SIC from the existing payload (`sec_edgar.peek_sic`) | **built** |
+| SC-3 | `agreement` / `disagreement` | **deleted** - unreachable (§9.5) |
+| SC-4a | `THEME_REGISTRY` / `ALL_REGISTERED_THEMES` | **built** (the parent doc's six ids) |
+| SC-4 | `THEME_PRIORITY_MATRIX` + `MATRIX_VERSION` + validator | **built** - 66 cells, each with a declared basis |
+| SC-5 | `candidate_themes` + the widening invariant | **built** - property-tested over every sector |
+| SC-5b | `theme_triggers` - the cheap escalation scan | **NEXT** - the one thing §11.3's `LOW` line still needs |
+| SC-6 | the gate, five places | **built** |
+| SC-7 | the `security_context` run-card block | **built** |
+| SC-8 | deterministic one-line rendering | **built** |
+| SC-9 | cross-run tracker (`scripts/`) | not started |
+| SC-10 | parent doc §36 gains item 11 | not started (owner's file) |
 
 ---
 
@@ -653,7 +679,7 @@ Do not begin with SC-8 or SC-9. SC-1 through SC-5 are the layer; the rest is plu
 **Correctness**
 - The widening invariant holds for every canonical sector (property test).
 - An unclassified company is checked *more*, not less.
-- Two disagreeing sources are both retained.
+- No state is advertised that cannot occur: the only classification source is named, and the unreachable agreement enum is absent (§9.5).
 
 **Safety**
 - Decision-context character delta is exactly zero.

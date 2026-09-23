@@ -1709,6 +1709,68 @@ def _run_card_analyst_consistency(save_path) -> dict | None:
     return out or None
 
 
+def _run_card_security_context(ticker: str, cfg: dict | None, save_path=None) -> dict | None:
+    """SecurityContext block for run_card.json (docs/design_security_context.md).
+
+    Deterministic classification metadata **with its provenance**: the provider's
+    sector and industry verbatim, the canonical sector reached through the repo's
+    one normalizer, the SPDR key, the SEC SIC when an earlier step already
+    fetched a submissions payload, and the declared theme priority order with its
+    matrix version. It exists because the repo labels four different provider
+    taxonomies as "GICS" and threw the source away - a sector string without its
+    source is unusable.
+
+    **No network call of its own**: it reads the already-``lru_cache``d
+    ``resolve_instrument_identity``, and the SIC is never fetched for this. The
+    as-of date comes from the run directory's own name, never from the clock, so
+    the block is reproducible.
+
+    Advisory, and deliberately outside the decision channel: the prior orders
+    evidence-gathering effort and **cannot remove a theme** from the candidate
+    set (``candidate_themes`` is a union), so this block cannot change a rating,
+    a size or a verdict. Returns ``None`` when the gate is off, so a gate-off card
+    is byte-identical to a pre-layer tree.
+    """
+    if not (cfg or {}).get("enable_security_context"):
+        return None
+    try:
+        from tradingagents.strategies.security_context import (
+            MATRIX_VERSION,
+            build_security_context,
+            candidate_themes,
+            render_security_context_basis,
+            theme_priority_order,
+        )
+
+        as_of = None
+        m = re.search(r"(\d{4})(\d{2})(\d{2})_\d{6}", str(save_path or ""))
+        if m:
+            as_of = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        # The SIC is read from the payload an EARLIER step already fetched; it
+        # is (None, None) when no such step ran, which means "not read" rather
+        # than "no SIC exists". Never fetched here.
+        from tradingagents.dataflows.sec_edgar import peek_sic
+
+        sic, sic_desc = peek_sic(ticker)
+        ctx = build_security_context(
+            ticker, as_of=as_of, sec_sic=sic, sec_sic_description=sic_desc
+        )
+        return {
+            "status": "ok",
+            "context": ctx.to_dict(),
+            "candidate_themes": sorted(candidate_themes(ctx)),
+            "priority_order": list(theme_priority_order(ctx)),
+            "matrix_version": MATRIX_VERSION,
+            "basis": render_security_context_basis(ctx),
+            "note": (
+                "declared prior, not a measurement: it orders evidence-gathering "
+                "effort and cannot remove a theme from the candidate set"
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001 - advisory; never break the report
+        return {"status": "unavailable", "unavailable": str(exc)}
+
+
 def write_report_tree(
     final_state: dict, ticker: str, save_path, config: "dict | None" = None,
     *, emit_run_artifacts: bool = True,
@@ -2278,6 +2340,12 @@ def write_report_tree(
         _event = _run_card_event_state(final_state, cfg)
         if _event is not None:
             card["event_state"] = _event
+        # docs/design_security_context.md: the classification block. Present
+        # only when its gate is on, so a gate-off card stays byte-identical.
+        # Advisory and outside the decision channel by construction.
+        _secctx = _run_card_security_context(ticker, cfg, save_path)
+        if _secctx is not None:
+            card["security_context"] = _secctx
         # WP-4/WP-9: the market-level regime score and its two-path read.
         _regime = _run_card_regime_score(cfg)
         if _regime is not None:

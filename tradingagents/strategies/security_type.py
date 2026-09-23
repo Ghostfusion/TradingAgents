@@ -88,6 +88,12 @@ def classify_security(
     Returns:
         ``{"security_type": "ETF"|"operating_company"|"UNKNOWN",
         "confidence": "high"|"medium"|"low", "evidence": [..]}``.
+
+        ``operating_company`` needs positive evidence - a provider
+        ``quote_type`` of ``EQUITY``/``stock``. A name alone is not proof: a
+        fund that escapes the universe lists and the wrapper patterns above
+        stays ``UNKNOWN``. ``UNKNOWN`` is the non-fund fallback, and callers
+        that only need "not an ETF" may treat it as such.
     """
     t = (ticker or "").strip().upper()
     evidence: list[str] = []
@@ -124,7 +130,23 @@ def classify_security(
         evidence.append(f"fund trust name: {name[:60]}")
         return {"security_type": "ETF", "confidence": "medium", "evidence": evidence}
 
-    # 4. Fallback: unknown -> current company path.
+    # 4. Fallback. An equity quote_type is POSITIVE provider evidence of an
+    #    operating company, and without this branch `operating_company` was
+    #    unreachable while being advertised in this docstring, in
+    #    docs/api_reference.md and in docs/design_etf_fundamental_valuation.md's
+    #    acceptance criterion - a contract naming a state that cannot occur.
+    #    It is also the state docs/implementation_plan_defect_audit.md's P0-9
+    #    criterion asked for by name.
+    #
+    #    Behaviour is unchanged for every consumer: they branch only on
+    #    `security_type == "ETF"` (fundamentals_analyst.py:61,
+    #    quantitative_scores.py:524/606, is_etf), so an operating company keeps
+    #    exactly the company path it had as UNKNOWN. Only the label it prints
+    #    in a basis changes.
+    if qt and qt.lower() in ("equity", "stock"):
+        evidence.append(f"provider quote_type={qt}")
+        return {"security_type": "operating_company", "confidence": "high", "evidence": evidence}
+    # Nothing to go on: the honest unknown, and still the non-fund path.
     return {"security_type": "UNKNOWN", "confidence": "low", "evidence": evidence}
 
 

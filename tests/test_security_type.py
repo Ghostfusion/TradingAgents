@@ -35,9 +35,13 @@ def test_fund_issuer_name_medium_confidence():
     assert c["confidence"] == "medium"
 
 
-def test_operating_company_unknown():
+def test_operating_company_is_named_and_is_not_etf():
+    """An EQUITY quote_type is positive evidence, so the state the docstring
+    advertises is reachable. The claim that matters - it is not an ETF, so it
+    keeps the company path - is unchanged."""
     c = classify_security("MSFT", identity={"quote_type": "EQUITY", "company_name": "Microsoft Corporation"})
-    assert c["security_type"] == "UNKNOWN"
+    assert c["security_type"] == "operating_company"
+    assert c["confidence"] == "high"
     assert not is_etf(c)
 
 

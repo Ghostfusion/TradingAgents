@@ -283,6 +283,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY` | `enable_sector_industry` | default `false` |
 | `TRADINGAGENTS_ENABLE_SECTOR_BREADTH` | `enable_sector_breadth` | default `false` |
 | `TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS` | `enable_sector_eodhd_constituents` | default `false` |
+| `TRADINGAGENTS_ENABLE_SECURITY_CONTEXT` | `enable_security_context` | default `false` |
 | `TRADINGAGENTS_RISK_AUDIT_ENABLED` | `risk_audit_enabled` | hash-chained risk audit ledger |
 | `TRADINGAGENTS_MAX_POSITION_PCT` | `max_position_pct` | single-name position cap (governor) |
 | `TRADINGAGENTS_RISK_MAX_POSITION_PCT` | `risk_max_position_pct` | whole-book position cap (governor) |

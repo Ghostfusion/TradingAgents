@@ -342,6 +342,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY": "enable_sector_industry",
     "TRADINGAGENTS_ENABLE_SECTOR_BREADTH": "enable_sector_breadth",
     "TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS": "enable_sector_eodhd_constituents",
+    "TRADINGAGENTS_ENABLE_SECURITY_CONTEXT": "enable_security_context",
     "TRADINGAGENTS_RISK_AUDIT_ENABLED": "risk_audit_enabled",
     # The limits the governor reads. These were config-only: the per-name cap,
     # the book cap and the sector cap could not be tightened from .env at all.
@@ -1106,6 +1107,14 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_sector_industry": False,
         "enable_sector_breadth": False,
         "enable_sector_eodhd_constituents": False,  # EODHD full-US universe for the breadth layer (sector_screener)
+        # SecurityContext (docs/design_security_context.md SC-1..SC-8): the
+        # deterministic classification front end the conditional research
+        # overlays were missing - sector/industry verbatim WITH their source,
+        # the canonical sector, and a declared (never gating) theme prior.
+        # Default-off, and it makes no network call of its own; while off no
+        # context is built and no card key is written, so a gate-off card is
+        # byte-identical to a pre-layer tree.
+        "enable_security_context": False,
         # Round-3 scoring & sentiment additions
         # (docs/implementation_plan_quant_formula_additions_round3.md). Ten
         # default-off gates; every item is additive, prints its basis, and

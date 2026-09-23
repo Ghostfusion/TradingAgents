@@ -384,6 +384,45 @@ def annual_facts(ticker: str, years: int = 15) -> dict:
     }
 
 
+#: The top-level classification fields of the last submissions payload per CIK.
+#:
+#: ``get_sec_filings`` reads only ``filings.recent`` and discards the payload's
+#: ``sic`` / ``sicDescription`` / ``name`` / ``exchanges`` on **every** call, so a
+#: caller that wants the regulatory classification has to pay for the fetch again.
+#: This memo lets a later step read what the run already paid for.
+#:
+#: Bounded, and deliberately a memo rather than a cache: entries are only ever
+#: *written* by a real fetch, and :func:`peek_sic` never fetches. A process that
+#: resolves more than ``_SIC_MEMO_MAX`` issuers drops the oldest wholesale rather
+#: than growing without bound - the fields are reproducible, so forgetting one
+#: costs a ``None``, never a wrong answer.
+_SIC_MEMO: dict[int, tuple[str | None, str | None]] = {}
+_SIC_MEMO_MAX = 512
+
+
+def _remember_sic(cik: int, payload: dict) -> None:
+    """Keep the classification fields of a payload we just fetched."""
+    sic = payload.get("sic")
+    desc = payload.get("sicDescription")
+    _SIC_MEMO[int(cik)] = (str(sic) if sic else None, str(desc) if desc else None)
+    if len(_SIC_MEMO) > _SIC_MEMO_MAX:
+        _SIC_MEMO.clear()
+
+
+def peek_sic(ticker: str) -> tuple[str | None, str | None]:
+    """``(sic, sicDescription)`` **if this run already fetched the payload**.
+
+    Returns ``(None, None)`` when it did not, and never fetches to find out: the
+    security-context layer records a classification opportunistically, so an
+    absent SIC means "not read", not "no SIC exists". The caller can tell the
+    difference because it knows whether ``get_sec_filings`` ran.
+    """
+    cik = _cik_for(ticker)
+    if cik is None:
+        return (None, None)
+    return _SIC_MEMO.get(int(cik), (None, None))
+
+
 def get_sec_filings(ticker: str, limit: int = 10) -> str:
     """Return a formatted summary of the most recent SEC filings for a ticker.
 
@@ -407,6 +446,10 @@ def get_sec_filings(ticker: str, limit: int = 10) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.warning("EDGAR submissions fetch failed for %s (CIK %s): %s", ticker, cik, exc)
         raise NoMarketDataError(ticker, detail=f"EDGAR submissions fetch failed: {exc}") from exc
+
+    # The payload carries a regulatory classification this function never asks
+    # for; keep it for a later step instead of making that step re-fetch.
+    _remember_sic(cik, payload)
 
     recent = payload.get("filings", {}).get("recent", {})
     forms = recent.get("form", []) or []

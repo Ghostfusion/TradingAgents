@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **40 of the 88 `enable_*` keys** in
+policy, data-surface and context gates: **41 of the 89 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -244,13 +244,15 @@ injection); only its default is the historical one.
 
 ## 7c. Post-run output gates — these add an artefact, never a decision
 
-A post-run output gate runs *after* the report is written and adds a file to the
-report tree. It cannot change a rating, a size, a verdict or anything the model
-reads: by the time it runs, the decision is already saved. It is off by default,
-so a gate-off run produces exactly the tree it produced before the gate existed.
+A post-run output gate runs *after* the report is written and adds an artefact to
+the report tree - a new file, or a new `run_card.json` key. It cannot change a
+rating, a size, a verdict or anything the model reads: by the time it runs, the
+decision is already saved. It is off by default, so a gate-off run produces
+exactly the tree it produced before the gate existed.
 
 | Key | Env var | What it can do | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
+| `enable_security_context` | `TRADINGAGENTS_ENABLE_SECURITY_CONTEXT` | writes the deterministic classification block: the provider's sector and industry **verbatim with the source that produced them**, the canonical sector, the SPDR key, the SEC SIC when an earlier step already fetched a submissions payload, and the declared theme priority order with its matrix version. It makes **no network call of its own** and adds **zero** decision-context characters - it never enters the decision channel. The prior **cannot gate**: `candidate_themes` is a union, so every registered theme stays a candidate and a wrong cell costs a missed *earlier* check, never a missed theme | `tradingagents/reporting.py`::`_run_card_security_context` (the block), `tradingagents/strategies/security_context.py`::`build_security_context` / `::candidate_themes` / `::theme_priority_order` / `::render_security_context_basis` | `test_security_context.py` (provenance, the widening property, the validator, the gate both ways), `test_gate_env_toggles.py` (the registry) | wired |
 | `enable_jev_verdict` | `TRADINGAGENTS_ENABLE_JV_VERDICT` | judges the four **analyst** reports with the TypeSafe decisions model, their position language neutralised, and writes `jev_verdict.json` (buy/hold/sell per report) into the report tree | `batch.py::_batch_jev_verdict` (the hook, called after `save_reports`), `tradingagents/jev.py::judge_tree` (the pass) | `test_jev_verdict_hook.py` (the gate fires both ways and the JSON lands in the tree), `test_jev_decide.py` (the recipe) | wired |
 
 `enable_jev_verdict` is the only gate that writes an artefact rather than
@@ -262,9 +264,20 @@ annotates a finished run must never fail it.
 
 ## 8. Adding a gate — the rule
 
-A new gate is not done until: (1) it has a key in `DEFAULT_CONFIG`, (2) an
-`_ENV_OVERRIDES` row so it is flippable from `.env`, (3) a row in this file with
-its enforcement site, (4) a test that **fails when the gate is ignored** (the
-mutations in the phase plans are the pattern), and (5) a CHANGELOG entry. The
-registry test enforces 1, 2, 3 and 4's existence; only a human can enforce 4's
-quality, which is why the "Proven by" column exists.
+A new gate is not done until it is registered in **six** places: (1) a key in
+`DEFAULT_CONFIG`, (2) an `_ENV_OVERRIDES` row so it is flippable from `.env`,
+(3) a row in this file with its enforcement site, (4) a test that **fails when
+the gate is ignored** (the mutations in the phase plans are the pattern),
+(5) a `CHANGELOG.md` entry, and (6) a row in the `docs/api_reference.md` §1.1
+env-var table.
+
+Four of those six are machine-enforced: `tests/test_gate_env_toggles.py` checks
+1-4 as far as a machine can (that the key, the env row, the doc row and the
+`REGISTRY` entry all exist and agree), and `tests/test_api_reference_env_table.py`
+checks 6 by regenerating the table from every env var the config reads. Only a
+human can enforce 4's quality, which is why the "Proven by" column exists.
+
+**This list said five until 2026-09-22**, and the missing one was 6: a new gate
+with no `api_reference.md` row fails the suite with *"the table omits 1 env var
+the config reads"*. It was found by adding one. The generator is
+`scripts/gen_api_reference_table.py --write`.
