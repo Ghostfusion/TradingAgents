@@ -101,6 +101,11 @@ REGISTRY: dict[str, str] = {
     # unconditionally while its documented env var was inert, so "always on"
     # is the shipped behaviour and the default must not change it.
     "enable_computed_context": "wired",
+    # SecurityContext (docs/design_security_context.md). A classification
+    # front end: it reads cached identity, makes no network call, and writes
+    # one advisory card key. The prior it prints cannot gate - the candidate
+    # set is the union of every registered theme with the prior's picks.
+    "enable_security_context": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",
