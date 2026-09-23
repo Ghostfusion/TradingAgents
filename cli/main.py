@@ -1,4 +1,3 @@
-import contextlib
 import datetime
 import os
 import sys
@@ -1281,31 +1280,18 @@ def run_analysis(
         )
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
-        # Initialize state and get graph args with callbacks.
-        # Resolve the instrument identity once here so all agents anchor to
-        # the real company (#814); the CLI builds state directly rather than
-        # going through propagate(), so this must happen on the CLI path too.
-        instrument_context = graph.resolve_instrument_context(
-            selections["ticker"], selections["asset_type"]
-        )
-        init_agent_state = graph.propagator.create_initial_state(
+        # Single producer for the pre-graph setup: the graph resolves the
+        # memory context and instrument identity, builds the initial state and
+        # seeds the deterministic blocks (risk context, the engine scorecard,
+        # the compiled decision context, the packet's close channel). The CLI
+        # used to duplicate this block by hand and drifted out of parity with
+        # propagate() - see TradingAgentsGraph.prepare_initial_state.
+        graph._resolve_pending_entries(selections["ticker"])
+        init_agent_state = graph.prepare_initial_state(
             selections["ticker"],
             selections["analysis_date"],
             asset_type=selections["asset_type"],
-            instrument_context=instrument_context,
         )
-        # Mirrors propagate(): seed the deterministic risk context BEFORE the
-        # Portfolio Manager runs so the PM sees the computed CVaR/liquidity
-        # inputs (the PM reads state["risk_context"] for its tail/liquidity
-        # lines). Without this the CLI decision omits the risk-gate context the
-        # batch/API path gives the PM.
-        if config.get("enable_risk_governor") and not init_agent_state.get("risk_context"):
-            try:
-                _rc = graph._precompute_risk_context(selections["ticker"])
-                if _rc:
-                    init_agent_state["risk_context"] = _rc
-            except Exception:  # noqa: BLE001 - precompute is best-effort
-                pass
         # Pass callbacks to graph config for tool execution tracking
         # (LLM tracking is handled separately via LLM constructor)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
@@ -1414,25 +1400,19 @@ def run_analysis(
 
             trace.append(chunk)
 
-        # Streamed chunks are per-node deltas, not full state. Merge them
-        # so every report field populated across the run is present.
+        # Streamed chunks are full states (stream_mode="values"), not per-node
+        # deltas. Merge them so every report field populated across the run is
+        # present, then run the SAME post-graph steps propagate() runs: the
+        # strategy overlays, the state log, the prediction-ledger row and the
+        # memory-log entry. The CLI used to stop after the overlays, so an
+        # interactive run never reached the memory log.
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
 
-        # Mirrors propagate(): apply the deterministic strategy overlays
-        # (regime/sizing -> catalyst -> position contract -> risk governor ->
-        # computed context) so the CLI report carries the same "Risk Gate
-        # (computed)" block, position contract and risk context that the
-        # batch/API path renders. Previously the CLI skipped overlays
-        # entirely, so decision.md differed structurally from a propagate()
-        # run's (no gate block, PM without computed risk inputs).
-        # _apply_strategy_overlays swallows its own errors (returns state
-        # unchanged), so a vendor hiccup can never break saving.
-        with contextlib.suppress(Exception):
-            final_state = graph._apply_strategy_overlays(
-                final_state, selections["ticker"]
-            )
+        final_state = graph.finalize_run(
+            final_state, selections["ticker"], selections["analysis_date"]
+        )
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:

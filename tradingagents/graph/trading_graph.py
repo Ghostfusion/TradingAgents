@@ -612,8 +612,25 @@ class TradingAgentsGraph:
             )
         return write_report_tree(final_state, ticker, save_path)
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
-        """Execute the graph and write the resulting state to disk and memory log."""
+    def prepare_initial_state(
+        self, company_name, trade_date, asset_type: str = "stock"
+    ) -> dict:
+        """Build a run's pre-graph state: memory context, identity and seed blocks.
+
+        The SINGLE producer of the pre-graph setup. ``propagate()`` /
+        ``_run_graph`` and the interactive CLI both call this, because the CLI
+        used to duplicate this block by hand and had drifted out of parity: it
+        seeded ``risk_context`` but never ``quant_scorecard``, so every
+        interactive run's four analyst reports and ``run_card.json`` were missing
+        the engine sections the batch path renders, and its agents ran without
+        the memory-log past context and aggregate track record.
+        """
+        # This instance is now running this ticker. ``propagate()`` used to be
+        # the only setter, but the interactive CLI bypasses it, so a CLI run
+        # left ``self.ticker`` at its ``None`` default - which ``_log_state``
+        # reads to name the state log. Setting it here makes every entry point
+        # self-contained.
+        self.ticker = company_name
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
@@ -718,44 +735,25 @@ class TradingAgentsGraph:
             )
 
             init_agent_state[DECISION_PACKET_CLOSES_KEY] = list(closes)
-        args = self.propagator.get_graph_args()
+        return init_agent_state
 
-        # Inject thread_id so same ticker+date+graph-shape+run resumes; a
-        # different date, graph shape or run starts fresh (#1089).
-        if self._checkpoint_scope is not None:
-            signature, run_id = self._checkpoint_scope
-            tid = thread_id(company_name, str(trade_date), signature, run_id)
-            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
-            trace = []
-            last_printed = None
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
-                    msg = chunk["messages"][-1]
-                    # Nodes after the trader don't append to messages, so the
-                    # same trailing message repeats across chunks. Print it only
-                    # when it changes (#1027); the trace/state merge is unchanged.
-                    signature = (type(msg).__name__, getattr(msg, "content", None))
-                    if signature != last_printed:
-                        msg.pretty_print()
-                        last_printed = signature
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
-                final_state.update(chunk)
-        else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+    def finalize_run(self, final_state, company_name, trade_date) -> dict:
+        """Post-graph work shared by every entry point: overlays, logs, memory.
 
+        The SINGLE producer of the post-graph steps. The interactive CLI used to
+        stop after the overlays, so an interactive run wrote no state log, no
+        prediction-ledger row and no memory-log entry - its decision never
+        reached deferred reflection, and the memory log only ever held batch
+        runs.
+        """
         # Store current state for reflection.
         self.curr_state = final_state
         # Wiring: attach config-gated strategy overlays (regime/sizing/context).
         final_state = self._apply_strategy_overlays(final_state, company_name)
 
         # Log state to disk.
-        self._log_state(trade_date, final_state)
+        self._log_state(trade_date, final_state, company_name)
 
         # W1-1 prediction ledger: every decision becomes a scorable prediction
         # row (advisory; never gates). Guarded by enable_prediction_ledger.
@@ -803,10 +801,55 @@ class TradingAgentsGraph:
                 run_id,
             )
 
+        return final_state
+
+
+    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+        """Execute the graph and write the resulting state to disk and memory log."""
+        init_agent_state = self.prepare_initial_state(
+            company_name, trade_date, asset_type
+        )
+        args = self.propagator.get_graph_args()
+
+        # Inject thread_id so same ticker+date+graph-shape+run resumes; a
+        # different date, graph shape or run starts fresh (#1089).
+        if self._checkpoint_scope is not None:
+            signature, run_id = self._checkpoint_scope
+            tid = thread_id(company_name, str(trade_date), signature, run_id)
+            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+
+        if self.debug:
+            trace = []
+            last_printed = None
+            for chunk in self.graph.stream(init_agent_state, **args):
+                if chunk["messages"]:
+                    msg = chunk["messages"][-1]
+                    # Nodes after the trader don't append to messages, so the
+                    # same trailing message repeats across chunks. Print it only
+                    # when it changes (#1027); the trace/state merge is unchanged.
+                    signature = (type(msg).__name__, getattr(msg, "content", None))
+                    if signature != last_printed:
+                        msg.pretty_print()
+                        last_printed = signature
+                    trace.append(chunk)
+            # Streamed chunks are full states (stream_mode="values"); merging
+            # them yields the final state, matching graph.invoke() below.
+            final_state = {}
+            for chunk in trace:
+                final_state.update(chunk)
+        else:
+            final_state = self.graph.invoke(init_agent_state, **args)
+
+        final_state = self.finalize_run(final_state, company_name, trade_date)
         return final_state, self.process_signal(final_state["final_trade_decision"])
 
-    def _log_state(self, trade_date, final_state):
-        """Log the final state to a JSON file."""
+    def _log_state(self, trade_date, final_state, ticker):
+        """Log the final state to a JSON file.
+
+        ``ticker`` is passed in rather than read off ``self.ticker``: that
+        attribute was only ever set by ``propagate()``, so a caller that did not
+        go through it (the interactive CLI) had no ticker to name the log with.
+        """
         self.log_states_dict[str(trade_date)] = {
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
@@ -836,7 +879,7 @@ class TradingAgentsGraph:
 
         # Save to file. Reject ticker values that would escape the
         # results directory when joined as a path component.
-        safe_ticker = safe_ticker_component(self.ticker)
+        safe_ticker = safe_ticker_component(ticker)
         directory = Path(self.config["results_dir"]) / safe_ticker / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 

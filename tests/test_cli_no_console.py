@@ -112,12 +112,16 @@ def test_analyze_no_save_no_display_flags(monkeypatch):
 
 
 def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_path):
-    """The interactive CLI must mirror propagate(): seed risk_context before
-    the graph streams and apply the strategy overlays before saving, so a CLI
-    report carries the same Risk Gate block / position contract that the
-    batch/API path renders (a former CLI-vs-batch divergence - a 12:02 batch
-    NVDA report showed a Risk Gate PASS while a 13:48 CLI report showed none
-    and a materially different decision)."""
+    """The interactive CLI must drive the graph's shared run producers.
+
+    It goes through ``prepare_initial_state`` before the graph streams and
+    ``finalize_run`` before saving, rather than re-implementing either, so a CLI
+    report carries the same Risk Gate block / position contract / engine
+    sections that the batch path renders. Two CLI-vs-batch divergences came from
+    the old hand-rolled copy: a 12:02 batch NVDA report showed a Risk Gate PASS
+    while a 13:48 CLI report showed none and a materially different decision; and
+    the engine scorecard was never seeded on the CLI path at all.
+    """
     import types
 
     calls: list[str] = []
@@ -125,10 +129,6 @@ def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_p
     saved: list = []
 
     class _Propagator:
-        @staticmethod
-        def create_initial_state(*a, **k):
-            return {"company_of_interest": "NVDA"}
-
         @staticmethod
         def get_graph_args(**k):
             return {}
@@ -144,15 +144,20 @@ def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_p
         propagator = _Propagator
         graph = _Stream
 
-        def resolve_instrument_context(self, ticker, asset_type):
-            return "NVDA (NVIDIA Corp)"
+        def _resolve_pending_entries(self, ticker):
+            calls.append("resolve_pending")
 
-        def _precompute_risk_context(self, ticker):
-            calls.append("risk_context")
-            return {"cvar_95": -0.03}
+        def prepare_initial_state(self, ticker, trade_date, asset_type="stock"):
+            # The graph is the single producer of the pre-graph state: memory
+            # context, identity, risk context, the engine scorecard and the
+            # compiled decision context. The CLI hands it on unchanged.
+            calls.append("prepare")
+            return {"company_of_interest": ticker, "risk_context": {"cvar_95": -0.03}}
 
-        def _apply_strategy_overlays(self, state, ticker):
-            calls.append("overlays")
+        def finalize_run(self, state, ticker, trade_date):
+            # Likewise for the post-graph steps: overlays, state log, prediction
+            # ledger and the memory-log entry.
+            calls.append("finalize")
             return {**state, "strategy_overlays": {"position_contract": "2.0%"}}
 
     class _NullLive:
@@ -210,10 +215,11 @@ def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_p
 
     m.run_analysis(save_report=True, display_report=False, save_path_arg=tmp_path / "out")
 
-    # 1) risk_context is computed and seeded into the state the graph streams.
-    assert calls == ["risk_context", "stream", "overlays", "save"]
+    # 1) the CLI drives the graph's shared producers, in order, and the state
+    #    prepare_initial_state returned is the state the graph then streams.
+    assert calls == ["resolve_pending", "prepare", "stream", "finalize", "save"]
     assert seen_state["risk_context"] == {"cvar_95": -0.03}
-    # 2) the saved state is the overlay-applied one, not the raw merged stream.
+    # 2) the saved state is finalize_run's, not the raw merged stream.
     saved_state, saved_ticker = saved[0]
     assert saved_ticker == "NVDA"
     assert saved_state["strategy_overlays"] == {"position_contract": "2.0%"}

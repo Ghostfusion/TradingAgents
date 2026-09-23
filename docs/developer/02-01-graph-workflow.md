@@ -81,6 +81,23 @@ REJECT sets `risk_halt=True`, which a downstream decision / portfolio step
   regional benchmark index and marks it resolved with a reflection note.
 - If `checkpoint_enabled`, a per-ticker SQLite resume is cleared on success.
 
+### One producer for the run's setup and teardown
+
+The pre-graph setup and steps 6-7 are methods on the graph, not inline code in
+`propagate()`: `prepare_initial_state` builds the initial state (memory context +
+track record, instrument identity, the deterministic risk context, the engine
+scorecard, the compiled decision context, the packet's close channel) and
+`finalize_run` runs the overlays, the state log, the prediction-ledger row and
+the memory-log entry.
+
+The interactive CLI bypasses `propagate()` so it can stream the graph for its
+live display, and it calls those same two methods. It must never re-implement
+them: a hand-rolled copy of this code is what made a CLI report and a batch
+report diverge - twice. The copy seeded `risk_context` but not
+`quant_scorecard` (so interactive reports had no engine sections), passed no
+memory context, and stopped after the overlays (so interactive runs reached
+neither the state log nor the memory log).
+
 ## Step 8 — report + result
 
 `save_reports` calls `reporting.write_report_tree` which writes:

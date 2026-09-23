@@ -53,5 +53,9 @@ preserves `Risk Gate (computed)` blocks.
 ## 7.6 Final-decision JSON log
 
 `_log_state` writes `results_dir/<ticker>/TradingAgentsStrategy_logs/full_states_log_<date>.json`.
+It takes the ticker as a parameter, so every entry point writes it - it used to
+read `self.ticker`, which only `propagate()` ever set and which the interactive
+CLI never set at all, so the CLI could not write a state log.
+
 
 Continue to [`08-development.md`](08-development.md).

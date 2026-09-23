@@ -938,6 +938,14 @@ class TestLegacyRemoval:
         # it calls must be bound too - a bare MagicMock would auto-create it and
         # feed a Mock decision into store_decision.
         mock_graph._run_graph = functools.partial(TradingAgentsGraph._run_graph, mock_graph)
+        # _run_graph delegates the pre- and post-graph work to these two, so they
+        # carry the write path now and must be bound to the real methods too.
+        mock_graph.prepare_initial_state = functools.partial(
+            TradingAgentsGraph.prepare_initial_state, mock_graph
+        )
+        mock_graph.finalize_run = functools.partial(
+            TradingAgentsGraph.finalize_run, mock_graph
+        )
         mock_graph._apply_strategy_overlays = functools.partial(
             TradingAgentsGraph._apply_strategy_overlays, mock_graph
         )
