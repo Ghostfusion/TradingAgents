@@ -14,6 +14,18 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**The `LOW` line stopped being circular: a cheap trigger scan now promotes a deprioritised theme (2026-09-22, SC-5b).** The priority matrix orders evidence-gathering effort and can only ever *add* attention - so a `LOW` theme stays a candidate and is evaluated last. That left §11.3's third line asserting an escalation with **no producer**: *"LOW -> evaluate only if the evidence stage raises it"*, when with a fixed budget nothing would read the evidence that should raise it. `tradingagents/strategies/theme_triggers.py` is that producer: it scans text **the run already holds** - its own analyst reports, so no new fetch and no LLM - for a small declared lexicon per registered theme, and names the themes a scan hit that the prior had put last.
+
+**Promotion is additive by construction.** It can only move a theme *earlier* than its prior put it; it cannot demote, cannot gate, and does not change the candidate set, so the widening invariant holds whether or not a trigger fires. A theme the prior already put first is not "promoted" - it was never behind.
+
+**Matching is word-bounded, and that is the load-bearing detail.** A substring match fires `ai` on *said*, *airline*, *chain*, *retail* and *campaign* - a lexicon whose name promises a detector it does not have, which is this repo's recurring defect class. Every term matches as a whole word or whole phrase, case-insensitively, and a test pins that with exactly those decoys.
+
+**Nothing consumes a promotion as a decision yet** - the overlay framework (the parent doc's §18 registry) does not exist - so the result is recorded inside the existing `security_context` card block and nothing more. `TRIGGER_VERSION` versions the lexicon the way `MATRIX_VERSION` versions the matrix.
+
+**Web impact**: none - one additive key group inside an existing default-off card block. No tool, CLI flag, gate, JSON shape or returned-dict key changed.
+
+**Tests.** 11 new in `tests/test_theme_triggers.py` - the decoy set, the lexicon's coverage of every registered theme, "scanned and found nothing" distinguished from "not scanned", a bounded term sample with an exact count, that only deprioritised themes promote, that promotion cannot change the candidate set, determinism, and the block read both ways. Full engine suite: 5326 passed, 6 skipped, 0 failed (+11, exactly the new tests). `ruff check .` clean.
+
 **The classification front end the overlay layer was missing - and the prior it prints cannot gate (2026-09-22, SC-1..SC-8).** `docs/Conditional_Research_Overlays_Design.md` specifies a conditional research-overlay layer whose Overlay Detector has three sub-steps (`doc:263-265`): materiality, evidence sufficiency and an `applicability test`. **The third had no producer anywhere in that doc** - named once (``doc:265``), never defined, and nothing in it reads a property of the company. This lands that producer: `tradingagents/strategies/security_context.py`, behind `enable_security_context` (default off).
 
 **The widening invariant is the point.** `candidate_themes()` is a **union** - `frozenset(ALL_REGISTERED_THEMES) | matrix_candidates(sector)` - so every registered theme stays a candidate for every company, and the matrix orders *evidence-gathering effort* without ever being able to remove a theme. That is a structural fact, not a convention: a property test walks all eleven canonical sectors, an unclassified company, and a sector label the matrix has never seen. The parent brief's own example is why - a company in **Energy** whose AI exposure is material anyway, because of data-centre electricity demand. **A prior that can exclude is not a prior, it is a decision.**

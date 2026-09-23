@@ -399,9 +399,13 @@ Once it cannot gate, its real function is clear: **ordering evidence-gathering e
 ```text
 HIGH    → evaluate in this pass
 MEDIUM  → evaluate if budget remains
-LOW     → evaluate only if the evidence stage raises it
+LOW     → evaluate last; a cheap trigger scan can promote it (§11.6)
 (absent) → no prior; falls through to the default order
 ```
+
+**The `LOW` line was circular as first written** - "evaluate only if the evidence
+stage raises it" named no producer, and with a fixed budget nothing would read the
+evidence that should raise the theme. §11.6 supplies it.
 
 This is genuinely useful and completely safe, because a wrong ordering costs a missed *earlier* check, not a missed theme.
 
@@ -424,6 +428,30 @@ That test cannot pass by accident, and it fails the moment someone adds an exclu
 With `sector_canonical = None`, `matrix_candidates` returns `{}` and the candidate set is all themes. An unclassified company is **checked more**, not less. This is P7, and it is the parent doc's P3 (`doc:139`, "not applicable is not zero") applied one layer earlier.
 
 ---
+
+### 11.6 The trigger scan - what promotes a `LOW` theme (SC-5b)
+
+`strategies/theme_triggers.py` scans text **the run already holds** - its own analyst
+reports, so no new fetch and no LLM - for a small declared lexicon per registered
+theme, and reports which themes were mentioned. A theme the prior put last (`LOW`, or
+no prior because the company is unclassified) that the scan hits is **promoted**: named
+in `promoted_themes` and evaluated earlier.
+
+**It is additive by construction.** A trigger can only move a theme *earlier* than its
+prior put it. It cannot demote, cannot gate, and does not change the candidate set - so
+the widening invariant holds whether or not a trigger fires. A theme the prior already
+put first is not "promoted"; it was never behind.
+
+**Matching is word-bounded, and that is load-bearing.** A substring match fires `ai` on
+"said", "airline", "chain", "retail" and "campaign" - a lexicon whose name promises a
+detector it does not have, which is this repo's recurring defect class. Every term is
+matched as a whole word or whole phrase, case-insensitively, and a test pins that with
+those exact decoys.
+
+**What it is not:** an overlay, an analysis, or a judgement. The overlay framework
+(§18 of the parent doc) does not exist yet, so no promotion is consumed as a decision -
+the result is recorded in the run-card block and nothing more. `TRIGGER_VERSION`
+versions the lexicon the same way `MATRIX_VERSION` versions the matrix.
 
 ## 12. Handoff to the materiality detector
 
@@ -642,7 +670,7 @@ SC-5b is the next item. Do not begin with SC-8 or SC-9.
 | SC-4a | `THEME_REGISTRY` / `ALL_REGISTERED_THEMES` | **built** (the parent doc's six ids) |
 | SC-4 | `THEME_PRIORITY_MATRIX` + `MATRIX_VERSION` + validator | **built** - 66 cells, each with a declared basis |
 | SC-5 | `candidate_themes` + the widening invariant | **built** - property-tested over every sector |
-| SC-5b | `theme_triggers` - the cheap escalation scan | **NEXT** - the one thing §11.3's `LOW` line still needs |
+| SC-5b | `theme_triggers` - the cheap escalation scan (§11.6) | **built** - word-bounded lexicon over the run's own reports; additive, cannot demote |
 | SC-6 | the gate, five places | **built** |
 | SC-7 | the `security_context` run-card block | **built** |
 | SC-8 | deterministic one-line rendering | **built** |

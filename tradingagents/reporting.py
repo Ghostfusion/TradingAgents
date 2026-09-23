@@ -1709,7 +1709,9 @@ def _run_card_analyst_consistency(save_path) -> dict | None:
     return out or None
 
 
-def _run_card_security_context(ticker: str, cfg: dict | None, save_path=None) -> dict | None:
+def _run_card_security_context(
+    ticker: str, cfg: dict | None, save_path=None, final_state: dict | None = None
+) -> dict | None:
     """SecurityContext block for run_card.json (docs/design_security_context.md).
 
     Deterministic classification metadata **with its provenance**: the provider's
@@ -1755,6 +1757,24 @@ def _run_card_security_context(ticker: str, cfg: dict | None, save_path=None) ->
         ctx = build_security_context(
             ticker, as_of=as_of, sec_sic=sic, sec_sic_description=sic_desc
         )
+        # SC-5b: the cheap trigger scan over the run's OWN analyst reports - the
+        # evidence the run already paid for. It is a detector, not an overlay: a
+        # promotion moves a LOW theme EARLIER than its prior put it and can never
+        # move one later, and nothing consumes it as a decision yet because the
+        # overlay framework (the parent design's section 18 registry) does not
+        # exist. Recorded so a LOW theme is not silently unreachable.
+        from tradingagents.strategies.theme_triggers import (
+            TRIGGER_VERSION,
+            promoted_themes,
+            theme_triggers,
+        )
+
+        evidence = "\n".join(
+            str((final_state or {}).get(k) or "")
+            for k in ("news_report", "sentiment_report", "market_report")
+        )
+        triggers = theme_triggers(evidence)
+        promoted = promoted_themes(ctx, evidence, triggers)
         return {
             "status": "ok",
             "context": ctx.to_dict(),
@@ -1762,6 +1782,9 @@ def _run_card_security_context(ticker: str, cfg: dict | None, save_path=None) ->
             "priority_order": list(theme_priority_order(ctx)),
             "matrix_version": MATRIX_VERSION,
             "basis": render_security_context_basis(ctx),
+            "theme_triggers": triggers,
+            "promoted_themes": list(promoted),
+            "trigger_version": TRIGGER_VERSION,
             "note": (
                 "declared prior, not a measurement: it orders evidence-gathering "
                 "effort and cannot remove a theme from the candidate set"
@@ -2343,7 +2366,7 @@ def write_report_tree(
         # docs/design_security_context.md: the classification block. Present
         # only when its gate is on, so a gate-off card stays byte-identical.
         # Advisory and outside the decision channel by construction.
-        _secctx = _run_card_security_context(ticker, cfg, save_path)
+        _secctx = _run_card_security_context(ticker, cfg, save_path, final_state)
         if _secctx is not None:
             card["security_context"] = _secctx
         # WP-4/WP-9: the market-level regime score and its two-path read.
