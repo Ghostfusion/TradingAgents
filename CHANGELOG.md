@@ -14,6 +14,20 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**The classification layer gained its cross-run ledger (2026-09-22, SC-9).** `scripts/security_context_ledger.py` reads the `security_context` blocks the runs already wrote and counts **what was classified, and how** - canonical-sector and source distributions, the unclassified rate, SIC presence, per-theme trigger and promotion counts, and the matrix/trigger versions in the wild. One run's classification is a fact about one company; drift is only visible across runs, and the classification is deterministic and versioned, so it is checkable.
+
+**Three distinctions it refuses to blur**, because the ledger's whole risk is claiming more than it can see: a tree with **no block** is *not* evidence the gate was off (it may predate the gate), and the note says so outright; an **unreadable `run_card.json`** is a card problem, counted apart from "no block"; and an empty sector on a *present* block **is** an unclassified company. A test pins each.
+
+**Trees are ordered by mtime, not by name** - a tree is named `TICKER_YYYYMMDD_HHMMSS`, so a name sort would order by ticker and `--limit` would sample the alphabet rather than the recent past. That was a real bug in the first draft, caught while writing the `--limit` test.
+
+Read-only: it prints, it never writes, so running it cannot change a tree. Follows the `scripts/coverage_scorecard.py` shape (`build_*` pure, `render_text`, `main` with `--json`), and carries **no score, rating, verdict or signal** - a test asserts the JSON has none.
+
+**Run against the live trees:** `trees: 5, with block: 0, without: 5` at `--limit 5` - correct and expected, since every tree predates the gate.
+
+**Web impact**: none - a read-only script under `scripts/`; no tool, CLI flag, gate, JSON shape or returned-dict key changed.
+
+**Tests.** 9 new in `tests/test_security_context_ledger.py` - the empty-dir case, the absent-block case, the unreadable-card case, unclassified vs classified, per-theme triggers and promotions, mixed versions, `--limit` taking the newest by mtime rather than by alphabet, determinism plus JSON round-trip, and the no-score assertion. Full engine suite: 5335 passed, 6 skipped, 0 failed (+9, exactly the new tests). `ruff check .` clean.
+
 **The `LOW` line stopped being circular: a cheap trigger scan now promotes a deprioritised theme (2026-09-22, SC-5b).** The priority matrix orders evidence-gathering effort and can only ever *add* attention - so a `LOW` theme stays a candidate and is evaluated last. That left §11.3's third line asserting an escalation with **no producer**: *"LOW -> evaluate only if the evidence stage raises it"*, when with a fixed budget nothing would read the evidence that should raise it. `tradingagents/strategies/theme_triggers.py` is that producer: it scans text **the run already holds** - its own analyst reports, so no new fetch and no LLM - for a small declared lexicon per registered theme, and names the themes a scan hit that the prior had put last.
 
 **Promotion is additive by construction.** It can only move a theme *earlier* than its prior put it; it cannot demote, cannot gate, and does not change the candidate set, so the widening invariant holds whether or not a trigger fires. A theme the prior already put first is not "promoted" - it was never behind.

@@ -547,6 +547,18 @@ No artefact currently persists sector or industry as a structured key — it sur
 
 **Cross-run tracking** (parent doc §14, `doc:608-644`) follows the `scripts/coverage_scorecard.py` shape — `DEFAULT_REPORTS_DIR` (`:51`), `CARD_NAME` (`:54`), a `load_cards` reader that skips malformed cards (`:87`), a pure `build_*` (`:598`), and `main()` with `--json` (`:747`) — emitting one repo-root artefact, the `reports/alpha_ledger.jsonl` precedent.
 
+**Built (SC-9):** `scripts/security_context_ledger.py`, read-only — `py -3.12
+scripts/security_context_ledger.py [--reports-dir reports] [--limit N]
+[--json]`. It counts what the runs classified and how: canonical-sector and
+source distributions, the unclassified rate, SIC presence, per-theme trigger
+and promotion counts, and the matrix/trigger versions seen. Three distinctions
+it refuses to blur: a tree with **no block** is not evidence the gate was off
+(it may predate the gate) and is stated as such; an **unreadable card** is a
+card problem, counted apart from "no block"; and an empty sector on a present
+block IS an unclassified company. Trees are ordered by **mtime**, not name — a
+tree is named `TICKER_YYYYMMDD_HHMMSS`, so a name sort would order by ticker
+and `--limit` would sample the alphabet rather than the recent past.
+
 ---
 
 ## 18. Rendering
@@ -674,7 +686,7 @@ SC-5b is the next item. Do not begin with SC-8 or SC-9.
 | SC-6 | the gate, five places | **built** |
 | SC-7 | the `security_context` run-card block | **built** |
 | SC-8 | deterministic one-line rendering | **built** |
-| SC-9 | cross-run tracker (`scripts/`) | not started |
+| SC-9 | cross-run tracker (`scripts/security_context_ledger.py`) | **built** - read-only; counts provenance, never scores |
 | SC-10 | parent doc §36 gains item 11 | not started (owner's file) |
 
 ---
