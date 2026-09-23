@@ -14,6 +14,20 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 
 ### Changed
 
+**The four analyst reports stopped carrying a vote (2026-09-23).** Each analyst prompt asked the model to prefix its response with `FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**` "so the team knows to stop", so a `1_analysts/*.md` report often opened AND closed with a one-line directional vote. **Nothing consumed it.** An exhaustive grep across all three repos found no parser, counter, schema field, gate, card key or metric on the analyst side - and no reference at all in `trading_web` or `TradingExecution`. The votes were prose for the debating LLMs and the reader.
+
+**The trader's line is a different object and stays.** `schemas.render_trader_proposal` *renders* it from the validated `TraderProposal.action` enum, so the trader's `FINAL TRANSACTION PROPOSAL` is generated from a typed field, never inherited from an analyst - and `test_truncation_retry`/`test_structured_agents`/`smoke_structured_output` pin it. Likewise `report_verifier`'s `_FINAL_VERDICT` scan, which flags two DIFFERENT verdicts in one artifact (a restart artifact); it reads the trader/PM text and stays.
+
+**Removed:** the two-line instruction in `market_analyst.py`, `news_analyst.py`, `fundamentals_analyst.py` and `sentiment_analyst.py` (4 files, 2 lines each), and the `report_hygiene.py` clause that named it - `"One report = ONE body and ONE 'FINAL TRANSACTION PROPOSAL' line"` is now `"one report, one body"`.
+
+**Unchanged and deliberately not touched:** `_looks_report_stub` (empty / degenerate / under `_REPORT_STUB_MIN_CHARS = 400`) - the stub guard tests keyed on length and degeneracy, not on the vote, and their bare-verdict fixtures still describe a real degenerate shape a model can return out of habit. Existing report trees keep whatever votes they already contain; this changes FUTURE runs only, exactly like the stub fix.
+
+**Known trade-off, accepted:** the instruction was also the analysts' only explicit stop affordance ("so the team knows to stop"). The tool-call loop's own caps are code, not prompt text, so termination does not depend on it - but a longer analyst monologue is the plausible cost, and it is recorded here rather than discovered later.
+
+**Web impact**: none - `trading_web` contains no reference to the line (verified across the repo), and its Reports screen renders the `.md` artifacts generically.
+
+**Tests.** Full engine suite: 5335 passed, 6 skipped, 0 failed (unchanged - nothing consumed the vote). `ruff check .` clean.
+
 **The classification layer gained its cross-run ledger (2026-09-22, SC-9).** `scripts/security_context_ledger.py` reads the `security_context` blocks the runs already wrote and counts **what was classified, and how** - canonical-sector and source distributions, the unclassified rate, SIC presence, per-theme trigger and promotion counts, and the matrix/trigger versions in the wild. One run's classification is a fact about one company; drift is only visible across runs, and the classification is deterministic and versioned, so it is checkable.
 
 **Three distinctions it refuses to blur**, because the ledger's whole risk is claiming more than it can see: a tree with **no block** is *not* evidence the gate was off (it may predate the gate), and the note says so outright; an **unreadable `run_card.json`** is a card problem, counted apart from "no block"; and an empty sector on a *present* block **is** an unclassified company. A test pins each.

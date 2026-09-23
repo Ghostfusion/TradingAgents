@@ -41,9 +41,9 @@ REPORT_HYGIENE_RULES = (
     " figure, or that the answer is unravelling, finish the current sentence"
     " and STOP. Never write 'correction needed', 'this is degenerating', 'I am"
     " stuck repeating myself', 'disregard this draft' or 'I will restart"
-    " cleanly', and never emit a second copy of the body. One report = ONE body"
-    " and ONE 'FINAL TRANSACTION PROPOSAL' line; a repetition loop or a restart"
-    " leaves the whole stem unusable (HPE 2026-09-14 fundamentals.md: a line"
+    " cleanly', and never emit a second copy of the body - one report, one body;"
+    " a repetition loop or a restart leaves the whole stem unusable (HPE"
+    " 2026-09-14 fundamentals.md: a line"
     " repeated twelve times, a self-disavowal, then a space-stripped second"
     " copy - the stem had to be discarded)."
 )
