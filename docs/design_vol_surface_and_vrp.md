@@ -9,6 +9,7 @@ and separates them into three classes: **forecastable** (volatility), **estimabl
 identifiable** (risk-neutral densities, surfaces), and **refused** (results this engine's data
 cannot reproduce).
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
+**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
 **Rule-4 impact:** none. Option and volatility reads are internal to the analysts and the risk engine.
 
 ---

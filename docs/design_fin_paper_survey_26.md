@@ -8,6 +8,7 @@ against this engine's actual surfaces, and route the ones that carry a usable pr
 per-theme design docs. Nothing here authorises a change: every adoption is proposed, gated and
 default-off, per the house pattern.
 **Method:** `.state/metadata.jsonl` supplied title/abstract for all 309; full text was extracted
+**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
 from all 309 PDFs and read directly for the shortlist. Every claim of the form "the repo already
 does this" was checked against the tree by grep, not recalled.
 
