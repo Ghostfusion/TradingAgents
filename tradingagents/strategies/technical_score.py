@@ -121,6 +121,9 @@ RAMPS: dict[str, tuple[float, float]] = {
     "pct_above_50d": (20.0, 80.0),
     "pct_above_200d": (20.0, 80.0),
     "ad_ratio": (-0.30, 0.30),
+    # max pain: how far spot sits from the monthly pin, in ATRs. Closer
+    # is the mean-reverting read, so lower_better.
+    "max_pain_dist_atr": (0.0, 2.0),
 }
 
 
@@ -171,6 +174,8 @@ COMPONENTS: dict[str, Component] = {
         _c("keltner_pct", "price_structure", "higher_better", "technical_factors.keltner_channel:349", "NON-MONOTONIC"),
         _c("near_sma200", "price_structure", "higher_better", "value_dip.support_structure:714", "1 = within 3% of the 200-SMA"),
         _c("fib_zone", "price_structure", "higher_better", "swing.fib_levels:290"),
+        _c("max_pain_dist_atr", "price_structure", "lower_better", "derivatives_gamma.max_pain:116 (abs distance / ATR)",
+           "0 = spot sits on the monthly max-pain strike"),
         # volume (10)
         _c("rvol", "volume", "higher_better", "momentum.rvol:25"),
         _c("elder_ratio", "volume", "higher_better", "technical_factors.elder_thermometer:494", "NON-MONOTONIC"),

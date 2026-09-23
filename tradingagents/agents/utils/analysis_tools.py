@@ -3132,7 +3132,7 @@ def get_option_breakeven(
 # ---------------------------------------------------------------------------
 
 
-def _options_chain_rows_lambda(ticker: str) -> tuple | None:
+def _options_chain_rows_lambda(ticker: str, *, monthly: bool = False) -> tuple | None:
     """Best-effort chain rows + spot + T for the gamma/iv reads.
 
     Returns ``(rows, spot, t_years, expiry, days)`` where rows = [{strike, iv,
@@ -3154,6 +3154,26 @@ def _options_chain_rows_lambda(ticker: str) -> tuple | None:
         if not expiries:
             return None
         expiry = expiries[min(2, len(expiries) - 1)]
+        if monthly:
+            # The standard monthly (third Friday), not merely the third listed
+            # expiry: max pain is expiry-specific, and the pinning evidence is
+            # about the monthly OPEX. Falls back to the default above when the
+            # calendar and the vendor's expiry strings cannot be matched.
+            from datetime import date as _date
+
+            from tradingagents.strategies.derivatives_gamma import opex_dates
+
+            today = _date.today()
+            want = [d for d in opex_dates(today.year) + opex_dates(today.year + 1)
+                    if d >= today]
+            parsed = {}
+            for e in expiries:
+                try:
+                    parsed[e] = _date.fromisoformat(str(e)[:10])
+                except ValueError:
+                    continue
+            if want and parsed:
+                expiry = min(parsed, key=lambda e: abs((parsed[e] - want[0]).days))
         chain = tk.option_chain(expiry)
         spot = float(closes[-1])
         days = expiry_days(expiry)
@@ -5075,6 +5095,11 @@ def _technical_components(ticker: str) -> dict:
     bars, the 200-day structures need 205, `vcp_setup` needs its 90-day window.
     A producer given too few bars returns its own short dict and the component
     is simply absent.
+
+    ONE EXCEPTION TO "NO NEW FETCH": `max_pain_dist_atr` needs the monthly
+    options chain, which the OHLCV cache does not hold. It is the only
+    component here that fetches, it does so best-effort, and it is absent
+    rather than scored as 0 when the chain or the ATR is missing.
     """
     data = _ohlcv(ticker)
     closes = data.get("closes") or []
@@ -5203,6 +5228,19 @@ def _technical_components(ticker: str) -> dict:
             low_zone = float(fib["0.618"])
             high_zone = float(fib["0.382"])
             vals["fib_zone"] = bool(low_zone <= last_close <= high_zone)
+    # max pain: the monthly pin as a stationary distance. The ONLY component
+    # here that is not fed from the run's own OHLCV - it needs the monthly
+    # options chain, so it fetches best-effort and is absent (never 0) when the
+    # chain or the ATR is missing.
+    _mp_rows = _options_chain_rows_lambda(ticker, monthly=True)
+    if _mp_rows and atr_v and last_close:
+        from tradingagents.strategies.derivatives_gamma import max_pain as _max_pain
+
+        _mp = _max_pain(_mp_rows[0])
+        if _mp and _mp.get("strike"):
+            vals["max_pain_dist_atr"] = round(
+                abs(float(last_close) - float(_mp["strike"])) / float(atr_v), 4
+            )
 
     # --- volume ------------------------------------------------------------
     rv = rvol(volumes)

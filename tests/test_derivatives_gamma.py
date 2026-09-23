@@ -6,6 +6,7 @@ import pytest
 from tradingagents.strategies.derivatives_gamma import (
     gamma_regime,
     gex_per_strike,
+    max_pain,
     opex_dates,
     opex_note,
     opex_status,
@@ -149,3 +150,42 @@ def test_opex_note_names_the_expiry_that_passed():
     note = opex_note(opex_status(date(2026, 9, 21)))
     assert "2026-09-18" in note
     assert "2026-10-16" not in note
+
+
+def test_max_pain_is_the_argmin_of_total_payout():
+    """The pin sits where the least option value expires in the money."""
+    rows = [
+        {"strike": 95.0, "oi": 100.0, "side": "put"},
+        {"strike": 95.0, "oi": 10.0, "side": "call"},
+        {"strike": 100.0, "oi": 50.0, "side": "call"},
+        {"strike": 100.0, "oi": 50.0, "side": "put"},
+        {"strike": 105.0, "oi": 100.0, "side": "call"},
+        {"strike": 105.0, "oi": 10.0, "side": "put"},
+    ]
+    out = max_pain(rows)
+    assert out["strike"] == 100.0
+    assert out["strikes"] == 3
+
+
+def test_max_pain_merges_duplicate_strike_rows():
+    """Two rows at one strike ADD; overwriting would silently halve the weight."""
+    dup = [
+        {"strike": 100.0, "oi": 60.0, "side": "call"},
+        {"strike": 100.0, "oi": 60.0, "side": "call"},
+        {"strike": 110.0, "oi": 100.0, "side": "put"},
+    ]
+    out = max_pain(dup)
+    assert out["strikes"] == 2  # two distinct strikes, not three rows
+    assert out["strike"] == 100.0  # 120 merged at 100 beats the put wall at 110
+
+
+def test_max_pain_refuses_to_invent_a_pin():
+    """One strike cannot make a minimum, and absent OI is not zero OI."""
+    assert max_pain([{"strike": 100.0, "oi": 5.0, "side": "call"}]) is None
+    assert max_pain([]) is None
+    assert max_pain(None) is None
+    assert max_pain([
+        {"strike": 100.0, "oi": 0.0, "side": "call"},
+        {"strike": 110.0, "oi": 0.0, "side": "put"},
+    ]) is None
+    assert max_pain([{"strike": "x", "oi": "y"}, {"strike": 1.0, "oi": 2.0}]) is None

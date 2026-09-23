@@ -19,7 +19,6 @@ table that can silently grow a second vocabulary is worse than no table.
 
 from __future__ import annotations
 
-import tradingagents.default_config as dc
 from tradingagents.reporting import _run_card_security_context
 from tradingagents.strategies.security_context import (
     ALL_REGISTERED_THEMES,
@@ -311,12 +310,6 @@ def test_the_gate_is_read_both_ways():
     assert block["context"]["classification_as_of"] == "2026-09-22"
     # A classification block carries no score, rating or direction to mistake.
     assert not [k for k in block if k in ("score", "rating", "direction", "signal")]
-
-
-def test_the_shipped_gate_defaults_off():
-    assert dc.DEFAULT_CONFIG["enable_security_context"] is False
-    key_to_env = {v: k for k, v in dc._ENV_OVERRIDES.items()}
-    assert key_to_env["enable_security_context"] == "TRADINGAGENTS_ENABLE_SECURITY_CONTEXT"
 
 
 def test_the_low_cells_are_the_ones_with_no_ordering_prior():

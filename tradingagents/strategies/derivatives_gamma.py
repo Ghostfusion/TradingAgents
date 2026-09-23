@@ -113,6 +113,45 @@ def gamma_regime(gamma: float | None) -> str | None:
     return "flat"
 
 
+def max_pain(rows: list[dict]) -> dict | None:
+    """The settlement strike that minimises total intrinsic payout.
+
+    ``Pain(S) = sum(max(S - K, 0) * call_OI) + sum(max(K - S, 0) * put_OI)``
+    over every listed strike K, and max pain is the argmin over candidate
+    settlements S - the strike at which the most option value expires
+    worthless. Candidates are the listed strikes themselves, which is the
+    standard construction.
+
+    Advisory, like every read in this module: this is a payout-minimising
+    strike, not a forecast, and the "price gets pinned to it" step is the
+    contested part. Returns None when fewer than two strikes carry open
+    interest - one strike cannot make a minimum.
+    """
+    calls: dict[float, float] = {}
+    puts: dict[float, float] = {}
+    for r in rows or []:
+        try:
+            k = float(r.get("strike"))
+            oi = float(r.get("oi") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if oi <= 0:
+            continue
+        bucket = calls if (r.get("side") or "call").lower() == "call" else puts
+        bucket[k] = bucket.get(k, 0.0) + oi
+    strikes = sorted(set(calls) | set(puts))
+    if len(strikes) < 2:
+        return None
+    best_k: float | None = None
+    best_pain: float | None = None
+    for s in strikes:
+        pain = sum(max(s - k, 0.0) * oi for k, oi in calls.items())
+        pain += sum(max(k - s, 0.0) * oi for k, oi in puts.items())
+        if best_pain is None or pain < best_pain:
+            best_k, best_pain = s, pain
+    return {"strike": best_k, "pain": round(best_pain or 0.0, 2), "strikes": len(strikes)}
+
+
 def opex_dates(year: int) -> list[date]:
     """Monthly OPEX dates: the third Friday of each month (US options)."""
     out = []
