@@ -1,4 +1,4 @@
-# Gate Registry — every policy, data-surface and context gate, its switch, where it fires, and what proves it
+# Gate Registry — every registered policy, data-surface and context gate: its switch, where it fires, and what proves it
 
 Status: **maintained** (2026-09-11). Companion to
 `docs/implementation_plan_quant_formula_additions.md` (round-2 additions) and the
@@ -22,17 +22,39 @@ document on every suite run:
    read somewhere outside `default_config.py`, and an `inert` gate must be read
    by nothing.
 
-**What this file covers — and what it does not.** The rows below are the policy,
-data-surface and context gates: the ones that change what a run *does*. This is
-**not** the whole `enable_*` surface. The eight score-engine gates
-(`enable_fundamental_score`, `enable_technical_score`, `enable_regime_score`,
-`enable_risk_score`, `enable_sentiment_score`, `enable_news_score`,
-`enable_trade_score`, `enable_quant_scorecard`) have no row here; they are
-covered by `tests/test_quant_scorecard.py` (the gate map, the default-off
-assertions and the ownership contract) and `tests/test_engine_ownership_map.py`
-(engine -> section -> gate). Growing this file to cover them is deliberate future
-work, one family at a time — an unverified "Proven by" cell is worse than a
-missing row in a file whose purpose is to stop gates that cannot fire.
+**What this file covers — and what it does not.** The rows below are the
+policy, data-surface and context gates: **40 of the 88 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
+`enable_*` keys have no row yet**, and a missing row means *not registered yet* —
+**never** "no such gate". The families still to be added:
+
+- the eight score-engine gates — `enable_fundamental_score`,
+  `enable_technical_score`, `enable_regime_score`, `enable_risk_score`,
+  `enable_sentiment_score`, `enable_news_score`, `enable_trade_score`,
+  `enable_quant_scorecard`. Covered instead by `tests/test_quant_scorecard.py`
+  (the gate map, the default-off assertions and the ownership contract) and
+  `tests/test_engine_ownership_map.py` (engine -> section -> gate);
+- the debate and run-shape flags — `enable_debate`, `enable_reflection`,
+  `enable_independent_vote`, `enable_evidence_symmetry`, `enable_decision_audit`,
+  `enable_pit_registry`, `enable_prediction_ledger`, `enable_report_attribution`;
+- the factor-model family — `enable_factor_model`, `enable_factor_profile`,
+  `enable_factor_proposal_loop`, `enable_composite_rank`,
+  `enable_quality_composite`, `enable_f_score_detail`, `enable_altman_variants`;
+- the event family — `enable_events`, `enable_event_calendars`,
+  `enable_event_state`;
+- the vendor and screener surfaces — `enable_alpaca`, `enable_massive_flat`,
+  `enable_market_movers`, `enable_market_routing`, `enable_screener`,
+  `enable_etf_engine`, `enable_enhanced_index`;
+- the score and aggregation flags — `enable_sentiment`, `enable_sentiment_factor`,
+  `enable_weighted_sentiment_agg`, `enable_weighted_sentiment_window`,
+  `enable_news_relevance`, `enable_growth_scores`, `enable_score_eval_rows`,
+  `enable_analyst_revision_index`, `enable_orderflow`, `enable_crowd_ratio_bands`,
+  `enable_preopen_rvol`, `enable_strategy_overlays`, `enable_topk_drop`,
+  `enable_tuner`, `enable_value_dip`.
+
+Growing this file is deliberate future work, one family at a time — an
+unverified "Proven by" cell is worse than a missing row in a file whose purpose
+is to stop gates that cannot fire.
 
 **Flipping a gate.** Put the env var in `.env` (uncommented) and restart — config
 is read at import, so a running process does not pick up a change:

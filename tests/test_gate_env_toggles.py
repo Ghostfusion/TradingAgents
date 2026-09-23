@@ -274,3 +274,27 @@ def test_the_engine_gates_the_doc_excludes_really_are_covered_elsewhere():
         assert key not in REGISTRY, f"{key} is now a registry row - update the doc"
     scorer = (REPO / "tests" / "test_quant_scorecard.py").read_text(encoding="utf-8")
     assert "enable_quant_scorecard" in scorer
+
+
+def test_the_doc_states_the_whole_enable_surface_and_names_every_excluded_key():
+    """The scope paragraph named only the eight score-engine gates while 48
+    ``enable_*`` keys have no row. A reader trusts the ABSENCE of a row, so a
+    partial exclusion list is the same over-claim in a softer voice: it reads as
+    "outside the score engines, everything policy-shaped is registered".
+
+    Both halves are recomputed from DEFAULT_CONFIG and REGISTRY, so stage 2
+    cannot add a family and leave the doc behind.
+    """
+    text = DOC.read_text(encoding="utf-8")
+    total = sorted(k for k in dc.DEFAULT_CONFIG if k.startswith("enable_"))
+    covered = sorted(k for k in REGISTRY if k.startswith("enable_"))
+    missing = [k for k in total if k not in REGISTRY]
+    assert f"{len(covered)} of the {len(total)}" in text, (
+        f"the doc must state how much of the enable_* surface it covers "
+        f"({len(covered)} of {len(total)}); {len(missing)} keys have no row"
+    )
+    unnamed = [k for k in missing if f"`{k}`" not in text]
+    assert not unnamed, (
+        f"uncovered enable_* keys the doc never names: {unnamed} - an unlisted "
+        "omission reads as 'no such gate'"
+    )
