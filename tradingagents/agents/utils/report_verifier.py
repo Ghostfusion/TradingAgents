@@ -425,6 +425,17 @@ class ReportVerification(BaseModel):
             "UNKNOWN = nothing ran at all."
         ),
     )
+    verdict: Literal["SUPPORTED", "REFUTED", "INCONCLUSIVE", "UNKNOWN"] = Field(
+        default="UNKNOWN",
+        description=(
+            "The H6 materiality vocabulary, alongside (not instead of) "
+            "`overall`: SUPPORTED = the claims' grounding interval clears zero; "
+            "REFUTED = some claim's evidence actively contradicts the report; "
+            "INCONCLUSIVE = unresolved (an UNSUPPORTED claim is not yet evidence "
+            "for or against, so it can never make the stem REFUTED); UNKNOWN = "
+            "nothing to judge. `report_materiality_verdict` is the one producer."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -757,6 +768,64 @@ def _overall_from_claims(claims: list) -> Literal["PASS", "FLAG", "UNKNOWN"]:
     ):
         return "FLAG"
     return "PASS"
+
+
+# ---------------------------------------------------------------------------
+# H6 - the three-way verdict vocabulary
+# ---------------------------------------------------------------------------
+#
+# `overall` is the report-QUALITY flag a consumer reads to know whether the
+# verification ran. The vocabulary below answers the different question H6 adds:
+# is the report's grounding *material*? A FLAG today merges a contradicted
+# figure (disproven) with a sentence no leaf could settle (unproven), and
+# "we could not show it" is not "we showed it is not there". One producer of the
+# claim statuses feeds both vocabularies.
+
+#: Claim statuses that actively REFUTE the report's assertion, so they make the
+#: whole stem REFUTED. UNSUPPORTED is deliberately absent: it leaves a claim
+#: unproven, which is INCONCLUSIVE territory, never refutation.
+_REFUTING_STATUSES = frozenset({"CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT"})
+
+
+def report_materiality_verdict(claims) -> str:
+    """H6: the SUPPORTED / REFUTED / INCONCLUSIVE verdict for one report's claims.
+
+    Reads the claim statuses (the one producer) and classifies the stem:
+
+    * ``REFUTED`` - some claim's evidence actively contradicts the report.
+    * otherwise ``evaluate.materiality_verdict`` classifies the claims' grounded
+      fraction against a **zero threshold**, its interval coming from H11's
+      ``conformal.block_bootstrap_interval`` over the claim indicators: the stem
+      is SUPPORTED only when that grounding interval clears zero, and
+      INCONCLUSIVE - unresolved, never refuted - when it straddles or the claim
+      set is too small to build an interval at all.
+    * ``UNKNOWN`` - nothing to judge (no claims).
+
+    The vocabulary is carried into the verifier precisely so a later phase's
+    finding can be INCONCLUSIVE: an unproven claim must not read as a refuted
+    report.
+    """
+    statuses: list[str] = []
+    for c in claims or []:
+        status = c.get("status") if isinstance(c, dict) else getattr(c, "status", None)
+        if status:
+            statuses.append(str(status))
+    if not statuses:
+        return "UNKNOWN"
+    if any(s in _REFUTING_STATUSES for s in statuses):
+        return "REFUTED"
+    from tradingagents.strategies.conformal import block_bootstrap_interval
+    from tradingagents.strategies.evaluate import materiality_verdict
+
+    grounded = [1.0 if s == "GROUNDED" else 0.0 for s in statuses]
+    stat = sum(grounded) / len(grounded)
+    # The claim set IS the sample here, so the interval floor is the smallest one
+    # H11 can still compute: a handful of claims is exactly the underpowered
+    # case this verdict must be able to name.
+    interval = block_bootstrap_interval(grounded, min_n=1)
+    if interval is None:
+        return "INCONCLUSIVE"
+    return materiality_verdict(stat, interval["low"], interval["high"], 0.0)
 
 
 # Cues in an LLM "UNSUPPORTED" reason that say "the figures exist but the
@@ -4880,6 +4949,61 @@ def _basis_registry(report_text: str, evidence_dec: set) -> list[BasisAssertion]
     return out
 
 
+def _materiality_gate_on() -> bool:
+    """Is the H6 materiality instrument switched on? (``enable_materiality_verdict``)
+
+    Off by default, so with it off the verifier's payload is exactly the pre-H6
+    shape: no per-stem ``verdict`` and no tree-level ``family``. A config read
+    must never break the read it guards, and the key is read literally so the
+    gate registry's read-site scan can see it.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_materiality_verdict", False))
+
+
+def _family_materiality(outcomes: dict) -> dict | None:
+    """H6: the run's stems as a family of findings, FDR-corrected once.
+
+    Each stem contributes its per-claim grounding as a signal (1.0 grounded,
+    0.0 not), aligned on the shortest claim set across the stems, against the
+    zero series (no grounding). ``evaluate.family_materiality`` - the one FDR
+    producer - corrects the family and classifies each stem, so a stem whose
+    grounding does not survive the correction is INCONCLUSIVE, never REFUTED.
+    A claim-indicator series has no meaningful annualised Sharpe, so the declared
+    S bar holds most stems at INCONCLUSIVE: the family correction can name a
+    survivor and can refuse to promote, but it cannot turn prose grounding into
+    a materiality claim - which is the point of routing it through the verdict
+    vocabulary rather than a bare flag.
+    ``None`` when fewer than two stems carry two or more claims, and the call
+    degrades rather than breaking the payload.
+    """
+    from tradingagents.strategies.evaluate import family_materiality
+
+    signals: dict[str, list[float]] = {}
+    for stem, entry in (outcomes or {}).items():
+        claims = (entry or {}).get("claims") or []
+        if len(claims) < 2:
+            continue
+        signals[stem] = [
+            1.0 if (c or {}).get("status") == "GROUNDED" else 0.0 for c in claims
+        ]
+    if len(signals) < 2:
+        return None
+    window = min(len(series) for series in signals.values())
+    candidates = {stem: series[:window] for stem, series in signals.items()}
+    try:
+        return family_materiality(candidates, [0.0] * window, n_boot=200,
+                                  block_len=2, seed=0, min_n=2)
+    except Exception as exc:  # noqa: BLE001 - advisory: never break the payload
+        logger.warning("report_verifier: family materiality skipped: %s", exc)
+        return None
+
+
 def verify_report_dir(
     report_dir: str | Path,
     *,
@@ -4906,6 +5030,9 @@ def verify_report_dir(
     from tradingagents.llm_clients import create_llm_client
 
     cfg = get_config()
+    # H6: read once, so every emission point in this call agrees on whether the
+    # verdict vocabulary is published.
+    publish_materiality = _materiality_gate_on()
     if max_calls is None:
         try:
             max_calls = int(cfg.get("report_verify_max_calls") or 12)
@@ -4980,6 +5107,8 @@ def verify_report_dir(
                 # the key exists before iterating it.
                 "basis": [],
             }
+            if publish_materiality:
+                outcomes[stem]["verdict"] = "UNKNOWN"
             continue
         if _unusable_note(report_text):
             # A stem that was REPLACED by a "SECTION UNUSABLE" note is not a
@@ -5004,6 +5133,8 @@ def verify_report_dir(
                 "reason": "unusable-generation note",
                 "basis": [],  # nothing to extract: no analyst prose in this stem
             }
+            if publish_materiality:
+                outcomes[stem]["verdict"] = "REFUTED"
             stem_succeeded += 1
             continue
         failed_reason: str | None = None
@@ -5058,6 +5189,11 @@ def verify_report_dir(
             # this function and lose the WHOLE payload for every section (30 of
             # 35 report trees had no verify_flags.json).
             entry["metric_errors"] = metric_errors
+        if publish_materiality:
+            # H6: the same claim statuses through the three-way materiality
+            # vocabulary, so a finding that is merely unproven reads
+            # INCONCLUSIVE instead of collapsing into a refutation.
+            entry["verdict"] = report_materiality_verdict(all_claims)
         if failed_reason is not None:
             # Named, in the same shape the max_calls / unusable branches use, so
             # a consumer can tell a REJECTED call from a verifier that never ran.
@@ -5066,7 +5202,7 @@ def verify_report_dir(
             stem_succeeded += 1
         outcomes[stem] = entry
 
-    return {
+    payload = {
         "report_dir": str(report_dir),
         "model": model or str(cfg.get("report_verify_model") or "") or str(
             cfg.get("quick_think_llm") or ""
@@ -5080,3 +5216,9 @@ def verify_report_dir(
         "envelope": _envelope_integrity(Path(report_dir)),
         "verification": outcomes,
     }
+    if publish_materiality:
+        # Tree-level (H6): the stems as one family of findings, FDR-corrected
+        # once, so a stem whose grounding does not survive reads INCONCLUSIVE
+        # rather than being silently promoted (None when no family resolves).
+        payload["family"] = _family_materiality(outcomes)
+    return payload

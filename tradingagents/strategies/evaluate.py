@@ -249,9 +249,40 @@ def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
         i += test_len
 
 
+def _exposure_matched(benchmark_returns, exposure) -> list[float] | None:
+    """Benchmark replayed on the strategy's own in-market bars (H6).
+
+    ``exposure`` is the strategy's binary position series, one flag per
+    benchmark bar: the benchmark's return is taken on a bar the strategy was
+    **in**, and zero (cash) on a bar it was flat. Cost-free by construction -
+    this arm isolates *when in market* from *what was held in market*, which a
+    common-window comparison cannot: a strategy that is out of the market on the
+    benchmark's best days is not measuring the same thing as one that held
+    through them.
+
+    ``None`` (the row is dropped, not guessed) when the exposure series does not
+    align one-for-one with the benchmark, or holds a non-numeric flag.
+    """
+    if not isinstance(exposure, (list, tuple)):
+        return None
+    if len(exposure) != len(benchmark_returns):
+        return None
+    out: list[float] = []
+    for ret, flag in zip(benchmark_returns, exposure, strict=False):
+        if flag is None:
+            return None
+        try:
+            on = float(flag) != 0.0
+        except (TypeError, ValueError):
+            return None
+        out.append(ret if on else 0.0)
+    return out
+
+
 def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float],
                      simple: dict | None = None,
-                     periods_per_year: float = 252.0) -> dict:
+                     periods_per_year: float = 252.0,
+                     exposure: list | None = None) -> dict:
     """Benchmark hierarchy (W1-6): the strategy vs a market benchmark and
     (optional) simple strategies, aligned on the common window.
 
@@ -259,6 +290,13 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
     from the supplied series only (honest: no fetched data, all None when the
     series is too short). ``simple`` may be {name: returns} for buy&hold /
     equal-weight / momentum / MA / vol-target comparators.
+
+    With ``exposure`` (the strategy's binary position series, one flag per
+    benchmark bar) a **time-in-market-matched** row is appended: the benchmark
+    replayed on exactly the bars the strategy held and flat (cash) elsewhere,
+    cost-free. Without it the table compares on a common window that does not
+    match time in market, and no ``exposure_matched`` row is emitted — the
+    default path is unchanged.
     """
     def _stats(name, rets):
         if not rets or len(rets) < 2:
@@ -276,6 +314,10 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
     n = min(len(strategy_returns), len(benchmark_returns))
     rows = [_stats("strategy", list(strategy_returns[-n:])),
             _stats("benchmark", list(benchmark_returns[-n:]))]
+    if exposure is not None:
+        matched = _exposure_matched(benchmark_returns, exposure)
+        if matched is not None:
+            rows.append(_stats("exposure_matched", matched[-n:]))
     for name, rets in (simple or {}).items():
         rows.append(_stats(name, list(rets[-n:]) if len(rets) >= n else rets))
     return {"window": n, "rows": rows}
@@ -509,6 +551,236 @@ def spa(candidates, benchmark, n_boot: int = 1000, block_len: int = 5,
         "n_candidates": len(names),
         "n_obs": n,
         "recentring": recentred,
+        "basis": basis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# H6 - the three-way materiality verdict, the family-level FDR, and the
+# exposure-matched benchmark arm
+# ---------------------------------------------------------------------------
+#
+# A non-significant result is not evidence of no effect. A published claim is
+# therefore classified into three buckets, not two: SUPPORTED when its interval
+# clears the threshold, REFUTED only when the interval lies entirely below it,
+# and INCONCLUSIVE when the interval straddles it. The last bucket means
+# *unresolved* - an underpowered test is not a null result - and collapsing
+# INCONCLUSIVE into REFUTED is the one failure this vocabulary exists to
+# prevent.
+#
+# The thresholds are pre-declared config VALUES, chosen before any result is
+# seen (never after it):
+#
+#     materiality_delta_s = 0.20   annualised Sharpe excess, the S axis
+#     materiality_delta_r = 0.01   per-period return excess, the R axis
+#
+# They are values, not gates: nothing switches on, no ``_ENV_OVERRIDES`` row
+# exists, and no env var reaches them.
+
+#: The verdict vocabulary, in the order of the paper's rule. ``INCONCLUSIVE``
+#: is a verdict, not a placeholder: a straddling interval is unresolved.
+MATERIALITY_VERDICTS = ("SUPPORTED", "REFUTED", "INCONCLUSIVE")
+
+#: Declared defaults, mirroring ``DEFAULT_CONFIG`` so an unreadable config
+#: never changes the threshold a claim was judged against.
+MATERIALITY_DELTA_S_DEFAULT = 0.20
+MATERIALITY_DELTA_R_DEFAULT = 0.01
+
+
+def _materiality_delta(key: str, default: float) -> float:
+    """A pre-declared materiality threshold, read from config by its key.
+
+    Values, not gates: nothing is switched on, so there is no registry entry and
+    no env row. An unreadable config (or a non-finite stored value) falls back to
+    the declared default, never to a different number.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        raw = (get_config() or {}).get(key, default)
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        return float(default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+    return value if math.isfinite(value) else float(default)
+
+
+def _materiality_gate_on() -> bool:
+    """Is the H6 materiality instrument switched on? (``enable_materiality_verdict``)
+
+    Off by default, so with it off the family is not FDR-corrected and the
+    verdict vocabulary is not published: a caller sees exactly the pre-H6
+    behaviour. ``materiality_verdict`` itself is a pure classifier, not a
+    switch - the gate decides whether the instrument that uses it runs. A config
+    read must never break the read it guards, and the key is read literally so
+    the gate registry's read-site scan can see it.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_materiality_verdict", False))
+
+
+def materiality_verdict(stat: float, ci_low: float, ci_high: float,
+                        delta: float) -> str:
+    """The three-way materiality verdict for one threshold on one interval.
+
+    The paper's rule, on a single axis::
+
+        REFUTED      iff U < delta
+        SUPPORTED    iff L > delta
+        INCONCLUSIVE iff the interval straddles the threshold
+
+    (the full rule composes two axes - ``delta_S`` on the Sharpe excess and
+    ``delta_R`` on the return excess - plus a separate survival test; this is the
+    single-axis piece each axis is classified by, and :func:`family_materiality`
+    composes both across a family.)
+
+    **INCONCLUSIVE is never REFUTED.** A straddling interval is *unresolved*,
+    not evidence of no edge: an underpowered test is not a null result, and the
+    failure this function exists to prevent is a reader taking "we could not
+    show it" for "we showed it is not there". A point estimate below the
+    threshold whose interval still contains it is exactly that case, and it
+    returns INCONCLUSIVE.
+
+    ``stat`` is the point estimate the interval was built around; it is validated
+    (finite) so a garbage statistic cannot produce a verdict, and it never
+    overrides the interval. Missing or non-finite inputs return ``unavailable`` -
+    a missing interval is not a verdict, and it is never reported as REFUTED.
+    """
+    try:
+        point = float(stat)
+        lo = float(ci_low)
+        hi = float(ci_high)
+        bar = float(delta)
+    except (TypeError, ValueError):
+        return "unavailable"
+    if not all(math.isfinite(v) for v in (point, lo, hi, bar)):
+        return "unavailable"
+    if lo > hi:
+        lo, hi = hi, lo
+    if lo > bar:
+        return "SUPPORTED"
+    if hi < bar:
+        return "REFUTED"
+    return "INCONCLUSIVE"
+
+
+def family_materiality(candidates, benchmark, *, delta_s: float | None = None,
+                       delta_r: float | None = None, alpha: float = 0.05,
+                       n_boot: int = 1000, block_len: int = 5,
+                       seed: int = 0, min_n: int | None = None) -> dict | None:
+    """H6: a family-level FDR over a batch of candidate signals.
+
+    One producer of the family adjustment. The stationary-bootstrap machinery
+    ``reality_check`` / ``spa`` are built from (``_rc_prepare``,
+    ``_stationary_indices``, ``_rc_metric``) supplies each candidate's one-sided
+    p-value against the benchmark, and Benjamini-Yekutieli's step-up
+    (``p_(i) <= (i/K) * alpha / H_K``, ``H_K`` the K-th harmonic number) turns
+    the batch into a family-level false-discovery rate. ``reality_check`` and
+    ``spa`` are reported beside it, so the family carries the familywise scalars
+    and is corrected once rather than once per candidate by each caller.
+
+    Each candidate is then classified on the R axis - its mean relative return
+    against ``delta_r``, with its interval from H11's
+    ``conformal.block_bootstrap_interval`` - and the declared S bar (its
+    relative Sharpe against ``delta_s``) is reported as a named necessary
+    condition. A candidate that clears the R threshold but does not survive the
+    FDR is demoted to ``INCONCLUSIVE``, **never** to ``REFUTED``: failing a
+    family correction is a statement about power, and this module refuses to read
+    power as refutation. (The paper's separate ruin/survival Monte Carlo is not
+    computed here; the ``survives`` key in the output is the FDR's, and is named
+    as such.)
+
+    ``delta_s`` / ``delta_r`` default to the pre-declared config values
+    ``materiality_delta_s`` / ``materiality_delta_r``. ``min_n`` overrides H11's
+    observation floor for the per-candidate interval (the default keeps H11's
+    own floor; a caller whose series *is* the whole sample may lower it).
+    ``None`` under ``reality_check``'s degradation rules (fewer than two
+    candidates, ragged or non-finite series, a window under ``2*block_len``, or
+    zero variance in every candidate), and ``None`` when
+    ``enable_materiality_verdict`` is off (default) - the instrument is not run
+    at all with the gate off. Deterministic given ``seed``.
+    """
+    if not _materiality_gate_on():
+        return None
+    prepared = _rc_prepare(candidates, benchmark, block_len)
+    if prepared is None:
+        return None
+    names, rel, n = prepared
+    ds = (_materiality_delta("materiality_delta_s", MATERIALITY_DELTA_S_DEFAULT)
+          if delta_s is None else float(delta_s))
+    dr = (_materiality_delta("materiality_delta_r", MATERIALITY_DELTA_R_DEFAULT)
+          if delta_r is None else float(delta_r))
+    k = len(names)
+    n_boot = max(1, int(n_boot))
+    observed = [_rc_metric(row, "mean") for row in rel]
+    rng = random.Random(seed)
+    exceed = [0] * k
+    for _ in range(n_boot):
+        idx = _stationary_indices(n, block_len, rng)
+        for j, row in enumerate(rel):
+            boot = _rc_metric([row[i] for i in idx], "mean")
+            if boot - observed[j] >= observed[j]:
+                exceed[j] += 1
+    p_values = [(1.0 + e) / (n_boot + 1.0) for e in exceed]
+    harmonic = sum(1.0 / i for i in range(1, k + 1))
+    order = sorted(range(k), key=lambda j: p_values[j])
+    cut = 0
+    for rank, j in enumerate(order, start=1):
+        if p_values[j] <= (rank / k) * alpha / harmonic:
+            cut = rank
+    surviving = {j for rank, j in enumerate(order, start=1) if rank <= cut}
+    from tradingagents.strategies.conformal import block_bootstrap_interval
+
+    rows = []
+    for j, name in enumerate(names):
+        interval = (block_bootstrap_interval(rel[j], seed=seed) if min_n is None
+                    else block_bootstrap_interval(rel[j], seed=seed, min_n=min_n))
+        verdict = ("unavailable" if interval is None
+                   else materiality_verdict(observed[j], interval["low"],
+                                            interval["high"], dr))
+        sharpe_excess = sharpe(rel[j])
+        survives = j in surviving
+        if verdict == "SUPPORTED" and (not survives or sharpe_excess <= ds):
+            # Refusing to promote on a family-corrected or sub-bar read is the
+            # demotion to unresolved; a REFUTED here would be the collapse this
+            # vocabulary exists to prevent.
+            verdict = "INCONCLUSIVE"
+        rows.append({
+            "name": name,
+            "relative_mean": round(observed[j], 6),
+            "p_value": round(p_values[j], 6),
+            "survives": survives,
+            "sharpe_excess": round(sharpe_excess, 4),
+            "sharpe_above_declared_bar": bool(sharpe_excess > ds),
+            "interval": interval,
+            "verdict": verdict,
+        })
+    basis = (
+        f"family materiality: Benjamini-Yekutieli FDR over {k} candidates x {n} "
+        f"obs (stationary bootstrap, mean block {block_len}, n_boot={n_boot}, "
+        f"seed={seed}, alpha={alpha}); R axis = relative mean vs delta_r={dr}, "
+        f"S axis = relative Sharpe vs delta_s={ds}; intervals from "
+        "conformal.block_bootstrap_interval"
+    )
+    return {
+        "n_candidates": k,
+        "n_obs": n,
+        "alpha": float(alpha),
+        "delta_s": ds,
+        "delta_r": dr,
+        "surviving": len(surviving),
+        "reality_check": reality_check(candidates, benchmark, n_boot=n_boot,
+                                       block_len=block_len, seed=seed),
+        "spa": spa(candidates, benchmark, n_boot=n_boot, block_len=block_len,
+                   seed=seed),
+        "candidates": rows,
         "basis": basis,
     }
 
@@ -1118,6 +1390,7 @@ __all__ = [
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",
     "benchmark_table",
+    "materiality_verdict", "family_materiality",
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",

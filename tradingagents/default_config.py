@@ -309,6 +309,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EVENT_IV_LIFT": "enable_event_iv_lift",
     "TRADINGAGENTS_ENABLE_TRIADIC_STRESS": "enable_triadic_stress",
     "TRADINGAGENTS_ENABLE_REFUSAL_LEDGER": "enable_refusal_ledger",
+    "TRADINGAGENTS_ENABLE_MATERIALITY_VERDICT": "enable_materiality_verdict",
     # _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored.
     "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
@@ -1108,6 +1109,13 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # expanding window of observed run lengths. An unknown value falls back
         # to "constant" rather than being guessed.
         "bocpd_hazard_mode": "constant",
+        # H6 (docs/paper_survey_26/): the materiality thresholds the three-way
+        # verdict compares against, DECLARED here so they are fixed before any
+        # result is seen rather than chosen after the fact. `delta_s` is the
+        # Sharpe delta and `delta_r` the return delta; both are plain values read
+        # by literal key in `strategies/evaluate.py`, and neither is a gate.
+        "materiality_delta_s": 0.20,
+        "materiality_delta_r": 0.01,
         # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each gates
         "enable_rn_skew_proxy": False,
         "enable_trend_spectral": False,
@@ -1119,6 +1127,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_event_iv_lift": False,
         "enable_triadic_stress": False,
         "enable_refusal_ledger": False,
+        "enable_materiality_verdict": False,
         # one read and all default OFF, so a gate-off run is byte-identical to the
         # run before the gate existed.
         "enable_coverage_window": False,
