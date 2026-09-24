@@ -264,6 +264,9 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_SPECTRAL_NULL_BAND` | `enable_spectral_null_band` | default `false` |
 | `TRADINGAGENTS_ENABLE_RND_RECOVERY` | `enable_rnd_recovery` | default `false` |
 | `TRADINGAGENTS_ENABLE_EIGEN_ROTATION` | `enable_eigen_rotation` | default `false` |
+| `TRADINGAGENTS_ENABLE_DRAWDOWN_ENVELOPE` | `enable_drawdown_envelope` | default `false` |
+| `TRADINGAGENTS_ENABLE_HMM_HEAVY_TAILS` | `enable_hmm_heavy_tails` | default `false` |
+| `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | `enable_tail_risk_layer` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |

@@ -1,6 +1,6 @@
 # Implementation Plan - Regime and State
 
-Status: **IN PROGRESS** - wave 0+1 build started: R1, R7 and R3 landed (2026-09-23), R1 selectable in-run via the bocpd_hazard_mode key, R3 still dormant pending its in-run panel glue. The rest of this plan is not started.
+Status: **IN PROGRESS** - wave 1 landed R1, R7 and R3 (2026-09-23); the T1 batch adds R2 (2026-09-24), which brings the Kupiec/Christoffersen coverage instrument shared with K1. R3's in-run panel glue is still dormant (decision 2). R4, R5 and R6 remain: R4 needs a curated policy corpus, R6 the labelled onset panel.
 path for the detectors, panel reads and constraints specified in
 [`design_regime_estimation_hardening.md`](design_regime_estimation_hardening.md), one of the six
 themed design docs derived from [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).

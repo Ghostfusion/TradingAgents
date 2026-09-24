@@ -240,7 +240,121 @@ def _log_returns(closes) -> list:
     return out
 
 
-def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict | None:
+#: The emission families R2 (2606.23492) swaps into the ONE forward-backward
+#: kernel: the Gaussian default plus three heavy-tailed families. Only the
+#: density and the per-state M-step differ - the recursion is shared, and the
+#: Gaussian branch is arithmetically identical to the pre-R2 path.
+EMISSION_FAMILIES: tuple[str, ...] = ("gaussian", "student_t", "laplace", "ged")
+
+#: Default degrees of freedom for the Student-t emission (the paper's low-dof
+#: heavy tail). Fixed rather than fitted: fitting nu is an ECM iteration the
+#: M-step here does not run, so a caller-chosen value is reported, not guessed.
+EMISSION_NU = 5.0
+
+#: Default shape for the GED emission (beta = 2 is Gaussian, < 2 is heavy-tailed).
+EMISSION_BETA = 1.5
+
+
+def _emission_logdens(x, means, covars, scales, family, nu, beta):
+    """``(T, K)`` log emission densities for one family (pure NumPy).
+
+    ``gaussian`` is the full-covariance multivariate normal - byte-identical in
+    arithmetic to what ``_hmm_em`` computed before R2. ``student_t`` is the
+    multivariate Student-t over the same covariance used as a scale matrix.
+    ``laplace`` and ``ged`` are the independent per-dimension families the paper
+    also fits: Laplace uses per-dimension scales ``b``; GED uses per-dimension
+    standard deviations ``sigma`` mapped to its scale
+    ``alpha = sigma * sqrt(Gamma(1/beta) / Gamma(3/beta))`` so the fitted scale
+    has unit-variance standardisation.
+    """
+    import numpy as np
+
+    n_rows, D = x.shape
+    K = len(means)
+    out = np.empty((n_rows, K))
+    if family == "gaussian":
+        for k in range(K):
+            inv = np.linalg.inv(covars[k])
+            det = max(float(np.linalg.det(covars[k])), 1e-300)
+            d = x - means[k]
+            quad = np.einsum("ij,jk,ik->i", d, inv, d)
+            out[:, k] = -0.5 * (D * math.log(2.0 * math.pi) + math.log(det) + quad)
+        return out
+    if family == "student_t":
+        for k in range(K):
+            inv = np.linalg.inv(covars[k])
+            det = max(float(np.linalg.det(covars[k])), 1e-300)
+            d = x - means[k]
+            quad = np.einsum("ij,jk,ik->i", d, inv, d)
+            out[:, k] = (
+                math.lgamma((nu + D) / 2.0) - math.lgamma(nu / 2.0)
+                - 0.5 * D * math.log(nu * math.pi) - 0.5 * math.log(det)
+                - 0.5 * (nu + D) * np.log1p(quad / nu)
+            )
+        return out
+    if family == "laplace":
+        for k in range(K):
+            s = scales[k]
+            d = np.abs(x - means[k]) / s
+            out[:, k] = float(np.sum(-math.log(2.0) - np.log(s))) + np.sum(-d, axis=1)
+        return out
+    if family == "ged":
+        a0 = math.sqrt(math.gamma(1.0 / beta) / math.gamma(3.0 / beta))
+        c0 = math.log(beta) - math.log(2.0) - math.lgamma(1.0 / beta)
+        for k in range(K):
+            s = scales[k]
+            d = np.abs(x - means[k]) / (s * a0)
+            out[:, k] = D * c0 - float(np.sum(np.log(s))) + np.sum(-(d ** beta), axis=1)
+        return out
+    raise ValueError(f"unknown emission family {family!r}; known: {EMISSION_FAMILIES}")
+
+
+def _emission_mstep(x, gamma, means, covars, scales, family, nu, beta):
+    """One per-state M-step for the family, sharing the E-step's ``gamma``.
+
+    ``gaussian`` is the weighted mean/covariance the pre-R2 path used, kept
+    arithmetically identical. ``student_t`` adds the t's one-step EM weight
+    ``u = (nu + D) / (nu + delta)`` to the mean/covariance. ``laplace`` uses the
+    weighted mean and the mean absolute deviation as its scale; ``ged`` uses the
+    weighted mean and the weighted standard deviation, with the fixed shape.
+    """
+    import numpy as np
+
+    n_rows, D = x.shape
+    K = len(means)
+    w = gamma.sum(axis=0)
+    if family == "gaussian":
+        means = (gamma.T @ x) / np.maximum(w[:, None], 1e-300)
+        for k in range(K):
+            d = x - means[k]
+            covars[k] = (d * gamma[:, k : k + 1]).T @ d / max(w[k], 1e-300) + np.eye(D) * 1e-8
+        return means, covars, scales
+    if family == "student_t":
+        for k in range(K):
+            inv = np.linalg.inv(covars[k])
+            d = x - means[k]
+            quad = np.einsum("ij,jk,ik->i", d, inv, d)
+            gw = gamma[:, k] * ((nu + D) / (nu + quad))
+            sw = max(float(gw.sum()), 1e-300)
+            means[k] = (gw[:, None] * x).sum(axis=0) / sw
+            d = x - means[k]
+            covars[k] = (d * gw[:, None]).T @ d / sw + np.eye(D) * 1e-8
+        return means, covars, scales
+    w = np.maximum(w, 1e-300)
+    means = (gamma.T @ x) / w[:, None]
+    for k in range(K):
+        d = x - means[k]
+        if family == "laplace":
+            scales[k] = (gamma[:, k : k + 1] * np.abs(d)).sum(axis=0) / w[k]
+        else:  # ged
+            scales[k] = np.sqrt((gamma[:, k : k + 1] * d * d).sum(axis=0) / w[k])
+        covars[k] = (d * gamma[:, k : k + 1]).T @ d / w[k] + np.eye(D) * 1e-8
+    return means, covars, scales
+
+
+def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4,
+            family: str = "gaussian", nu: float = EMISSION_NU,
+            beta: float = EMISSION_BETA) -> dict | None:
     """Baum-Welch (scaled forward-backward) on a ``(T, D)`` feature matrix.
 
     Pure NumPy - the same choice ``garch11_fit`` makes - so the filter has no
@@ -248,10 +362,18 @@ def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict
     keeps it readable: each alpha row is normalized by its own scale factor, and
     the log-likelihood is the sum of the log scale factors.
 
-    None on a degenerate fit (a singular covariance that cannot be regularized).
+    R2 (2606.23492): ONE shared forward-backward kernel with only the emission
+    density (``_emission_logdens``) and the per-state M-step
+    (``_emission_mstep``) swapping across ``family``. With ``family="gaussian"``
+    every arithmetic step is the pre-R2 one, so existing pins are unchanged.
+
+    None on a degenerate fit (a singular covariance that cannot be regularized)
+    or an unknown family.
     """
     import numpy as np
 
+    if family not in EMISSION_FAMILIES:
+        return None
     n_rows, D = x.shape
     if n_rows < n_states * 2:
         return None
@@ -262,19 +384,23 @@ def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict
         return None
     means = np.array([x[c].mean(axis=0) for c in chunks])
     covars = np.array([np.cov(x[c].T, ddof=0).reshape(D, D) + np.eye(D) * 1e-6 for c in chunks])
+    scales = np.sqrt(np.maximum(np.array([np.diag(c) for c in covars]), 1e-12))
     pi = np.full(n_states, 1.0 / n_states)
     A = np.full((n_states, n_states), 1.0 / n_states)
     prev_ll = -np.inf
     ll = -np.inf
     try:
         for _ in range(int(n_iter)):
-            B = np.empty((n_rows, n_states))
-            for k in range(n_states):
-                inv = np.linalg.inv(covars[k])
-                det = max(float(np.linalg.det(covars[k])), 1e-300)
-                d = x - means[k]
-                quad = np.einsum("ij,jk,ik->i", d, inv, d)
-                B[:, k] = np.exp(-0.5 * (D * math.log(2.0 * math.pi) + math.log(det) + quad))
+            if family == "gaussian":
+                B = np.empty((n_rows, n_states))
+                for k in range(n_states):
+                    inv = np.linalg.inv(covars[k])
+                    det = max(float(np.linalg.det(covars[k])), 1e-300)
+                    d = x - means[k]
+                    quad = np.einsum("ij,jk,ik->i", d, inv, d)
+                    B[:, k] = np.exp(-0.5 * (D * math.log(2.0 * math.pi) + math.log(det) + quad))
+            else:
+                B = np.exp(_emission_logdens(x, means, covars, scales, family, nu, beta))
             B = np.clip(B, 1e-300, None)
 
             alpha = np.empty((n_rows, n_states))
@@ -290,22 +416,27 @@ def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict
             gamma = np.empty((n_rows, n_states))
             gamma[-1] = alpha[-1]
             xi = np.zeros((n_states, n_states))
-            beta = np.ones(n_states)
+            beta_ = np.ones(n_states)
             for t in range(n_rows - 2, -1, -1):
-                beta = (A @ (B[t + 1] * beta)) / c[t + 1]
-                gamma[t] = alpha[t] * beta
+                beta_ = (A @ (B[t + 1] * beta_)) / c[t + 1]
+                gamma[t] = alpha[t] * beta_
                 s = gamma[t].sum() or 1e-300
                 gamma[t] /= s
-                xi += np.outer(alpha[t], B[t + 1] * beta) / c[t + 1]
+                xi += np.outer(alpha[t], B[t + 1] * beta_) / c[t + 1]
 
             ll = float(np.log(c).sum())
             pi = gamma[0] / (gamma[0].sum() or 1e-300)
             A = xi / np.maximum(xi.sum(axis=1, keepdims=True), 1e-300)
-            w = gamma.sum(axis=0)
-            means = (gamma.T @ x) / np.maximum(w[:, None], 1e-300)
-            for k in range(n_states):
-                d = x - means[k]
-                covars[k] = (d * gamma[:, k : k + 1]).T @ d / max(w[k], 1e-300) + np.eye(D) * 1e-8
+            if family == "gaussian":
+                w = gamma.sum(axis=0)
+                means = (gamma.T @ x) / np.maximum(w[:, None], 1e-300)
+                for k in range(n_states):
+                    d = x - means[k]
+                    covars[k] = (d * gamma[:, k : k + 1]).T @ d / max(w[k], 1e-300) + np.eye(D) * 1e-8
+                scales = np.sqrt(np.maximum(np.array([np.diag(covars[k]) for k in range(n_states)]), 1e-12))
+            else:
+                means, covars, scales = _emission_mstep(
+                    x, gamma, means, covars, scales, family, float(nu), float(beta))
             if abs(ll - prev_ll) < tol:
                 break
             prev_ll = ll
@@ -313,7 +444,8 @@ def _hmm_em(x, n_states: int, n_iter: int, seed: int, tol: float = 1e-4) -> dict
         return None
     if not np.isfinite(ll):
         return None
-    return {"pi": pi, "A": A, "means": means, "covars": covars, "loglik": ll}
+    return {"pi": pi, "A": A, "means": means, "covars": covars, "scales": scales,
+            "family": family, "nu": float(nu), "beta": float(beta), "loglik": ll}
 
 
 def _hmm_filter_step(alpha, model, obs):
@@ -325,14 +457,26 @@ def _hmm_filter_step(alpha, model, obs):
     import numpy as np
 
     prior = np.asarray(alpha) @ model["A"]
-    d = obs - model["means"]
-    dens = np.empty(len(model["means"]))
-    for k in range(len(model["means"])):
-        inv = np.linalg.inv(model["covars"][k])
-        det = max(float(np.linalg.det(model["covars"][k])), 1e-300)
-        dens[k] = math.exp(
-            -0.5 * (len(obs) * math.log(2.0 * math.pi) + math.log(det) + d[k] @ inv @ d[k])
+    fam = model.get("family", "gaussian")
+    if fam == "gaussian":
+        d = obs - model["means"]
+        dens = np.empty(len(model["means"]))
+        for k in range(len(model["means"])):
+            inv = np.linalg.inv(model["covars"][k])
+            det = max(float(np.linalg.det(model["covars"][k])), 1e-300)
+            dens[k] = math.exp(
+                -0.5 * (len(obs) * math.log(2.0 * math.pi) + math.log(det) + d[k] @ inv @ d[k])
+            )
+    else:
+        # Same forward recursion, R2's emission density: the filtered posterior
+        # must use the family the parameters were fit under, or a refit would
+        # silently revert to Gaussian.
+        logd = _emission_logdens(
+            np.asarray(obs, dtype=float)[None, :], model["means"], model["covars"],
+            model["scales"], fam, model.get("nu", EMISSION_NU),
+            model.get("beta", EMISSION_BETA),
         )
+        dens = np.exp(logd[0])
     post = prior * np.clip(dens, 1e-300, None)
     total = post.sum()
     return post / total if total > 0 else prior
@@ -362,7 +506,7 @@ def _hmm_canonical(model: dict) -> dict:
     import numpy as np
 
     order = np.argsort(-np.asarray(model["means"])[:, 0], kind="stable")
-    return {
+    out = {
         "pi": model["pi"][order],
         "A": model["A"][np.ix_(order, order)],
         "means": model["means"][order],
@@ -370,6 +514,32 @@ def _hmm_canonical(model: dict) -> dict:
         "loglik": model["loglik"],
         "order": [int(i) for i in order],
     }
+    # Carry the R2 emission identity and per-dimension scales through the
+    # reorder: the filter's density must use the same family after a refit.
+    if "scales" in model:
+        out["scales"] = model["scales"][order]
+    for key in ("family", "nu", "beta"):
+        if key in model:
+            out[key] = model[key]
+    return out
+
+
+def _hmm_heavy_tails_enabled() -> bool:
+    """Is R2's heavy-tailed emission path switched on? (``enable_hmm_heavy_tails``)
+
+    Off by default. The key is read by its literal name so the gate registry's
+    read-site scan finds it, and an unreadable config leaves the gate off - a
+    config read must never break the read it guards. With the gate off a
+    requested non-Gaussian emission falls back to Gaussian, so a gate-off
+    ``hmm_filtered_regime`` is byte-identical to the pre-R2 one.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_hmm_heavy_tails", False))
 
 
 def hmm_filtered_regime(
@@ -385,8 +555,19 @@ def hmm_filtered_regime(
     n_iter: int = 60,
     restarts: int = 3,
     seed: int = 7,
+    emission: str = "gaussian",
+    nu: float = EMISSION_NU,
+    beta: float = EMISSION_BETA,
 ) -> dict | None:
-    """Walk-forward Gaussian HMM whose probabilities are FILTERED, not smoothed.
+    """Walk-forward HMM whose probabilities are FILTERED, not smoothed.
+
+    One shared forward-backward kernel (``_hmm_em``); R2 (2606.23492) swaps in a
+    heavy-tailed emission family - ``gaussian`` (the default, unchanged),
+    ``student_t``, ``laplace`` or ``ged`` - behind ``enable_hmm_heavy_tails``
+    (default off). With the gate off a non-Gaussian ``emission`` silently falls
+    back to Gaussian and the record says so, so a gate-off caller's ``probs``
+    are byte-identical to the pre-R2 run. ``n_states`` (the paper's ``K``) is
+    selectable; the ``selection`` field reports the criterion used.
 
     A regime model used live may only condition on data it has. ``predict_proba``
     in hmmlearn runs the forward AND backward passes, so its rows are
@@ -420,6 +601,12 @@ def hmm_filtered_regime(
 
     if int(n_states) < 2:
         return None
+    fam = str(emission).lower()
+    if fam not in EMISSION_FAMILIES:
+        return None
+    gate_off_fallback = fam != "gaussian" and not _hmm_heavy_tails_enabled()
+    if gate_off_fallback:
+        fam = "gaussian"
     cs = [float(c) for c in (closes or [])]
     if len(cs) < 3:
         return None
@@ -448,7 +635,8 @@ def hmm_filtered_regime(
         if model is None or (t - int(min_train)) % int(refit_every) == 0:
             best = None
             for j in range(max(1, int(restarts))):
-                cand = _hmm_em(x[:t], k_states, int(n_iter), int(seed) + 17 * j)
+                cand = _hmm_em(x[:t], k_states, int(n_iter), int(seed) + 17 * j,
+                               family=fam, nu=float(nu), beta=float(beta))
                 if cand is None:
                     continue
                 if best is None or cand["loglik"] > best["loglik"]:
@@ -479,6 +667,20 @@ def hmm_filtered_regime(
         if k_states == 2
         else ("bull" if last_state == 0 else "bear" if last_state == k_states - 1 else "neutral")
     )
+    n_obs = int(len(x))
+    dim = int(x.shape[1])
+    n_params = (
+        k_states * k_states          # transition matrix
+        + (k_states - 1)             # initial distribution
+        + k_states * dim             # per-state means
+        + k_states * (dim * (dim + 1) // 2)  # per-state covariances
+    )
+    if fam == "student_t":
+        n_params += 1                # degrees of freedom
+    elif fam == "ged":
+        n_params += 1 + k_states * dim   # shape + per-state scales
+    elif fam == "laplace":
+        n_params += k_states * dim       # per-state scales
     return {
         "states": states,
         "probs": probs,
@@ -499,8 +701,29 @@ def hmm_filtered_regime(
             "transmat": [[round(float(v), 6) for v in row] for row in model["A"]],
         },
         "refits": refits,
+        "emission": {
+            "family": fam,
+            "requested": str(emission).lower(),
+            "gate_off_fallback": gate_off_fallback,
+            "nu": float(nu) if fam == "student_t" else None,
+            "beta": float(beta) if fam == "ged" else None,
+            "means": [round(float(means[k][0]), 8) for k in range(k_states)],
+            "vol_means": [round(float(means[k][1]), 8) for k in range(k_states)],
+            "scales": [round(float(model["scales"][k][0]), 8) for k in range(k_states)],
+        },
+        "selection": {
+            "k": k_states,
+            "criterion": (
+                "supplied by the caller (K is a parameter; no held-out "
+                "log-likelihood/BIC search is run here)"
+            ),
+            "loglik": round(float(model["loglik"]), 4),
+            "bic": round(-2.0 * float(model["loglik"]) + n_params * math.log(max(1, n_obs)), 4),
+            "n_obs": n_obs,
+            "n_params": n_params,
+        },
         "basis": (
-            f"{k_states}-state Gaussian HMM over [log return, "
+            f"{k_states}-state {fam} HMM over [log return, "
             f"yang_zhang_vol({int(vol_window)})] on {len(x)} feature rows, output "
             f"BAR-ALIGNED to the {n_bars} closes; "
             f"FILTERED probabilities P(S_t | x_1:t) - the forward pass only, no "
@@ -508,6 +731,11 @@ def hmm_filtered_regime(
             f"{int(refit_every)} bars ({refits} refit(s)), states canonicalized by "
             f"mean return; {measured} of {n_bars} bars carry a filtered read, "
             f"first at bar {first_index}"
+            + (
+                f"; requested emission {str(emission).lower()} fell back to "
+                f"gaussian because enable_hmm_heavy_tails is off (default)"
+                if gate_off_fallback else ""
+            )
         ),
     }
 
@@ -533,6 +761,82 @@ def hmm_regime(close: list[float], n_states: int = 2) -> str:
     if not res or not res.get("last"):
         return "unknown"
     return str(res["last"]["label"])
+
+
+def _emission_cdf(z, family: str, nu: float, beta: float):
+    """Elementwise CDF of the standardized emission family (scipy, deterministic)."""
+    from scipy import stats
+
+    if family == "gaussian":
+        return stats.norm.cdf(z)
+    if family == "student_t":
+        return stats.t.cdf(z, float(nu))
+    if family == "laplace":
+        return stats.laplace.cdf(z)
+    if family == "ged":
+        return stats.gennorm.cdf(z, float(beta))
+    raise ValueError(f"unknown emission family {family!r}; known: {EMISSION_FAMILIES}")
+
+
+def regime_conditional_var(posteriors, emissions: dict, q: float = 0.05) -> list:
+    """Regime-conditional VaR from the running posterior times each state's CDF.
+
+    R2 (2606.23492). At each bar the mixture distribution of the next return is
+    ``F_t(x) = sum_k p_{t,k} F_k(x)``, with ``p_t`` the FILTERED state posterior
+    (``hmm_filtered_regime``'s ``probs`` row) and ``F_k`` the state-k emission
+    CDF at the requested ``q``. The VaR is the ``q``-quantile of that mixture,
+    found by bisection - reported in ``simple_var``'s convention (negative =
+    loss), so it can be handed straight to ``book_risk.var_coverage_test``.
+
+    ``emissions`` is the identity/hygiene record ``hmm_filtered_regime``
+    returns: ``{"family", "means", "scales", "nu", "beta"}`` where ``means`` /
+    ``scales`` are the per-state 1-D **return** location and family-native scale
+    (dimension 0 of the fitted features). ``posteriors`` is a list of ``K``-row
+    probability vectors (a ``None`` row yields ``None`` - a named gap, never 0).
+    Returns one VaR per posterior row, in the input's order.
+    """
+    import numpy as np
+
+    fam = str(emissions.get("family", "gaussian")).lower()
+    if fam not in EMISSION_FAMILIES:
+        raise ValueError(f"unknown emission family {fam!r}; known: {EMISSION_FAMILIES}")
+    means = np.asarray([float(m) for m in emissions["means"]], dtype=float)
+    scales = np.asarray([float(s) for s in emissions["scales"]], dtype=float)
+    k = len(means)
+    nu = float(emissions.get("nu") or EMISSION_NU)
+    beta = float(emissions.get("beta") or EMISSION_BETA)
+    rows = list(posteriors or [])
+    n = len(rows)
+    out: list = [None] * n
+    valid = np.zeros(n, dtype=bool)
+    P = np.zeros((n, k))
+    for i, row in enumerate(rows):
+        if row is None:
+            continue
+        try:
+            vals = [float(x) for x in row]
+        except (TypeError, ValueError):
+            continue
+        if len(vals) != k or any(not math.isfinite(v) for v in vals):
+            continue
+        P[i] = vals
+        valid[i] = True
+    if not valid.any():
+        return out
+    lo = np.full(n, float(np.min(means - 12.0 * scales)))
+    hi = np.full(n, float(np.max(means + 12.0 * scales)))
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        z = (mid[:, None] - means[None, :]) / scales[None, :]
+        c = (P * _emission_cdf(z, fam, nu, beta)).sum(axis=1)
+        over = c > float(q)
+        hi = np.where(over, mid, hi)
+        lo = np.where(over, lo, mid)
+    vals = 0.5 * (lo + hi)
+    for i in range(n):
+        if valid[i]:
+            out[i] = float(vals[i])
+    return out
 
 
 
@@ -1293,6 +1597,11 @@ __all__ = [
     "CHOP_TREND_THRESHOLD",
     "regime_label",
     "hmm_regime",
+    "hmm_filtered_regime",
+    "regime_conditional_var",
+    "EMISSION_FAMILIES",
+    "EMISSION_NU",
+    "EMISSION_BETA",
     "make_vol_series_of_closes",
     "regime_gate_read",
     "regime_state",

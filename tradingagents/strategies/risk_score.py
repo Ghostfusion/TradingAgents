@@ -156,6 +156,16 @@ COMPONENTS: dict[str, Component] = {
            "book_risk.extreme_quantile_var:451 (es)", "loss fraction of book equity",
            pin=PIN_NEGATE, convention=PIN_TAIL,
            note="EVT/GPD Expected Shortfall; producer returns it NEGATIVE"),
+        _c("tail_risk", "tail", "lower_better",
+           "tail_risk.tail_risk:172 (var)", "loss fraction of book equity (signed; negative loss)",
+           kind=PRINTED,
+           note="K1 (2604.08765): the quality- and uncertainty-adjusted tail "
+                "number. PRINTED beside the score and never scored by it - it "
+                "carries its own breach rate and Kupiec/Christoffersen coverage "
+                "verdict, and a red quality verdict or a gate-off run is "
+                "`unavailable` rather than a number. The producer returns a "
+                "NEGATIVE loss (simple_var's convention); no pin is applied "
+                "because a printed row is never aligned (R3/R7 precedent)"),
         # --- liquidity risk (10) ------------------------------------------
         _c("amihud_illiquidity", "liquidity", "lower_better",
            "liquidity_risk.amihud_illiquidity:71",

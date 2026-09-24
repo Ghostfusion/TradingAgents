@@ -972,6 +972,453 @@ def copula_scenarios(
     }
 
 
+# ---------------------------------------------------------------------------
+# VaR coverage tests: Kupiec POF + Christoffersen joint conditional coverage
+# (R2, 2606.23492 - the coverage test IS the deliverable)
+# ---------------------------------------------------------------------------
+#
+# A VaR is a claim about a breach probability, and a claim is only usable when
+# its breaches are consistent with it. Two classical tests are reported together:
+#
+#   * Kupiec (1995) proportion-of-failures: is the observed hit rate equal to
+#     the stated tail probability? (two-sided: over- and under-coverage both
+#     reject, because a VaR that never breaches is not thereby a good VaR).
+#   * Christoffersen (1998) independence + joint conditional coverage: are the
+#     hits i.i.d. through time, or do they cluster (a VaR that is silent until a
+#     regime turns and then breaches in runs)? The joint statistic is the sum of
+#     the POF and independence likelihood ratios, chi-square on 2 degrees of
+#     freedom.
+#
+# The chi-square survival functions needed are closed form on 1 and 2 degrees of
+# freedom (``erfc(sqrt(x/2))`` and ``exp(-x/2)``), so the test stays stdlib only -
+# no scipy import, deterministic to the last bit.
+
+#: Below this many held-out observations the coverage test cannot speak: a 5%
+#: tail needs enough trials for a proportion to mean anything.
+VAR_COVERAGE_MIN_N = 60
+
+#: The p-value at or above which a VaR's breach behaviour is read as consistent
+#: with its stated level (the conventional 5% test level).
+VAR_COVERAGE_LEVEL = 0.05
+
+
+def _chi2_sf(stat: float, df: int) -> float:
+    """Chi-square survival ``P(X > stat)`` for ``df`` in {1, 2} (closed form)."""
+    if stat is None or not math.isfinite(float(stat)) or float(stat) <= 0.0:
+        return 1.0
+    x = float(stat)
+    if df == 1:
+        return math.erfc(math.sqrt(x / 2.0))
+    if df == 2:
+        return math.exp(-x / 2.0)
+    raise ValueError(f"only df 1 and 2 are closed form here, got {df!r}")
+
+
+def _kupiec_pof(n: int, hits: int, p: float) -> tuple[float | None, float | None]:
+    """``(LR_pof, p_value)``: the proportion-of-failures likelihood ratio.
+
+    The null is ``hit rate = p``. ``0**0`` is taken as 1 (the boundary cases
+    ``hits == 0`` and ``hits == n`` are handled explicitly), so a VaR that never
+    (or always) breaches still yields a finite statistic - and a rejection.
+    """
+    if n <= 0 or not 0.0 < p < 1.0:
+        return None, None
+    if hits <= 0:
+        ln_null, ln_alt = n * math.log(1.0 - p), 0.0
+    elif hits >= n:
+        ln_null, ln_alt = n * math.log(p), 0.0
+    else:
+        pi = hits / n
+        ln_null = (n - hits) * math.log(1.0 - p) + hits * math.log(p)
+        ln_alt = (n - hits) * math.log(1.0 - pi) + hits * math.log(pi)
+    lr = -2.0 * (ln_null - ln_alt)
+    return lr, _chi2_sf(lr, 1)
+
+
+def _christoffersen_independence(
+    n00: int, n01: int, n10: int, n11: int
+) -> tuple[float | None, float | None]:
+    """``(LR_ind, p_value)``: are the breaches i.i.d. through time?
+
+    First-order Markov chain on the hit sequence: ``pi01 = P(hit | no hit)``,
+    ``pi11 = P(hit | hit)``. Independence is ``pi01 = pi11``. Returns
+    ``(None, None)`` when the chain has no transitions to test (all-hit or
+    all-quiet), where the statistic is not defined - never a fabricated pass.
+    """
+    n0, n1 = n00 + n01, n10 + n11
+    total = n0 + n1
+    if n0 == 0 or n1 == 0 or total == 0:
+        return None, None
+    pi01 = n01 / n0
+    pi11 = n11 / n1
+    pi = (n01 + n11) / total
+
+    def _ll(prob: float, k: int, m: int) -> float | None:
+        if k < 0 or m < 0:
+            return None
+        if k == 0 and m == 0:
+            return 0.0
+        if prob <= 0.0 or prob >= 1.0:
+            # a boundary MLE makes the log-likelihood finite only when the
+            # corresponding count is zero (0*log(0) := 0)
+            if prob <= 0.0 and k == 0:
+                return m * math.log(1.0)
+            if prob >= 1.0 and m == 0:
+                return k * math.log(1.0)
+            return None
+        return k * math.log(prob) + m * math.log(1.0 - prob)
+
+    ln_null = _ll(pi, n01 + n11, n00 + n10)
+    a = _ll(pi01, n01, n00)
+    b = _ll(pi11, n11, n10)
+    if ln_null is None or a is None or b is None:
+        return None, None
+    lr = -2.0 * (ln_null - (a + b))
+    return lr, _chi2_sf(lr, 1)
+
+
+def var_coverage_test(
+    returns: list,
+    *,
+    alpha: float = 0.05,
+    var_series: list | None = None,
+    min_window: int = VAR_COVERAGE_MIN_N,
+) -> dict:
+    """Kupiec + Christoffersen joint conditional coverage of a VaR series (R2).
+
+    ``returns`` are the **held-out** realized returns; ``var_series`` is the
+    predicted VaR aligned to them (negative = loss, ``simple_var``'s convention)
+    - typically the regime-conditional VaR from
+    ``regime.regime_conditional_var``, which is what this instrument exists to
+    test. When ``var_series`` is omitted an expanding-window historical VaR is
+    built from strictly-past returns (``simple_var``), so the test is usable
+    standalone; the provenance is named in ``basis`` either way.
+
+    A breach is ``return < VaR``. Returns
+    ``{"kupiec": {...}, "christoffersen": {...}, "verdict", "n", "window",
+    "coverage_level", "basis"}``. ``verdict`` is ``pass`` / ``fail`` at
+    ``VAR_COVERAGE_LEVEL`` on the joint statistic (falling back to the POF
+    statistic when the hit sequence has no transitions to test), or the
+    ``unavailable`` refusal when the held-out window is thinner than
+    ``min_window`` - never a fabricated pass.
+    """
+    rets = [float(r) for r in (returns or []) if r is not None]
+    n_rets = len(rets)
+    try:
+        a = float(alpha)
+        floor = int(min_window)
+    except (TypeError, ValueError):
+        a, floor = 0.05, VAR_COVERAGE_MIN_N
+    window = {
+        "held_out": n_rets,
+        "var_points": len(var_series) if var_series is not None else 0,
+        "n": 0,
+        "min_window": floor,
+        "first": None,
+        "last": None,
+    }
+    if not 0.0 < a < 1.0:
+        return _coverage_refusal(
+            f"alpha={alpha!r} is outside (0, 1): a tail probability is not a level",
+            window, a,
+        )
+    if var_series is None:
+        burn = max(30, floor // 2)
+        vs: list = [None] * n_rets
+        for t in range(burn, n_rets):
+            vs[t] = simple_var(rets[:t], a)
+        source = (
+            f"expanding-window historical VaR (simple_var over strictly-past "
+            f"returns, {burn}-bar burn-in)"
+        )
+    else:
+        vs = list(var_series)
+        source = "supplied VaR series"
+    n = min(n_rets, len(vs))
+    window["n"] = n
+    usable = [t for t in range(n) if vs[t] is not None]
+    if n < floor or len(usable) < floor:
+        return _coverage_refusal(
+            f"held-out window of {len(usable)} usable observation(s) is below the "
+            f"{floor}-observation floor: a tail proportion is not measurable here "
+            f"(master rule 1 - missing data is unavailable, never zero)",
+            window, a,
+        )
+    window["first"] = usable[0]
+    window["last"] = usable[-1]
+    hits = [1 if rets[t] < float(vs[t]) else 0 for t in usable]
+    x = sum(hits)
+    lr_pof, p_pof = _kupiec_pof(len(hits), x, a)
+    n00 = n01 = n10 = n11 = 0
+    for i in range(1, len(hits)):
+        prev, cur = hits[i - 1], hits[i]
+        if prev == 0 and cur == 0:
+            n00 += 1
+        elif prev == 0 and cur == 1:
+            n01 += 1
+        elif prev == 1 and cur == 0:
+            n10 += 1
+        else:
+            n11 += 1
+    lr_ind, p_ind = _christoffersen_independence(n00, n01, n10, n11)
+    joint_stat = joint_p = None
+    if lr_pof is not None and lr_ind is not None:
+        joint_stat = lr_pof + lr_ind
+        joint_p = _chi2_sf(joint_stat, 2)
+    if joint_p is not None:
+        verdict = "pass" if joint_p >= VAR_COVERAGE_LEVEL else "fail"
+        judged_on = "christoffersen joint conditional coverage (LR_cc ~ chi2_2)"
+    elif p_pof is not None:
+        verdict = "pass" if p_pof >= VAR_COVERAGE_LEVEL else "fail"
+        judged_on = "kupiec POF (no transitions to test independence)"
+    else:
+        verdict = "unavailable"
+        judged_on = "nothing"
+    return {
+        "kupiec": {
+            "stat": lr_pof,
+            "p_value": p_pof,
+            "n": len(hits),
+            "hits": x,
+            "hit_rate": x / len(hits),
+            "expected": a,
+            "level": VAR_COVERAGE_LEVEL,
+        },
+        "christoffersen": {
+            "stat": lr_ind,
+            "p_value": p_ind,
+            "joint_stat": joint_stat,
+            "joint_p_value": joint_p,
+            "n00": n00,
+            "n01": n01,
+            "n10": n10,
+            "n11": n11,
+        },
+        "verdict": verdict,
+        "judged_on": judged_on,
+        "n": len(hits),
+        "coverage_level": round(1.0 - a, 6),
+        "window": window,
+        "basis": (
+            f"VaR coverage test on {len(hits)} held-out observation(s) "
+            f"(window [{usable[0]}, {usable[-1]}]): {x} breach(es) at the "
+            f"{(1.0 - a):.1%} VaR (expected {a:.1%}); {source}; verdict {verdict} "
+            f"on {judged_on}"
+        ),
+    }
+
+
+def _coverage_refusal(reason: str, window: dict, alpha: float) -> dict:
+    """The refusal record: no verdict, the reason, and the window it was asked on."""
+    return {
+        "kupiec": {"stat": None, "p_value": None, "n": 0, "hits": 0,
+                   "hit_rate": None, "expected": alpha, "level": VAR_COVERAGE_LEVEL},
+        "christoffersen": {"stat": None, "p_value": None, "joint_stat": None,
+                           "joint_p_value": None, "n00": 0, "n01": 0, "n10": 0,
+                           "n11": 0},
+        "verdict": "unavailable",
+        "judged_on": "nothing",
+        "n": 0,
+        "coverage_level": round(1.0 - alpha, 6),
+        "window": window,
+        "basis": reason,
+    }
+
+
+def _regime_var_coverage(
+    returns: list,
+    posteriors: list,
+    emissions: dict,
+    *,
+    q: float = 0.05,
+    min_window: int = VAR_COVERAGE_MIN_N,
+) -> dict:
+    """R2's VaR consumer: regime-conditional VaR handed to the coverage test.
+
+    ``regime.regime_conditional_var`` builds the mixture quantile from the
+    running state posterior and each state's CDF; this aligns it to the
+    held-out returns and runs :func:`var_coverage_test` at the same tail
+    probability. A VaR without a coverage test is a number, so this is the only
+    form in which the regime VaR is reported. The public instrument R2 shares
+    with K1 is :func:`var_coverage_test` itself.
+    """
+    from tradingagents.strategies.regime import regime_conditional_var
+
+    var_series = regime_conditional_var(posteriors, emissions, q)
+    out = var_coverage_test(returns, alpha=float(q), var_series=var_series,
+                            min_window=min_window)
+    out["var_series"] = var_series
+    out["q"] = float(q)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# K2 - four drawdown expectations and the right time-scaling (2608.00127)
+# ---------------------------------------------------------------------------
+#
+# The engine measures the drawdown that HAPPENED (``evaluate.max_drawdown``,
+# ``book_risk.drawdown_gate``); it cannot say how deep or how long a drawdown at
+# a given Sharpe should run. This computes the four expectations the paper
+# separates - maximum drawdown, maximum loss, time under water and longest
+# recovery - as a Monte-Carlo table over standardized higher moments, so a
+# book's own skewness and kurtosis move them independently (no single Gaussian
+# table reproduces all four).
+#
+# The paper's corrected scaling: under long memory the apparent amplification of
+# drawdown risk is, for maximum-drawdown depth, almost entirely self-similar
+# dispersion scaling ``T^(H - 1/2)`` rather than path geometry. So the depth
+# measures are rescaled by exactly that factor when a Hurst estimate exists; with
+# no Hurst estimate the square-root-of-time convention is used and the record
+# says ``hurst: "assumed"``. Duration measures keep the horizon's own
+# convention - the paper's closed form is about depth.
+#
+# REPORT-ONLY. Nothing here is wired into ``risk_governor`` / ``govern`` /
+# ``drawdown_gate``: the mandate answer on letting the ``T^(H-1/2)`` rescaling
+# reach the governor is still open, so the envelope is reported beside the
+# realized ``max_drawdown`` it is meant to be read with.
+
+#: Monte-Carlo paths per envelope (reduced automatically as the horizon grows;
+#: the total work is bounded so the read stays cheap inside an evaluation loop).
+DRAWDOWN_ENVELOPE_PATHS = 2000
+
+#: Fixed seed: the envelope must be identical across runs (it is a table, not a
+#: draw), so a published expectation does not move between two reads of the same
+#: book.
+DRAWDOWN_ENVELOPE_SEED = 20260924
+
+#: Per-read work ceiling: ``paths * horizon`` never exceeds this.
+DRAWDOWN_ENVELOPE_CELLS = 2_000_000
+
+
+def _sharpe_uncertainty(sharpe: float, n: int) -> dict:
+    """The Sharpe's estimation uncertainty (Lo 2002), reported with the envelope.
+
+    ``SE(SR) = sqrt((1 + SR^2 / 2) / n)`` for ``n`` independent observations.
+    The paper's own point is that Sharpe-*estimation* uncertainty changes the
+    drawdown answer, so the envelope may never be printed without it.
+    """
+    se = math.sqrt((1.0 + 0.5 * float(sharpe) ** 2) / max(1, int(n)))
+    return {
+        "se": se,
+        "n": int(n),
+        "ci95": [float(sharpe) - 1.959964 * se, float(sharpe) + 1.959964 * se],
+        "method": "Lo (2002) SE(SR) = sqrt((1 + SR^2 / 2) / n)",
+    }
+
+
+def drawdown_envelope(
+    sharpe: float,
+    horizon: int,
+    skew: float | None = None,
+    kurtosis: float | None = None,
+    hurst: float | None = None,
+    *,
+    n_paths: int = DRAWDOWN_ENVELOPE_PATHS,
+    seed: int = DRAWDOWN_ENVELOPE_SEED,
+    periods_per_year: float = 252.0,
+) -> dict:
+    """Four drawdown expectations for a Sharpe over ``horizon`` periods (K2).
+
+    Simulates standardized returns at the given annualized ``sharpe`` (a
+    Cornish-Fisher draw matched to ``skew`` and ``kurtosis``; the location and
+    scale are carried in units of the book's own annualized volatility, so no
+    volatility parameter is needed) and reads four separate measures:
+
+    - ``mdd_median`` / ``mdd_p90``: maximum peak-to-trough drawdown.
+    - ``max_loss``: worst cumulative shortfall from the starting capital.
+    - ``time_under_water``: fraction of the horizon below the running peak.
+    - ``longest_recovery``: longest consecutive underwater run, in periods.
+
+    The ``p90`` of each duration/depth measure is the headline (a conservative
+    expectation). Depth measures are rescaled by ``horizon ** (hurst - 1/2)``
+    when a Hurst estimate is supplied - without one the square-root-of-time
+    convention is used and ``hurst`` reads ``"assumed"``. The Sharpe's
+    estimation uncertainty (``sharpe_uncertainty``) is always reported when a
+    Sharpe is. Deterministic for a given ``seed``; ``status`` is ``ok`` or the
+    ``unavailable`` refusal when the Sharpe is missing/non-finite.
+    """
+    try:
+        T = int(horizon)
+    except (TypeError, ValueError):
+        T = 0
+    h_ok = sharpe is not None and math.isfinite(float(sharpe))
+    if T < 2 or not h_ok:
+        return {
+            "status": "unavailable",
+            "mdd_median": None, "mdd_p90": None, "max_loss": None,
+            "time_under_water": None, "longest_recovery": None,
+            "hurst": hurst if hurst is not None else "assumed",
+            "hurst_exponent": None, "hurst_scale": None,
+            "sharpe_uncertainty": None,
+            "horizon": T if T >= 0 else None,
+            "basis": (
+                "drawdown envelope unavailable: "
+                + ("horizon < 2 periods" if T < 2 else "no finite Sharpe supplied")
+                + " (master rule 1 - no number is invented for an unmeasured input)"
+            ),
+        }
+    import numpy as np
+
+    S = float(sharpe)
+    mu_p = S / float(periods_per_year)
+    sig_p = 1.0 / math.sqrt(float(periods_per_year))
+    g1 = float(skew) if (skew is not None and math.isfinite(float(skew))) else 0.0
+    g2 = (float(kurtosis) - 3.0
+          if (kurtosis is not None and math.isfinite(float(kurtosis))) else 0.0)
+    paths = max(200, min(int(n_paths), max(1, DRAWDOWN_ENVELOPE_CELLS // T)))
+    rng = np.random.default_rng(int(seed))
+    z = rng.standard_normal((paths, T))
+    # Cornish-Fisher expansion to the requested skew / excess kurtosis.
+    z = (z + (g1 / 6.0) * (z * z - 1.0) + (g2 / 24.0) * (z ** 3 - 3.0 * z)
+         - (g1 * g1 / 36.0) * (2.0 * z ** 3 - 5.0 * z))
+    eq = np.cumprod(1.0 + mu_p + sig_p * z, axis=1)
+    peak = np.maximum.accumulate(eq, axis=1)
+    dd = (peak - eq) / peak
+    mdd = dd.max(axis=1)
+    loss = (1.0 - eq).max(axis=1)
+    under = (eq < peak).astype(float)
+    tuw = under.mean(axis=1)
+    run = np.zeros(len(eq))
+    longest = np.zeros(len(eq))
+    for t in range(T):
+        run = np.where(under[:, t] > 0.0, run + 1.0, 0.0)
+        longest = np.maximum(longest, run)
+    h_val = (float(hurst)
+             if (hurst is not None and math.isfinite(float(hurst))) else None)
+    exponent = 0.0 if h_val is None else (h_val - 0.5)
+    scale = 1.0 if h_val is None else float(T) ** exponent
+    return {
+        "status": "ok",
+        "mdd_median": float(np.median(mdd)) * scale,
+        "mdd_p90": float(np.quantile(mdd, 0.9)) * scale,
+        "max_loss": float(np.quantile(loss, 0.9)) * scale,
+        "time_under_water": float(np.quantile(tuw, 0.9)),
+        "time_under_water_median": float(np.median(tuw)),
+        "longest_recovery": float(np.quantile(longest, 0.9)),
+        "longest_recovery_median": float(np.median(longest)),
+        "hurst": h_val if h_val is not None else "assumed",
+        "hurst_exponent": exponent,
+        "hurst_scale": scale,
+        "sharpe_uncertainty": _sharpe_uncertainty(S, T),
+        "horizon": T,
+        "paths": paths,
+        "seed": int(seed),
+        "periods_per_year": float(periods_per_year),
+        "basis": (
+            f"drawdown envelope (2608.00127): {paths} Monte-Carlo path(s) over "
+            f"T={T} period(s) at annualized Sharpe {S:.4g} and unit annualized "
+            f"volatility, standardized skew {g1:.3g} / excess kurtosis {g2:.3g}; "
+            f"depth measures rescaled by T^(H-1/2) = {scale:.6g} "
+            + (f"(H={h_val:.4g} measured)" if h_val is not None
+               else "(H assumed 0.5: the square-root-of-time convention)")
+            + "; durations keep the horizon's own convention; REPORT-ONLY - the "
+            "rescaling is deliberately not wired into any governor"
+        ),
+    }
+
+
 __all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "net_beta", "drawdown_gate",
            "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var",
-           "min_cvar_weights", "copula_scenarios"]
+           "min_cvar_weights", "copula_scenarios",
+           "var_coverage_test", "VAR_COVERAGE_MIN_N", "VAR_COVERAGE_LEVEL",
+           "drawdown_envelope"]

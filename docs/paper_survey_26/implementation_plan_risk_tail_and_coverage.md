@@ -1,6 +1,6 @@
 # Implementation Plan - Risk, Tails, and the Coverage That Licenses Them
 
-Status: **IN PROGRESS** - wave 0+1 build started: K3 landed (2026-09-23). The rest of this plan is not started.
+Status: **IN PROGRESS** - wave 1 landed K3 (2026-09-23); the T1 batch adds K2 (report-only, so the governor keeps the square-root-of-time convention until the mandate answer) and K1 (2026-09-24). K4, K5 and K6 remain: K4 is deferred for want of a training stack, K5 awaits the sizing authorisation, K6 is recorded only.
 for the drawdown expectations, the option-implied skew proxy, the quality-adjusted tail number, the
 boundary size multiplier, the deferred characteristics covariance and the recorded marking-aware
 VaR, all specified in the theme design below, one of the six themed design docs derived from

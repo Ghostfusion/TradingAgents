@@ -303,13 +303,26 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
             return {"name": name, "total_return": None, "cagr": None,
                     "sharpe": None, "max_drawdown": None}
         eq = equity_curve(rets)
-        return {
+        row = {
             "name": name,
             "total_return": round(total_return(rets), 4),
             "cagr": round(cagr(rets, periods_per_year), 4),
             "sharpe": round(sharpe(rets, periods_per_year), 3),
             "max_drawdown": round(max_drawdown(eq), 4),
         }
+        if _drawdown_envelope_gate_on():
+            # K2 (2608.00127): the EXPECTED drawdown envelope beside the realized
+            # ``max_drawdown`` already on the row, so the engine can say how deep
+            # and how long a drawdown at this Sharpe should run. REPORT-ONLY -
+            # the T^(H-1/2) rescaling is deliberately NOT wired into any governor.
+            from tradingagents.strategies.book_risk import drawdown_envelope
+            from tradingagents.strategies.mean_reversion import hurst_exponent
+
+            row["drawdown_envelope"] = drawdown_envelope(
+                row["sharpe"], len(rets), skewness(rets), kurtosis(rets),
+                hurst_exponent(rets),
+            )
+        return row
 
     n = min(len(strategy_returns), len(benchmark_returns))
     rows = [_stats("strategy", list(strategy_returns[-n:])),
@@ -624,6 +637,23 @@ def _materiality_gate_on() -> bool:
     except Exception:  # noqa: BLE001 - a config read must never break the read
         cfg = {}
     return bool(cfg.get("enable_materiality_verdict", False))
+
+
+def _drawdown_envelope_gate_on() -> bool:
+    """Is K2's drawdown expectation switched on? (``enable_drawdown_envelope``)
+
+    Off by default: with it off a strategy row carries exactly the keys it had
+    before K2 landed, so no existing consumer moves. The key is read literally
+    so the gate registry's read-site scan can see it, and a config read must
+    never break the read it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_drawdown_envelope", False))
 
 
 def materiality_verdict(stat: float, ci_low: float, ci_high: float,

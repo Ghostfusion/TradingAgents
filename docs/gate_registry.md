@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **57 of the 105 `enable_*` keys** in
+policy, data-surface and context gates: **60 of the 108 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -289,6 +289,9 @@ a number computed over a padded one (ground rule 4).
 | `enable_spectral_null_band` | `TRADINGAGENTS_ENABLE_SPECTRAL_NULL_BAND` | declares a regime change only when a spectral functional's move EXCEEDS its calibrated first-order null band - so a non-rejection reads 'not detectable', never 'no change' | `tradingagents/strategies/regime.py`::`_spectral_band_gate` / `::`spectral_change_read`, declared as the `spectral_change` component by `tradingagents/strategies/regime_score.py`::`_spectral_gate`, numerics in `tradingagents/strategies/covariance_models.py` | `test_spectral_null_band.py` | wired |
 | `enable_rnd_recovery` | `TRADINGAGENTS_ENABLE_RND_RECOVERY` | V3: recover a risk-neutral density only when the quotes can identify one; a sparse chain refuses | options_surface.py _rnd_gate, read from expected_move_from_chain | `tests/test_rnd_recovery.py` | wired |
 | `enable_eigen_rotation` | `TRADINGAGENTS_ENABLE_EIGEN_ROTATION` | V5: subdominant eigenspace rotation, refused inside the Marchenko-Pastur bulk | covariance_models.py spectral_functionals gated rotation key, reached from regime.spectral_change_read | `tests/test_eigen_rotation.py` | wired |
+| `enable_drawdown_envelope` | `TRADINGAGENTS_ENABLE_DRAWDOWN_ENVELOPE` | K2: four drawdown expectations with the Hurst depth rescaling, report-only | book_risk.py drawdown_envelope, read by the strategy-evaluation row in evaluate.py | `tests/test_drawdown_envelope.py` | wired |
+| `enable_hmm_heavy_tails` | `TRADINGAGENTS_ENABLE_HMM_HEAVY_TAILS` | R2: heavy-tailed HMM emissions and a regime VaR judged by Kupiec and Christoffersen | regime.py hmm_filtered_regime emission path and regime_conditional_var, consumed by book_risk.py | `tests/test_hmm_heavy_tails.py` | wired |
+| `enable_tail_risk_layer` | `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | K1: a tail number carrying its data quality and estimation uncertainty, one-directional | tail_risk.py tail_risk, printed by risk_score.py | `tests/test_tail_risk_layer.py` | wired |
 
 ## 8. Adding a gate — the rule
 
