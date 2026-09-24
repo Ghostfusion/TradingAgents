@@ -30,6 +30,30 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-23] **The paper-survey adoption set landed its first wave - fourteen default-off instruments
+  and state reads, and one measured defect it deliberately did not fix** — Waves 0 and 1 of
+  `docs/paper_survey_26/`, one item per push, every one additive and off by default, so a gate-off run is
+  byte-identical to the run before it existed and nothing entered `COMPOSITE_ENGINES`. The honesty
+  instruments came first because they decide whether anything later deserves to land: a **coverage window**
+  that refuses a panel statistic computed over a padded one, a **trial ledger** that reads the trial count
+  and the Sharpe dispersion back from its own rows so a deflated Sharpe is deflated by a *measured* search
+  rather than a caller's assertion, a **refusal ledger** that records the candidates the guardrails *stop*
+  (a ratio without its denominator is not a measurement) with *missed beats saved* as an explicit
+  tie-break, **autocorrelation-aware intervals** whose block length comes from the series' own ACF decay and
+  is checked against an ADF test, and an **information gap** that tells a wide-but-uninformative band from a
+  tight one. Then the state reads over data the engine already fetches: a duration-law hazard on the
+  changepoint read, daily-bar jump proxies that say whether a tail came in one print, a GPH/Whittle memory
+  parameter beside the HAR forecast, a labelled cross-strike skew proxy, a Marchenko-Pastur count of how
+  many independent bets are left, a trend read beside the swing factor, a pre-event IV shape indexed in
+  event time, a null-band spectral change read, and a triadic stress index that names the epicentre and is
+  labelled `coincident`. Two honesty results travel with the wave: the block interval recovers most of what
+  an IID interval loses under persistence but **does not** restore nominal coverage at panel scale (0.75
+  against 0.45 measured at `rho = 0.8`), so the module says so instead of rounding up; and a **confirmed
+  divergence from Ledoit-Wolf (2004)** in `ledoit_wolf_shrink` - the intensity omits the `1/t` factor and
+  saturates at 1.0 on a narrow panel (measured 1.0000 against the paper's 0.6366) - is recorded with its
+  proof and **not fixed**, because the code matches its own docstring and its own pinned test and changing
+  it moves numbers you read. Gates, tests and caveats are in `CHANGELOG.md`; the per-theme plans live in
+  `docs/paper_survey_26/`.
 - [2026-09-15] **The post-PM decision guardrail is on, and the executor's only input contract is actually
   written** — `strategies/decision_guardrail.py` (still default-off in code) is enabled in the shipped `.env`: a
   Buy/Overweight is capped at Hold when a structured risk-debate row is HIGH/CRITICAL, confidence is capped on
