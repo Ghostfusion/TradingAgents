@@ -17,7 +17,8 @@ document on every suite run:
 2. every key exists in `DEFAULT_CONFIG` **and** has an `_ENV_OVERRIDES` row;
 3. flipping each key through the real loader works in **both** directions
    (`_apply_env_overrides`, the same path `.env` takes);
-4. every env var below appears in `.env.example`;
+4. every env var below appears in `.env.example` **and** in the live `.env` (created at its
+   `DEFAULT_CONFIG` value when the name is absent, never overwritten — owner rule, 2026-09-24);
 5. the **Status** column is verified against the source: a `wired` gate must be
    read somewhere outside `default_config.py`, and an `inert` gate must be read
    by nothing.
@@ -298,23 +299,40 @@ a number computed over a padded one (ground rule 4).
 
 ## 8. Adding a gate — the rule
 
-A new gate is not done until it is registered in **six** places: (1) a key in
+A new gate is not done until it is registered in **seven** places: (1) a key in
 `DEFAULT_CONFIG`, (2) an `_ENV_OVERRIDES` row so it is flippable from `.env`,
-(3) a row in this file with its enforcement site, (4) a test that **fails when
-the gate is ignored** (the mutations in the phase plans are the pattern),
-(5) a `CHANGELOG.md` entry, and (6) a row in the `docs/api_reference.md` §1.1
-env-var table.
+(3) a row in this file with its enforcement site, (4) a `REGISTRY` entry in
+`tests/test_gate_env_toggles.py`, (5) a test that **fails when the gate is
+ignored** (the mutations in the phase plans are the pattern), (6) a line in
+`.env.example`, and (7) a row in the `docs/api_reference.md` §1.1 env-var table.
+A `CHANGELOG.md` entry is required as well, but it is a documentation obligation
+rather than a registration point.
 
-Four of those six are machine-enforced: `tests/test_gate_env_toggles.py` checks
-1-4 as far as a machine can (that the key, the env row, the doc row and the
-`REGISTRY` entry all exist and agree), and `tests/test_api_reference_env_table.py`
-checks 6 by regenerating the table from every env var the config reads. Only a
-human can enforce 4's quality, which is why the "Proven by" column exists.
+**The live `.env` is required too, and it is an owner rule (2026-09-24):** every
+config key the engine ships - gate or value - must have an entry in the `.env`
+the run actually reads, created with its `DEFAULT_CONFIG` value when the name is
+absent and **never overwritten** when it is already there. An `.env.example`
+line alone leaves the switch invisible in the operator's own file. Prove a
+top-up by comparing the effective config before and after; the loader runs
+`load_dotenv()` **without** `override=`, so a written default cannot mask an
+exported variable.
 
-**This list said five until 2026-09-22**, and the missing one was 6: a new gate
-with no `api_reference.md` row fails the suite with *"the table omits 1 env var
-the config reads"*. It was found by adding one. The generator is
-`scripts/gen_api_reference_table.py --write`.
+Points 1-4 are machine-enforced: `tests/test_gate_env_toggles.py` checks that
+the key, the env row, the doc row and the `REGISTRY` entry all exist and agree,
+and `tests/test_api_reference_env_table.py` checks 7 by regenerating the table
+from every env var the config reads. Only a human can enforce 5's quality, which
+is why the "Proven by" column exists.
+
+**This list said five until 2026-09-22 and six until 2026-09-24.** The 2026-09-22
+correction added 7: a new gate with no `api_reference.md` row fails the suite with
+*"the table omits 1 env var the config reads"* - found by adding one. The
+2026-09-24 correction added the live `.env` (an operator-facing file the contract
+had never named) and reconciled the two lists that had drifted apart: this one
+had counted a `CHANGELOG.md` entry and omitted `.env.example`, while the adoption
+set's ground rules counted `.env.example` and the `REGISTRY` entry and omitted the
+CHANGELOG. The list above is the union.
+
+The generator is `scripts/gen_api_reference_table.py --write`.
 
 **Read the key by its literal name.** The read-site scan behind point 4 looks for a *quoted* key
 inside an access idiom (`cfg.get("enable_x", False)`, `config["enable_x"]`, `_flag("enable_x")`, a

@@ -189,7 +189,17 @@ py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/wor
    Alpaca, FMP...) and is **gitignored**. NEVER print, commit, or paste them.
    Set `TRADINGAGENTS_*` overrides there, not in code. `.env.example`
    mirrors every supported `TRADINGAGENTS_*` key — keep it in sync when
-   adding new config keys.
+   adding new config keys. **AND create the key in `.env` itself, carrying
+   the engine's default value** (owner rule, 2026-09-24): a key that exists
+   only in `DEFAULT_CONFIG` and `.env.example` is invisible in the file the
+   run actually reads, so the operator cannot see that the switch exists at
+   all. **Create it only when the name is absent, and NEVER overwrite a
+   value already there** — an existing line is the operator's decision, not
+   a default to be refreshed. This covers every config key, gate or value,
+   not just the `enable_*` family. `load_dotenv()` runs without
+   `override=`, so an exported variable still wins over `.env` and writing a
+   default can never mask someone's shell environment; prove any top-up with
+   a before/after comparison of the effective config.
 
 ## Project structure (current `main`)
 
