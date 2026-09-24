@@ -1,6 +1,11 @@
 # Paper-Survey Adoption - Index
 
-Status: **PLAN SET - not started.**
+Status: **IN PROGRESS - wave 0 (P0) and the wave-1 state reads have landed (2026-09-23); the rest is not started.**
+16 of the 44 buildable items are built, proved and pushed - the six P0 honesty instruments (H10, H1, H7, H11,
+H4, H6) and ten P1 state reads (R1, R3, R7, V6, V2, K3, V4, X3, X6, X8) - each behind its own default-off gate
+with its failing-first proof, its `CHANGELOG.md` entry and its `docs/gate_registry.md` row. **K2 is deliberately
+not built:** its `T^(H-1/2)` rescaling reaches the drawdown governor and awaits the owner's mandate answer
+(decision 3 below). R3's in-run panel glue is the one landed read still dormant, and that is decision 2.
 **Date:** 2026-09-23
 **Survey:** [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md) - v1.0 SURVEY, 309 papers read
 (31 high / 111 medium / 124 low / 43 none relevance).
@@ -244,6 +249,15 @@ Each themed plan ends with its own line; those six, plus five the grounding work
 11. **`docs/scores/MEASUREMENT_FINDINGS.md`** is owner-authored and already records three fields as
     "not measured" that are now measured. Findings from these phases need a home; nominate the file
     (and its edit convention) or a new ledger, and say which.
+
+12. **The score panel's `N` (surfaced by the H1 build).** H1 wired the trial ledger into `alpha_zoo.bench_zoo`,
+    which is where candidates are recorded and read back. `scripts/score_panel.py` still deflates by the family
+    count it measured itself (`len(tested)`), which is a measured count for *that* panel and not a caller's
+    assertion - so the card's clause holds there as stated. Moving that site to the ledger's dispersion is **not
+    a one-liner and should not be wired blind**: the ledger records Sharpes under the equity convention
+    (`periods_per_year=252`) while the panel's decile-spread series is per-period (`periods_per_year=1.0`), so
+    `V` would have to be rescaled (`V / 252`) before it is dimensionally valid against that statistic. The
+    owner's call, recorded rather than guessed.
 
 **Standing constraint, restated:** R9 is not a build. Regime information conditions *how much to
 trust* another read; it is never concatenated onto it.
