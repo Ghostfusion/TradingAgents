@@ -254,6 +254,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES` | `enable_jump_robust_proxies` | default `false` |
 | `TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM` | `enable_mp_lower_spectrum` | default `false` |
 | `TRADINGAGENTS_ENABLE_LONG_MEMORY` | `enable_long_memory` | default `false` |
+| `TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS` | `enable_bootstrap_intervals` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |

@@ -301,6 +301,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES": "enable_jump_robust_proxies",
     "TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM": "enable_mp_lower_spectrum",
     "TRADINGAGENTS_ENABLE_LONG_MEMORY": "enable_long_memory",
+    "TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS": "enable_bootstrap_intervals",
     # _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored.
     "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
@@ -1101,6 +1102,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_jump_robust_proxies": False,
         "enable_mp_lower_spectrum": False,
         "enable_long_memory": False,
+        "enable_bootstrap_intervals": False,
         # one read and all default OFF, so a gate-off run is byte-identical to the
         # run before the gate existed.
         "enable_coverage_window": False,
