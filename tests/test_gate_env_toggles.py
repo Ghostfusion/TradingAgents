@@ -61,6 +61,10 @@ REGISTRY: dict[str, str] = {
     "enable_return_decomposition": "wired",
     "enable_text_factors": "wired",
     "enable_bocpd": "wired",
+    # Paper-survey adoption, waves 0-1 (docs/paper_survey_26/).
+    "enable_coverage_window": "wired",
+    "enable_rn_skew_proxy": "wired",
+    "enable_trend_spectral": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

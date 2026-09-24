@@ -1,6 +1,6 @@
 # Implementation Plan - Honest Evaluation Gates
 
-Status: **PLAN - not started.** Implements the eleven honest-evaluation items (H1-H11) of the
+Status: **IN PROGRESS** - wave 0+1 build started: H10 landed (2026-09-23). The rest of this plan is not started.
 2026 `q-fin` corpus survey - the gates that decide whether a claim the engine publishes is
 *earned*. Parent survey: [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).
 **Parent design:** [`design_research_honesty_gates.md`](design_research_honesty_gates.md)

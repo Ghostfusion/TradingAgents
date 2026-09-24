@@ -46,9 +46,17 @@ import textwrap
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.score_panel import engine_registry  # noqa: E402
+from tradingagents.strategies.coverage_window import coverage_window  # noqa: E402
+from tradingagents.strategies.data_quality import panel_statistic  # noqa: E402
 
 #: Where ``batch.py`` writes its trees. Repo-relative, gitignored.
 DEFAULT_REPORTS_DIR = "reports"
+
+#: The tool-evidence entry whose CSV carries the run's own loaded price frame.
+PRICE_TOOL = "get_stock_data"
+
+#: The tool-evidence file inside a tree (the run's own record of what it fetched).
+EVIDENCE_NAME = "tool_evidence.json"
 
 #: The per-tree card this reads. A tree without one is skipped and counted.
 CARD_NAME = "run_card.json"
@@ -591,6 +599,145 @@ def gap_reason(engine: str, field: str, klass: str, *, absent: dict[str, str]) -
 
 
 # ---------------------------------------------------------------------------
+# The coverage window, per symbol
+# ---------------------------------------------------------------------------
+#
+# A tree is one run of one symbol, and its own tool evidence holds the price
+# frame that run loaded (``get_stock_data``). Reading that frame back is reading
+# the run's own input - no new vendor call - so the coverage window costs
+# nothing here. The requested date range is the calendar the frame was aligned
+# to; positions before the symbol's first observed bar are the padding H10
+# measures. The dependent panel statistic is read through ``data_quality``, so a
+# padded window reports ``unavailable`` rather than a number.
+
+
+def _load_evidence(tree_dir: str) -> dict | None:
+    """The tree's own ``tool_evidence.json``, or ``None`` when absent/bad."""
+    path = os.path.join(tree_dir, EVIDENCE_NAME)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_price_content(content: str) -> list[tuple[str, float]]:
+    """``(date, close)`` rows from a ``get_stock_data`` markdown/CSV payload."""
+    rows: list[tuple[str, float]] = []
+    for line in str(content or "").splitlines():
+        parts = line.split(",")
+        if len(parts) < 5:
+            continue
+        date = parts[0].strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            continue
+        try:
+            close = float(parts[4])
+        except ValueError:
+            continue
+        rows.append((date, close))
+    return rows
+
+
+def _price_entry(evidence: dict, ticker: str) -> tuple[list[tuple[str, float]], str, str]:
+    """``(rows, start_date, end_date)`` for the run's own loaded price frame."""
+    entries = (evidence or {}).get("market")
+    if not isinstance(entries, list):
+        return [], "", ""
+    fallback: tuple[list[tuple[str, float]], str, str] | None = None
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("tool") != PRICE_TOOL:
+            continue
+        rows = _parse_price_content(entry.get("content"))
+        if not rows:
+            continue
+        args = entry.get("args")
+        if isinstance(args, str):
+            try:
+                args = ast.literal_eval(args)
+            except (ValueError, SyntaxError):
+                args = {}
+        args = args if isinstance(args, dict) else {}
+        got = (rows, str(args.get("start_date") or ""), str(args.get("end_date") or ""))
+        if ticker and str(args.get("symbol") or "") == ticker:
+            return got
+        if fallback is None:
+            fallback = got
+    return fallback or ([], "", "")
+
+
+def _calendar_panel(rows: list[tuple[str, float]], start: str, end: str):
+    """The requested calendar with the observed closes, missing where no bar.
+
+    Positions before the symbol's first observed bar are NaN - exactly the
+    padding a heterogeneous listing history creates - so ``coverage_window``
+    counts them. Interior holidays also read as missing, which ``n_bars`` (the
+    valid count) already accounts for; only the leading run is padding.
+    """
+    import pandas as pd
+
+    observed = {date: close for date, close in rows if date}
+    dates = sorted(observed)
+    if not dates:
+        return None
+    lo = start if start and start <= dates[0] else dates[0]
+    hi = end if end and end >= dates[-1] else dates[-1]
+    try:
+        calendar = [d.strftime("%Y-%m-%d") for d in pd.bdate_range(lo, hi)]
+    except Exception:  # noqa: BLE001 - a bad range falls back to the observed bars
+        calendar = dates
+    if not calendar or calendar[0] > dates[0]:
+        calendar = dates
+    return pd.Series([observed.get(d) for d in calendar],
+                     index=pd.to_datetime(calendar))
+
+
+def _coverage_gate() -> bool:
+    """Is the H10 per-symbol coverage window switched on? (``enable_coverage_window``)
+
+    Off by default, so a gate-off scorecard prints exactly the sections it
+    printed before the per-symbol window existed. A config read must never
+    break the report it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_coverage_window", False))
+
+
+def symbol_coverage(tree: str, card: dict, evidence: dict | None) -> dict:
+    """The coverage-window line for one symbol (one run tree).
+
+    Reads the tree's own loaded frame and reports its window; a tree with no
+    frame degrades to ``unavailable`` with the reason, never to a zero. The
+    dependent statistic is ``data_quality.panel_statistic`` so a padded window
+    is refused (H10).
+    """
+    ticker = str(card.get("ticker") or "")
+    rows, start, end = _price_entry(evidence or {}, ticker)
+    panel = _calendar_panel(rows, start, end) if rows else None
+    window = coverage_window(panel)
+    stat = panel_statistic(panel)
+    return {
+        "tree": tree,
+        "ticker": ticker,
+        "window": window,
+        "statistic": stat["statistic"],
+        "unavailable": stat["unavailable"],
+    }
+
+
+def _label(value) -> str:
+    """A window label as a date string when it can be one, else ``str``."""
+    fmt = getattr(value, "strftime", None)
+    return fmt("%Y-%m-%d") if fmt else str(value)
+
+
+# ---------------------------------------------------------------------------
 # The scorecard
 # ---------------------------------------------------------------------------
 
@@ -665,11 +812,16 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
             "fields": fields,
         }
 
+    symbols = [] if not _coverage_gate() else [
+        symbol_coverage(name, card, _load_evidence(os.path.join(reports_dir, name)))
+        for name, card in cards
+    ]
     return {
         "reports_dir": os.path.abspath(os.path.expanduser(str(reports_dir))),
         "trees": len(cards),
         "trees_with_cards": len(cards),
         "engines": engines_out,
+        "symbols": symbols,
     }
 
 
@@ -738,6 +890,21 @@ def render_text(report: dict) -> str:
                              f"always 0.0 - check for a placeholder")
 
     lines.append("")
+    symbols = report.get("symbols") or []
+    if symbols:
+        lines.append("### symbols (coverage window, read off the tree's own loaded frame)")
+        for s in symbols:
+            w = s.get("window") or {}
+            name = s.get("ticker") or s.get("tree") or "?"
+            if w.get("first_valid") is None:
+                lines.append(f"  {name:<12} n/a  {s.get('unavailable') or 'no window'}")
+                continue
+            lines.append(
+                f"  {name:<12} {_label(w['first_valid'])}..{_label(w['last_valid'])}  "
+                f"n_bars={w['n_bars']}  padded_days={w['padded_days']}  "
+                f"{w['alignment']}"
+            )
+        lines.append("")
     lines.append(f"totals: {total}")
     lines.append("legend: X = actionable gap (unbuilt/unwired), "
                  "x = structural (producer runs, data absent), ! = partial")
@@ -795,6 +962,7 @@ __all__ = [
     "FILL_OK",
     "GAP_REASONS",
     "LIVE_ROOTS",
+    "PRICE_TOOL",
     "action_for",
     "build_scorecard",
     "classify",
@@ -808,4 +976,5 @@ __all__ = [
     "measured_values",
     "parse_producer",
     "render_text",
+    "symbol_coverage",
 ]

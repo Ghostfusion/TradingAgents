@@ -1,6 +1,6 @@
 # Implementation Plan - Cross-Section and Allocation
 
-Status: **PLAN - not started.** Implements the eight cross-section and allocation items X1-X8 - one
+Status: **IN PROGRESS** - wave 0+1 build started: X8 landed (2026-09-23). The rest of this plan is not started.
 volatility-rank chain, one redundancy screen, two spectral reads, one peer-producer replacement, one
 edge classifier, one validation study and one horizon decomposition - of the 2026 `q-fin` corpus
 survey adoption, of parent [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).

@@ -16,6 +16,10 @@ no-fabrication rule). No network, no state.
 
 from __future__ import annotations
 
+import math
+
+import numpy as np
+
 
 def _sma(series: list, n: int) -> list:
     """SMA series; None for the first n-1 positions."""
@@ -307,6 +311,8 @@ __all__ = [
     "elder_ray",
     "supertrend",
     "volume_profile",
+    "spectral_excess_mass",
+    "cost_optimal_span",
 ]
 
 
@@ -751,4 +757,120 @@ def volume_profile(closes, volumes, bins: int = 20) -> dict:
         }
     except (TypeError, ValueError, ZeroDivisionError):
         return {"poc": None, "value_area_high": None, "value_area_low": None}
+
+
+# ---------------------------------------------------------------------------
+# Trend-following as spectral excess mass (2607.19497), with the lookback the
+# engine's own cost estimate can pay for. Both are STATE READS: reported
+# beside the swing factor, never folded into its score.
+# ---------------------------------------------------------------------------
+
+#: Poisson-kernel span of the spectral read. 250 periods is the long span the
+#: trend-following literature reports as the practical optimum; the decay it
+#: implies, ``lambda = 1 - 2/(span+1)``, is this module's own EMA convention
+#: (:func:`ema` uses ``k = 2/(n+1)``), so the kernel is the filter a caller of
+#: the swing factor would actually run rather than an abstract taper.
+_SPECTRAL_SPAN = 250
+
+#: Shortest series the spectral read is attempted on: below this the null's
+#: own sampling spread (which shrinks only as 1/sqrt(n)) is the same size as a
+#: low-frequency component the read is supposed to find.
+_SPECTRAL_MIN_OBS = 64
+
+#: The excess must clear this many sampling standard deviations of the
+#: white-noise null. A bare positive sign is met by roughly half of all
+#: white-noise draws, so the sign alone is not a gate; 2 sigma is a ~2.5%
+#: false-positive rate under the null.
+_SPECTRAL_NULL_SIGMA = 2.0
+
+#: Share of one period's volatility the round trip may cost per period. This
+#: is the design knob that sets the span's scale (the paper's own calibration
+#: is its backtest); it is not fitted to any symbol.
+_COST_BUDGET_VOL_SHARE = 0.005
+
+#: Span bounds: a lookback below one period is meaningless, and past two
+#: trading years the engine's days-to-weeks mandate is gone.
+_SPAN_MIN = 1
+_SPAN_MAX = 504
+
+
+def spectral_excess_mass(returns: list, span: int = _SPECTRAL_SPAN) -> dict:
+    """Poisson-kernel-weighted excess low-frequency spectral mass.
+
+    2607.19497 expresses a trend system's P&L in volatility-normalized
+    returns and splits it into autocorrelation and drift terms: at zero drift
+    the alpha is exactly the *excess low-frequency spectral mass*, i.e. the
+    power the Poisson kernel of span ``span`` sees above what white noise
+    carries over the same window. It is a CONDITION, not a signal - it says
+    when trend alpha can exist, never which direction the name will go - so it
+    is reported beside the swing factor and never inside its score.
+
+    ``mass`` is that excess in vol^2 units: the Poisson-kernel-weighted
+    autocovariance sum (the kernel's spectral integral, by Wiener-Khinchin),
+    net of the finite-sample bias ``-(n-k)/n^2`` of the biased autocorrelation
+    estimator, and doubled for the two-sided spectrum. It is compared against
+    ``_SPECTRAL_NULL_SIGMA`` sampling standard deviations of the white-noise
+    null, ``2*sqrt(sum(w^2)/n)``, which is the read's own noise floor.
+
+    Both fields are None - never a fabricated ``False`` - when the series is
+    shorter than ``_SPECTRAL_MIN_OBS`` or carries no dispersion (a constant
+    series has no low-frequency content to measure against its own noise).
+
+    Cost: one length-``2n`` FFT. The caller reports the window it passed.
+    """
+    try:
+        values = [float(v) for v in returns if v is not None]
+    except (TypeError, ValueError):
+        return {"mass": None, "condition_met": None}
+    if not values or span < 2:
+        return {"mass": None, "condition_met": None}
+    x = np.asarray(values, dtype=float)
+    x = x[np.isfinite(x)]
+    n = int(x.size)
+    if n < _SPECTRAL_MIN_OBS:
+        return {"mass": None, "condition_met": None}
+    sd = float(x.std())
+    if not sd > 0.0:
+        return {"mass": None, "condition_met": None}
+    z = (x - float(x.mean())) / sd
+    lam = 1.0 - 2.0 / (span + 1.0)
+    lags = np.arange(1, n, dtype=float)
+    weights = (1.0 - lam) * lam ** (lags - 1.0)
+    # Biased sample autocorrelation of the normalized series, from its power
+    # spectrum (acf[0] == 1 because z has unit variance).
+    spec = np.fft.rfft(z, 2 * n)
+    acf = np.fft.irfft(spec * np.conjugate(spec), 2 * n)[:n] / n
+    # Under white noise the biased estimator is centred at -(n-k)/n^2, so the
+    # excess is measured against that null rather than against zero.
+    excess = 2.0 * float(np.dot(weights, acf[1:] + (n - lags) / (n * n)))
+    null_sd = 2.0 * float(np.sqrt(float(np.dot(weights, weights)) / n))
+    return {
+        "mass": round(excess, 6),
+        "condition_met": bool(excess > _SPECTRAL_NULL_SIGMA * null_sd),
+    }
+
+
+def cost_optimal_span(cost_bps: float, vol: float) -> int | None:
+    """Lookback span whose turnover spends the engine's cost estimate.
+
+    An EMA of span ``s`` replaces ``2/(s+1)`` of its weight each period (the
+    convention :func:`ema` uses), so the round trip it pays per period is
+    ``cost * 2/(s+1)``. Holding that inside ``_COST_BUDGET_VOL_SHARE`` of one
+    period's volatility gives ``s >= 2*cost/(share*vol)``: a dearer round trip
+    or a calmer name buys a longer lookback, which is the trade-off the
+    cost-optimal-span result states.
+
+    ``vol`` is the symbol's per-period volatility, in the same return units as
+    ``cost_bps`` is a fraction of. Returns None - never a fabricated span -
+    when either input is missing or non-positive.
+    """
+    try:
+        cost = float(cost_bps)
+        sigma = float(vol)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(cost) or not math.isfinite(sigma) or cost < 0.0 or sigma <= 0.0:
+        return None
+    span = math.ceil(2.0 * (cost / 10_000.0) / (_COST_BUDGET_VOL_SHARE * sigma))
+    return max(_SPAN_MIN, min(int(span), _SPAN_MAX))
 

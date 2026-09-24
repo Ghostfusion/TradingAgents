@@ -12,12 +12,18 @@
 - ``fundamentals_pit_ok`` — W3-4: a fundamental read is only usable in a
   decision whose effective date is >= the fundamental's period/as-of date;
   otherwise fail-closed (refuse the leak of a future restated/dated value).
+- ``panel_statistic`` — H10: a panel statistic computed over a window is
+  refused (``unavailable``) when that window is padded by positions before the
+  symbol's first valid observation. ``coverage_window`` reads the window; this
+  is where the refusal is applied, and the dense-frame result is unchanged.
 
 All pure + deterministic; advisory only (reports a score/flag, never gates a
 hard rule by itself).
 """
 
 from __future__ import annotations
+
+from tradingagents.strategies.coverage_window import coverage_window
 
 # Per-input quality weight (sums to 100 over the standard set). Missing
 # inputs are excluded and the remaining weights renormalized.
@@ -106,5 +112,100 @@ def fundamentals_pit_ok(period_date: str | None, effective_date: str | None) -> 
         return False
 
 
+def _valid_values(series) -> list[float]:
+    """Every finite (non-missing, non-NaN) observation in ``series`` as float."""
+    if series is None:
+        return []
+    values = series.tolist() if hasattr(series, "tolist") else list(series)
+    out: list[float] = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            continue
+        if f == f:  # not NaN
+            out.append(f)
+    return out
+
+
+def _coverage_gate() -> bool:
+    """Is the H10 coverage-window refusal switched on? (``enable_coverage_window``)
+
+    Off by default, so a gate-off caller computes the statistic exactly as it
+    did before the window existed. A config read must never break the read it
+    guards: an unreadable config leaves the gate off.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_coverage_window", False))
+
+
+def panel_statistic(series, *, alignment: str | None = None) -> dict:
+    """H10: a panel statistic guarded by its coverage window.
+
+    ``series`` is the already-loaded, calendar-aligned panel for one symbol. Its
+    window is read first by :func:`coverage_window` (a reader of the frame, never
+    a second data-quality authority). When that window is **padded** - there are
+    positions before the first valid observation - the statistic is reported
+    ``unavailable`` rather than computed, because a mean over a padded window
+    averages histories that did not trade together.
+
+    Returns ``{statistic, n, window, unavailable}``. On the dense window the
+    statistic is the plain mean of the valid observations, computed the same way
+    the unwindowed path would, so the dense result is unchanged. With the gate
+    off the window is not read at all: the statistic is that same plain mean and
+    ``window`` is ``None``, which is what a caller did before H10 existed.
+    """
+    if not _coverage_gate():
+        values = _valid_values(series)
+        return {
+            "statistic": (sum(values) / len(values)) if values else None,
+            "n": len(values),
+            "window": None,
+            "unavailable": None,
+        }
+    window = coverage_window(series, alignment=alignment)
+    if window["padded_days"] > 0:
+        return {
+            "statistic": None,
+            "n": window["n_bars"],
+            "window": window,
+            "unavailable": (
+                f"panel statistic refused: {window['padded_days']} padded "
+                f"position(s) before the first valid observation "
+                f"({window['first_valid']} first_valid, alignment "
+                f"{window['alignment']}); a statistic over a padded window "
+                "averages histories that did not trade together"
+            ),
+        }
+    if window["unavailable"] is not None:
+        return {
+            "statistic": None,
+            "n": 0,
+            "window": window,
+            "unavailable": f"panel statistic unavailable: {window['unavailable']}",
+        }
+    values = _valid_values(series)
+    if not values:
+        return {
+            "statistic": None,
+            "n": 0,
+            "window": window,
+            "unavailable": "panel statistic unavailable: no valid observation",
+        }
+    return {
+        "statistic": sum(values) / len(values),
+        "n": len(values),
+        "window": window,
+        "unavailable": None,
+    }
+
+
 __all__ = ["aggregate_quality", "disagreement_flag", "fundamentals_pit_ok",
-           "_INPUT_WEIGHT", "_QUALITY_TIERS"]
+           "panel_statistic", "_INPUT_WEIGHT", "_QUALITY_TIERS"]

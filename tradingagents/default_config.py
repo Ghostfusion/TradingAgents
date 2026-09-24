@@ -294,6 +294,12 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION": "enable_return_decomposition",
     "TRADINGAGENTS_ENABLE_TEXT_FACTORS": "enable_text_factors",
     "TRADINGAGENTS_ENABLE_BOCPD": "enable_bocpd",
+    # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each MUST be mapped here:
+    "TRADINGAGENTS_ENABLE_RN_SKEW_PROXY": "enable_rn_skew_proxy",
+    "TRADINGAGENTS_ENABLE_TREND_SPECTRAL": "enable_trend_spectral",
+    # _apply_env_overrides only reads names in this dict, so an unmapped
+    # TRADINGAGENTS_ENABLE_* is silently ignored.
+    "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
     # Round-3 scoring & sentiment gates (all default OFF). These MUST be mapped
     # here: _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored - which is also why the
@@ -1084,6 +1090,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Q8 Bayesian online changepoint detection - complements the landed
         # CUSUM/EWMA shift read with a calibrated changepoint probability.
         "enable_bocpd": False,
+        # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each gates
+        "enable_rn_skew_proxy": False,
+        "enable_trend_spectral": False,
+        # one read and all default OFF, so a gate-off run is byte-identical to the
+        # run before the gate existed.
+        "enable_coverage_window": False,
         # OpenBB Phase-3 free-tier data surfaces. Each is keyless/free and
         # analysis-only; all default OFF. Flip an env override (e.g.
         # TRADINGAGENTS_ENABLE_OPTIONS_SURFACE=true) to let its @tool fetch

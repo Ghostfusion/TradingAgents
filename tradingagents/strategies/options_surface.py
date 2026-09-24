@@ -159,6 +159,144 @@ def term_structure_slope(atm_iv_short: float | None, atm_iv_long: float | None) 
 
 
 # ---------------------------------------------------------------------------
+# Cross-strike IV skew proxy (K3) -- a labelled proxy, never a constant
+# ---------------------------------------------------------------------------
+
+#: Distinct OTM strikes a cross-strike IV skew proxy needs before its slope is
+#: identified. Below this the read is ``unavailable`` -- never a number.
+RN_SKEW_MIN_STRIKES = 5
+
+#: What the record names itself (K3). The paper is explicit that a cross-strike
+#: IV slope is a *proxy* for the risk-neutral skewness, not the true BKM
+#: moment, whose integral needs the whole OTM price tape.
+RN_SKEW_LABEL = "cross-strike IV proxy"
+
+
+def _otm_iv_points(rows: list[dict]) -> list[tuple[float, float, float, float]]:
+    """``(strike, spot, iv, days_to_expiry)`` for rows OTM by their own ``side``.
+
+    A row with no ``side``, or with a non-positive strike / spot / iv / days, is
+    dropped: which wing it sits in cannot be inferred from a missing label, and
+    a zero or negative quote is not a vol.
+    """
+    pts: list[tuple[float, float, float, float]] = []
+    for r in rows or []:
+        side = r.get("side")
+        try:
+            k = float(r.get("strike"))
+            s = float(r.get("spot"))
+            iv = float(r.get("iv"))
+            days = float(r.get("days_to_expiry"))
+        except (TypeError, ValueError):
+            continue
+        if side not in ("put", "call") or k <= 0 or s <= 0 or iv <= 0 or days <= 0:
+            continue
+        if (side == "put" and k >= s) or (side == "call" and k <= s):
+            continue
+        pts.append((k, s, iv, days))
+    return pts
+
+
+def _regime_cell_view(regime_cell: dict | str | None) -> dict | None:
+    """The ``{'state', 'label'}`` subset of a regime cell, or None.
+
+    Accepts the engine's own cell (``regime.hmm_filtered_regime(...)['last']``)
+    or a bare label; an unreadable cell is None, so the record says the read was
+    not conditioned instead of guessing a cell.
+    """
+    if isinstance(regime_cell, str):
+        return {"label": regime_cell} if regime_cell.strip() else None
+    if isinstance(regime_cell, dict):
+        view = {k: regime_cell[k] for k in ("state", "label") if k in regime_cell}
+        return view or None
+    return None
+
+
+def rn_skew_proxy(rows: list[dict], regime_cell: dict | str | None = None) -> dict:
+    """Cross-strike risk-neutral skewness PROXY over one chain's OTM IVs (K3).
+
+    ``rows``: option rows (``strike`` / ``iv`` / ``days_to_expiry`` / ``spot`` /
+    ``side``) -- the same rows `surface_shape` reads. Only OTM rows count, each
+    judged by its own ``side`` (a put below spot, a call above it).
+
+    The statistic is the OLS slope of the chain's *fractional* IV deviation
+    (``iv / mean_iv - 1``) on standardized log-moneyness ``ln(K/S) / sqrt(T)``.
+    Both axes are scale-free, so the number does not move when a vendor quotes
+    the chain in percent instead of decimals, and the sign follows the
+    risk-neutral skewness: **negative when the OTM put wing is priced above the
+    call wing** (the equity smirk) -- the same sign as `surface_shape`'s
+    ``rr25`` and the opposite of `iv_skew`'s put-call spread.
+
+    Two things the record may not claim. It is a **cross-strike IV proxy**, not
+    the true BKM risk-neutral moment (that needs the OTM price integrals over
+    the whole tape), so it names itself and is read as a proxy only. And it is
+    not a constant: a published option-implied predictor of this kind is
+    regime-conditional, so the caller passes the cell the engine already
+    produces (``regime.hmm_filtered_regime(...)['last']``) and the record
+    carries it as ``regime_cell`` with ``conditioned`` True. With no cell the
+    number is still the chain's own slope, but the record says
+    ``conditioned: False`` and a scoring site must not apply it as an
+    unconditional coefficient.
+
+    Requires at least ``RN_SKEW_MIN_STRIKES`` distinct OTM strikes; below that
+    the return is ``status: "unavailable"`` with ``proxy`` None and a reason
+    (master rule 1: never 0, never a substituted default). Returns
+    ``{'label', 'proxy', 'status', 'n_strikes', 'n_points', 'regime_cell',
+    'conditioned', 'unavailable', 'basis'}``.
+    """
+    import math
+
+    cell = _regime_cell_view(regime_cell)
+    rec: dict = {
+        "label": RN_SKEW_LABEL,
+        "proxy": None,
+        "status": "unavailable",
+        "n_strikes": 0,
+        "n_points": 0,
+        "regime_cell": cell,
+        "conditioned": cell is not None,
+        "unavailable": None,
+        "basis": "",
+    }
+    pts = _otm_iv_points(rows)
+    rec["n_points"] = len(pts)
+    rec["n_strikes"] = len({round(p[0], 10) for p in pts})
+    if rec["n_strikes"] < RN_SKEW_MIN_STRIKES:
+        rec["unavailable"] = (
+            f"needs at least {RN_SKEW_MIN_STRIKES} distinct OTM strikes, "
+            f"got {rec['n_strikes']}"
+        )
+        rec["basis"] = f"{RN_SKEW_LABEL} unavailable: {rec['unavailable']}"
+        return rec
+    mean_iv = sum(p[2] for p in pts) / len(pts)
+    xs = [math.log(p[0] / p[1]) / math.sqrt(p[3] / 365.0) for p in pts]
+    ys = [p[2] / mean_iv - 1.0 for p in pts]
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
+    if sxx <= 0.0:
+        rec["unavailable"] = (
+            "every usable OTM strike sits at one standardized moneyness "
+            "(the slope is not identified)"
+        )
+        rec["basis"] = f"{RN_SKEW_LABEL} unavailable: {rec['unavailable']}"
+        return rec
+    rec["proxy"] = round(sxy / sxx, 6)
+    rec["status"] = "ok"
+    rec["basis"] = (
+        f"{RN_SKEW_LABEL}: OLS slope of (iv/mean_iv - 1) on ln(K/S)/sqrt(T) over "
+        f"{rec['n_points']} OTM rows across {rec['n_strikes']} strikes; mean_iv "
+        f"{round(mean_iv, 6)}; negative = OTM puts priced over OTM calls; a proxy "
+        f"for the risk-neutral skewness, NOT the BKM moment (that needs the full "
+        f"OTM price integrals); regime cell "
+        + (str(cell) if cell
+           else "not supplied - unconditioned, never applied as a constant")
+    )
+    return rec
+
+
+# ---------------------------------------------------------------------------
 # Put-call parity / conversion-reversal arbitrage screen
 # ---------------------------------------------------------------------------
 
@@ -212,4 +350,5 @@ def parity_violation(
 __all__ = ["iv_percentile", "iv_skew", "put_call_oi_concentration",
            "implied_move_pct", "expected_move_from_chain",
            "volatility_risk_premium", "surface_shape", "term_structure_slope",
+           "rn_skew_proxy", "RN_SKEW_LABEL", "RN_SKEW_MIN_STRIKES",
            "parity_violation"]

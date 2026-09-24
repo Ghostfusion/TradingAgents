@@ -8089,6 +8089,7 @@ def get_vol_surface_shape(
     try:
 
         from tradingagents.strategies.options_surface import (
+            rn_skew_proxy as _rn_skew,
             surface_shape as _shape,
             term_structure_slope as _ts,
         )
@@ -8147,6 +8148,38 @@ def get_vol_surface_shape(
             )
         else:
             lines.append("- term-structure slope: n/a")
+        # K3: the cross-strike IV skew PROXY, carried with the regime cell the
+        # engine's one HMM producer reports (regime.hmm_filtered_regime) - the
+        # paper's finding is that this coefficient is regime-conditional, so an
+        # un-conditioned read says so and is never scored as a constant. The
+        # gate is off by default, so nothing here runs unless it is enabled.
+        try:
+            from tradingagents.agents.utils.quant_formula_tools import _flag
+
+            proxy_gate = _flag("enable_rn_skew_proxy")
+        except Exception:  # noqa: BLE001 - a config read must never break a tool
+            proxy_gate = False
+        if proxy_gate:
+            cell = None
+            if len(closes) >= 260:
+                try:
+                    from tradingagents.strategies.regime import hmm_filtered_regime
+
+                    cell = (hmm_filtered_regime(closes, closes, closes, closes,
+                                                n_states=2) or {}).get("last")
+                except Exception:  # noqa: BLE001 - the conditioning degrades
+                    cell = None
+            proxy = _rn_skew(near_rows, regime_cell=cell)
+            if proxy["status"] == "ok":
+                where = (f"regime cell {cell.get('label')} (state {cell.get('state')})"
+                         if cell else "unconditioned")
+                lines.append(
+                    f"- cross-strike IV proxy ({proxy['n_strikes']} OTM strikes, "
+                    f"{where}): {proxy['proxy']:+.4f} [negative = OTM puts priced "
+                    f"over OTM calls; a cross-strike IV proxy, not the BKM moment]"
+                )
+            else:
+                lines.append(f"- cross-strike IV proxy: n/a ({proxy['unavailable']})")
         lines.append("")
         lines.append("Interpretation: RR < 0 = downside puts rich (skew); BF > 0 = smile "
                      "curvature (wings rich); TS = IV(long) - IV(short): TS > 0 = contango "

@@ -1,6 +1,6 @@
 # Implementation Plan - Risk, Tails, and the Coverage That Licenses Them
 
-Status: **PLAN - not started.** Implements items K1-K6 of the risk-and-tail theme: the adoption path
+Status: **IN PROGRESS** - wave 0+1 build started: K3 landed (2026-09-23). The rest of this plan is not started.
 for the drawdown expectations, the option-implied skew proxy, the quality-adjusted tail number, the
 boundary size multiplier, the deferred characteristics covariance and the recorded marking-aware
 VaR, all specified in the theme design below, one of the six themed design docs derived from

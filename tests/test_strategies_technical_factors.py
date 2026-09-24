@@ -5,6 +5,7 @@ Covers chandelier_exit / fib_levels (swing.py), the new technical_factors
 the no-fabrication rule (None on missing input).
 """
 
+import numpy as np
 import pytest
 
 from tradingagents.strategies.swing import chandelier_exit, fib_levels
@@ -12,12 +13,14 @@ from tradingagents.strategies.technical_factors import (
     adx,
     aroon,
     chaikin_oscillator,
+    cost_optimal_span,
     elder_ray,
     fisher_transform,
     kst,
     mf_index,
     pivot_distance_atr,
     pivot_points,
+    spectral_excess_mass,
     stochastic_oscillator,
     supertrend,
     volume_profile,
@@ -247,3 +250,80 @@ def test_pivot_distance_atr_is_stationary_and_never_invents_zero():
     assert pivot_distance_atr(None, 100.0, 2.0) is None
     assert pivot_distance_atr(103.0, None, 2.0) is None
     assert pivot_distance_atr("x", 100.0, 2.0) is None
+
+
+def test_cost_optimal_span_is_monotone_in_cost():
+    """The two trend-spectral reads (2607.19497), reported BESIDE the swing
+    factor.
+
+    An EMA of span ``s`` turns over ``2/(s+1)`` of its weight per period, so
+    the round trip a span pays is ``cost * 2/(s+1)``: a dearer round trip (or
+    a calmer name) must buy a LONGER lookback. The mutation this test is
+    written against returns the zero-cost span and ignores ``cost_bps``, which
+    collapses the whole grid onto one value.
+
+    The same read reports the condition: ``condition_met`` is the low-frequency
+    spectral mass above the white-noise null, so it is False on white noise and
+    True on a series with a planted low-frequency component.
+    """
+    grid = [0.5, 2.0, 5.0, 10.0, 25.0, 50.0]
+    spans = [cost_optimal_span(c, 0.02) for c in grid]
+    assert all(isinstance(s, int) and s > 0 for s in spans)
+    assert spans == sorted(spans)
+    assert len(set(spans)) == len(spans)  # strictly monotone: no plateau
+    assert spans[-1] > spans[0]  # near-zero and high cost differ
+    # the same cost in a calmer name buys a longer lookback, not a shorter one
+    assert cost_optimal_span(50.0, 0.04) < cost_optimal_span(50.0, 0.02)
+    # no cost estimate / no measurable volatility -> no lookback, never 0 or 1
+    assert cost_optimal_span(None, 0.02) is None
+    assert cost_optimal_span(10.0, None) is None
+    assert cost_optimal_span(10.0, 0.0) is None
+
+    rng = np.random.default_rng(20260923)
+    n = 256
+    noise = spectral_excess_mass(list(rng.standard_normal(n)))
+    assert noise["condition_met"] is False
+    t = np.arange(n)
+    planted = 0.6 * np.sin(2.0 * np.pi * t / n) + 0.4 * rng.standard_normal(n)
+    low_freq = spectral_excess_mass(list(planted))
+    assert low_freq["condition_met"] is True
+    assert low_freq["mass"] > 0.0
+    # too thin a window is unavailable, not a fabricated False
+    assert spectral_excess_mass([0.01] * 10) == {"mass": None, "condition_met": None}
+
+
+def test_swing_factor_unchanged_when_trend_spectral_gate_is_on():
+    """The spectral read sits beside the swing verdict, never inside its score.
+
+    The swing factor's own value (every field of the report, and the candidate
+    verdict in particular) must be identical with ``enable_trend_spectral`` on
+    and off; with the gate off the report must not carry the block at all.
+    """
+    from tradingagents.dataflows.config import reset_config, set_config
+    from tradingagents.strategies.swing import swing_report
+
+    n = 220
+    closes = [100.0 + 0.4 * i + 2.0 * np.sin(i / 7.0) for i in range(n)]
+    highs = [c + 1.0 for c in closes]
+    lows = [c - 1.0 for c in closes]
+    vols = [1_000_000.0] * n
+
+    reset_config()
+    try:
+        off = swing_report(closes, highs, lows, vols, atr_value=2.0)
+        assert off is not None
+        assert "trend_spectral" not in off
+
+        set_config({"enable_trend_spectral": True})
+        on = swing_report(closes, highs, lows, vols, atr_value=2.0)
+        assert on is not None
+        block = on["trend_spectral"]
+        assert block["window"] == n - 1  # the read reports the window it used
+        assert isinstance(block["span"], int) and block["span"] > 0
+        assert block["condition_met"] in (True, False)
+        # ... and the swing factor itself is untouched by the gate
+        assert {k: v for k, v in on.items() if k != "trend_spectral"} == off
+        assert on["candidate"] == off["candidate"]
+    finally:
+        reset_config()
+

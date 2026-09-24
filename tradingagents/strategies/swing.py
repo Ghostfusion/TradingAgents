@@ -14,10 +14,15 @@ Implements the deterministic parts of the techno-fundamental swing framework
     scale-out to break-even and a 20-day-EMA trailing rule for the balance
 
 Pure and offline-testable; no network, no state. The screener and any overlay
-feed daily OHLCV and read flags back.
+feed daily OHLCV and read flags back. The one config read is the off-by-default
+``enable_trend_spectral`` switch: with it on, ``swing_report`` carries one
+additive ``trend_spectral`` block beside the verdict, and with it off the
+returned dict is exactly what it was before that block existed.
 """
 
 from __future__ import annotations
+
+import math
 
 
 def _sma(series: list, n: int) -> float | None:
@@ -507,7 +512,7 @@ def swing_report(
             "rs: " + rs.get("verdict", "?") if rs.get("verdict") != "unknown" else "rs: n/a"
         )
     ctx_parts.append("rsi=" + band.get("label", "?"))
-    return {
+    out = {
         "architecture": arch,
         "rsi": band,
         "pullback": pull,
@@ -522,6 +527,59 @@ def swing_report(
         "vcp": vcp_setup(closes, highs, lows, volumes),
         "candidate": candidate,
         "context": "; ".join(p for p in ctx_parts if p),
+    }
+    # Trend-following as spectral excess mass (2607.19497): a STATE read -
+    # "is there low-frequency mass for trend alpha to live in, and how long a
+    # lookback can these costs pay for" - reported BESIDE the verdict, never
+    # folded into it. Gated, so a gate-off run returns the dict above exactly.
+    spectral = _trend_spectral_read(closes)
+    if spectral is not None:
+        out["trend_spectral"] = spectral
+    return out
+
+
+def _trend_spectral_read(closes: list) -> dict | None:
+    """Excess spectral mass + the cost-optimal span for one symbol's closes.
+
+    Returns None when ``enable_trend_spectral`` is off (its default), which is
+    what keeps a gate-off ``swing_report`` byte-identical to the run before
+    the block existed, and never touches the verdict either way.
+
+    The two reads degrade independently: the span also needs the engine's cost
+    estimate (``evaluate_cost_bps``) and a measurable volatility, so either one
+    missing leaves just that field None rather than a substituted default.
+    ``window`` is the number of returns the mass was computed over.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    if not bool(cfg.get("enable_trend_spectral", False)):
+        return None
+    from .regime import realized_vol
+    from .technical_factors import cost_optimal_span, spectral_excess_mass
+
+    prices = [float(c) for c in (closes or [])]
+    rets = [
+        math.log(prices[i] / prices[i - 1])
+        for i in range(1, len(prices))
+        if prices[i] > 0.0 and prices[i - 1] > 0.0
+    ]
+    vol = realized_vol(prices, window=21, periods=1.0)
+    try:
+        cost_bps = float(cfg.get("evaluate_cost_bps", 10))
+    except (TypeError, ValueError):
+        cost_bps = None
+    mass = spectral_excess_mass(rets)
+    return {
+        "mass": mass["mass"],
+        "condition_met": mass["condition_met"],
+        "window": len(rets),
+        "span": cost_optimal_span(cost_bps, vol) if cost_bps is not None else None,
+        "cost_bps": cost_bps,
+        "vol": vol,
     }
 
 
