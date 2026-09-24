@@ -30,6 +30,26 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-24] **The survey's T1 batch landed - nine items, all default-off, and the risk lane now refuses what
+  it cannot identify** — the T1 tier of `docs/paper_survey_26/README.md` section 2.1, in six pushes. **The
+  refusals are the point.** A risk-neutral density is recovered only when the covered strikes can identify one:
+  the read takes the SVD of the mixture's price-sensitivity matrix and refuses with `density: None` *plus* the
+  rank and condition number, measured at **4031.5** on a four-strike chain where the unflagged fit would
+  happily return a 1% quantile of 50.50. A subdominant eigenspace rotation is refused inside the
+  Marchenko-Pastur bulk, where the eigenvectors are noise — and the bound is **imported** from
+  `market_breadth.mp_below_count`, never re-derived. A forward shift, or a field whose declared availability
+  is later than the decision date, is now **inexpressible** in the factor DSL rather than discouraged, and an
+  undeclared field fails closed. **The instruments arrived with the reads:** a shared Kupiec/Christoffersen
+  coverage test (`book_risk.var_coverage_test`) judges the regime VaR that K1's tail layer also consumes, and
+  that tail number can only ever **widen** — quality and uncertainty move the band outward or refuse it, never
+  inward. **The reporting reads:** a drawdown envelope applying the `T^(H-1/2)` depth rescaling only when a
+  Hurst estimate exists, landed **report-only** so the governor keeps square-root-of-time until the mandate
+  answer; and a cross-sectional forward stress probability whose calibration is part of the output (the number
+  *is* its band's realized hit rate) and which says in its own `caveat` that it is fitted, not walk-forward
+  tested. Two smaller deliverables: an offline redundancy screen with the L1 selection hand-rolled in numpy
+  (scikit-learn is absent and adding it is still a decision), and a prompt-condition harness that makes a
+  prompt edit attributable **without changing a single prompt string**. Gates, tests and per-item caveats are
+  in `CHANGELOG.md`. Gate surface: 103 keys / 55 registry rows → **111 keys / 63 rows**.
 - [2026-09-23] **The paper-survey adoption set landed its first wave - fourteen default-off instruments
   and state reads, and one measured defect it deliberately did not fix** — Waves 0 and 1 of
   `docs/paper_survey_26/`, one item per push, every one additive and off by default, so a gate-off run is

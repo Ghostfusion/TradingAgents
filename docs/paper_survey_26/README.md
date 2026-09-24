@@ -1,12 +1,14 @@
 # Paper-Survey Adoption - Index
 
-Status: **IN PROGRESS - wave 0 (P0) and the wave-1 state reads have landed (2026-09-23); the rest is not started.**
-16 of the 44 buildable items are built, proved and pushed - the six P0 honesty instruments (H10, H1, H7, H11,
-H4, H6) and ten P1 state reads (R1, R3, R7, V6, V2, K3, V4, X3, X6, X8) - each behind its own default-off gate
-with its failing-first proof, its `CHANGELOG.md` entry and its `docs/gate_registry.md` row. **K2 is deliberately
-not built:** its `T^(H-1/2)` rescaling reaches the drawdown governor and awaits the owner's mandate answer
-(decision 3 below). R3's in-run panel glue is the one landed read still dormant, and that is decision 2.
-**Date:** 2026-09-23
+Status: **IN PROGRESS - wave 0 (P0), the wave-1 state reads and the nine T1 items have landed (2026-09-24); the rest is not started.**
+25 of the 44 buildable items are built, proved and pushed - the six P0 honesty instruments (H10, H1, H7, H11,
+H4, H6), ten P1 state reads (R1, R3, R7, V6, V2, K3, V4, X3, X6, X8) and the nine T1 items (K2, R2, K1, H2, X2,
+V3, V5, R5, N5) - each behind its own default-off gate with its failing-first proof, its `CHANGELOG.md` entry
+and its `docs/gate_registry.md` row. Each was proved by mutating the source and watching its named test fail,
+with the source restored byte-identical. **K2 landed REPORT-ONLY:** its `T^(H-1/2)` rescaling reaches the
+strategy-evaluation row and the governor leg stays square-root-of-time, so the mandate question in decision 3
+is still open. R3's in-run panel glue is the one landed read still dormant, and that is decision 2.
+**Date:** 2026-09-24
 **Survey:** [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md) - v1.0 SURVEY, 309 papers read
 (31 high / 111 medium / 124 low / 43 none relevance).
 **Scope:** the six themed design docs derived from that survey, the six implementation plans that
@@ -207,20 +209,24 @@ remaining work is genuinely harder, not merely later.
 | 15 | H6 | three-way verdict and family FDR | P0 | `enable_materiality_verdict` | built |
 | 16 | H11 | autocorrelation-aware intervals and information gap | P0 | `enable_bootstrap_intervals` | built |
 
-**T1 - small, unblocked, numpy and scipy only (9).** One host module each, no new data source, no new
-dependency, no fitted model. The only things standing in front of them are the owner's decisions.
+**T1 - small, unblocked, numpy and scipy only (9 - all built 2026-09-24).** One host module each, no new data
+source, no new dependency, no fitted model.
 
 | # | Item | What it is | Phase | Gate | Status |
 |---|---|---|---|---|---|
-| 17 | K2 | four drawdown expectations and the right time-scaling | P1 | `enable_drawdown_envelope` | held - mandate |
-| 18 | H2 | availability-typed factor DSL gate (registration-time, free) | P2 | `enable_factor_availability_gate` | not started - after H8 |
-| 19 | X2 | redundancy screen over components (a scheduled script) | P3 | none (scheduled script) | not started - L1 solver decision |
-| 20 | V3 | RND recovery, only when it is identifiable | P3 | `enable_rnd_recovery` | not started |
-| 21 | V5 | eigenspace rotation as a state variable, with the MP check | P3 | `enable_eigen_rotation` | not started |
-| 22 | R2 | heavy-tailed emissions and a coverage-tested VaR | P2 | `enable_hmm_heavy_tails` | not started |
-| 23 | R5 | calibrated forward stress probability from the cross-section | P3 | `enable_forward_stress_probability` | not started |
-| 24 | K1 | a tail number that carries its quality and uncertainty | P2 | `enable_tail_risk_layer` | not started |
-| 25 | N5 | prompt-condition A/B harness | P3 | `enable_prompt_condition_harness` | not started |
+| 17 | K2 | four drawdown expectations and the right time-scaling | P1 | `enable_drawdown_envelope` | built - report-only |
+| 18 | H2 | availability-typed factor DSL gate (registration-time, free) | P2 | `enable_factor_availability_gate` | built |
+| 19 | X2 | redundancy screen over components (a scheduled script) | P3 | none (scheduled script) | built |
+| 20 | V3 | RND recovery, only when it is identifiable | P3 | `enable_rnd_recovery` | built |
+| 21 | V5 | eigenspace rotation as a state variable, with the MP check | P3 | `enable_eigen_rotation` | built |
+| 22 | R2 | heavy-tailed emissions and a coverage-tested VaR | P2 | `enable_hmm_heavy_tails` | built |
+| 23 | R5 | calibrated forward stress probability from the cross-section | P3 | `enable_forward_stress_probability` | built |
+| 24 | K1 | a tail number that carries its quality and uncertainty | P2 | `enable_tail_risk_layer` | built |
+| 25 | N5 | prompt-condition A/B harness | P3 | `enable_prompt_condition_harness` | built |
+
+Landed in six commits, because three pairs share a file: K2+R2+K1 all write
+`strategies/book_risk.py`, and H2+X2 both write `strategies/alpha_zoo.py` - the same reason H10+K3+X8 shared
+one in wave 0. What each item decided, and the limits it states, are in its `CHANGELOG.md` entry.
 
 **T2 - medium: a new module plus a fit or an LLM stage (9).**
 
@@ -253,8 +259,10 @@ dependency, no fitted model. The only things standing in front of them are the o
 
 **Not in the order.** R8 and R9 are constraints that bind now and specify no build; V7, V8 and K6 are
 declined or recorded-only (K6's option tape exceeds this engine's vendors). And a T1 item is not
-automatically next: **H2 should still follow H8**, because an availability gate is only meaningful
-against H8's lag table - the dependency, not the cost, settles it.
+automatically next: **H2 landed ahead of H8 anyway**, because the availability DECLARATION is buildable
+without the sourced lag table - the classes stop at what this repo can state (a filing date, a session
+close) and an undeclared field fails closed. **What H8 still owes H2 is the table itself:** populating it
+is what turns "we refuse what we cannot date" into "we date it correctly".
 
 ---
 
@@ -269,7 +277,10 @@ P0-6 H6  three verdicts .......... -> every later item's findings, which must be
 P1 V2   memory_parameter ......... <- K2 (Hurst is computed today; a memory parameter is the complement)
 P1 X3   mp_below_count ........... + R3 eigen null band: both spectral, one per panel read
 P1 R1   hazard_mode .............. independent; smallest change in the regime theme
-P2 H2   availability gate ........ <- a per-field availability table (H8's publication-lag work)
+P2 H2   availability gate ........ <- a per-field availability table (H8's publication-lag work).
+                                    H2 LANDED 2026-09-24 with only the classes this repo can state
+                                    (a filing date, a session close) and a fail-closed default;
+                                    H8 is what would populate the table.
 P2 R2   coverage-tested VaR ...... -> K1 (the coverage test ships with the tail layer)
 P4 R6   onset gate ............... <- the labelled onset panel, which does not exist yet
 P4 K4   characteristics covariance <- an offline encoder; must replace, not sit beside
@@ -314,7 +325,12 @@ Each themed plan ends with its own line; those six, plus five the grounding work
 2. **Regime (R):** whether **R1 + R2** land as a first pass, and whether to fund the labelled onset
    panel that **R6** depends on.
 3. **Risk (K):** whether **K1 + K2** land as a first pass, and whether the mandate permits the
-   **`T^(H-1/2)` rescaling** to reach the drawdown governor.
+   **`T^(H-1/2)` rescaling** to reach the drawdown governor. **[PARTLY ANSWERED 2026-09-24]** K1 and K2 have
+   both landed: K1 scored-printed as planned, and K2 as the card's own documented fallback for an unanswered
+   mandate - **report-only**, reaching the strategy-evaluation row while `risk_governor.govern`, `drawdown_gate`
+   and `book_context.measured_book_drawdown` stay untouched on the square-root-of-time convention. **The
+   governor question itself is still open:** it is the one line that would change a gate's output rather than
+   a report's, so it waits for you.
 4. **Volatility (V):** whether **V6 + V2** land as a first pass, and whether **`VXV` and a HY-spread
    series** are worth adding to the vendor surface to enable V1's full state vector.
 5. **Cross-section (X):** whether **X3 + X6 + X2** land first, and whether the panel-scale items
