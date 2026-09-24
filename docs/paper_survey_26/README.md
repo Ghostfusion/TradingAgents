@@ -362,6 +362,14 @@ Each themed plan ends with its own line; those six, plus five the grounding work
     `V` would have to be rescaled (`V / 252`) before it is dimensionally valid against that statistic. The
     owner's call, recorded rather than guessed.
 
+13. **H9's gate key already exists (surfaced by the T1 integration, 2026-09-24).** H9's card names
+    `enable_report_attribution`, and that key **ships today** for the DSA-2 advisory layer
+    (`default_config.py:991`, the DSA family in `docs/gate_registry.md`). A new gate cannot be registered
+    under an existing key - the six-point protocol asserts the key is absent - so H9 takes either an
+    extension of that gate or a new name (`enable_report_influence` is free), and this plan's "34 new config
+    gates" becomes 33 new plus one extension, the shape R1 already has. Every other unbuilt gate name across
+    the six plans was checked the same day: **no other collision**. The card and both tables carry the note.
+
 **Standing constraint, restated:** R9 is not a build. Regime information conditions *how much to
 trust* another read; it is never concatenated onto it.
 

@@ -141,7 +141,7 @@ INCONCLUSIVE iff the interval straddles the threshold   (underpowered, NOT null)
 **Target.** A new module beside `strategies/score_disagreement.py` (which already compares quant and LLM risk reads): `attribution(reports, thesis) -> weights` by a **non-negative least squares** projection of the thesis vector onto the four report vectors, and a novelty screen for a newly admitted factor against the existing zoo plus a disclosed reference set. The per-claim granularity it sits above is `strategies/debate_claim.py`'s; the reference-set machinery is `strategies/peer_universe.py`'s.  
 **Phase / run mode.** P3 / in-run  
 **Behaviour.** The engine cannot say which analyst report drove a decision, and cannot say whether a "new" factor is a relabelling. `novelty = mean_f max_{z in Z} |corr(s_f, z)|` against a reference set `Z` held out from generation, and productivity, performance and novelty are required **jointly** - no one meaningful without the other two. One embedding pass per report plus a small NNLS solve; descriptive of a completed run, no look-ahead; the paper's rolling re-execution protocol is out of scope.  
-**Gate.** `enable_report_attribution`, default off.  
+**Gate.** `enable_report_attribution`, default off. **[COLLISION FOUND 2026-09-24 - decide before this item is built]** That key **already ships**: `tradingagents/default_config.py:991` declares it for the DSA-2 advisory layer ("computed driver attribution + disclosure blocks"), and `docs/gate_registry.md` lists it in the DSA family. H9 therefore cannot register it as a new gate - the six-point registration asserts the key is absent - so the choice is **extend that gate** (honest only if H9's influence weights and DSA-2's computed driver attribution are the same read, which they overlap in but are not identical to) or **take a new key** (e.g. `enable_report_influence`). Either way this plan's "34 new config gates" becomes 33 new plus one extension, the same shape as R1's `enable_bocpd`. Checked against every other unbuilt gate name in the six plans on the same date: this is the only collision.  
 **Failing-first test.** New `tests/test_report_attribution.py::test_relabelled_factor_flagged`: a mutation that removes the novelty screen must fail by name; a factor that is a relabelling of an existing zoo member must be flagged.  
 **Acceptance.** Influence weights are non-negative and attribute the thesis across the report vectors; a relabelled factor is flagged rather than admitted as new.  
 **Depends on.** nothing.  
@@ -178,7 +178,7 @@ K_eff   = (sum lambda_i)^2 / sum lambda_i^2   from the candidate correlation mat
 | H2 | availability-typed factor DSL gate | `strategies/factor_expressions.py`, `strategies/factor_schema.py` | P2 | in-run | `enable_factor_availability_gate` |
 | H5 | five-gate verdict + positive controls + next-open variant | `strategies/rule_eval.py` | P3 | in-run | `enable_rule_policy_gates` |
 | H8 | vintage/lag guard + non-LLM comparator | `strategies/data_quality.py`, `dataflows/` | P3 | in-run | `enable_vintage_guard` |
-| H9 | report attribution + factor novelty | new module beside `strategies/score_disagreement.py` | P3 | in-run | `enable_report_attribution` |
+| H9 | report attribution + factor novelty | new module beside `strategies/score_disagreement.py` | P3 | in-run | `enable_report_attribution` **[EXISTS - DSA-2; see the card]** |
 | H3 | synthetic-null workflow falsification | new offline harness | P4 | OFFLINE | none (offline harness/script) |
 
 ## 3. Gates added by this plan
@@ -194,7 +194,7 @@ K_eff   = (sum lambda_i)^2 / sum lambda_i^2   from the candidate correlation mat
 | `enable_factor_availability_gate` | H2 | `strategies/factor_expressions.py` AST gate | off |
 | `enable_rule_policy_gates` | H5 | `strategies/rule_eval.py` | off |
 | `enable_vintage_guard` | H8 | `strategies/data_quality.py` PIT invariant | off |
-| `enable_report_attribution` | H9 | new module beside `strategies/score_disagreement.py` | off |
+| `enable_report_attribution` **[ALREADY SHIPS - DSA-2]** | H9 | new module beside `strategies/score_disagreement.py` | off |
 
 The six registration points per gate are listed in [`README.md`](README.md).
 
