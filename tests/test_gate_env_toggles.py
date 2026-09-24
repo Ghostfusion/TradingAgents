@@ -65,6 +65,7 @@ REGISTRY: dict[str, str] = {
     "enable_coverage_window": "wired",
     "enable_rn_skew_proxy": "wired",
     "enable_trend_spectral": "wired",
+    "enable_trial_ledger": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

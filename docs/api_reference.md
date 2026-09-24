@@ -250,6 +250,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
 | `TRADINGAGENTS_ENABLE_RN_SKEW_PROXY` | `enable_rn_skew_proxy` | default `false` |
 | `TRADINGAGENTS_ENABLE_TREND_SPECTRAL` | `enable_trend_spectral` | default `false` |
+| `TRADINGAGENTS_ENABLE_TRIAL_LEDGER` | `enable_trial_ledger` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |

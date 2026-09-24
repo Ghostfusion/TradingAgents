@@ -243,7 +243,8 @@ def _zoo_reality_check(series_list: list, fwd: list, seed: int) -> dict:
 def bench_zoo(exprs: list[str], records: list[dict],
               forward_days: int = 1, n_trials: int = 1,
               walk_forward: bool = False, cpcv_folds: int = 0, *,
-              reality_check: bool = False, seed: int = 0) -> list[dict]:
+              reality_check: bool = False, seed: int = 0,
+              trial_ledger_dir: str | None = None) -> list[dict]:
     """Rank-IC of each gated expression vs forward returns + validation
     (W2): includes out-of-sample rank IC (leading-train split), walk-forward
     across rolling train/test folds, CPCV overfit flag, and a deflated-Sharpe
@@ -253,16 +254,39 @@ def bench_zoo(exprs: list[str], records: list[dict],
     key holding the universe-level ``{"reality_check": ..., "spa": ...}``
     results (White's RC and Hansen's SPA over the bench expressions vs the
     forward-return benchmark); the default path is unchanged.
+
+    With ``trial_ledger_dir`` set (and ``enable_trial_ledger`` on) the deflated
+    IC stops trusting the caller's ``n_trials``: every evaluated candidate is
+    recorded as one row in the trial ledger, N and V are read back FROM those
+    rows, and each row gains ``deflated_ic_n_trials`` and
+    ``deflated_ic_dispersion`` beside the number, so a published deflated IC
+    carries the search it was deflated against. With the gate off the argument
+    is inert and the caller-supplied path below is unchanged.
     """
     from tradingagents.strategies.evaluate import (
         cpcv_overfit_mask,
         deflated_sharpe,
+        deflated_sharpe_report,
         purged_cpcv_splits,
+        sharpe,
     )
     from tradingagents.strategies.signal_analysis import rank_ic
+    from tradingagents.strategies.trial_ledger import (
+        gate_on,
+        record,
+        returns_sha,
+        trial_stats,
+    )
 
+    ledger_dir = trial_ledger_dir if (trial_ledger_dir is not None and gate_on()) else None
     closes = [r.get("close") for r in records]
     n = len(closes)
+    first_date = str((records[0] or {}).get("date") or "") if records else ""
+    last_date = str((records[-1] or {}).get("date") or "") if records else ""
+    as_of = last_date
+    ledger_window = (f"{first_date}..{last_date}" if (first_date or last_date)
+                     else f"bars:0..{n - 1}")
+    ledger_rows: list[tuple[dict, list | None]] = []
 
     def _fwd(i):
         j = i + forward_days
@@ -314,14 +338,41 @@ def bench_zoo(exprs: list[str], records: list[dict],
                     row["cpcv_overfit"] = cpcv_overfit_mask(ipcs, oopcs)
             # deflated IC (W2-1): penalize multi-trial selection on the
             # one-factor-per-expr directional series proxy.
-            if n_trials > 1:
+            dr = None
+            if n_trials > 1 or ledger_dir is not None:
                 dr = [0.0] * n
                 for i in range(n):
                     if fwd[i] is not None and series[i] is not None:
                         dr[i] = series[i] * fwd[i]
+            if dr is not None and ledger_dir is None:
                 row["deflated_ic"] = round(deflated_sharpe(dr, n_trials), 4)
+            if dr is not None and ledger_dir is not None:
+                # One immutable row per EVALUATED candidate: the ledger is what
+                # supplies N and V below, so it has to see every candidate.
+                record(expr, ledger_window, returns_sha(dr), sharpe(dr), as_of,
+                       results_dir=ledger_dir)
+                ledger_rows.append((row, dr))
         series_list.append((expr, series))
         out.append(row)
+    if ledger_dir is not None and ledger_rows:
+        stats = trial_stats(results_dir=ledger_dir)
+        n_ledger = stats.get("n_trials")
+        v_ledger = stats.get("sharpe_dispersion")
+        for row, dr in ledger_rows:
+            if n_ledger is None:
+                # The ledger measured nothing (gate off, or the write failed):
+                # the caller's count is all there is, and the row says so.
+                if n_trials > 1:
+                    row["deflated_ic"] = round(deflated_sharpe(dr, n_trials), 4)
+                row["deflated_ic_n_trials"] = max(1, int(n_trials))
+                row["deflated_ic_dispersion"] = "assumed"
+                continue
+            rep = deflated_sharpe_report(dr, n_trials=n_ledger,
+                                         sharpe_dispersion=v_ledger)
+            value = rep["value"]
+            row["deflated_ic"] = round(value, 4) if isinstance(value, float) else None
+            row["deflated_ic_n_trials"] = rep["n_trials"]
+            row["deflated_ic_dispersion"] = rep["dispersion"]
     if reality_check:
         universe = _zoo_reality_check(series_list, fwd_all, seed)
         for row in out:

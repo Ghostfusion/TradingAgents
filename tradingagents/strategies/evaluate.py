@@ -100,20 +100,123 @@ def sharpe(returns: list[float], risk_free: float = 0.0,
     return (cagr(returns, periods_per_year) - risk_free) / vol
 
 
+#: Euler-Mascheroni g, the weight on the second-order term of the expected
+#: maximum of N standard normals (Bailey & Lopez de Prado).
+_EULER_MASCHERONI = 0.5772156649015328606
+
+
+def _trial_ledger_gate_on() -> bool:
+    """Is ``enable_trial_ledger`` on? A missing config/import is off, not a crash."""
+    try:
+        from tradingagents.strategies.trial_ledger import gate_on
+
+        return bool(gate_on())
+    except Exception:  # noqa: BLE001 - an unreadable gate is an off gate
+        return False
+
+
+def _dispersion_threshold(n_trials: int, sharpe_dispersion: float) -> float | None:
+    """SR*_0 for N trials whose Sharpe ratios have variance V.
+
+    ``SR*_0 = sqrt(V) * [(1-g)*Phi^-1(1 - 1/N) + g*Phi^-1(1 - 1/(N*e))]`` with g
+    Euler-Mascheroni. ``None`` when N < 2 or V is not a non-negative finite
+    number: the closed form has no value there.
+    """
+    if n_trials < 2:
+        return None
+    try:
+        var = float(sharpe_dispersion)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(var) or var < 0.0:
+        return None
+    from statistics import NormalDist
+
+    nd = NormalDist()
+    first = nd.inv_cdf(1.0 - 1.0 / n_trials)
+    second = nd.inv_cdf(1.0 - 1.0 / (n_trials * math.e))
+    return math.sqrt(var) * ((1.0 - _EULER_MASCHERONI) * first
+                             + _EULER_MASCHERONI * second)
+
+
+def _selection_threshold(n_trials: int,
+                         sharpe_dispersion: float | None) -> tuple[float | None, str]:
+    """``(threshold, provenance)`` for one deflation; provenance is the tag.
+
+    ``"measured"`` when the ledger's Sharpe dispersion entered the standard
+    closed form, ``"assumed"`` when the independence approximation was used
+    instead (no dispersion, the gate off, or N < 2). One producer of the
+    threshold, so the number and its tag cannot disagree.
+    """
+    if n_trials <= 1:
+        return None, "assumed"
+    if sharpe_dispersion is not None and _trial_ledger_gate_on():
+        threshold = _dispersion_threshold(n_trials, sharpe_dispersion)
+        if threshold is not None:
+            return threshold, "measured"
+    # Approximation of E[max Z] for standard normals under independence.
+    return math.sqrt(2.0 * math.log(n_trials)), "assumed"
+
+
 def deflated_sharpe(returns: list[float], n_trials: int = 100,
                     risk_free: float = 0.0,
-                    periods_per_year: float = 252.0) -> float:
+                    periods_per_year: float = 252.0,
+                    sharpe_dispersion: float | None = None) -> float:
     """Lopez de Prado style deflated Sharpe: penalize multi-trial tuning.
 
     The expected maximum Sharpe across n independent trials is approximated
     (Euler-Mascheroni-based) and subtracted from the observed Sharpe.
+
+    With ``sharpe_dispersion`` supplied - V, the variance of the trials' Sharpe
+    ratios, read back from the trial ledger - the selection threshold is the
+    standard closed form instead of the independence approximation, so a tightly
+    clustered search and a wildly dispersed one are penalised differently::
+
+        SR*_0 = sqrt(V) * [(1-g)*Phi^-1(1 - 1/N) + g*Phi^-1(1 - 1/(N*e))]
+
+    That path is behind ``enable_trial_ledger`` (default off): with the gate off
+    the argument is ignored and the result is the pre-existing approximation bit
+    for bit. ``deflated_sharpe_report`` returns the same number beside its N and
+    whether the dispersion was measured or assumed.
     """
     observed = sharpe(returns, risk_free, periods_per_year)
-    if n_trials <= 1:
+    threshold, _ = _selection_threshold(n_trials, sharpe_dispersion)
+    if threshold is None:
         return observed
-    # Approximation of E[max Z] for standard normals under independence.
-    expected_max = math.sqrt(2.0 * math.log(n_trials))
-    return observed - expected_max
+    return observed - threshold
+
+
+def deflated_sharpe_report(returns: list[float], n_trials: int = 100,
+                           risk_free: float = 0.0,
+                           periods_per_year: float = 252.0,
+                           sharpe_dispersion: float | None = None) -> dict:
+    """The deflated Sharpe WITH the N it was deflated by, and its provenance.
+
+    ``dispersion`` is ``"measured"`` when the ledger's Sharpe dispersion entered
+    the closed-form threshold and ``"assumed"`` when the independence
+    approximation was used instead - so a published deflated number can never be
+    read without knowing which search, and which dispersion, it was deflated
+    against. ``value`` is exactly ``deflated_sharpe``'s return.
+    """
+    observed = sharpe(returns, risk_free, periods_per_year)
+    threshold, provenance = _selection_threshold(n_trials, sharpe_dispersion)
+    return {
+        "value": observed if threshold is None else observed - threshold,
+        "n_trials": max(1, int(n_trials)),
+        "sharpe_dispersion": float(sharpe_dispersion)
+        if provenance == "measured" else None,
+        "dispersion": provenance,
+        "threshold": threshold,
+        "observed_sharpe": observed,
+        "basis": (
+            "the observed Sharpe minus the multiple-testing selection threshold "
+            + ("(sqrt(V) * [(1-g)*Phi^-1(1 - 1/N) + g*Phi^-1(1 - 1/(N*e))], V and N "
+               "read back from the trial ledger)" if provenance == "measured"
+               else "(sqrt(2*ln(N)) independence approximation; the trials' Sharpe "
+                    "dispersion was not measured)")
+            + f"; n_trials={max(1, int(n_trials))}"
+        ),
+    }
 
 
 def max_drawdown(equity_curve: list[float]) -> float:
@@ -1010,7 +1113,8 @@ def implementation_shortfall(
 
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
-    "deflated_sharpe", "max_drawdown", "equity_curve", "walk_forward_splits",
+    "deflated_sharpe", "deflated_sharpe_report",
+    "max_drawdown", "equity_curve", "walk_forward_splits",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",
     "benchmark_table",
