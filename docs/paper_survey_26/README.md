@@ -63,11 +63,12 @@ any of them.
    refuse.
 5. **Gates must be able to fail.** Each new test is proven failing under a targeted mutation of the
    code it guards. Tests assert observable behaviour, never wiring or source text.
-6. **Six registration points per gate**: `DEFAULT_CONFIG`, an `_ENV_OVERRIDES` row, a
-   `docs/gate_registry.md` row with an enforcement site, a `tests/test_gate_env_toggles.py`
-   `REGISTRY` entry, `.env.example`, and a `docs/api_reference.md` section 1.1 row (regenerate with
-   `scripts/gen_api_reference_table.py --write`). Registering a gate also moves the coverage
-   sentence in `docs/gate_registry.md`.
+6. **Seven registration points per gate**: `DEFAULT_CONFIG`, an `_ENV_OVERRIDES` row, a
+   `docs/gate_registry.md` row with the enforcement site, a `tests/test_gate_env_toggles.py`
+   `REGISTRY` entry, `.env.example`, a `docs/api_reference.md` section 1.1 row (regenerate with
+   `scripts/gen_api_reference_table.py --write`), and **the live `.env`** — created with the
+   key's default value when it is absent, **never overwriting an entry already there** (owner rule,
+   2026-09-24). Registering a gate also moves the coverage sentence in `docs/gate_registry.md`.
 7. **A new public function in `strategies/` or `dataflows/` ships with its first caller in the same
    commit**, or
    `tests/test_calc_agent_wiring.py::test_public_calc_reachable_or_whitelisted` fails.
@@ -382,7 +383,7 @@ Per item, in order:
 1. **Failing-first proof.** Write the test, prove it **fails** under a targeted mutation of the code
    it guards, restore the source **byte-identical** (assert sha256 in a `finally`), and assert the
    expected test name appears in the failure output.
-2. **Gate registration (six points)** if the item adds a gate - section 0 rule 6.
+2. **Gate registration (seven points)** if the item adds a gate - section 0 rule 6.
 3. **Wiring in the same commit** if the item adds a public function to `strategies/` or
    `dataflows/` - section 0 rule 7.
 4. **Full engine suite** (`py -3.12 -m pytest tests -q`, ~11-13 min) for any code change, run
