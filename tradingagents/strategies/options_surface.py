@@ -47,19 +47,94 @@ def implied_move_pct(atm_iv: float | None, days_to_expiry: float | None) -> floa
     return atm_iv * (days_to_expiry / 365.0) ** 0.5 * 100.0
 
 
-def expected_move_from_chain(rows: list[dict]) -> dict:
+def _rnd_gate(cfg: dict | None = None) -> bool:
+    """Is V3's risk-neutral-density recovery switched on? (``enable_rnd_recovery``)
+
+    Off by default, so a gate-off caller adds no key and the expected-move read is
+    byte-identical to the run before the recovery existed. The key is read by its
+    **literal** name so the gate registry's read-site scan finds it; an unreadable
+    config leaves the gate off (the house shape: ``regime._spectral_band_gate``).
+    """
+    if cfg is None:
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - a config read must never break the read
+            cfg = {}
+    return bool((cfg or {}).get("enable_rnd_recovery", False))
+
+
+def _rnd_chain_from_rows(rows: list[dict]) -> dict | None:
+    """The parallel-array chain ``rnd_recovery`` takes, or None for an empty lift.
+
+    Rows carry IV, not prices, so each OTM quote is priced by the repo's own
+    Black-76 at the row's own side (``F = spot``, ``r = q = 0``). The forward and
+    the expiry come from the rows; a row missing strike/spot/iv/days is dropped,
+    never assumed.
+    """
+    from tradingagents.strategies.options_math import black76 as _b76
+
+    strikes: list[float] = []
+    calls: list[float] = []
+    puts: list[float] = []
+    forward = None
+    t = None
+    for r in rows or []:
+        side = r.get("side")
+        if side not in ("call", "put"):
+            continue
+        try:
+            k = float(r.get("strike"))
+            spot = float(r.get("spot"))
+            iv = float(r.get("iv"))
+            days = float(r.get("days_to_expiry"))
+        except (TypeError, ValueError):
+            continue
+        if k <= 0 or spot <= 0 or iv <= 0 or days <= 0:
+            continue
+        forward = spot
+        t = days / 365.0
+        price = _b76(spot, k, t, iv, side, 0.0).get("price")
+        if price is None or price <= 0:
+            continue
+        strikes.append(k)
+        calls.append(price if side == "call" else 0.0)
+        puts.append(price if side == "put" else 0.0)
+    if forward is None or t is None or not strikes:
+        return None
+    return {"strikes": strikes, "calls": calls, "puts": puts,
+            "forward": forward, "t": t, "r": 0.0}
+
+
+def expected_move_from_chain(rows: list[dict], *, cfg: dict | None = None) -> dict:
     """ATR-like + ATM-IV expected move from an options chain (best-effort).
     Returns mid/10d/ATM IV / expected move; None when the chain is empty or
-    has no ATM row."""
+    has no ATM row.
+
+    With ``enable_rnd_recovery`` on (default off) it also carries
+    ``risk_neutral_density`` - V3's ``rnd_recovery`` read of the same chain,
+    which reports its own ``status``/``unavailable`` rather than a fabricated
+    density. With the gate off the key is absent and the read is never taken, so
+    every key above is unchanged.
+    """
+    rnd = None
+    if _rnd_gate(cfg):
+        chain = _rnd_chain_from_rows(rows)
+        if chain is not None:
+            from tradingagents.strategies.rnd_recovery import rnd_recovery as _rnd
+
+            rnd = _rnd(chain)
+    extra = {"risk_neutral_density": rnd} if rnd is not None else {}
     if not rows:
-        return {"atm_iv": None, "ten_d_move_pct": None, "n_rows": 0}
+        return {"atm_iv": None, "ten_d_move_pct": None, "n_rows": 0, **extra}
     atm = min(rows, key=lambda r: abs(float(r.get("strike") or 0) - float(r.get("spot", 0)) or 0))
     iv = atm.get("iv")
     days = atm.get("days_to_expiry")
     if iv is None or days is None:
-        return {"atm_iv": None, "ten_d_move_pct": None, "n_rows": len(rows)}
+        return {"atm_iv": None, "ten_d_move_pct": None, "n_rows": len(rows), **extra}
     return {"atm_iv": float(iv), "ten_d_move_pct": implied_move_pct(float(iv), float(days)),
-            "n_rows": len(rows)}
+            "n_rows": len(rows), **extra}
 
 
 def volatility_risk_premium(iv: float | None, realized_vol: float | None) -> float | None:
