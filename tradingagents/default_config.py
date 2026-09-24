@@ -311,6 +311,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_REFUSAL_LEDGER": "enable_refusal_ledger",
     "TRADINGAGENTS_ENABLE_MATERIALITY_VERDICT": "enable_materiality_verdict",
     "TRADINGAGENTS_ENABLE_ACCURACY_CEILING": "enable_accuracy_ceiling",
+    "TRADINGAGENTS_ENABLE_SPECTRAL_NULL_BAND": "enable_spectral_null_band",
     # _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored.
     "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
@@ -1130,6 +1131,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_refusal_ledger": False,
         "enable_materiality_verdict": False,
         "enable_accuracy_ceiling": False,
+        "enable_spectral_null_band": False,
         # one read and all default OFF, so a gate-off run is byte-identical to the
         # run before the gate existed.
         "enable_coverage_window": False,

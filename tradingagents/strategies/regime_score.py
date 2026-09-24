@@ -172,7 +172,7 @@ COMPONENTS: dict[str, Component] = {
             "breadth",
             "breadth",
             "higher_better",
-            "strategies/market_breadth.py::market_breadth:44",
+            "strategies/market_breadth.py::market_breadth:114",
             "percent above the 50d SMA, 0-100",
             "prerequisite 2 (P0-3); the leaf passes pct_above_50d",
         ),
@@ -196,7 +196,7 @@ COMPONENTS: dict[str, Component] = {
             "choppiness",
             "choppiness",
             "lower_better",
-            "strategies/regime.py::choppiness:133",
+            "strategies/regime.py::choppiness:141",
             "canonical CHOP 0-100 (one unit, both branches)",
             "high = ranging; the producer returns None when unmeasurable",
         ),
@@ -204,7 +204,7 @@ COMPONENTS: dict[str, Component] = {
             "realized_vol_percentile",
             "volatility",
             "lower_better",
-            "strategies/regime.py::vol_percentile:51",
+            "strategies/regime.py::vol_percentile:59",
             "0-1 rank of realised vol",
             "the defect fix: None when unmeasurable, never a fabricated 0.5",
         ),
@@ -231,17 +231,18 @@ def align_components(components: dict) -> dict[str, float | None]:
 
     An unknown key is ignored (the engine scores what it declares); a declared
     component with no value - absent, ``None``, non-finite, or a bool where a
-    measurement is declared - is ``None`` and leaves the denominator. Never a
-    neutral 50 (master rule 1).
+    measurement is declared - is ``None`` and leaves the denominator. R3's leg
+    takes the flagged read and aligns its FLAG (:func:`_spectral_flag`), never
+    the functional it was read from. Never a neutral 50 (master rule 1).
     """
     values = components or {}
+    declared, ramps = _declared_set()
     out: dict[str, float | None] = {}
-    for name, comp in COMPONENTS.items():
-        if name not in values:
-            out[name] = None
-            continue
-        lo, hi = RAMPS[name]
-        out[name] = align(values.get(name), direction=comp.direction, lo=lo, hi=hi)
+    for name, comp in declared.items():
+        raw = values.get(name)
+        raw = _spectral_flag(raw) if name == SPECTRAL_CHANGE_KEY else raw
+        lo, hi = ramps[name]
+        out[name] = align(raw, direction=comp.direction, lo=lo, hi=hi)
     return out
 
 
@@ -251,14 +252,14 @@ def _composite_floor() -> int:
     An uncapped count floor is an off switch wearing a floor's name (the WP-2
     FGS lesson): a set smaller than the floor could never score.
     """
-    return max(1, min(int(COMPOSITE_MIN_COVERAGE), len(COMPONENTS)))
+    return max(1, min(int(COMPOSITE_MIN_COVERAGE), len(_declared_set()[0])))
 
 
 def regime_score(components: dict, *, weights: dict | None = None) -> dict:
-    """The 0-100 market-environment score over the six declared components.
+    """The 0-100 market-environment score over the declared components.
 
-    ``components`` is ``{component: raw value}`` over `COMPONENTS`; anything
-    absent is ``NA`` and is reported, never scored as 0 or as a neutral 50.
+    ``components`` is ``{component: raw value}`` over the declared set: the six
+    market-level legs plus R3's gated spectral read. Absent is ``NA``, never 0.
 
     ``weights`` overrides the default vector. ``None`` means **equal weight**,
     because no per-component weight vector is published - the owner's table is at
@@ -271,13 +272,14 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
     "basis"}``. ``status`` is ``RESEARCH_ONLY``: the ramps are declared policy and
     the combination is unvalidated.
     """
+    declared = _declared_set()[0]
     aligned = align_components(components)
     floor = _composite_floor()
     combined = combine(
         aligned, weights=weights, min_coverage=floor, bands=REGIME_BANDS
     )
-    measured = [name for name in COMPONENT_ORDER if aligned.get(name) is not None]
-    absent = [name for name in COMPONENT_ORDER if aligned.get(name) is None]
+    measured = [name for name in declared if aligned.get(name) is not None]
+    absent = [name for name in declared if aligned.get(name) is None]
 
     if weights is None:
         weight_basis = (
@@ -291,8 +293,8 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
     owner_txt = ", ".join(f"{k} {v:g}" for k, v in OWNER_CATEGORY_WEIGHTS.items())
     basis = " | ".join(
         [
-            f"RegimeScore (RESEARCH_ONLY): {len(measured)} of {len(COMPONENT_ORDER)} "
-            f"market-level component(s) measured, coverage {combined.get('coverage')}, "
+            f"RegimeScore (RESEARCH_ONLY): {len(measured)} of {len(declared)} "
+            f"declared component(s) measured, coverage {combined.get('coverage')}, "
             f"floor {floor}",
             weight_basis,
             "the owner's published table is at CATEGORY level and is not used as a "
@@ -300,9 +302,7 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
             f"{len(MEASURED_CATEGORIES)} of its {len(OWNER_CATEGORY_WEIGHTS)} "
             f"categories ({', '.join(MEASURED_CATEGORIES)}); not measured here: "
             f"{', '.join(owner_absent)}",
-            "three of the six components are volatility-regime legs, so an equal "
-            "vector gives volatility 50% where the owner's table gives it 20% - "
-            "stated, not hidden",
+            _volatility_note(declared),
             RAMP_BASIS,
             f"absent (NA, never 0): {', '.join(absent)}" if absent else "no component absent",
             "advisory environment read: never a gate, never a size, never a direction",
@@ -316,13 +316,13 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
             name: {
                 "raw": (components or {}).get(name),
                 "aligned": aligned.get(name),
-                "direction": COMPONENTS[name].direction,
-                "category": COMPONENTS[name].category,
-                "producer": COMPONENTS[name].producer,
-                "unit": COMPONENTS[name].unit,
-                "note": COMPONENTS[name].note,
+                "direction": declared[name].direction,
+                "category": declared[name].category,
+                "producer": declared[name].producer,
+                "unit": declared[name].unit,
+                "note": declared[name].note,
             }
-            for name in COMPONENT_ORDER
+            for name in declared
         },
         "aligned": aligned,
         "measured": measured,
@@ -443,6 +443,131 @@ def vix_term_structure(vix9d: float | None, vix3m: float | None) -> dict:
             f"equity-IV slope"
         ),
     }
+
+
+# --- R3: the flagged spectral read (2607.06373) ----------------------------
+#
+# A spectrum estimated from a finite window moves on its own, so this engine
+# declares a cross-sectional structural change only when the movement exceeds the
+# calibrated first-order null band `regime.spectral_change_read` reports. What
+# enters the score is that read's FLAG - never the absorption ratio, never the
+# projector distance - and `align_components` takes the flag out of the record,
+# so a raw functional cannot reach the score even by accident.
+#
+# The component is declared only while its gate is on, because the declared set
+# is what the coverage denominator counts: with the gate off (the default) this
+# engine measures exactly the six market-level legs it measured before, and a
+# gate-off run is byte-identical.
+
+#: R3's component: the flagged spectral read. Its unit is the flag, and its
+#: declared input is the read rather than a number (see :func:`_spectral_flag`).
+SPECTRAL_CHANGE_COMPONENT = Component(
+    name="spectral_change",
+    category="breadth",
+    direction="lower_better",
+    producer="strategies/regime.py::spectral_change_read:1159",
+    unit="flag: 1 = a spectral move beyond the calibrated null band",
+    note=(
+        "R3 (2607.06373); the FLAG enters, never the absorption ratio or the "
+        "projector distance it was read from"
+    ),
+)
+
+#: The key a caller passes for R3's read.
+SPECTRAL_CHANGE_KEY = SPECTRAL_CHANGE_COMPONENT.name
+
+#: R3's ramp: the flag is 0 (no move beyond the band) or 1 (a move beyond it).
+#: Declared policy like every other edge here - no published coefficient exists.
+SPECTRAL_CHANGE_RAMP: tuple[float, float] = (0.0, 1.0)
+
+
+def _spectral_gate() -> bool:
+    """Is R3's spectral null-band read switched on? (``enable_spectral_null_band``)
+
+    The component below is only *declared* while the gate is on. Off by default,
+    and an unreadable config leaves it off - a config read must never break the
+    score it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_spectral_null_band", False))
+
+
+def _declared_set() -> tuple[dict, dict]:
+    """The declared component table and its ramps, for the R3 gate's state.
+
+    ``(COMPONENTS, RAMPS)`` with the gate off (the module's own tables, no copy,
+    so a gate-off score reads exactly the six legs it read before), plus R3's
+    spectral leg while ``enable_spectral_null_band`` is on.
+    """
+    if _spectral_gate():
+        return (
+            {**COMPONENTS, SPECTRAL_CHANGE_KEY: SPECTRAL_CHANGE_COMPONENT},
+            {**RAMPS, SPECTRAL_CHANGE_KEY: SPECTRAL_CHANGE_RAMP},
+        )
+    return COMPONENTS, RAMPS
+
+
+def _volatility_note(declared: dict) -> str:
+    """The equal vector's real distortion, over the DECLARED set.
+
+    Three of the six market-level legs are volatility legs; R3's leg is not, and
+    the equal vector is over the declared set, so the count has to travel with
+    the table rather than being frozen into the sentence.
+    """
+    legs = sum(1 for comp in declared.values() if comp.category == "volatility")
+    return (
+        f"{legs} of the {len(declared)} components are volatility-regime legs, so "
+        f"an equal vector gives volatility {100.0 * legs / len(declared):g}% where "
+        "the owner's table gives it 20% - stated, not hidden"
+    )
+
+
+def _spectral_flag(raw):
+    """The FLAG out of R3's read - never the functional the flag was read from.
+
+    The declared input for this component is the flagged READ
+    (``regime.spectral_change_read``) or the bare flag (``0.0`` / ``1.0``).
+    Anything else - the absorption ratio, the projector distance, a value on any
+    other scale - is ``None``, so a raw functional cannot enter the score even by
+    accident (R3's item 3).
+    """
+    if isinstance(raw, dict):
+        flag = raw.get("flag")
+        return None if flag is None else (1.0 if flag else 0.0)
+    if isinstance(raw, bool):
+        return 1.0 if raw else 0.0
+    if isinstance(raw, (int, float)) and float(raw) in (0.0, 1.0):
+        return float(raw)
+    return None
+
+
+def _spectral_change_values(
+    prev_window: dict, curr_window: dict, *, cfg: dict | None = None
+) -> dict:
+    """R3's flagged read as the ``{component: value}`` mapping `regime_score` takes.
+
+    The leaf supplies the two rolling windows of the tracked cross-section - a
+    per-PANEL read, never per-symbol. The gate is read inside
+    :func:`regime.spectral_change_read`, so with it off (the default) this
+    returns ``{}`` and the component is not declared at all; with a panel too thin
+    to read, the read reports ``unavailable`` with its window and the component
+    stays `NA` rather than entering the score as a zero.
+
+    The value handed back is the FLAG (``1.0`` / ``0.0``). `align_components`
+    also accepts the read itself and takes the flag out of it, which is what keeps
+    the absorption ratio and the projector distance out of the score.
+    """
+    from .regime import spectral_change_read
+
+    read = spectral_change_read(prev_window, curr_window, cfg=cfg)
+    if read is None or read.get("flag") is None:
+        return {}
+    return {SPECTRAL_CHANGE_KEY: 1.0 if read["flag"] else 0.0}
 
 
 # --- The two regime paths --------------------------------------------------
@@ -609,6 +734,9 @@ __all__ = [
     "VIX9D_SERIES",
     "VIX3M_SERIES",
     "VIX_TERM_UNAVAILABLE",
+    "SPECTRAL_CHANGE_COMPONENT",
+    "SPECTRAL_CHANGE_KEY",
+    "SPECTRAL_CHANGE_RAMP",
     "PATH_A_NAME",
     "PATH_B_NAME",
     "AXIS_KEYS",

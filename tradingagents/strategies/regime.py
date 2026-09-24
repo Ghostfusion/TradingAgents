@@ -11,6 +11,14 @@ deterministic path is always available and testable offline.
 Wire-up: compute features from daily OHLCV in a pre-graph step, stash
 `regime` in graph state, and let the risk node scale position size /
 stop levels and analysts frame their lens (bull/bear context).
+
+R3's per-panel spectral read (`spectral_change_read`, 2607.06373) is the one
+read here that takes a cross-section rather than a series: gated off by default,
+it reports the movement of the panel's correlation spectrum between two rolling
+windows - the projector distance, the absorption ratio, the leading-eigenvalue
+share - each beside the calibrated first-order null band it must clear before a
+structural change is declared. A non-rejection reads "not detectable", never "no
+change".
 """
 
 from __future__ import annotations
@@ -1111,6 +1119,171 @@ def bocpd(
     return out
 
 
+# --- R3: the spectral null band (2607.06373) -------------------------------
+#
+# A spectrum estimated from a finite window moves on its own, so a move in the
+# cross-section's eigenspace is only a regime signal when it exceeds the
+# first-order null band 2607.06373 derives for a shrinkage estimator. The
+# arithmetic lives beside the estimators it reads (`covariance_models.
+# panel_spectrum` / `eigen_projector_distance` / `spectral_functionals`); what
+# belongs HERE is the gated per-PANEL entry point, its coverage report and the
+# wording of its verdicts.
+
+#: R3's gate. Off by default: with it off ``spectral_change_read`` returns
+#: ``None`` and no caller carries an extra key, so a gate-off run is
+#: byte-identical to the run before the read existed.
+#:
+#: The gate is read by its **literal** key in :func:`_spectral_band_gate`
+#: (docs/gate_registry.md §8): a read through this constant scans as "read by
+#: nothing". The constant exists for the messages.
+SPECTRAL_GATE_NAME = "enable_spectral_null_band"
+
+
+def _spectral_band_gate(cfg: dict | None = None) -> bool:
+    """Is R3's spectral null-band read switched on? (``enable_spectral_null_band``)
+
+    Off by default, so a gate-off caller computes nothing new. An unreadable
+    config leaves the gate off - a config read must never break the read it
+    guards (the house shape: ``data_quality._coverage_gate``).
+    """
+    if cfg is None:
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - a config read must never break the read
+            cfg = {}
+    return bool((cfg or {}).get("enable_spectral_null_band", False))
+
+
+def spectral_change_read(
+    prev_window: dict,
+    curr_window: dict,
+    *,
+    k: int = 1,
+    min_n: int | None = None,
+    shrinkage: float = 0.0,
+    cfg: dict | None = None,
+) -> dict | None:
+    """R3: did the cross-section's eigenspace move further than estimation noise?
+
+    2607.06373's finding is that a spectrum estimated from a finite window moves
+    on its own - shrink an estimator and its leading eigenspace wanders - so
+    reading a spectral move as structural change requires a calibrated null.
+    This is the gated per-PANEL entry point, and the two windows are
+    ``{name: [return, ...]}`` over the tracked cross-section: **never one
+    symbol**, because the read needs a panel (and R3's bands are widest exactly
+    where the book is smallest).
+
+    ``None`` when ``enable_spectral_null_band`` is off (its default). Otherwise a
+    record carrying three movements - the projector distance of the dominant
+    ``k``-dimensional eigenspace, the absorption ratio, the leading-eigenvalue
+    share - each beside **its own calibrated first-order null band**, plus:
+
+    * ``flag`` - the read's single answer, and the only thing that feeds
+      ``regime_score``. ``True`` when ANY leg's move exceeds its band, ``False``
+      when every leg was measured and none did, and ``None`` when the panel could
+      not be read.
+    * ``window`` - ``n_obs`` / ``n_names`` / ``min_n``, reported beside the
+      numbers. A window too thin to support a spectrum, a name set that changed
+      between the two windows, or an unmeasurable shrinkage intensity is refused
+      with its reason in ``unavailable`` (rule 4) - never a zero.
+    * ``reading`` - ``"change detected"``, or ``"not detectable"`` with the
+      paper's own caveat: a non-rejection partly reflects a wide null band, so it
+      is **not** a statement that nothing changed.
+    * ``band_calibration`` - the (window length, shrinkage intensity) pair the
+      whole read is cut at, which is what makes the same length and intensity
+      carry the same band on any panel.
+    * ``shrinkage`` - the intensity the band was calibrated at (``0.0`` by
+      default: the engine's correlation matrix read raw), and
+      ``engine_shrinkage`` - the intensity the engine's OWN Ledoit-Wolf estimator
+      applies to these windows, reported beside it and never folded into it. This
+      engine's estimator saturates at ``1.0`` on every panel it has been asked
+      about, and a band of zero is refused with its reason rather than flagging
+      every move (see ``covariance_models._band_refusal``).
+
+    ONE eigendecomposition per window: both windows are decomposed once, here,
+    and the spectra are handed to every leg, so a rolling read costs two
+    decompositions rather than one per functional.
+    """
+    if not _spectral_band_gate(cfg):
+        return None
+    from .covariance_models import (
+        SPECTRAL_DETECTED,
+        SPECTRAL_MIN_OBS,
+        SPECTRAL_NOT_DETECTABLE_REASON,
+        SPECTRAL_NULL_Z,
+        SPECTRAL_UNAVAILABLE,
+        _engine_shrinkage,
+        eigen_projector_distance,
+        panel_spectrum,
+        spectral_functionals,
+        spectral_null_band,
+    )
+
+    floor = SPECTRAL_MIN_OBS if min_n is None else int(min_n)
+    prev = panel_spectrum(prev_window or {}, min_n=floor)
+    curr = panel_spectrum(curr_window or {}, min_n=floor)
+    projector = eigen_projector_distance(
+        k=k,
+        shrinkage=shrinkage,
+        min_n=floor,
+        prev_spectrum=prev,
+        curr_spectrum=curr,
+    )
+    scalars = spectral_functionals(
+        shrinkage=shrinkage,
+        min_n=floor,
+        prev_spectrum=prev,
+        curr_spectrum=curr,
+    )
+    legs = (projector, scalars["absorption_ratio"], scalars["leading_share"])
+    n_names = int(prev.get("n_names") or 0)
+    n_obs = min(int(prev.get("n_obs") or 0), int(curr.get("n_obs") or 0))
+    engine_shrinkage = _engine_shrinkage(prev, curr)
+    delta = 0.0 if shrinkage is None else float(shrinkage)
+    band = spectral_null_band(n_obs, delta)
+    measured = all(leg.get("exceeds") is not None for leg in legs)
+    flag = None
+    reading = SPECTRAL_UNAVAILABLE
+    unavailable = None
+    if measured:
+        flag = any(bool(leg["exceeds"]) for leg in legs)
+        reading = SPECTRAL_DETECTED if flag else SPECTRAL_NOT_DETECTABLE_REASON
+    else:
+        unavailable = "; ".join(
+            str(leg["unavailable"]) for leg in legs if leg.get("unavailable")
+        ) or "the panel could not be read"
+    return {
+        "projector_distance": projector,
+        "absorption_ratio": scalars["absorption_ratio"],
+        "leading_share": scalars["leading_share"],
+        "flag": flag,
+        "reading": reading,
+        "window": {"n_obs": n_obs, "n_names": n_names, "min_n": floor},
+        "n_obs": n_obs,
+        "n_names": n_names,
+        "band_calibration": band,
+        "shrinkage": delta,
+        "engine_shrinkage": engine_shrinkage,
+        "k": projector.get("k"),
+        "status": "ADVISORY",
+        "unavailable": unavailable,
+        "basis": (
+            f"R3 spectral null band (2607.06373): {n_names} name(s) x {n_obs} "
+            f"observation(s), {len(legs)} movement(s) cut at one calibrated "
+            f"first-order band {band if band is None else round(band, 6)} "
+            f"(z={SPECTRAL_NULL_Z}, shrinkage {delta:.6g}); this band is a "
+            f"function of the window length and the shrinkage intensity alone; "
+            f"the engine's own Ledoit-Wolf intensity here is "
+            f"{'-' if engine_shrinkage is None else format(engine_shrinkage, '.6f')} "
+            f"(reported, not the band); flag={flag} ({reading}); the flag is what "
+            f"`regime_score` takes - the absorption ratio and the projector "
+            f"distance feed nothing"
+        ),
+    }
+
+
 __all__ = [
     "realized_vol",
     "vol_percentile",
@@ -1128,6 +1301,8 @@ __all__ = [
     "ewma_control",
     "bocpd",
     "BOCPD_SHIFT_THRESHOLD",
+    "SPECTRAL_GATE_NAME",
+    "spectral_change_read",
 ]
 
 

@@ -75,6 +75,7 @@ REGISTRY: dict[str, str] = {
     "enable_refusal_ledger": "wired",
     "enable_materiality_verdict": "wired",
     "enable_accuracy_ceiling": "wired",
+    "enable_spectral_null_band": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates
