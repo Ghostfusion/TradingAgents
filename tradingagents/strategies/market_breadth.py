@@ -18,7 +18,11 @@ with the reason rather than a noisy number over a handful of names (master rule 
 
 from __future__ import annotations
 
-from .sector_breadth import multi_breadth
+import math
+
+import numpy as np
+
+from .sector_breadth import SPECTRUM_WINDOW, mp_lower_spectrum, multi_breadth
 from .sector_screener import breadth_with_gate
 
 #: The market-wide bucket key handed to ``multi_breadth``. The panel is ONE
@@ -41,11 +45,79 @@ def _usable(series) -> list[float] | None:
     return vals if len(vals) >= 2 else None
 
 
+def _spectrum_refused(names: int, window: int, reason: str) -> dict:
+    """The one refusal shape of the X3 read: ``unavailable``, never zero."""
+    return {
+        "count": None,
+        "mp_lower": None,
+        "status": "unavailable",
+        "window": window,
+        "n_names": names,
+        "unavailable": reason,
+    }
+
+
+def mp_below_count(corr, n: int, w: int) -> dict:
+    """Eigenvalues of a panel correlation matrix below the Marchenko-Pastur
+    lower bound (X3, 2608.09641).
+
+    ``corr`` is the ``n x n`` correlation matrix of ONE panel's trailing ``w``
+    returns; the bound is ``(1 - sqrt(n/w))^2``, the lower edge of the
+    Marchenko-Pastur bulk for an ``n x w`` i.i.d. matrix. The count of
+    eigenvalues below it RISES when the effective number of independent bets
+    collapses - a panel whose names have started moving as one. Read it as a
+    synchronization STATE: it is coincident and direction-blind, so it cannot
+    separate a crash from a bubble and is never a signal.
+
+    ``status`` is ``"unavailable"`` - never ``count == 0`` - when ``w <= n``:
+    at a window no longer than the panel the bound collapses to 0 and the bulk
+    has no lower edge, so "nothing sits below the bound" would be an artifact
+    of a degenerate limit rather than a measurement. A missing, wrongly shaped
+    or non-finite matrix refuses the same way (rule 4).
+
+    Returns ``{count, mp_lower, status, window, n_names, unavailable}``: the
+    window and the panel size the count was computed over travel with it (rule
+    4 / H10), and ``unavailable`` carries the reason when the read is refused.
+    """
+    window = int(w)
+    names = int(n)
+    if window <= names:
+        return _spectrum_refused(
+            names, window,
+            f"window {window} is not longer than the panel ({names} names): the "
+            "Marchenko-Pastur lower bound collapses to 0, so no eigenvalue "
+            "count would be a measurement",
+        )
+    matrix = np.asarray(corr, dtype=float) if corr is not None else None
+    if matrix is None or matrix.ndim != 2 or matrix.shape != (names, names):
+        shape = None if matrix is None else matrix.shape
+        return _spectrum_refused(
+            names, window,
+            f"correlation matrix {shape} is not the {names}x{names} panel matrix",
+        )
+    if not np.all(np.isfinite(matrix)):
+        return _spectrum_refused(
+            names, window, "correlation matrix carries a non-finite entry"
+        )
+    lower = (1.0 - math.sqrt(names / window)) ** 2
+    eigenvalues = np.linalg.eigvalsh(matrix)
+    return {
+        "count": int(np.count_nonzero(eigenvalues < lower)),
+        "mp_lower": float(lower),
+        "status": "ok",
+        "window": window,
+        "n_names": names,
+        "unavailable": None,
+    }
+
+
 def market_breadth(
     closes_by_name: dict,
     *,
     windows: tuple = (20, 50, 200),
     min_n: int = 20,
+    cfg: dict | None = None,
+    spectrum_window: int = SPECTRUM_WINDOW,
 ) -> dict | None:
     """Market-wide breadth over a panel of close series, or None for an empty map.
 
@@ -64,6 +136,10 @@ def market_breadth(
           "new_highs_52w_n": how many names carried the full year,
           "small_sample": bool, "min_n": int, "basis": str,
           "reason": why the percentages are withheld (small sample only),
+          "mp_lower_spectrum": the panel's Marchenko-Pastur lower-spectrum read
+              (``{count, mp_lower, status, window, n_names, ...}``) - present
+              ONLY with ``enable_mp_lower_spectrum`` on, so every key above is
+              byte-identical to the run before the read existed,
         }
 
     ``new_highs``/``new_lows`` are measured against **the series each name was
@@ -83,6 +159,13 @@ def market_breadth(
     Never returns 0 for an absent read: an empty map is ``None``, and a panel
     below ``min_n`` keeps its counts with the percentages withheld and the reason
     printed (``small_sample``).
+
+    ``cfg``/``spectrum_window`` drive the ONE gated extra key: with
+    ``enable_mp_lower_spectrum`` on, ``mp_lower_spectrum`` (X3) reads the
+    Marchenko-Pastur lower spectrum of THIS panel - one read for the panel, not
+    one per name - and reports the window it was computed over. With the gate
+    off (the default, and the only state in which the key is absent) the read is
+    never taken and nothing above moves.
     """
     panel = {k: v for k, v in (closes_by_name or {}).items() if _usable(v)}
     if not panel:
@@ -160,7 +243,14 @@ def market_breadth(
         out["basis"] += " | the shared producer reports the 20/50/200 columns only"
     if gated.get("reason"):
         out["reason"] = gated["reason"]
+    # X3: ONE Marchenko-Pastur lower-spectrum read for the panel (never one per
+    # name), gated by ``enable_mp_lower_spectrum`` - off by default, which is
+    # what keeps every key above byte-identical to the run before the read
+    # existed. With the gate on it ADDS this one key and moves nothing else.
+    spectrum = mp_lower_spectrum(panel, window=spectrum_window, cfg=cfg)
+    if spectrum is not None:
+        out["mp_lower_spectrum"] = spectrum
     return out
 
 
-__all__ = ["market_breadth", "PANEL_KEY"]
+__all__ = ["market_breadth", "mp_below_count", "PANEL_KEY"]

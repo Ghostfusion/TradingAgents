@@ -17,6 +17,12 @@ Extends the sector-rotation screen with:
 4. ``msi_zone``          - the advisory risk-budget note from the MSI level
                          + 5d slope (advisory; the repo's risk governor stays
                          authoritative - never a gate).
+5. ``mp_lower_spectrum`` - X3 (2608.09641): the count of eigenvalues of ONE
+                         panel's correlation matrix below the Marchenko-Pastur
+                         lower bound ``(1 - sqrt(n/w))^2``, which rises when the
+                         effective number of independent bets collapses. Gated
+                         by ``enable_mp_lower_spectrum`` (off by default), and a
+                         per-PANEL read - never a per-symbol one.
 
 All functions are pure, None-safe, and reuse the repo's existing helpers
 (sma/ema/constituent fetch); the ~300-member S&P-500 universe built for the
@@ -26,6 +32,8 @@ screen is the exact data source the McClellan needs.
 from __future__ import annotations
 
 import math
+
+import numpy as np
 
 
 def _sma(values: list, window: int, idx: int = -1) -> float | None:
@@ -55,6 +63,103 @@ def _ema_series(values: list, span: int) -> list:
     for v in values[1:]:
         out.append(alpha * v + (1 - alpha) * out[-1])
     return out
+
+
+#: X3's gate (2608.09641). Off by default: with it off ``mp_lower_spectrum``
+#: returns ``None`` and no breadth output carries an extra key, so a gate-off
+#: run is byte-identical to the run before the read existed.
+GATE_NAME = "enable_mp_lower_spectrum"
+
+#: The number of RETURNS the panel correlation matrix is built over. One
+#: trading year - the same 252 the volatility models annualize with and
+#: ``market_breadth``'s ``*_52w`` counters use - so "a year of returns" means
+#: one thing everywhere in the repo.
+SPECTRUM_WINDOW = 252
+
+
+def _panel_returns(closes_by_name: dict, window: int) -> tuple[list[str], list[list[float]]]:
+    """``(names, return rows)`` for the panel's trailing ``window`` returns.
+
+    A name enters only when it carries the WHOLE window: a correlation matrix
+    built from series of different lengths is not one panel read, so a short,
+    non-positive or flat series is left out and reported by
+    ``mp_lower_spectrum``'s coverage fields rather than padded with a
+    substituted value (rule 4).
+    """
+    names: list[str] = []
+    rows: list[list[float]] = []
+    for name, series in (closes_by_name or {}).items():
+        closes: list[float] = []
+        for value in (series or []):
+            if value is None:
+                continue
+            f = float(value)
+            if f == f:  # not NaN
+                closes.append(f)
+        if len(closes) < window + 1:
+            continue
+        seg = closes[-(window + 1):]
+        if any(c <= 0.0 for c in seg):
+            continue
+        rets = [seg[i] / seg[i - 1] - 1.0 for i in range(1, len(seg))]
+        if max(rets) == min(rets):  # a flat series has no correlation to give
+            continue
+        names.append(name)
+        rows.append(rets)
+    return names, rows
+
+
+def mp_lower_spectrum(closes_by_name: dict, *, window: int = SPECTRUM_WINDOW,
+                      cfg: dict | None = None) -> dict | None:
+    """X3: the Marchenko-Pastur lower-spectrum read of ONE panel (gated).
+
+    ``closes_by_name`` is ``{name: [close, ...]}`` - the same panel shape
+    ``market_breadth`` takes, and the shape the sector screen already builds for
+    the 11 SPDR sector ETFs ``sector_rank`` tracks. The panel's correlation
+    matrix is built over the trailing ``window`` returns and handed to
+    ``market_breadth.mp_below_count``, which owns the bound, the count and the
+    ``w <= n`` refusal; this function owns the panel, its window and its
+    coverage. One call per panel, never one per symbol.
+
+    Returns ``None`` when ``enable_mp_lower_spectrum`` is off (its default),
+    and otherwise the ``mp_below_count`` record plus ``panel_n`` - how many
+    names the panel OFFERED, beside ``n_names``, how many carried the window.
+    A panel that cannot yield two full-window names reads ``status:
+    "unavailable"`` with the counts, never a zero.
+
+    The read is coincident and direction-blind - it cannot separate a crash
+    from a bubble - so it is reported as a state, never as a signal.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        gate = get_config() if cfg is None else cfg
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        gate = cfg or {}
+    if not bool((gate or {}).get("enable_mp_lower_spectrum", False)):
+        return None
+    # Deferred: ``market_breadth`` imports THIS module at the top (it reuses
+    # ``multi_breadth``), so the producer is imported at call time.
+    from .market_breadth import mp_below_count
+
+    win = int(window)
+    offered = len(closes_by_name or {})
+    names, rows = _panel_returns(closes_by_name, win)
+    if len(names) < 2:
+        return {
+            "count": None,
+            "mp_lower": None,
+            "status": "unavailable",
+            "window": win,
+            "n_names": len(names),
+            "panel_n": offered,
+            "unavailable": (
+                f"panel read refused: {len(names)} of {offered} name(s) carry "
+                f"{win} returns (2 are needed for a correlation matrix)"
+            ),
+        }
+    corr = np.corrcoef(np.asarray(rows, dtype=float))
+    return {**mp_below_count(corr, len(names), win), "panel_n": offered}
 
 
 def multi_breadth(closes_map: dict, *, windows: tuple = (20, 50, 200),
@@ -221,4 +326,5 @@ def msi_zone(msi: float | None, msi_slope5: float | None,
             "allow_new_longs": allow}
 
 
-__all__ = ["multi_breadth", "mcclellan_read", "rrg_heading", "msi_zone"]
+__all__ = ["GATE_NAME", "SPECTRUM_WINDOW", "mp_lower_spectrum", "multi_breadth",
+           "mcclellan_read", "rrg_heading", "msi_zone"]
