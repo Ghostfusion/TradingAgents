@@ -263,6 +263,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_ACCURACY_CEILING` | `enable_accuracy_ceiling` | default `false` |
 | `TRADINGAGENTS_ENABLE_SPECTRAL_NULL_BAND` | `enable_spectral_null_band` | default `false` |
 | `TRADINGAGENTS_ENABLE_RND_RECOVERY` | `enable_rnd_recovery` | default `false` |
+| `TRADINGAGENTS_ENABLE_EIGEN_ROTATION` | `enable_eigen_rotation` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |

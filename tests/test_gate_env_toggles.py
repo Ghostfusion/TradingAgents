@@ -77,6 +77,7 @@ REGISTRY: dict[str, str] = {
     "enable_accuracy_ceiling": "wired",
     "enable_spectral_null_band": "wired",
     "enable_rnd_recovery": "wired",
+    "enable_eigen_rotation": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

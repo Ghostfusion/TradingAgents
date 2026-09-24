@@ -1,6 +1,6 @@
 # Implementation Plan - Volatility, the Option Surface, and What the Engine Should Refuse
 
-Status: **IN PROGRESS** - wave 1 landed V6, V2 and V4 (2026-09-23); the T1 batch adds V3 (2026-09-24). V5, V1, V7 and V8 remain: V1 is blocked on the vendor state vector, V7 and V8 are recorded declines.
+Status: **IN PROGRESS** - wave 1 landed V6, V2 and V4 (2026-09-23) and the T1 batch adds V3 and V5 (2026-09-24). V1 remains, blocked on the vendor state vector (VXV plus a HY-spread series); V7 and V8 are recorded declines.
 2026 paper-survey adoption work, one of the six themes derived from the parent survey.
 **Parent design:** [`design_vol_surface_and_vrp.md`](design_vol_surface_and_vrp.md)
 **Parent survey:** [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md)

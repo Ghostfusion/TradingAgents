@@ -634,6 +634,77 @@ def eigen_projector_distance(
     )
 
 
+def _rotation_gate(cfg: dict | None = None) -> bool:
+    """Is V5's eigenspace-rotation read switched on? (``enable_eigen_rotation``)
+
+    Off by default, so a gate-off caller computes nothing new and
+    :func:`spectral_functionals` returns exactly the keys it returned before this
+    read existed. The key is read by its **literal** name so the gate registry's
+    read-site scan finds it (docs/gate_registry.md §8); an unreadable config
+    leaves the gate off - a config read must never break the read it guards (the
+    house shape: ``regime._spectral_band_gate``, ``data_quality._coverage_gate``).
+    """
+    if cfg is None:
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - a config read must never break the read
+            cfg = {}
+    return bool((cfg or {}).get("enable_eigen_rotation", False))
+
+
+def _corr_from_spectrum(spectrum: dict):
+    """The correlation matrix ``spectrum`` decomposes, rebuilt from it.
+
+    ``corr = V diag(lambda) V^T`` - the eigenvectors as columns, scaled by their
+    eigenvalues. This is the SAME matrix :func:`panel_spectrum` decomposed (its
+    own producer, ``statistical.correlation_matrix``), so a rotation read can be
+    handed the pairwise windows without a second correlation build.
+    """
+    import numpy as _np
+
+    vecs = _np.asarray(spectrum["eigenvectors"], dtype=float)
+    vals = _np.asarray(spectrum["eigenvalues"], dtype=float)
+    return (vecs.T * vals) @ vecs
+
+
+def _rotation_block(p, c, reason, n_obs: int, n_names: int) -> dict:
+    """V5's rotation record for a spectral pair, or its refusal shape.
+
+    The arithmetic is :func:`eigen_rotation`'s - this module owns only the lift
+    from the pair's spectra to the correlation matrices it reads.
+    """
+    if reason is not None or p is None or c is None:
+        return {
+            "rec": None,
+            "angles": None,
+            "mp_edge_check": None,
+            "status": "unavailable",
+            "unavailable": reason or "the panel could not be read",
+            "n_names": int(n_names),
+            "window": int(n_obs) or None,
+            "basis": "eigenspace rotation unavailable: the panel could not be read",
+        }
+    from .eigen_rotation import eigen_rotation
+
+    try:
+        corr_p = _corr_from_spectrum(p)
+        corr_c = _corr_from_spectrum(c)
+    except Exception:  # noqa: BLE001 - a lift failure is a refusal, not a crash
+        return {
+            "rec": None,
+            "angles": None,
+            "mp_edge_check": None,
+            "status": "unavailable",
+            "unavailable": "the correlation matrix could not be rebuilt from the spectrum",
+            "n_names": int(n_names),
+            "window": int(n_obs),
+            "basis": "eigenspace rotation unavailable: unrebuildable spectrum",
+        }
+    return eigen_rotation(corr_p, corr_c, window=n_obs)
+
+
 def spectral_functionals(
     prev_window: dict | None = None,
     curr_window: dict | None = None,
@@ -643,6 +714,7 @@ def spectral_functionals(
     min_n: int = SPECTRAL_MIN_OBS,
     prev_spectrum: dict | None = None,
     curr_spectrum: dict | None = None,
+    cfg: dict | None = None,
 ) -> dict:
     """R3: the scalar spectral functionals of two rolling windows, each with a band.
 
@@ -686,6 +758,15 @@ def spectral_functionals(
     n_names = int(prev.get("n_names") or 0)
     n_obs = min(int(prev.get("n_obs") or 0), int(curr.get("n_obs") or 0))
     names = ("absorption_ratio", "leading_share")
+    # V5 (2608.14487): the ONE gated extra key. With ``enable_eigen_rotation`` off
+    # (the default, and the only state in which the key is absent) nothing below
+    # moves, so every key above is byte-identical to the run before the read
+    # existed.
+    rotation_gate = _rotation_gate(cfg)
+    rotation = (
+        _rotation_block(p, c, reason, n_obs, n_names) if rotation_gate else None
+    )
+    rotation_extra = {"rotation": rotation} if rotation_gate else {}
     if reason is not None:
         legs = {
             name: _unavailable_leg(
@@ -703,6 +784,7 @@ def spectral_functionals(
             "window": {"n_obs": n_obs, "n_names": n_names, "min_n": int(min_n)},
             "unavailable": reason,
             "basis": f"spectral functionals unavailable: {reason}",
+            **rotation_extra,
         }
     n_obs, delta = _pair_calibration(p, c, shrinkage)
     band = spectral_null_band(n_obs, delta)
@@ -725,6 +807,7 @@ def spectral_functionals(
             "window": {"n_obs": n_obs, "n_names": n_names, "min_n": int(min_n)},
             "unavailable": reason,
             "basis": f"spectral functionals unavailable: {reason}",
+            **rotation_extra,
         }
     k_absorption = (
         max(1, min(int(round(n_names / 5.0)), n_names))
@@ -780,4 +863,5 @@ def spectral_functionals(
             f"shrinkage {float(delta):.6f}) depends on the window length and the "
             "shrinkage intensity alone"
         ),
+        **rotation_extra,
     }

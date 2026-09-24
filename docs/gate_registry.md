@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **56 of the 104 `enable_*` keys** in
+policy, data-surface and context gates: **57 of the 105 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -288,6 +288,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_accuracy_ceiling` | `TRADINGAGENTS_ENABLE_ACCURACY_CEILING` | the R-squared ceiling and the excess-accuracy read, so an impossible (2DA-1)^2 vs R2_OOS/kappa point above the 45-degree line is FLAGGED - a falsifier, never a validator | `tradingagents/strategies/alpha_eval.py`::`_ceiling_gate` / `::`ceiling_ratio`, `tradingagents/strategies/calibration.py`::`_ceiling_gate` / `::`excess_accuracy`, reported by `tradingagents/graph/trading_graph.py`::`_maybe_report_accuracy_ceiling` | `test_accuracy_ceiling.py` | wired |
 | `enable_spectral_null_band` | `TRADINGAGENTS_ENABLE_SPECTRAL_NULL_BAND` | declares a regime change only when a spectral functional's move EXCEEDS its calibrated first-order null band - so a non-rejection reads 'not detectable', never 'no change' | `tradingagents/strategies/regime.py`::`_spectral_band_gate` / `::`spectral_change_read`, declared as the `spectral_change` component by `tradingagents/strategies/regime_score.py`::`_spectral_gate`, numerics in `tradingagents/strategies/covariance_models.py` | `test_spectral_null_band.py` | wired |
 | `enable_rnd_recovery` | `TRADINGAGENTS_ENABLE_RND_RECOVERY` | V3: recover a risk-neutral density only when the quotes can identify one; a sparse chain refuses | options_surface.py _rnd_gate, read from expected_move_from_chain | `tests/test_rnd_recovery.py` | wired |
+| `enable_eigen_rotation` | `TRADINGAGENTS_ENABLE_EIGEN_ROTATION` | V5: subdominant eigenspace rotation, refused inside the Marchenko-Pastur bulk | covariance_models.py spectral_functionals gated rotation key, reached from regime.spectral_change_read | `tests/test_eigen_rotation.py` | wired |
 
 ## 8. Adding a gate — the rule
 
