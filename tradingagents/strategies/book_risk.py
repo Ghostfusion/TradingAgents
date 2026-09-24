@@ -491,11 +491,79 @@ def _gpd_fit(exceedances: list[float]) -> tuple[float, float] | None:
     return xi, beta
 
 
+# The jump-share thresholds the tail read maps to a shape. They are thresholds
+# on a PROXY (the V6 bipower proxy's share of the window's variance that no
+# lag-1 cross-product carried), so they are named here rather than buried in a
+# comparison: >= ONE_PRINT means more than half the window's variance arrived in
+# jumps, <= DIFFUSE means at most a quarter did, anything between is `mixed`.
+_ONE_PRINT_SHARE = 0.50
+_DIFFUSE_SHARE = 0.25
+
+
+def _jump_read(ohlc, config: dict | None) -> dict | None:
+    """The V6 jump leg beside the EVT tail read, or None when it is gated off.
+
+    The GPD fit above extrapolates a tail from the loss distribution; it says
+    nothing about whether that tail arrived in ONE print. The bipower proxy
+    answers that: a jump share near 1 means the tail is a jump (a single-print
+    gap a variance level cannot separate from a diffusion), near 0 means the
+    variance arrived diffusively. The quarticity proxy is reported beside it as
+    the fourth-moment scale.
+
+    Gated by ``enable_jump_robust_proxies`` (default off). With the gate off -
+    or with no bars supplied - this returns None and the tail record is exactly
+    what it was before V6, so a gate-off read is byte-identical.
+    """
+    if ohlc is None:
+        return None
+    from tradingagents.strategies.volatility_models import (
+        bipower_proxy,
+        jump_robust_proxies_enabled,
+        quarticity_proxy,
+    )
+
+    if not jump_robust_proxies_enabled(config):
+        return None
+    bp = bipower_proxy(ohlc)
+    rq = quarticity_proxy(ohlc)
+    share = bp.get("jump_share_proxy")
+    if share is None:
+        return {
+            "tail_shape": "unavailable",
+            "jump_share_proxy": None,
+            "bipower_proxy": None,
+            "quarticity_proxy": None,
+            "n": bp.get("n"),
+            "basis": bp.get("basis"),
+        }
+    if share >= _ONE_PRINT_SHARE:
+        shape = "one_print"
+    elif share <= _DIFFUSE_SHARE:
+        shape = "diffuse"
+    else:
+        shape = "mixed"
+    return {
+        "tail_shape": shape,
+        "jump_share_proxy": share,
+        "bipower_proxy": bp.get("bipower_proxy"),
+        "quarticity_proxy": rq.get("quarticity_proxy"),
+        "n": bp.get("n"),
+        "basis": (
+            f"{shape}: jump share {share:.4f} of the window's variance arrived in "
+            f"returns no lag-1 cross-product carried (bipower proxy); quarticity "
+            f"proxy {rq.get('quarticity_proxy')}; a PROXY read of one-print risk, "
+            f"not a realized measure"
+        ),
+    }
+
+
 def extreme_quantile_var(
     returns: list,
     alpha: float = 0.01,
     threshold_quantile: float = 0.90,
     min_exceed: int = 10,
+    ohlc=None,
+    config: dict | None = None,
 ) -> dict | None:
     """EVT extreme-quantile VaR / Expected Shortfall from a GPD tail fit.
 
@@ -512,6 +580,17 @@ def extreme_quantile_var(
     maximum. Returns None when the series is too short, fewer than
     ``min_exceed`` exceedances fall above the threshold, or the fit is
     degenerate — never fabricated.
+
+    **The jump leg (V6).** A GPD tail fit reads how fat the tail is, never
+    whether the tail arrived in ONE print — a single-print gap and a diffuse
+    stretch of the same variance fit the same shape. Pass ``ohlc`` (the same
+    bar window the returns came from, in either shape ``volatility_models``
+    accepts) with the ``enable_jump_robust_proxies`` gate on and the record
+    gains a ``"jump"`` leg: the bipower proxy's jump share, its quarticity
+    proxy companion, and a ``tail_shape`` verdict (``one_print`` / ``mixed`` /
+    ``diffuse``; ``unavailable`` - never a number - below the proxy floor).
+    With the gate off or no bars supplied the record is byte-identical to the
+    pre-V6 one.
     """
     vals = [float(r) for r in returns if r is not None]
     n = len(vals)
@@ -543,7 +622,7 @@ def extreme_quantile_var(
     es_pos = (var_pos + beta - xi * u) / (1.0 - xi)
     if not math.isfinite(es_pos) or es_pos < var_pos:
         return None
-    return {
+    out = {
         "var": round(-var_pos, 6),
         "es": round(-es_pos, 6),
         "xi": round(xi, 6),
@@ -553,6 +632,10 @@ def extreme_quantile_var(
         "n": n,
         "alpha": alpha,
     }
+    jump = _jump_read(ohlc, config)
+    if jump is not None:
+        out["jump"] = jump
+    return out
 
 
 # ---------------------------------------------------------------------------

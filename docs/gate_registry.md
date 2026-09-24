@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **45 of the 93 `enable_*` keys** in
+policy, data-surface and context gates: **46 of the 94 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -277,6 +277,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_rn_skew_proxy` | `TRADINGAGENTS_ENABLE_RN_SKEW_PROXY` | a cross-strike OTM risk-neutral skewness PROXY (>= 5 strikes, else `unavailable`) reported beside the surface read, with the regime cell it was conditioned on | `tradingagents/agents/utils/analysis_tools.py`::`get_vol_surface_shape` (the \`_flag\` read), `tradingagents/strategies/options_surface.py`::`rn_skew_proxy` (the proxy) | `test_rn_skew_proxy.py` | wired |
 | `enable_trend_spectral` | `TRADINGAGENTS_ENABLE_TREND_SPECTRAL` | spectral excess mass and the cost-optimal span reported BESIDE the swing factor (never inside its score), so a trend read states when it deserves weight | `tradingagents/strategies/swing.py`::`_trend_spectral_read` (the guarded read), `tradingagents/strategies/technical_factors.py`::`spectral_excess_mass` / `::cost_optimal_span` | `test_strategies_technical_factors.py` | wired |
 | `enable_trial_ledger` | `TRADINGAGENTS_ENABLE_TRIAL_LEDGER` | reads the trial count and the trials' Sharpe dispersion back from the append-only ledger, so a deflated number is deflated by a MEASURED search and not by a caller's assertion | `tradingagents/strategies/evaluate.py`::`_selection_threshold` (the dispersion branch, ignored unless the gate is on), `tradingagents/strategies/trial_ledger.py`::`gate_on` / `::`record` / `::`trial_stats` | `test_trial_ledger.py` | wired |
+| `enable_jump_robust_proxies` | `TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES` | daily-bar bipower and quarticity PROXIES plus the jump share they imply, so a tail read can say whether the tail came in one print or in a diffusion | `tradingagents/strategies/volatility_models.py`::`jump_robust_proxies_enabled` (the read), `tradingagents/strategies/book_risk.py`::`_jump_read` (the tail read that fires it) | `test_volatility_models.py` | wired |
 
 ## 8. Adding a gate — the rule
 

@@ -13,11 +13,21 @@ realized vol in ``regime.py``:
 - EWMA volatility (RiskMetrics lambda=0.94) — the standard risk-neutral
   vol forecaster,
 - GARCH(1,1) conditional volatility via pure-NumPy MLE (long-run vol =
-  omega/(1-alpha-beta)).
+  omega/(1-alpha-beta)),
+- jump-robust daily-bar **proxies** (V6): ``bipower_proxy`` (lag-1 cross-product
+  of absolute log returns) with the jump share it implies, and
+  ``quarticity_proxy``, so a one-print tail is distinguishable from a diffusion
+  without tick data.
 
 Every function returns ``float | None`` / dicts with explicit None on
 insufficient or degenerate input — never fabricated. All daily-frequency;
 annualization uses 252 trading days.
+
+The jump-robust proxies are named **proxies** everywhere (docstrings and their
+returned records): without intraday data they are daily-bar analogues, not
+realized measures. ``jump_robust_proxies_enabled`` is this module's ONE config
+touch and the enforcement site of the ``enable_jump_robust_proxies`` gate
+(default off) — the estimators themselves stay pure.
 """
 
 from __future__ import annotations
@@ -32,6 +42,9 @@ __all__ = [
     "yang_zhang_vol_series",
     "ewma_vol",
     "garch11_fit",
+    "bipower_proxy",
+    "quarticity_proxy",
+    "jump_robust_proxies_enabled",
 ]
 
 _DAYS = 252.0
@@ -515,3 +528,212 @@ def garch11_fit(
         n=len(vals),
         converged=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Jump-robust daily-bar proxies (V6, implementation_plan_vol_surface_and_vrp.md)
+# ---------------------------------------------------------------------------
+
+
+# The estimator floor for both proxies: below this many returns the lag-1
+# cross-product sum is too thin for a jump share to separate a one-print tail
+# from a diffusion. The same floor `semivariance` uses.
+_JUMP_MIN_OBS = 20
+
+
+def jump_robust_proxies_enabled(config: dict | None = None) -> bool:
+    """Whether the ``enable_jump_robust_proxies`` gate is on (default **off**).
+
+    This helper is the gate's **enforcement site**: the proxies below stay pure
+    - they never read the config themselves - and every caller reads the switch
+    from here, so the gate has one home rather than one per call site.
+
+    ``config`` may be supplied explicitly (the ``strategies/overlays.py``
+    convention), so a caller already holding the run's config does not re-fetch
+    it. A missing or unreadable config is an **ungated** read, never a crash.
+    """
+    if config is None:
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            config = get_config() or {}
+        except Exception:  # noqa: BLE001 - a config read must never break a read
+            return False
+    return bool((config or {}).get("enable_jump_robust_proxies", False))
+
+
+def _bar_closes(ohlc) -> list:
+    """Close series out of an OHLC container, or ``[]`` when it carries none.
+
+    Two shapes, both already used in this repo: the run cache's column mapping
+    (``{"closes": [...]}`` - the ``_RUN_OHLCV_CACHE`` shape ``alpha158_subset``
+    takes) and a sequence of OHLCV-ish bar dicts each carrying ``close`` (the
+    ``alpha_zoo`` record shape). No other shape is guessed at: an unreadable
+    container is a gap, not a silent zero.
+    """
+    if ohlc is None:
+        return []
+    if isinstance(ohlc, dict):
+        for key in ("closes", "close"):
+            if key in ohlc:
+                return list(ohlc.get(key) or [])
+        return []
+    out = []
+    for row in ohlc:
+        if not isinstance(row, dict):
+            return []
+        out.append(row.get("close", row.get("closes")))
+    return out
+
+
+def _proxy_returns(ohlc, window: int | None) -> tuple[list[float], int | None]:
+    """Close-to-close log returns over the usable rows, tail-sliced by window.
+
+    ``window`` counts RETURNS, sliced after the return chain is built - the
+    same convention ``semivariance`` uses. A pair with a non-positive or
+    non-finite close is skipped rather than bridged, so the chain never steps
+    over a bad row.
+    """
+    cs: list[float] = []
+    for c in _bar_closes(ohlc):
+        try:
+            f = float(c)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            cs.append(f)
+    rets: list[float] = []
+    for i in range(1, len(cs)):
+        prev, cur = cs[i - 1], cs[i]
+        if prev > 0.0 and cur > 0.0:
+            rets.append(math.log(cur / prev))
+    w = int(window) if window else None
+    if w:
+        rets = rets[-w:]
+    return rets, w
+
+
+def bipower_proxy(ohlc, window: int | None = None, *, min_obs: int = _JUMP_MIN_OBS) -> dict:
+    """Daily-bar **bipower proxy** and the jump share it implies.
+
+    The daily-bar analogue of bipower variation (Barndorff-Nielsen & Shephard
+    2004). The lag-1 cross-product of absolute close-to-close log returns
+    estimates the *diffusive* part of a window's variance, because a jump lands
+    in ONE return and therefore in only two cross-products, while a diffusion
+    lands in all of them::
+
+        BPV = (pi/2) * sum_{i=2..n} |r_i| * |r_{i-1}|
+        jump_share = max(RV - BPV, 0) / RV,   RV = sum_{i=1..n} r_i^2
+
+    So a path whose variance arrived in one print leaves ``BPV ~ 0`` and a jump
+    share near 1, while a smooth path of the SAME total variance leaves
+    ``BPV ~ RV`` and a share near 0. That is the distinction a variance level
+    alone cannot make, and it is why this read exists.
+
+    **A proxy, never a realized measure.** Without tick data ``RV`` here is a
+    sum of daily close-to-close squared log returns, not an integrated
+    variance, and the ``pi/2`` correction assumes Gaussian diffusive returns;
+    the record and its ``basis`` name it a proxy for exactly that reason.
+
+    Returns ``{"bipower_proxy", "jump_share_proxy", "n", "window", "basis"}``.
+    Every value is ``None`` (with the reason in ``basis``) below ``min_obs``
+    returns or on a zero-variance window - never ``0.0``, which would read as
+    "a perfectly diffusive path" when the truth is "not measured".
+    """
+    rets, w = _proxy_returns(ohlc, window)
+    n = len(rets)
+    if n < int(min_obs):
+        return {
+            "bipower_proxy": None,
+            "jump_share_proxy": None,
+            "n": n,
+            "window": w,
+            "basis": (
+                f"bipower proxy unavailable: {n} close-to-close log return(s), "
+                f"needs {int(min_obs)} (None, never 0 - a window too thin for a "
+                f"lag-1 cross-product is a gap, not a quiet market)"
+            ),
+        }
+    rv = sum(r * r for r in rets)
+    if rv <= 0.0:
+        return {
+            "bipower_proxy": None,
+            "jump_share_proxy": None,
+            "n": n,
+            "window": w,
+            "basis": (
+                f"bipower proxy unavailable: zero variance over {n} return(s) "
+                f"(None, never 0)"
+            ),
+        }
+    bpv = (math.pi / 2.0) * sum(abs(rets[i]) * abs(rets[i - 1]) for i in range(1, n))
+    share = max(rv - bpv, 0.0) / rv
+    return {
+        "bipower_proxy": bpv,
+        "jump_share_proxy": share,
+        "n": n,
+        "window": w,
+        "basis": (
+            f"bipower proxy over {n} close-to-close log return(s) (window "
+            f"{w if w else 'all'}): lag-1 cross-product sum x pi/2 = {bpv:.6g} "
+            f"vs RV {rv:.6g}, jump share {share:.4f}; daily-bar PROXY, not a "
+            f"realized measure (no tick data)"
+        ),
+    }
+
+
+def quarticity_proxy(ohlc, window: int | None = None, *, min_obs: int = _JUMP_MIN_OBS) -> dict:
+    """Daily-bar **quarticity proxy**: how concentrated a window's variance is.
+
+    The daily-bar analogue of realized quarticity (Barndorff-Nielsen &
+    Shephard): ``RQ = (n/3) * sum r_i^4``. A jump inflates the fourth-moment
+    sum far more than the second, so this is the companion scale to
+    ``bipower_proxy``'s jump share - a Gaussian diffusion leaves
+    ``RQ ~ 3 * RV^2 / n``, while a one-print window leaves ``RQ`` far larger for
+    the SAME total variance.
+
+    **A proxy, never a realized measure.** ``n`` here is the number of DAILY
+    bars, not of intraday returns, so the ``n/3`` scaling is the daily-bar
+    analogue: the number is comparable across windows of this engine and is
+    never a tick-level realized quarticity.
+
+    Returns ``{"quarticity_proxy", "n", "window", "basis"}``; the value is
+    ``None`` (with the reason in ``basis``) below ``min_obs`` returns or on a
+    zero-variance window - never ``0.0``.
+    """
+    rets, w = _proxy_returns(ohlc, window)
+    n = len(rets)
+    if n < int(min_obs):
+        return {
+            "quarticity_proxy": None,
+            "n": n,
+            "window": w,
+            "basis": (
+                f"quarticity proxy unavailable: {n} close-to-close log "
+                f"return(s), needs {int(min_obs)} (None, never 0 - a window too "
+                f"thin for a fourth-moment sum is a gap, not a quiet market)"
+            ),
+        }
+    rv = sum(r * r for r in rets)
+    if rv <= 0.0:
+        return {
+            "quarticity_proxy": None,
+            "n": n,
+            "window": w,
+            "basis": (
+                f"quarticity proxy unavailable: zero variance over {n} return(s) "
+                f"(None, never 0)"
+            ),
+        }
+    rq = (n / 3.0) * sum(r**4 for r in rets)
+    return {
+        "quarticity_proxy": rq,
+        "n": n,
+        "window": w,
+        "basis": (
+            f"quarticity proxy over {n} close-to-close log return(s) (window "
+            f"{w if w else 'all'}): (n/3) x fourth-moment sum = {rq:.6g} "
+            f"(Gaussian-diffusion reference 3*RV^2/n = {3.0 * rv * rv / n:.6g}); "
+            f"daily-bar PROXY, not a realized measure (no tick data)"
+        ),
+    }

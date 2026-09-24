@@ -1,6 +1,6 @@
 # Implementation Plan - Volatility, the Option Surface, and What the Engine Should Refuse
 
-Status: **PLAN - not started.** Implements the volatility-and-options theme (V1-V8) of the
+Status: **IN PROGRESS** - wave 0+1 build started: V6 landed (2026-09-23). The rest of this plan is not started.
 2026 paper-survey adoption work, one of the six themes derived from the parent survey.
 **Parent design:** [`design_vol_surface_and_vrp.md`](design_vol_surface_and_vrp.md)
 **Parent survey:** [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md)
