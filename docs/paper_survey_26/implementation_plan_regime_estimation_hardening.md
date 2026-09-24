@@ -1,6 +1,6 @@
 # Implementation Plan - Regime and State
 
-Status: **IN PROGRESS** - wave 0+1 build started: R1 and R7 landed (2026-09-23), R1 still dormant in-run pending the tool selector. The rest of this plan is not started.
+Status: **IN PROGRESS** - wave 0+1 build started: R1 and R7 landed, and R1's duration law is now selectable in-run via the bocpd_hazard_mode key (2026-09-23). The rest of this plan is not started.
 path for the detectors, panel reads and constraints specified in
 [`design_regime_estimation_hardening.md`](design_regime_estimation_hardening.md), one of the six
 themed design docs derived from [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).

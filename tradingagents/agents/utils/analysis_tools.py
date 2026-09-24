@@ -7836,12 +7836,13 @@ def get_tail_extreme_var(
         from tradingagents.strategies.book_risk import extreme_quantile_var as _eqv
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"extreme tail var unavailable: {exc}"
-    closes = _ohlcv(ticker).get("closes") or []
+    ohlcv = _ohlcv(ticker)
+    closes = ohlcv.get("closes") or []
     rets = _daily_returns(closes)
     if len(rets) < 40:
         return f"extreme tail var unavailable for {ticker}: insufficient history"
     try:
-        r = _eqv(rets, alpha=float(alpha))
+        r = _eqv(rets, alpha=float(alpha), ohlc=ohlcv)
     except Exception as exc:  # noqa: BLE001 - degrades
         return f"extreme tail var unavailable for {ticker}: {exc}"
     if not r:
@@ -7849,10 +7850,20 @@ def get_tail_extreme_var(
     var = f"{abs(r['var']):.2%}" if r.get("var") is not None else "n/a"
     es = f"{abs(r['es']):.2%}" if r.get("es") is not None else "n/a"
     tail = "fat" if r["xi"] > 0.05 else ("bounded" if r["xi"] < -0.05 else "exponential")
+    # V6: was the tail one print or a diffusion? The bars are already fetched, so
+    # the jump leg costs one pass and is absent (never zero) when the gate is off.
+    jump = r.get("jump") or {}
+    share = jump.get("jump_share_proxy")
+    shape = jump.get("tail_shape")
+    jump_note = (
+        f", jump_share={share:.2f} ({shape})"
+        if isinstance(share, (int, float)) and shape not in (None, "unavailable")
+        else ""
+    )
     return (
         f"extreme tail var {ticker} (alpha={alpha}): var={var}, es={es}, "
         f"gpd_shape_xi={r['xi']} ({tail} tail), threshold={r['threshold']:.2%}, "
-        f"n_exceed={r['n_exceed']} n={r['n']}"
+        f"n_exceed={r['n_exceed']} n={r['n']}{jump_note}"
     )
 
 
@@ -9229,6 +9240,27 @@ def get_mean_reversion_quality(
         return f"mean-reversion quality unavailable for {ticker}: {exc}"
 
 
+def _bocpd_hazard_mode() -> str:
+    """The configured run-length hazard law for the BOCPD read (R1).
+
+    ``"constant"`` is the default and reproduces the flat hazard bit-for-bit.
+    ``lognormal`` / ``pareto`` / ``geometric`` compile the hazard from a duration
+    law whose parameters are re-estimated on the expanding window of observed run
+    lengths; the read then also reports its segmentation's covering metric.
+    An unknown or unreadable value falls back to ``"constant"`` rather than being
+    guessed, and a config read must never break the read it guards.
+    """
+    allowed = ("constant", "lognormal", "pareto", "geometric")
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    mode = str(cfg.get("bocpd_hazard_mode") or "constant").strip().lower()
+    return mode if mode in allowed else "constant"
+
+
 @tool
 
 def get_shift_detection(
@@ -9287,12 +9319,20 @@ def get_shift_detection(
         if _flag("enable_bocpd"):
             from tradingagents.strategies.regime import bocpd as _bocpd
 
-            bc = _bocpd(series)
+            mode = _bocpd_hazard_mode()
+            bc = _bocpd(series, hazard_mode=mode)
             if bc:
+                extra = ""
+                if mode != "constant":
+                    cov = (bc.get("covering") or {}).get("value")
+                    extra = (
+                        f" hazard_mode={mode}"
+                        + (f" covering={cov:.3f}" if isinstance(cov, (int, float)) else "")
+                    )
                 lines.append(
                     f"- BOCPD: zero_run_prob={bc['zero_run_prob']:.3f} "
                     f"map_run={bc['map_run_length']} shift={bc['shift']} "
-                    f"(hazard={bc['hazard']:.4f}, n={bc['n']})"
+                    f"(hazard={bc['hazard']:.4f}, n={bc['n']}{extra})"
                 )
                 if bc["shift"]:
                     lines.append(

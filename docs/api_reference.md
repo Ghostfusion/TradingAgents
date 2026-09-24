@@ -248,6 +248,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION` | `enable_return_decomposition` | overnight vs intraday return decomposition (Q5) |
 | `TRADINGAGENTS_ENABLE_TEXT_FACTORS` | `enable_text_factors` | Loughran-McDonald tone / readability / divergence (Q6) |
 | `TRADINGAGENTS_ENABLE_BOCPD` | `enable_bocpd` | Bayesian online changepoint read in `get_shift_detection` (Q8) |
+| `TRADINGAGENTS_BOCPD_HAZARD_MODE` | `bocpd_hazard_mode` | default `constant` |
 | `TRADINGAGENTS_ENABLE_RN_SKEW_PROXY` | `enable_rn_skew_proxy` | default `false` |
 | `TRADINGAGENTS_ENABLE_TREND_SPECTRAL` | `enable_trend_spectral` | default `false` |
 | `TRADINGAGENTS_ENABLE_TRIAL_LEDGER` | `enable_trial_ledger` | default `false` |

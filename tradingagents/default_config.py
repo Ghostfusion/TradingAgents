@@ -294,6 +294,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_RETURN_DECOMPOSITION": "enable_return_decomposition",
     "TRADINGAGENTS_ENABLE_TEXT_FACTORS": "enable_text_factors",
     "TRADINGAGENTS_ENABLE_BOCPD": "enable_bocpd",
+    # R1: the run-length hazard law for the BOCPD read (constant | lognormal |
+    # pareto | geometric). A MODE, not a gate: it changes what the gated read
+    # computes, so it stays "constant" unless someone sets it deliberately.
+    "TRADINGAGENTS_BOCPD_HAZARD_MODE": "bocpd_hazard_mode",
     # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each MUST be mapped here:
     "TRADINGAGENTS_ENABLE_RN_SKEW_PROXY": "enable_rn_skew_proxy",
     "TRADINGAGENTS_ENABLE_TREND_SPECTRAL": "enable_trend_spectral",
@@ -1097,6 +1101,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # Q8 Bayesian online changepoint detection - complements the landed
         # CUSUM/EWMA shift read with a calibrated changepoint probability.
         "enable_bocpd": False,
+        # R1 (docs/paper_survey_26/): the run-length hazard law the BOCPD read
+        # compiles. "constant" is today's flat hazard, bit-for-bit; a duration
+        # law (lognormal / pareto / geometric) re-estimates its parameters on the
+        # expanding window of observed run lengths. An unknown value falls back
+        # to "constant" rather than being guessed.
+        "bocpd_hazard_mode": "constant",
         # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each gates
         "enable_rn_skew_proxy": False,
         "enable_trend_spectral": False,
