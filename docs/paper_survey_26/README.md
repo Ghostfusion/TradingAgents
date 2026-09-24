@@ -169,6 +169,93 @@ land at all. Each is independently landable.
 Landing rule: **one item per commit**, each with its own CHANGELOG entry and its own failing-first
 proof. A phase is complete when every item in it is either landed or explicitly deferred in writing.
 
+### 2.1 Difficulty order (an estimate, not a schedule)
+
+The phase map above is a **priority** order: the instruments first, because they decide whether the
+later items deserve to land at all. This is the same 44 buildable items sorted by **cost**, which is a
+different question; the two orders agree at the ends and disagree in the middle. Sizes use §2's own
+scale (S = under a day, M = one to three days, L = a week or more).
+
+Difficulty is estimated from four measurable things rather than from the paper's importance: **(a)**
+how much surface the item touches - one function in an existing host is smaller than a new module plus
+its callers; **(b)** whether it needs data or a dependency the engine does not hold; **(c)** whether it
+can change a live decision (size, governor, admission); **(d)** whether it needs an offline fit, a
+panel job, or the replacement of an existing producer. Within a tier the order is judgement; the tier
+is the signal. Nothing here was re-measured against the engine - it is a reading of the cards.
+
+**T0 - built (16).** The six P0 instruments and the ten P1 state reads. Every one is a single module or
+a single function over numpy and scipy, with no new data source. They went first because they are the
+cheapest items in the set, which is also why the plan sized P0 and P1 at S - and it is the reason the
+remaining work is genuinely harder, not merely later.
+
+| # | Item | What it is | Phase | Gate | Status |
+|---|---|---|---|---|---|
+| 1 | X6 | forward-rank study over the existing liquidity estimators | P1 | none (offline study) | built |
+| 2 | R1 | duration-law hazard on `bocpd` plus the covering metric | P1 | extends `enable_bocpd` | built |
+| 3 | V6 | jump-robust daily-bar proxies; a tail read that names its source | P1 | `enable_jump_robust_proxies` | built |
+| 4 | V4 | pre-event ATM IV shape, indexed in event time | P1 | `enable_event_iv_lift` | built |
+| 5 | K3 | cross-strike risk-neutral skew proxy | P1 | `enable_rn_skew_proxy` | built |
+| 6 | X3 | Marchenko-Pastur lower-spectrum count | P1 | `enable_mp_lower_spectrum` | built |
+| 7 | X8 | spectral excess mass and cost-optimal span | P1 | `enable_trend_spectral` | built |
+| 8 | H10 | coverage window, and the refusal it licenses | P0 | `enable_coverage_window` | built |
+| 9 | R7 | triadic stress index and epicentre | P1 | `enable_triadic_stress` | built |
+| 10 | V2 | memory parameter beside a HAR forecast | P1 | `enable_long_memory` | built |
+| 11 | H4 | R-squared ceiling and excess accuracy | P0 | `enable_accuracy_ceiling` | built |
+| 12 | H7 | refusal ledger and save-to-miss ratio | P0 | `enable_refusal_ledger` | built |
+| 13 | H1 | trial ledger and dispersion-aware deflation | P0 | `enable_trial_ledger` | built |
+| 14 | R3 | spectral null band (landed; its in-run glue is still dormant) | P1 | `enable_spectral_null_band` | built |
+| 15 | H6 | three-way verdict and family FDR | P0 | `enable_materiality_verdict` | built |
+| 16 | H11 | autocorrelation-aware intervals and information gap | P0 | `enable_bootstrap_intervals` | built |
+
+**T1 - small, unblocked, numpy and scipy only (9).** One host module each, no new data source, no new
+dependency, no fitted model. The only things standing in front of them are the owner's decisions.
+
+| # | Item | What it is | Phase | Gate | Status |
+|---|---|---|---|---|---|
+| 17 | K2 | four drawdown expectations and the right time-scaling | P1 | `enable_drawdown_envelope` | held - mandate |
+| 18 | H2 | availability-typed factor DSL gate (registration-time, free) | P2 | `enable_factor_availability_gate` | not started - after H8 |
+| 19 | X2 | redundancy screen over components (a scheduled script) | P3 | none (scheduled script) | not started - L1 solver decision |
+| 20 | V3 | RND recovery, only when it is identifiable | P3 | `enable_rnd_recovery` | not started |
+| 21 | V5 | eigenspace rotation as a state variable, with the MP check | P3 | `enable_eigen_rotation` | not started |
+| 22 | R2 | heavy-tailed emissions and a coverage-tested VaR | P2 | `enable_hmm_heavy_tails` | not started |
+| 23 | R5 | calibrated forward stress probability from the cross-section | P3 | `enable_forward_stress_probability` | not started |
+| 24 | K1 | a tail number that carries its quality and uncertainty | P2 | `enable_tail_risk_layer` | not started |
+| 25 | N5 | prompt-condition A/B harness | P3 | `enable_prompt_condition_harness` | not started |
+
+**T2 - medium: a new module plus a fit or an LLM stage (9).**
+
+| # | Item | What it is | Phase | Gate | Status |
+|---|---|---|---|---|---|
+| 26 | H9 | report attribution and factor novelty | P3 | `enable_report_attribution` | not started |
+| 27 | H5 | five-gate verdict, positive controls, next-open variant | P3 | `enable_rule_policy_gates` | not started |
+| 28 | N3 | learned aggregator over labels, confidences and agreement | P2 | `enable_learned_aggregator` | not started |
+| 29 | N6 | embedding news relevance, compared not swapped | P3 | `enable_embedding_relevance` | blocked - encoder decision |
+| 30 | N4 | five-dimension elicitation, relevance-weighted | P3 | `enable_multidim_sentiment` | not started |
+| 31 | N2 | Item 1A-scoped, volatility-supervised filing tone | P3 | `enable_filing_sentiment` | not started |
+| 32 | X7 | relation-classified peer edges | P3 | `enable_peer_edge_classifier` | not started |
+| 33 | N7 | semantic plausibility screen on lead-lag candidates | P3 | `enable_leadlag_plausibility` | not started |
+| 34 | H8 | vintage/lag guard and the non-LLM comparator | P3 | `enable_vintage_guard` | blocked - vintage store |
+
+**T3 - large: an offline fit, a panel job, or a replacement (10).**
+
+| # | Item | What it is | Phase | Gate | Status |
+|---|---|---|---|---|---|
+| 35 | R4 | shift-date proposer plus an LR-VAR validator | P3 | `enable_regime_shift_proposer` | needs a policy corpus |
+| 36 | X1 | volatility-rank transition chain | P4 | none (weekly offline job) | not started |
+| 37 | X4 | eigenmode variance ratio by horizon | P4 | none (weekly offline job) | not started |
+| 38 | N1 | event tags, story clustering and a per-tag drift prior | P3 | `enable_news_event_tags` | not started |
+| 39 | X5 | valuation-anchored peer weights (a replacement, not a sibling) | P3 | none (replacement) | needs a fitted tree |
+| 40 | K4 | covariance from characteristics on the ragged path | P4 | none (deferred) | blocked - training stack |
+| 41 | V1 | volatility forecast pool and regime-similarity routing | P4 | none (needs the state vector) | blocked - VXV and HY spread |
+| 42 | R6 | the gate every early-warning indicator must pass | P4 | none (gate module) | blocked - no onset panel |
+| 43 | H3 | synthetic-null workflow falsification | P4 | none (offline harness) | needs 5 x 1000 replays |
+| 44 | K5 | size below Kelly when a costly boundary is near | P2 | `enable_boundary_sizing` | smallest code, largest blast radius |
+
+**Not in the order.** R8 and R9 are constraints that bind now and specify no build; V7, V8 and K6 are
+declined or recorded-only (K6's option tape exceeds this engine's vendors). And a T1 item is not
+automatically next: **H2 should still follow H8**, because an availability gate is only meaningful
+against H8's lag table - the dependency, not the cost, settles it.
+
 ---
 
 ## 3. Cross-item dependencies
