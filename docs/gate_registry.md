@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **62 of the 110 `enable_*` keys** in
+policy, data-surface and context gates: **63 of the 111 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -294,6 +294,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_tail_risk_layer` | `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | K1: a tail number carrying its data quality and estimation uncertainty, one-directional | tail_risk.py tail_risk, printed by risk_score.py | `tests/test_tail_risk_layer.py` | wired |
 | `enable_factor_availability_gate` | `TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE` | H2: registration-time rejection of a forward shift or a field unobservable at the decision date | factor_expressions.py availability_gate, called from scripts/factor_bench.py | `tests/test_factor_availability_gate.py` | wired |
 | `enable_forward_stress_probability` | `TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY` | R5: a calibrated one-month-ahead forward stress probability from the cross-section | market_breadth.py forward_stress_probability, printed by regime_score.py | `tests/test_forward_stress_probability.py` | wired |
+| `enable_prompt_condition_harness` | `TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS` | N5: prompt versioning with per-condition accuracy on the decision ledger, offline by construction | agents/utils/prompt_metrics.py record_condition_run and condition_accuracy | `tests/test_prompt_condition_harness.py` | wired |
 
 ## 8. Adding a gate — the rule
 

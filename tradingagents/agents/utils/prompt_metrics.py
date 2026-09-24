@@ -30,15 +30,24 @@ runs for exactly this reason.
 
 from __future__ import annotations
 
+import hashlib
+
 __all__ = [
     "PROMPT_METRICS_KEY",
     "PM_LLM_OUTPUT_KEY",
+    "PROMPT_CONDITION_KEY",
+    "PROMPT_VERSION_KEY",
+    "CONDITION_MIN_N",
     "DIRECTION_BY_RATING",
     "STANCE_SOURCES",
     "TOKENS_PER_CHAR_DIVISOR",
+    "condition_accuracy",
+    "condition_descriptor",
     "decision_telemetry_block",
     "direction_of",
     "merge_prompt_metrics",
+    "prompt_version",
+    "record_condition_run",
     "record_prompt_parts",
     "record_stage",
     "snapshot_identity",
@@ -394,4 +403,253 @@ def decision_telemetry_block(
         },
         "evidence": dict(evidence_counts or {}),
         "snapshot": snapshot_identity(cfg, state),
+    }
+
+
+# ---------------------------------------------------------------------------
+# N5: the prompt-condition A/B harness (OFFLINE - ground rule 8)
+# ---------------------------------------------------------------------------
+#
+# **Adopt the harness, not the framing.** 2606.00061 reports a prompt-framing
+# effect that is MODEL-DEPENDENT - one model improves monotonically, another only
+# at a 60-month window, a third mostly does not, and the SAME model flips sign
+# across context windows - with `n = 72` per cell and no multiple-comparison
+# control against a 50% baseline. That is weak evidence for its own framing, so
+# nothing here asserts that a framing effect exists. What lands is the harness:
+#
+# - the prompt becomes a VERSIONED first-class input (`prompt_version`), so two
+#   runs whose prompts differ in any byte are distinguishable;
+# - the condition is RECORDED PER RUN on the decision ledger, through the
+#   ledger's own writer (`strategies.prediction_ledger.log_decision`);
+# - accuracy is scored PER CONDITION, on the ledger's own outcomes, so a prompt
+#   edit becomes attributable instead of an unrecorded drift.
+#
+# **The engine's prompt strings do not change.** The harness only labels them.
+# It is OFFLINE by construction (ground rule 8): nothing here is reachable from
+# `prepare_initial_state`, from `finalize_run`, or from an agent tool, because an
+# A/B comparison DOUBLES the LLM spend of every run it touches - it is run on a
+# sample, out of band, by an operator.
+#
+# **A run with no recorded condition is not pooled.** It cannot be attributed to
+# an arm, so `condition_accuracy` reports it as unattributed with its count
+# rather than folding it into any arm's rate - the same discipline the
+# denominator-integrity rule applies to a thin panel (master rule 1).
+
+#: The ledger field carrying the prompt condition one run ran under.
+PROMPT_CONDITION_KEY = "prompt_condition"
+
+#: The field carrying the prompt VERSION behind that condition, so a label that
+#: silently spans two prompt texts is visible rather than trusted.
+PROMPT_VERSION_KEY = "prompt_version"
+
+#: The floor below which an arm's accuracy is NOT reported: a rate over a couple
+#: of rows is noise, and quoting it is the very defect this harness exists to
+#: avoid. The count is still reported.
+CONDITION_MIN_N = 5
+
+
+def _condition_gate(cfg: dict | None = None) -> bool:
+    """Is the N5 harness switched on? (``enable_prompt_condition_harness``)
+
+    The key is read by its literal name so the gate registry's read-site scan
+    finds it. Off by default, and an unreadable config leaves it off - a config
+    read must never break the read it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        gate = get_config() if cfg is None else cfg
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        gate = cfg or {}
+    return bool((gate or {}).get("enable_prompt_condition_harness", False))
+
+
+def prompt_version(prompt: object) -> str | None:
+    """A deterministic content id for one prompt string - the versioned input.
+
+    ``sha256(text)[:16]``: two runs whose prompts differ in any byte get
+    different ids, so a prompt edit is attributable rather than silent. ``None``
+    for an unreadable prompt - a named gap, never a hash of nothing.
+    """
+    try:
+        text = prompt if isinstance(prompt, str) else str(prompt)
+    except Exception:  # noqa: BLE001 - telemetry never raises
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def condition_descriptor(label: str, prompts: dict | None = None) -> dict:
+    """The condition one run ran under: its arm LABEL and its prompt versions.
+
+    ``prompts`` is ``{stage: prompt}`` - the engine's prompt strings, read as
+    they are (this function never changes one). Each stage is versioned with
+    :func:`prompt_version`, and ``version_id`` folds those versions together, so
+    two runs sharing a label but carrying different prompt text are
+    distinguishable - the label is the arm's NAME, never its identity.
+
+    Returns ``{"label", "prompt_versions", "version_id", "status",
+    "unavailable"}``. An empty label is ``unavailable`` with the reason: a run
+    that cannot be named cannot be attributed to an arm.
+    """
+    name = str(label or "").strip()
+    if not name:
+        return {
+            "label": None,
+            "prompt_versions": {},
+            "version_id": None,
+            "status": "unavailable",
+            "unavailable": "no condition label: an unnamed arm is not a condition",
+        }
+    versions = {
+        str(stage): prompt_version(prompt)
+        for stage, prompt in sorted((prompts or {}).items())
+    }
+    version_id = None
+    if versions:
+        version_id = prompt_version(
+            "|".join(f"{k}={v}" for k, v in versions.items())
+        )
+    return {
+        "label": name,
+        "prompt_versions": versions,
+        "version_id": version_id,
+        "status": "ok",
+        "unavailable": None,
+    }
+
+
+def record_condition_run(
+    condition: dict | None,
+    *,
+    cfg: dict | None = None,
+    **row,
+) -> dict:
+    """OFFLINE: append ONE decision-ledger row tagged with its prompt condition.
+
+    The WRITER SITE is ``strategies.prediction_ledger.log_decision`` - the
+    append-only JSONL writer the run's own finalize path also calls (under
+    ``enable_prediction_ledger``). This harness adds the CONDITION column to that
+    row and nothing else; it is deliberately reachable from no run path (ground
+    rule 8), so running an extra arm is an explicit offline act rather than
+    something a graph node can trigger.
+
+    ``row`` carries the ledger fields (``ticker``, ``date``, ``rating``,
+    ``entry``, ``confidence``, ``results_dir``, ...). Returns the appended row,
+    or - when the gate is off or the condition is unusable - a refusal record
+    with the reason, and NOTHING is written.
+    """
+    if not _condition_gate(cfg):
+        return {
+            "status": "unavailable",
+            "unavailable": (
+                "enable_prompt_condition_harness is off (default): the harness "
+                "does not run on a gate-off run"
+            ),
+        }
+    label = (condition or {}).get("label") if isinstance(condition, dict) else None
+    if not label:
+        return {
+            "status": "unavailable",
+            "unavailable": (
+                "no condition label: a run that cannot be named is not written, "
+                "because it could only ever be unattributable"
+            ),
+        }
+    from tradingagents.strategies.prediction_ledger import log_decision
+
+    return log_decision(
+        prompt_condition=str(label),
+        prompt_version=(condition or {}).get("version_id"),
+        **row,
+    )
+
+
+def condition_accuracy(
+    ledger_rows: list[dict],
+    *,
+    cfg: dict | None = None,
+    min_n: int = CONDITION_MIN_N,
+) -> dict:
+    """Per-condition accuracy over SCORED decision-ledger rows (N5).
+
+    ``ledger_rows`` is the output of ``prediction_ledger.score_all`` - rows that
+    carry an ``outcome.hit``. Each row is grouped by its recorded
+    ``prompt_condition`` and each arm reports its hit rate **with its count**. A
+    row with NO recorded condition is NOT pooled into any arm, and neither is a
+    row whose outcome could not be scored: both are counted under
+    ``unattributed`` with their reason, because a run that cannot be attributed
+    cannot be compared.
+
+    An arm with fewer than ``min_n`` scored rows reports ``accuracy: None`` (and
+    ``below_min_n: True``) rather than a rate from noise. ``version_conflict``
+    flags a label that spans more than one prompt version - the case a bare label
+    would hide.
+
+    Returns ``{"status", "unavailable", "conditions", "unattributed", "n_rows",
+    "n_scored", "min_n", "basis"}``. With the gate off the whole read is
+    ``unavailable`` with the reason and no arm is scored.
+    """
+    if not _condition_gate(cfg):
+        return {
+            "status": "unavailable",
+            "unavailable": (
+                "enable_prompt_condition_harness is off (default): no arm is "
+                "scored on a gate-off run"
+            ),
+            "conditions": {},
+            "unattributed": {},
+            "n_rows": len(list(ledger_rows or [])),
+            "n_scored": 0,
+            "min_n": int(min_n),
+            "basis": "harness off (default)",
+        }
+
+    rows = [r for r in (ledger_rows or []) if isinstance(r, dict)]
+    arms: dict[str, dict] = {}
+    no_condition = 0
+    no_outcome = 0
+    for row in rows:
+        label = row.get(PROMPT_CONDITION_KEY)
+        if not label:
+            no_condition += 1
+            continue
+        outcome = row.get("outcome")
+        hit = outcome.get("hit") if isinstance(outcome, dict) else None
+        if hit is None:
+            no_outcome += 1
+            continue
+        arm = arms.setdefault(
+            str(label),
+            {"n": 0, "hits": 0, "accuracy": None, "below_min_n": False,
+             "versions": set(), "version_conflict": False},
+        )
+        arm["n"] += 1
+        arm["hits"] += int(bool(hit))
+        arm["versions"].add(row.get(PROMPT_VERSION_KEY))
+
+    for arm in arms.values():
+        arm["below_min_n"] = arm["n"] < int(min_n)
+        if not arm["below_min_n"]:
+            arm["accuracy"] = round(arm["hits"] / arm["n"], 4)
+        versions = sorted(str(v) for v in arm["versions"])
+        arm["versions"] = versions
+        arm["version_conflict"] = len(versions) > 1
+
+    conditions = {label: arms[label] for label in sorted(arms)}
+    n_scored = sum(arm["n"] for arm in conditions.values())
+    return {
+        "status": "ok",
+        "unavailable": None,
+        "conditions": conditions,
+        "unattributed": {"no_condition": no_condition, "no_outcome": no_outcome},
+        "n_rows": len(rows),
+        "n_scored": n_scored,
+        "min_n": int(min_n),
+        "basis": (
+            f"per-condition hit rate over {n_scored} scored decision-ledger "
+            f"row(s) in {len(conditions)} arm(s); a row with no recorded "
+            f"condition ({no_condition}) or no scored outcome ({no_outcome}) is "
+            f"NOT pooled - it is unattributed; an arm below min_n={int(min_n)} "
+            "reports its count and no rate"
+        ),
     }

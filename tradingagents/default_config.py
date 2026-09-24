@@ -319,6 +319,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER": "enable_tail_risk_layer",
     "TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE": "enable_factor_availability_gate",
     "TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY": "enable_forward_stress_probability",
+    "TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS": "enable_prompt_condition_harness",
     # _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored.
     "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
@@ -1146,6 +1147,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_tail_risk_layer": False,
         "enable_factor_availability_gate": False,
         "enable_forward_stress_probability": False,
+        "enable_prompt_condition_harness": False,
         # one read and all default OFF, so a gate-off run is byte-identical to the
         # run before the gate existed.
         "enable_coverage_window": False,

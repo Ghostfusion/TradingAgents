@@ -1,6 +1,6 @@
 # Implementation Plan - Text, News and Disclosure Signals
 
-Status: **PLAN - not started.** Implements the seven items (N1-N7) of the text, news and disclosure
+Status: **IN PROGRESS** - the T1 batch adds N5 (2026-09-24), the prompt-condition harness, offline by construction; N1-N4, N6 and N7 are not started. This plan implements the seven items (N1-N7) of the text, news and disclosure
 theme, one of the six themes derived from
 [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md) (v1.0, SURVEY).
 **Parent design:** [`design_news_and_filing_signals.md`](design_news_and_filing_signals.md) - owns the

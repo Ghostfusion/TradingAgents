@@ -269,6 +269,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | `enable_tail_risk_layer` | default `false` |
 | `TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE` | `enable_factor_availability_gate` | default `false` |
 | `TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY` | `enable_forward_stress_probability` | default `false` |
+| `TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS` | `enable_prompt_condition_harness` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |

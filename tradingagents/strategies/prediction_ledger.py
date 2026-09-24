@@ -42,9 +42,17 @@ def log_decision(
     horizon_days: int = 60,
     data_quality: str = "unknown",
     results_dir: str | None = None,
+    prompt_condition: str | None = None,
     **extra,
 ) -> dict:
-    """Append one immutable prediction row; returns it (never raises on IO)."""
+    """Append one immutable prediction row; returns it (never raises on IO).
+
+    ``prompt_condition`` (N5) is the prompt-condition arm the run was produced
+    under, recorded as a first-class column: a run that did not record one
+    carries an explicit ``None``, which the A/B harness reports as
+    *unattributed* rather than pooling it into an arm. Nothing here changes the
+    prompt strings - the column only makes a prompt edit attributable.
+    """
     row = {
         "ticker": str(ticker or "").upper(),
         "date": date,
@@ -57,6 +65,7 @@ def log_decision(
         "confidence": confidence,
         "horizon_days": int(horizon_days or 0),
         "data_quality": str(data_quality or "unknown"),
+        "prompt_condition": str(prompt_condition) if prompt_condition else None,
     }
     for k, v in (extra or {}).items():
         if k not in row:
