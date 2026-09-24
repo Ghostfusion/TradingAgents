@@ -68,6 +68,7 @@ REGISTRY: dict[str, str] = {
     "enable_trial_ledger": "wired",
     "enable_jump_robust_proxies": "wired",
     "enable_mp_lower_spectrum": "wired",
+    "enable_long_memory": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

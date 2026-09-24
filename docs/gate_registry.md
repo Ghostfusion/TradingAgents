@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **47 of the 95 `enable_*` keys** in
+policy, data-surface and context gates: **48 of the 96 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -279,6 +279,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_trial_ledger` | `TRADINGAGENTS_ENABLE_TRIAL_LEDGER` | reads the trial count and the trials' Sharpe dispersion back from the append-only ledger, so a deflated number is deflated by a MEASURED search and not by a caller's assertion | `tradingagents/strategies/evaluate.py`::`_selection_threshold` (the dispersion branch, ignored unless the gate is on), `tradingagents/strategies/trial_ledger.py`::`gate_on` / `::record` / `::trial_stats` | `test_trial_ledger.py` | wired |
 | `enable_jump_robust_proxies` | `TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES` | daily-bar bipower and quarticity PROXIES plus the jump share they imply, so a tail read can say whether the tail came in one print or in a diffusion | `tradingagents/strategies/volatility_models.py`::`jump_robust_proxies_enabled` (the read), `tradingagents/strategies/book_risk.py`::`_jump_read` (the tail read that fires it) | `test_volatility_models.py` | wired |
 | `enable_mp_lower_spectrum` | `TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM` | counts the panel correlation eigenvalues below the Marchenko-Pastur lower bound, so a collapse in the effective number of independent bets is visible as a count rather than a story | `tradingagents/strategies/sector_breadth.py`::`mp_lower_spectrum` (the only reader of the gate; `None` when off), reported by `tradingagents/strategies/market_breadth.py`::`market_breadth` | `test_strategies_market_breadth.py` | wired |
+| `enable_long_memory` | `TRADINGAGENTS_ENABLE_LONG_MEMORY` | a rolling semiparametric memory parameter (GPH and local Whittle) plus a HAR-family realized-volatility forecast, with d reported BESIDE the forecast rather than instead of it | `tradingagents/strategies/long_memory.py`::`long_memory_enabled` (the read), read by `tradingagents/strategies/mean_reversion.py`::`memory_profile` | `test_long_memory.py` | wired |
 
 ## 8. Adding a gate — the rule
 

@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import math
 
-__all__ = ["ar1_half_life", "ou_half_life", "hurst_exponent", "mean_reversion_verdict", "variance_ratio"]
+__all__ = ["ar1_half_life", "ou_half_life", "hurst_exponent", "memory_profile",
+           "mean_reversion_verdict", "variance_ratio"]
 
 
 def _clean(series) -> list[float]:
@@ -178,6 +179,48 @@ def hurst_exponent(series: list, min_obs: int = 64, min_chunk: int = 8) -> float
         return None
     h = max(0.0, min(1.0, h))
     return round(h, 4)
+
+
+def memory_profile(returns, as_of=None, *, window: int = 750, config: dict | None = None) -> dict:
+    """Long-memory companion to :func:`hurst_exponent` (the roughness leg).
+
+    ``hurst_exponent`` reports the roughness of the return series; it does not
+    report the *memory* of the variance process. This read pairs the two: the
+    semiparametric memory parameter ``d`` (GPH log-periodogram + local Whittle)
+    from :mod:`tradingagents.strategies.long_memory`, beside the HAR-family
+    next-day realized-variance forecast that consumes it. ``d`` is carried in
+    the forecast record, never instead of it. Nothing is recomputed here - the
+    roughness leg stays in :func:`hurst_exponent` and this only reports it.
+
+    Gated by ``enable_long_memory`` (default off); the switch is read once here,
+    at the gate's single enforcement site
+    (:func:`long_memory.long_memory_enabled`). With the gate off, ``memory`` and
+    ``forecast`` are None and the record names the disabled gate - the roughness
+    read above is unchanged.
+
+    Returns ``{'roughness_h', 'memory', 'forecast', 'unavailable'}``; ``memory``
+    is ``memory_parameter``'s record and ``forecast`` is ``rv_forecast``'s, both
+    of which degrade to ``status: "unavailable"`` rather than to a zero.
+    """
+    from .long_memory import long_memory_enabled, memory_parameter, rv_forecast
+
+    if not long_memory_enabled(config):
+        return {
+            "roughness_h": hurst_exponent(returns),
+            "memory": None,
+            "forecast": None,
+            "unavailable": (
+                "enable_long_memory is off (default): the memory parameter and the "
+                "HAR-family forecast are not computed; the roughness leg above is "
+                "unchanged"
+            ),
+        }
+    return {
+        "roughness_h": hurst_exponent(returns),
+        "memory": memory_parameter(returns, as_of, window=window),
+        "forecast": rv_forecast(returns, as_of, window=window),
+        "unavailable": None,
+    }
 
 
 def mean_reversion_verdict(
